@@ -203,12 +203,7 @@ internal static class CalibrationMeshReader
         string unit = "millimeter";
         int objectCount = 0;
         int triangleCount = 0;
-        decimal minX = decimal.MaxValue;
-        decimal minY = decimal.MaxValue;
-        decimal minZ = decimal.MaxValue;
-        decimal maxX = decimal.MinValue;
-        decimal maxY = decimal.MinValue;
-        decimal maxZ = decimal.MinValue;
+        var bounds = new BoundsAccumulator();
         List<(decimal X, decimal Y, decimal Z)> vertices = [];
         bool sawMesh = false;
 
@@ -286,7 +281,7 @@ internal static class CalibrationMeshReader
                                 "The model declares too many vertices.");
                         }
 
-                        Accumulate(vertex, ref minX, ref minY, ref minZ, ref maxX, ref maxY, ref maxZ);
+                        bounds.Accumulate(vertex);
                         break;
                     case "triangle":
                         triangleCount++;
@@ -331,7 +326,7 @@ internal static class CalibrationMeshReader
                 "The model package could not be decompressed.");
         }
 
-        if (!sawMesh || triangleCount == 0 || maxX <= decimal.MinValue)
+        if (!sawMesh || triangleCount == 0 || bounds.MaxX <= decimal.MinValue)
         {
             return Fail(
                 CalibrationGenerationProblemCodes.ModelContentInvalid,
@@ -342,7 +337,7 @@ internal static class CalibrationMeshReader
         return new MeshReadResult(
             Math.Max(objectCount, 1),
             triangleCount,
-            new CalibrationModelBounds(minX, minY, minZ, maxX, maxY, maxZ),
+            bounds.ToBounds(),
             unit,
             null);
     }
@@ -489,13 +484,7 @@ internal static class CalibrationMeshReader
                 "The declared triangle count does not match the model content length.");
         }
 
-        decimal minX = decimal.MaxValue;
-        decimal minY = decimal.MaxValue;
-        decimal minZ = decimal.MaxValue;
-        decimal maxX = decimal.MinValue;
-        decimal maxY = decimal.MinValue;
-        decimal maxZ = decimal.MinValue;
-
+        var bounds = new BoundsAccumulator();
         for (int triangle = 0; triangle < triangleCount; triangle++)
         {
             int recordOffset = 84 + (triangle * 50);
@@ -515,14 +504,14 @@ internal static class CalibrationMeshReader
                         "The model contains a non-finite or out-of-range vertex.");
                 }
 
-                Accumulate((dx, dy, dz), ref minX, ref minY, ref minZ, ref maxX, ref maxY, ref maxZ);
+                bounds.Accumulate((dx, dy, dz));
             }
         }
 
         return new MeshReadResult(
             1,
             (int)triangleCount,
-            new CalibrationModelBounds(minX, minY, minZ, maxX, maxY, maxZ),
+            bounds.ToBounds(),
             "millimeter",
             null);
     }
@@ -530,12 +519,7 @@ internal static class CalibrationMeshReader
     private static MeshReadResult ReadAsciiStl(ReadOnlySpan<byte> content, string field)
     {
         string text = Encoding.UTF8.GetString(content);
-        decimal minX = decimal.MaxValue;
-        decimal minY = decimal.MaxValue;
-        decimal minZ = decimal.MaxValue;
-        decimal maxX = decimal.MinValue;
-        decimal maxY = decimal.MinValue;
-        decimal maxZ = decimal.MinValue;
+        var bounds = new BoundsAccumulator();
         int vertexCount = 0;
 
         foreach (ReadOnlySpan<char> rawLine in text.AsSpan().EnumerateLines())
@@ -568,7 +552,7 @@ internal static class CalibrationMeshReader
                     "The model declares too many vertices.");
             }
 
-            Accumulate((x, y, z), ref minX, ref minY, ref minZ, ref maxX, ref maxY, ref maxZ);
+            bounds.Accumulate((x, y, z));
         }
 
         if (vertexCount == 0 || vertexCount % 3 != 0)
@@ -582,7 +566,7 @@ internal static class CalibrationMeshReader
         return new MeshReadResult(
             1,
             vertexCount / 3,
-            new CalibrationModelBounds(minX, minY, minZ, maxX, maxY, maxZ),
+            bounds.ToBounds(),
             "millimeter",
             null);
     }
@@ -599,23 +583,40 @@ internal static class CalibrationMeshReader
         return true;
     }
 
-    private static void Accumulate(
-        (decimal X, decimal Y, decimal Z) vertex,
-        ref decimal minX,
-        ref decimal minY,
-        ref decimal minZ,
-        ref decimal maxX,
-        ref decimal maxY,
-        ref decimal maxZ)
-    {
-        minX = Math.Min(minX, vertex.X);
-        minY = Math.Min(minY, vertex.Y);
-        minZ = Math.Min(minZ, vertex.Z);
-        maxX = Math.Max(maxX, vertex.X);
-        maxY = Math.Max(maxY, vertex.Y);
-        maxZ = Math.Max(maxZ, vertex.Z);
-    }
-
     private static MeshReadResult Fail(string code, string field, string message) =>
         new(0, 0, null, string.Empty, new CalibrationGenerationProblem(code, field, message));
+
+    /// <summary>
+    /// Mutable running min/max bounds across the X/Y/Z axes, accumulated one vertex at a time.
+    /// Replaces a 6-`ref`-parameter accumulator method with a single stateful value that each
+    /// reader loop mutates in place and converts to a <see cref="CalibrationModelBounds"/> once done.
+    /// </summary>
+    private struct BoundsAccumulator
+    {
+        private decimal _minX = decimal.MaxValue;
+        private decimal _minY = decimal.MaxValue;
+        private decimal _minZ = decimal.MaxValue;
+        private decimal _maxX = decimal.MinValue;
+        private decimal _maxY = decimal.MinValue;
+        private decimal _maxZ = decimal.MinValue;
+
+        public BoundsAccumulator()
+        {
+        }
+
+        public readonly decimal MaxX => _maxX;
+
+        public void Accumulate((decimal X, decimal Y, decimal Z) vertex)
+        {
+            _minX = Math.Min(_minX, vertex.X);
+            _minY = Math.Min(_minY, vertex.Y);
+            _minZ = Math.Min(_minZ, vertex.Z);
+            _maxX = Math.Max(_maxX, vertex.X);
+            _maxY = Math.Max(_maxY, vertex.Y);
+            _maxZ = Math.Max(_maxZ, vertex.Z);
+        }
+
+        public readonly CalibrationModelBounds ToBounds() =>
+            new(_minX, _minY, _minZ, _maxX, _maxY, _maxZ);
+    }
 }
