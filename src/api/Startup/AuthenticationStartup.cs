@@ -1,7 +1,9 @@
 ﻿using System.Text;
 using Farm.Infrastructure.Authorization;
+using Farm.Web.Api.Authentication;
 using Farm.Web.Api.Authorization;
 using Farm.Web.Api.Infrastructure.Authorization;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.IdentityModel.Tokens;
@@ -114,7 +116,15 @@ public static class AuthenticationStartup
                 // (If a future test truly needs to bypass these checks, generate a properly formed token
                 // instead of weakening validation here.)
                 options.TokenValidationParameters = tvp;
-            });
+            })
+            // Real authentication scheme for the OctoPrint-compatible X-Api-Key header (issue #1666).
+            // Chained onto the same AddAuthentication("Bearer") builder — NOT a second
+            // AddAuthentication() call — so "Bearer" remains the default scheme while
+            // OctoPrintApiKey is available as an additional scheme actions can opt into via
+            // [Authorize(AuthenticationSchemes = "Bearer,OctoPrintApiKey")].
+            .AddScheme<AuthenticationSchemeOptions, OctoPrintApiKeyAuthenticationHandler>(
+                OctoPrintApiKeyDefaults.AuthenticationScheme,
+                _ => { });
 
         // Add Authorization with custom policies
         services.AddAuthorization(options =>

@@ -43,8 +43,6 @@ public sealed class AnonymousEndpointArchitectureTests
                 "GET /api/schema-health/ready - supports credential-free deployment readiness probes.",
             ["Farm.Web.Api.Controllers.FilaManController.GetPrintersAsync [api/filaman/printers]"] =
                 "GET /api/filaman/printers - supplies minimal selector metadata to unprovisioned firmware.",
-            ["Farm.Web.Api.Controllers.OctoPrintCompatController.UploadFileAsync [api/files/local]"] =
-                "POST /api/files/local - requires either an authenticated user or a valid X-Api-Key.",
             ["Farm.Web.Api.Controllers.OctoPrintCompatController.GetVersion [api/version]"] =
                 "GET /api/version - exposes non-sensitive compatibility metadata before key configuration.",
             ["Farm.Web.Api.Controllers.OctoPrintCompatController.GetServer [api/server]"] =

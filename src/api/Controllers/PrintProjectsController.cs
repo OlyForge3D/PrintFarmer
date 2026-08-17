@@ -1,6 +1,8 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Projects;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Projects;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -276,6 +278,7 @@ public class PrintProjectsController(IPrintProjectService projectService, ILogge
     /// <param name="id">The project ID.</param>
     /// <param name="request">Queue configuration options.</param>
     [HttpPost("{id:guid}/queue")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueueProjectResultDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]

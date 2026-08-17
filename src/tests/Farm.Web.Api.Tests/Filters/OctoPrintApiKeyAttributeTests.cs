@@ -35,7 +35,7 @@ public class OctoPrintApiKeyAttributeTests
     {
         var authService = new Mock<IOctoPrintAuthService>(MockBehavior.Strict);
         authService
-            .Setup(service => service.ValidateApiKeyAsync(null, null, null, true))
+            .Setup(service => service.ValidateApiKeyAsync(null, true))
             .ReturnsAsync(false);
         var services = new Mock<IServiceProvider>(MockBehavior.Strict);
         services

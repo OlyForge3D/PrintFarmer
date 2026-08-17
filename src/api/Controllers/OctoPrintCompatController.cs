@@ -2,10 +2,13 @@
 using System.IO;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Logging;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Authentication;
 using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Filters;
 using Farm.Web.Api.Services.Gcode;
@@ -27,7 +30,6 @@ namespace Farm.Web.Api.Controllers;
 public class OctoPrintCompatController : ControllerBase
 {
     private readonly ILogger<OctoPrintCompatController> _logger;
-    private readonly IOctoPrintAuthService _authService;
     private readonly OctoPrintSettings _settings;
     private readonly IGcodeFilesService _gcodeFilesService;
     private readonly IJobQueueService _jobQueueService;
@@ -35,14 +37,12 @@ public class OctoPrintCompatController : ControllerBase
 
     public OctoPrintCompatController(
         ILogger<OctoPrintCompatController> logger,
-        IOctoPrintAuthService authService,
         IOptions<OctoPrintSettings> settings,
         IGcodeFilesService gcodeFilesService,
         IJobQueueService jobQueueService,
         IRateLimitService rateLimitService)
     {
         _logger = logger;
-        _authService = authService;
         _settings = settings.Value;
         _gcodeFilesService = gcodeFilesService;
         _jobQueueService = jobQueueService;
@@ -51,13 +51,42 @@ public class OctoPrintCompatController : ControllerBase
 
 #pragma warning disable S6932 // Controller intentionally uses raw request data for OctoPrint API compatibility
     [HttpPost("files/local")]
-    [AllowAnonymous] // Public to JWT auth because anonymous OctoPrint clients must provide a valid X-Api-Key.
-    [OctoPrintApiKey(RequireValidKeyForAnonymous = true)]
+    // Real authentication is required here (issue #1666): either a JWT Bearer token or a
+    // resolved OctoPrint API key (via OctoPrintApiKeyAuthenticationHandler), so that
+    // [RequirePermission] below runs against a genuine, permission-checkable identity
+    // instead of being skipped entirely by [AllowAnonymous].
+    [Authorize(AuthenticationSchemes = "Bearer," + OctoPrintApiKeyDefaults.AuthenticationScheme)]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "OctoPrint compatibility uploads are explicitly capped at 50 MB.")]
     [RequestSizeLimit(52428800)] // 50 MB default; adjust based on settings
     [RequestFormLimits(MultipartBodyLengthLimit = 52_428_800)]
     public async Task<IActionResult> UploadFileAsync([FromQuery] Guid? printerId)
     {
+        // Resolve and validate the real caller's identity up front, fail closed. Mirrors
+        // JobQueueController.QueueJobAsync's identity-resolution pattern (see issue #1666).
+        string? userIdStr;
+        try
+        {
+            userIdStr = QueueActorIdentity.Resolve(User);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _logger.LogWarning("OctoPrint upload denied: unable to resolve user identity from claims");
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new { error = "Unable to verify group access — user identity could not be resolved." });
+        }
+
+        if (!Guid.TryParse(userIdStr, out Guid parsedUserId))
+        {
+            _logger.LogWarning("OctoPrint upload denied: unable to resolve user identity from claims (raw value: {UserIdStr})", userIdStr);
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new { error = "Unable to verify group access — user identity could not be resolved." });
+        }
+
+        Guid callerId = parsedUserId;
+
         // OctoPrint API sends 'print' and 'select' as form fields, not query params
         // We need to read form first to get these values
         bool print = false;
@@ -81,7 +110,8 @@ public class OctoPrintCompatController : ControllerBase
             "OctoPrint upload request: ContentType={ContentType}, ContentLength={ContentLength}, print={Print}, select={Select}, printerId={PrinterId}",
             LogSanitizer.Sanitize(Request.ContentType), Request.ContentLength, print, select, LogSanitizer.Sanitize(printerId?.ToString()));
 
-        // API key validation is handled by the action's [OctoPrintApiKey] filter.
+        // Authentication is handled by [Authorize(AuthenticationSchemes = ...)] and
+        // [RequirePermission] above; callerId was already resolved and fail-closed-checked.
 
         // Rate limiting: key by apiKey if present otherwise by remote IP
         var apiKey = Request.Headers["X-Api-Key"].ToString();
@@ -193,7 +223,7 @@ public class OctoPrintCompatController : ControllerBase
                     enqueueReq.RequiredNozzleDiameter?.ToString("F2") ?? "(any)",
                     LogSanitizer.Sanitize(enqueueReq.RequiredMaterialType) ?? "(any)");
 
-                JobQueuePrintJobDto? job = await _jobQueueService.AddJobToQueueAsync(enqueueReq, null, HttpContext.RequestAborted);
+                JobQueuePrintJobDto? job = await _jobQueueService.AddJobToQueueAsync(enqueueReq, callerId, HttpContext.RequestAborted);
                 if (job is null)
                 {
                     _logger.LogInformation(
@@ -219,6 +249,27 @@ public class OctoPrintCompatController : ControllerBase
             }
 
             return Ok(new { file = uploadDto });
+        }
+        catch (QueueGroupAccessDeniedException)
+        {
+            // gcode.PrinterGroupId ACL check (JobQueueService.AddJobToQueueAsync) denied the
+            // caller submission rights to the file's printer group.
+            _logger.LogWarning("OctoPrint upload+print denied: caller {UserId} lacks submit access to the file's printer group", callerId);
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new { error = "You do not have permission to submit jobs to this printer group." });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Target-printer ACL check (JobQueueService.AddJobToQueueAsync via
+            // IQueueResourceAuthorizationService.CanActorAccessPrinterAsync) denied the caller
+            // Submit-level access to the specific printer resolved for this job. Mapped to 403
+            // (rather than mirroring JobQueueController's 404) for consistent, unambiguous
+            // fail-closed semantics on this endpoint — see issue #1666's acceptance criteria.
+            _logger.LogWarning("OctoPrint upload+print denied: caller {UserId} lacks submit access to the target printer", callerId);
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new { error = "You do not have permission to submit jobs to this printer." });
         }
         catch (Exception ex)
         {
