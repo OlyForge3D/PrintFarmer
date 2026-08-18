@@ -434,6 +434,126 @@ public class PowerMonitorAggregationTests : IDisposable
     }
 
     /// <summary>
+    /// Regression test for issue #1677: a job with no readings in its window must not become
+    /// a permanent per-cycle cost. This drives two poll cycles back-to-back with nothing in
+    /// between the first and second except the passage of time (no readings added), then
+    /// asserts <see cref="PrintJob.KwhUsed"/> is still null and the cost service was never
+    /// invoked — i.e. the job is inert, not actively retried to a different outcome.
+    /// </summary>
+    [Fact]
+    public async Task AggregateCompletedJobs_NoReadingsInWindow_StaysUnaggregatedAcrossMultipleCycles()
+    {
+        DateTime jobStart = DateTime.UtcNow.AddHours(-2);
+        DateTime jobEnd = DateTime.UtcNow.AddHours(-1);
+        Guid jobId;
+
+        using (AppDbContext db = CreateContext())
+        {
+            (Guid printerId, _, _, Guid seededJobId) = SeedPrinterAndJob(db, jobStart, jobEnd);
+            jobId = seededJobId;
+
+            var monitor = new Farm.Infrastructure.Domain.PowerMonitor
+            {
+                PrinterId = printerId,
+                ProviderType = "Kasa",
+                DeviceAddress = "192.168.1.200",
+                IsEnabled = true,
+            };
+            db.PowerMonitors.Add(monitor);
+            db.SaveChanges();
+
+            // No readings at all in the job's window: this printer's monitor was attached
+            // after the job completed. This job must never be selected as a candidate.
+        }
+
+        Mock<IJobCostCalculationService> costServiceMock = new();
+        costServiceMock
+            .Setup(c => c.CalculateAndStoreCostsAsync(jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        // First cycle: candidate query must exclude the job (no readings anywhere in window).
+        PrintJob? afterFirstCycle = await RunAggregationCycleAsync(CreateContext, costServiceMock, jobId);
+        Assert.NotNull(afterFirstCycle);
+        Assert.Null(afterFirstCycle!.KwhUsed);
+
+        // Second cycle: still excluded, still inert. Nothing changed in between — this
+        // demonstrates the job does not flip state or get "used up" by repeated polling.
+        PrintJob? afterSecondCycle = await RunAggregationCycleAsync(CreateContext, costServiceMock, jobId);
+        Assert.NotNull(afterSecondCycle);
+        Assert.Null(afterSecondCycle!.KwhUsed);
+
+        costServiceMock.Verify(
+            c => c.CalculateAndStoreCostsAsync(jobId, It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// Regression test for issue #1677's explicit caution against an irreversible terminal
+    /// marker: a job with no readings in its window must still be aggregated normally once
+    /// readings are backfilled (e.g. historical import, clock-skew correction). Because the
+    /// fix restricts candidates via a query condition rather than a persisted "already tried"
+    /// flag, there is nothing to clear — the very next poll cycle picks it up as soon as a
+    /// matching reading exists.
+    /// </summary>
+    [Fact]
+    public async Task AggregateCompletedJobs_ReadingsBackfilledAfterFailedCycle_IsAggregatedOnNextCycle()
+    {
+        DateTime jobStart = DateTime.UtcNow.AddHours(-2);
+        DateTime jobEnd = DateTime.UtcNow.AddHours(-1);
+        Guid jobId;
+        int monitorId;
+
+        using (AppDbContext db = CreateContext())
+        {
+            (Guid printerId, _, _, Guid seededJobId) = SeedPrinterAndJob(db, jobStart, jobEnd);
+            jobId = seededJobId;
+
+            var monitor = new Farm.Infrastructure.Domain.PowerMonitor
+            {
+                PrinterId = printerId,
+                ProviderType = "Kasa",
+                DeviceAddress = "192.168.1.200",
+                IsEnabled = true,
+            };
+            db.PowerMonitors.Add(monitor);
+            db.SaveChanges();
+            monitorId = monitor.Id;
+
+            // No readings yet — job is not a candidate on the first cycle.
+        }
+
+        Mock<IJobCostCalculationService> costServiceMock = new();
+        costServiceMock
+            .Setup(c => c.CalculateAndStoreCostsAsync(jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        PrintJob? afterFirstCycle = await RunAggregationCycleAsync(CreateContext, costServiceMock, jobId);
+        Assert.NotNull(afterFirstCycle);
+        Assert.Null(afterFirstCycle!.KwhUsed);
+
+        // Backfill: historical readings imported for the job's window after the fact.
+        using (AppDbContext db = CreateContext())
+        {
+            db.PowerReadings.Add(new Farm.Infrastructure.Domain.PowerReading
+            {
+                PowerMonitorId = monitorId,
+                WattsNow = 150m,
+                RecordedAt = jobStart.AddMinutes(5),
+            });
+            db.SaveChanges();
+        }
+
+        PrintJob? afterSecondCycle = await RunAggregationCycleAsync(CreateContext, costServiceMock, jobId);
+
+        Assert.NotNull(afterSecondCycle);
+        Assert.Equal(Math.Round(150m * 30m / 3_600_000m, 4), afterSecondCycle!.KwhUsed);
+
+        costServiceMock.Verify(
+            c => c.CalculateAndStoreCostsAsync(jobId, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    /// <summary>
     /// Confirms the rewritten aggregation query is translated to server-side SQL
     /// (a single GROUP BY producing COUNT/SUM) rather than silently falling back to
     /// client evaluation, which would reintroduce the original in-memory materialization

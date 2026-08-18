@@ -155,11 +155,20 @@ public class PowerMonitorPollingService(
 
     /// <summary>
     /// Finds completed <see cref="PrintJob"/> records whose assigned printer has a
-    /// <see cref="DomainPowerMonitor"/> and that do not yet have
-    /// <see cref="PrintJob.KwhUsed"/> set. For each, sums the <see cref="DomainPowerReading"/>
-    /// rows that fall within the job's active print window, stores the result, then
-    /// triggers a cost recalculation.
+    /// <see cref="DomainPowerMonitor"/> with at least one <see cref="DomainPowerReading"/>
+    /// inside the job's active print window, and that do not yet have
+    /// <see cref="PrintJob.KwhUsed"/> set. For each, sums the readings that fall within the
+    /// window, stores the result, then triggers a cost recalculation.
     /// </summary>
+    /// <remarks>
+    /// The "has a matching reading in window" condition is deliberately part of the candidate
+    /// query (not just a post-hoc check in <see cref="SetKwhUsedAsync"/>). A job whose window
+    /// currently has no readings — e.g. it completed before a monitor was attached, or spans a
+    /// monitor outage — is excluded from the result set entirely, so it is not re-queried on
+    /// every subsequent poll cycle. This is intentionally not a terminal/irreversible marker:
+    /// if readings are later backfilled for that window (historical import, clock-skew fix),
+    /// the job becomes a candidate again on the very next poll and is aggregated normally.
+    /// </remarks>
     private async Task AggregateCompletedJobsAsync(
         AppDbContext db,
         IJobCostCalculationService costService,
@@ -173,7 +182,12 @@ public class PowerMonitorPollingService(
                 j.ActualStartTime != null &&
                 j.ActualEndTime != null &&
                 j.AssignedPrinterId != null &&
-                db.PowerMonitors.Any(m => m.PrinterId == j.AssignedPrinterId))
+                db.PowerMonitors.Any(m =>
+                    m.PrinterId == j.AssignedPrinterId &&
+                    db.PowerReadings.Any(r =>
+                        r.PowerMonitorId == m.Id &&
+                        r.RecordedAt >= j.ActualStartTime.Value &&
+                        r.RecordedAt <= j.ActualEndTime.Value)))
             .ToListAsync(ct);
 
         if (jobs.Count == 0)
