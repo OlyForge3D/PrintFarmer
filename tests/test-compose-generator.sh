@@ -257,6 +257,28 @@ test_model_thumbnail_replacement_routing() {
     route_count=$(grep -c "location /api/3d-models/" "$split_config")
     assert_equals "2" "$route_count" "Split proxy should route 3D model endpoints over HTTP and HTTPS" || return 1
 
+    # Regression test for issue #1687: nginx auto-redirects a bare
+    # "location /api/3d-models/" prefix match to add the trailing slash, but
+    # that self-generated redirect uses nginx's own internal listen port
+    # rather than the externally-mapped host port, so the browser gets
+    # ERR_CONNECTION_REFUSED. An exact-match "location = /api/3d-models" block
+    # (matching the bare path the frontend actually calls) must exist ahead of
+    # the trailing-slash block in both the HTTP and HTTPS server blocks so the
+    # bare request is proxied directly instead of being redirected.
+    local exact_match_count
+    exact_match_count=$(grep -c "location = /api/3d-models {" "$split_config")
+    assert_equals "2" "$exact_match_count" \
+        "Split proxy should have an exact-match /api/3d-models route (no trailing slash) over HTTP and HTTPS to avoid nginx's port-dropping redirect (issue #1687)" || return 1
+
+    local exact_match_routed_to_slicer
+    exact_match_routed_to_slicer=$(awk '
+        /location = \/api\/3d-models \{/ { in_route = 1; next }
+        in_route && /proxy_pass \$slicer_upstream\$request_uri;/ { routed++; in_route = 0 }
+        in_route && /^        }/ { in_route = 0 }
+        END { print routed + 0 }
+    ' "$split_config")
+    assert_equals "2" "$exact_match_routed_to_slicer" "Both exact-match 3D model routes should target the slicer upstream" || return 1
+
     local upstream_count
     upstream_count=$(grep -c 'set $slicer_upstream http://slicer-host:5246;' "$split_config")
     assert_equals "2" "$upstream_count" "Both split proxy server blocks should resolve slicer-host" || return 1
