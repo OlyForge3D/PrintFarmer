@@ -49,8 +49,13 @@ vi.mock('@/features/filament-coverage/hooks', () => ({
   usePrinterCoverageFromFleet: () => ({ data: undefined, isLoading: false }),
 }));
 
+const printerCoverageSummaryRenderMock = vi.hoisted(() => vi.fn());
+
 vi.mock('@/features/filament-coverage/components/FilamentCoverageBadge', () => ({
-  PrinterCoverageSummary: () => null,
+  PrinterCoverageSummary: (props: Record<string, unknown>) => {
+    printerCoverageSummaryRenderMock(props);
+    return null;
+  },
 }));
 
 vi.mock('@/features/printers/hooks/useFailureDetectionAlert', () => ({
@@ -641,6 +646,46 @@ describe('CompactPrinterCard memoization', () => {
     );
 
     expect(progressBarRender).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('CompactPrinterCard filament coverage online gating (#1684)', () => {
+  beforeEach(() => {
+    printerCoverageSummaryRenderMock.mockClear();
+  });
+
+  // Regression test for issue #1684: the Moonraker Offline card showed
+  // "No spool loaded" alongside a green "Filament OK" check even though the
+  // printer was unreachable. `PrinterCoverageSummary` now derives its
+  // effective status from `isOnline`, but only if the card actually passes
+  // that flag through — this pins the wiring so a future refactor can't
+  // silently drop it again.
+  it('passes isOnline=false through to PrinterCoverageSummary for an offline printer', () => {
+    render(
+      <CompactPrinterCard
+        printer={createPrinter({ isOnline: false })}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(printerCoverageSummaryRenderMock).toHaveBeenCalledWith(
+      expect.objectContaining({ isOnline: false }),
+    );
+  });
+
+  it('passes isOnline=true through to PrinterCoverageSummary for an online printer', () => {
+    render(
+      <CompactPrinterCard
+        printer={createPrinter({ isOnline: true })}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(printerCoverageSummaryRenderMock).toHaveBeenCalledWith(
+      expect.objectContaining({ isOnline: true }),
+    );
   });
 });
 

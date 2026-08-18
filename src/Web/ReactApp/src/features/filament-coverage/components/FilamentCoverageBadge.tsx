@@ -211,6 +211,15 @@ export interface PrinterCoverageSummaryProps {
   /** Compact rendering (used by CompactPrinterCard filament row). */
   compact?: boolean;
   className?: string;
+  /**
+   * Whether the printer is currently reachable. Defaults to `true` so
+   * existing callers that don't yet track connectivity keep their prior
+   * behavior. When explicitly `false`, the coverage snapshot is treated as
+   * stale/unverifiable and rendered as "unknown" regardless of what the
+   * backend last reported — an offline printer must never show a "Filament
+   * OK" success indicator (issue #1684).
+   */
+  isOnline?: boolean;
 }
 
 /**
@@ -221,8 +230,14 @@ export function PrinterCoverageSummary({
   coverage,
   compact = false,
   className,
+  isOnline = true,
 }: PrinterCoverageSummaryProps): React.ReactElement | null {
   if (!coverage) return null;
+  // An offline printer's last-known coverage snapshot can't be trusted to
+  // reflect reality (e.g. a spool could have been removed while
+  // unreachable), so it must never be presented as a verified "covers" or
+  // "runout" state. Fall back to "unknown" and suppress the runout chip.
+  const status = isOnline ? coverage.status : "unknown";
   return (
     <span
       className={[
@@ -234,11 +249,11 @@ export function PrinterCoverageSummary({
       data-testid="printer-coverage-summary"
     >
       <FilamentCoverageBadge
-        status={coverage.status}
+        status={status}
         ariaContext={coverage.printerName || undefined}
         compact={compact}
       />
-      {coverage.status === "runout" && (
+      {isOnline && coverage.status === "runout" && (
         <RunoutRiskChip
           predictedRunoutAt={coverage.earliestPredictedRunoutAt}
           predictedRunoutLayer={null}
