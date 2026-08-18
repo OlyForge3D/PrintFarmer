@@ -13,7 +13,7 @@ import {
   FilamentCoverageBadge,
   RunoutRiskChip,
 } from '@/features/filament-coverage/components/FilamentCoverageBadge';
-import type { ToolheadCoverage } from '@/features/filament-coverage/types';
+import type { PrinterFilamentCoverage, ToolheadCoverage } from '@/features/filament-coverage/types';
 import type { MmuStatus, ToolheadDto } from '@/types/api';
 import {
   isLightColor,
@@ -36,6 +36,15 @@ export interface MaterialLoadoutProps {
   reviewedRowVersion?: string | null;
   /** Denser rendering for the printer card. */
   compact?: boolean;
+  /**
+   * Whether the printer is currently reachable. Defaults to `true` so
+   * existing callers that don't yet track connectivity keep their prior
+   * behavior. When explicitly `false`, the last-known coverage snapshot is
+   * treated as stale/unverifiable: every status is downgraded to
+   * "unknown" so an offline printer never shows a "Filament OK" success
+   * indicator or a "runout" warning it can no longer verify (issue #1684).
+   */
+  isOnline?: boolean;
   onSpoolChange?: () => void;
   className?: string;
 }
@@ -45,6 +54,27 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 function slotNoun(kind: LoadoutKind): string {
   return kind === 'gate' ? 'gate' : 'toolhead';
+}
+
+/**
+ * Downgrades a coverage snapshot to "unknown" for both the printer-level
+ * status and every toolhead when the printer is offline. An offline
+ * printer's last-known coverage can't be verified (e.g. a spool could have
+ * been pulled while unreachable), so it must never render a "covers"
+ * (green "Filament OK") or "runout" indicator based on stale data
+ * (issue #1684). Numeric fields (remaining/demand grams) are preserved
+ * since they're informational, not a claimed live health signal.
+ */
+function withOfflineOverride(
+  coverage: PrinterFilamentCoverage | null | undefined,
+  isOnline: boolean,
+): PrinterFilamentCoverage | null | undefined {
+  if (isOnline || !coverage) return coverage;
+  return {
+    ...coverage,
+    status: 'unknown',
+    toolheads: coverage.toolheads.map((th) => ({ ...th, status: 'unknown' })),
+  };
 }
 
 /**
@@ -237,6 +267,7 @@ export function MaterialLoadout({
   currentSpoolId,
   reviewedRowVersion,
   compact = false,
+  isOnline = true,
   onSpoolChange,
   className,
 }: MaterialLoadoutProps) {
@@ -265,7 +296,11 @@ export function MaterialLoadout({
   const { data: revisionSource } = usePrinterDetails(printerId, {
     enabled: !reviewedRowVersion,
   });
-  const { data: coverage } = usePrinterCoverageFromFleet(printerId);
+  const { data: rawCoverage } = usePrinterCoverageFromFleet(printerId);
+  const coverage = useMemo(
+    () => withOfflineOverride(rawCoverage, isOnline),
+    [rawCoverage, isOnline],
+  );
   const fallbackRevision = revisionSource?.rowVersion ?? null;
   const effectiveRowVersion = reviewedRowVersion ?? fallbackRevision;
   if (selectedKey && !lockedRevision && !capturedFallbackRevision && fallbackRevision) {

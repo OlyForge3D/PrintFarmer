@@ -999,6 +999,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           currentSpoolId={printer.currentSpoolId}
           reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
           compact
+          isOnline={isOnline}
           className="mb-2"
         />
       )}
