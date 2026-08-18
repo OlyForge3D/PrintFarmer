@@ -36,6 +36,7 @@ vi.mock('@/services/partsInventoryService', () => ({
 }));
 
 import { PartsInventoryPage } from '../pages/PartsInventoryPage';
+import { partsInventoryKeys } from '../hooks/usePartsInventory';
 
 // Shape tolerated by `isFeatureDisabledError` (utils/problemDetails.ts):
 // an axios-error-like object carrying a ProblemDetails `code` extension.
@@ -43,10 +44,13 @@ const FEATURE_DISABLED_ERROR = {
   response: { status: 404, data: { code: 'featureDisabled' } },
 };
 
-function renderPage(path = '/parts-inventory/skus') {
-  const queryClient = new QueryClient({
+function makeQueryClient() {
+  return new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+}
+
+function renderPage(path = '/parts-inventory/skus', queryClient = makeQueryClient()) {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[path]}>
@@ -98,11 +102,44 @@ describe('PartsInventoryPage query gating when feature disabled', () => {
 
     await waitFor(() => {
       expect(listParts).toHaveBeenCalledTimes(1);
+      expect(listBins).toHaveBeenCalledTimes(1);
     });
-    expect(listBins).toHaveBeenCalledTimes(1);
     expect(listReorderCandidates).toHaveBeenCalledTimes(1);
     expect(
       screen.queryByText(/parts inventory feature is currently disabled/i)
     ).not.toBeInTheDocument();
+  });
+
+  it('does not leak SKUs/Bins requests while a stale cached "enabled" reorder result is being revalidated', async () => {
+    // Simulate a prior mount (earlier in the same SPA session) that saw the
+    // feature enabled and cached an empty reorder-candidates success. Mark
+    // it stale (older than the hook's 30s staleTime) so this mount triggers
+    // react-query's default refetch-on-mount for stale data: the query
+    // resolves synchronously from cache (`isLoading`/`isPending` false)
+    // while a real network refetch is still in flight — the exact scenario
+    // that could let a naive `isLoading`-only gate mount the tabs early.
+    const queryClient = makeQueryClient();
+    queryClient.setQueryData(partsInventoryKeys.reorder(), [], {
+      updatedAt: Date.now() - 60_000,
+    });
+
+    // An admin disabled the feature in the meantime, so the background
+    // refetch now comes back `featureDisabled`.
+    listReorderCandidates.mockRejectedValue(FEATURE_DISABLED_ERROR);
+    listParts.mockResolvedValue([]);
+    listBins.mockResolvedValue([]);
+    listMappings.mockResolvedValue([]);
+
+    renderPage('/parts-inventory/skus', queryClient);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/parts inventory feature is currently disabled/i)
+      ).toBeInTheDocument();
+    });
+
+    expect(listReorderCandidates).toHaveBeenCalledTimes(1);
+    expect(listParts).not.toHaveBeenCalled();
+    expect(listBins).not.toHaveBeenCalled();
   });
 });

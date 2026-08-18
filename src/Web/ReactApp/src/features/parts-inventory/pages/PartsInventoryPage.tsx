@@ -13,7 +13,7 @@
  * page never touches the maintenance API surface.
  */
 
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Tabs, Badge, Alert, Spinner } from '@/common/components/ui';
@@ -78,7 +78,8 @@ export function PartsInventoryPage() {
   const {
     data: reorderCandidates = [],
     error: reorderError,
-    isLoading: reorderStatusLoading,
+    status: reorderStatus,
+    isFetching: reorderFetching,
   } = useReorderCandidates();
   const reorderCount = reorderCandidates.length;
 
@@ -88,19 +89,45 @@ export function PartsInventoryPage() {
   // disabled state regardless of the active tab.
   const featureDisabled = isFeatureDisabledError(reorderError);
 
-  // Until the probe settles we don't yet know whether the feature is
-  // enabled. Rendering the tabs before then would mount the default (SKUs)
-  // tab, whose own `useParts`/`useBins` queries would fire in parallel with
-  // the probe — and get their own 404s once the feature turns out to be
-  // disabled (issue #1686). Withhold the tab content until the probe query
-  // has settled, one way or the other.
-  const featureStatusKnown = !reorderStatusLoading;
+  // Until the probe has *settled* — not merely returned a possibly-stale
+  // cached result — we don't yet know whether the feature is enabled.
+  // Rendering the tabs before then would mount the default (SKUs) tab,
+  // whose own `useParts`/`useBins` queries would fire in parallel with the
+  // probe — and get their own 404s once the feature turns out to be
+  // disabled (issue #1686).
+  //
+  // Using only `isLoading` is not sufficient: if a prior mount already
+  // cached a *successful* reorder result (feature was enabled then) and the
+  // cache entry has since gone stale, react-query serves that stale success
+  // synchronously (`isLoading` false) while a background refetch — which
+  // could now come back `featureDisabled` if an admin toggled the feature
+  // off in the meantime — is still in flight. Gating on `isLoading` alone
+  // would treat that stale "enabled" snapshot as authoritative and mount the
+  // tabs anyway, reintroducing the exact race this fix closes.
+  //
+  // Instead, latch `featureStatusKnown` the first time the query is settled
+  // (not pending) AND not currently fetching — i.e. the first time we have a
+  // fetch-confirmed answer since this component mounted, whether that
+  // answer came back instantly (fresh cache) or after a network round trip
+  // (no cache, or a stale-cache background refetch). Once latched it stays
+  // latched, so later background refetches (e.g. on window refocus) don't
+  // re-hide the already-rendered tabs.
+  //
+  // Updating state directly in the render body (rather than in a
+  // useEffect) is the React-sanctioned way to derive a one-way latch like
+  // this: React re-renders immediately with the new value before the user
+  // sees anything, so the already-settled case never flickers, and once
+  // `featureStatusKnown` flips true this branch is simply skipped on every
+  // later render — no cascading effect, and later background refetches
+  // don't reset it.
+  const reorderSettled = reorderStatus !== 'pending' && !reorderFetching;
+  const [featureStatusKnown, setFeatureStatusKnown] = useState(false);
+  if (!featureStatusKnown && reorderSettled) {
+    setFeatureStatusKnown(true);
+  }
 
-  const subtitle = useMemo(
-    () =>
-      'Configure printed-part SKUs, storage bins with barcodes, and job-output mappings. Separate from maintenance components.',
-    []
-  );
+  const subtitle =
+    'Configure printed-part SKUs, storage bins with barcodes, and job-output mappings. Separate from maintenance components.';
 
   return (
     <PageTemplate
@@ -119,57 +146,57 @@ export function PartsInventoryPage() {
         </Alert>
       ) : (
         <Tabs activeTab={activeTab} onTabChange={handleTabChange} className="space-y-0">
-        <Tabs.List
-          className="border-b border-pf-border bg-pf-bg-1 -mx-4 px-4 mb-0 overflow-x-auto"
-          aria-label="Printed parts inventory sections"
-        >
-          <Tabs.Tab id="skus" icon={<PackageIcon className="h-4 w-4" ariaLabel="SKUs" />}>
-            SKUs
-          </Tabs.Tab>
-          <Tabs.Tab id="bins" icon={<DatabaseIcon className="h-4 w-4" ariaLabel="Bins" />}>
-            Bins
-          </Tabs.Tab>
-          <Tabs.Tab id="mappings" icon={<LayersIcon className="h-4 w-4" ariaLabel="Mappings" />}>
-            Output Mappings
-          </Tabs.Tab>
-          <Tabs.Tab
-            id="reorder"
-            icon={<AlertIcon className="h-4 w-4" ariaLabel="Reorder" />}
+          <Tabs.List
+            className="border-b border-pf-border bg-pf-bg-1 -mx-4 px-4 mb-0 overflow-x-auto"
+            aria-label="Printed parts inventory sections"
           >
-            <span className="inline-flex items-center gap-2">
-              Reorder
-              {reorderCount > 0 && (
-                <Badge variant="warning" size="sm">
-                  {reorderCount}
-                </Badge>
-              )}
-            </span>
-          </Tabs.Tab>
-        </Tabs.List>
+            <Tabs.Tab id="skus" icon={<PackageIcon className="h-4 w-4" ariaLabel="SKUs" />}>
+              SKUs
+            </Tabs.Tab>
+            <Tabs.Tab id="bins" icon={<DatabaseIcon className="h-4 w-4" ariaLabel="Bins" />}>
+              Bins
+            </Tabs.Tab>
+            <Tabs.Tab id="mappings" icon={<LayersIcon className="h-4 w-4" ariaLabel="Mappings" />}>
+              Output Mappings
+            </Tabs.Tab>
+            <Tabs.Tab
+              id="reorder"
+              icon={<AlertIcon className="h-4 w-4" ariaLabel="Reorder" />}
+            >
+              <span className="inline-flex items-center gap-2">
+                Reorder
+                {reorderCount > 0 && (
+                  <Badge variant="warning" size="sm">
+                    {reorderCount}
+                  </Badge>
+                )}
+              </span>
+            </Tabs.Tab>
+          </Tabs.List>
 
-        <Tabs.Panels>
-          <Tabs.Panel id="skus">
-            <div className="mt-4">
-              <PartsTab />
-            </div>
-          </Tabs.Panel>
-          <Tabs.Panel id="bins">
-            <div className="mt-4">
-              <BinsTab />
-            </div>
-          </Tabs.Panel>
-          <Tabs.Panel id="mappings">
-            <div className="mt-4">
-              <MappingsTab />
-            </div>
-          </Tabs.Panel>
-          <Tabs.Panel id="reorder">
-            <div className="mt-4">
-              <ReorderTab onOpenSkusTab={() => handleTabChange('skus')} />
-            </div>
-          </Tabs.Panel>
-        </Tabs.Panels>
-      </Tabs>
+          <Tabs.Panels>
+            <Tabs.Panel id="skus">
+              <div className="mt-4">
+                <PartsTab />
+              </div>
+            </Tabs.Panel>
+            <Tabs.Panel id="bins">
+              <div className="mt-4">
+                <BinsTab />
+              </div>
+            </Tabs.Panel>
+            <Tabs.Panel id="mappings">
+              <div className="mt-4">
+                <MappingsTab />
+              </div>
+            </Tabs.Panel>
+            <Tabs.Panel id="reorder">
+              <div className="mt-4">
+                <ReorderTab onOpenSkusTab={() => handleTabChange('skus')} />
+              </div>
+            </Tabs.Panel>
+          </Tabs.Panels>
+        </Tabs>
       )}
     </PageTemplate>
   );
