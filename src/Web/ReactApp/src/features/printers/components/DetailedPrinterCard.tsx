@@ -1083,7 +1083,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               )}
             </div>
           </div>
-          <FilamentCoverageBreakdown printerId={printer.id} className="mb-2" />
+          <FilamentCoverageBreakdown printerId={printer.id} className="mb-2" isOnline={isOnline} />
           <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
         </div>
       )}

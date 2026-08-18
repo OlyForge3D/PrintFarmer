@@ -1476,7 +1476,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   </div>
               }
             >
-              <FilamentCoverageBreakdown printerId={printer.id} />
+              <FilamentCoverageBreakdown printerId={printer.id} isOnline={isOnline} />
               <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo ?? (displayPrinter?.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: displayPrinter.currentSpoolId } : undefined)} />
             </CollapsibleSection>
           );

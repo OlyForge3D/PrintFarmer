@@ -13,7 +13,8 @@ import {
   FilamentCoverageBadge,
   RunoutRiskChip,
 } from '@/features/filament-coverage/components/FilamentCoverageBadge';
-import type { PrinterFilamentCoverage, ToolheadCoverage } from '@/features/filament-coverage/types';
+import type { ToolheadCoverage } from '@/features/filament-coverage/types';
+import { withOfflineOverride } from '@/features/filament-coverage/utils';
 import type { MmuStatus, ToolheadDto } from '@/types/api';
 import {
   isLightColor,
@@ -54,27 +55,6 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 function slotNoun(kind: LoadoutKind): string {
   return kind === 'gate' ? 'gate' : 'toolhead';
-}
-
-/**
- * Downgrades a coverage snapshot to "unknown" for both the printer-level
- * status and every toolhead when the printer is offline. An offline
- * printer's last-known coverage can't be verified (e.g. a spool could have
- * been pulled while unreachable), so it must never render a "covers"
- * (green "Filament OK") or "runout" indicator based on stale data
- * (issue #1684). Numeric fields (remaining/demand grams) are preserved
- * since they're informational, not a claimed live health signal.
- */
-function withOfflineOverride(
-  coverage: PrinterFilamentCoverage | null | undefined,
-  isOnline: boolean,
-): PrinterFilamentCoverage | null | undefined {
-  if (isOnline || !coverage) return coverage;
-  return {
-    ...coverage,
-    status: 'unknown',
-    toolheads: coverage.toolheads.map((th) => ({ ...th, status: 'unknown' })),
-  };
 }
 
 /**

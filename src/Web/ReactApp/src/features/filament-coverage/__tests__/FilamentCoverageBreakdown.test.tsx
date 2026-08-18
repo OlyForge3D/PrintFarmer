@@ -109,4 +109,56 @@ describe("FilamentCoverageBreakdown", () => {
       screen.getByTestId("filament-coverage-breakdown"),
     ).toBeInTheDocument();
   });
+
+  // Regression tests for issue #1684: this panel is mounted directly
+  // alongside MaterialLoadout in both DetailedPrinterCard's expanded view
+  // and PrinterDetailsSidebar's drill-down, and independently fetched the
+  // same fleet-wide coverage cache with no isOnline awareness — so it
+  // reproduced the exact same false "Filament OK"/"Runout risk" claim for
+  // an offline printer, one scroll position away from the fix applied to
+  // MaterialLoadout and PrinterCoverageSummary.
+  it("downgrades to unknown and hides 'Filament OK' when isOnline=false (#1684)", () => {
+    mockUsePrinterCoverageFromFleet.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: baseCoverage,
+    });
+    const qc = makeClient();
+    render(<FilamentCoverageBreakdown printerId="p-1" isOnline={false} />, {
+      wrapper: wrapper(qc),
+    });
+    expect(screen.getByText("Filament unknown")).toBeInTheDocument();
+    expect(screen.queryByText("Filament OK")).not.toBeInTheDocument();
+  });
+
+  it("suppresses the runout chip when offline even for a last-known runout status (#1684)", () => {
+    mockUsePrinterCoverageFromFleet.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: {
+        ...baseCoverage,
+        status: "runout",
+        earliestPredictedRunoutAt: new Date(Date.now() + 20 * 60_000).toISOString(),
+      },
+    });
+    const qc = makeClient();
+    render(<FilamentCoverageBreakdown printerId="p-1" isOnline={false} />, {
+      wrapper: wrapper(qc),
+    });
+    expect(screen.queryByText("Runout risk")).not.toBeInTheDocument();
+    expect(screen.getByText("Filament unknown")).toBeInTheDocument();
+  });
+
+  it("keeps existing (online) badge behavior when isOnline is not provided (back-compat)", () => {
+    mockUsePrinterCoverageFromFleet.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: baseCoverage,
+    });
+    const qc = makeClient();
+    render(<FilamentCoverageBreakdown printerId="p-1" />, {
+      wrapper: wrapper(qc),
+    });
+    expect(screen.getByText("Filament OK")).toBeInTheDocument();
+  });
 });
