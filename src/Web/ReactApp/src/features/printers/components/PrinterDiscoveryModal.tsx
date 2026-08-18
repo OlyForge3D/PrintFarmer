@@ -212,7 +212,10 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
       width="max-w-4xl"
       closeAriaLabel="Close discovery modal"
       footer={(
-        <>
+        <div
+          className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3"
+          data-testid="discovery-modal-footer"
+        >
           {/* During scan: Cancel Scan button */}
           {isActive && (
             <Button
@@ -255,7 +258,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
               {hasScanRun ? 'Scan Again' : 'Start Scan'}
             </Button>
           )}
-        </>
+        </div>
       )}
     >
       <div className="space-y-6">
