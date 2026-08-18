@@ -52,6 +52,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
   const swatchRef = useRef<HTMLButtonElement>(null);
 
   const normalizedHex = normalizeToHash(value);
+  const strippedValue = value.replace(/^#+/, '');
 
   // Close popover on outside click or Escape
   useEffect(() => {
@@ -138,7 +139,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
               <input
                 id={id}
                 type="text"
-                value={value ? `#${value}` : ''}
+                value={strippedValue ? `#${strippedValue}` : ''}
                 onChange={handleTextChange}
                 placeholder={placeholder.startsWith('#') ? placeholder : `#${placeholder}`}
                 disabled={disabled}
@@ -162,7 +163,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
           <input
             id={id}
             type="text"
-            value={value ? `#${value}` : ''}
+            value={strippedValue ? `#${strippedValue}` : ''}
             onChange={handleTextChange}
             placeholder={placeholder.startsWith('#') ? placeholder : `#${placeholder}`}
             disabled={disabled}
