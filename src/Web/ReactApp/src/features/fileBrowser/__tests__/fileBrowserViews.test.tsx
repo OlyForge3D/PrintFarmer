@@ -1,9 +1,24 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { GridView } from '../components/GridView';
 import { ExplorerView } from '../components/ExplorerView';
 import type { ColumnDef, FileItem, FolderNode } from '../types';
+
+/** Installs a `window.matchMedia` mock reporting `matches` for every query, mirroring
+ * the media-query listener contract `ExplorerView` relies on to detect the mobile layout. */
+function mockMatchMedia(matches: boolean) {
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
 
 const files: FileItem[] = [
   { id: '1', path: '/file.gcode', fileName: 'file.gcode', isDirectory: false, size: 1024 },
@@ -127,5 +142,73 @@ describe('ExplorerView', () => {
 
     await userEvent.click(deleteAction);
     expect(screen.getByText('Delete folder "dir"? This action cannot be undone.')).toBeVisible();
+  });
+});
+
+describe('ExplorerView mobile layout (issue #1688)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const renderExplorer = () =>
+    render(
+      <ExplorerView
+        folders={folders}
+        files={files}
+        selectedIds={[]}
+        onToggle={vi.fn()}
+        onSelectAll={vi.fn()}
+        onNavigate={vi.fn()}
+        currentPath="/"
+        renderActions={() => null}
+        sortBy="fileName"
+        sortOrder="asc"
+        onSort={vi.fn()}
+        page={1}
+        totalPages={1}
+        onPageChange={vi.fn()}
+        columns={columns}
+      />
+    );
+
+  it('stacks the folder tree above the file table below the sm breakpoint instead of clipping it', () => {
+    mockMatchMedia(true); // simulates the 375px reproduction viewport
+
+    renderExplorer();
+
+    const region = screen.getByRole('region', { name: 'Explorer view' });
+    expect(region).toHaveClass('flex-col');
+    expect(region).not.toHaveClass('flex-row');
+
+    // The resize divider only makes sense for a side-by-side (width) split; it must
+    // not render in the stacked mobile layout.
+    expect(
+      screen.queryByRole('separator', { name: 'Resize tree and list views' })
+    ).not.toBeInTheDocument();
+
+    // The tree panel must not be pinned to a fixed pixel width on mobile, or it
+    // would again squeeze the file table into a narrow clipped column.
+    const folderTreeHeading = screen.getByText('Folders');
+    const treePanel = folderTreeHeading.closest('div[class*="max-h-"]');
+    expect(treePanel).not.toBeNull();
+    expect(treePanel).not.toHaveAttribute('style', expect.stringContaining('width'));
+
+    // Folders and the file table both remain present and readable.
+    expect(screen.getByLabelText('Folder tree')).toBeVisible();
+    expect(screen.getByRole('table', { name: 'Files list' })).toBeVisible();
+  });
+
+  it('keeps the folder tree and file table side-by-side with a resizable divider at desktop widths', () => {
+    mockMatchMedia(false);
+
+    renderExplorer();
+
+    const region = screen.getByRole('region', { name: 'Explorer view' });
+    expect(region).toHaveClass('flex-row');
+    expect(region).not.toHaveClass('flex-col');
+
+    expect(
+      screen.getByRole('separator', { name: 'Resize tree and list views' })
+    ).toBeInTheDocument();
   });
 });
