@@ -212,8 +212,13 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
       width="max-w-4xl"
       closeAriaLabel="Close discovery modal"
       footer={(
+        // Deliberately `flex-col` (not `flex-col-reverse`): each Button below is
+        // an individual flex item here, so a reversed column would swap visual
+        // stacking order without touching DOM/tab order, disorienting keyboard
+        // and screen-reader users (WCAG 2.4.3 Focus Order). Keeping visual order
+        // == DOM order == tab order on mobile is what actually fixes #1685.
         <div
-          className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3"
+          className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3"
           data-testid="discovery-modal-footer"
         >
           {/* During scan: Cancel Scan button */}

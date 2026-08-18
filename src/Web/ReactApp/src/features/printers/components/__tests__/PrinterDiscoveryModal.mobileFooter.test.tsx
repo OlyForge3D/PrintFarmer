@@ -12,13 +12,16 @@ import { PrinterBackend } from '@/types/api';
 // off-screen instead of the right-most.
 //
 // The fix wraps the discovery modal's own footer buttons in a single
-// container that stacks them (`flex-col-reverse`) below the `sm` (640px)
-// breakpoint and only switches to the original single-row, right-aligned
-// layout at `sm` and above. jsdom performs no real layout/media-query
-// evaluation (see DetailedPrinterCardResponsiveWidth.test.ts), so this
-// asserts the structural fix directly: every footer action must be a
-// descendant of the responsive wrapper, and that wrapper must declare the
-// mobile-stack / desktop-row classes.
+// container that stacks them (`flex-col`) below the `sm` (640px) breakpoint
+// and only switches to the original single-row, right-aligned layout at
+// `sm` and above. `flex-col` (not `flex-col-reverse`) is intentional: each
+// button is an individual flex item, so a reversed column would swap
+// visual stacking order without touching DOM/tab order (WCAG 2.4.3 Focus
+// Order). jsdom performs no real layout/media-query evaluation (see
+// DetailedPrinterCardResponsiveWidth.test.ts), so this asserts the
+// structural fix directly: every footer action must be a descendant of the
+// responsive wrapper, and that wrapper must declare the mobile-stack /
+// desktop-row classes.
 
 const foundPrinters = [
   {
@@ -69,10 +72,12 @@ describe('PrinterDiscoveryModal — mobile footer layout (#1685)', () => {
 
     const footer = screen.getByTestId('discovery-modal-footer');
 
-    // Mobile-first: stacked full-width column, reversed so the primary
-    // action lands first visually; only switches to a single right-aligned
-    // row at the `sm` breakpoint and above.
-    expect(footer.className).toMatch(/\bflex-col-reverse\b/);
+    // Mobile-first: stacked full-width column in DOM order (not reversed —
+    // reversing would swap visual order without touching tab order, which
+    // is its own accessibility regression); only switches to a single
+    // right-aligned row at the `sm` breakpoint and above.
+    expect(footer.className).toMatch(/\bflex-col\b/);
+    expect(footer.className).not.toMatch(/\bflex-col-reverse\b/);
     expect(footer.className).toMatch(/\bw-full\b/);
     expect(footer.className).toMatch(/\bsm:flex-row\b/);
     expect(footer.className).toMatch(/\bsm:justify-end\b/);
@@ -83,5 +88,14 @@ describe('PrinterDiscoveryModal — mobile footer layout (#1685)', () => {
     expect(within(footer).getByRole('button', { name: 'Close' })).toBeInTheDocument();
     expect(within(footer).getByRole('button', { name: /Add 0 Selected Printers/ })).toBeInTheDocument();
     expect(within(footer).getByRole('button', { name: 'Scan Again' })).toBeInTheDocument();
+
+    // DOM order (== tab order) must match the pre-fix, desktop-row reading
+    // order: Close, then Add Selected, then Scan Again. `flex-col` preserves
+    // this; `flex-col-reverse` would not, which is exactly the regression
+    // this assertion guards against.
+    const buttonNames = within(footer)
+      .getAllByRole('button')
+      .map((button) => button.textContent);
+    expect(buttonNames).toEqual(['Close', 'Add 0 Selected Printers', 'Scan Again']);
   });
 });
