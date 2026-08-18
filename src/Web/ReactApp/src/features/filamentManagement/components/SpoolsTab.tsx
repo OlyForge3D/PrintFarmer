@@ -21,7 +21,7 @@ import {
   PlusIcon,
   DeleteIcon,
 } from '@/common/components/icons/MdiIcons';
-import { classifyColor, getRepresentativeHex } from '@/common/utils/colorFamilies';
+import { classifyColor } from '@/common/utils/colorFamilies';
 import { isSafeHttpUrl, toSafeHref } from '@/common/utils/validation';
 import { Button, Checkbox, Select, FileUpload } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
@@ -165,7 +165,7 @@ export function SpoolsTab() {
 
   const defaultColumns: SpoolTableColumn[] = [
     { id: 'id', label: 'ID', visible: true, sortable: true, render: s => s.id, sortValue: s => s.id },
-    { id: 'color', label: 'Color', visible: true, sortable: true, render: s => <ColorSwatch color={getRepresentativeHex(classifyColor(s.colorHex))} label={classifyColor(s.colorHex)} />, sortValue: s => classifyColor(s.colorHex).toLowerCase() },
+    { id: 'color', label: 'Color', visible: true, sortable: true, render: s => <ColorSwatch color={s.colorHex || '#888888'} label={classifyColor(s.colorHex)} />, sortValue: s => classifyColor(s.colorHex).toLowerCase() },
     { id: 'vendor', label: 'Vendor', visible: true, sortable: true, render: s => (s.vendor || '—'), sortValue: s => (s.vendor || '').toLowerCase() },
     { id: 'material', label: 'Material', visible: true, sortable: true, render: s => (s.material || '—'), sortValue: s => (s.material || '').toLowerCase() },
     { id: 'name', label: 'Name', visible: true, sortable: true, render: s => (s.filamentName || s.name || '—'), sortValue: s => (s.filamentName || s.name || '').toLowerCase() },

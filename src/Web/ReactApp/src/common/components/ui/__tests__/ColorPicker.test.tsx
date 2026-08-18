@@ -12,6 +12,15 @@ describe('ColorPicker', () => {
     expect(input.value).toBe('#FF5733');
   });
 
+  it('does not double the leading # when the incoming value already includes one', () => {
+    // Regression: some DB/API-sourced colorHex values already include a leading '#'
+    // (e.g. Spoolman-style colors). The component previously always prepended '#' to
+    // whatever value it was given, so a value of '#FF5733' rendered as '##FF5733'.
+    render(<ColorPicker value="#FF5733" onChange={() => {}} aria-label="Filament colour" />);
+    const input = screen.getByLabelText('Filament colour') as HTMLInputElement;
+    expect(input.value).toBe('#FF5733');
+  });
+
   it('swatchOnly mode hides the inline hex input until the popover is opened', () => {
     render(
       <ColorPicker value="00A98F" onChange={() => {}} swatchOnly aria-label="Extruder 1 filament colour" />,
@@ -44,6 +53,14 @@ describe('ColorPicker', () => {
     render(<ColorPicker value="FFFFFF" onChange={onChange} aria-label="Colour" />);
     const input = screen.getByLabelText('Colour');
     fireEvent.change(input, { target: { value: '#abcdef' } });
+    expect(onChange).toHaveBeenCalledWith('abcdef');
+  });
+
+  it('strips a doubled leading # if the browser/autocomplete inserts one', () => {
+    const onChange = vi.fn();
+    render(<ColorPicker value="#FFFFFF" onChange={onChange} aria-label="Colour" />);
+    const input = screen.getByLabelText('Colour');
+    fireEvent.change(input, { target: { value: '##abcdef' } });
     expect(onChange).toHaveBeenCalledWith('abcdef');
   });
 
