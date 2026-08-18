@@ -195,10 +195,12 @@ export function ToolheadCoverageRow({
         reason={toolhead.statusReason}
         ariaContext={toolhead.toolheadName || `Toolhead ${toolhead.toolheadIndex}`}
       />
-      <RunoutRiskChip
-        predictedRunoutAt={toolhead.predictedRunoutAt}
-        predictedRunoutLayer={toolhead.predictedRunoutLayer}
-      />
+      {toolhead.status === "runout" && (
+        <RunoutRiskChip
+          predictedRunoutAt={toolhead.predictedRunoutAt}
+          predictedRunoutLayer={toolhead.predictedRunoutLayer}
+        />
+      )}
       <span className="text-pf-text-tertiary">{remainingLabel}</span>
       <span className="text-pf-text-tertiary">·</span>
       <span className="text-pf-text-tertiary">{demandLabel}</span>

@@ -161,4 +161,42 @@ describe("FilamentCoverageBreakdown", () => {
     });
     expect(screen.getByText("Filament OK")).toBeInTheDocument();
   });
+
+  it("suppresses a per-toolhead runout chip when offline, even with a stale predicted runout time (#1684)", () => {
+    mockUsePrinterCoverageFromFleet.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: {
+        ...baseCoverage,
+        status: "runout",
+        toolheads: [
+          {
+            toolheadIndex: 1,
+            toolheadName: "Extruder 1",
+            spoolId: 42,
+            material: "PETG",
+            filamentColor: "#0f0",
+            remainingGrams: 100,
+            currentJobRequiredGrams: 400,
+            currentJobRemainingGrams: 300,
+            queuedRequiredGrams: null,
+            totalDemandGrams: 400,
+            status: "runout",
+            statusReason: "insufficient-remaining",
+            predictedRunoutAt: new Date(Date.now() + 20 * 60_000).toISOString(),
+            predictedRunoutLayer: 123,
+          },
+        ],
+      },
+    });
+    const qc = makeClient();
+    render(<FilamentCoverageBreakdown printerId="p-1" isOnline={false} />, {
+      wrapper: wrapper(qc),
+    });
+    expect(screen.queryByText(/Runs out in/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Runout risk/i)).not.toBeInTheDocument();
+    // The per-toolhead badge must also read "unknown", not "Filament OK"/"Runout risk".
+    const badges = screen.getAllByRole("status");
+    expect(badges.some((el) => /Filament unknown/i.test(el.textContent ?? ""))).toBe(true);
+  });
 });

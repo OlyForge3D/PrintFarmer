@@ -94,6 +94,24 @@ describe("ToolheadCoverageRow", () => {
     render(<ToolheadCoverageRow toolhead={toolhead} />);
     expect(screen.getByText(/demand unknown/i)).toBeInTheDocument();
   });
+
+  // Regression test for issue #1684: withOfflineOverride downgrades a
+  // toolhead's `status` to "unknown" when the printer is offline but does
+  // not (and should not need to) clear predictedRunoutAt/predictedRunoutLayer,
+  // since those are still real last-known values on the coverage object.
+  // ToolheadCoverageRow itself must not render a runout-risk claim from
+  // stale prediction data once the status is no longer "runout" — mirrors
+  // the header-level RunoutRiskChip's own status gating.
+  it("does not render the runout chip when status is not 'runout', even with a stale predicted runout time (#1684)", () => {
+    render(
+      <ToolheadCoverageRow
+        toolhead={{ ...toolhead, status: "unknown" }}
+      />,
+    );
+    expect(screen.getByText("Filament unknown")).toBeInTheDocument();
+    expect(screen.queryByText(/Runs out in/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Runout risk/i)).not.toBeInTheDocument();
+  });
 });
 
 describe("PrinterCoverageSummary", () => {
