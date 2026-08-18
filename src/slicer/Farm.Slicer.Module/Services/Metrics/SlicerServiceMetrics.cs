@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Threading;
 
 namespace Farm.Slicer.Module.Services.Metrics;
 
@@ -12,9 +13,12 @@ public sealed class SlicerServiceMetrics : IDisposable
     private readonly Meter _meter;
     private bool _disposed;
 
-    private Func<int>? _getTotalCapacity;
-    private Func<int>? _getAvailableCapacity;
-    private Func<int>? _getActiveJobs;
+    // Snapshot of worker capacity, refreshed asynchronously by
+    // SlicerCapacityMetricsRefreshService (see #1676). The observable gauges below
+    // read this volatile reference instead of running database work inline on the
+    // OpenTelemetry collection thread. Reference assignment is atomic, and Volatile
+    // ensures the latest value is visible across threads without a lock.
+    private CapacitySnapshot _capacitySnapshot = new(TotalCapacity: 0, AvailableCapacity: 0, ActiveJobs: 0);
 
     /// <summary>Gets the counter for total submitted jobs.</summary>
     public Counter<long> JobsSubmittedTotal { get; }
@@ -114,15 +118,15 @@ public sealed class SlicerServiceMetrics : IDisposable
 
         ServiceTotalCapacity = _meter.CreateObservableGauge(
             "printfarmer.slicer.service_total_capacity",
-            () => _getTotalCapacity?.Invoke() ?? 0,
+            () => Volatile.Read(ref _capacitySnapshot).TotalCapacity,
             description: "Total job capacity across all slicer services");
         ServiceAvailableCapacity = _meter.CreateObservableGauge(
             "printfarmer.slicer.service_available_capacity",
-            () => _getAvailableCapacity?.Invoke() ?? 0,
+            () => Volatile.Read(ref _capacitySnapshot).AvailableCapacity,
             description: "Available job capacity across all slicer services");
         ServiceActiveJobs = _meter.CreateObservableGauge(
             "printfarmer.slicer.service_active_jobs",
-            () => _getActiveJobs?.Invoke() ?? 0,
+            () => Volatile.Read(ref _capacitySnapshot).ActiveJobs,
             description: "Number of jobs currently executing");
         ServiceCapacityUtilization = _meter.CreateHistogram<int>(
             "printfarmer.slicer.service_capacity_utilization_percent",
@@ -159,19 +163,18 @@ public sealed class SlicerServiceMetrics : IDisposable
     }
 
     /// <summary>
-    /// Set callbacks for observable capacity metrics.
+    /// Atomically updates the worker-capacity snapshot backing the observable
+    /// capacity gauges. Intended to be called periodically by a background
+    /// refresher (<c>SlicerCapacityMetricsRefreshService</c>) that owns its own
+    /// DI scope — never from an OpenTelemetry gauge callback, and never with
+    /// a delegate bound to a scoped service (see #1676).
     /// </summary>
-    /// <param name="getTotalCapacity">Callback to retrieve total job capacity.</param>
-    /// <param name="getAvailableCapacity">Callback to retrieve available job capacity.</param>
-    /// <param name="getActiveJobs">Callback to retrieve the number of active jobs.</param>
-    public void SetCapacityProviders(
-        Func<int> getTotalCapacity,
-        Func<int> getAvailableCapacity,
-        Func<int> getActiveJobs)
+    /// <param name="totalCapacity">Total job capacity across all live slicer workers.</param>
+    /// <param name="availableCapacity">Available (free) job capacity across all live, non-draining workers.</param>
+    /// <param name="activeJobs">Number of jobs currently executing across all live workers.</param>
+    public void UpdateCapacitySnapshot(int totalCapacity, int availableCapacity, int activeJobs)
     {
-        _getTotalCapacity = getTotalCapacity;
-        _getAvailableCapacity = getAvailableCapacity;
-        _getActiveJobs = getActiveJobs;
+        Volatile.Write(ref _capacitySnapshot, new CapacitySnapshot(totalCapacity, availableCapacity, activeJobs));
     }
 
     /// <summary>Record job submission.</summary>
@@ -369,4 +372,10 @@ public sealed class SlicerServiceMetrics : IDisposable
         _meter.Dispose();
         _disposed = true;
     }
+
+    /// <summary>
+    /// Immutable snapshot of worker capacity counters, refreshed asynchronously
+    /// by a background service and read directly by the observable gauges.
+    /// </summary>
+    private sealed record CapacitySnapshot(int TotalCapacity, int AvailableCapacity, int ActiveJobs);
 }

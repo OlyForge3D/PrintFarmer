@@ -114,6 +114,7 @@ public static class TelemetryStartup
                        .AddRuntimeInstrumentation()
                        .AddMeter("PrintFarmer.Artifacts")
                        .AddMeter("PrintFarmer.Slicing")
+                       .AddMeter("PrintFarmer.SlicerService")
                        .AddMeter("PrintFarmer.FailureDetection")
                        .AddMeter("PrintFarmer.API")
                        .AddMeter(Farm.Infrastructure.Services.Notifications.NativePush.NativePushMetrics.MeterName);
