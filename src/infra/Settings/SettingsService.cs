@@ -68,6 +68,34 @@ public class SettingsService : ISettingsService
     private Dictionary<string, object> _settings = new();
     private readonly List<Type> _settingTypes;
 
+    // The set of loaded assemblies (and therefore the [AppSetting]/[SystemSetting]-decorated
+    // types they contain) is fixed once the host finishes ConfigureServices — plugin backends
+    // (see BackendPluginExtensions.AddBackendClientPlugins) load their assemblies via
+    // Assembly.LoadFrom synchronously during service registration, before the host starts
+    // accepting requests. SettingsService is only ever constructed while handling a request
+    // (or a health probe), i.e. strictly after that point, so a Lazy<T> evaluated on first
+    // construction is safe: it never runs before plugin discovery completes. This turns the
+    // full-AppDomain reflection scan from a per-request cost into a once-per-process cost.
+    private static readonly Lazy<List<Type>> CachedSettingTypes = new(DiscoverSettingTypes, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private static List<Type> DiscoverSettingTypes()
+    {
+        return AppDomain.CurrentDomain.GetAssemblies()
+            .SelectMany(a =>
+            {
+                try
+                {
+                    return a.GetTypes();
+                }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    return ex.Types.Where(t => t != null).Cast<Type>();
+                }
+            })
+            .Where(t => t.GetCustomAttribute<AppSettingAttribute>() != null || t.GetCustomAttribute<SystemSettingAttribute>() != null)
+            .ToList();
+    }
+
     public SettingsService(IConfiguration config)
     {
         // For DI: IConfiguration and IDbContextFactory
@@ -83,20 +111,7 @@ public class SettingsService : ISettingsService
         Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository settingsRepo,
         IMutationWatermarkReader? watermarkReader = null)
     {
-        _settingTypes = AppDomain.CurrentDomain.GetAssemblies()
-            .SelectMany(a =>
-            {
-                try
-                {
-                    return a.GetTypes();
-                }
-                catch (ReflectionTypeLoadException ex)
-                {
-                    return ex.Types.Where(t => t != null).Cast<Type>();
-                }
-            })
-            .Where(t => t.GetCustomAttribute<AppSettingAttribute>() != null || t.GetCustomAttribute<SystemSettingAttribute>() != null)
-            .ToList();
+        _settingTypes = CachedSettingTypes.Value;
         _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _settingsRepo = settingsRepo ?? throw new ArgumentNullException(nameof(settingsRepo));
@@ -109,7 +124,27 @@ public class SettingsService : ISettingsService
         long? originWatermark = CaptureOriginWatermark();
         Dictionary<string, object> newSettings = new Dictionary<string, object>();
         Dictionary<string, long?> newOriginWatermarks = [];
+
+        // Collect the DB-backed [AppSetting] keys up front so the DB read below can be a
+        // single query filtered to just those keys, rather than one FirstOrDefault query per
+        // settings class. AppSettingsEntities also stores distributed lock records (see
+        // TryAcquireLockAsync/CompleteLockAsync/ClearLockAsync), so an unfiltered load would
+        // pull rows this service has no use for.
+        List<string> appSettingKeys = _settingTypes
+            .Select(t => t.GetCustomAttribute<AppSettingAttribute>()?.Key)
+            .Where(key => key != null)
+            .Select(key => key!)
+            .ToList();
+
         using AppDbContext dbContext = _dbContextFactory.CreateDbContext();
+        Dictionary<string, string> settingsJsonByKey = new();
+        if (appSettingKeys.Count > 0)
+        {
+            settingsJsonByKey = dbContext.AppSettingsEntities
+                .Where(e => appSettingKeys.Contains(e.Key))
+                .Select(e => new { e.Key, e.SettingsJson })
+                .ToDictionary(e => e.Key, e => e.SettingsJson);
+        }
 
         foreach (Type type in _settingTypes)
         {
@@ -125,12 +160,12 @@ public class SettingsService : ISettingsService
             if (appAttr != null)
             {
                 // AppSettings: try DB first, fallback to config
-                AppSettingsEntity? dbEntity = dbContext.AppSettingsEntities.FirstOrDefault(e => e.Key == appAttr.Key);
-                if (dbEntity != null && !string.IsNullOrWhiteSpace(dbEntity.SettingsJson))
+                string? settingsJson = settingsJsonByKey.TryGetValue(appAttr.Key, out string? json) ? json : null;
+                if (!string.IsNullOrWhiteSpace(settingsJson))
                 {
                     try
                     {
-                        instance = JsonSerializer.Deserialize(dbEntity.SettingsJson, type);
+                        instance = JsonSerializer.Deserialize(settingsJson, type);
                     }
                     catch
                     {
