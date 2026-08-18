@@ -8,6 +8,7 @@
  */
 import React from "react";
 import { usePrinterCoverageFromFleet } from "../hooks";
+import { withOfflineOverride } from "../utils";
 import {
   FilamentCoverageBadge,
   RunoutRiskChip,
@@ -17,14 +18,24 @@ import {
 export interface FilamentCoverageBreakdownProps {
   printerId: string;
   className?: string;
+  /**
+   * Whether the printer is currently reachable. Defaults to `true` for
+   * back-compat. When `false`, the last-known coverage snapshot cannot be
+   * verified (issue #1684), so both the aggregate status and every
+   * toolhead's status are downgraded to "unknown" — this panel must never
+   * show a stale "Filament OK"/"Runout risk" claim for an offline printer.
+   */
+  isOnline?: boolean;
 }
 
 export function FilamentCoverageBreakdown({
   printerId,
   className,
+  isOnline = true,
 }: FilamentCoverageBreakdownProps): React.ReactElement | null {
-  const { data: coverage, isPending, isError } =
+  const { data: rawCoverage, isPending, isError } =
     usePrinterCoverageFromFleet(printerId);
+  const coverage = withOfflineOverride(rawCoverage, isOnline);
 
   if (isPending) {
     return null;

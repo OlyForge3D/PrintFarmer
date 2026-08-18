@@ -14,6 +14,7 @@ import {
   RunoutRiskChip,
 } from '@/features/filament-coverage/components/FilamentCoverageBadge';
 import type { ToolheadCoverage } from '@/features/filament-coverage/types';
+import { withOfflineOverride } from '@/features/filament-coverage/utils';
 import type { MmuStatus, ToolheadDto } from '@/types/api';
 import {
   isLightColor,
@@ -36,6 +37,15 @@ export interface MaterialLoadoutProps {
   reviewedRowVersion?: string | null;
   /** Denser rendering for the printer card. */
   compact?: boolean;
+  /**
+   * Whether the printer is currently reachable. Defaults to `true` so
+   * existing callers that don't yet track connectivity keep their prior
+   * behavior. When explicitly `false`, the last-known coverage snapshot is
+   * treated as stale/unverifiable: every status is downgraded to
+   * "unknown" so an offline printer never shows a "Filament OK" success
+   * indicator or a "runout" warning it can no longer verify (issue #1684).
+   */
+  isOnline?: boolean;
   onSpoolChange?: () => void;
   className?: string;
 }
@@ -237,6 +247,7 @@ export function MaterialLoadout({
   currentSpoolId,
   reviewedRowVersion,
   compact = false,
+  isOnline = true,
   onSpoolChange,
   className,
 }: MaterialLoadoutProps) {
@@ -265,7 +276,11 @@ export function MaterialLoadout({
   const { data: revisionSource } = usePrinterDetails(printerId, {
     enabled: !reviewedRowVersion,
   });
-  const { data: coverage } = usePrinterCoverageFromFleet(printerId);
+  const { data: rawCoverage } = usePrinterCoverageFromFleet(printerId);
+  const coverage = useMemo(
+    () => withOfflineOverride(rawCoverage, isOnline),
+    [rawCoverage, isOnline],
+  );
   const fallbackRevision = revisionSource?.rowVersion ?? null;
   const effectiveRowVersion = reviewedRowVersion ?? fallbackRevision;
   if (selectedKey && !lockedRevision && !capturedFallbackRevision && fallbackRevision) {

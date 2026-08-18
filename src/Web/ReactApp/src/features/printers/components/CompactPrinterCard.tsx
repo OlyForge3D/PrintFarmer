@@ -505,7 +505,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
 
             return <span className="italic text-pf-text-tertiary">No spool loaded</span>;
           })()}
-          <PrinterCoverageSummary coverage={coverage} compact className="ml-1" />
+          <PrinterCoverageSummary coverage={coverage} compact className="ml-1" isOnline={isOnline} />
         </div>
         <div className="relative shrink-0 ml-2">
           <Button

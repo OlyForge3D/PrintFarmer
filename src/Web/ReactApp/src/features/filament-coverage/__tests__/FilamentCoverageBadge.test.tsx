@@ -94,6 +94,24 @@ describe("ToolheadCoverageRow", () => {
     render(<ToolheadCoverageRow toolhead={toolhead} />);
     expect(screen.getByText(/demand unknown/i)).toBeInTheDocument();
   });
+
+  // Regression test for issue #1684: withOfflineOverride downgrades a
+  // toolhead's `status` to "unknown" when the printer is offline but does
+  // not (and should not need to) clear predictedRunoutAt/predictedRunoutLayer,
+  // since those are still real last-known values on the coverage object.
+  // ToolheadCoverageRow itself must not render a runout-risk claim from
+  // stale prediction data once the status is no longer "runout" — mirrors
+  // the header-level RunoutRiskChip's own status gating.
+  it("does not render the runout chip when status is not 'runout', even with a stale predicted runout time (#1684)", () => {
+    render(
+      <ToolheadCoverageRow
+        toolhead={{ ...toolhead, status: "unknown" }}
+      />,
+    );
+    expect(screen.getByText("Filament unknown")).toBeInTheDocument();
+    expect(screen.queryByText(/Runs out in/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Runout risk/i)).not.toBeInTheDocument();
+  });
 });
 
 describe("PrinterCoverageSummary", () => {
@@ -131,5 +149,38 @@ describe("PrinterCoverageSummary", () => {
     const statuses = screen.getAllByRole("status");
     expect(statuses.some((el) => /Filament OK/i.test(el.textContent ?? ""))).toBe(true);
     expect(statuses.some((el) => /Runs out in/i.test(el.textContent ?? ""))).toBe(false);
+  });
+
+  // Regression test for issue #1684: an offline printer's last-known
+  // coverage snapshot can't be trusted (e.g. a spool could have been
+  // pulled while unreachable), so it must never render a "Filament OK"
+  // success indicator — even though the backend last reported "covers".
+  it("never shows 'Filament OK' for an offline printer, even when last-known status is 'covers'", () => {
+    render(
+      <PrinterCoverageSummary
+        coverage={{ ...coverage, status: "covers", earliestPredictedRunoutAt: null }}
+        isOnline={false}
+      />,
+    );
+    const statuses = screen.getAllByRole("status");
+    expect(statuses.some((el) => /Filament unknown/i.test(el.textContent ?? ""))).toBe(true);
+    expect(statuses.some((el) => /Filament OK/i.test(el.textContent ?? ""))).toBe(false);
+  });
+
+  it("suppresses the runout chip for an offline printer even when last-known status is 'runout'", () => {
+    render(<PrinterCoverageSummary coverage={coverage} isOnline={false} />);
+    const statuses = screen.getAllByRole("status");
+    expect(statuses.some((el) => /Filament unknown/i.test(el.textContent ?? ""))).toBe(true);
+    expect(statuses.some((el) => /Runout risk/i.test(el.textContent ?? ""))).toBe(false);
+    expect(statuses.some((el) => /Runs out in/i.test(el.textContent ?? ""))).toBe(false);
+  });
+
+  it("defaults to online behavior when isOnline is not provided (back-compat)", () => {
+    render(
+      <PrinterCoverageSummary
+        coverage={{ ...coverage, status: "covers", earliestPredictedRunoutAt: null }}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(/Filament OK/i);
   });
 });

@@ -327,6 +327,11 @@ export function QueueJobsTable({
                   {(() => {
                     const printerId = jobWrapper.assignedPrinter?.id;
                     if (!printerId) return null;
+                    // Issue #1684: an offline printer's last-known coverage
+                    // status can't be verified (a spool could have been
+                    // pulled while unreachable), so never surface a runout
+                    // warning derived from stale data.
+                    if (jobWrapper.assignedPrinter?.isOnline === false) return null;
                     const cov = coverageByPrinterId.get(printerId);
                     if (cov?.status !== "runout") return null;
                     return (

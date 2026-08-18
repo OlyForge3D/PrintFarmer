@@ -383,6 +383,64 @@ describe('MaterialLoadout', () => {
     expect(within(drawer).getByText('400g needed')).toBeInTheDocument();
   });
 
+  // Regression test for issue #1684: this surface (reached from the
+  // expanded DetailedPrinterCard and the printer details sidebar) rendered
+  // the same false "Filament OK"/"Runout risk" success-or-warning claim as
+  // the compact printer-list card, driven by the same stale last-known
+  // coverage snapshot, whenever the printer was offline. `isOnline={false}`
+  // must downgrade the header badge, the runout chip, and every per-slot
+  // ring/badge to "unknown" regardless of what the backend last reported.
+  it('downgrades every coverage status to unknown when the printer is offline (#1684)', () => {
+    coverage.mockReturnValue({
+      printerId: 'printer-1',
+      printerName: 'Qidi Plus 4',
+      status: 'covers',
+      earliestPredictedRunoutAt: null,
+      toolheads: [
+        { toolheadIndex: 2, status: 'covers', remainingGrams: 900, totalDemandGrams: 400 },
+      ],
+    });
+
+    renderLoadout({ isOnline: false });
+
+    // Header badge must read "unknown", never "Filament OK".
+    expect(screen.getByText('Filament unknown')).toBeInTheDocument();
+    expect(screen.queryByText('Filament OK')).not.toBeInTheDocument();
+    // Per-slot status must also be downgraded, not just the header rollup.
+    expect(screen.getByTestId('loadout-slot-2')).toHaveAttribute('data-status', 'unknown');
+  });
+
+  it('suppresses the runout chip and warning ring when offline even for a last-known runout status (#1684)', () => {
+    coverage.mockReturnValue({
+      printerId: 'printer-1',
+      printerName: 'Qidi Plus 4',
+      status: 'runout',
+      earliestPredictedRunoutAt: new Date(Date.now() + 20 * 60_000).toISOString(),
+      toolheads: [
+        { toolheadIndex: 2, status: 'runout', remainingGrams: 100, totalDemandGrams: 400 },
+      ],
+    });
+
+    renderLoadout({ isOnline: false });
+
+    expect(screen.queryByText('Runout risk')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Runs out in/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId('loadout-slot-2')).toHaveAttribute('data-status', 'unknown');
+  });
+
+  it('keeps existing (online) badge behavior when isOnline is not provided (back-compat)', () => {
+    coverage.mockReturnValue({
+      printerId: 'printer-1',
+      printerName: 'Qidi Plus 4',
+      status: 'covers',
+      toolheads: [],
+    });
+
+    renderLoadout();
+
+    expect(screen.getByText('Filament OK')).toBeInTheDocument();
+  });
+
   it('calls a toolchanger slot a tool, never an AMS gate', () => {
     renderLoadout({
       mmuStatus: mmu([gate(0), gate(1)], MmuProtocol.SnapmakerU1),

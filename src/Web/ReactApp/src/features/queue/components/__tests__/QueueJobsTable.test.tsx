@@ -560,4 +560,16 @@ describe("QueueJobsTable — filament coverage badge", () => {
       expect(screen.queryByRole("status", { name: /runout risk/i })).not.toBeInTheDocument(),
     );
   });
+
+  it("does NOT show the runout badge when the assigned printer is offline, even with a last-known 'runout' status (#1684)", async () => {
+    mockGetCoverage.mockReturnValue(fleetWithStatus("runout"));
+    const offlineJob = {
+      ...jobWithPrinter,
+      assignedPrinter: { ...jobWithPrinter.assignedPrinter, isOnline: false },
+    };
+    render(<QueueJobsTable jobs={[offlineJob]} />);
+    await waitFor(() =>
+      expect(screen.queryByRole("status", { name: /runout risk/i })).not.toBeInTheDocument(),
+    );
+  });
 });

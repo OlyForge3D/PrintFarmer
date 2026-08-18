@@ -999,6 +999,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           currentSpoolId={printer.currentSpoolId}
           reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
           compact
+          isOnline={isOnline}
           className="mb-2"
         />
       )}
@@ -1082,7 +1083,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               )}
             </div>
           </div>
-          <FilamentCoverageBreakdown printerId={printer.id} className="mb-2" />
+          <FilamentCoverageBreakdown printerId={printer.id} className="mb-2" isOnline={isOnline} />
           <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
         </div>
       )}

@@ -1386,12 +1386,17 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 toolheads={printerDetails?.toolheads}
                 currentSpoolId={printer?.currentSpoolId}
                 reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
+                isOnline={isOnline}
                 onSpoolChange={() => {
                   queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
                 }}
               />
               {persistedToolheads && (
-                <FallbackGroupsPanel printerId={printer.id} toolheads={persistedToolheads} />
+                <FallbackGroupsPanel
+                  printerId={printer.id}
+                  toolheads={persistedToolheads}
+                  isOnline={isOnline}
+                />
               )}
             </CollapsibleSection>
           );
@@ -1475,7 +1480,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   </div>
               }
             >
-              <FilamentCoverageBreakdown printerId={printer.id} />
+              <FilamentCoverageBreakdown printerId={printer.id} isOnline={isOnline} />
               <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo ?? (displayPrinter?.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: displayPrinter.currentSpoolId } : undefined)} />
             </CollapsibleSection>
           );

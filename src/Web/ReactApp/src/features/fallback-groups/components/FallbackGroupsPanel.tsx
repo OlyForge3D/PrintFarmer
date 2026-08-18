@@ -22,6 +22,7 @@ import {
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
 import { useFilamentTypes } from "@/common/hooks/useApi";
 import { usePrinterFilamentCoverage } from "@/features/filament-coverage/hooks";
+import { withOfflineOverride } from "@/features/filament-coverage/utils";
 import type { ToolheadDto } from "@/types/api";
 import { normalizeToolheadType } from "@/features/printers/utils/isEligibleMaintenanceToolhead";
 import {
@@ -48,6 +49,14 @@ import { FallbackGroupEditor } from "./FallbackGroupEditor";
 interface FallbackGroupsPanelProps {
   printerId: string;
   toolheads: ToolheadDto[];
+  /**
+   * Whether the printer is currently reachable. Defaults to `true` for
+   * back-compat with existing call sites. When `false`, per-toolhead
+   * coverage is downgraded to "unknown" before deriving chain state so a
+   * stale last-known "runout" status can never render an "Exhausted" chip
+   * for data that can no longer be verified (issue #1684).
+   */
+  isOnline?: boolean;
 }
 
 function isPhysical(toolhead: ToolheadDto): boolean {
@@ -63,6 +72,7 @@ function isPhysical(toolhead: ToolheadDto): boolean {
 export function FallbackGroupsPanel({
   printerId,
   toolheads,
+  isOnline = true,
 }: FallbackGroupsPanelProps) {
   const physicalToolheads = useMemo(
     () => toolheads.filter(isPhysical),
@@ -86,8 +96,11 @@ export function FallbackGroupsPanel({
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const coverageLookup = useMemo(
-    () => buildCoverageLookup(coverageQuery.data?.toolheads ?? null),
-    [coverageQuery.data?.toolheads],
+    () =>
+      buildCoverageLookup(
+        withOfflineOverride(coverageQuery.data, isOnline)?.toolheads ?? null,
+      ),
+    [coverageQuery.data, isOnline],
   );
 
   const materialSuggestions = useMemo(
