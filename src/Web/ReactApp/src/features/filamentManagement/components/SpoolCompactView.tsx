@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { EditIcon, CopyIcon, DeleteIcon, TagIcon } from '@/common/components/icons/MdiIcons';
-import { classifyColor, getRepresentativeHex } from '@/common/utils/colorFamilies';
+import { classifyColor } from '@/common/utils/colorFamilies';
 import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
 import { formatSpoolWeight } from '@/features/filamentManagement/utils/formatters';
 import type { SpoolmanSpoolDto } from '@/features/filamentManagement/types';
@@ -84,7 +84,7 @@ export function SpoolCompactView({
             {/* Color swatch */}
             <div className="w-6 shrink-0 flex items-center">
               <ColorSwatch
-                color={getRepresentativeHex(classifyColor(spool.colorHex))}
+                color={spool.colorHex || '#888888'}
                 label={classifyColor(spool.colorHex)}
                 className="w-4 h-4"
               />

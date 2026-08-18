@@ -1,7 +1,7 @@
 import { Button } from '@/common/components/ui';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { EditIcon, CopyIcon, DeleteIcon, TagIcon } from '@/common/components/icons/MdiIcons';
-import { classifyColor, getRepresentativeHex } from '@/common/utils/colorFamilies';
+import { classifyColor } from '@/common/utils/colorFamilies';
 import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
 import { SpoolUsageBar } from '@/features/filamentManagement/components/SpoolUsageBar';
 import { formatSpoolWeight, getUsagePercentage, getRemainingPercentage, weightTooltip } from '@/features/filamentManagement/utils/formatters';
@@ -53,7 +53,7 @@ export function SpoolCard({ spool, isSelected, onToggleSelect, onEdit, onClone, 
         )}
       </div>
       <div className="flex items-center gap-2 mb-3">
-        <ColorSwatch color={getRepresentativeHex(classifyColor(spool.colorHex))} label={classifyColor(spool.colorHex)} />
+        <ColorSwatch color={spool.colorHex || '#888888'} label={classifyColor(spool.colorHex)} />
         <div className="text-sm font-medium text-pf-text-primary truncate flex-1">
           {spool.filamentName || spool.name || 'Unnamed'}
         </div>
