@@ -1,8 +1,22 @@
-import { ReactNode, useRef, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import { Button, Checkbox } from '@/common/components/ui';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { type ColumnDef, type FileItem, type FolderNode, type SortOrder } from '../types';
-import { ArrowLeftIcon, ArrowRightIcon, DeleteIcon, FolderOpenIcon, FolderIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  DeleteIcon,
+  FolderOpenIcon,
+  FolderIcon,
+  PlusIcon,
+} from '@/common/components/icons/MdiIcons';
+
+// Tailwind's `sm` breakpoint (640px). Below this, the folder tree and file
+// table stack vertically instead of sitting side-by-side, so a fixed-width
+// tree panel never squeezes the file table into an unusably narrow column.
+const MOBILE_BREAKPOINT_PX = 640;
 
 interface ExplorerViewProps {
   folders: FolderNode[];
@@ -36,6 +50,7 @@ const FolderTree = ({
   onCreateFolder,
   onDeleteFolder,
   onTogglePanel,
+  isMobile,
 }: {
   nodes: FolderNode[];
   currentPath: string;
@@ -47,6 +62,7 @@ const FolderTree = ({
   onCreateFolder?: (path: string) => void;
   onDeleteFolder?: (path: string) => void;
   onTogglePanel?: () => void;
+  isMobile?: boolean;
 }) => {
   return (
     <>
@@ -62,7 +78,9 @@ const FolderTree = ({
               onClick={onTogglePanel}
               disabled={isBusy}
               title="Collapse folder panel"
-              iconCenter={<ArrowLeftIcon className="h-4 w-4" />}
+              iconCenter={
+                isMobile ? <ChevronUpIcon className="h-4 w-4" /> : <ArrowLeftIcon className="h-4 w-4" />
+              }
             />
           )}
           {onCreateDirectory && (
@@ -314,6 +332,25 @@ export const ExplorerView = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [treeWidth, setTreeWidth] = useState(220);
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
+  // Below the `sm` breakpoint, stack the folder tree above the file table instead
+  // of placing them side-by-side. A fixed-width tree panel at that viewport leaves
+  // too little room for the file table, clipping it. Lazily initialize from the
+  // current viewport so the very first render (e.g. in tests without matchMedia
+  // change events, or before the effect below attaches its listener) is already
+  // correct instead of always starting desktop-sized.
+  const [isMobile, setIsMobile] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX - 1}px)`).matches
+  );
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX - 1}px)`);
+    const handleChange = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
 
   // Helper to create drag data (extracted to avoid JSON.stringify in JSX)
   const createDragData = (fileIds: string[]): string => {
@@ -341,7 +378,9 @@ export const ExplorerView = ({
 
   return (
     <div
-      className="flex gap-0 h-full bg-pf-bg-0 rounded-lg border border-pf-border overflow-hidden"
+      className={`flex gap-0 h-full bg-pf-bg-0 rounded-lg border border-pf-border overflow-hidden ${
+        isMobile ? 'flex-col' : 'flex-row'
+      }`}
       role="region"
       aria-label="Explorer view"
       aria-busy={isBusy}
@@ -349,7 +388,14 @@ export const ExplorerView = ({
     >
       {/* Left Pane: Folder Tree or Collapsed Bar */}
       {isPanelCollapsed ? (
-        <div className="border-r border-pf-border bg-pf-bg-0 flex flex-col items-center py-2 px-1 shrink-0" style={{ width: '48px' }}>
+        <div
+          className={
+            isMobile
+              ? 'border-b border-pf-border bg-pf-bg-0 flex items-center justify-center py-1 px-1 shrink-0 w-full'
+              : 'border-r border-pf-border bg-pf-bg-0 flex flex-col items-center py-2 px-1 shrink-0'
+          }
+          style={isMobile ? undefined : { width: '48px' }}
+        >
           <Button
             type="button"
             size="sm"
@@ -358,14 +404,18 @@ export const ExplorerView = ({
             onClick={() => setIsPanelCollapsed(false)}
             disabled={isBusy}
             title="Expand folder panel"
-            iconCenter={<ArrowRightIcon className="h-4 w-4" />}
+            iconCenter={
+              isMobile ? <ChevronDownIcon className="h-4 w-4" /> : <ArrowRightIcon className="h-4 w-4" />
+            }
           />
         </div>
       ) : (
         <>
           <div
-            className="border-r border-pf-border overflow-y-auto bg-pf-bg-0 flex flex-col shrink-0"
-            style={{ width: `${treeWidth}px` }}
+            className={`overflow-y-auto bg-pf-bg-0 flex flex-col shrink-0 ${
+              isMobile ? 'border-b border-pf-border w-full max-h-[40vh]' : 'border-r border-pf-border'
+            }`}
+            style={isMobile ? undefined : { width: `${treeWidth}px` }}
           >
             <div className="sticky top-0 shrink-0">
               <FolderTree 
@@ -377,6 +427,7 @@ export const ExplorerView = ({
                 onMoveFiles={onMoveFiles}
                 isBusy={isBusy}
                 onTogglePanel={() => setIsPanelCollapsed(true)}
+                isMobile={isMobile}
                 onCreateFolder={(path) => {
                   const folderName = prompt('Enter folder name:');
                   if (folderName?.trim()) {
@@ -396,14 +447,16 @@ export const ExplorerView = ({
             </div>
           </div>
 
-          {/* Resizable Divider - only show when panel is expanded */}
-          <div
-            className="w-1 bg-pf-border hover:bg-pf-accent active:bg-pf-accent-hover transition-colors cursor-col-resize shrink-0"
-            onMouseDown={handleResizeDivider}
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize tree and list views"
-          />
+          {/* Resizable Divider - only shown side-by-side on desktop; stacked layout on mobile has no horizontal resize */}
+          {!isMobile && (
+            <div
+              className="w-1 bg-pf-border hover:bg-pf-accent active:bg-pf-accent-hover transition-colors cursor-col-resize shrink-0"
+              onMouseDown={handleResizeDivider}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize tree and list views"
+            />
+          )}
         </>
       )}
 
