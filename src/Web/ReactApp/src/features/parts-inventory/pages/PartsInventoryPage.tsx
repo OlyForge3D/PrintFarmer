@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Tabs, Badge, Alert } from '@/common/components/ui';
+import { Tabs, Badge, Alert, Spinner } from '@/common/components/ui';
 import {
   PackageIcon,
   DatabaseIcon,
@@ -75,14 +75,26 @@ export function PartsInventoryPage() {
     [navigate]
   );
 
-  const { data: reorderCandidates = [], error: reorderError } = useReorderCandidates();
+  const {
+    data: reorderCandidates = [],
+    error: reorderError,
+    isLoading: reorderStatusLoading,
+  } = useReorderCandidates();
   const reorderCount = reorderCandidates.length;
 
   // The parts API root paths return a `featureDisabled` 404 when an admin has
   // switched the feature off. The reorder query hits one of those root paths on
-  // every page mount, so it surfaces the disabled state regardless of the
-  // active tab.
+  // every page mount and is used purely as a status probe, so it surfaces the
+  // disabled state regardless of the active tab.
   const featureDisabled = isFeatureDisabledError(reorderError);
+
+  // Until the probe settles we don't yet know whether the feature is
+  // enabled. Rendering the tabs before then would mount the default (SKUs)
+  // tab, whose own `useParts`/`useBins` queries would fire in parallel with
+  // the probe — and get their own 404s once the feature turns out to be
+  // disabled (issue #1686). Withhold the tab content until the probe query
+  // has settled, one way or the other.
+  const featureStatusKnown = !reorderStatusLoading;
 
   const subtitle = useMemo(
     () =>
@@ -96,7 +108,12 @@ export function PartsInventoryPage() {
       subtitle={subtitle}
       icon={PackageIcon}
     >
-      {featureDisabled ? (
+      {!featureStatusKnown ? (
+        <div className="flex items-center gap-2 py-8 justify-center text-pf-text-secondary">
+          <Spinner size="md" />
+          <span>Checking printed-parts inventory status…</span>
+        </div>
+      ) : featureDisabled ? (
         <Alert type="warning">
           The parts inventory feature is currently disabled by an administrator
         </Alert>
