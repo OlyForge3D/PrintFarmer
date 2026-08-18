@@ -1392,7 +1392,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 }}
               />
               {persistedToolheads && (
-                <FallbackGroupsPanel printerId={printer.id} toolheads={persistedToolheads} />
+                <FallbackGroupsPanel
+                  printerId={printer.id}
+                  toolheads={persistedToolheads}
+                  isOnline={isOnline}
+                />
               )}
             </CollapsibleSection>
           );

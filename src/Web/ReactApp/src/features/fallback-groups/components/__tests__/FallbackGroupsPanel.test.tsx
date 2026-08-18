@@ -20,6 +20,10 @@ const hoisted = vi.hoisted(() => ({
     getPrinterCoverage: vi.fn(),
   },
   filamentTypes: vi.fn(),
+  // Mutable per-test coverage payload for usePrinterFilamentCoverage (see
+  // mock below). Defaults to no toolhead rows since coverage isn't
+  // exercised by most of this file's tests.
+  coverageData: { printerId: "p1", toolheads: [] as unknown[] },
 }));
 
 vi.mock("@/services/api", () => ({
@@ -43,9 +47,10 @@ vi.mock("@/services/printer-signalr", () => {
   return { printerSignalRService: hoisted.signalR };
 });
 
-// Coverage lookup shouldn't drive this panel's tests; return no coverage rows.
+// Coverage lookup is exercised per-test via `hoisted.coverageData`; most
+// tests in this file don't care and rely on the empty-toolheads default.
 vi.mock("@/features/filament-coverage/hooks", () => ({
-  usePrinterFilamentCoverage: () => ({ data: { printerId: "p1", toolheads: [] }, isSuccess: true }),
+  usePrinterFilamentCoverage: () => ({ data: hoisted.coverageData, isSuccess: true }),
 }));
 
 import { FallbackGroupsPanel } from "../FallbackGroupsPanel";
@@ -98,7 +103,7 @@ const twoGroupResponse = [
   },
 ];
 
-function renderPanel(toolheads = physicalToolheads) {
+function renderPanel(toolheads = physicalToolheads, isOnline?: boolean) {
   const qc = new QueryClient({
     defaultOptions: {
       queries: { retry: false, refetchOnWindowFocus: false, gcTime: 0 },
@@ -109,7 +114,7 @@ function renderPanel(toolheads = physicalToolheads) {
     qc,
     ...render(
       <QueryClientProvider client={qc}>
-        <FallbackGroupsPanel printerId="p1" toolheads={toolheads} />
+        <FallbackGroupsPanel printerId="p1" toolheads={toolheads} isOnline={isOnline} />
       </QueryClientProvider>,
     ),
   };
@@ -125,6 +130,7 @@ describe("FallbackGroupsPanel", () => {
     hoisted.filamentTypes.mockResolvedValue([{ id: "pla", name: "PLA", defaultTemperatures: {}, isAbrasive: false, needsEnclosure: false }]);
     __resetFallbackGroupsSubscriptionForTests();
     hoisted.cb.current = null;
+    hoisted.coverageData = { printerId: "p1", toolheads: [] };
   });
 
   afterEach(() => {
@@ -297,6 +303,39 @@ describe("FallbackGroupsPanel", () => {
     hoisted.apiGet.mockResolvedValueOnce({ data: [mismatchGroup] });
     renderPanel();
     expect(await screen.findByText(/mixed materials in chain/i)).toBeInTheDocument();
+  });
+
+  // Regression test for issue #1684: this panel independently fetches
+  // per-toolhead coverage and derives "Exhausted" chain state from a raw
+  // `status === "runout"` check, bypassing the shared `withOfflineOverride`
+  // gating used elsewhere (MaterialLoadout, FilamentCoverageBreakdown,
+  // PrinterCoverageSummary) unless `isOnline` is explicitly threaded through.
+  it("does not render 'Exhausted' for a last-known runout status when the printer is offline (#1684)", async () => {
+    hoisted.coverageData = {
+      printerId: "p1",
+      toolheads: [
+        { toolheadIndex: 0, status: "runout" },
+        { toolheadIndex: 1, status: "covers" },
+      ],
+    };
+    hoisted.apiGet.mockResolvedValueOnce({ data: twoGroupResponse });
+    renderPanel(physicalToolheads, false);
+    await screen.findByTestId("fallback-group-g1");
+    expect(screen.queryByText("Exhausted")).not.toBeInTheDocument();
+  });
+
+  it("renders 'Exhausted' for a runout toolhead when the printer is online (back-compat)", async () => {
+    hoisted.coverageData = {
+      printerId: "p1",
+      toolheads: [
+        { toolheadIndex: 0, status: "runout" },
+        { toolheadIndex: 1, status: "covers" },
+      ],
+    };
+    hoisted.apiGet.mockResolvedValueOnce({ data: twoGroupResponse });
+    renderPanel(physicalToolheads, true);
+    await screen.findByTestId("fallback-group-g1");
+    expect(await screen.findByText("Exhausted")).toBeInTheDocument();
   });
 
   it("refetches the printer's groups when the SignalR event arrives", async () => {
