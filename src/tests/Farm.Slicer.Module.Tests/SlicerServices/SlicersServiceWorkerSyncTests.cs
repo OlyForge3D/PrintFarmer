@@ -509,7 +509,6 @@ public class SlicersServiceWorkerSyncTests
     public async Task CapacityGauges_Should_Exclude_Offline_And_Disabled_Workers()
     {
         using SlicerDbContext db = CreateDb();
-        EfSlicersRepository slicerRepo = new(db);
         EfWorkerRepository workerRepo = new(db);
         Worker[] workers =
         [
@@ -523,22 +522,19 @@ public class SlicersServiceWorkerSyncTests
         await db.SaveChangesAsync();
 
         using SlicerServiceMetrics metrics = CreateMetrics();
-        using HttpClient httpClient = CreateMockHttpClient();
-        _ = new SlicersService(
-            slicerRepo,
-            workerRepo,
-            CreateMockProfileRepository().Object,
-            CreateMockFilamentProfileRepository().Object,
-            CreateMockMachineProfileRepository().Object,
-            CreateMockMachineModelProfileRepository().Object,
-            CreateMockCatalogService().Object,
-            CreateMockAliasService().Object,
-            CreateMockSettingsService().Object,
-            CreateMockHub(out _).Object,
+
+        // The gauge callbacks read a snapshot published by SlicerCapacityMetricsRefreshService
+        // rather than a delegate bound to a scoped service (see #1676). Drive one refresh
+        // cycle against a DI container that resolves IWorkerRepository from the test db.
+        ServiceCollection services = new();
+        _ = services.AddSingleton<IWorkerRepository>(workerRepo);
+        using ServiceProvider serviceProvider = services.BuildServiceProvider();
+        SlicerCapacityMetricsRefreshService refresher = new(
+            serviceProvider,
             metrics,
-            httpClient,
-            CreateMockLogger(),
-            CreateMockSlicerSettings());
+            NullLogger<SlicerCapacityMetricsRefreshService>.Instance);
+
+        await refresher.RefreshOnceAsync();
 
         Dictionary<string, int> observed = new();
         using MeterListener listener = new();

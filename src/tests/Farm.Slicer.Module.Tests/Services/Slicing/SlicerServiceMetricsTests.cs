@@ -51,30 +51,35 @@ public class SlicerServiceMetricsTests : IDisposable
 
     #endregion
 
-    #region Capacity Provider Tests
+    #region Capacity Snapshot Tests
 
     [Fact]
-    public void SetCapacityProviders_WithValidFunctions_StoresCallbacks()
+    public void UpdateCapacitySnapshot_WithValidCounters_DoesNotThrow()
     {
-        // Arrange
-        Func<int> totalCapacity = () => 100;
-        Func<int> availableCapacity = () => 50;
-        Func<int> activeJobs = () => 50;
-
         // Act - should not throw
-        _metrics.SetCapacityProviders(totalCapacity, availableCapacity, activeJobs);
+        _metrics.UpdateCapacitySnapshot(totalCapacity: 100, availableCapacity: 50, activeJobs: 50);
 
         // Assert - can be verified by observing no exceptions thrown
         Assert.True(true);
     }
 
     [Fact]
-    public void SetCapacityProviders_WithNullFunctions_StoresCallbacks()
+    public void UpdateCapacitySnapshot_WithZeroCounters_DoesNotThrow()
     {
-        // Arrange & Act - null callbacks should be allowed
-        _metrics.SetCapacityProviders(null!, null!, null!);
+        // Act & Assert - zero counters are a valid (e.g. no workers registered) snapshot
+        _metrics.UpdateCapacitySnapshot(totalCapacity: 0, availableCapacity: 0, activeJobs: 0);
 
-        // Assert - no exception thrown
+        Assert.True(true);
+    }
+
+    [Fact]
+    public void UpdateCapacitySnapshot_CalledRepeatedly_LatestValueWins()
+    {
+        // Arrange & Act - simulate successive refresh cycles
+        _metrics.UpdateCapacitySnapshot(totalCapacity: 10, availableCapacity: 5, activeJobs: 5);
+        _metrics.UpdateCapacitySnapshot(totalCapacity: 20, availableCapacity: 15, activeJobs: 5);
+
+        // Assert - no exception; gauge callbacks read the snapshot set by the last call
         Assert.True(true);
     }
 

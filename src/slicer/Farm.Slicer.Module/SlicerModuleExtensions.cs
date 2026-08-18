@@ -197,6 +197,11 @@ public static class SlicerModuleExtensions
 
         _ = services.AddHostedService<WorkerHealthMonitorService>();
 
+        // Refreshes the SlicerServiceMetrics capacity snapshot out-of-band so its
+        // observable gauges never run database work on the OpenTelemetry collection
+        // thread nor capture a scoped service's `this` (see #1676).
+        _ = services.AddHostedService<SlicerCapacityMetricsRefreshService>();
+
         // Error recovery: scan for stuck slice jobs and requeue/fail according to retry policy
         _ = services.Configure<JobDispatchRetrySettings>(configuration.GetSection("JobDispatchRetry"));
 

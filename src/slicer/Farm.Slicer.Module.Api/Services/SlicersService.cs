@@ -65,7 +65,9 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
     /// <summary>
     /// Initializes a new instance of the SlicersService with required dependencies.
-    /// Sets up capacity metrics providers for real-time monitoring of worker capacity.
+    /// Capacity gauges are refreshed out-of-band by <c>SlicerCapacityMetricsRefreshService</c>,
+    /// which owns its own DI scope — this constructor does not register any callbacks on the
+    /// singleton <see cref="SlicerServiceMetrics"/> (see #1676).
     /// </summary>
     /// <param name="repo">Repository for slicer service data persistence and retrieval</param>
     /// <param name="workerRepo">Repository for worker data access and management</param>
@@ -112,70 +114,6 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _slicerSettings = slicerSettings ?? throw new ArgumentNullException(nameof(slicerSettings));
-
-        // Set up observable capacity metrics
-        _metrics.SetCapacityProviders(
-            getTotalCapacity: () => GetTotalCapacitySync(),
-            getAvailableCapacity: () => GetAvailableCapacitySync(),
-            getActiveJobs: () => GetActiveJobsSync());
-    }
-
-    private int GetTotalCapacitySync()
-    {
-        try
-        {
-#pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
-            IReadOnlyList<Worker> workers = _workerRepo.GetAllAsync(limit: 1000).GetAwaiter().GetResult();
-#pragma warning restore VSTHRD002
-            return workers
-                .Where(IsLiveWorker)
-                .Sum(w => w.TotalSlots);
-        }
-        catch
-        {
-            return 0;
-        }
-    }
-
-    private int GetAvailableCapacitySync()
-    {
-        try
-        {
-#pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
-            IReadOnlyList<Worker> workers = _workerRepo.GetAllAsync(limit: 1000).GetAwaiter().GetResult();
-#pragma warning restore VSTHRD002
-            return workers
-                .Where(w => IsLiveWorker(w) && w.Status != WorkerStatus.Draining)
-                .Sum(w => w.FreeSlots);
-        }
-        catch
-        {
-            return 0;
-        }
-    }
-
-    private int GetActiveJobsSync()
-    {
-        try
-        {
-#pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
-            IReadOnlyList<Worker> workers = _workerRepo.GetAllAsync(limit: 1000).GetAwaiter().GetResult();
-#pragma warning restore VSTHRD002
-            return workers
-                .Where(IsLiveWorker)
-                .Sum(w => w.ActiveJobs);
-        }
-        catch
-        {
-            return 0;
-        }
-    }
-
-    private static bool IsLiveWorker(Worker worker)
-    {
-        return !worker.IsDisabled &&
-               worker.Status != WorkerStatus.Offline &&
-               worker.Status != WorkerStatus.Error;
     }
 
     /// <summary>
