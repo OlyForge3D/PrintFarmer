@@ -166,9 +166,12 @@ public class JobQueueAnalyticsController(
     /// position) for every printer in one call. Replaces the N per-printer
     /// <see cref="GetPrinterQueueAsync"/> round trips the compact printer grid previously made
     /// to derive its "X of Y" label — this endpoint computes every summary from a single
-    /// grouped query with no GcodeFile/AssignedPrinter includes. Printers the caller cannot
-    /// access, and printers with no active (Queued or Printing) job, are both omitted from the
-    /// response.
+    /// grouped query with no GcodeFile/AssignedPrinter includes. Access is scoped with a single
+    /// batched <see cref="IQueueResourceAuthorizationService.FilterAccessiblePrinterIdsAsync"/>
+    /// call (constant query count regardless of printer count) rather than looping
+    /// <see cref="IQueueResourceAuthorizationService.CanAccessPrinterAsync"/> per printer.
+    /// Printers the caller cannot access, and printers with no active (Queued or Printing) job,
+    /// are both omitted from the response.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("printer-summaries")]
@@ -187,18 +190,15 @@ public class JobQueueAnalyticsController(
                 return Ok(summaries);
             }
 
-            var authorized = new List<PrinterQueueSummaryDto>(summaries.Count);
-            foreach (PrinterQueueSummaryDto summary in summaries)
-            {
-                if (await resourceAuthorization.CanAccessPrinterAsync(
-                    User,
-                    summary.PrinterId,
-                    PrinterGroupAccessLevel.View,
-                    cancellationToken))
-                {
-                    authorized.Add(summary);
-                }
-            }
+            Guid[] printerIds = summaries.Select(summary => summary.PrinterId).Distinct().ToArray();
+            IReadOnlySet<Guid> allowedPrinterIds = await resourceAuthorization.FilterAccessiblePrinterIdsAsync(
+                User,
+                printerIds,
+                PrinterGroupAccessLevel.View,
+                cancellationToken);
+            List<PrinterQueueSummaryDto> authorized = summaries
+                .Where(summary => allowedPrinterIds.Contains(summary.PrinterId))
+                .ToList();
 
             return Ok(authorized);
         }
