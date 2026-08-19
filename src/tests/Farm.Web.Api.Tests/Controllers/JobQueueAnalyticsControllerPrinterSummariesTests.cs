@@ -118,6 +118,66 @@ public class JobQueueAnalyticsControllerPrinterSummariesTests
     }
 
     [Fact]
+    public async Task GetPrinterQueueSummariesAsync_AllPrintersInaccessible_ReturnsOkWithEmptyList()
+    {
+        var summaries = new List<PrinterQueueSummaryDto>
+        {
+            new(Guid.NewGuid(), 1, 1, 1),
+            new(Guid.NewGuid(), 2, 0, null),
+        };
+        _printJobManagementServiceMock
+            .Setup(s => s.GetPrinterQueueSummariesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(summaries);
+
+        var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(r => r.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid>());
+        JobQueueAnalyticsController controller = CreateController(resourceAuthorization.Object);
+
+        IActionResult result = await controller.GetPrinterQueueSummariesAsync(CancellationToken.None);
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.Empty(Assert.IsAssignableFrom<IEnumerable<PrinterQueueSummaryDto>>(okResult.Value));
+    }
+
+    [Fact]
+    public async Task GetPrinterQueueSummariesAsync_PropagatesCancellationTokenToBatchedFilter()
+    {
+        Guid printerId = Guid.NewGuid();
+        var summaries = new List<PrinterQueueSummaryDto> { new(printerId, 1, 1, 1) };
+        using var cts = new CancellationTokenSource();
+        CancellationToken expectedToken = cts.Token;
+        _printJobManagementServiceMock
+            .Setup(s => s.GetPrinterQueueSummariesAsync(expectedToken))
+            .ReturnsAsync(summaries);
+
+        var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(r => r.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                PrinterGroupAccessLevel.View,
+                expectedToken))
+            .ReturnsAsync(new HashSet<Guid> { printerId });
+        JobQueueAnalyticsController controller = CreateController(resourceAuthorization.Object);
+
+        await controller.GetPrinterQueueSummariesAsync(expectedToken);
+
+        resourceAuthorization.Verify(
+            r => r.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                PrinterGroupAccessLevel.View,
+                expectedToken),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task GetPrinterQueueSummariesAsync_NoActiveQueues_ReturnsOkWithEmptyList()
     {
         _printJobManagementServiceMock
