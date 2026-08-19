@@ -89,6 +89,42 @@ describe('CommandPalette', () => {
     expect(input).toHaveValue('email');
   });
 
+  it('renders highlighted fuzzy-matched labels as a single flex item so gap spacing never lands between characters', () => {
+    // Regression test for #1710: HighlightedFuzzyText previously returned a
+    // bare fragment, so its per-character spans were flattened directly into
+    // the label's `flex gap-2` row and the row's gap was inserted between
+    // every character, overflowing the result card on mobile.
+    render(
+      <CommandPalette
+        isOpen
+        items={items}
+        onClose={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole('combobox', { name: 'Search settings command palette' });
+    // "crs" fuzzy-matches non-contiguous characters in "Cameras" (C-a-m-e-R-a-S).
+    fireEvent.change(input, { target: { value: 'crs' } });
+
+    const option = screen.getByRole('option', { name: /Cameras/ });
+    const labelRow = option.querySelector('.gap-2');
+    expect(labelRow).not.toBeNull();
+
+    // Only the label's wrapping span should be a direct child of the flex
+    // row (no "Confirm" badge on this non-destructive item). If the fix
+    // regresses to a fragment, the per-character spans become additional
+    // direct children here instead of being nested inside one wrapper.
+    expect(labelRow?.children).toHaveLength(1);
+
+    const highlightedChars = labelRow?.querySelectorAll('.break-words > span') ?? [];
+    expect(highlightedChars.length).toBeGreaterThan(0);
+    const wrapper = labelRow?.querySelector('.break-words');
+    for (const charSpan of Array.from(highlightedChars)) {
+      expect(charSpan.parentElement).toBe(wrapper);
+    }
+  });
+
   it('renders keyboard hint text in the footer', () => {
     render(
       <CommandPalette
