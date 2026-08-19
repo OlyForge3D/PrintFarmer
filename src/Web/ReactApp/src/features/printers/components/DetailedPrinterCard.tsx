@@ -24,7 +24,9 @@ import { PrinterHistoryModal } from '@/features/printers/components/PrinterHisto
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { MaterialLoadout } from '@/features/printers/components/MaterialLoadout';
+import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
 import { resolveMaterialLoadout } from '@/features/printers/utils/materialLoadout';
+import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
@@ -144,6 +146,9 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
   const mmuStatus = (printer as PrinterDisplay).mmuStatus;
+  // Snapmaker U1's AMS-equivalent is surfaced through its own UI elsewhere, so the
+  // generic AMS control box is suppressed for it — mirrors PrinterDetailsSidebar's guard.
+  const isSnapmakerU1Mmu = mmuStatus?.mmuType === MmuProtocol.SnapmakerU1;
   const browserUrl = printer.frontendUrl && isBrowserReachableUrl(printer.frontendUrl)
     ? toSafeHref(printer.frontendUrl)
     : undefined;
@@ -841,8 +846,8 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       {/*
         Section order below follows PRINTER_DETAIL_SECTION_ORDER (see
         printerDetailSectionOrder.ts): Statistics, Version, Objects, Move
-        (which embeds Control), Temperature, Materials, Spool — matching
-        PrinterDetailsSidebar (#1698).
+        (which embeds Control), Temperature, AMS, Materials, Spool — matching
+        PrinterDetailsSidebar (#1698, #1699).
       */}
 
       {/* Statistics and Version — folded in from the details sidebar (#1584) */}
@@ -1105,6 +1110,19 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         onApplyPreset={handleApplyPreset}
         onApplySingleHeaterPreset={handleApplySingleHeaterPreset}
       />
+
+      {/* AMS control box — mirrors PrinterDetailsSidebar's placement immediately
+          before the materials module, so gate select/load/unload/eject controls
+          available in the sidebar are also available from the detail card. */}
+      {mmuStatus && !isSnapmakerU1Mmu && (
+        <div className="mb-2">
+          <MmuControlBox
+            printerId={printer.id}
+            mmuStatus={mmuStatus}
+            isOnline={isOnline}
+          />
+        </div>
+      )}
 
       {/* Consolidated materials module — replaces the old Material Slots strip
           and the parallel Spools assignment list, which could disagree. */}
