@@ -250,13 +250,17 @@ public class AutoDispatchConcurrencyTests : IDisposable
             TaskCreationOptions.RunContinuationsAsynchronously);
 
         // Both printers score well for the job
+        DispatchScore printer1Score = new(printer1Id, "Printer-1", 85.0, new Dictionary<string, FactorScore>(), false, []);
+        DispatchScore printer2Score = new(printer2Id, "Printer-2", 82.0, new Dictionary<string, FactorScore>(), false, []);
         scorerMock
             .Setup(s => s.ScorePrintersForJobAsync(jobId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid jId, CancellationToken _) =>
-            [
-                new DispatchScore(printer1Id, "Printer-1", 85.0, new Dictionary<string, FactorScore>(), false, []),
-                new DispatchScore(printer2Id, "Printer-2", 82.0, new Dictionary<string, FactorScore>(), false, []),
-            ]);
+            .ReturnsAsync((Guid jId, CancellationToken _) => [printer1Score, printer2Score]);
+        scorerMock
+            .Setup(s => s.ScorePrinterForJobAsync(jobId, printer1Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printer1Score);
+        scorerMock
+            .Setup(s => s.ScorePrinterForJobAsync(jobId, printer2Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printer2Score);
 
         // Track dispatch calls and update DB to simulate real dispatch behavior
         dispatchMock
@@ -354,14 +358,19 @@ public class AutoDispatchConcurrencyTests : IDisposable
 
         var scorerMock = new Mock<IDispatchScorer>();
         var dispatchMock = new Mock<IJobDispatchService>();
+        Dictionary<Guid, DispatchScore> scoresByPrinter = new()
+        {
+            [p1] = new DispatchScore(p1, "P1", 80.0, new Dictionary<string, FactorScore>(), false, []),
+            [p2] = new DispatchScore(p2, "P2", 75.0, new Dictionary<string, FactorScore>(), false, []),
+            [p3] = new DispatchScore(p3, "P3", 70.0, new Dictionary<string, FactorScore>(), false, []),
+        };
         scorerMock
             .Setup(s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid _, CancellationToken _) =>
-            [
-                new DispatchScore(p1, "P1", 80.0, new Dictionary<string, FactorScore>(), false, []),
-                new DispatchScore(p2, "P2", 75.0, new Dictionary<string, FactorScore>(), false, []),
-                new DispatchScore(p3, "P3", 70.0, new Dictionary<string, FactorScore>(), false, []),
-            ]);
+            .ReturnsAsync((Guid _, CancellationToken _) => scoresByPrinter.Values.ToList());
+        scorerMock
+            .Setup(s => s.ScorePrinterForJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid _, Guid printerId, CancellationToken _) =>
+                scoresByPrinter.TryGetValue(printerId, out DispatchScore? score) ? score : null);
         dispatchMock
             .Setup(d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
             .Returns((Guid jobId, Guid printerId, string _, DispatchScore _, CancellationToken _) =>
@@ -486,6 +495,20 @@ public class AutoDispatchConcurrencyTests : IDisposable
                         []),
                 ];
             });
+        scorerMock.Setup(value => value.ScorePrinterForJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid jobId, Guid printerId, CancellationToken _) =>
+                printerByJob.TryGetValue(jobId, out Guid expectedPrinterId) && expectedPrinterId == printerId
+                    ? new DispatchScore(
+                        printerId,
+                        $"capacity-{printerId:N}",
+                        90,
+                        new Dictionary<string, FactorScore>(),
+                        false,
+                        [])
+                    : null);
         var twoEntered = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var allCapacityAttemptsEntered = new TaskCompletionSource(
@@ -701,6 +724,20 @@ public class AutoDispatchConcurrencyTests : IDisposable
                         []),
                 ];
             });
+        scorerMock.Setup(value => value.ScorePrinterForJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid jobId, Guid printerId, CancellationToken _) =>
+                printerByJob.TryGetValue(jobId, out Guid expectedPrinterId) && expectedPrinterId == printerId
+                    ? new DispatchScore(
+                        printerId,
+                        $"configured-{printerId:N}",
+                        90,
+                        new Dictionary<string, FactorScore>(),
+                        false,
+                        [])
+                    : null);
         var configuredCapacityReached = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseUploads = new TaskCompletionSource(
@@ -845,6 +882,17 @@ public class AutoDispatchConcurrencyTests : IDisposable
                     false,
                     []),
             ]);
+        scorerMock.Setup(value => value.ScorePrinterForJobAsync(
+                It.IsAny<Guid>(),
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DispatchScore(
+                printerId,
+                printer.Name,
+                90,
+                new Dictionary<string, FactorScore>(),
+                false,
+                []));
         var dispatchEntered = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseDispatch = new TaskCompletionSource(
@@ -958,6 +1006,23 @@ public class AutoDispatchConcurrencyTests : IDisposable
                     false,
                     []))
                 .ToList());
+        scorerMock.Setup(value => value.ScorePrinterForJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid _, Guid printerId, CancellationToken _) =>
+            {
+                int index = printers.FindIndex(p => p.Id == printerId);
+                return index < 0
+                    ? null
+                    : new DispatchScore(
+                        printers[index].Id,
+                        printers[index].Name,
+                        100 - index,
+                        new Dictionary<string, FactorScore>(),
+                        false,
+                        []);
+            });
         var capacityReached = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseUploads = new TaskCompletionSource(
@@ -1096,12 +1161,19 @@ public class AutoDispatchConcurrencyTests : IDisposable
         }
 
         _db.SaveChanges();
-        _ = SeedQueuedJob("startup-capacity-job");
+        Guid startupJobId = SeedQueuedJob("startup-capacity-job");
         var scorerMock = new Mock<IDispatchScorer>();
         scorerMock.Setup(value => value.ScorePrintersForJobAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        var scoredPrinters = new ConcurrentDictionary<Guid, byte>();
+        scorerMock.Setup(value => value.ScorePrinterForJobAsync(
+                startupJobId,
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Guid, Guid, CancellationToken>((_, printerId, _) => scoredPrinters.TryAdd(printerId, 0))
+            .ReturnsAsync((DispatchScore?)null);
         var dispatchMock = new Mock<IJobDispatchService>(MockBehavior.Strict);
         var considered = new ConcurrentDictionary<Guid, byte>();
         var allConsidered = new TaskCompletionSource(
@@ -1141,6 +1213,10 @@ public class AutoDispatchConcurrencyTests : IDisposable
         }
 
         considered.Keys.Should().BeEquivalentTo(printers);
+        scoredPrinters.Keys.Should().BeEquivalentTo(
+            printers,
+            "the targeted single-printer scorer (issue #1705) must be invoked once per eligible printer, " +
+            "not merely once per fleet");
         dispatchMock.VerifyNoOtherCalls();
     }
 
@@ -1182,6 +1258,17 @@ public class AutoDispatchConcurrencyTests : IDisposable
                     false,
                     []),
             ]);
+        scorerMock.Setup(value => value.ScorePrinterForJobAsync(
+                jobId,
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DispatchScore(
+                printerId,
+                printer.Name,
+                90,
+                new Dictionary<string, FactorScore>(),
+                false,
+                []));
         var dispatchEntered = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseDispatch = new TaskCompletionSource(
@@ -1333,6 +1420,17 @@ public class AutoDispatchConcurrencyTests : IDisposable
                     false,
                     []),
             ]);
+        scorerMock.Setup(value => value.ScorePrinterForJobAsync(
+                jobId,
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DispatchScore(
+                printerId,
+                printer.Name,
+                90,
+                new Dictionary<string, FactorScore>(),
+                false,
+                []));
         var dispatchEntered = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var cancellationObserved = new TaskCompletionSource(

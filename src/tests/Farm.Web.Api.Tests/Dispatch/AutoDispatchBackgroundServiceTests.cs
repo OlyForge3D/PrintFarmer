@@ -281,6 +281,9 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         _scorerMock
             .Setup(s => s.ScorePrintersForJobAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync([goodScore]);
+        _scorerMock
+            .Setup(s => s.ScorePrinterForJobAsync(job.Id, printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(goodScore);
 
         _dispatchServiceMock
             .Setup(d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
@@ -327,6 +330,9 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         _scorerMock
             .Setup(s => s.ScorePrintersForJobAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync([goodScore]);
+        _scorerMock
+            .Setup(s => s.ScorePrinterForJobAsync(job.Id, printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(goodScore);
 
         _dispatchServiceMock
             .Setup(d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
@@ -430,7 +436,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         // Assert: scorer never called, nothing dispatched
         _scorerMock.Verify(
-            s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            s => s.ScorePrinterForJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _dispatchServiceMock.Verify(
             d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
@@ -452,7 +458,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
         _scorerMock.Verify(
-            s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            s => s.ScorePrinterForJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -472,7 +478,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         // No jobs → scorer never called, no dispatch
         _scorerMock.Verify(
-            s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            s => s.ScorePrinterForJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _dispatchServiceMock.Verify(
             d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
@@ -501,6 +507,9 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         _scorerMock
             .Setup(s => s.ScorePrintersForJobAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync([eliminatedScore]);
+        _scorerMock
+            .Setup(s => s.ScorePrinterForJobAsync(job.Id, printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(eliminatedScore);
 
         await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
@@ -537,6 +546,9 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         _scorerMock
             .Setup(s => s.ScorePrintersForJobAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync([lowScore]);
+        _scorerMock
+            .Setup(s => s.ScorePrinterForJobAsync(job.Id, printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(lowScore);
 
         await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
@@ -567,6 +579,9 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         _scorerMock
             .Setup(s => s.ScorePrintersForJobAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync([goodScore]);
+        _scorerMock
+            .Setup(s => s.ScorePrinterForJobAsync(job.Id, printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(goodScore);
 
         await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
@@ -603,6 +618,9 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         _scorerMock
             .Setup(s => s.ScorePrintersForJobAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync([goodScore]);
+        _scorerMock
+            .Setup(s => s.ScorePrinterForJobAsync(job.Id, printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(goodScore);
 
         await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
@@ -644,7 +662,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         // Should never reach scoring or dispatch
         _scorerMock.Verify(
-            s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            s => s.ScorePrinterForJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _dispatchServiceMock.Verify(
             d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
@@ -669,7 +687,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
         _scorerMock.Verify(
-            s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            s => s.ScorePrinterForJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -716,7 +734,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         // Should not score or dispatch because printer already has active job
         _scorerMock.Verify(
-            s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            s => s.ScorePrinterForJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -768,7 +786,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         // Per-printer auto-dispatch disabled → never score, never dispatch
         _scorerMock.Verify(
-            s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            s => s.ScorePrinterForJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _dispatchServiceMock.Verify(
             d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
@@ -797,6 +815,9 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         _scorerMock
             .Setup(s => s.ScorePrintersForJobAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync([goodScore]);
+        _scorerMock
+            .Setup(s => s.ScorePrinterForJobAsync(job.Id, printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(goodScore);
 
         _dispatchServiceMock
             .Setup(d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))

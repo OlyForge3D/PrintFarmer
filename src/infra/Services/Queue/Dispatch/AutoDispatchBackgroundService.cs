@@ -456,8 +456,11 @@ public sealed class AutoDispatchBackgroundService(
                 continue;
             }
 
-            List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(job.Id, ct);
-            DispatchScore? printerScore = scores.FirstOrDefault(score => score.PrinterId == printerId);
+            // Targeted single-printer scoring (issue #1705): the fleet-scoring API used here
+            // previously loaded and scored every enabled printer only to discard all but this
+            // one, under the global selection lock. See IDispatchScorer.ScorePrinterForJobAsync
+            // for the equivalence guarantee this relies on.
+            DispatchScore? printerScore = await scorer.ScorePrinterForJobAsync(job.Id, printerId, ct);
             if (printerScore is null
                 || printerScore.Eliminated
                 || printerScore.TotalScore < settings.MinimumScoreThreshold)
