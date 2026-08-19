@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
+const { mockToast } = vi.hoisted(() => ({
+  mockToast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+}));
+vi.mock('sonner', () => ({ toast: mockToast }));
+
 // The bed visualization renders a WebGL/R3F canvas that jsdom can't run.
 // Stub it but CAPTURE the props the workspace passes in, so tests can invoke the
 // per-plate callbacks (arrange/orient/delete) that now live in the in-scene
@@ -137,6 +142,76 @@ describe('SlicerWorkspace multi-plate', () => {
 
     await waitFor(() => {
       expect(onModelSelect).toHaveBeenCalledWith(null);
+    });
+  });
+
+  // Regression coverage for issue #1709: "Slice Plate" remained enabled and
+  // threw after a model on the active plate failed to load its source file.
+  describe('slice action after a model load failure', () => {
+    it('disables Slice and blocks the click with an actionable message once a model on the active plate fails to load', async () => {
+      const onSlice = vi.fn();
+      const a = model('A', [60, 60, 5]);
+
+      // Mount empty, then add the model via rerender: SlicerWorkspace only
+      // assigns newly-added model ids to the active plate when its `models`
+      // prop *changes* after mount, not for the very first render's models.
+      const { rerender } = render(
+        <SlicerWorkspace bedConfig={bedConfig} models={[]} onSlice={onSlice} canSlice />,
+      );
+      rerender(<SlicerWorkspace bedConfig={bedConfig} models={[a]} onSlice={onSlice} canSlice />);
+
+      // Slice is enabled before any load failure is reported.
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /slice/i })).not.toBeDisabled();
+      });
+
+      // The bed visualization reports the model's source file failed to load.
+      const onModelLoadError = lastBedProps.onModelLoadError as (modelId: string) => void;
+      act(() => onModelLoadError('A'));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /slice/i })).toBeDisabled();
+      });
+      expect(screen.getByText(/model on this plate failed to load/i)).toBeInTheDocument();
+
+      // Since the Slice button is now disabled, a real click cannot reach the
+      // handler at all — the browser doesn't dispatch click on disabled
+      // buttons, and this is itself the crash-avoidance the fix guarantees.
+      fireEvent.click(screen.getByRole('button', { name: /slice/i }));
+      expect(onSlice).not.toHaveBeenCalled();
+    });
+
+    it('re-enables Slice once the model reloads successfully', async () => {
+      const onSlice = vi.fn();
+      const a = model('A', [60, 60, 5]);
+
+      const { rerender } = render(
+        <SlicerWorkspace bedConfig={bedConfig} models={[]} onSlice={onSlice} canSlice />,
+      );
+      rerender(<SlicerWorkspace bedConfig={bedConfig} models={[a]} onSlice={onSlice} canSlice />);
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /slice/i })).not.toBeDisabled();
+      });
+
+      const onModelLoadError = lastBedProps.onModelLoadError as (modelId: string) => void;
+      act(() => onModelLoadError('A'));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /slice/i })).toBeDisabled();
+      });
+
+      // A successful (re)load reports non-null geometry for the same model id.
+      const onModelGeometryChange = lastBedProps.onModelGeometryChange as (
+        modelId: string,
+        geometry: unknown,
+      ) => void;
+      act(() => onModelGeometryChange('A', {}));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /slice/i })).not.toBeDisabled();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /slice/i }));
+      expect(onSlice).toHaveBeenCalledWith(['A']);
     });
   });
 });
