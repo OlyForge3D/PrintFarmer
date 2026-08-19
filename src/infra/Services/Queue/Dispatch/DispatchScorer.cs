@@ -60,96 +60,108 @@ public class DispatchScorer(
         return [.. result.Scores];
     }
 
+    /// <summary>
+    /// Scores a single candidate printer for a job without loading or scoring the rest of the
+    /// fleet (issue #1705). This is the targeted counterpart to
+    /// <see cref="ScorePrintersForJobAsync"/>, used by the auto-dispatch selection loop which only
+    /// ever needs one printer's result and previously paid for the whole fleet's score to get it.
+    /// <para>
+    /// Returns <see langword="null"/> when the job does not exist, or when the printer does not
+    /// exist or is not enabled — mirroring exactly what filtering
+    /// <see cref="ScorePrintersForJobAsync"/>'s result down to <paramref name="printerId"/> would
+    /// yield, since disabled printers are excluded from the fleet query entirely rather than
+    /// scored and eliminated. This equivalence (same <see cref="DispatchScore.TotalScore"/>,
+    /// <see cref="DispatchScore.Eliminated"/>, and elimination reasons as the corresponding fleet
+    /// entry) is covered by dedicated equivalence tests and must be preserved by any future change
+    /// to either path — see the caveats on issue #1705.
+    /// </para>
+    /// </summary>
+    public async Task<DispatchScore?> ScorePrinterForJobAsync(
+        Guid jobId,
+        Guid printerId,
+        CancellationToken ct = default)
+    {
+        JobScoringContext context = await LoadJobScoringContextAsync(jobId, ct).ConfigureAwait(false);
+        if (context.Job is null)
+        {
+            logger.LogWarning("Dispatch scorer: job {JobId} not found", jobId);
+            return null;
+        }
+
+        List<Printer> printers = await LoadPrintersAsync(printerId, ct).ConfigureAwait(false);
+        Printer? printer = printers.SingleOrDefault();
+        if (printer is null)
+        {
+            return null;
+        }
+
+        Dictionary<Guid, int> queueDepths = await LoadQueueDepthsAsync(printerId, ct).ConfigureAwait(false);
+
+        Dictionary<(Guid PrinterId, int Tool), PerToolGramsContext>? gramsContexts = null;
+        if (context.GramsAware && coverageService is not null)
+        {
+            gramsContexts = await BuildPerToolGramsContextAsync(
+                    printers,
+                    context.Job.RequiredMaterialsPerTool!,
+                    context.RequiredOrigins,
+                    ct)
+                .ConfigureAwait(false);
+        }
+
+        return ScorePrinter(
+            context.Job,
+            printer,
+            context.RequiredFilament,
+            queueDepths,
+            context.ClusterMateNames,
+            context.MultiSlotEnabled,
+            context.GramsAware,
+            gramsContexts);
+    }
+
     public async Task<DispatchScoreResult> ScorePrintersForJobWithOriginAsync(
         Guid jobId,
         CancellationToken ct = default)
     {
-        long? originWatermark = await OriginWatermark
-            .CaptureAsync(watermarkReader, logger, "dispatch scoring", ct)
-            .ConfigureAwait(false);
-        List<long?> requiredOrigins = [originWatermark];
-
-        PrintJob? job = await db.PrintJobs
-            .Include(j => j.GcodeFile)
-                .ThenInclude(g => g!.PrinterModel)
-            .AsNoTracking()
-            .FirstOrDefaultAsync(j => j.Id == jobId, ct);
-
-        if (job is null)
+        JobScoringContext context = await LoadJobScoringContextAsync(jobId, ct).ConfigureAwait(false);
+        if (context.Job is null)
         {
             logger.LogWarning("Dispatch scorer: job {JobId} not found", jobId);
-            return new DispatchScoreResult([], originWatermark);
+            return new DispatchScoreResult([], context.OriginWatermark);
         }
 
         // Pre-filter: get all enabled, non-maintenance printers with toolheads
-        List<Printer> printers = await db.Printers
-            .Include(p => p.Model)
-                .ThenInclude(m => m!.SupportedFilamentTypes)
-            .Include(p => p.Model)
-                .ThenInclude(m => m!.Aliases)
-            .Include(p => p.Toolheads)
-                .ThenInclude(t => t.NozzleModel)
-            .Include(p => p.DispatchState)
-            .AsSplitQuery()
-            .AsNoTracking()
-            .Where(p => p.IsEnabled)
-            .ToListAsync(ct);
+        List<Printer> printers = await LoadPrintersAsync(printerId: null, ct).ConfigureAwait(false);
 
         // Batch-load queue depths for all printers in one query
-        Dictionary<Guid, int> queueDepths = await db.PrintJobs
-            .Where(j => j.AssignedPrinterId != null
-                && j.Status != PrintJobStatus.Completed
-                && j.Status != PrintJobStatus.Failed
-                && j.Status != PrintJobStatus.Cancelled)
-            .GroupBy(j => j.AssignedPrinterId!.Value)
-            .ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
-
-        // Resolve the required material's FilamentType for enclosure/abrasive checks
-        FilamentType? requiredFilament = null;
-        string? requiredMaterial = job.RequiredMaterialType ?? job.GcodeFile?.RequiredMaterial;
-        if (!string.IsNullOrWhiteSpace(requiredMaterial))
-        {
-            requiredFilament = await db.FilamentTypes
-                .AsNoTracking()
-                .FirstOrDefaultAsync(f => f.Name == requiredMaterial && f.IsActive, ct);
-        }
-
-        // Pre-load cluster mate names for the required material (used for fallback matching)
-        HashSet<string> clusterMateNames = [];
-        if (!string.IsNullOrWhiteSpace(requiredMaterial))
-        {
-            clusterMateNames = await GetClusterMateNamesAsync(requiredMaterial, ct);
-        }
+        Dictionary<Guid, int> queueDepths = await LoadQueueDepthsAsync(printerId: null, ct).ConfigureAwait(false);
 
         List<DispatchScore> results = [];
-        bool multiSlotEnabled = featureGate is null
-            || await featureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
 
         // Batch-load per-tool usable coverage and fallback chains only when the feature is on and
         // the job carries gram estimates. Missing/failed coverage remains material-only with an
         // explicit "coverage unknown" explanation.
-        IReadOnlyList<PrintJobToolMaterialRequirement>? perToolReqs = job.RequiredMaterialsPerTool;
-        bool gramsAware = multiSlotEnabled
-            && perToolReqs is { Count: > 0 }
-            && perToolReqs.Any(r => r.EstimatedGrams is > 0);
         Dictionary<(Guid PrinterId, int Tool), PerToolGramsContext>? gramsContexts = null;
-        if (gramsAware && coverageService is not null)
+        if (context.GramsAware && coverageService is not null)
         {
-            gramsContexts =
-                await BuildPerToolGramsContextAsync(printers, perToolReqs!, requiredOrigins, ct)
-                    .ConfigureAwait(false);
+            gramsContexts = await BuildPerToolGramsContextAsync(
+                    printers,
+                    context.Job.RequiredMaterialsPerTool!,
+                    context.RequiredOrigins,
+                    ct)
+                .ConfigureAwait(false);
         }
 
         foreach (Printer printer in printers)
         {
             DispatchScore score = ScorePrinter(
-                job,
+                context.Job,
                 printer,
-                requiredFilament,
+                context.RequiredFilament,
                 queueDepths,
-                clusterMateNames,
-                multiSlotEnabled,
-                gramsAware,
+                context.ClusterMateNames,
+                context.MultiSlotEnabled,
+                context.GramsAware,
                 gramsContexts);
             results.Add(score);
         }
@@ -171,7 +183,128 @@ public class DispatchScorer(
 
         return new DispatchScoreResult(
             results,
-            OriginWatermark.Combine([.. requiredOrigins]));
+            OriginWatermark.Combine([.. context.RequiredOrigins]));
+    }
+
+    /// <summary>
+    /// Job-scoped context shared by both the fleet-wide and targeted single-printer scoring
+    /// paths: the job itself, its resolved required-filament/cluster-mate lookups, the
+    /// multi-slot-fallback feature gate result, and the origin watermark bookkeeping. Loading
+    /// this once and reusing it for both paths is what keeps them from drifting apart.
+    /// </summary>
+    private readonly record struct JobScoringContext(
+        PrintJob? Job,
+        FilamentType? RequiredFilament,
+        HashSet<string> ClusterMateNames,
+        bool MultiSlotEnabled,
+        bool GramsAware,
+        long? OriginWatermark,
+        List<long?> RequiredOrigins);
+
+    private async Task<JobScoringContext> LoadJobScoringContextAsync(Guid jobId, CancellationToken ct)
+    {
+        long? originWatermark = await OriginWatermark
+            .CaptureAsync(watermarkReader, logger, "dispatch scoring", ct)
+            .ConfigureAwait(false);
+        List<long?> requiredOrigins = [originWatermark];
+
+        PrintJob? job = await db.PrintJobs
+            .Include(j => j.GcodeFile)
+                .ThenInclude(g => g!.PrinterModel)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(j => j.Id == jobId, ct);
+
+        if (job is null)
+        {
+            return new JobScoringContext(null, null, [], false, false, originWatermark, requiredOrigins);
+        }
+
+        // Resolve the required material's FilamentType for enclosure/abrasive checks
+        FilamentType? requiredFilament = null;
+        string? requiredMaterial = job.RequiredMaterialType ?? job.GcodeFile?.RequiredMaterial;
+        if (!string.IsNullOrWhiteSpace(requiredMaterial))
+        {
+            requiredFilament = await db.FilamentTypes
+                .AsNoTracking()
+                .FirstOrDefaultAsync(f => f.Name == requiredMaterial && f.IsActive, ct);
+        }
+
+        // Pre-load cluster mate names for the required material (used for fallback matching)
+        HashSet<string> clusterMateNames = [];
+        if (!string.IsNullOrWhiteSpace(requiredMaterial))
+        {
+            clusterMateNames = await GetClusterMateNamesAsync(requiredMaterial, ct);
+        }
+
+        bool multiSlotEnabled = featureGate is null
+            || await featureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
+
+        IReadOnlyList<PrintJobToolMaterialRequirement>? perToolReqs = job.RequiredMaterialsPerTool;
+        bool gramsAware = multiSlotEnabled
+            && perToolReqs is { Count: > 0 }
+            && perToolReqs.Any(r => r.EstimatedGrams is > 0);
+
+        return new JobScoringContext(
+            job,
+            requiredFilament,
+            clusterMateNames,
+            multiSlotEnabled,
+            gramsAware,
+            originWatermark,
+            requiredOrigins);
+    }
+
+    /// <summary>
+    /// Loads enabled printers with the full graph the scorer needs. When
+    /// <paramref name="printerId"/> is supplied, the query is restricted to that single printer
+    /// (issue #1705 targeted path) instead of loading the whole fleet — the filter is applied
+    /// identically to the fleet pre-filter (<c>IsEnabled</c>) so a disabled or missing printer
+    /// yields an empty list here exactly as it would be absent from the fleet result.
+    /// </summary>
+    private async Task<List<Printer>> LoadPrintersAsync(Guid? printerId, CancellationToken ct)
+    {
+        IQueryable<Printer> query = db.Printers
+            .Include(p => p.Model)
+                .ThenInclude(m => m!.SupportedFilamentTypes)
+            .Include(p => p.Model)
+                .ThenInclude(m => m!.Aliases)
+            .Include(p => p.Toolheads)
+                .ThenInclude(t => t.NozzleModel)
+            .Include(p => p.DispatchState)
+            .AsSplitQuery()
+            .AsNoTracking()
+            .Where(p => p.IsEnabled);
+
+        if (printerId is Guid id)
+        {
+            query = query.Where(p => p.Id == id);
+        }
+
+        return await query.ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Batch-loads queue depths (jobs assigned and still active) keyed by printer id. When
+    /// <paramref name="printerId"/> is supplied, restricts the count to that printer so the
+    /// targeted scoring path (issue #1705) never scans the whole fleet's queue depths just to
+    /// read one entry.
+    /// </summary>
+    private async Task<Dictionary<Guid, int>> LoadQueueDepthsAsync(Guid? printerId, CancellationToken ct)
+    {
+        IQueryable<PrintJob> query = db.PrintJobs
+            .Where(j => j.AssignedPrinterId != null
+                && j.Status != PrintJobStatus.Completed
+                && j.Status != PrintJobStatus.Failed
+                && j.Status != PrintJobStatus.Cancelled);
+
+        if (printerId is Guid id)
+        {
+            query = query.Where(j => j.AssignedPrinterId == id);
+        }
+
+        return await query
+            .GroupBy(j => j.AssignedPrinterId!.Value)
+            .ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
     }
 
     private DispatchScore ScorePrinter(
