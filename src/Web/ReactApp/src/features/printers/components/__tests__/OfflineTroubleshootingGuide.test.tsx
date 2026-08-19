@@ -12,6 +12,12 @@ describe('OfflineTroubleshootingGuide', () => {
     expect(screen.getByText('Verify the network cable is connected or WiFi is associated')).toBeInTheDocument();
   });
 
+  it('starts expanded by default for the full variant when defaultExpanded is omitted (backwards compatibility)', () => {
+    render(<OfflineTroubleshootingGuide printerBackend="Moonraker" />);
+
+    expect(screen.getByText('Common Checks')).toBeInTheDocument();
+  });
+
   it('renders Moonraker-specific steps', () => {
     render(<OfflineTroubleshootingGuide printerBackend="Moonraker" />);
 
