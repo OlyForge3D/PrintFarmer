@@ -811,6 +811,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             serverUrl={printer.serverUrl ?? printer.backendUrl}
             frontendUrl={printer.frontendUrl}
             variant="full"
+            defaultExpanded={false}
           />
         </div>
       )}
@@ -841,6 +842,122 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           className="mb-4"
         />
       )}
+
+      {/*
+        Section order below follows PRINTER_DETAIL_SECTION_ORDER (see
+        printerDetailSectionOrder.ts): Statistics, Version, Objects, Move
+        (which embeds Control), Temperature, AMS, Materials, Spool — matching
+        PrinterDetailsSidebar (#1698, #1699).
+      */}
+
+      {/* Statistics and Version — folded in from the details sidebar (#1584) */}
+      <div className="mb-3 space-y-3">
+        <CollapsibleSection
+          title="Statistics"
+          expanded={isStatisticsExpanded}
+          onToggle={setIsStatisticsExpanded}
+          defaultExpanded={false}
+          headerActions={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void printerStatisticsQuery.refetch()}
+              className="p-1! h-auto!"
+              title="Refresh statistics"
+              aria-label="Refresh statistics"
+              iconCenter={<RefreshIcon className="h-4 w-4" />}
+            ></Button>
+          }
+        >
+          {printerStatisticsQuery.isLoading ? (
+            <div className="text-sm text-pf-text-secondary">Loading statistics…</div>
+          ) : printerStatisticsQuery.data ? (
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Print time</dt>
+                <dd className="font-medium text-pf-text-primary">{formatHours(printerStatisticsQuery.data.totalPrintHours)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Filament</dt>
+                <dd className="font-medium text-pf-text-primary">{formatFilament(printerStatisticsQuery.data.totalFilamentUsedGrams)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Completed</dt>
+                <dd className="font-medium text-pf-text-primary">{printerStatisticsQuery.data.totalJobsCompleted}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Failed</dt>
+                <dd className="font-medium text-pf-text-primary">{printerStatisticsQuery.data.totalJobsFailed}</dd>
+              </div>
+              <div className="col-span-2">
+                <dt className="text-xs text-pf-text-secondary">Last sync</dt>
+                <dd className="text-pf-text-primary">
+                  {formatLastSyncTime(printerStatisticsQuery.data.lastSyncTime)}
+                </dd>
+              </div>
+            </dl>
+          ) : (
+            <div className="text-sm text-pf-text-secondary">Statistics unavailable.</div>
+          )}
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="Version"
+          expanded={isVersionExpanded}
+          onToggle={setIsVersionExpanded}
+          defaultExpanded={false}
+          headerActions={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void refreshVersionMutation.mutate()}
+              className="p-1! h-auto!"
+              title="Refresh version info"
+              aria-label="Refresh version info"
+              disabled={refreshVersionMutation.isPending}
+              iconCenter={<RefreshIcon className="h-4 w-4" />}
+            ></Button>
+          }
+        >
+          {printerVersionQuery.isLoading ? (
+            <div className="text-sm text-pf-text-secondary">Loading version…</div>
+          ) : printerVersionQuery.data ? (
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Firmware</dt>
+                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.firmwareVersion || '—'}</dd>
+                <dd className="text-[11px] text-pf-text-secondary">
+                  {printerVersionQuery.data.recordedFirmwareIdentity
+                    ? 'Recorded — used for calibration eligibility'
+                    : 'Live reading only — not used for calibration eligibility'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Backend</dt>
+                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.backendVersion || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">API</dt>
+                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.apiVersion || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-pf-text-secondary">Supported</dt>
+                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.supported ? 'Yes' : 'No'}</dd>
+              </div>
+              {printerVersionQuery.data.message ? (
+                <div className="col-span-2">
+                  <dt className="text-xs text-pf-text-secondary">Message</dt>
+                  <dd className="text-pf-text-primary wrap-break-word">{printerVersionQuery.data.message}</dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : (
+            <div className="text-sm text-pf-text-secondary">Version unavailable.</div>
+          )}
+        </CollapsibleSection>
+      </div>
 
       {/* Print Objects (skip object) — folded in from the details sidebar (#1584) */}
       {support.supportsObjectExclusion && (
@@ -908,25 +1025,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         </div>
       )}
 
-      {/* Temps Section */}
-      <TemperatureControlSection
-        hotendTemp={hotendTemp}
-        bedTemp={bedTemp}
-        hotendTarget={printer.hotendTarget}
-        bedTarget={printer.bedTarget}
-        hotendCurrent={printer.hotendTemp}
-        bedCurrent={printer.bedTemp}
-        temperatureActionPending={temperatureActionPending}
-        canSetTemperatures={canSetTemperaturesNow}
-        canCooldown={canCooldownNow}
-        onHotendTempChange={setHotendTemp}
-        onBedTempChange={setBedTemp}
-        onHotendTempKeyDown={handleHotendTempKeyDown}
-        onBedTempKeyDown={handleBedTempKeyDown}
-        onApplyPreset={handleApplyPreset}
-        onApplySingleHeaterPreset={handleApplySingleHeaterPreset}
-      />
-
       {/* Move and Control Section */}
       <div className="mb-2">
           <MovementControlSection
@@ -993,6 +1091,25 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             }
           />
       </div>
+
+      {/* Temps Section */}
+      <TemperatureControlSection
+        hotendTemp={hotendTemp}
+        bedTemp={bedTemp}
+        hotendTarget={printer.hotendTarget}
+        bedTarget={printer.bedTarget}
+        hotendCurrent={printer.hotendTemp}
+        bedCurrent={printer.bedTemp}
+        temperatureActionPending={temperatureActionPending}
+        canSetTemperatures={canSetTemperaturesNow}
+        canCooldown={canCooldownNow}
+        onHotendTempChange={setHotendTemp}
+        onBedTempChange={setBedTemp}
+        onHotendTempKeyDown={handleHotendTempKeyDown}
+        onBedTempKeyDown={handleBedTempKeyDown}
+        onApplyPreset={handleApplyPreset}
+        onApplySingleHeaterPreset={handleApplySingleHeaterPreset}
+      />
 
       {/* AMS control box — mirrors PrinterDetailsSidebar's placement immediately
           before the materials module, so gate select/load/unload/eject controls
@@ -1105,115 +1222,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
         </div>
       )}
-
-      {/* Statistics and Version — folded in from the details sidebar (#1584) */}
-      <div className="mt-3 space-y-3">
-        <CollapsibleSection
-          title="Statistics"
-          expanded={isStatisticsExpanded}
-          onToggle={setIsStatisticsExpanded}
-          defaultExpanded={false}
-          headerActions={
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => void printerStatisticsQuery.refetch()}
-              className="p-1! h-auto!"
-              title="Refresh statistics"
-              aria-label="Refresh statistics"
-              iconCenter={<RefreshIcon className="h-4 w-4" />}
-            ></Button>
-          }
-        >
-          {printerStatisticsQuery.isLoading ? (
-            <div className="text-sm text-pf-text-secondary">Loading statistics…</div>
-          ) : printerStatisticsQuery.data ? (
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-              <div>
-                <dt className="text-xs text-pf-text-secondary">Print time</dt>
-                <dd className="font-medium text-pf-text-primary">{formatHours(printerStatisticsQuery.data.totalPrintHours)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-pf-text-secondary">Filament</dt>
-                <dd className="font-medium text-pf-text-primary">{formatFilament(printerStatisticsQuery.data.totalFilamentUsedGrams)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-pf-text-secondary">Completed</dt>
-                <dd className="font-medium text-pf-text-primary">{printerStatisticsQuery.data.totalJobsCompleted}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-pf-text-secondary">Failed</dt>
-                <dd className="font-medium text-pf-text-primary">{printerStatisticsQuery.data.totalJobsFailed}</dd>
-              </div>
-              <div className="col-span-2">
-                <dt className="text-xs text-pf-text-secondary">Last sync</dt>
-                <dd className="text-pf-text-primary">
-                  {formatLastSyncTime(printerStatisticsQuery.data.lastSyncTime)}
-                </dd>
-              </div>
-            </dl>
-          ) : (
-            <div className="text-sm text-pf-text-secondary">Statistics unavailable.</div>
-          )}
-        </CollapsibleSection>
-
-        <CollapsibleSection
-          title="Version"
-          expanded={isVersionExpanded}
-          onToggle={setIsVersionExpanded}
-          defaultExpanded={false}
-          headerActions={
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => void refreshVersionMutation.mutate()}
-              className="p-1! h-auto!"
-              title="Refresh version info"
-              aria-label="Refresh version info"
-              disabled={refreshVersionMutation.isPending}
-              iconCenter={<RefreshIcon className="h-4 w-4" />}
-            ></Button>
-          }
-        >
-          {printerVersionQuery.isLoading ? (
-            <div className="text-sm text-pf-text-secondary">Loading version…</div>
-          ) : printerVersionQuery.data ? (
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-              <div>
-                <dt className="text-xs text-pf-text-secondary">Firmware</dt>
-                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.firmwareVersion || '—'}</dd>
-                <dd className="text-[11px] text-pf-text-secondary">
-                  {printerVersionQuery.data.recordedFirmwareIdentity
-                    ? 'Recorded — used for calibration eligibility'
-                    : 'Live reading only — not used for calibration eligibility'}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-pf-text-secondary">Backend</dt>
-                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.backendVersion || '—'}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-pf-text-secondary">API</dt>
-                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.apiVersion || '—'}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-pf-text-secondary">Supported</dt>
-                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.supported ? 'Yes' : 'No'}</dd>
-              </div>
-              {printerVersionQuery.data.message ? (
-                <div className="col-span-2">
-                  <dt className="text-xs text-pf-text-secondary">Message</dt>
-                  <dd className="text-pf-text-primary wrap-break-word">{printerVersionQuery.data.message}</dd>
-                </div>
-              ) : null}
-            </dl>
-          ) : (
-            <div className="text-sm text-pf-text-secondary">Version unavailable.</div>
-          )}
-        </CollapsibleSection>
-      </div>
 
       <Modal
         isOpen={objectToSkip !== null}

@@ -44,6 +44,10 @@ import {
 } from '@/features/printers/constants/temperaturePresets';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
 import { getStatusHeaderClassName, getStatusIndicatorColor } from '@/features/printers/utils/statusColors';
+// This component's scrollable content follows PRINTER_DETAIL_SECTION_ORDER
+// (see printerDetailSectionOrder.ts): Statistics, Version, Control, Objects,
+// Move, Temperature, Materials/MMU, Spool. DetailedPrinterCard mirrors this
+// order for its shared sections (#1698).
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button, TemperatureControlRow, MovementInput, MoveDistanceSlider, Select, CollapsibleSection, LoadedFilamentCard } from '@/common/components/ui';
 import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
