@@ -85,4 +85,36 @@ describe('Input', () => {
     
     expect(screen.getByRole('textbox')).toHaveAttribute('pattern', '[A-Za-z]{3}');
   });
+
+  it('should blur a focused number input on wheel to avoid hijacking scroll', () => {
+    render(<Input type="number" placeholder="Amount" />);
+
+    const input = screen.getByPlaceholderText('Amount');
+    input.focus();
+    expect(input).toHaveFocus();
+
+    fireEvent.wheel(input, { deltaY: 100 });
+
+    expect(input).not.toHaveFocus();
+  });
+
+  it('should not blur non-number inputs on wheel', () => {
+    render(<Input placeholder="Text" />);
+
+    const input = screen.getByPlaceholderText('Text');
+    input.focus();
+
+    fireEvent.wheel(input, { deltaY: 100 });
+
+    expect(input).toHaveFocus();
+  });
+
+  it('should still call a caller-provided onWheel handler for number inputs', () => {
+    const handleWheel = vi.fn();
+    render(<Input type="number" placeholder="Amount" onWheel={handleWheel} />);
+
+    fireEvent.wheel(screen.getByPlaceholderText('Amount'), { deltaY: 100 });
+
+    expect(handleWheel).toHaveBeenCalled();
+  });
 });

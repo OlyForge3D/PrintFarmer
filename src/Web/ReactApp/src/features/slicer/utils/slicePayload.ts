@@ -60,6 +60,26 @@ export function buildSlicePayloadModels(activePlateModels: LoadedModel[]): Slice
 }
 
 /**
+ * Resolve the `model3DId` field for a slice request: set only when the
+ * active plate resolves to a single sliceable model, so the backend can
+ * link the job to that library model. `payload.modelFileUrls` is only
+ * populated when there is more than one sliceable model (see
+ * `buildSlicePayloadModels`), so callers must key off `sliceableCount`
+ * rather than `modelFileUrls.length` — reading `.length` off the
+ * possibly-undefined `modelFileUrls` was the direct cause of the
+ * "Cannot read properties of undefined (reading 'length')" crash in
+ * issue #1709.
+ */
+export function resolveModel3DId(
+  payload: SlicePayloadModels,
+  selectedModelId?: string,
+): string | undefined {
+  return payload.sliceableCount <= 1
+    ? payload.primary?.id || selectedModelId || undefined
+    : undefined;
+}
+
+/**
  * Compute the process-setting overrides to send with a slice job: ONLY the keys
  * whose current editor value differs from the original baseline.
  *

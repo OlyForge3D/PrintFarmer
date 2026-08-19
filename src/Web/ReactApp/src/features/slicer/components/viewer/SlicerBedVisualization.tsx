@@ -172,6 +172,12 @@ export interface SlicerBedVisualizationProps {
    * Passes `null` when the model unmounts.
    */
   onModelGeometryChange?: (modelId: string, geometry: THREE.BufferGeometry | null) => void;
+  /**
+   * Called when a model fails to load (e.g. the source file 404s/401s). Lets
+   * the parent block slicing for that model instead of leaving the slice
+   * action enabled against data that never arrived (issue #1709).
+   */
+  onModelLoadError?: (modelId: string) => void;
   /** When true, measure tool is active for point-to-point distance */
   measureMode?: boolean;
   /** When true, models are offset radially for exploded assembly inspection */
@@ -1765,6 +1771,7 @@ function BedScene({
   onLayFlatComplete,
   autoOrientTrigger = 0,
   onModelGeometryChange,
+  onModelLoadError,
   measureMode = false,
   assemblyViewActive = false,
   splitTrigger = 0,
@@ -2179,6 +2186,7 @@ function BedScene({
                   ) : (
                     <ModelViewerErrorBoundary
                       resetKey={`${model.id}:${model.viewerUrl ?? model.url}`}
+                      onError={() => onModelLoadError?.(model.id)}
                       fallback={(
                         <Html center>
                           <div
@@ -2403,6 +2411,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
   onLayFlatComplete,
   autoOrientTrigger = 0,
   onModelGeometryChange,
+  onModelLoadError,
   measureMode = false,
   assemblyViewActive = false,
   splitTrigger = 0,
@@ -2480,6 +2489,7 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
               onLayFlatComplete={onLayFlatComplete}
               autoOrientTrigger={autoOrientTrigger}
               onModelGeometryChange={onModelGeometryChange}
+              onModelLoadError={onModelLoadError}
               measureMode={measureMode}
               assemblyViewActive={assemblyViewActive}
               splitTrigger={splitTrigger}

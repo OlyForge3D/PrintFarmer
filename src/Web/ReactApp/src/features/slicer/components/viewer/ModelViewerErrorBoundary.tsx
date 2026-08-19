@@ -7,6 +7,8 @@ interface ModelViewerErrorBoundaryProps {
   className?: string;
   resetKey?: string;
   fallback?: ReactNode;
+  /** Called when a child throws (e.g. a 3D model failed to load). */
+  onError?: (error: Error) => void;
 }
 
 interface ModelViewerErrorBoundaryState {
@@ -31,6 +33,7 @@ export class ModelViewerErrorBoundary extends Component<ModelViewerErrorBoundary
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ModelViewerErrorBoundary caught an error:', error, errorInfo);
+    this.props.onError?.(error);
   }
 
   componentDidUpdate(prevProps: ModelViewerErrorBoundaryProps) {
