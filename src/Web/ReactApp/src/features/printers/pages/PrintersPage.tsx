@@ -28,6 +28,8 @@ import type { Printer, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import { sortPrintersForDisplay, getBackendName, type PrinterSortMode } from '@/features/printers/utils/printerDisplaySort';
+import { computeIsSidebarOpen } from '@/features/printers/utils/printerSidebarVisibility';
+import { useIsLgBreakpoint } from '@/common/hooks/useMediaQuery';
 
 import { PrinterIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
 import PrinterImportExportControls from '@/features/printers/components/admin/PrinterImportExportControls';
@@ -57,6 +59,7 @@ const EditPrinterModal = lazyWithPreload<EditPrinterModalProps, React.FC<EditPri
 const PrinterDiscoveryModal = lazyWithPreload<PrinterDiscoveryModalProps, React.FC<PrinterDiscoveryModalProps>>(
   () => import('@/features/printers/components/PrinterDiscoveryModal').then(m => ({ default: m.PrinterDiscoveryModal }))
 );
+
 
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
@@ -176,6 +179,21 @@ export function PrintersPage() {
     ),
     [allAutoDispatchStatuses, displayPrinterStateById]
   );
+  // #1702 (follow-up): the sidebar renders differently depending on viewport
+  // width — inline between the toolbar and the grid on small screens, or as
+  // a sticky column beside the grid on large screens. Previously both
+  // layouts were rendered unconditionally and CSS (`lg:hidden` /
+  // `hidden lg:block`) hid whichever one didn't apply. That still mounts
+  // *two* PrinterDetailsSidebar (and therefore two MmuControlBox/
+  // MaterialLoadout) component trees any time the sidebar is open, in every
+  // view mode — the same class of hazard #1702 describes, just gated by
+  // viewport width instead of route/view-mode. A hidden copy can't be
+  // clicked by a real user (display:none is inert), but it's still a live,
+  // unnecessary second mount. Use a JS breakpoint check (matching this
+  // component's existing `lg:` usage) so only one PrinterDetailsSidebar is
+  // ever mounted. Declared here, before any early return below, so the
+  // Rules of Hooks aren't violated by the loading/error early-return paths.
+  const isLgUp = useIsLgBreakpoint();
   const [searchParams] = useSearchParams();
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const fromUrl = searchParams.get('view');
@@ -383,6 +401,23 @@ export function PrintersPage() {
     }
   }, [isLoading, navigate, printersById, routePrinterId]);
 
+  // #1702: the detailed grid already folds a printer's sidebar info inline
+  // (MaterialLoadout, statistics, version, etc. — see #1584), so keep the
+  // details sidebar closed while in that view. Otherwise PrinterDetailsSidebar
+  // and the grid's DetailedPrinterCard can both mount for the same printer at
+  // once, and each independently renders its own MaterialLoadout (and, in the
+  // sidebar, MmuControlBox) with no shared lock — letting two mounts issue
+  // conflicting AMS/MMU hardware mutations (spool assignment, gate
+  // load/unload/eject/home/recover) for the same physical unit. Preserve the
+  // existing query string (e.g. `?view=detailed`) so this redirect only drops
+  // the printer id, not the user's view-mode choice.
+  useEffect(() => {
+    if (viewMode === 'detailed' && expandedPrinterId) {
+      const search = searchParams.toString();
+      navigate({ pathname: '/printers', search: search ? `?${search}` : undefined }, { replace: true });
+    }
+  }, [viewMode, expandedPrinterId, navigate, searchParams]);
+
   const handleBulkSetMaintenance = async (printers: Printer[], inMaintenance: boolean) => {
     try {
       if (window.PrintFarmerDebug?.printers) {
@@ -474,7 +509,15 @@ export function PrintersPage() {
     );
   }
 
-  const isSidebarOpen = !!expandedPrinterId;
+  // #1702: gate this at render time, not only via the redirect effect below —
+  // an effect runs after commit/paint, so relying on it alone would still let
+  // the sidebar and the detailed grid's DetailedPrinterCard mount together
+  // (each with their own MmuControlBox) for one commit whenever `viewMode`
+  // flips to 'detailed' while a printer is already expanded via route (e.g.
+  // via ViewModeToggle, or a warm DetailedPrinterCard lazy chunk resolving
+  // synchronously on a deep link). See computeIsSidebarOpen for why this is
+  // a pure, directly-unit-tested function rather than an inline expression.
+  const isSidebarOpen = computeIsSidebarOpen(expandedPrinterId, viewMode);
 
   return (
     <PageTemplate
@@ -615,9 +658,12 @@ export function PrintersPage() {
             </div>
           </div>
 
-          {/* Printer details sidebar on small screens: between toolbar and grid */}
-          {isSidebarOpen && (
-            <div className="lg:hidden mb-6 min-w-0">
+          {/* Printer details sidebar on small screens: between toolbar and grid.
+              Only mounted when isLgUp is false — see isLgUp above for why this
+              must be a single JS-gated mount rather than a second, CSS-hidden
+              copy of PrinterDetailsSidebar. */}
+          {isSidebarOpen && !isLgUp && (
+            <div className="mb-6 min-w-0">
               <PrinterDetailsSidebar
                 printerId={expandedPrinterId}
                 printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
@@ -730,8 +776,13 @@ export function PrintersPage() {
           </div>
         </div>
 
-        {isSidebarOpen && (
-          <div className="hidden lg:block lg:self-start lg:sticky lg:top-0 lg:max-h-[calc(100dvh-5rem)]">
+        {/* Printer details sidebar on large screens: sticky column beside the
+            grid. Only mounted when isLgUp is true — the counterpart of the
+            inline mobile mount above; together they guarantee exactly one
+            PrinterDetailsSidebar (and one MmuControlBox/MaterialLoadout pair)
+            is ever mounted for a given printer, regardless of viewport. */}
+        {isSidebarOpen && isLgUp && (
+          <div className="lg:self-start lg:sticky lg:top-0 lg:max-h-[calc(100dvh-5rem)]">
             <PrinterDetailsSidebar
               printerId={expandedPrinterId}
               printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}

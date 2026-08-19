@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Printer } from '@/types/api';
 import { PrintersPage } from '../PrintersPage';
+import { LG_BREAKPOINT_QUERY } from '@/common/hooks/useMediaQuery';
 
 const mockRefetchPrinters = vi.fn();
 const mockUsePrinters = vi.fn();
@@ -85,7 +86,12 @@ vi.mock('@/common/components/ui/Select', () => ({
 }));
 
 vi.mock('@/common/components/ViewModeToggle', () => ({
-  ViewModeToggle: () => <div data-testid="view-mode-toggle" />,
+  ViewModeToggle: ({ onChange }: { viewMode: string; onChange: (mode: 'collapsed' | 'detailed' | 'table') => void }) => (
+    <div data-testid="view-mode-toggle">
+      <button type="button" onClick={() => onChange('detailed')}>Detailed view</button>
+      <button type="button" onClick={() => onChange('collapsed')}>Collapsed view</button>
+    </div>
+  ),
 }));
 
 vi.mock('@/features/printers/components/CompactPrinterCard', () => ({
@@ -212,6 +218,25 @@ function renderPage(initialEntry: string) {
   );
 }
 
+/**
+ * The global matchMedia polyfill (src/test/setup.ts) always reports
+ * `matches: false`, i.e. "not desktop". Override it for tests that need to
+ * exercise the `isLgUp` (desktop/large-screen) branch of PrintersPage.
+ */
+function mockLgBreakpoint(matches: boolean) {
+  const mql = {
+    matches,
+    media: LG_BREAKPOINT_QUERY,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  };
+  window.matchMedia = vi.fn().mockReturnValue(mql) as unknown as typeof window.matchMedia;
+}
+
 describe('PrintersPage', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -230,12 +255,36 @@ describe('PrintersPage', () => {
   it('opens the details sidebar when loaded from /printers/:printerId', () => {
     renderPage('/printers/printer-1');
 
-    const sidebars = screen.getAllByTestId('printer-details-sidebar');
-    expect(sidebars).toHaveLength(2);
-    sidebars.forEach((sidebar) => {
-      expect(sidebar).toHaveTextContent('printer-1');
-    });
+    // #1702 (follow-up): exactly one PrinterDetailsSidebar is mounted, never
+    // both the mobile and desktop layout copies at once — see
+    // "mounts exactly one PrinterDetailsSidebar..." below for the dedicated
+    // regression test on this invariant.
+    expect(screen.getByTestId('printer-details-sidebar')).toHaveTextContent('printer-1');
     expect(screen.getByTestId('location-display')).toHaveTextContent('/printers/printer-1');
+  });
+
+  it('mounts exactly one PrinterDetailsSidebar regardless of viewport width (#1702 follow-up)', () => {
+    // PrinterDetailsSidebar renders MaterialLoadout/MmuControlBox, which fire
+    // hardware mutations from onClick handlers with no concurrency guard.
+    // Previously PrintersPage rendered PrinterDetailsSidebar twice
+    // unconditionally (a `lg:hidden` mobile copy and a `hidden lg:block`
+    // desktop copy) and relied on CSS alone to hide whichever one didn't
+    // apply — both React trees were mounted regardless of viewport. That's
+    // the same dual-mount hazard #1702 describes, just gated by viewport
+    // width instead of route/view-mode. Assert only one mounts, on both
+    // sides of the lg breakpoint.
+    mockLgBreakpoint(false);
+    const { unmount } = renderPage('/printers/printer-1');
+    expect(screen.getAllByTestId('printer-details-sidebar')).toHaveLength(1);
+    unmount();
+
+    mockLgBreakpoint(true);
+    renderPage('/printers/printer-1');
+    expect(screen.getAllByTestId('printer-details-sidebar')).toHaveLength(1);
+
+    // Restore the default (mobile) breakpoint so later tests in this file
+    // aren't affected by this override.
+    mockLgBreakpoint(false);
   });
 
   it('falls back to /printers when the route printer id does not exist', async () => {
@@ -257,11 +306,8 @@ describe('PrintersPage', () => {
       expect(screen.getByTestId('location-display')).toHaveTextContent('/printers/printer-1');
     });
 
-    const sidebars = screen.getAllByTestId('printer-details-sidebar');
-    expect(sidebars).toHaveLength(2);
-    sidebars.forEach((sidebar) => {
-      expect(sidebar).toHaveTextContent('printer-1');
-    });
+    const sidebar = screen.getByTestId('printer-details-sidebar');
+    expect(sidebar).toHaveTextContent('printer-1');
   });
 
   it('navigates back to /printers when the sidebar closes', async () => {
@@ -274,6 +320,49 @@ describe('PrintersPage', () => {
       expect(screen.getByTestId('location-display')).toHaveTextContent('/printers');
     });
     expect(screen.queryByTestId('printer-details-sidebar')).not.toBeInTheDocument();
+  });
+
+  it('closes the details sidebar when landing in detailed view for the same printer (#1702 dual-mount race)', async () => {
+    // In detailed view, DetailedPrinterCard already folds the sidebar's
+    // MaterialLoadout/MmuControlBox content inline (#1584). If the sidebar
+    // stayed open too, both would mount for the same printer at once, each
+    // capable of firing its own AMS/MMU hardware mutation with no shared
+    // lock. The route must be redirected back to /printers instead.
+    renderPage('/printers/printer-1?view=detailed');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-display')).toHaveTextContent('/printers');
+    });
+    expect(screen.getByTestId('location-display')).not.toHaveTextContent('/printers/printer-1');
+    expect(screen.queryByTestId('printer-details-sidebar')).not.toBeInTheDocument();
+
+    // The grid itself is untouched — the view mode (and its query param) is
+    // preserved across the redirect, so the remounted page still resolves
+    // viewMode from the URL and both printers still render via
+    // DetailedPrinterCard instead of falling back to the collapsed view.
+    await waitFor(() => {
+      expect(screen.getByText('Printer Alpha')).toBeInTheDocument();
+      expect(screen.getByText('Printer Beta')).toBeInTheDocument();
+    });
+  });
+
+  it('never renders the sidebar alongside the detailed grid, even for the render that switches view mode (#1702)', async () => {
+    // End-to-end confirmation that the settled state is correct once the
+    // page finishes redirecting after a client-side view-mode switch. The
+    // render-time guard itself is unit-tested directly in
+    // printerSidebarVisibility.test.ts, since a DOM assertion taken after an
+    // interaction can't observe whether the guard fired at render time or
+    // was only eventually corrected by the redirect effect below.
+    const user = userEvent.setup();
+    renderPage('/printers/printer-1');
+
+    expect(screen.getByTestId('printer-details-sidebar')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Detailed view' }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('printer-details-sidebar')).not.toBeInTheDocument();
+    });
   });
 
   it('renders a retryable error instead of the empty state when loading printers fails', async () => {
