@@ -122,6 +122,16 @@ public class HarvestCompletionServiceTests
         Assert.Equal(GcodeHarvestStatus.Completed, operation.Status);
         Assert.NotNull(operation.CompletedAt);
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+
+        // Regression: the state-transition log must still fire at Information.
+        _loggerMock.Verify(
+            l => l.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
     }
 
     [Fact]
@@ -180,10 +190,6 @@ public class HarvestCompletionServiceTests
 
         _harvestRepoMock.Setup(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<GcodeHarvestOperation> { op1, op2 });
-        _harvestRepoMock.Setup(h => h.GetDiscoveredFilesCountAsync(op1.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(5);
-        _harvestRepoMock.Setup(h => h.GetDiscoveredFilesCountAsync(op2.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(9);
         _harvestRepoMock.Setup(h => h.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -193,6 +199,55 @@ public class HarvestCompletionServiceTests
         // Assert
         Assert.Equal(GcodeHarvestStatus.Completed, op1.Status);
         Assert.NotEqual(GcodeHarvestStatus.Completed, op2.Status);
+    }
+
+    [Fact]
+    public async Task ProcessOperationsAsync_NeverCallsGetDiscoveredFilesCountAsync()
+    {
+        // Arrange: the discovered-files COUNT query was a dead call whose only
+        // consumer was a removed log line. It must never be invoked.
+        var operationId = Guid.NewGuid();
+        GcodeHarvestOperation operation = CreateOperation(
+            operationId,
+            filesFound: 10,
+            filesAdded: 8,
+            filesSkipped: 2,
+            filesErrored: 0);
+
+        _harvestRepoMock.Setup(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<GcodeHarvestOperation> { operation });
+
+        // Act
+        await _service.ProcessOperationsAsync(_unitOfWorkMock.Object, CancellationToken.None);
+
+        // Assert
+        _harvestRepoMock.Verify(
+            h => h.GetDiscoveredFilesCountAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessOperationsAsync_WithIdleFarm_LogsNothingAtInformation()
+    {
+        // Arrange: no running operations - simulates an idle farm tick.
+        _harvestRepoMock.Setup(h => h.GetRunningOperationsWithFilesFoundAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<GcodeHarvestOperation>());
+
+        // Act - simulate several ticks
+        for (var i = 0; i < 5; i++)
+        {
+            await _service.ProcessOperationsAsync(_unitOfWorkMock.Object, CancellationToken.None);
+        }
+
+        // Assert - no Information (or higher) level logs were emitted for the tick itself
+        _loggerMock.Verify(
+            l => l.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
     }
 
     [Fact]
