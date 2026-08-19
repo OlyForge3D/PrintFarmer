@@ -15,6 +15,7 @@ import { CutPlaneOverlay } from './CutPlaneOverlay';
 import { PlateBedOverlay } from './PlateBedOverlay';
 import { ModelViewerErrorBoundary } from './ModelViewerErrorBoundary';
 import { ThreeMFViewer } from '@/features/slicer/components/ThreeMFViewer';
+import { AuthenticatedModelSource } from '@/common/components/AuthenticatedModelSource';
 import {
   detectMajorFaces,
   computeAutoOrientation,
@@ -827,23 +828,7 @@ function computeZForBedPlacement(
  * "interactive" for its click bookkeeping (prevents onPointerMissed from
  * firing when a mesh was actually pressed).
  */
-function STLModel({ 
-  url, 
-  position = [0, 0, 0], 
-  rotation = [0, 0, 0], 
-  scale = [1, 1, 1],
-  selected = false,
-  outOfBounds = false,
-  layFlatMode = false,
-  draggable = false,
-  dimmed = false,
-  onClick,
-  onDragStart,
-  meshRef,
-  onSelectedMetrics,
-  onLayFlatFaceClick,
-  onGeometryReady,
-}: { 
+interface STLModelProps {
   url: string;
   position?: [number, number, number];
   rotation?: [number, number, number];
@@ -863,7 +848,43 @@ function STLModel({
   }) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
   onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
-}) {
+}
+
+/**
+ * Loads and renders an STL model from `url`.
+ *
+ * `url` may point at an authenticated API endpoint (`/3d-models/file/{id}`),
+ * so it is resolved through {@link AuthenticatedModelSource} first — that
+ * pre-fetches the bytes with the app's bearer token attached and hands
+ * `STLGeometryModel` a `Blob` object URL that `useLoader(STLLoader, ...)` can
+ * fetch without authentication (see #1711).
+ */
+function STLModel(props: STLModelProps) {
+  const { url, ...rest } = props;
+  return (
+    <AuthenticatedModelSource url={url}>
+      {(resolvedUrl) => <STLGeometryModel url={resolvedUrl} {...rest} />}
+    </AuthenticatedModelSource>
+  );
+}
+
+function STLGeometryModel({
+  url,
+  position = [0, 0, 0],
+  rotation = [0, 0, 0],
+  scale = [1, 1, 1],
+  selected = false,
+  outOfBounds = false,
+  layFlatMode = false,
+  draggable = false,
+  dimmed = false,
+  onClick,
+  onDragStart,
+  meshRef,
+  onSelectedMetrics,
+  onLayFlatFaceClick,
+  onGeometryReady,
+}: STLModelProps) {
   const rawGeometry = useLoader(STLLoader, url);
   const internalRef = useRef<THREE.Group>(null);
   const ref = meshRef || internalRef;

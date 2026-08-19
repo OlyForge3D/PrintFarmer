@@ -3,6 +3,7 @@ import { useLoader } from '@react-three/fiber';
 import { Select } from '@/common/components/ui';
 import { DEFAULT_EXTRUDER_COLORS } from '@/features/slicer/components/viewer/extruderColors';
 import { apiClient } from '@/services/api';
+import { AuthenticatedModelSource } from '@/common/components/AuthenticatedModelSource';
 import { cloneThreeMfMeshesDroppedToBed } from '@/features/slicer/utils/threemf-display';
 import { disposeParsedThreeMfModel, parseThreeMfArchive, ThreeMfSecurityError, type ParsedThreeMfModel } from '@/features/slicer/utils/threemf-parser';
 import { STLLoader } from 'three-stdlib';
@@ -142,7 +143,25 @@ function usePreparedDisplayData(
   return preparedData;
 }
 
-function FallbackStlModel({
+/**
+ * Renders an STL fallback for a 3MF that failed to parse natively.
+ *
+ * `url` may point at an authenticated API endpoint (`/3d-models/file/{id}`),
+ * so it is resolved through {@link AuthenticatedModelSource} first — that
+ * pre-fetches the bytes with the app's bearer token attached and hands
+ * `FallbackStlGeometryModel` a `Blob` object URL that `useLoader(STLLoader, ...)`
+ * can fetch without authentication (see #1711).
+ */
+function FallbackStlModel(props: SharedModelViewerProps) {
+  const { url, ...rest } = props;
+  return (
+    <AuthenticatedModelSource url={url}>
+      {(resolvedUrl) => <FallbackStlGeometryModel url={resolvedUrl} {...rest} />}
+    </AuthenticatedModelSource>
+  );
+}
+
+function FallbackStlGeometryModel({
   url,
   position = [0, 0, 0],
   rotation = [0, 0, 0],
