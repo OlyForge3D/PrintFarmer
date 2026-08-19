@@ -50,7 +50,7 @@ import type { LoadedModel, BedConfig } from '@/features/slicer/components/viewer
 import type { BufferGeometry } from 'three';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 import { buildSlicerViewerModelUrl, getSlicerViewerFileType } from '@/features/slicer/utils/model-file-utils';
-import { buildSlicePayloadModels, modelTransformJson, diffProcessOverrides } from '@/features/slicer/utils/slicePayload';
+import { buildSlicePayloadModels, resolveModel3DId, modelTransformJson, diffProcessOverrides } from '@/features/slicer/utils/slicePayload';
 import { readOrcaBundle } from '@/features/slicer/utils/orcaBundleLoader';
 import { SlicerWorkspaceBoundary } from '@/features/slicer/components/viewer/SlicerWorkspaceBoundary';
 import { STLPreviewModalBoundary } from '@/features/slicer/components/viewer/STLPreviewModalBoundary';
@@ -1795,9 +1795,7 @@ export const NewSliceJobPage: React.FC = () => {
       userId: user?.id || '',
       printerId: undefined,
       modelFileUrl: effectiveModelFileUrl,
-      model3DId: payloadModels.modelFileUrls.length <= 1
-        ? (primaryModel?.id || selectedModelId || undefined)
-        : undefined,
+      model3DId: resolveModel3DId(payloadModels, selectedModelId),
       modelFileName: effectiveModelFileName,
       slicerEngine: slicerInfo.engine,
       // Issue #578 dual-engine: when the user leaves the dropdown on "Latest"

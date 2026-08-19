@@ -217,6 +217,31 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     }
   }, []);
 
+  // Issue #1709: models whose source file failed to load (e.g. a 401/404 on
+  // the STL/3MF fetch). A model can still have a real server URL and thus
+  // look "sliceable" by URL alone, so we track load failures explicitly and
+  // use them to keep the Slice action honest instead of letting it dispatch
+  // a job for data that never arrived. Cleared automatically when the model
+  // is removed from the workspace, or when a later load attempt (retry, or
+  // the same model swapped for a working one) succeeds — see
+  // handleModelGeometryChange below and the removedIds cleanup.
+  const [failedModelLoadIds, setFailedModelLoadIds] = useState<Set<string>>(new Set());
+  const handleModelLoadError = useCallback((modelId: string) => {
+    setFailedModelLoadIds(prev => (prev.has(modelId) ? prev : new Set(prev).add(modelId)));
+  }, []);
+  const handleModelGeometryOrLoadStateChange = useCallback((modelId: string, geometry: THREE.BufferGeometry | null) => {
+    handleModelGeometryChange(modelId, geometry);
+    if (geometry) {
+      // A successful (re)load clears any previously recorded failure for this model.
+      setFailedModelLoadIds(prev => {
+        if (!prev.has(modelId)) return prev;
+        const next = new Set(prev);
+        next.delete(modelId);
+        return next;
+      });
+    }
+  }, [handleModelGeometryChange]);
+
   // --- Multi-plate state ---
   const [plateState, setPlateState] = useState<PlateManagerState>(() => createInitialPlateState());
 
@@ -278,6 +303,13 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         setColorPaintData(prev => { const next = new Map(prev); next.delete(id); return next; });
         setFuzzySkinPaintData(prev => { const next = new Map(prev); next.delete(id); return next; });
       }
+      // A removed model can no longer block slicing (issue #1709).
+      setFailedModelLoadIds(prev => {
+        if (!removedIds.some(id => prev.has(id))) return prev;
+        const next = new Set(prev);
+        for (const id of removedIds) next.delete(id);
+        return next;
+      });
     }
   }
 
@@ -331,6 +363,14 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     () => plateState.plates.some(p => p.id !== plateState.activePlateId && p.modelIds.length > 0),
     [plateState],
   );
+  // True when at least one model on the active plate failed to load its
+  // source file. Slicing against such a model would either crash (issue
+  // #1709) or dispatch a job for data that never arrived, so it blocks the
+  // Slice action just like an empty plate does.
+  const activePlateHasLoadError = useMemo(
+    () => activePlateModels.some(m => failedModelLoadIds.has(m.id)),
+    [activePlateModels, failedModelLoadIds],
+  );
   // True when the ACTIVE plate is locked. Used to block every user-initiated
   // mutation that targets the active/selected plate (numeric transform inputs,
   // toolbar arrange/orient, split, cut, paint) — the 3D scene already blocks
@@ -340,8 +380,12 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     [plateState],
   );
   const handleSliceClick = useCallback(() => {
+    if (activePlateHasLoadError) {
+      toast.error('One or more models on this plate failed to load. Retry or remove them before slicing.');
+      return;
+    }
     onSlice?.(activePlateModels.map(m => m.id));
-  }, [onSlice, activePlateModels]);
+  }, [onSlice, activePlateModels, activePlateHasLoadError]);
 
   // Notify parent of plate state changes
   useEffect(() => {
@@ -1549,7 +1593,8 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           onPlateArrange={handleArrangePlate}
           onPlateOrient={handleOrientPlate}
           onPlateToggleLock={handleTogglePlateLock}
-          onModelGeometryChange={handleModelGeometryChange}
+          onModelGeometryChange={handleModelGeometryOrLoadStateChange}
+          onModelLoadError={handleModelLoadError}
           transformMode={transformMode}
           onModelTransform={handleModelTransform}
           onSelectedModelMetricsChange={(metrics) => {
@@ -1773,9 +1818,15 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         slicesTotal={slicesTotal}
         onSlice={handleSliceClick}
         slicing={slicing}
-        canSlice={canSlice && activePlateModels.length > 0}
+        canSlice={canSlice && activePlateModels.length > 0 && !activePlateHasLoadError}
         sliceButtonLabel={sliceButtonLabel}
-        sliceNote={otherPlatesHaveModels ? 'Only the active plate is sliced.' : undefined}
+        sliceNote={
+          activePlateHasLoadError
+            ? 'A model on this plate failed to load. Retry or remove it before slicing.'
+            : otherPlatesHaveModels
+            ? 'Only the active plate is sliced.'
+            : undefined
+        }
       />
     </div>
   );

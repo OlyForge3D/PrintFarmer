@@ -3,6 +3,7 @@ import {
   isSliceableModel,
   modelTransformJson,
   buildSlicePayloadModels,
+  resolveModel3DId,
   diffProcessOverrides,
 } from '../slicePayload';
 import type { LoadedModel } from '@/features/slicer/components/viewer/SlicerBedVisualization';
@@ -71,6 +72,34 @@ describe('slicePayload', () => {
       ]);
       expect(result.modelFileTransforms).toHaveLength(2);
       expect(result.primary?.id).toBe('a');
+    });
+  });
+
+  describe('resolveModel3DId', () => {
+    // Regression test for issue #1709: "Slice Plate" threw
+    // `TypeError: Cannot read properties of undefined (reading 'length')`
+    // because the caller read `payload.modelFileUrls.length`, and
+    // `modelFileUrls` is only set by `buildSlicePayloadModels` when there is
+    // more than one sliceable model — it is `undefined` for the single-model
+    // case (e.g. right after a model load failure leaves exactly one
+    // still-URL-bearing model on the active plate).
+    it('does not throw and resolves the primary id for a single sliceable model', () => {
+      const payload = buildSlicePayloadModels([model({ id: 'only' })]);
+      expect(payload.modelFileUrls).toBeUndefined();
+
+      expect(() => resolveModel3DId(payload, undefined)).not.toThrow();
+      expect(resolveModel3DId(payload, undefined)).toBe('only');
+    });
+
+    it('falls back to the selected model id when the active plate has no sliceable model', () => {
+      const payload = buildSlicePayloadModels([]);
+      expect(resolveModel3DId(payload, 'selected-fallback')).toBe('selected-fallback');
+      expect(resolveModel3DId(payload, undefined)).toBeUndefined();
+    });
+
+    it('is undefined for a multi-model plate (model3DId only applies to a single model)', () => {
+      const payload = buildSlicePayloadModels([model({ id: 'a' }), model({ id: 'b' })]);
+      expect(resolveModel3DId(payload, 'a')).toBeUndefined();
     });
   });
 
