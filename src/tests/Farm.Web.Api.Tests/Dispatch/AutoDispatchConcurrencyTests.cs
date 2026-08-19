@@ -1161,12 +1161,19 @@ public class AutoDispatchConcurrencyTests : IDisposable
         }
 
         _db.SaveChanges();
-        _ = SeedQueuedJob("startup-capacity-job");
+        Guid startupJobId = SeedQueuedJob("startup-capacity-job");
         var scorerMock = new Mock<IDispatchScorer>();
         scorerMock.Setup(value => value.ScorePrintersForJobAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        var scoredPrinters = new ConcurrentDictionary<Guid, byte>();
+        scorerMock.Setup(value => value.ScorePrinterForJobAsync(
+                startupJobId,
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Guid, Guid, CancellationToken>((_, printerId, _) => scoredPrinters.TryAdd(printerId, 0))
+            .ReturnsAsync((DispatchScore?)null);
         var dispatchMock = new Mock<IJobDispatchService>(MockBehavior.Strict);
         var considered = new ConcurrentDictionary<Guid, byte>();
         var allConsidered = new TaskCompletionSource(
@@ -1206,6 +1213,10 @@ public class AutoDispatchConcurrencyTests : IDisposable
         }
 
         considered.Keys.Should().BeEquivalentTo(printers);
+        scoredPrinters.Keys.Should().BeEquivalentTo(
+            printers,
+            "the targeted single-printer scorer (issue #1705) must be invoked once per eligible printer, " +
+            "not merely once per fleet");
         dispatchMock.VerifyNoOtherCalls();
     }
 

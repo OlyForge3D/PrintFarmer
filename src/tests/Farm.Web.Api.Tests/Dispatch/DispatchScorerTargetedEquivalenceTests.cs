@@ -70,7 +70,8 @@ public class DispatchScorerTargetedEquivalenceTests : IDisposable
         string name,
         string? currentMaterial,
         bool isEnabled = true,
-        bool isAvailable = true)
+        bool isAvailable = true,
+        string[]? supportedMaterials = null)
     {
         var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = $"{name} Mfg" };
         var model = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = manufacturer.Id, Name = $"{name} Model" };
@@ -93,13 +94,13 @@ public class DispatchScorerTargetedEquivalenceTests : IDisposable
         printer.ManufacturerId = manufacturer.Id;
         printer.ModelId = model.Id;
 
-        Toolhead toolhead = CreateToolhead(printer.Id, currentMaterial, manufacturer.Id);
+        Toolhead toolhead = CreateToolhead(printer.Id, currentMaterial, manufacturer.Id, supportedMaterials);
         printer.Toolheads.Add(toolhead);
 
         return printer;
     }
 
-    private Toolhead CreateToolhead(Guid printerId, string? currentMaterial, Guid manufacturerId)
+    private Toolhead CreateToolhead(Guid printerId, string? currentMaterial, Guid manufacturerId, string[]? supportedMaterials = null)
     {
         var nozzleModel = new NozzleModelDefinition
         {
@@ -121,7 +122,7 @@ public class DispatchScorerTargetedEquivalenceTests : IDisposable
             NozzleModelId = nozzleModel.Id,
             NozzleModel = nozzleModel,
             CurrentMaterial = currentMaterial,
-            SupportedMaterials = ["PLA", "PETG", "ABS"],
+            SupportedMaterials = supportedMaterials ?? ["PLA", "PETG", "ABS"],
             UpdatedAt = DateTime.UtcNow,
         };
     }
@@ -160,32 +161,38 @@ public class DispatchScorerTargetedEquivalenceTests : IDisposable
 
     /// <summary>
     /// Builds a representative matrix: two jobs (one requiring PLA, one requiring
-    /// ABS) scored against three printers — one that matches both jobs well, one
-    /// that is eliminated for material mismatch on the ABS job, and one that is
-    /// disabled (and therefore absent from fleet scoring entirely). For every
-    /// (job, enabled printer) pair, asserts the targeted score is equivalent —
-    /// field for field, including elimination reasons — to the entry the fleet
-    /// scan would have produced for that printer.
+    /// ABS) scored against four printers — one that matches both jobs well, one
+    /// that only supports PLA (and is therefore hard-eliminated for material
+    /// mismatch on the ABS job), one that is unavailable (hard-eliminated on the
+    /// availability gate regardless of job), and one that is disabled (and
+    /// therefore absent from fleet scoring entirely). For every (job, enabled
+    /// printer) pair, asserts the targeted score is equivalent — field for
+    /// field, including elimination reasons — to the entry the fleet scan would
+    /// have produced for that printer.
     /// </summary>
     [Fact]
     [Trait("Category", "Dispatch")]
     public async Task ScorePrinterForJobAsync_MatrixOfJobsAndPrinters_MatchesFleetScoringEntry()
     {
-        Printer plaPrinter = CreateTestPrinter("PLA Printer", currentMaterial: "PLA");
-        Printer absPrinter = CreateTestPrinter("ABS Printer", currentMaterial: "ABS");
+        Printer plaPrinter = CreateTestPrinter(
+            "PLA Printer", currentMaterial: "PLA", supportedMaterials: ["PLA", "PETG", "ABS"]);
+        Printer absPrinter = CreateTestPrinter(
+            "ABS Printer", currentMaterial: "ABS", supportedMaterials: ["PLA", "PETG", "ABS"]);
+        Printer plaOnlyPrinter = CreateTestPrinter(
+            "PLA-Only Printer", currentMaterial: "PLA", supportedMaterials: ["PLA"]);
         Printer busyPrinter = CreateTestPrinter("Busy Printer", currentMaterial: "PLA", isAvailable: false);
         Printer disabledPrinter = CreateTestPrinter("Disabled Printer", currentMaterial: "PLA", isEnabled: false);
 
         PrintJob plaJob = CreateTestJob("PLA Job", requiredMaterial: "PLA");
         PrintJob absJob = CreateTestJob("ABS Job", requiredMaterial: "ABS");
 
-        _context.Printers.AddRange(plaPrinter, absPrinter, busyPrinter, disabledPrinter);
+        _context.Printers.AddRange(plaPrinter, absPrinter, plaOnlyPrinter, busyPrinter, disabledPrinter);
         _context.PrintJobs.AddRange(plaJob, absJob);
         await _context.SaveChangesAsync();
 
         var scorer = new DispatchScorer(_context, NullLogger<DispatchScorer>.Instance);
 
-        Guid[] enabledPrinterIds = [plaPrinter.Id, absPrinter.Id, busyPrinter.Id];
+        Guid[] enabledPrinterIds = [plaPrinter.Id, absPrinter.Id, plaOnlyPrinter.Id, busyPrinter.Id];
         Guid[] jobIds = [plaJob.Id, absJob.Id];
 
         foreach (Guid jobId in jobIds)
@@ -223,6 +230,25 @@ public class DispatchScorerTargetedEquivalenceTests : IDisposable
         busyPrinterOnPlaJobTargeted.Should().BeEquivalentTo(
             busyPrinterOnPlaJobFleet,
             "the eliminated targeted entry (including its elimination reason) must match the fleet entry exactly");
+
+        // The PLA-only printer's toolhead declares an explicit supported-materials list
+        // that excludes ABS, so the ABS job hard-eliminates it on a true material
+        // mismatch (not an availability gate) — assert this elimination (and its
+        // reason) is preserved identically by the targeted path.
+        DispatchScore? plaOnlyPrinterOnAbsJobFleet = (await scorer.ScorePrintersForJobAsync(absJob.Id))
+            .FirstOrDefault(s => s.PrinterId == plaOnlyPrinter.Id);
+        plaOnlyPrinterOnAbsJobFleet.Should().NotBeNull();
+        plaOnlyPrinterOnAbsJobFleet!.Eliminated.Should().BeTrue(
+            "the printer's toolhead does not support the ABS material the job requires");
+        plaOnlyPrinterOnAbsJobFleet.EliminationReasons.Should().Contain(
+            reason => reason.Contains("ABS", StringComparison.OrdinalIgnoreCase));
+
+        DispatchScore? plaOnlyPrinterOnAbsJobTargeted =
+            await scorer.ScorePrinterForJobAsync(absJob.Id, plaOnlyPrinter.Id);
+        plaOnlyPrinterOnAbsJobTargeted.Should().BeEquivalentTo(
+            plaOnlyPrinterOnAbsJobFleet,
+            "the eliminated targeted entry (including its material-mismatch elimination reason) " +
+            "must match the fleet entry exactly");
 
         // A disabled printer never appears in the fleet list at all — the targeted
         // path must mirror that by returning null, not an "eliminated" score.
