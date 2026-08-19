@@ -3,6 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { ViewCube } from './ViewCube';
+import { loadModelArrayBuffer } from '@/common/utils/authenticatedModelUrl';
 
 interface STLViewerProps {
   file?: File | ArrayBuffer | string;
@@ -317,12 +318,10 @@ export const STLViewer: React.FC<STLViewerProps> = ({
             });
           }
         } else if (typeof file === 'string') {
-          // File is a URL - fetch it
-          const response = await fetch(file);
-          if (!response.ok) {
-            throw new Error(`Failed to fetch STL file: ${response.statusText}`);
-          }
-          arrayBuffer = await response.arrayBuffer();
+          // File is a URL - fetch it. Route through loadModelArrayBuffer so
+          // authenticated API URLs (e.g. /api/3d-models/file/{id}) carry the
+          // bearer token instead of a bare, unauthenticated fetch (#1711).
+          arrayBuffer = await loadModelArrayBuffer(file);
         } else {
           arrayBuffer = file as ArrayBuffer;
         }

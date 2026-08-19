@@ -97,7 +97,7 @@ describe('STLViewer Component', () => {
     render(<STLViewer file="http://example.com/model.stl" />);
 
     expect(await screen.findByTestId('stl-canvas')).toBeInTheDocument();
-    expect(fetch).toHaveBeenCalledWith('http://example.com/model.stl');
+    expect(fetch).toHaveBeenCalledWith('http://example.com/model.stl', { signal: undefined });
   });
 
   it('accepts autoRotate prop while rendering the model', async () => {

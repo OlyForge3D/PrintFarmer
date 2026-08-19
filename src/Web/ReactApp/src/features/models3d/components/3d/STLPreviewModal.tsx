@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from '@/common/components/ui/Button';
 import { CloseIcon } from '@/common/components/icons/MdiIcons';
 import { STLViewer } from './STLViewer';
+import { loadModelArrayBuffer } from '@/common/utils/authenticatedModelUrl';
 
 interface STLPreviewModalProps {
   isOpen: boolean;
@@ -79,11 +80,13 @@ export const STLPreviewModal: React.FC<STLPreviewModalProps> = ({
       // For URL-based files, estimate info from file name
       // Defer setIsLoading to satisfy React Compiler rules
       queueMicrotask(() => setIsLoading(true));
-      fetch(fileUrl, { signal: controller.signal })
-        .then(res => res.blob())
-        .then(blob => {
+      // Route through loadModelArrayBuffer so authenticated API URLs (e.g.
+      // /api/3d-models/file/{id}) carry the bearer token instead of a bare,
+      // unauthenticated fetch (#1711).
+      loadModelArrayBuffer(fileUrl, controller.signal)
+        .then(arrayBuffer => {
           if (!mounted) return;
-          const fileSize = (blob.size / 1024 / 1024).toFixed(2);
+          const fileSize = (arrayBuffer.byteLength / 1024 / 1024).toFixed(2);
           setModelInfo({
             vertices: 0,
             triangles: 0,

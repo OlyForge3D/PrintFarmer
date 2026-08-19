@@ -889,6 +889,17 @@ function STLGeometryModel({
   const internalRef = useRef<THREE.Group>(null);
   const ref = meshRef || internalRef;
 
+  // `url` is frequently a one-off Blob object URL minted by
+  // AuthenticatedModelSource (see #1711); useLoader's cache never expires
+  // entries on its own, so evict this entry once this component stops using
+  // it (unmount, or the model swaps to a different url) to avoid retaining a
+  // parsed geometry per Blob URL for the lifetime of the session.
+  useEffect(() => {
+    return () => {
+      useLoader.clear(STLLoader, url);
+    };
+  }, [url]);
+
   // Clone geometry so we don't mutate the useLoader cache, center it on ALL
   // axes so the pivot / gizmo sits at the volumetric center of the model.
   const { geometry, halfZ } = useMemo(() => {

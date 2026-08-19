@@ -320,6 +320,17 @@ function STLModel({ url, color = "#0969da", viewMode = 'solid', onDimensionsChan
   const geometry = useLoader(STLLoader, url);
   const meshRef = useRef<THREE.Mesh>(null);
 
+  // `url` is frequently a one-off Blob object URL minted by
+  // AuthenticatedModelSource (see #1711); useLoader's cache never expires
+  // entries on its own, so evict this entry once this component stops using
+  // it (unmount, or the model swaps to a different url) to avoid retaining a
+  // parsed geometry per Blob URL for the lifetime of the session.
+  useEffect(() => {
+    return () => {
+      useLoader.clear(STLLoader, url);
+    };
+  }, [url]);
+
   // Transform geometry to proper orientation and position
   useEffect(() => {
     if (geometry) {
@@ -641,6 +652,13 @@ function PLYModel({ url, color = "#0969da", viewMode = 'solid', onDimensionsChan
 }) {
   const geometry = useLoader(PLYLoader, url);
   const meshRef = useRef<THREE.Mesh>(null);
+
+  // See STLModel above: evict this Blob-URL cache entry once retired (#1711).
+  useEffect(() => {
+    return () => {
+      useLoader.clear(PLYLoader, url);
+    };
+  }, [url]);
 
   // Transform geometry to proper orientation and position
   useEffect(() => {
