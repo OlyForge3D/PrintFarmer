@@ -22,6 +22,15 @@ export interface AuthenticatedModelSourceProps {
   renderLoading?: () => React.ReactNode;
   /** Rendered when the authenticated fetch fails. Defaults to a small in-canvas HTML overlay. */
   renderError?: (message: string) => React.ReactNode;
+  /**
+   * Called (in addition to the default/`renderError` UI) when the authenticated
+   * fetch fails. Lets callers that sit inside an error-boundary-driven failure
+   * pipeline (e.g. SlicerBedVisualization's `onModelLoadError`, which used to
+   * fire from a thrown `useLoader` error) observe the failure too — this
+   * component never throws, so without this callback that signal would
+   * otherwise be silently lost. See #1711.
+   */
+  onError?: (message: string) => void;
 }
 
 export function AuthenticatedModelSource({
@@ -29,6 +38,7 @@ export function AuthenticatedModelSource({
   children,
   renderLoading,
   renderError,
+  onError,
 }: AuthenticatedModelSourceProps) {
   const requiresAuthentication = isAuthenticatedModelUrl(url);
   const [loadedSource, setLoadedSource] = useState<{ source: string; objectUrl: string } | null>(null);
@@ -38,6 +48,13 @@ export function AuthenticatedModelSource({
     if (!requiresAuthentication) {
       return;
     }
+
+    // Reset stale state from a previous `url` immediately: without this, a
+    // url change from A -> B -> back to A (before B's fetch resolves) could
+    // let the render guard below match `loadedSource.source === url` against
+    // A's *already-revoked* object URL from the cleanup below.
+    setLoadedSource(null);
+    setLoadError(null);
 
     const controller = new AbortController();
     let objectUrl: string | null = null;
@@ -54,10 +71,9 @@ export function AuthenticatedModelSource({
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
-          setLoadError({
-            source: url,
-            message: error instanceof Error ? error.message : 'Failed to load model',
-          });
+          const message = error instanceof Error ? error.message : 'Failed to load model';
+          setLoadError({ source: url, message });
+          onError?.(message);
         }
       });
 
@@ -67,6 +83,7 @@ export function AuthenticatedModelSource({
         window.URL.revokeObjectURL(objectUrl);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onError is intentionally excluded: it is expected to be an inline callback at most call sites and including it would re-run the fetch on every render.
   }, [requiresAuthentication, url]);
 
   if (!requiresAuthentication) {

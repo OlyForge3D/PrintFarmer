@@ -3,6 +3,20 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { STLViewer } from './STLViewer';
 
+const { apiClientGetMock } = vi.hoisted(() => ({
+  apiClientGetMock: vi.fn(),
+}));
+
+vi.mock('@/services/api', () => ({
+  apiClient: {
+    get: apiClientGetMock,
+  },
+}));
+
+vi.mock('@/common/utils/apiUrlHelpers', () => ({
+  getApiBaseUrl: vi.fn(() => '/api'),
+}));
+
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children }: { children: ReactNode }) => <div data-testid="stl-canvas">{children}</div>,
   useFrame: vi.fn(),
@@ -63,6 +77,7 @@ function createStlFile(name = 'model.stl') {
 
 describe('STLViewer Component', () => {
   beforeEach(() => {
+    apiClientGetMock.mockReset();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       arrayBuffer: vi.fn().mockResolvedValue(createMinimalBinaryStl()),
@@ -98,6 +113,20 @@ describe('STLViewer Component', () => {
 
     expect(await screen.findByTestId('stl-canvas')).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith('http://example.com/model.stl', { signal: undefined });
+  });
+
+  it('fetches an authenticated model URL through apiClient instead of a bare fetch (#1711)', async () => {
+    apiClientGetMock.mockResolvedValue({ data: createMinimalBinaryStl() });
+
+    render(<STLViewer file="/api/3d-models/file/model-123" />);
+
+    expect(await screen.findByTestId('stl-canvas')).toBeInTheDocument();
+    expect(apiClientGetMock).toHaveBeenCalledWith(
+      '/api/3d-models/file/model-123',
+      expect.objectContaining({ responseType: 'arraybuffer', baseURL: '' }),
+    );
+    expect(fetch).not.toHaveBeenCalled();
+    expect(screen.queryByText('Error Loading Model')).not.toBeInTheDocument();
   });
 
   it('accepts autoRotate prop while rendering the model', async () => {

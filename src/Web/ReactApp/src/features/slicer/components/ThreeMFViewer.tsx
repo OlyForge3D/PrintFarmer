@@ -33,6 +33,14 @@ interface SharedModelViewerProps {
   onSelectedMetrics?: (metrics: ViewerMetrics) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
   onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
+  /**
+   * Called if the authenticated pre-fetch of the STL fallback fails.
+   * `AuthenticatedModelSource` never throws, so without this callback a
+   * failed authenticated load would no longer reach
+   * `ModelViewerErrorBoundary` / `onModelLoadError` the way a thrown
+   * `useLoader` error used to — see #1711 / #1709.
+   */
+  onLoadError?: (message: string) => void;
   renderSelectionBoundingBox: (geometry: THREE.BufferGeometry, outOfBounds?: boolean) => React.ReactNode;
   renderFaceSwatches: (geometry: THREE.BufferGeometry, onFaceClick: (normal: THREE.Vector3) => void) => React.ReactNode;
 }
@@ -153,9 +161,9 @@ function usePreparedDisplayData(
  * can fetch without authentication (see #1711).
  */
 function FallbackStlModel(props: SharedModelViewerProps) {
-  const { url, ...rest } = props;
+  const { url, onLoadError, ...rest } = props;
   return (
-    <AuthenticatedModelSource url={url}>
+    <AuthenticatedModelSource url={url} onError={onLoadError}>
       {(resolvedUrl) => <FallbackStlGeometryModel url={resolvedUrl} {...rest} />}
     </AuthenticatedModelSource>
   );
@@ -319,6 +327,7 @@ export function ThreeMFViewer({
   onSelectedMetrics,
   onLayFlatFaceClick,
   onGeometryReady,
+  onLoadError,
   renderSelectionBoundingBox,
   renderFaceSwatches,
 }: SharedModelViewerProps) {
@@ -445,6 +454,7 @@ export function ThreeMFViewer({
           onSelectedMetrics={onSelectedMetrics}
           onLayFlatFaceClick={onLayFlatFaceClick}
           onGeometryReady={onGeometryReady}
+          onLoadError={onLoadError}
           renderSelectionBoundingBox={renderSelectionBoundingBox}
           renderFaceSwatches={renderFaceSwatches}
         />

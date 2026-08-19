@@ -848,6 +848,15 @@ interface STLModelProps {
   }) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
   onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
+  /**
+   * Called if the authenticated pre-fetch fails. `AuthenticatedModelSource`
+   * never throws (it renders its own in-canvas error state), so without this
+   * callback a failed authenticated load would no longer reach
+   * `ModelViewerErrorBoundary` / `onModelLoadError` the way a thrown
+   * `useLoader` error used to — silently defeating the "block Slice on a
+   * failed model" guard from #1709. See #1711.
+   */
+  onLoadError?: (message: string) => void;
 }
 
 /**
@@ -860,9 +869,9 @@ interface STLModelProps {
  * fetch without authentication (see #1711).
  */
 function STLModel(props: STLModelProps) {
-  const { url, ...rest } = props;
+  const { url, onLoadError, ...rest } = props;
   return (
-    <AuthenticatedModelSource url={url}>
+    <AuthenticatedModelSource url={url} onError={onLoadError}>
       {(resolvedUrl) => <STLGeometryModel url={resolvedUrl} {...rest} />}
     </AuthenticatedModelSource>
   );
@@ -1029,6 +1038,7 @@ function UrlModelViewer({
   onSelectedMetrics,
   onLayFlatFaceClick,
   onGeometryReady,
+  onLoadError,
 }: {
   fileType: LoadedModel['fileType'];
   url: string;
@@ -1050,6 +1060,7 @@ function UrlModelViewer({
   }) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
   onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
+  onLoadError?: (message: string) => void;
 }) {
   if (fileType === '3mf') {
     return (
@@ -1069,6 +1080,7 @@ function UrlModelViewer({
         onSelectedMetrics={onSelectedMetrics}
         onLayFlatFaceClick={onLayFlatFaceClick}
         onGeometryReady={onGeometryReady}
+        onLoadError={onLoadError}
         renderSelectionBoundingBox={(geometry, isOutOfBounds) => (
           <SelectionBoundingBox geometry={geometry} outOfBounds={isOutOfBounds} />
         )}
@@ -1096,6 +1108,7 @@ function UrlModelViewer({
       onSelectedMetrics={onSelectedMetrics}
       onLayFlatFaceClick={onLayFlatFaceClick}
       onGeometryReady={onGeometryReady}
+      onLoadError={onLoadError}
     />
   );
 }
@@ -2254,6 +2267,7 @@ function BedScene({
                           })
                           : undefined}
                         onGeometryReady={geometryRegistrars.get(model.id)}
+                        onLoadError={() => onModelLoadError?.(model.id)}
                       />
                     </ModelViewerErrorBoundary>
                   )
