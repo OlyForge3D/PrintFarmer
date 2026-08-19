@@ -34,11 +34,19 @@ import { AuthenticatedModelSource } from './AuthenticatedModelSource';
  * of silently reintroducing the 401.
  */
 describe('AuthenticatedModelSource', () => {
-  const createObjectURLSpy = vi.fn(() => 'blob:mock-object-url');
+  // Each call returns a *distinct* URL (like a real `URL.createObjectURL`
+  // would for two different Blobs). Tests that resolve the same `url` value
+  // more than once rely on this to distinguish a freshly-minted object URL
+  // from an earlier, already-revoked one for that same source url — with a
+  // constant mock value, a test could pass identically whether or not the
+  // component actually re-resolved.
+  let objectUrlCounter = 0;
+  const createObjectURLSpy = vi.fn(() => `blob:mock-object-url-${objectUrlCounter++}`);
   const revokeObjectURLSpy = vi.fn();
 
   beforeEach(() => {
     apiClientGetMock.mockReset();
+    objectUrlCounter = 0;
     createObjectURLSpy.mockClear();
     revokeObjectURLSpy.mockClear();
     vi.stubGlobal('URL', Object.assign(URL, {
@@ -73,7 +81,7 @@ describe('AuthenticatedModelSource', () => {
     // reach the loader — this is exactly what caused the 401 in #1711.
     expect(renderChild).not.toHaveBeenCalled();
 
-    await waitFor(() => expect(renderChild).toHaveBeenCalledWith('blob:mock-object-url'));
+    await waitFor(() => expect(renderChild).toHaveBeenCalledWith('blob:mock-object-url-0'));
 
     expect(apiClientGetMock).toHaveBeenCalledWith(
       '/api/3d-models/file/model-123',
@@ -90,11 +98,11 @@ describe('AuthenticatedModelSource', () => {
       <AuthenticatedModelSource url="/api/3d-models/file/model-123">{renderChild}</AuthenticatedModelSource>
     );
 
-    await waitFor(() => expect(renderChild).toHaveBeenCalledWith('blob:mock-object-url'));
+    await waitFor(() => expect(renderChild).toHaveBeenCalledWith('blob:mock-object-url-0'));
 
     unmount();
 
-    expect(revokeObjectURLSpy).toHaveBeenCalledWith('blob:mock-object-url');
+    expect(revokeObjectURLSpy).toHaveBeenCalledWith('blob:mock-object-url-0');
   });
 
   it('surfaces a load failure instead of falling back to the raw authenticated URL', async () => {
@@ -145,7 +153,7 @@ describe('AuthenticatedModelSource', () => {
       </AuthenticatedModelSource>
     );
 
-    await waitFor(() => expect(renderChild).toHaveBeenCalledWith('blob:mock-object-url'));
+    await waitFor(() => expect(renderChild).toHaveBeenCalledWith('blob:mock-object-url-0'));
     expect(onError).not.toHaveBeenCalled();
   });
 
@@ -154,6 +162,13 @@ describe('AuthenticatedModelSource', () => {
    * changes away and then back before the new fetch resolves, children must
    * never be handed the earlier resolved (and possibly already-revoked) blob
    * URL for the old `url` value — the component must re-resolve instead.
+   *
+   * `createObjectURLSpy` returns a *distinct* value per call (see setup
+   * above), so "children were called with model-a's object URL" only proves
+   * the second (fresh) resolution if we also assert `apiClientGetMock` was
+   * actually invoked a third time for model-a — otherwise a reverted
+   * implementation that simply reuses the first, stale, already-revoked
+   * object URL would satisfy an identical assertion.
    */
   it('re-resolves instead of reusing a stale blob URL when url changes away and back', async () => {
     let resolveSecondFetch: (value: { data: ArrayBuffer }) => void = () => {};
@@ -164,7 +179,8 @@ describe('AuthenticatedModelSource', () => {
       <AuthenticatedModelSource url="/api/3d-models/file/model-a">{renderChild}</AuthenticatedModelSource>
     );
 
-    await waitFor(() => expect(renderChild).toHaveBeenCalledWith('blob:mock-object-url'));
+    await waitFor(() => expect(renderChild).toHaveBeenCalledWith('blob:mock-object-url-0'));
+    expect(apiClientGetMock).toHaveBeenCalledTimes(1);
     renderChild.mockClear();
 
     // Switch to a different url whose fetch never resolves within this test...
@@ -178,6 +194,7 @@ describe('AuthenticatedModelSource', () => {
     // ...children must not be re-invoked with the stale model-a blob URL
     // while model-b's fetch is still in flight.
     expect(renderChild).not.toHaveBeenCalled();
+    expect(apiClientGetMock).toHaveBeenCalledTimes(2);
 
     // Switch back to model-a before model-b's fetch resolves.
     apiClientGetMock.mockImplementationOnce(() => Promise.resolve({ data: new ArrayBuffer(4) }));
@@ -185,11 +202,66 @@ describe('AuthenticatedModelSource', () => {
       <AuthenticatedModelSource url="/api/3d-models/file/model-a">{renderChild}</AuthenticatedModelSource>
     );
 
-    await waitFor(() => expect(renderChild).toHaveBeenCalledWith('blob:mock-object-url'));
+    // Confirm a genuinely fresh fetch was made for model-a (a stale-state bug
+    // would instead reuse the cached first-call object URL without a third
+    // apiClient call). createObjectURL is called only twice total: once for
+    // the first model-a resolution, once for the second — model-b's fetch
+    // never resolves before its effect is cleaned up (aborted), so it never
+    // reaches createObjectURL.
+    await waitFor(() => expect(apiClientGetMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(renderChild).toHaveBeenCalledWith('blob:mock-object-url-1'));
+    expect(renderChild).not.toHaveBeenCalledWith('blob:mock-object-url-0');
 
-    // Resolve the abandoned model-b fetch afterward; it must not clobber
-    // the freshly-resolved model-a state.
+    // Resolve the abandoned model-b fetch afterward; its controller was
+    // already aborted when we navigated away from it, so it must not call
+    // createObjectURL or clobber the freshly-resolved model-a state.
     resolveSecondFetch({ data: new ArrayBuffer(4) });
-    expect(renderChild).toHaveBeenCalledWith('blob:mock-object-url');
+    await waitFor(() => Promise.resolve());
+    expect(createObjectURLSpy).toHaveBeenCalledTimes(2);
+    expect(renderChild).toHaveBeenCalledWith('blob:mock-object-url-1');
+  });
+
+  /**
+   * Regression coverage for Hicks's and Vasquez's round-3 finding: the
+   * stale-state reset must run on *every* url change, including a transition
+   * through a non-authenticated url — not only between two authenticated
+   * urls. Before this fix, the reset lived after the `!requiresAuthentication`
+   * early return, so an authenticated A -> public B -> authenticated A
+   * transition left A's revoked object URL in `loadedSource` and the second
+   * visit to A rendered it without ever re-fetching.
+   */
+  it('re-resolves an authenticated url after transitioning through a non-authenticated url', async () => {
+    apiClientGetMock.mockImplementationOnce(() => Promise.resolve({ data: new ArrayBuffer(4) }));
+    const renderChild = vi.fn().mockReturnValue(<div data-testid="model" />);
+
+    const { rerender } = render(
+      <AuthenticatedModelSource url="/api/3d-models/file/model-a">{renderChild}</AuthenticatedModelSource>
+    );
+
+    await waitFor(() => expect(renderChild).toHaveBeenCalledWith('blob:mock-object-url-0'));
+    expect(apiClientGetMock).toHaveBeenCalledTimes(1);
+    renderChild.mockClear();
+
+    // Transition to a non-authenticated url (e.g. a bed texture) — this hits
+    // the early-return branch of the effect.
+    rerender(
+      <AuthenticatedModelSource url="/textures/bed.png">{renderChild}</AuthenticatedModelSource>
+    );
+
+    await waitFor(() => expect(renderChild).toHaveBeenCalledWith('/textures/bed.png'));
+    renderChild.mockClear();
+
+    // Transition back to the same authenticated url as before.
+    apiClientGetMock.mockImplementationOnce(() => Promise.resolve({ data: new ArrayBuffer(4) }));
+    rerender(
+      <AuthenticatedModelSource url="/api/3d-models/file/model-a">{renderChild}</AuthenticatedModelSource>
+    );
+
+    // Must re-fetch (a second apiClient call) and hand children a fresh
+    // object URL, not the first, already-revoked one.
+    await waitFor(() => expect(apiClientGetMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(renderChild).toHaveBeenCalledWith('blob:mock-object-url-1'));
+    expect(renderChild).not.toHaveBeenCalledWith('blob:mock-object-url-0');
   });
 });
+

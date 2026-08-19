@@ -45,16 +45,21 @@ export function AuthenticatedModelSource({
   const [loadError, setLoadError] = useState<{ source: string; message: string } | null>(null);
 
   useEffect(() => {
+    // Reset stale state from a previous `url` immediately, before the
+    // `requiresAuthentication` early return below. Without this, transitioning
+    // authenticated URL A -> a non-authenticated URL B -> back to A (before a
+    // fresh authenticated fetch for A completes) would leave `loadedSource`
+    // holding A's *already-revoked* object URL (revoked by the effect cleanup
+    // when leaving A), and the render guard below would match
+    // `loadedSource.source === url` against that stale, revoked value instead
+    // of re-resolving it. The same hazard applies to an authenticated A -> B
+    // -> A transition where B is also authenticated.
+    setLoadedSource(null);
+    setLoadError(null);
+
     if (!requiresAuthentication) {
       return;
     }
-
-    // Reset stale state from a previous `url` immediately: without this, a
-    // url change from A -> B -> back to A (before B's fetch resolves) could
-    // let the render guard below match `loadedSource.source === url` against
-    // A's *already-revoked* object URL from the cleanup below.
-    setLoadedSource(null);
-    setLoadError(null);
 
     const controller = new AbortController();
     let objectUrl: string | null = null;
