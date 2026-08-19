@@ -806,6 +806,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             serverUrl={printer.serverUrl ?? printer.backendUrl}
             frontendUrl={printer.frontendUrl}
             variant="full"
+            defaultExpanded={false}
           />
         </div>
       )}

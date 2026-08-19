@@ -98,6 +98,17 @@ describe('OfflineTroubleshootingGuide', () => {
     expect(screen.getByText('Common Checks')).toBeInTheDocument();
   });
 
+  it('starts collapsed when defaultExpanded={false} is passed with the full variant (#1697)', async () => {
+    const user = userEvent.setup();
+    render(<OfflineTroubleshootingGuide printerBackend="Moonraker" variant="full" defaultExpanded={false} />);
+
+    expect(screen.getByText('Printer Offline — Troubleshooting Steps')).toBeInTheDocument();
+    expect(screen.queryByText('Common Checks')).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText('Toggle offline troubleshooting guide'));
+    expect(screen.getByText('Common Checks')).toBeInTheDocument();
+  });
+
   it('renders FlashForge/SDCP steps with power-cycle suggestion', () => {
     render(<OfflineTroubleshootingGuide printerBackend="FlashForge" />);
 
