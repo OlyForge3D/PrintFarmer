@@ -12,6 +12,13 @@ interface OfflineTroubleshootingGuideProps {
   frontendUrl?: string;
   onDismiss?: () => void;
   variant?: 'full' | 'compact' | 'popover';
+  /**
+   * Whether the steps list starts expanded. Defaults to expanded for the
+   * `full` variant (backwards-compatible default) and collapsed for
+   * `compact`/`popover`. Pass `false` explicitly to start collapsed
+   * regardless of variant (see #1697).
+   */
+  defaultExpanded?: boolean;
 }
 
 interface TroubleshootingStep {
@@ -132,8 +139,9 @@ export function OfflineTroubleshootingGuide({
   frontendUrl,
   onDismiss,
   variant = 'full',
+  defaultExpanded,
 }: OfflineTroubleshootingGuideProps) {
-  const [isExpanded, setIsExpanded] = useState(variant === 'full');
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded ?? variant === 'full');
   const backendName = getBackendName(printerBackend);
   const commonSteps = getCommonSteps(printerIp, serverUrl, frontendUrl);
   const backendSteps = getBackendSteps(backendName);

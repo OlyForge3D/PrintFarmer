@@ -12,6 +12,12 @@ describe('OfflineTroubleshootingGuide', () => {
     expect(screen.getByText('Verify the network cable is connected or WiFi is associated')).toBeInTheDocument();
   });
 
+  it('starts expanded by default for the full variant when defaultExpanded is omitted (backwards compatibility)', () => {
+    render(<OfflineTroubleshootingGuide printerBackend="Moonraker" />);
+
+    expect(screen.getByText('Common Checks')).toBeInTheDocument();
+  });
+
   it('renders Moonraker-specific steps', () => {
     render(<OfflineTroubleshootingGuide printerBackend="Moonraker" />);
 
@@ -92,6 +98,17 @@ describe('OfflineTroubleshootingGuide', () => {
     render(<OfflineTroubleshootingGuide printerBackend="Moonraker" variant="compact" />);
 
     expect(screen.getByText('Troubleshoot')).toBeInTheDocument();
+    expect(screen.queryByText('Common Checks')).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText('Toggle offline troubleshooting guide'));
+    expect(screen.getByText('Common Checks')).toBeInTheDocument();
+  });
+
+  it('starts collapsed when defaultExpanded={false} is passed with the full variant (#1697)', async () => {
+    const user = userEvent.setup();
+    render(<OfflineTroubleshootingGuide printerBackend="Moonraker" variant="full" defaultExpanded={false} />);
+
+    expect(screen.getByText('Printer Offline — Troubleshooting Steps')).toBeInTheDocument();
     expect(screen.queryByText('Common Checks')).not.toBeInTheDocument();
 
     await user.click(screen.getByLabelText('Toggle offline troubleshooting guide'));
