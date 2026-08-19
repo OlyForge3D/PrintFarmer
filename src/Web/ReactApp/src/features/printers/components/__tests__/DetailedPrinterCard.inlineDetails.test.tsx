@@ -345,4 +345,42 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
 
     expect(screen.queryByText('Objects')).not.toBeInTheDocument();
   });
+
+  // Regression coverage for #1698: the card's shared sections must appear in the same
+  // relative order as PrinterDetailsSidebar (see printerDetailSectionOrder.ts):
+  // Statistics, Version, Objects, Move, Temperature, Materials.
+  it('renders shared sections in the same relative order as the sidebar (#1698)', () => {
+    usePrintJobObjectsMock.mockReturnValue({
+      data: { objects: [makeObject({ name: 'part_1' })] },
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <DetailedPrinterCard
+        printer={makePrinter()}
+        backendCapabilities={{ supportsObjectExclusion: true } as unknown as Parameters<typeof DetailedPrinterCard>[0]['backendCapabilities']}
+      />
+    );
+
+    const precedes = (a: Element, b: Element) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+    const statistics = screen.getByText('Statistics');
+    const version = screen.getByText('Version');
+    const objects = screen.getByText('Objects');
+    const move = screen.getByTestId('movement-section');
+    const temperature = screen.getByTestId('temp-section');
+    // No mmuStatus is set up on this printer, so materialLoadout resolves to
+    // null and the single-spool fallback card ("Spool") renders instead of
+    // MaterialLoadout — both occupy the same "materials" slot in the order.
+    const spool = screen.getByText('Spool');
+
+    expect(precedes(statistics, version)).toBe(true);
+    expect(precedes(version, objects)).toBe(true);
+    expect(precedes(objects, move)).toBe(true);
+    expect(precedes(move, temperature)).toBe(true);
+    expect(precedes(temperature, spool)).toBe(true);
+  });
 });

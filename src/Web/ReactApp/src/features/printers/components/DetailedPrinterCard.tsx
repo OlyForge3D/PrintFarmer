@@ -838,259 +838,15 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         />
       )}
 
-      {/* Print Objects (skip object) — folded in from the details sidebar (#1584) */}
-      {support.supportsObjectExclusion && (
-        <div className="mb-3">
-          <CollapsibleSection
-            title="Objects"
-            expanded={true}
-            headerActions={
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => void printJobObjectsQuery.refetch()}
-                disabled={!isPrinting || printJobObjectsQuery.isFetching}
-                className="p-1! h-auto!"
-                title="Refresh print objects"
-                aria-label="Refresh print objects"
-                iconCenter={<RefreshIcon className="h-4 w-4" />}
-              ></Button>
-            }
-          >
-            {printJobObjectsQuery.isLoading ? (
-              <div className="text-sm text-pf-text-secondary">Loading print objects…</div>
-            ) : !isPrinting && !isPaused ? (
-              <div className="text-sm text-pf-text-secondary">Object skipping is available during an active print.</div>
-            ) : printJobObjects.length === 0 ? (
-              <div className="text-sm text-pf-text-secondary">No object metadata is available for this job.</div>
-            ) : (
-              <ul className="space-y-2" aria-label="Current print objects">
-                {printJobObjects.map((object) => (
-                  <li
-                    key={object.name}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/15 px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-pf-text-primary">{object.name}</div>
-                      <div className="mt-1 flex flex-wrap gap-1 text-[10px] uppercase tracking-wide">
-                        {object.isCurrent && (
-                          <span className="rounded-xs border border-pf-accent/50 bg-pf-accent-bg px-2 py-0.5 text-pf-accent">
-                            Printing
-                          </span>
-                        )}
-                        {object.isExcluded && (
-                          <span className="rounded-xs border border-pf-border bg-pf-bg-2 px-2 py-0.5 text-pf-text-secondary">
-                            Skipped
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="danger"
-                      size="sm"
-                      disabled={!canExcludeObjectNow || object.isExcluded || excludeObjectMutation.isPending}
-                      onClick={() => setObjectToSkip(object)}
-                      aria-label={`Skip object ${object.name}`}
-                    >
-                      Skip
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CollapsibleSection>
-        </div>
-      )}
-
-      {/* Temps Section */}
-      <TemperatureControlSection
-        hotendTemp={hotendTemp}
-        bedTemp={bedTemp}
-        hotendTarget={printer.hotendTarget}
-        bedTarget={printer.bedTarget}
-        hotendCurrent={printer.hotendTemp}
-        bedCurrent={printer.bedTemp}
-        temperatureActionPending={temperatureActionPending}
-        canSetTemperatures={canSetTemperaturesNow}
-        canCooldown={canCooldownNow}
-        onHotendTempChange={setHotendTemp}
-        onBedTempChange={setBedTemp}
-        onHotendTempKeyDown={handleHotendTempKeyDown}
-        onBedTempKeyDown={handleBedTempKeyDown}
-        onApplyPreset={handleApplyPreset}
-        onApplySingleHeaterPreset={handleApplySingleHeaterPreset}
-      />
-
-      {/* Move and Control Section */}
-      <div className="mb-2">
-          <MovementControlSection
-            moveX={moveX}
-            moveY={moveY}
-            moveZ={moveZ}
-            step={step}
-            extrudeStep={extrudeStep}
-            extrudeSpeed={extrudeSpeed}
-            printerX={printer.x}
-            printerY={printer.y}
-            printerZ={printer.z}
-            homedAxes={homedAxesRaw}
-            hotendTemp={printer.hotendTemp}
-            extrudeMinTemp={extrudeMinTemp}
-            movementActionPending={movementActionPending}
-            canMove={canMoveNow}
-            canDisableMotors={canDisableMotorsNow}
-            canSetStep={canSetStepNow}
-            canManualMove={canManualMoveNow}
-            canExtrude={canExtrudeNow}
-            onMoveXChange={setMoveX}
-            onMoveYChange={setMoveY}
-            onMoveZChange={setMoveZ}
-            onStepChange={handleStepChange}
-            onExtrudeStepChange={setExtrudeStep}
-            onExtrudeSpeedChange={setExtrudeSpeed}
-            onMove={handleMove}
-            onHome={handleHome}
-            onDisableMotors={() => handleControlAction('disable-motors')}
-            onExtrude={handleExtrude}
-            rightContent={
-              <div className="flex flex-col gap-1 items-start">
-                <PrinterActionBar
-                  isPaused={isPaused}
-                  isShutdown={isShutdown}
-                  controlActionPending={controlActionPending}
-                  canPauseOrResume={canPauseOrResumeNow}
-                  canCancel={canCancelNow}
-                  canEmergencyStop={canEmergencyStopNow}
-                  onControlAction={handleControlAction}
-                />
-                {support.supportsFilamentControl && (
-                  <FilamentControlSection
-                    filamentActionPending={filamentActionPending}
-                    canFilamentControl={canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
-                    canFilamentChange={canFilamentChange({ isOnline, isEnabled, support })}
-                    onFilamentAction={handleFilamentAction}
-                  />
-                )}
-                {support.supportsMovement && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={!isOnline || isPrinting}
-                    onClick={() => setShowZOffsetWizard(true)}
-                    onMouseEnter={() => ZOffsetCalibrationWizard.preload()}
-                    onFocus={() => ZOffsetCalibrationWizard.preload()}
-                  >
-                    Calibrate Z-Offset
-                  </Button>
-                )}
-              </div>
-            }
-          />
-      </div>
-
-      {/* Consolidated materials module — replaces the old Material Slots strip
-          and the parallel Spools assignment list, which could disagree. */}
-      {materialLoadout && (
-        <MaterialLoadout
-          printerId={printer.id}
-          mmuStatus={mmuStatus}
-          toolheads={printerDetails?.toolheads}
-          currentSpoolId={printer.currentSpoolId}
-          reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
-          compact
-          isOnline={isOnline}
-          className="mb-2"
-        />
-      )}
-
-      {/* Single-spool printers keep the classic spool card; multi-slot printers are
-          fully described by the materials module above. */}
-      {(spoolmanReady || printer.spoolInfo) && !materialLoadout && (
-        <div className="mb-2">
-          <div className="flex items-center justify-between mb-1">
-            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">Spool</div>
-            <div className="flex items-center gap-0.5">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={spoolActionPending || spoolRevisionUnavailable}
-                explainedDisabled={spoolRevisionUnavailable}
-                onClick={() => setShowSpoolPicker(true)}
-                className="p-0.5! h-auto!"
-                title={spoolRevisionUnavailable ? spoolRevisionBlockedReason : 'Change spool'}
-                aria-label={spoolRevisionUnavailable ? `Change spool — ${spoolRevisionBlockedReason}` : 'Change spool'}
-                iconCenter={<FilamentChangeIcon className="h-3.5 w-3.5" />}
-              ></Button>
-              {printer.spoolInfo?.hasActiveSpool && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={spoolActionPending || spoolRevisionUnavailable}
-                  explainedDisabled={spoolRevisionUnavailable}
-                  onClick={async () => {
-                    setSpoolActionPending(true);
-                    try {
-                      const reviewedRowVersion = spoolReviewedRowVersion;
-                      if (!reviewedRowVersion) {
-                        toast.error('Printer revision unavailable. Refresh and review again.');
-                        return;
-                      }
-                      const nextRowVersion = await apiClient.clearActiveSpool(
-                        printer.id,
-                        reviewedRowVersion
-                      );
-                      queryClient.setQueryData<Printer[]>(['printers'], (old) =>
-                        old?.map(p => p.id === printer.id
-                          ? {
-                              ...p,
-                              rowVersion: nextRowVersion,
-                              spoolInfo: { hasActiveSpool: false },
-                            }
-                          : p
-                        )
-                      );
-                      queryClient.setQueryData<PrinterDetails>(
-                        queryKeys.printerDetails(printer.id),
-                        (old) => old ? { ...old, rowVersion: nextRowVersion } : old,
-                      );
-                      // Reconcile the optimistic update with server truth so
-                      // downstream consumers (printer details, coverage) see
-                      // the cleared spool. Awaiting the invalidation prevents
-                      // a follow-up assignment from racing a stale refetch.
-                      await queryClient.invalidateQueries({ queryKey: ['printers'] });
-                    } catch (err) {
-                      console.error('Failed to eject spool:', err);
-                      if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
-                        await queryClient.invalidateQueries({
-                          queryKey: ['printers'],
-                        });
-                      }
-                      toast.error(
-                        mutationErrorMessage(err, 'Failed to eject spool')
-                      );
-                    } finally {
-                      setSpoolActionPending(false);
-                    }
-                  }}
-                  className="p-0.5! h-auto!"
-                  title={spoolRevisionUnavailable ? spoolRevisionBlockedReason : 'Eject spool'}
-                  aria-label={spoolRevisionUnavailable ? `Eject spool — ${spoolRevisionBlockedReason}` : 'Eject spool'}
-                  iconCenter={<EjectIcon className="h-3.5 w-3.5" />}
-                ></Button>
-              )}
-            </div>
-          </div>
-          <FilamentCoverageBreakdown printerId={printer.id} className="mb-2" isOnline={isOnline} />
-          <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
-        </div>
-      )}
+      {/*
+        Section order below follows PRINTER_DETAIL_SECTION_ORDER (see
+        printerDetailSectionOrder.ts): Statistics, Version, Objects, Move
+        (which embeds Control), Temperature, Materials, Spool — matching
+        PrinterDetailsSidebar (#1698).
+      */}
 
       {/* Statistics and Version — folded in from the details sidebar (#1584) */}
-      <div className="mt-3 space-y-3">
+      <div className="mb-3 space-y-3">
         <CollapsibleSection
           title="Statistics"
           expanded={isStatisticsExpanded}
@@ -1197,6 +953,257 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           )}
         </CollapsibleSection>
       </div>
+
+      {/* Print Objects (skip object) — folded in from the details sidebar (#1584) */}
+      {support.supportsObjectExclusion && (
+        <div className="mb-3">
+          <CollapsibleSection
+            title="Objects"
+            expanded={true}
+            headerActions={
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void printJobObjectsQuery.refetch()}
+                disabled={!isPrinting || printJobObjectsQuery.isFetching}
+                className="p-1! h-auto!"
+                title="Refresh print objects"
+                aria-label="Refresh print objects"
+                iconCenter={<RefreshIcon className="h-4 w-4" />}
+              ></Button>
+            }
+          >
+            {printJobObjectsQuery.isLoading ? (
+              <div className="text-sm text-pf-text-secondary">Loading print objects…</div>
+            ) : !isPrinting && !isPaused ? (
+              <div className="text-sm text-pf-text-secondary">Object skipping is available during an active print.</div>
+            ) : printJobObjects.length === 0 ? (
+              <div className="text-sm text-pf-text-secondary">No object metadata is available for this job.</div>
+            ) : (
+              <ul className="space-y-2" aria-label="Current print objects">
+                {printJobObjects.map((object) => (
+                  <li
+                    key={object.name}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/15 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-pf-text-primary">{object.name}</div>
+                      <div className="mt-1 flex flex-wrap gap-1 text-[10px] uppercase tracking-wide">
+                        {object.isCurrent && (
+                          <span className="rounded-xs border border-pf-accent/50 bg-pf-accent-bg px-2 py-0.5 text-pf-accent">
+                            Printing
+                          </span>
+                        )}
+                        {object.isExcluded && (
+                          <span className="rounded-xs border border-pf-border bg-pf-bg-2 px-2 py-0.5 text-pf-text-secondary">
+                            Skipped
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="danger"
+                      size="sm"
+                      disabled={!canExcludeObjectNow || object.isExcluded || excludeObjectMutation.isPending}
+                      onClick={() => setObjectToSkip(object)}
+                      aria-label={`Skip object ${object.name}`}
+                    >
+                      Skip
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CollapsibleSection>
+        </div>
+      )}
+
+      {/* Move and Control Section */}
+      <div className="mb-2">
+          <MovementControlSection
+            moveX={moveX}
+            moveY={moveY}
+            moveZ={moveZ}
+            step={step}
+            extrudeStep={extrudeStep}
+            extrudeSpeed={extrudeSpeed}
+            printerX={printer.x}
+            printerY={printer.y}
+            printerZ={printer.z}
+            homedAxes={homedAxesRaw}
+            hotendTemp={printer.hotendTemp}
+            extrudeMinTemp={extrudeMinTemp}
+            movementActionPending={movementActionPending}
+            canMove={canMoveNow}
+            canDisableMotors={canDisableMotorsNow}
+            canSetStep={canSetStepNow}
+            canManualMove={canManualMoveNow}
+            canExtrude={canExtrudeNow}
+            onMoveXChange={setMoveX}
+            onMoveYChange={setMoveY}
+            onMoveZChange={setMoveZ}
+            onStepChange={handleStepChange}
+            onExtrudeStepChange={setExtrudeStep}
+            onExtrudeSpeedChange={setExtrudeSpeed}
+            onMove={handleMove}
+            onHome={handleHome}
+            onDisableMotors={() => handleControlAction('disable-motors')}
+            onExtrude={handleExtrude}
+            rightContent={
+              <div className="flex flex-col gap-1 items-start">
+                <PrinterActionBar
+                  isPaused={isPaused}
+                  isShutdown={isShutdown}
+                  controlActionPending={controlActionPending}
+                  canPauseOrResume={canPauseOrResumeNow}
+                  canCancel={canCancelNow}
+                  canEmergencyStop={canEmergencyStopNow}
+                  onControlAction={handleControlAction}
+                />
+                {support.supportsFilamentControl && (
+                  <FilamentControlSection
+                    filamentActionPending={filamentActionPending}
+                    canFilamentControl={canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
+                    canFilamentChange={canFilamentChange({ isOnline, isEnabled, support })}
+                    onFilamentAction={handleFilamentAction}
+                  />
+                )}
+                {support.supportsMovement && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!isOnline || isPrinting}
+                    onClick={() => setShowZOffsetWizard(true)}
+                    onMouseEnter={() => ZOffsetCalibrationWizard.preload()}
+                    onFocus={() => ZOffsetCalibrationWizard.preload()}
+                  >
+                    Calibrate Z-Offset
+                  </Button>
+                )}
+              </div>
+            }
+          />
+      </div>
+
+      {/* Temps Section */}
+      <TemperatureControlSection
+        hotendTemp={hotendTemp}
+        bedTemp={bedTemp}
+        hotendTarget={printer.hotendTarget}
+        bedTarget={printer.bedTarget}
+        hotendCurrent={printer.hotendTemp}
+        bedCurrent={printer.bedTemp}
+        temperatureActionPending={temperatureActionPending}
+        canSetTemperatures={canSetTemperaturesNow}
+        canCooldown={canCooldownNow}
+        onHotendTempChange={setHotendTemp}
+        onBedTempChange={setBedTemp}
+        onHotendTempKeyDown={handleHotendTempKeyDown}
+        onBedTempKeyDown={handleBedTempKeyDown}
+        onApplyPreset={handleApplyPreset}
+        onApplySingleHeaterPreset={handleApplySingleHeaterPreset}
+      />
+
+      {/* Consolidated materials module — replaces the old Material Slots strip
+          and the parallel Spools assignment list, which could disagree. */}
+      {materialLoadout && (
+        <MaterialLoadout
+          printerId={printer.id}
+          mmuStatus={mmuStatus}
+          toolheads={printerDetails?.toolheads}
+          currentSpoolId={printer.currentSpoolId}
+          reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
+          compact
+          isOnline={isOnline}
+          className="mb-2"
+        />
+      )}
+
+      {/* Single-spool printers keep the classic spool card; multi-slot printers are
+          fully described by the materials module above. */}
+      {(spoolmanReady || printer.spoolInfo) && !materialLoadout && (
+        <div className="mb-2">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">Spool</div>
+            <div className="flex items-center gap-0.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={spoolActionPending || spoolRevisionUnavailable}
+                explainedDisabled={spoolRevisionUnavailable}
+                onClick={() => setShowSpoolPicker(true)}
+                className="p-0.5! h-auto!"
+                title={spoolRevisionUnavailable ? spoolRevisionBlockedReason : 'Change spool'}
+                aria-label={spoolRevisionUnavailable ? `Change spool — ${spoolRevisionBlockedReason}` : 'Change spool'}
+                iconCenter={<FilamentChangeIcon className="h-3.5 w-3.5" />}
+              ></Button>
+              {printer.spoolInfo?.hasActiveSpool && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={spoolActionPending || spoolRevisionUnavailable}
+                  explainedDisabled={spoolRevisionUnavailable}
+                  onClick={async () => {
+                    setSpoolActionPending(true);
+                    try {
+                      const reviewedRowVersion = spoolReviewedRowVersion;
+                      if (!reviewedRowVersion) {
+                        toast.error('Printer revision unavailable. Refresh and review again.');
+                        return;
+                      }
+                      const nextRowVersion = await apiClient.clearActiveSpool(
+                        printer.id,
+                        reviewedRowVersion
+                      );
+                      queryClient.setQueryData<Printer[]>(['printers'], (old) =>
+                        old?.map(p => p.id === printer.id
+                          ? {
+                              ...p,
+                              rowVersion: nextRowVersion,
+                              spoolInfo: { hasActiveSpool: false },
+                            }
+                          : p
+                        )
+                      );
+                      queryClient.setQueryData<PrinterDetails>(
+                        queryKeys.printerDetails(printer.id),
+                        (old) => old ? { ...old, rowVersion: nextRowVersion } : old,
+                      );
+                      // Reconcile the optimistic update with server truth so
+                      // downstream consumers (printer details, coverage) see
+                      // the cleared spool. Awaiting the invalidation prevents
+                      // a follow-up assignment from racing a stale refetch.
+                      await queryClient.invalidateQueries({ queryKey: ['printers'] });
+                    } catch (err) {
+                      console.error('Failed to eject spool:', err);
+                      if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
+                        await queryClient.invalidateQueries({
+                          queryKey: ['printers'],
+                        });
+                      }
+                      toast.error(
+                        mutationErrorMessage(err, 'Failed to eject spool')
+                      );
+                    } finally {
+                      setSpoolActionPending(false);
+                    }
+                  }}
+                  className="p-0.5! h-auto!"
+                  title={spoolRevisionUnavailable ? spoolRevisionBlockedReason : 'Eject spool'}
+                  aria-label={spoolRevisionUnavailable ? `Eject spool — ${spoolRevisionBlockedReason}` : 'Eject spool'}
+                  iconCenter={<EjectIcon className="h-3.5 w-3.5" />}
+                ></Button>
+              )}
+            </div>
+          </div>
+          <FilamentCoverageBreakdown printerId={printer.id} className="mb-2" isOnline={isOnline} />
+          <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
+        </div>
+      )}
 
       <Modal
         isOpen={objectToSkip !== null}
