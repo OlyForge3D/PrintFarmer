@@ -383,6 +383,23 @@ export function PrintersPage() {
     }
   }, [isLoading, navigate, printersById, routePrinterId]);
 
+  // #1702: the detailed grid already folds a printer's sidebar info inline
+  // (MaterialLoadout, statistics, version, etc. — see #1584), so keep the
+  // details sidebar closed while in that view. Otherwise PrinterDetailsSidebar
+  // and the grid's DetailedPrinterCard can both mount for the same printer at
+  // once, and each independently renders its own MaterialLoadout (and, in the
+  // sidebar, MmuControlBox) with no shared lock — letting two mounts issue
+  // conflicting AMS/MMU hardware mutations (spool assignment, gate
+  // load/unload/eject/home/recover) for the same physical unit. Preserve the
+  // existing query string (e.g. `?view=detailed`) so this redirect only drops
+  // the printer id, not the user's view-mode choice.
+  useEffect(() => {
+    if (viewMode === 'detailed' && expandedPrinterId) {
+      const search = searchParams.toString();
+      navigate({ pathname: '/printers', search: search ? `?${search}` : undefined }, { replace: true });
+    }
+  }, [viewMode, expandedPrinterId, navigate, searchParams]);
+
   const handleBulkSetMaintenance = async (printers: Printer[], inMaintenance: boolean) => {
     try {
       if (window.PrintFarmerDebug?.printers) {

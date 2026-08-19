@@ -276,6 +276,30 @@ describe('PrintersPage', () => {
     expect(screen.queryByTestId('printer-details-sidebar')).not.toBeInTheDocument();
   });
 
+  it('closes the details sidebar when landing in detailed view for the same printer (#1702 dual-mount race)', async () => {
+    // In detailed view, DetailedPrinterCard already folds the sidebar's
+    // MaterialLoadout/MmuControlBox content inline (#1584). If the sidebar
+    // stayed open too, both would mount for the same printer at once, each
+    // capable of firing its own AMS/MMU hardware mutation with no shared
+    // lock. The route must be redirected back to /printers instead.
+    renderPage('/printers/printer-1?view=detailed');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-display')).toHaveTextContent('/printers');
+    });
+    expect(screen.getByTestId('location-display')).not.toHaveTextContent('/printers/printer-1');
+    expect(screen.queryByTestId('printer-details-sidebar')).not.toBeInTheDocument();
+
+    // The grid itself is untouched — the view mode (and its query param) is
+    // preserved across the redirect, so the remounted page still resolves
+    // viewMode from the URL and both printers still render via
+    // DetailedPrinterCard instead of falling back to the collapsed view.
+    await waitFor(() => {
+      expect(screen.getByText('Printer Alpha')).toBeInTheDocument();
+      expect(screen.getByText('Printer Beta')).toBeInTheDocument();
+    });
+  });
+
   it('renders a retryable error instead of the empty state when loading printers fails', async () => {
     const user = userEvent.setup();
     mockUsePrinters.mockReturnValue({
