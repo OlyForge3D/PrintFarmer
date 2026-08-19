@@ -123,12 +123,16 @@ public class HarvestCompletionServiceTests
         Assert.NotNull(operation.CompletedAt);
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
 
-        // Regression: the state-transition log must still fire at Information.
+        // Regression: the "Marking operation ... as completed" state-transition log
+        // must still fire at Information, and it must be that specific message —
+        // not merely some Information-level log.
         _loggerMock.Verify(
             l => l.Log(
                 LogLevel.Information,
                 It.IsAny<EventId>(),
-                It.IsAny<It.IsAnyType>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Marking operation")
+                    && v.ToString()!.Contains("as completed")
+                    && v.ToString()!.Contains(operationId.ToString())),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
