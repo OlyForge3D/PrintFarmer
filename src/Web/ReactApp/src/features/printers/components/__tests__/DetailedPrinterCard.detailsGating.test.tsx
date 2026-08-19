@@ -60,6 +60,9 @@ vi.mock('@/features/printers/components/SpoolPickerModal', () => ({ SpoolPickerM
 vi.mock('@/features/printers/components/MaterialLoadout', () => ({
   MaterialLoadout: () => <div data-testid="material-loadout" />,
 }));
+vi.mock('@/features/printers/components/MmuControlBox', () => ({
+  MmuControlBox: () => <div data-testid="ams-control-box" />,
+}));
 vi.mock('@/features/printers/components/TemperatureControlSection', () => ({
   TemperatureControlSection: () => <div data-testid="temp-section" />,
 }));
