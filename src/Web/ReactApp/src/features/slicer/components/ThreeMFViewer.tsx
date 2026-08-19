@@ -3,6 +3,7 @@ import { useLoader } from '@react-three/fiber';
 import { Select } from '@/common/components/ui';
 import { DEFAULT_EXTRUDER_COLORS } from '@/features/slicer/components/viewer/extruderColors';
 import { apiClient } from '@/services/api';
+import { AuthenticatedModelSource } from '@/common/components/AuthenticatedModelSource';
 import { cloneThreeMfMeshesDroppedToBed } from '@/features/slicer/utils/threemf-display';
 import { disposeParsedThreeMfModel, parseThreeMfArchive, ThreeMfSecurityError, type ParsedThreeMfModel } from '@/features/slicer/utils/threemf-parser';
 import { STLLoader } from 'three-stdlib';
@@ -32,6 +33,14 @@ interface SharedModelViewerProps {
   onSelectedMetrics?: (metrics: ViewerMetrics) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
   onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
+  /**
+   * Called if the authenticated pre-fetch of the STL fallback fails.
+   * `AuthenticatedModelSource` never throws, so without this callback a
+   * failed authenticated load would no longer reach
+   * `ModelViewerErrorBoundary` / `onModelLoadError` the way a thrown
+   * `useLoader` error used to — see #1711 / #1709.
+   */
+  onLoadError?: (message: string) => void;
   renderSelectionBoundingBox: (geometry: THREE.BufferGeometry, outOfBounds?: boolean) => React.ReactNode;
   renderFaceSwatches: (geometry: THREE.BufferGeometry, onFaceClick: (normal: THREE.Vector3) => void) => React.ReactNode;
 }
@@ -142,7 +151,25 @@ function usePreparedDisplayData(
   return preparedData;
 }
 
-function FallbackStlModel({
+/**
+ * Renders an STL fallback for a 3MF that failed to parse natively.
+ *
+ * `url` may point at an authenticated API endpoint (`/3d-models/file/{id}`),
+ * so it is resolved through {@link AuthenticatedModelSource} first — that
+ * pre-fetches the bytes with the app's bearer token attached and hands
+ * `FallbackStlGeometryModel` a `Blob` object URL that `useLoader(STLLoader, ...)`
+ * can fetch without authentication (see #1711).
+ */
+function FallbackStlModel(props: SharedModelViewerProps) {
+  const { url, onLoadError, ...rest } = props;
+  return (
+    <AuthenticatedModelSource url={url} onError={onLoadError}>
+      {(resolvedUrl) => <FallbackStlGeometryModel url={resolvedUrl} {...rest} />}
+    </AuthenticatedModelSource>
+  );
+}
+
+function FallbackStlGeometryModel({
   url,
   position = [0, 0, 0],
   rotation = [0, 0, 0],
@@ -164,6 +191,17 @@ function FallbackStlModel({
   const rawGeometry = useLoader(STLLoader, url);
   const internalRef = useRef<THREE.Group>(null);
   const ref = meshRef || internalRef;
+
+  // `url` is frequently a one-off Blob object URL minted by
+  // AuthenticatedModelSource (see #1711); useLoader's cache never expires
+  // entries on its own, so evict this entry once this component stops using
+  // it (unmount, or the model swaps to a different url) to avoid retaining a
+  // parsed geometry per Blob URL for the lifetime of the session.
+  useEffect(() => {
+    return () => {
+      useLoader.clear(STLLoader, url);
+    };
+  }, [url]);
 
   const { geometry, halfZ } = useMemo(() => {
     const clonedGeometry = rawGeometry.clone();
@@ -289,6 +327,7 @@ export function ThreeMFViewer({
   onSelectedMetrics,
   onLayFlatFaceClick,
   onGeometryReady,
+  onLoadError,
   renderSelectionBoundingBox,
   renderFaceSwatches,
 }: SharedModelViewerProps) {
@@ -415,6 +454,7 @@ export function ThreeMFViewer({
           onSelectedMetrics={onSelectedMetrics}
           onLayFlatFaceClick={onLayFlatFaceClick}
           onGeometryReady={onGeometryReady}
+          onLoadError={onLoadError}
           renderSelectionBoundingBox={renderSelectionBoundingBox}
           renderFaceSwatches={renderFaceSwatches}
         />

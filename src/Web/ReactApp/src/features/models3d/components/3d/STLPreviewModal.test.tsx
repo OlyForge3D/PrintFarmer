@@ -4,6 +4,20 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { STLPreviewModal } from './STLPreviewModal';
 
+const { apiClientGetMock } = vi.hoisted(() => ({
+  apiClientGetMock: vi.fn(),
+}));
+
+vi.mock('@/services/api', () => ({
+  apiClient: {
+    get: apiClientGetMock,
+  },
+}));
+
+vi.mock('@/common/utils/apiUrlHelpers', () => ({
+  getApiBaseUrl: vi.fn(() => '/api'),
+}));
+
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children }: { children: ReactNode }) => <div data-testid="stl-canvas">{children}</div>,
   useFrame: vi.fn(),
@@ -64,6 +78,7 @@ function createStlFile(name = 'model.stl') {
 
 describe('STLPreviewModal Component', () => {
   beforeEach(() => {
+    apiClientGetMock.mockReset();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       blob: vi.fn().mockResolvedValue(new Blob([createMinimalBinaryStl()])),
@@ -102,6 +117,27 @@ describe('STLPreviewModal Component', () => {
     expect(screen.getByText(/STL Model Preview/i)).toBeInTheDocument();
     expect(screen.getByText('model.stl')).toBeInTheDocument();
     expect(await screen.findByTestId('stl-canvas')).toBeInTheDocument();
+    expect(screen.queryByText('Error Loading Model')).not.toBeInTheDocument();
+  });
+
+  it('fetches an authenticated model URL through apiClient instead of a bare fetch (#1711)', async () => {
+    apiClientGetMock.mockResolvedValue({ data: createMinimalBinaryStl() });
+
+    render(
+      <STLPreviewModal
+        isOpen
+        fileUrl="/api/3d-models/file/model-123"
+        fileName="model.stl"
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByTestId('stl-canvas')).toBeInTheDocument();
+    expect(apiClientGetMock).toHaveBeenCalledWith(
+      '/api/3d-models/file/model-123',
+      expect.objectContaining({ responseType: 'arraybuffer', baseURL: '' }),
+    );
+    expect(fetch).not.toHaveBeenCalled();
     expect(screen.queryByText('Error Loading Model')).not.toBeInTheDocument();
   });
 

@@ -15,6 +15,7 @@ import { CutPlaneOverlay } from './CutPlaneOverlay';
 import { PlateBedOverlay } from './PlateBedOverlay';
 import { ModelViewerErrorBoundary } from './ModelViewerErrorBoundary';
 import { ThreeMFViewer } from '@/features/slicer/components/ThreeMFViewer';
+import { AuthenticatedModelSource } from '@/common/components/AuthenticatedModelSource';
 import {
   detectMajorFaces,
   computeAutoOrientation,
@@ -827,23 +828,7 @@ function computeZForBedPlacement(
  * "interactive" for its click bookkeeping (prevents onPointerMissed from
  * firing when a mesh was actually pressed).
  */
-function STLModel({ 
-  url, 
-  position = [0, 0, 0], 
-  rotation = [0, 0, 0], 
-  scale = [1, 1, 1],
-  selected = false,
-  outOfBounds = false,
-  layFlatMode = false,
-  draggable = false,
-  dimmed = false,
-  onClick,
-  onDragStart,
-  meshRef,
-  onSelectedMetrics,
-  onLayFlatFaceClick,
-  onGeometryReady,
-}: { 
+interface STLModelProps {
   url: string;
   position?: [number, number, number];
   rotation?: [number, number, number];
@@ -863,10 +848,66 @@ function STLModel({
   }) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
   onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
-}) {
+  /**
+   * Called if the authenticated pre-fetch fails. `AuthenticatedModelSource`
+   * never throws (it renders its own in-canvas error state), so without this
+   * callback a failed authenticated load would no longer reach
+   * `ModelViewerErrorBoundary` / `onModelLoadError` the way a thrown
+   * `useLoader` error used to — silently defeating the "block Slice on a
+   * failed model" guard from #1709. See #1711.
+   */
+  onLoadError?: (message: string) => void;
+}
+
+/**
+ * Loads and renders an STL model from `url`.
+ *
+ * `url` may point at an authenticated API endpoint (`/3d-models/file/{id}`),
+ * so it is resolved through {@link AuthenticatedModelSource} first — that
+ * pre-fetches the bytes with the app's bearer token attached and hands
+ * `STLGeometryModel` a `Blob` object URL that `useLoader(STLLoader, ...)` can
+ * fetch without authentication (see #1711).
+ */
+function STLModel(props: STLModelProps) {
+  const { url, onLoadError, ...rest } = props;
+  return (
+    <AuthenticatedModelSource url={url} onError={onLoadError}>
+      {(resolvedUrl) => <STLGeometryModel url={resolvedUrl} {...rest} />}
+    </AuthenticatedModelSource>
+  );
+}
+
+function STLGeometryModel({
+  url,
+  position = [0, 0, 0],
+  rotation = [0, 0, 0],
+  scale = [1, 1, 1],
+  selected = false,
+  outOfBounds = false,
+  layFlatMode = false,
+  draggable = false,
+  dimmed = false,
+  onClick,
+  onDragStart,
+  meshRef,
+  onSelectedMetrics,
+  onLayFlatFaceClick,
+  onGeometryReady,
+}: STLModelProps) {
   const rawGeometry = useLoader(STLLoader, url);
   const internalRef = useRef<THREE.Group>(null);
   const ref = meshRef || internalRef;
+
+  // `url` is frequently a one-off Blob object URL minted by
+  // AuthenticatedModelSource (see #1711); useLoader's cache never expires
+  // entries on its own, so evict this entry once this component stops using
+  // it (unmount, or the model swaps to a different url) to avoid retaining a
+  // parsed geometry per Blob URL for the lifetime of the session.
+  useEffect(() => {
+    return () => {
+      useLoader.clear(STLLoader, url);
+    };
+  }, [url]);
 
   // Clone geometry so we don't mutate the useLoader cache, center it on ALL
   // axes so the pivot / gizmo sits at the volumetric center of the model.
@@ -997,6 +1038,7 @@ function UrlModelViewer({
   onSelectedMetrics,
   onLayFlatFaceClick,
   onGeometryReady,
+  onLoadError,
 }: {
   fileType: LoadedModel['fileType'];
   url: string;
@@ -1018,6 +1060,7 @@ function UrlModelViewer({
   }) => void;
   onLayFlatFaceClick?: (normal: THREE.Vector3) => void;
   onGeometryReady?: (geometry: THREE.BufferGeometry | null) => void;
+  onLoadError?: (message: string) => void;
 }) {
   if (fileType === '3mf') {
     return (
@@ -1037,6 +1080,7 @@ function UrlModelViewer({
         onSelectedMetrics={onSelectedMetrics}
         onLayFlatFaceClick={onLayFlatFaceClick}
         onGeometryReady={onGeometryReady}
+        onLoadError={onLoadError}
         renderSelectionBoundingBox={(geometry, isOutOfBounds) => (
           <SelectionBoundingBox geometry={geometry} outOfBounds={isOutOfBounds} />
         )}
@@ -1064,6 +1108,7 @@ function UrlModelViewer({
       onSelectedMetrics={onSelectedMetrics}
       onLayFlatFaceClick={onLayFlatFaceClick}
       onGeometryReady={onGeometryReady}
+      onLoadError={onLoadError}
     />
   );
 }
@@ -2222,6 +2267,7 @@ function BedScene({
                           })
                           : undefined}
                         onGeometryReady={geometryRegistrars.get(model.id)}
+                        onLoadError={() => onModelLoadError?.(model.id)}
                       />
                     </ModelViewerErrorBoundary>
                   )
