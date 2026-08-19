@@ -85,7 +85,12 @@ vi.mock('@/common/components/ui/Select', () => ({
 }));
 
 vi.mock('@/common/components/ViewModeToggle', () => ({
-  ViewModeToggle: () => <div data-testid="view-mode-toggle" />,
+  ViewModeToggle: ({ onChange }: { viewMode: string; onChange: (mode: 'collapsed' | 'detailed' | 'table') => void }) => (
+    <div data-testid="view-mode-toggle">
+      <button type="button" onClick={() => onChange('detailed')}>Detailed view</button>
+      <button type="button" onClick={() => onChange('collapsed')}>Collapsed view</button>
+    </div>
+  ),
 }));
 
 vi.mock('@/features/printers/components/CompactPrinterCard', () => ({
@@ -297,6 +302,25 @@ describe('PrintersPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Printer Alpha')).toBeInTheDocument();
       expect(screen.getByText('Printer Beta')).toBeInTheDocument();
+    });
+  });
+
+  it('never renders the sidebar alongside the detailed grid, even for the render that switches view mode (#1702)', async () => {
+    // End-to-end confirmation that the settled state is correct once the
+    // page finishes redirecting after a client-side view-mode switch. The
+    // render-time guard itself is unit-tested directly in
+    // printerSidebarVisibility.test.ts, since a DOM assertion taken after an
+    // interaction can't observe whether the guard fired at render time or
+    // was only eventually corrected by the redirect effect below.
+    const user = userEvent.setup();
+    renderPage('/printers/printer-1');
+
+    expect(screen.getAllByTestId('printer-details-sidebar')).toHaveLength(2);
+
+    await user.click(screen.getByRole('button', { name: 'Detailed view' }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('printer-details-sidebar')).not.toBeInTheDocument();
     });
   });
 

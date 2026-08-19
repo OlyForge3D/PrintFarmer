@@ -28,6 +28,7 @@ import type { Printer, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import { sortPrintersForDisplay, getBackendName, type PrinterSortMode } from '@/features/printers/utils/printerDisplaySort';
+import { computeIsSidebarOpen } from '@/features/printers/utils/printerSidebarVisibility';
 
 import { PrinterIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
 import PrinterImportExportControls from '@/features/printers/components/admin/PrinterImportExportControls';
@@ -57,6 +58,7 @@ const EditPrinterModal = lazyWithPreload<EditPrinterModalProps, React.FC<EditPri
 const PrinterDiscoveryModal = lazyWithPreload<PrinterDiscoveryModalProps, React.FC<PrinterDiscoveryModalProps>>(
   () => import('@/features/printers/components/PrinterDiscoveryModal').then(m => ({ default: m.PrinterDiscoveryModal }))
 );
+
 
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
@@ -491,7 +493,15 @@ export function PrintersPage() {
     );
   }
 
-  const isSidebarOpen = !!expandedPrinterId;
+  // #1702: gate this at render time, not only via the redirect effect below —
+  // an effect runs after commit/paint, so relying on it alone would still let
+  // the sidebar and the detailed grid's DetailedPrinterCard mount together
+  // (each with their own MmuControlBox) for one commit whenever `viewMode`
+  // flips to 'detailed' while a printer is already expanded via route (e.g.
+  // via ViewModeToggle, or a warm DetailedPrinterCard lazy chunk resolving
+  // synchronously on a deep link). See computeIsSidebarOpen for why this is
+  // a pure, directly-unit-tested function rather than an inline expression.
+  const isSidebarOpen = computeIsSidebarOpen(expandedPrinterId, viewMode);
 
   return (
     <PageTemplate
