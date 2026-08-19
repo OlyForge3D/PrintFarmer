@@ -154,6 +154,7 @@ vi.mock('@/common/components/HelpButton', () => ({
 vi.mock('@/common/components/icons/MdiIcons', () => ({
   PrinterIcon: () => <span>PrinterIcon</span>,
   PrinterSearchIcon: () => <span>PrinterSearchIcon</span>,
+  ClearFiltersIcon: () => <span>ClearFiltersIcon</span>,
 }));
 
 vi.mock('@/common/utils/printerStateDisplay', () => ({
@@ -363,6 +364,49 @@ describe('PrintersPage', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('printer-details-sidebar')).not.toBeInTheDocument();
     });
+  });
+
+  it('shows a distinct filtered-empty state (not the onboarding empty state) when a backend filter matches no printers (#1713)', async () => {
+    const user = userEvent.setup();
+    renderPage('/printers');
+
+    // Sanity check: printers are seeded and neither empty state shows yet.
+    expect(screen.queryByText('No Printers Found')).not.toBeInTheDocument();
+    expect(screen.queryByText('No printers match these filters')).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Filter by backend'), 'PrusaLink');
+
+    // Only Printer Alpha (PrusaLink) matches; Printer Beta (Moonraker) does not.
+    expect(screen.queryByText('No printers match these filters')).not.toBeInTheDocument();
+    expect(screen.getByText('Open Printer Alpha')).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Filter by backend'), 'SDCP');
+
+    // No seeded printer uses SDCP: the filtered-empty state must show, not
+    // the onboarding "No Printers Found" / "add your first printer" prompt.
+    expect(screen.getByText('No printers match these filters')).toBeInTheDocument();
+    expect(screen.queryByText('No Printers Found')).not.toBeInTheDocument();
+    expect(screen.queryByText(/add your first 3D printer/i)).not.toBeInTheDocument();
+
+    // Clearing filters restores the full list.
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(screen.queryByText('No printers match these filters')).not.toBeInTheDocument();
+    expect(screen.getByText('Open Printer Alpha')).toBeInTheDocument();
+  });
+
+  it('still shows the onboarding empty state when the farm genuinely has no printers', () => {
+    mockUsePrinters.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: mockRefetchPrinters,
+    });
+
+    renderPage('/printers');
+
+    expect(screen.getByText('No Printers Found')).toBeInTheDocument();
+    expect(screen.queryByText('No printers match these filters')).not.toBeInTheDocument();
   });
 
   it('renders a retryable error instead of the empty state when loading printers fails', async () => {
