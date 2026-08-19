@@ -169,11 +169,19 @@ function HighlightedFuzzyText({ text, matches }: { text: string; matches: number
   const matchSet = useMemo(() => new Set(matches), [matches]);
 
   if (matchSet.size === 0) {
-    return <>{text}</>;
+    return <span className="break-words">{text}</span>;
   }
 
+  // Wrap the per-character spans in a single containing element rather than
+  // a bare fragment. Call sites render this inside a `flex gap-*` row (e.g.
+  // the label next to the destructive "Confirm" badge); a fragment lets
+  // React flatten every character span directly into that flex container,
+  // so the row's gap gets inserted between each individual character and
+  // overflows the result card on narrow viewports (#1710). Keeping this as
+  // one element makes it exactly one flex item, and `break-words` lets long
+  // unbroken text wrap within the card instead of overflowing it.
   return (
-    <>
+    <span className="break-words">
       {Array.from(text).map((character, index) => (
         <span
           key={`${character}-${index}`}
@@ -184,7 +192,7 @@ function HighlightedFuzzyText({ text, matches }: { text: string; matches: number
           {character}
         </span>
       ))}
-    </>
+    </span>
   );
 }
 
@@ -561,8 +569,10 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
                             <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-pf-text-tertiary">
                               <HighlightedFuzzyText text={result.item.breadcrumb} matches={result.breadcrumbMatches} />
                             </span>
-                            <span className="mt-1 flex items-center gap-2 text-sm font-medium text-pf-text-primary">
-                              <HighlightedFuzzyText text={result.item.label} matches={result.labelMatches} />
+                            <span className="mt-1 flex min-w-0 items-center gap-2 text-sm font-medium text-pf-text-primary">
+                              <span className="min-w-0">
+                                <HighlightedFuzzyText text={result.item.label} matches={result.labelMatches} />
+                              </span>
                               {isDestructive ? (
                                 <span className="rounded-md border border-pf-error/40 bg-pf-error/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-pf-error">
                                   Confirm
