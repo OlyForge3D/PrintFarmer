@@ -29,6 +29,7 @@ import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import { sortPrintersForDisplay, getBackendName, type PrinterSortMode } from '@/features/printers/utils/printerDisplaySort';
 import { computeIsSidebarOpen } from '@/features/printers/utils/printerSidebarVisibility';
+import { useIsLgBreakpoint } from '@/common/hooks/useMediaQuery';
 
 import { PrinterIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
 import PrinterImportExportControls from '@/features/printers/components/admin/PrinterImportExportControls';
@@ -178,6 +179,21 @@ export function PrintersPage() {
     ),
     [allAutoDispatchStatuses, displayPrinterStateById]
   );
+  // #1702 (follow-up): the sidebar renders differently depending on viewport
+  // width — inline between the toolbar and the grid on small screens, or as
+  // a sticky column beside the grid on large screens. Previously both
+  // layouts were rendered unconditionally and CSS (`lg:hidden` /
+  // `hidden lg:block`) hid whichever one didn't apply. That still mounts
+  // *two* PrinterDetailsSidebar (and therefore two MmuControlBox/
+  // MaterialLoadout) component trees any time the sidebar is open, in every
+  // view mode — the same class of hazard #1702 describes, just gated by
+  // viewport width instead of route/view-mode. A hidden copy can't be
+  // clicked by a real user (display:none is inert), but it's still a live,
+  // unnecessary second mount. Use a JS breakpoint check (matching this
+  // component's existing `lg:` usage) so only one PrinterDetailsSidebar is
+  // ever mounted. Declared here, before any early return below, so the
+  // Rules of Hooks aren't violated by the loading/error early-return paths.
+  const isLgUp = useIsLgBreakpoint();
   const [searchParams] = useSearchParams();
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const fromUrl = searchParams.get('view');
@@ -642,9 +658,12 @@ export function PrintersPage() {
             </div>
           </div>
 
-          {/* Printer details sidebar on small screens: between toolbar and grid */}
-          {isSidebarOpen && (
-            <div className="lg:hidden mb-6 min-w-0">
+          {/* Printer details sidebar on small screens: between toolbar and grid.
+              Only mounted when isLgUp is false — see isLgUp above for why this
+              must be a single JS-gated mount rather than a second, CSS-hidden
+              copy of PrinterDetailsSidebar. */}
+          {isSidebarOpen && !isLgUp && (
+            <div className="mb-6 min-w-0">
               <PrinterDetailsSidebar
                 printerId={expandedPrinterId}
                 printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
@@ -757,8 +776,13 @@ export function PrintersPage() {
           </div>
         </div>
 
-        {isSidebarOpen && (
-          <div className="hidden lg:block lg:self-start lg:sticky lg:top-0 lg:max-h-[calc(100dvh-5rem)]">
+        {/* Printer details sidebar on large screens: sticky column beside the
+            grid. Only mounted when isLgUp is true — the counterpart of the
+            inline mobile mount above; together they guarantee exactly one
+            PrinterDetailsSidebar (and one MmuControlBox/MaterialLoadout pair)
+            is ever mounted for a given printer, regardless of viewport. */}
+        {isSidebarOpen && isLgUp && (
+          <div className="lg:self-start lg:sticky lg:top-0 lg:max-h-[calc(100dvh-5rem)]">
             <PrinterDetailsSidebar
               printerId={expandedPrinterId}
               printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
