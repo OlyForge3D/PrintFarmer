@@ -60,19 +60,14 @@ public class HarvestCompletionService(
         // Find running operations that might be completed
         List<GcodeHarvestOperation> runningOperations = await unitOfWork.HarvestOperations.GetRunningOperationsWithFilesFoundAsync(ct);
 
-        _logger.LogInformation("Found {RunningOperationsCount} running harvest operations to check", runningOperations.Count);
+        _logger.LogDebug("Found {RunningOperationsCount} running harvest operations to check", runningOperations.Count);
 
         foreach (GcodeHarvestOperation? operation in runningOperations)
         {
             // Count processed files (added + skipped + errored)
             int processedFiles = operation.FilesAdded + operation.FilesSkipped + operation.FilesErrored;
 
-            _logger.LogInformation("Operation {OperationId}: Found={OperationFilesFound}, Added={OperationFilesAdded}, Skipped={OperationFilesSkipped}, Errored={OperationFilesErrored}, Processed={ProcessedFiles}", operation.Id, operation.FilesFound, operation.FilesAdded, operation.FilesSkipped, operation.FilesErrored, processedFiles);
-
-            // Get the count of discovered files for this operation
-            int discoveredFileCount = await unitOfWork.HarvestOperations.GetDiscoveredFilesCountAsync(operation.Id, ct);
-
-            _logger.LogInformation("Operation {OperationId}: Found {DiscoveredFileCount} files in the DiscoveredGcodeFiles table", operation.Id, discoveredFileCount);
+            _logger.LogDebug("Operation {OperationId}: Found={OperationFilesFound}, Added={OperationFilesAdded}, Skipped={OperationFilesSkipped}, Errored={OperationFilesErrored}, Processed={ProcessedFiles}", operation.Id, operation.FilesFound, operation.FilesAdded, operation.FilesSkipped, operation.FilesErrored, processedFiles);
 
             if (processedFiles >= operation.FilesFound)
             {

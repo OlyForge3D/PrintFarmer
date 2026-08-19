@@ -499,7 +499,21 @@ export const ExplorerView = ({
         </div>
 
         {/* Table */}
-        <div className="flex-1 overflow-x-auto">
+        {/*
+         * The right pane relies on an ancestor with a bounded height for `flex-1` /
+         * `h-full` to create an internally-scrollable region. Pages that host
+         * FileBrowser (e.g. FilesPage) only set a `min-h-*`, not a fixed/viewport
+         * height, so on desktop this pane simply grows to fit its content — which is
+         * harmless there because the table's ~674px width fits comfortably. On
+         * mobile, the same ~674px table overflows a ~350-370px viewport, so the
+         * `overflow-x-auto` scrollbar becomes load-bearing — but with no bounded
+         * height, it renders at the very bottom of a box that grows with every row,
+         * making it unreachable without first scrolling the whole page an
+         * unpredictable distance. Capping the mobile height here (mirroring the
+         * folder tree's `max-h-[40vh]` pattern above) keeps the scrollbar within a
+         * predictable, reachable area regardless of row count.
+         */}
+        <div className={`flex-1 overflow-x-auto ${isMobile ? 'overflow-y-auto max-h-[50vh]' : ''}`}>
           <table className="w-full text-sm border-collapse" role="table" aria-label="Files list">
             <thead className="sticky top-0 bg-pf-bg-1 border-b border-pf-border">
               <tr>
