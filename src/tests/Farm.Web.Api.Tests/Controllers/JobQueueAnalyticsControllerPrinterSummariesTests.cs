@@ -86,11 +86,12 @@ public class JobQueueAnalyticsControllerPrinterSummariesTests
 
         var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
         resourceAuthorization
-            .Setup(r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), visiblePrinterId, PrinterGroupAccessLevel.View, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
-        resourceAuthorization
-            .Setup(r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), hiddenPrinterId, PrinterGroupAccessLevel.View, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
+            .Setup(r => r.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Count == 2 && ids.Contains(visiblePrinterId) && ids.Contains(hiddenPrinterId)),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid> { visiblePrinterId });
         JobQueueAnalyticsController controller = CreateController(resourceAuthorization.Object);
 
         IActionResult result = await controller.GetPrinterQueueSummariesAsync(CancellationToken.None);
@@ -99,6 +100,21 @@ public class JobQueueAnalyticsControllerPrinterSummariesTests
         var returned = Assert.IsAssignableFrom<IEnumerable<PrinterQueueSummaryDto>>(okResult.Value).ToList();
         PrinterQueueSummaryDto onlyEntry = Assert.Single(returned);
         Assert.Equal(visiblePrinterId, onlyEntry.PrinterId);
+
+        resourceAuthorization.Verify(
+            r => r.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<PrinterGroupAccessLevel>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        resourceAuthorization.Verify(
+            r => r.CanAccessPrinterAsync(
+                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
+                It.IsAny<Guid>(),
+                It.IsAny<PrinterGroupAccessLevel>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
