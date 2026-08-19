@@ -31,7 +31,7 @@ import { sortPrintersForDisplay, getBackendName, type PrinterSortMode } from '@/
 import { computeIsSidebarOpen } from '@/features/printers/utils/printerSidebarVisibility';
 import { useIsLgBreakpoint } from '@/common/hooks/useMediaQuery';
 
-import { PrinterIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
+import { PrinterIcon, PrinterSearchIcon, ClearFiltersIcon } from '@/common/components/icons/MdiIcons';
 import PrinterImportExportControls from '@/features/printers/components/admin/PrinterImportExportControls';
 import PrinterBulkControls from '@/features/printers/components/admin/PrinterBulkControls';
 import { usePageTour } from '@/common/hooks/usePageTour';
@@ -313,6 +313,22 @@ export function PrintersPage() {
   }, [optimisticPrinters, stateFilter, backendFilter, availabilityHours, filterNow, sortMode, pendingPrinterIds, bedTypeFilter]);
 
   const deferredUserPrinters = useDeferredValue(userPrinters);
+
+  // Whether any filter is narrowing the printer list. Used to distinguish the
+  // genuine "no printers in the farm" onboarding state from a "filters matched
+  // nothing" state (#1713) — the two need different empty-state messaging.
+  const hasActiveFilters = stateFilter !== 'all'
+    || backendFilter !== 'all'
+    || availabilityHours !== null
+    || bedTypeFilter !== 'all';
+
+  const handleClearFilters = useCallback(() => {
+    setStateFilter('all');
+    setBackendFilter('all');
+    setAvailabilityFilter('all');
+    setAvailabilityHours(null);
+    setBedTypeFilter('all');
+  }, []);
 
   // Keyboard shortcuts for printer management
   useKeyboardShortcuts([
@@ -677,11 +693,20 @@ export function PrintersPage() {
           {/* Content Area */}
           <div data-tour="printers-grid" className="space-y-6">
             {(
-              (deferredUserPrinters.length === 0) ? (
+              (deferredUserPrinters.length === 0 && (optimisticPrinters?.length ?? 0) === 0) ? (
                 <div className="text-center py-12">
                   <PrinterIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
                   <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No Printers Found</h3>
                   <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer using the "Add Printer" button above.</p>
+                </div>
+              ) : (deferredUserPrinters.length === 0 && hasActiveFilters) ? (
+                <div className="text-center py-12">
+                  <ClearFiltersIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No printers match these filters</h3>
+                  <p className="text-pf-text-secondary mb-6">Try adjusting or clearing your filters to see more printers.</p>
+                  <Button variant="secondary" size="sm" onClick={handleClearFilters}>
+                    Clear filters
+                  </Button>
                 </div>
               ) : viewMode === 'collapsed' ? (
                 <PrinterCardGrid
