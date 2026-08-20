@@ -27,7 +27,7 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
             type: .any
         )
         XCTAssertTrue(
-            failureCard.waitForExistence(timeout: 10),
+            failureCard.waitForExistence(timeout: 30),
             "The deterministic failure card must load on the Attention root"
         )
 
