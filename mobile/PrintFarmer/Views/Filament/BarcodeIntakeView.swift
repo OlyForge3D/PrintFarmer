@@ -51,8 +51,19 @@ struct BarcodeIntakeView: View {
 
                 if let barcode = viewModel.lastScannedBarcode {
                     Section("Last Scan") {
-                        Text(barcode)
-                            .font(.body.monospaced())
+                        LabeledContent("Scanned Barcode") {
+                            Text(barcode)
+                                .font(.body.monospaced())
+                        }
+                        if let gtin = viewModel.lastResolvedBarcode, !gtin.isEmpty {
+                            LabeledContent("GTIN") {
+                                Text(gtin)
+                                    .font(.body.monospaced())
+                            }
+                        }
+                        if let sku = viewModel.lastResolvedVendorSKU, !sku.isEmpty {
+                            LabeledContent("Vendor SKU", value: sku)
+                        }
                     }
                 }
 
@@ -155,6 +166,7 @@ private struct UnknownBarcodeView: View {
             ($0.name?.lowercased().contains(query) ?? false)
             || ($0.material?.lowercased().contains(query) ?? false)
             || ($0.vendor?.lowercased().contains(query) ?? false)
+            || ($0.gtin?.lowercased().contains(query) ?? false)
             || ($0.articleNumber?.lowercased().contains(query) ?? false)
         }
     }
@@ -366,6 +378,16 @@ private struct UnknownBarcodeView: View {
                 }
                 .font(.caption)
                 .foregroundStyle(Color.pfTextSecondary)
+                if let gtin = filament.gtin, !gtin.isEmpty {
+                    Text("GTIN \(gtin)")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(Color.pfTextSecondary)
+                }
+                if let sku = filament.articleNumber, !sku.isEmpty {
+                    Text("SKU \(sku)")
+                        .font(.caption)
+                        .foregroundStyle(Color.pfTextSecondary)
+                }
             }
 
             Spacer()
@@ -428,7 +450,7 @@ private struct UnknownBarcodeView: View {
                     diameter: diameterMm,
                     weight: totalWeightG,
                     spoolWeight: spoolWeightG,
-                    articleNumber: barcode
+                    gtin: barcode
                 )
                 let filament = try await spoolService.createFilament(request)
                 if let importError = await onSelectFilament(filament) {

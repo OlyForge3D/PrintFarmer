@@ -982,13 +982,14 @@ public class SpoolmanController(
     }
 
     /// <summary>
-    /// Creates a new filament in Spoolman.
+    /// Creates a new filament in Spoolman. A supplied GTIN is validated and normalized
+    /// to GTIN-14 before the external create request.
     /// </summary>
     /// <param name="request">Filament data</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>The created filament</returns>
     /// <response code="201">Returns the created filament</response>
-    /// <response code="400">If the creation fails</response>
+    /// <response code="400">If the GTIN is invalid or creation fails</response>
     [RequirePermission("spoolman", "admin")]
     [HttpPost("filaments")]
     [ProducesResponseType(typeof(SpoolmanFilamentDto), StatusCodes.Status201Created)]

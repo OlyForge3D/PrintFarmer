@@ -5,7 +5,11 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
     @MainActor
     func testKnownBarcodeInstantImportAppendsToTally() async {
         let (viewModel, service) = makeSubject()
-        service.filamentToResolve = makeFilament(id: 7)
+        service.filamentToResolve = makeFilament(
+            id: 7,
+            gtin: "00012345678905",
+            articleNumber: "PRM-PLA-BK"
+        )
         service.spoolToImport = makeSpool(id: 42, filamentId: 7)
 
         await viewModel.handleScannedBarcode("012345678905")
@@ -13,6 +17,8 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         XCTAssertEqual(service.resolveBarcodes, ["012345678905"])
         XCTAssertEqual(service.importCalls.map(\.barcode), ["012345678905"])
         XCTAssertEqual(viewModel.importedThisSession.map(\.id), [42])
+        XCTAssertEqual(viewModel.lastResolvedBarcode, "00012345678905")
+        XCTAssertEqual(viewModel.lastResolvedVendorSKU, "PRM-PLA-BK")
         XCTAssertNil(viewModel.pendingUnknownBarcode)
         XCTAssertNil(viewModel.errorMessage)
         XCTAssertFalse(viewModel.isBusy)
@@ -38,6 +44,8 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         XCTAssertEqual(service.saveMappingCalls.first?.filamentId, 8)
         XCTAssertEqual(service.importCalls.map(\.barcode), ["4006381333931"])
         XCTAssertEqual(viewModel.importedThisSession.map(\.id), [77])
+        XCTAssertEqual(viewModel.lastResolvedBarcode, "00012345678905")
+        XCTAssertEqual(viewModel.lastResolvedVendorSKU, "PRM-PLA-BK")
         XCTAssertNil(viewModel.pendingUnknownBarcode)
         XCTAssertNil(viewModel.errorMessage)
     }
@@ -167,7 +175,11 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         return (viewModel, service)
     }
 
-    private func makeFilament(id: Int) -> SpoolmanFilament {
+    private func makeFilament(
+        id: Int,
+        gtin: String? = "00012345678905",
+        articleNumber: String? = "PRM-PLA-BK"
+    ) -> SpoolmanFilament {
         SpoolmanFilament(
             id: id,
             name: "PLA Black",
@@ -181,7 +193,8 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
             price: 25,
             settingsExtruderTemp: 215,
             settingsBedTemp: 60,
-            articleNumber: nil,
+            articleNumber: articleNumber,
+            gtin: gtin,
             comment: nil,
             multiColorHexes: nil,
             externalId: nil

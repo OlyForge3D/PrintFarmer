@@ -17,6 +17,7 @@ final class DemoBarcodeIntakeService: BarcodeIntakeServiceProtocol, @unchecked S
         settingsExtruderTemp: 215,
         settingsBedTemp: 60,
         articleNumber: "DEMO-PLA-BK",
+        gtin: "00012345678905",
         comment: nil,
         multiColorHexes: nil,
         externalId: nil

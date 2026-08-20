@@ -107,7 +107,10 @@ struct SpoolmanFilament: Codable, Identifiable, Sendable {
     let price: Double?
     let settingsExtruderTemp: Int?
     let settingsBedTemp: Int?
+    /// Vendor-defined article number or SKU.
     let articleNumber: String?
+    /// Retail barcode stored by Spoolman, typically normalized to GTIN-14 by the server.
+    let gtin: String?
     let comment: String?
     let multiColorHexes: String?
     let externalId: String?
@@ -125,7 +128,10 @@ struct SpoolmanFilamentRequest: Codable, Sendable {
     var price: Double?
     var settingsExtruderTemp: Int?
     var settingsBedTemp: Int?
+    /// Vendor-defined article number or SKU.
     var articleNumber: String?
+    /// Retail barcode; PrintFarmer sends the scanned digits and lets the server normalize them.
+    var gtin: String?
     var comment: String?
     var multiColorHexes: String?
     var externalId: String?
@@ -143,6 +149,7 @@ struct SpoolmanFilamentRequest: Codable, Sendable {
         settingsExtruderTemp: Int? = nil,
         settingsBedTemp: Int? = nil,
         articleNumber: String? = nil,
+        gtin: String? = nil,
         comment: String? = nil,
         multiColorHexes: String? = nil,
         externalId: String? = nil
@@ -159,6 +166,7 @@ struct SpoolmanFilamentRequest: Codable, Sendable {
         self.settingsExtruderTemp = settingsExtruderTemp
         self.settingsBedTemp = settingsBedTemp
         self.articleNumber = articleNumber
+        self.gtin = gtin
         self.comment = comment
         self.multiColorHexes = multiColorHexes
         self.externalId = externalId
@@ -184,7 +192,8 @@ extension SpoolmanFilamentRequest {
         diameter: Double? = nil,
         weight: Double? = nil,
         spoolWeight: Double? = nil,
-        articleNumber: String? = nil
+        articleNumber: String? = nil,
+        gtin: String? = nil
     ) -> SpoolmanFilamentRequest {
         SpoolmanFilamentRequest(
             name: name,
@@ -195,7 +204,8 @@ extension SpoolmanFilamentRequest {
             diameter: positive(diameter) ?? defaultDiameterMillimeters,
             weight: positive(weight),
             spoolWeight: nonNegative(spoolWeight),
-            articleNumber: articleNumber
+            articleNumber: articleNumber,
+            gtin: gtin
         )
     }
 
