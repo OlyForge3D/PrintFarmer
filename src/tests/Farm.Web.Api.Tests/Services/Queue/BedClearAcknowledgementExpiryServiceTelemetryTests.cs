@@ -134,21 +134,27 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
         using MeterListener listener = new();
         listener.InstrumentPublished = (instrument, l) =>
         {
-            if (instrument.Meter.Name == BedClearAcknowledgementExpiryMetrics.MeterName)
+            // Filter by instrument identity, not by Meter.Name string equality: another live
+            // instance of BedClearAcknowledgementExpiryMetrics (e.g. a DI-registered singleton
+            // spun up elsewhere in a parallel test run) would share the same meter name and
+            // instrument names, and a name-based filter would silently pick up its
+            // measurements too, making these assertions flaky under this assembly's enabled
+            // parallel test execution.
+            if (instrument == _metrics.ScannedCount || instrument == _metrics.ScanDurationMs)
             {
                 l.EnableMeasurementEvents(instrument);
             }
         };
         listener.SetMeasurementEventCallback<int>((instrument, measurement, _, _) =>
         {
-            if (instrument.Name == "bed_clear_acknowledgement_expiry.scanned_count")
+            if (instrument == _metrics.ScannedCount)
             {
                 counts.Add(measurement);
             }
         });
         listener.SetMeasurementEventCallback<double>((instrument, measurement, _, _) =>
         {
-            if (instrument.Name == "bed_clear_acknowledgement_expiry.scan_duration_ms")
+            if (instrument == _metrics.ScanDurationMs)
             {
                 durations.Add(measurement);
             }
@@ -162,7 +168,7 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
     }
 
     [Fact(DisplayName = "ScanAsync records scanned count and duration once per pass")]
-    public async Task ScanAsync_RecordsScannedCountAndDuration_OncePerPass()
+    public void ScanAsync_RecordsScannedCountAndDuration_OncePerPass()
     {
         Guid printerA = SeedAcknowledgedPrinter(1);
         Guid printerB = SeedAcknowledgedPrinter(2);
@@ -181,7 +187,7 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
     }
 
     [Fact(DisplayName = "ScanAsync records a zero scanned count when nothing is acknowledged")]
-    public async Task ScanAsync_RecordsZeroScannedCount_WhenNoAcknowledgedPrinters()
+    public void ScanAsync_RecordsZeroScannedCount_WhenNoAcknowledgedPrinters()
     {
         BedClearAcknowledgementExpiryService sut = CreateSut();
 
@@ -194,7 +200,7 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
     }
 
     [Fact(DisplayName = "ScanAsync only scans printers with an outstanding acknowledgement")]
-    public async Task ScanAsync_OnlyScansPrintersWithOutstandingAcknowledgement()
+    public void ScanAsync_OnlyScansPrintersWithOutstandingAcknowledgement()
     {
         Guid acknowledged = SeedAcknowledgedPrinter(1);
 
