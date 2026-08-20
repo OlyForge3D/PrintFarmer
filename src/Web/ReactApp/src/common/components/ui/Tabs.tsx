@@ -64,7 +64,10 @@ export interface TabListProps {
 const TabList: React.FC<TabListProps> = ({ children, className, 'aria-label': ariaLabel }) => {
   return (
     <div
-      className={clsx('flex items-center gap-2 bg-pf-bg-1 px-2 pt-2 pb-0', className)}
+      className={clsx(
+        'flex items-center gap-2 bg-pf-bg-1 px-2 pt-2 pb-0 overflow-x-auto flex-nowrap',
+        className,
+      )}
       role="tablist"
       aria-orientation="horizontal"
       aria-label={ariaLabel}
@@ -149,7 +152,7 @@ const Tab: React.FC<TabProps> = ({
         }
       }}
       className={clsx(
-        'px-4 py-2 text-sm font-medium transition-colors rounded-none',
+        'px-4 py-2 text-sm font-medium transition-colors rounded-none shrink-0 whitespace-nowrap',
         'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
         isActive
           ? 'relative z-20 -mb-px border-l-0 border-t border-r-0 border-b-0 border-pf-border bg-pf-bg-0 text-pf-text-primary rounded-none'
