@@ -165,19 +165,19 @@ public class JobQueueControllerTests
 
         Mock<IQueueResourceAuthorizationService> authorization = new();
         authorization
-            .Setup(service => service.CanAccessJobAsync(
+            .Setup(service => service.FilterAccessiblePrinterIdsAsync(
                 It.IsAny<ClaimsPrincipal>(),
-                allowedJobId,
+                It.IsAny<IReadOnlyCollection<Guid>>(),
                 PrinterGroupAccessLevel.View,
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
+            .ReturnsAsync(new HashSet<Guid>());
         authorization
-            .Setup(service => service.CanAccessJobAsync(
-                It.IsAny<ClaimsPrincipal>(),
-                deniedJobId,
+            .Setup(service => service.FilterActorAccessibleJobIdsAsync(
+                It.IsAny<string>(),
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Contains(allowedJobId) && ids.Contains(deniedJobId)),
                 PrinterGroupAccessLevel.View,
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
+            .ReturnsAsync(new HashSet<Guid> { allowedJobId });
         JobQueueController controller = CreateController(db, authorization.Object);
 
         IActionResult result = await controller.GetChangesAsync(
