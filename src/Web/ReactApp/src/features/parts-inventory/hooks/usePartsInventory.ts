@@ -76,10 +76,11 @@ export function usePartAdjustments(sku: string | undefined, limit = 100) {
   });
 }
 
-export function useReorderCandidates() {
+export function useReorderCandidates(options?: { enabled?: boolean }) {
   return useQuery<ReorderCandidateDto[]>({
     queryKey: partsInventoryKeys.reorder(),
     queryFn: () => partsInventoryService.listReorderCandidates(),
+    enabled: options?.enabled ?? true,
     staleTime: STALE_LIST_MS,
   });
 }

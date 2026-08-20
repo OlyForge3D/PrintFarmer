@@ -3,16 +3,21 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Regression test for issue #1686: when the printed-parts-inventory feature
-// is disabled server-side, the page must not fire the SKUs/Bins requests
-// alongside the reorder status probe. Unlike PartsInventoryPage.test.tsx,
-// this test exercises the *real* tab components and hooks (nothing but the
-// service layer is mocked) so it can assert on actual network call counts.
+// Regression tests for issue #1761: when the printed-parts-inventory
+// feature is disabled server-side, the page must not fire the reorder
+// probe (or the SKUs/Bins/Mappings tab queries) at all. The prior fix for
+// issue #1686 kept the SKUs/Bins/Mappings queries from racing the reorder
+// probe, but the probe itself — hitting `/api/parts-inventory/reorder` on
+// every mount to *detect* the disabled state — still fired and 404'd. This
+// suite exercises the *real* tab components and hooks (nothing but the
+// service layer and system-capabilities hook are mocked) so it can assert
+// on actual network call counts.
 
 const listParts = vi.hoisted(() => vi.fn());
 const listBins = vi.hoisted(() => vi.fn());
 const listReorderCandidates = vi.hoisted(() => vi.fn());
 const listMappings = vi.hoisted(() => vi.fn());
+const useSystemCapabilitiesMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/services/partsInventoryService', () => ({
   partsInventoryService: {
@@ -35,14 +40,11 @@ vi.mock('@/services/partsInventoryService', () => ({
   },
 }));
 
-import { PartsInventoryPage } from '../pages/PartsInventoryPage';
-import { partsInventoryKeys } from '../hooks/usePartsInventory';
+vi.mock('@/common/hooks/useSystemCapabilities', () => ({
+  useSystemCapabilities: () => useSystemCapabilitiesMock(),
+}));
 
-// Shape tolerated by `isFeatureDisabledError` (utils/problemDetails.ts):
-// an axios-error-like object carrying a ProblemDetails `code` extension.
-const FEATURE_DISABLED_ERROR = {
-  response: { status: 404, data: { code: 'featureDisabled' } },
-};
+import { PartsInventoryPage } from '../pages/PartsInventoryPage';
 
 function makeQueryClient() {
   return new QueryClient({
@@ -69,8 +71,12 @@ describe('PartsInventoryPage query gating when feature disabled', () => {
     window.localStorage.clear();
   });
 
-  it('does not request SKUs, Bins, or Mappings when the reorder probe reports the feature disabled', async () => {
-    listReorderCandidates.mockRejectedValue(FEATURE_DISABLED_ERROR);
+  it('does not request the reorder probe, SKUs, Bins, or Mappings when capabilities report the feature disabled', async () => {
+    useSystemCapabilitiesMock.mockReturnValue({
+      data: { operatorFeatures: { printedPartsInventoryEnabled: false } },
+      status: 'success',
+    });
+    listReorderCandidates.mockResolvedValue([]);
     listParts.mockResolvedValue([]);
     listBins.mockResolvedValue([]);
     listMappings.mockResolvedValue([]);
@@ -83,16 +89,20 @@ describe('PartsInventoryPage query gating when feature disabled', () => {
       ).toBeInTheDocument();
     });
 
-    // The reorder probe is expected to fire (it's how we learn the feature
-    // is disabled) but the SKUs/Bins/Mappings tab queries must never fire,
-    // whichever tab happened to be the active/default one.
-    expect(listReorderCandidates).toHaveBeenCalledTimes(1);
+    // Neither the reorder probe nor any tab query should ever fire — the
+    // disabled state is known up front from system capabilities, so no
+    // parts-inventory API request (including reorder) is made at all.
+    expect(listReorderCandidates).not.toHaveBeenCalled();
     expect(listParts).not.toHaveBeenCalled();
     expect(listBins).not.toHaveBeenCalled();
     expect(listMappings).not.toHaveBeenCalled();
   });
 
-  it('still fetches the active tab data once the probe confirms the feature is enabled', async () => {
+  it('still fetches the reorder probe and the active tab data once capabilities confirm the feature is enabled', async () => {
+    useSystemCapabilitiesMock.mockReturnValue({
+      data: { operatorFeatures: { printedPartsInventoryEnabled: true } },
+      status: 'success',
+    });
     listReorderCandidates.mockResolvedValue([]);
     listParts.mockResolvedValue([]);
     listBins.mockResolvedValue([]);
@@ -110,35 +120,37 @@ describe('PartsInventoryPage query gating when feature disabled', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('does not leak SKUs/Bins requests while a stale cached "enabled" reorder result is being revalidated', async () => {
-    // Simulate a prior mount (earlier in the same SPA session) that saw the
-    // feature enabled and cached an empty reorder-candidates success. Mark
-    // it stale (older than the hook's 30s staleTime) so this mount triggers
-    // react-query's default refetch-on-mount for stale data: the query
-    // resolves synchronously from cache (`isLoading`/`isPending` false)
-    // while a real network refetch is still in flight — the exact scenario
-    // that could let a naive `isLoading`-only gate mount the tabs early.
-    const queryClient = makeQueryClient();
-    queryClient.setQueryData(partsInventoryKeys.reorder(), [], {
-      updatedAt: Date.now() - 60_000,
+  it('treats a missing operatorFeatures flag as enabled (older API builds omit it entirely)', async () => {
+    useSystemCapabilitiesMock.mockReturnValue({
+      data: {},
+      status: 'success',
     });
-
-    // An admin disabled the feature in the meantime, so the background
-    // refetch now comes back `featureDisabled`.
-    listReorderCandidates.mockRejectedValue(FEATURE_DISABLED_ERROR);
+    listReorderCandidates.mockResolvedValue([]);
     listParts.mockResolvedValue([]);
     listBins.mockResolvedValue([]);
     listMappings.mockResolvedValue([]);
 
-    renderPage('/parts-inventory/skus', queryClient);
+    renderPage('/parts-inventory/skus');
 
     await waitFor(() => {
-      expect(
-        screen.getByText(/parts inventory feature is currently disabled/i)
-      ).toBeInTheDocument();
+      expect(listParts).toHaveBeenCalledTimes(1);
     });
+    expect(
+      screen.queryByText(/parts inventory feature is currently disabled/i)
+    ).not.toBeInTheDocument();
+  });
 
-    expect(listReorderCandidates).toHaveBeenCalledTimes(1);
+  it('shows a checking-status placeholder and fires no queries while capabilities are still pending', async () => {
+    useSystemCapabilitiesMock.mockReturnValue({ data: undefined, status: 'pending' });
+    listReorderCandidates.mockResolvedValue([]);
+    listParts.mockResolvedValue([]);
+    listBins.mockResolvedValue([]);
+    listMappings.mockResolvedValue([]);
+
+    renderPage('/parts-inventory/skus');
+
+    expect(screen.getByText(/checking printed-parts inventory status/i)).toBeInTheDocument();
+    expect(listReorderCandidates).not.toHaveBeenCalled();
     expect(listParts).not.toHaveBeenCalled();
     expect(listBins).not.toHaveBeenCalled();
   });
