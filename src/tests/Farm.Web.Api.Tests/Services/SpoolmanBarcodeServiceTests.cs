@@ -91,14 +91,112 @@ public class SpoolmanBarcodeServiceTests
     }
 
     [Fact]
-    public async Task SaveBarcodeMappingAsync_ValidRequest_PatchesArticleNumber()
+    public async Task GetFilamentByBarcodeAsync_MatchesNormalizedGtin()
+    {
+        // Stored gtin "0123456789012" (13-digit) normalizes the same as the scanned 12-digit
+        // barcode below: leading zeros never change the GS1 mod-10 check digit.
+        using ServiceHarness harness = CreateService(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
+            {
+                object[] filaments =
+                [
+                    new { id = 5, name = "Match", gtin = "0123456789012", material = "PLA" },
+                ];
+                return JsonResponse(filaments, totalCount: "1");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("123456789012", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(5, result.Id);
+    }
+
+    [Fact]
+    public async Task GetFilamentByBarcodeAsync_ScannedUpc12ResolvesFilamentStoredAsEan13()
+    {
+        using ServiceHarness harness = CreateService(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
+            {
+                object[] filaments =
+                [
+                    new { id = 11, name = "Ean13Stored", gtin = "0123456789012", material = "PLA" },
+                ];
+                return JsonResponse(filaments, totalCount: "1");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        // Scan the UPC-12 (GTIN-12) form; the stored value is the equivalent EAN-13 (GTIN-13).
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("123456789012", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(11, result.Id);
+    }
+
+    [Fact]
+    public async Task GetFilamentByBarcodeAsync_ScannedEan13ResolvesFilamentStoredAsUpc12()
+    {
+        using ServiceHarness harness = CreateService(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
+            {
+                object[] filaments =
+                [
+                    new { id = 12, name = "Upc12Stored", gtin = "123456789012", material = "PLA" },
+                ];
+                return JsonResponse(filaments, totalCount: "1");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        // Scan the EAN-13 (GTIN-13) form; the stored value is the equivalent UPC-12 (GTIN-12).
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("0123456789012", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(12, result.Id);
+    }
+
+    [Fact]
+    public async Task GetFilamentByBarcodeAsync_LegacyArticleNumberOnly_StillResolves()
+    {
+        // Record predates the gtin column: gtin is null, only article_number holds the
+        // (verbatim, unnormalized) scanned value.
+        using ServiceHarness harness = CreateService(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
+            {
+                object[] filaments =
+                [
+                    new { id = 20, name = "Legacy", article_number = "123456789012", gtin = (string?)null, material = "PLA" },
+                ];
+                return JsonResponse(filaments, totalCount: "1");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("123456789012", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(20, result.Id);
+    }
+
+    [Fact]
+    public async Task SaveBarcodeMappingAsync_ValidRequest_PatchesNormalizedGtin()
     {
         string? patchPayload = null;
         using ServiceHarness harness = CreateService(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri!.AbsolutePath == "/api/v1/filament/7")
             {
-                return JsonResponse(new { id = 7, name = "Target", article_number = (string?)null, material = "PLA" });
+                return JsonResponse(new { id = 7, name = "Target", article_number = (string?)null, gtin = (string?)null, material = "PLA" });
             }
 
             if (req.Method == HttpMethod.Get && req.RequestUri!.AbsolutePath == "/api/v1/filament")
@@ -109,20 +207,37 @@ public class SpoolmanBarcodeServiceTests
             if (req.Method == HttpMethod.Patch && req.RequestUri!.AbsolutePath == "/api/v1/filament/7")
             {
                 patchPayload = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-                return JsonResponse(new { id = 7, name = "Target", article_number = "UPC123", material = "PLA" });
+                return JsonResponse(new { id = 7, name = "Target", gtin = "00123456789012", material = "PLA" });
             }
 
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        SpoolmanFilamentDto? result = await harness.Service.SaveBarcodeMappingAsync(7, "UPC123", CancellationToken.None);
+        SpoolmanFilamentDto? result = await harness.Service.SaveBarcodeMappingAsync(7, "123456789012", CancellationToken.None);
 
         Assert.NotNull(result);
-        Assert.Equal("UPC123", result.ArticleNumber);
+        Assert.Equal("00123456789012", result.Gtin);
         Assert.NotNull(patchPayload);
         using JsonDocument doc = JsonDocument.Parse(patchPayload);
-        Assert.Equal("UPC123", doc.RootElement.GetProperty("article_number").GetString());
+        Assert.Equal("00123456789012", doc.RootElement.GetProperty("gtin").GetString());
         _ = Assert.Single(doc.RootElement.EnumerateObject());
+    }
+
+    [Fact]
+    public async Task SaveBarcodeMappingAsync_InvalidBarcode_ReturnsNullWithoutPersisting()
+    {
+        bool anyHttpCallMade = false;
+        using ServiceHarness harness = CreateService(_ =>
+        {
+            anyHttpCallMade = true;
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        // Bad GS1 mod-10 check digit; must be rejected, never patched to Spoolman.
+        SpoolmanFilamentDto? result = await harness.Service.SaveBarcodeMappingAsync(7, "04850807Z", CancellationToken.None);
+
+        Assert.Null(result);
+        Assert.False(anyHttpCallMade, "An invalid barcode must be rejected before any Spoolman request is made.");
     }
 
     [Fact]
@@ -130,7 +245,7 @@ public class SpoolmanBarcodeServiceTests
     {
         using ServiceHarness harness = CreateService(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
 
-        SpoolmanFilamentDto? result = await harness.Service.SaveBarcodeMappingAsync(404, "UPC123", CancellationToken.None);
+        SpoolmanFilamentDto? result = await harness.Service.SaveBarcodeMappingAsync(404, "123456789012", CancellationToken.None);
 
         Assert.Null(result);
     }

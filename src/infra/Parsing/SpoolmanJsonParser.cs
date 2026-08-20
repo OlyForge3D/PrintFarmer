@@ -204,6 +204,7 @@ public static class SpoolmanJsonParser
         string? comment = TryGetString(el, "comment");
         string? multiColorHexes = TryGetString(el, "multi_color_hexes");
         string? externalId = TryGetString(el, "external_id");
+        string? gtin = TryGetString(el, "gtin");
 
         return new SpoolmanFilamentDto(
             Id: id,
@@ -221,7 +222,8 @@ public static class SpoolmanJsonParser
             ArticleNumber: articleNumber,
             Comment: comment,
             MultiColorHexes: multiColorHexes,
-            ExternalId: externalId);
+            ExternalId: externalId,
+            Gtin: gtin);
     }
 
     /// <summary>

@@ -21,7 +21,8 @@ public record SpoolmanFilamentDto(
     string? ArticleNumber,
     string? Comment,
     string? MultiColorHexes,
-    string? ExternalId);
+    string? ExternalId,
+    string? Gtin = null);
 
 /// <summary>
 /// Represents a vendor retrieved from Spoolman.
@@ -65,10 +66,13 @@ public record SpoolmanCreateFilamentRequest
     public string? ArticleNumber { get; init; }
 
     public string? MultiColorHexes { get; init; }
+
+    public string? Gtin { get; init; }
 }
 
 /// <summary>
-/// Request to associate a retail barcode with a Spoolman filament by storing it in articleNumber.
+/// Request to associate a retail barcode with a Spoolman filament by storing it in the
+/// normalized GTIN-14 <c>gtin</c> field.
 /// </summary>
 public record SpoolmanBarcodeMappingRequest
 {

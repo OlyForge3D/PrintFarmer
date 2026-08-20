@@ -101,7 +101,7 @@ public class SpoolmanBarcodeEndpointTests
     public async Task GetFilamentByBarcodeAsync_QueryCodeWithSlashPercentAndSpace_ReturnsOkWithFilament()
     {
         const string barcode = "ABC/DEF 12%3";
-        SpoolmanFilamentDto filament = CreateFilament(44, barcode);
+        SpoolmanFilamentDto filament = CreateFilament(44, barcode, gtin: "00123456789012");
         Mock<ISpoolmanService> routedSpoolmanServiceMock = new();
         routedSpoolmanServiceMock
             .Setup(s => s.GetFilamentByBarcodeAsync(barcode, It.IsAny<CancellationToken>()))
@@ -126,6 +126,7 @@ public class SpoolmanBarcodeEndpointTests
         Assert.NotNull(value);
         Assert.Equal(44, value.Id);
         Assert.Equal(barcode, value.ArticleNumber);
+        Assert.Equal("00123456789012", value.Gtin);
         routedSpoolmanServiceMock.Verify(
             s => s.GetFilamentByBarcodeAsync(barcode, It.IsAny<CancellationToken>()),
             Times.Once);
@@ -134,10 +135,11 @@ public class SpoolmanBarcodeEndpointTests
     [Fact]
     public async Task SaveBarcodeMappingAsync_ValidRequest_ReturnsUpdatedFilament()
     {
-        SpoolmanFilamentDto filament = CreateFilament(7, "ABC123");
-        SpoolmanBarcodeMappingRequest request = new() { Barcode = "ABC123", FilamentId = 7 };
+        const string barcode = "123456789012";
+        SpoolmanFilamentDto filament = CreateFilament(7, articleNumber: null, gtin: "00123456789012");
+        SpoolmanBarcodeMappingRequest request = new() { Barcode = barcode, FilamentId = 7 };
         spoolmanServiceMock
-            .Setup(s => s.SaveBarcodeMappingAsync(7, "ABC123", It.IsAny<CancellationToken>()))
+            .Setup(s => s.SaveBarcodeMappingAsync(7, barcode, It.IsAny<CancellationToken>()))
             .ReturnsAsync(filament);
 
         ActionResult<SpoolmanFilamentDto> result = await controller.SaveBarcodeMappingAsync(request, CancellationToken.None);
@@ -145,16 +147,17 @@ public class SpoolmanBarcodeEndpointTests
         OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
         SpoolmanFilamentDto value = Assert.IsType<SpoolmanFilamentDto>(ok.Value);
         Assert.Equal(7, value.Id);
-        Assert.Equal("ABC123", value.ArticleNumber);
+        Assert.Equal("00123456789012", value.Gtin);
         VerifyLogged(BarcodeScanAction.Mapping, BarcodeScanOutcome.Mapped, 200, matchedFilamentId: 7);
     }
 
     [Fact]
     public async Task SaveBarcodeMappingAsync_MissingFilament_ReturnsNotFound()
     {
-        SpoolmanBarcodeMappingRequest request = new() { Barcode = "ABC123", FilamentId = 404 };
+        const string barcode = "123456789012";
+        SpoolmanBarcodeMappingRequest request = new() { Barcode = barcode, FilamentId = 404 };
         spoolmanServiceMock
-            .Setup(s => s.SaveBarcodeMappingAsync(404, "ABC123", It.IsAny<CancellationToken>()))
+            .Setup(s => s.SaveBarcodeMappingAsync(404, barcode, It.IsAny<CancellationToken>()))
             .ReturnsAsync((SpoolmanFilamentDto?)null);
 
         ActionResult<SpoolmanFilamentDto> result = await controller.SaveBarcodeMappingAsync(request, CancellationToken.None);
@@ -174,11 +177,27 @@ public class SpoolmanBarcodeEndpointTests
     }
 
     [Fact]
+    public async Task SaveBarcodeMappingAsync_InvalidGtinCheckDigit_ReturnsBadRequestWithoutCallingService()
+    {
+        // Bad GS1 mod-10 check digit; the controller must reject before ever calling the service.
+        SpoolmanBarcodeMappingRequest request = new() { Barcode = "04850807Z", FilamentId = 7 };
+
+        ActionResult<SpoolmanFilamentDto> result = await controller.SaveBarcodeMappingAsync(request, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        spoolmanServiceMock.Verify(
+            s => s.SaveBarcodeMappingAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        VerifyLogged(BarcodeScanAction.Mapping, BarcodeScanOutcome.Error, 400, matchedFilamentId: 7);
+    }
+
+    [Fact]
     public async Task SaveBarcodeMappingAsync_ServiceThrows_LogsErrorOutcome()
     {
-        SpoolmanBarcodeMappingRequest request = new() { Barcode = "ERR123", FilamentId = 7 };
+        const string barcode = "123456789012";
+        SpoolmanBarcodeMappingRequest request = new() { Barcode = barcode, FilamentId = 7 };
         spoolmanServiceMock
-            .Setup(s => s.SaveBarcodeMappingAsync(7, "ERR123", It.IsAny<CancellationToken>()))
+            .Setup(s => s.SaveBarcodeMappingAsync(7, barcode, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Spoolman failed"));
 
         ActionResult<SpoolmanFilamentDto> result = await controller.SaveBarcodeMappingAsync(request, CancellationToken.None);
@@ -328,7 +347,7 @@ public class SpoolmanBarcodeEndpointTests
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
-    private static SpoolmanFilamentDto CreateFilament(int id, string? articleNumber)
+    private static SpoolmanFilamentDto CreateFilament(int id, string? articleNumber, string? gtin = null)
         => new(
             Id: id,
             Name: "PolyTerra PLA",
@@ -345,6 +364,7 @@ public class SpoolmanBarcodeEndpointTests
             ArticleNumber: articleNumber,
             Comment: null,
             MultiColorHexes: null,
+            Gtin: gtin,
             ExternalId: null);
 
     private void VerifyLogged(

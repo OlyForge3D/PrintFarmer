@@ -448,50 +448,35 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
         const int pageSize = 500;
         string baseUrl = cfg.BaseUrl.TrimEnd('/');
-        var matches = new List<SpoolmanFilamentDto>();
-        bool useArticleNumberFilter = true;
-        int offset = 0;
+        string? normalizedGtin = GtinNormalizer.Normalize(trimmedBarcode);
 
-        while (true)
+        List<SpoolmanFilamentDto> matches = [];
+
+        if (normalizedGtin is not null)
         {
-            SpoolmanPagedResult<SpoolmanFilamentDto>? page = await FetchBarcodeFilamentPageAsync(
+            matches = await CollectBarcodeMatchesAsync(
                 baseUrl,
-                useArticleNumberFilter ? trimmedBarcode : null,
                 pageSize,
-                offset,
+                articleNumberFilter: null,
+                gtinFilter: normalizedGtin,
+                isMatch: filament => string.Equals(GtinNormalizer.Normalize(filament.Gtin), normalizedGtin, StringComparison.Ordinal),
+                debugFilterName: "gtin",
                 ct);
+        }
 
-            if (page is null)
-            {
-                if (useArticleNumberFilter)
-                {
-                    logger.LogDebug("Spoolman article_number filament filter failed; falling back to full filament scan.");
-                    useArticleNumberFilter = false;
-                    offset = 0;
-                    matches.Clear();
-                    continue;
-                }
-
-                return null;
-            }
-
-            foreach (SpoolmanFilamentDto filament in page.Items.Where(filament =>
-                         string.Equals(filament.ArticleNumber, trimmedBarcode, StringComparison.Ordinal)))
-            {
-                matches.Add(filament);
-            }
-
-            if (page.Items.Count == 0 || page.Items.Count < pageSize)
-            {
-                break;
-            }
-
-            if (page.TotalCount > 0 && offset + page.Items.Count >= page.TotalCount)
-            {
-                break;
-            }
-
-            offset += pageSize;
+        if (matches.Count == 0)
+        {
+            // Legacy fallback: filaments written before `gtin` existed store the scanned
+            // barcode verbatim in article_number. Compare with the raw (unnormalized) value
+            // so records that were never backfilled still resolve.
+            matches = await CollectBarcodeMatchesAsync(
+                baseUrl,
+                pageSize,
+                articleNumberFilter: trimmedBarcode,
+                gtinFilter: null,
+                isMatch: filament => string.Equals(filament.ArticleNumber, trimmedBarcode, StringComparison.Ordinal),
+                debugFilterName: "article_number",
+                ct);
         }
 
         if (matches.Count == 0)
@@ -510,6 +495,69 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         return first;
+    }
+
+    /// <summary>
+    /// Pages through Spoolman filaments, applying a server-side filter when possible (falling
+    /// back to a full scan if the server rejects the filter query param), and collects the
+    /// filaments satisfying <paramref name="isMatch"/>.
+    /// </summary>
+    private async Task<List<SpoolmanFilamentDto>> CollectBarcodeMatchesAsync(
+        string baseUrl,
+        int pageSize,
+        string? articleNumberFilter,
+        string? gtinFilter,
+        Func<SpoolmanFilamentDto, bool> isMatch,
+        string debugFilterName,
+        CancellationToken ct)
+    {
+        var matches = new List<SpoolmanFilamentDto>();
+        bool useFilter = true;
+        int offset = 0;
+
+        while (true)
+        {
+            SpoolmanPagedResult<SpoolmanFilamentDto>? page = await FetchBarcodeFilamentPageAsync(
+                baseUrl,
+                useFilter ? articleNumberFilter : null,
+                useFilter ? gtinFilter : null,
+                pageSize,
+                offset,
+                ct);
+
+            if (page is null)
+            {
+                if (useFilter)
+                {
+                    logger.LogDebug("Spoolman {Filter} filament filter failed; falling back to full filament scan.", debugFilterName);
+                    useFilter = false;
+                    offset = 0;
+                    matches.Clear();
+                    continue;
+                }
+
+                return matches;
+            }
+
+            foreach (SpoolmanFilamentDto filament in page.Items.Where(isMatch))
+            {
+                matches.Add(filament);
+            }
+
+            if (page.Items.Count == 0 || page.Items.Count < pageSize)
+            {
+                break;
+            }
+
+            if (page.TotalCount > 0 && offset + page.Items.Count >= page.TotalCount)
+            {
+                break;
+            }
+
+            offset += pageSize;
+        }
+
+        return matches;
     }
 
     /// <summary>
@@ -556,6 +604,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     private async Task<SpoolmanPagedResult<SpoolmanFilamentDto>?> FetchBarcodeFilamentPageAsync(
         string baseUrl,
         string? articleNumber,
+        string? gtin,
         int limit,
         int offset,
         CancellationToken ct)
@@ -569,6 +618,11 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         if (!string.IsNullOrWhiteSpace(articleNumber))
         {
             parts.Add($"article_number={Uri.EscapeDataString(articleNumber)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(gtin))
+        {
+            parts.Add($"gtin={Uri.EscapeDataString(gtin)}");
         }
 
         string url = $"{baseUrl}/api/v1/filament?{string.Join('&', parts)}";
@@ -787,6 +841,16 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             return null;
         }
 
+        string? normalizedGtin = GtinNormalizer.Normalize(trimmedBarcode);
+        if (normalizedGtin is null)
+        {
+            logger.LogWarning(
+                "Rejected barcode {Barcode} for filament {FilamentId}: not a valid GTIN-8/12/13/14 (bad length or check digit).",
+                LogSanitizer.Sanitize(trimmedBarcode),
+                filamentId);
+            return null;
+        }
+
         SpoolmanFilamentDto? target = await GetFilamentByIdAsync(filamentId, ct);
         if (target is null)
         {
@@ -805,7 +869,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
         return await UpdateFilamentInSpoolmanAsync(
             filamentId,
-            new SpoolmanCreateFilamentRequest { ArticleNumber = trimmedBarcode },
+            new SpoolmanCreateFilamentRequest { Gtin = normalizedGtin },
             ct);
     }
 
@@ -1106,6 +1170,11 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         if (request.ArticleNumber != null)
         {
             body["article_number"] = request.ArticleNumber;
+        }
+
+        if (request.Gtin != null)
+        {
+            body["gtin"] = request.Gtin;
         }
 
         if (request.MultiColorHexes != null)

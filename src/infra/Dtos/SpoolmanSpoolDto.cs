@@ -97,7 +97,8 @@ public record SpoolmanSpoolRequest
 }
 
 /// <summary>
-/// Request to create a Spoolman spool by resolving a retail barcode to a filament articleNumber.
+/// Request to create a Spoolman spool by resolving a retail barcode to a filament's normalized
+/// GTIN-14 <c>gtin</c> value (falling back to <c>article_number</c> for legacy records).
 /// </summary>
 public record SpoolmanImportSpoolByBarcodeRequest
 {

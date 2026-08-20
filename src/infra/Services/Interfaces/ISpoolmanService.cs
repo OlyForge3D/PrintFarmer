@@ -58,8 +58,10 @@ public interface ISpoolmanService
     Task<SpoolmanPagedResult<SpoolmanFilamentDto>> ListFilamentsPagedAsync(SpoolmanFilamentQueryParams queryParams, CancellationToken ct);
 
     /// <summary>
-    /// Gets the filament whose articleNumber exactly matches the scanned barcode.
-    /// Returns the lowest-ID filament if duplicate articleNumbers exist.
+    /// Gets the filament whose normalized GTIN-14 <c>gtin</c> matches the scanned barcode
+    /// (after normalizing both sides), falling back to an exact <c>articleNumber</c> match for
+    /// legacy filaments that have not yet been assigned a <c>gtin</c>.
+    /// Returns the lowest-ID filament if duplicate matches exist.
     /// </summary>
     Task<SpoolmanFilamentDto?> GetFilamentByBarcodeAsync(string barcode, CancellationToken ct);
 
@@ -147,7 +149,10 @@ public interface ISpoolmanService
     Task<SpoolmanFilamentDto> UpdateFilamentInSpoolmanAsync(int filamentId, SpoolmanCreateFilamentRequest request, CancellationToken ct);
 
     /// <summary>
-    /// Stores a barcode mapping on a filament by setting its articleNumber field.
+    /// Stores a barcode mapping on a filament by normalizing it to a 14-digit GTIN and setting
+    /// its <c>gtin</c> field. <c>articleNumber</c> is never written by this path. Returns
+    /// <c>null</c> if the filament does not exist or the barcode fails GTIN normalization
+    /// (invalid length or check digit).
     /// Duplicate mappings are allowed and resolved deterministically by barcode lookup.
     /// </summary>
     Task<SpoolmanFilamentDto?> SaveBarcodeMappingAsync(int filamentId, string barcode, CancellationToken ct);
