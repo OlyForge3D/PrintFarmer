@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import clsx from 'clsx';
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
@@ -9,7 +9,10 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
   { invalid, className, type, ...rest },
   ref
 ) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  // Tracked in state (rather than a plain ref) so the wheel-listener effect
+  // below re-runs whenever the underlying DOM node changes, not just when
+  // `type` changes.
+  const [inputNode, setInputNode] = useState<HTMLInputElement | null>(null);
 
   // Chrome (and other Chromium browsers) increments/decrements a focused
   // number input's value on mouse-wheel scroll instead of letting the scroll
@@ -27,11 +30,11 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
   // change and lets focus move away, restoring normal scroll behavior
   // without altering the value the user last typed.
   useEffect(() => {
-    const node = inputRef.current;
-    if (!node || type !== 'number') {
+    if (!inputNode || type !== 'number') {
       return;
     }
 
+    const node = inputNode;
     const handleNativeWheel = (event: WheelEvent) => {
       // Only intercept while this field is actually focused — Chromium's
       // increment/refocus default action only applies to a focused number
@@ -50,10 +53,10 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
 
     node.addEventListener('wheel', handleNativeWheel, { passive: false });
     return () => node.removeEventListener('wheel', handleNativeWheel);
-  }, [type]);
+  }, [inputNode, type]);
 
   const setRefs = (node: HTMLInputElement | null) => {
-    inputRef.current = node;
+    setInputNode(node);
     if (typeof ref === 'function') {
       ref(node);
     } else if (ref) {

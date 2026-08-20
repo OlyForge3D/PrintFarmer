@@ -117,4 +117,39 @@ describe('Input', () => {
 
     expect(handleWheel).toHaveBeenCalled();
   });
+
+  it('should NOT cancel a wheel event over an unfocused number input', () => {
+    // Regression guard for issue #1745: an earlier version of this fix called
+    // preventDefault()/blur() on every wheel event over a number input,
+    // regardless of focus. That cancelled the browser's whole scroll
+    // gesture whenever the cursor happened to be over an *unfocused* number
+    // input, making a scroll container (e.g. the Add Printer modal body)
+    // unscrollable past it. Chromium's increment/refocus default action only
+    // applies to a *focused* number input, so the fix must only intercept
+    // (and therefore only cancel) the wheel event while the field is focused.
+    render(<Input type="number" placeholder="Amount" />);
+
+    const input = screen.getByPlaceholderText('Amount');
+    expect(input).not.toHaveFocus();
+
+    // fireEvent returns `false` when the event was cancelled via
+    // preventDefault(), and `true` otherwise.
+    const notCancelled = fireEvent.wheel(input, { deltaY: 100, cancelable: true });
+
+    expect(notCancelled).toBe(true);
+    expect(input).not.toHaveFocus();
+  });
+
+  it('should cancel a wheel event over a focused number input', () => {
+    render(<Input type="number" placeholder="Amount" />);
+
+    const input = screen.getByPlaceholderText('Amount');
+    input.focus();
+    expect(input).toHaveFocus();
+
+    const notCancelled = fireEvent.wheel(input, { deltaY: 100, cancelable: true });
+
+    expect(notCancelled).toBe(false);
+    expect(input).not.toHaveFocus();
+  });
 });
