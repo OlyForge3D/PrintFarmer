@@ -196,6 +196,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService, Farm.Infrastructure.Services.Queue.PrinterPhysicalActuationService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService, Farm.Infrastructure.Services.Queue.Dispatch.DispatchClaimService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IBedClearAcknowledgementService, Farm.Infrastructure.Services.Queue.BedClearAcknowledgementService>();
+
         // #1731: direct membership-change SignalR hint, wired into printer-group/printer/user mutations.
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IQueueSubscriptionMembershipNotifier, Farm.Infrastructure.Services.Queue.QueueSubscriptionMembershipNotifier>();
 

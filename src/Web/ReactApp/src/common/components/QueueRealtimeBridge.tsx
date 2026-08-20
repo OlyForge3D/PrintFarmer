@@ -130,12 +130,26 @@ export function QueueRealtimeBridge() {
     // #1731: event types accumulated since the last invalidateAuthority run, drained
     // (and used to narrow the invalidation) at the start of each run.
     const pendingEventTypes = new Set<string>();
+    // #1731: set whenever a connect/resources-changed/mount trigger requests an
+    // invalidation, and consumed at the start of the next invalidateAuthority run.
+    // This is deliberately independent of pendingEventTypes: if a reconnect (which may
+    // have missed arbitrary events while disconnected) happens to get coalesced into
+    // the same run as an in-flight actuation-only queue event, the run must still be
+    // a full invalidation -- narrowing must never be inferred from *what type of
+    // trigger* caused the run, only from ordinary queue events on their own.
+    let forceFullInvalidation = false;
 
     const invalidateAuthority = async () => {
       const eventTypes = Array.from(pendingEventTypes);
       pendingEventTypes.clear();
+      const mustInvalidateFully = forceFullInvalidation;
+      forceFullInvalidation = false;
 
-      if (eventTypes.length > 0 && eventTypes.every(isPrinterActuationOnlyEventType)) {
+      if (
+        !mustInvalidateFully &&
+        eventTypes.length > 0 &&
+        eventTypes.every(isPrinterActuationOnlyEventType)
+      ) {
         // Every accumulated event since the last run is a single-printer physical/
         // backend actuation -- only that printer's own state can have changed.
         await queryClient.invalidateQueries({ queryKey: queryKeys.printers });
@@ -194,6 +208,10 @@ export function QueueRealtimeBridge() {
 
     const refreshInvalidateOnly = () => invalidateRefresher.trigger();
     const refreshBoth = () => {
+      // A connect/resources-changed/mount trigger may have missed arbitrary
+      // (non-actuation) events, or genuinely changed subscription membership --
+      // either way its invalidation must never be narrowed to just the printers key.
+      forceFullInvalidation = true;
       const invalidatePromise = invalidateRefresher.trigger();
       const reconcilePromise = reconcileRefresher.trigger();
       return Promise.all([invalidatePromise, reconcilePromise]);

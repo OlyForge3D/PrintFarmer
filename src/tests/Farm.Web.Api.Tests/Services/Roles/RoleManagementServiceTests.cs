@@ -3,6 +3,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Roles;
 using Farm.Infrastructure.Services.Authentication;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Roles;
 using Farm.Web.Api.Services.Startup;
 using FluentAssertions;
@@ -24,6 +25,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
     private readonly SqliteConnection _connection;
     private readonly DbContextOptions<AppDbContext> _options;
     private readonly Mock<IAuthAuditService> _authAuditService = new(MockBehavior.Loose);
+    private readonly Mock<IQueueSubscriptionMembershipNotifier> _membershipNotifier = new(MockBehavior.Loose);
 
     public RoleManagementServiceTests()
     {
@@ -50,7 +52,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
     private RoleManagementService CreateService(AppDbContext context)
     {
         EfRolesRepository repository = new(context);
-        return new RoleManagementService(repository, _authAuditService.Object);
+        return new RoleManagementService(repository, _authAuditService.Object, _membershipNotifier.Object);
     }
 
     private static async Task<Guid> CreateUserAsync(AppDbContext context, string username, bool isActive = true)
@@ -306,6 +308,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
         membership!.RoleId.Should().Be(target.Id);
         membership.ExpiresAt.Should().BeCloseTo(expiry, TimeSpan.FromSeconds(1));
         (await context.Roles.AnyAsync(r => r.Id == source.Id)).Should().BeFalse();
+        _membershipNotifier.Verify(n => n.NotifyMembershipChangedAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -322,6 +325,25 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
 
         (await context.UserRoles.AnyAsync(ur => ur.UserId == memberId)).Should().BeFalse();
         (await context.Roles.AnyAsync(r => r.Id == role.Id)).Should().BeFalse();
+        _membershipNotifier.Verify(n => n.NotifyMembershipChangedAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
+    /// #1731: deleting a role that has no members mutates no <c>UserRoles</c> rows, so it
+    /// cannot change any queue reader's authorized subscription set -- the notifier must not
+    /// fire, mirroring the narrowed-hint contract enforced elsewhere in this issue.
+    /// </summary>
+    [Fact]
+    public async Task DeleteRoleAsync_WithNoMembers_DoesNotNotifyMembershipChanged()
+    {
+        await using AppDbContext context = await CreateSeededContextAsync();
+        RoleManagementService service = CreateService(context);
+        Guid actor = Guid.NewGuid();
+        RoleDetailDto role = await service.CreateRoleAsync(new CreateCustomRoleRequest { Name = "operators", DisplayName = "Operators" }, actor, null);
+
+        await service.DeleteRoleAsync(role.Id, reassignToRoleId: null, cascade: false, actor, null);
+
+        _membershipNotifier.Verify(n => n.NotifyMembershipChangedAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ---- D9: admin lockout guardrails ----

@@ -11,10 +11,13 @@ namespace Farm.Web.Api.Tests.Services.PrinterGroups;
 
 /// <summary>
 /// #1731: verifies PrinterGroupService notifies IQueueSubscriptionMembershipNotifier
-/// exactly once whenever printer-group membership actually changes (reassigning a printer
-/// to a different group, removing a printer from a group, or deleting a group), and never
-/// on operations that cannot change subscription membership (create/rename/access-rule
-/// changes). This is the mandatory membership-change acceptance scenario from the issue.
+/// exactly once whenever printer-group membership actually changes -- reassigning a
+/// printer to a different group, removing a printer from a group, deleting a group, or
+/// changing which roles may access a group (since access-rule changes gate which
+/// printers a role's members are authorized to see, and therefore subscribe to, just
+/// like printer membership does) -- and never on operations that cannot change
+/// subscription membership (create/rename). This is the mandatory membership-change
+/// acceptance scenario from the issue.
 /// </summary>
 public class PrinterGroupServiceMembershipNotificationTests
 {
@@ -83,6 +86,33 @@ public class PrinterGroupServiceMembershipNotificationTests
         PrinterGroupService service = CreateService(db, notifier.Object);
 
         await service.DeleteAsync(group.Id, CancellationToken.None);
+
+        notifier.Verify(n => n.NotifyMembershipChangedAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SetAccessRulesAsync_NotifiesMembershipChangedExactlyOnce()
+    {
+        await using AppDbContext db = CreateDbContext();
+        PrinterGroup group = CreateGroup("Restricted");
+        var role = new Role { Id = Guid.NewGuid(), Name = "farm_operator" };
+        db.PrinterGroups.Add(group);
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        var notifier = new Mock<IQueueSubscriptionMembershipNotifier>();
+        notifier
+            .Setup(n => n.NotifyMembershipChangedAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        PrinterGroupService service = CreateService(db, notifier.Object);
+
+        // Revoking/granting a role's access to a group changes which printers that
+        // role's members are authorized to see -- and therefore subscribe to -- just
+        // like adding/removing a printer from the group does.
+        await service.SetAccessRulesAsync(
+            group.Id,
+            new SetAccessRulesDto(new[] { new SetAccessRuleItem(role.Id, PrinterGroupAccessLevel.View) }),
+            CancellationToken.None);
 
         notifier.Verify(n => n.NotifyMembershipChangedAsync(It.IsAny<CancellationToken>()), Times.Once);
     }

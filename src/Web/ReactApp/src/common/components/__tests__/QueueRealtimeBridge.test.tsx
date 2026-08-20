@@ -327,6 +327,39 @@ describe('QueueRealtimeBridge', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-stats'] });
   });
 
+  it('#1731: a resources-changed hint that races with a pending actuation-only queue event still forces a full invalidation', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <QueueRealtimeBridge />
+      </QueryClientProvider>
+    );
+    await waitFor(() =>
+      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledTimes(1)
+    );
+
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    invalidate.mockClear();
+
+    // Fire an actuation-only queue event and the membership-changed hint back to
+    // back, synchronously, so the coalescing loop may batch both triggers into the
+    // same invalidateAuthority run. Even so, the resources-changed hint must force a
+    // full invalidation -- narrowing must never be inferred from what accumulated in
+    // pendingEventTypes when a connect/resources-changed/mount trigger is also in
+    // play, since that trigger may have missed arbitrary non-actuation events.
+    mocks.emitQueueEvent({
+      printerId: 'p1',
+      eventType: 'PrintFarmer.Queue.BedClearAcknowledged.v1',
+    });
+    mocks.emitResourcesChanged();
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-stats'] })
+    );
+  });
+
   it('runs a trailing snapshot when B commits after in-flight snapshot A reads resources', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },

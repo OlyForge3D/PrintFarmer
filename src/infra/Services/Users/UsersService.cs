@@ -31,6 +31,7 @@ namespace Farm.Infrastructure.Services.Users;
 /// <param name="passwordHashingService">Service for secure password hashing and verification</param>
 /// <param name="revocationService">Shared helper to revoke a user's active sessions when their effective permissions change</param>
 /// <param name="authAuditService">Service for recording authentication and authorization audit events</param>
+/// <param name="membershipNotifier">Optional notifier for queue subscription membership changes (issue #1731); null in contexts that don't need it</param>
 /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
 public class UsersService(
     IUsersRepository users,

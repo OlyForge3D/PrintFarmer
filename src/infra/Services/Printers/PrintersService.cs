@@ -76,6 +76,8 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="spoolResolver">Resolves guided spool ids from each printer's owning source</param>
 /// <param name="coverageBroadcaster">Broadcasts filament coverage invalidations after printer mutations</param>
 /// <param name="activityAccumulator">Optional per-tool active-time accumulator (issue #711, round-14) consulted when wiring the per-tool attribution capability flag and reset on printer removal</param>
+/// <param name="configuration">Optional configuration accessor</param>
+/// <param name="membershipNotifier">Optional notifier for queue subscription membership changes (issue #1731); null in contexts that don't need it</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
