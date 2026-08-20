@@ -34,10 +34,8 @@ function renderModal(overrides: Partial<React.ComponentProps<typeof MachineProfi
 }
 
 /** Rows in one nozzle section. */
-function rowsIn(nozzleLabel: string) {
-  const section = screen.getByRole('region', { name: nozzleLabel })
-    ?? screen.getByLabelText(nozzleLabel);
-  return within(section).getAllByRole('button');
+function rowsIn(sectionLabel: string) {
+  return within(screen.getByRole('region', { name: sectionLabel })).getAllByRole('button');
 }
 
 describe('MachineProfileSelectorModal', () => {

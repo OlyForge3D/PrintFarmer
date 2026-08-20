@@ -21,6 +21,7 @@ import { ProfileEditorModal, type ProfileType } from '@/features/slicer/componen
 import { ProcessProfileEditorModal } from '@/features/slicer/components/ProcessProfileEditorModal';
 import { MachineProfileSelectorModal, type MachineProfileChoice } from '@/features/slicer/components/job/MachineProfileSelectorModal';
 import { buildMachineProfileLabels, mentionsHighFlow } from '@/features/slicer/utils/machineProfileLabels';
+import { buildSlicerProfileJson } from '@/features/slicer/utils/slicerProfilePayload';
 import {
   SlicerSettingsPanel,
   type OrcaProcessSettings,
@@ -1114,7 +1115,9 @@ export const NewSliceJobPage: React.FC = () => {
     if (!selectedMachineProfileId) return '';
     const selected = machineProfileChoices.find((c) => c.name === selectedMachineProfileId);
     if (!selected) return selectedMachineProfileId;
-    const sameNozzle = machineProfileChoices.filter((c) => c.nozzleDiameter === selected.nozzleDiameter);
+    const sameNozzle = machineProfileChoices.filter(
+      (c) => c.nozzleDiameter === selected.nozzleDiameter && c.isSystem === selected.isSystem,
+    );
     const labels = buildMachineProfileLabels(sameNozzle.map((c) => c.name));
     return labels.get(selectedMachineProfileId) ?? selectedMachineProfileId;
   }, [selectedMachineProfileId, machineProfileChoices]);
@@ -1869,28 +1872,23 @@ export const NewSliceJobPage: React.FC = () => {
       // actually claim it. When nothing is registered/available, remain
       // unpinned so legacy single-worker deployments still work.
       slicerEngineVersion: selectedEngineVersion ?? latestAvailableForEngine,
-      slicerProfileJson: JSON.stringify({
-            machineProfileName: selectedMachineProfileId,
-            filamentProfileName: selectedFilamentProfileId,
-            // Include per-extruder names in profile JSON so workers can access them
-            ...(extruderFilamentNames ? { filamentProfileNames: extruderFilamentNames } : {}),
-            // Per-slice filament colour overrides (preview/G-code metadata only)
-            ...(extruderFilamentColoursPayload ? { filamentColours: extruderFilamentColoursPayload } : {}),
-            ...(singleFilamentColour ? { filamentColour: singleFilamentColour } : {}),
-            processProfileName: selectedProcessPresetId.startsWith('system:')
-              ? selectedProcessPresetId.slice('system:'.length)
-              : selectedProcessPresetId.startsWith('custom:')
-              ? selectedProcessPresetId.slice('custom:'.length)
-              : selectedProcessPresetId,
-            overrides: scrubSettingsForVersion(
-              {
-                ...advancedProcessSettings,
-                ...modifiedProcessOverrides,
-              },
-              'process',
-              selectedEngineVersion ?? latestAvailableForEngine,
-            ),
-          }),
+      slicerProfileJson: buildSlicerProfileJson({
+        // Canonical profile name, never the trimmed picker label.
+        machineProfileName: selectedMachineProfileId,
+        filamentProfileName: selectedFilamentProfileId,
+        filamentProfileNames: extruderFilamentNames,
+        filamentColours: extruderFilamentColoursPayload,
+        filamentColour: singleFilamentColour,
+        processPresetId: selectedProcessPresetId,
+        overrides: scrubSettingsForVersion(
+          {
+            ...advancedProcessSettings,
+            ...modifiedProcessOverrides,
+          },
+          'process',
+          selectedEngineVersion ?? latestAvailableForEngine,
+        ),
+      }),
       slicerProfileId: selectedProcessPresetId.startsWith('custom:')
             ? selectedProcessPresetId.slice('custom:'.length)
             : undefined,
@@ -2179,9 +2177,10 @@ export const NewSliceJobPage: React.FC = () => {
             />
 
             <div className="border-t border-pf-border/70 pt-2 space-y-2">
-              {selectedPrinterId ? (
-                <>
-                  <div className="space-y-1">
+              {/* The kebab (Edit / Import / Manage) lives OUTSIDE the printer
+                  conditional: machine-profile management must stay reachable even
+                  before a printer is chosen. Only the picker trigger is gated. */}
+              <div className="space-y-1">
                     {/* eslint-disable-next-line local/pf-no-raw-html-controls -- hidden file input requires native <input> for programmatic .click() trigger */}
                     <input
                       ref={importMachineFileRef}
@@ -2202,13 +2201,18 @@ export const NewSliceJobPage: React.FC = () => {
                       Machine profile
                     </span>
                     <div className="flex items-center gap-1">
-                      {/* Single machine-profile control. Replaces the old paired
+                      {!selectedPrinterId ? (
+                        <p className="min-w-0 flex-1 text-xs text-pf-warning">
+                          Select a printer above to choose a machine profile
+                        </p>
+                      ) : (
+                      /* Single machine-profile control. Replaces the old paired
                           machine-profile + nozzle dropdowns: in OrcaSlicer a machine
                           profile IS (printer model x nozzle), and for Prusa CORE One two
                           profiles share one nozzle diameter (standard vs HF), so nozzle
                           alone can never identify a profile. Resolving both inside the
                           picker also removes the old behaviour where changing the nozzle
-                          silently cleared the machine profile. */}
+                          silently cleared the machine profile. */
                       <Button
                         type="button"
                         variant="unstyled"
@@ -2217,6 +2221,10 @@ export const NewSliceJobPage: React.FC = () => {
                         aria-expanded={isMachinePickerOpen}
                         onClick={() => setIsMachinePickerOpen(true)}
                         disabled={machineProfileChoices.length === 0 || isMachineProfilesLoading}
+                        // Keeps the button focusable while unavailable so the
+                        // explanation below is actually reachable; a `title` on a
+                        // natively disabled button is announced to nobody.
+                        explainedDisabled={machineProfileChoices.length === 0 && !isMachineProfilesLoading}
                         title={machineProfileChoices.length === 0 && !isMachineProfilesLoading
                           ? 'No machine profiles for this printer — use the options menu to import one'
                           : undefined}
@@ -2251,6 +2259,7 @@ export const NewSliceJobPage: React.FC = () => {
                           <SwapHorizontalIcon className="w-4 h-4 text-pf-text-muted" />
                         </span>
                       </Button>
+                      )}
                       <div className="relative shrink-0" ref={machineMenuRef}>
                         <Button
                           type="button"
@@ -2307,13 +2316,6 @@ export const NewSliceJobPage: React.FC = () => {
                       </div>
                     </div>
                   </div>
-
-                </>
-              ) : (
-                <p className="text-xs text-pf-warning">
-                  Select a printer above to choose a machine profile
-                </p>
-              )}
 
             {selectedPrinterId && machineProfilesData.length > 0 && !hasVisibleMachineProfiles && selectedNozzleDiameter !== undefined && (
               <p className="text-xs text-pf-warning mt-1">
