@@ -2268,6 +2268,14 @@ export interface QueueChangeFeed {
   nextSequence: number;
   hasMore: boolean;
   events: QueueEventEnvelope[];
+  /**
+   * True only when the server returned 410 Gone because the requested cursor is
+   * older than the retention window for queue change events. Callers must treat
+   * this as an authoritative "resynchronize" signal, not a silent gap.
+   */
+  expired?: boolean;
+  /** Present when `expired` is true — the sequence a fresh cursor should resume from. */
+  currentSequence?: number;
 }
 
 export interface QueueSubscriptionResources {

@@ -200,6 +200,188 @@ public class JobQueueControllerTests
     }
 
     [Fact]
+    public async Task GetChangesAsync_CursorBelowRetentionFloor_ReturnsGoneWithCursorExpired()
+    {
+        // Simulates a pruned table: the oldest surviving row's sequence is well
+        // above the client's stale cursor, proving events in between were pruned.
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        await using var db = new AppDbContext(options);
+        Guid jobId = Guid.NewGuid();
+        db.QueueDispatchOutbox.AddRange(
+            CreateOutboxEvent(jobId, 50),
+            CreateOutboxEvent(jobId, 51));
+        await db.SaveChangesAsync();
+
+        Mock<IQueueResourceAuthorizationService> authorization = new();
+        JobQueueController controller = CreateController(db, authorization.Object);
+
+        IActionResult result = await controller.GetChangesAsync(
+            afterSequence: 5,
+            limit: 100,
+            CancellationToken.None);
+
+        ObjectResult gone = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status410Gone, gone.StatusCode);
+        object value = Assert.IsAssignableFrom<object>(gone.Value);
+        Assert.Equal("cursor_expired", value.GetType().GetProperty("error")?.GetValue(value));
+        Assert.Equal(49L, value.GetType().GetProperty("currentSequence")?.GetValue(value));
+    }
+
+    [Fact]
+    public async Task GetChangesAsync_CursorAtRetentionFloorBoundary_IsNotExpired()
+    {
+        // afterSequence + 1 == oldest surviving sequence: the client's cursor is
+        // exactly at the boundary of what survived pruning, so nothing was lost.
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        await using var db = new AppDbContext(options);
+        Guid jobId = Guid.NewGuid();
+        db.QueueDispatchOutbox.Add(CreateOutboxEvent(jobId, 6));
+        await db.SaveChangesAsync();
+
+        Mock<IQueueResourceAuthorizationService> authorization = new();
+        authorization
+            .Setup(service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid>());
+        authorization
+            .Setup(service => service.FilterActorAccessibleJobIdsAsync(
+                It.IsAny<string>(),
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Contains(jobId)),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid> { jobId });
+        JobQueueController controller = CreateController(db, authorization.Object);
+
+        IActionResult result = await controller.GetChangesAsync(
+            afterSequence: 5,
+            limit: 100,
+            CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        object value = Assert.IsAssignableFrom<object>(ok.Value);
+        object? eventValue = value.GetType().GetProperty("events")?.GetValue(value);
+        List<QueueEventEnvelope> events = Assert.IsType<List<QueueEventEnvelope>>(eventValue);
+        Assert.Single(events);
+        Assert.Equal(6, events[0].Sequence);
+    }
+
+    [Fact]
+    public async Task GetChangesAsync_OldestSurvivingRowIsFilteredEventType_IsNotFalselyExpired()
+    {
+        // Regression test: the oldest surviving row right after the cursor is an
+        // internal event type that GetChangesAsync filters out of the response
+        // (BackendStartCommandEventType). The expiry check must be derived from the
+        // raw (unfiltered) row set, not the filtered candidate list — otherwise a
+        // filtered-out row would be invisible to the gap check and produce a false
+        // "cursor expired" verdict even though nothing was pruned.
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        await using var db = new AppDbContext(options);
+        Guid jobId = Guid.NewGuid();
+        QueueDispatchOutbox filteredEvent = CreateOutboxEvent(jobId, 6);
+        filteredEvent.EventType = BedClearAcknowledgementService.BackendStartCommandEventType;
+        db.QueueDispatchOutbox.AddRange(filteredEvent, CreateOutboxEvent(jobId, 7));
+        await db.SaveChangesAsync();
+
+        Mock<IQueueResourceAuthorizationService> authorization = new();
+        authorization
+            .Setup(service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid>());
+        authorization
+            .Setup(service => service.FilterActorAccessibleJobIdsAsync(
+                It.IsAny<string>(),
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Contains(jobId)),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid> { jobId });
+        JobQueueController controller = CreateController(db, authorization.Object);
+
+        IActionResult result = await controller.GetChangesAsync(
+            afterSequence: 5,
+            limit: 100,
+            CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        object value = Assert.IsAssignableFrom<object>(ok.Value);
+        object? eventValue = value.GetType().GetProperty("events")?.GetValue(value);
+        List<QueueEventEnvelope> events = Assert.IsType<List<QueueEventEnvelope>>(eventValue);
+        Assert.Single(events);
+        Assert.Equal(7, events[0].Sequence);
+        Assert.Equal(7L, value.GetType().GetProperty("nextSequence")?.GetValue(value));
+    }
+
+    [Fact]
+    public async Task GetChangesAsync_EmptyTableAfterFullPrune_ClientCaughtUp_IsNotExpired()
+    {
+        // The outbox has been fully pruned (empty), but the client's cursor already
+        // matches the allocator high-water mark, so it is caught up, not expired.
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        await using var db = new AppDbContext(options);
+        db.OutboxSequenceStates.Add(new OutboxSequenceState { Id = 1, NextSequence = 10 });
+        await db.SaveChangesAsync();
+
+        Mock<IQueueResourceAuthorizationService> authorization = new();
+        JobQueueController controller = CreateController(db, authorization.Object);
+
+        IActionResult result = await controller.GetChangesAsync(
+            afterSequence: 10,
+            limit: 100,
+            CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        object value = Assert.IsAssignableFrom<object>(ok.Value);
+        object? eventValue = value.GetType().GetProperty("events")?.GetValue(value);
+        List<QueueEventEnvelope> events = Assert.IsType<List<QueueEventEnvelope>>(eventValue);
+        Assert.Empty(events);
+    }
+
+    [Fact]
+    public async Task GetChangesAsync_EmptyTableAfterFullPrune_StaleCursor_ReturnsGone()
+    {
+        // The outbox is empty (fully pruned) but the allocator has moved past the
+        // client's stale cursor — events existed and were pruned, so it is expired.
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        await using var db = new AppDbContext(options);
+        db.OutboxSequenceStates.Add(new OutboxSequenceState { Id = 1, NextSequence = 500 });
+        await db.SaveChangesAsync();
+
+        Mock<IQueueResourceAuthorizationService> authorization = new();
+        JobQueueController controller = CreateController(db, authorization.Object);
+
+        IActionResult result = await controller.GetChangesAsync(
+            afterSequence: 0,
+            limit: 100,
+            CancellationToken.None);
+
+        ObjectResult gone = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status410Gone, gone.StatusCode);
+        object value = Assert.IsAssignableFrom<object>(gone.Value);
+        Assert.Equal("cursor_expired", value.GetType().GetProperty("error")?.GetValue(value));
+        Assert.Equal(500L, value.GetType().GetProperty("currentSequence")?.GetValue(value));
+    }
+
+    [Fact]
     public async Task GetChangeWatermarkAsync_EmptyOutbox_ReturnsZero()
     {
         DbContextOptions<AppDbContext> options =
