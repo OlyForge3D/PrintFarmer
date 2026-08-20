@@ -245,6 +245,187 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime
         _ = job.FilamentProfileJson.Should().BeNullOrEmpty();
     }
 
+    [Fact(DisplayName = "A process profile name shared across incompatible printer models resolves to the one compatible with the selected machine")]
+    public async Task Submit_WithDuplicateProcessNameAcrossModels_ResolvesTheCompatibleOne()
+    {
+        // Regression coverage for a blocking review finding: ProcessProfile.Name is not a unique
+        // key (the schema keys on Name + SlicerType + PrinterModelId, and OrcaSlicer commonly
+        // ships same-named process profiles scoped to different printer models via
+        // CompatiblePrinters). Picking the first name match without regard to the resolved
+        // machine could silently snapshot an incompatible profile onto the job.
+        Guid userId = await GetAuthenticatedUserIdAsync();
+        await AddProfilesAsync(userId, filamentName: CustomFilamentName);
+
+        const string compatibleProcessJson = """{"type":"process","layer_height":"0.30"}""";
+        const string incompatibleProcessJson = """{"type":"process","layer_height":"0.40"}""";
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+            db.ProcessProfiles.AddRange(
+                new ProcessProfile
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Ambiguous Process",
+                    SlicerType = SlicerType.OrcaSlicer,
+                    SlicerDistribution = "upstream",
+                    SlicerVersion = "2.3.1",
+                    ProfileFormat = "orca-json",
+                    RawJson = compatibleProcessJson,
+                    Hash = Sha256(compatibleProcessJson),
+                    CompatiblePrinters = "Test Machine",
+                    CreatedByUserId = userId,
+                    IsPublic = false,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                },
+                new ProcessProfile
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Ambiguous Process",
+                    SlicerType = SlicerType.OrcaSlicer,
+                    SlicerDistribution = "upstream",
+                    SlicerVersion = "2.3.1",
+                    ProfileFormat = "orca-json",
+                    RawJson = incompatibleProcessJson,
+                    Hash = Sha256(incompatibleProcessJson),
+                    CompatiblePrinters = "Some Other Machine",
+                    CreatedByUserId = userId,
+                    IsPublic = false,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+            _ = await db.SaveChangesAsync();
+        }
+
+        string slicerProfileJson = JsonSerializer.Serialize(new
+        {
+            machineProfileName = "Test Machine",
+            processProfileName = "Ambiguous Process",
+            filamentProfileName = CustomFilamentName,
+        });
+
+        HttpResponseMessage submit = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = userId,
+            ModelFileUrl = "models/test.stl",
+            ModelFileName = "test.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            SlicerProfileJson = slicerProfileJson,
+        });
+        _ = submit.StatusCode.Should().Be(HttpStatusCode.Created, await submit.Content.ReadAsStringAsync());
+
+        WorkerSliceJobResponse claimed = await ClaimAsync();
+        _ = claimed.ProcessProfileJson.Should().Be(
+            compatibleProcessJson,
+            "the profile whose CompatiblePrinters names the selected machine must win over the same-named incompatible one");
+    }
+
+    [Fact(DisplayName = "A non-OrcaSlicer submission is never routed through named DB resolution")]
+    public async Task Submit_WithNonOrcaEngine_DoesNotSnapshotNativeProfiles()
+    {
+        // Only OrcaSlicer profiles are mirrored into the database today; PrusaSlicer (or any other
+        // engine) must keep using the legacy worker-side name lookup unchanged, even when the
+        // submitted profile names happen to also exist as OrcaSlicer database rows.
+        Guid userId = await GetAuthenticatedUserIdAsync();
+        await AddProfilesAsync(userId, filamentName: CustomFilamentName);
+
+        string slicerProfileJson = JsonSerializer.Serialize(new
+        {
+            machineProfileName = "Test Machine",
+            processProfileName = "Test Process",
+            filamentProfileName = CustomFilamentName,
+        });
+
+        HttpResponseMessage submit = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = userId,
+            ModelFileUrl = "models/test.stl",
+            ModelFileName = "test.stl",
+            SlicerEngine = SlicerEngineType.PrusaSlicer,
+            SlicerProfileJson = slicerProfileJson,
+        });
+        _ = submit.StatusCode.Should().Be(HttpStatusCode.Created, await submit.Content.ReadAsStringAsync());
+        SubmitSliceJobResponse submitted = await submit.Content.ReadFromJsonAsync<SubmitSliceJobResponse>()
+            ?? throw new InvalidOperationException("Missing submit response.");
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        SliceJob job = await db.SliceJobs.AsNoTracking().SingleAsync(value => value.Id == submitted.JobId);
+
+        _ = job.MachineProfileJson.Should().BeNullOrEmpty();
+        _ = job.ProcessProfileJson.Should().BeNullOrEmpty();
+        _ = job.FilamentProfileJson.Should().BeNullOrEmpty();
+    }
+
+    [Fact(DisplayName = "A multi-extruder submission is left on the legacy per-extruder worker-side resolution")]
+    public async Task Submit_WithMultipleExtruderFilamentNames_DoesNotSnapshotNativeProfiles()
+    {
+        Guid userId = await GetAuthenticatedUserIdAsync();
+        await AddProfilesAsync(userId, filamentName: CustomFilamentName);
+
+        string slicerProfileJson = JsonSerializer.Serialize(new
+        {
+            machineProfileName = "Test Machine",
+            processProfileName = "Test Process",
+            filamentProfileName = CustomFilamentName,
+            extruderFilamentProfileNames = new[] { CustomFilamentName, CustomFilamentName },
+        });
+
+        HttpResponseMessage submit = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = userId,
+            ModelFileUrl = "models/test.stl",
+            ModelFileName = "test.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            SlicerProfileJson = slicerProfileJson,
+        });
+        _ = submit.StatusCode.Should().Be(HttpStatusCode.Created, await submit.Content.ReadAsStringAsync());
+        SubmitSliceJobResponse submitted = await submit.Content.ReadFromJsonAsync<SubmitSliceJobResponse>()
+            ?? throw new InvalidOperationException("Missing submit response.");
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        SliceJob job = await db.SliceJobs.AsNoTracking().SingleAsync(value => value.Id == submitted.JobId);
+
+        _ = job.MachineProfileJson.Should().BeNullOrEmpty();
+        _ = job.ProcessProfileJson.Should().BeNullOrEmpty();
+        _ = job.FilamentProfileJson.Should().BeNullOrEmpty();
+    }
+
+    [Fact(DisplayName = "A true partial name match (machine and process resolve, filament does not) leaves the job on the legacy path")]
+    public async Task Submit_WithPartiallyResolvableProfileNames_DoesNotSnapshotNativeProfiles()
+    {
+        Guid userId = await GetAuthenticatedUserIdAsync();
+        await AddProfilesAsync(userId, filamentName: CustomFilamentName);
+
+        string slicerProfileJson = JsonSerializer.Serialize(new
+        {
+            machineProfileName = "Test Machine",
+            processProfileName = "Test Process",
+            filamentProfileName = "Nonexistent Filament",
+        });
+
+        HttpResponseMessage submit = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = userId,
+            ModelFileUrl = "models/test.stl",
+            ModelFileName = "test.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            SlicerProfileJson = slicerProfileJson,
+        });
+        _ = submit.StatusCode.Should().Be(HttpStatusCode.Created, await submit.Content.ReadAsStringAsync());
+        SubmitSliceJobResponse submitted = await submit.Content.ReadFromJsonAsync<SubmitSliceJobResponse>()
+            ?? throw new InvalidOperationException("Missing submit response.");
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        SliceJob job = await db.SliceJobs.AsNoTracking().SingleAsync(value => value.Id == submitted.JobId);
+
+        _ = job.MachineProfileJson.Should().BeNullOrEmpty();
+        _ = job.ProcessProfileJson.Should().BeNullOrEmpty();
+        _ = job.FilamentProfileJson.Should().BeNullOrEmpty();
+    }
+
     private static string Sha256(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 

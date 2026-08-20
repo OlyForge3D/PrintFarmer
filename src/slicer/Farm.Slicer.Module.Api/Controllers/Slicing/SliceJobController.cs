@@ -1606,13 +1606,18 @@ public partial class SliceJobController(
 
         IReadOnlyList<ProcessProfile> processes =
             await _processProfileRepository.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId, ct);
-        ProcessProfile? process = processes.FirstOrDefault(p =>
-            string.Equals(p.Name, processName, StringComparison.OrdinalIgnoreCase));
+        List<ProcessProfile> processCandidates = processes
+            .Where(p => string.Equals(p.Name, processName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        ProcessProfile? process = SelectCompatibleProfile(
+            processCandidates, machine, p => p.CompatiblePrinters, p => p.PrinterModelId);
 
         IReadOnlyList<FilamentProfile> filaments =
             await _filamentProfileRepository.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId, ct);
-        FilamentProfile? filament = filaments.FirstOrDefault(f =>
-            string.Equals(f.Name, filamentName, StringComparison.OrdinalIgnoreCase));
+        List<FilamentProfile> filamentCandidates = filaments
+            .Where(f => string.Equals(f.Name, filamentName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        FilamentProfile? filament = SelectCompatibleProfile(filamentCandidates, machine, f => f.CompatiblePrinters);
 
         if (machine is null || process is null || filament is null ||
             string.IsNullOrWhiteSpace(machine.RawJson) ||
@@ -1660,6 +1665,70 @@ public partial class SliceJobController(
         job.FilamentProfileSha256 = ComputeSha256(filamentJson);
         job.SlicerDistribution = machine.SlicerDistribution ?? job.SlicerDistribution;
         job.SlicerVersion = machine.SlicerVersion ?? job.SlicerVersion;
+    }
+
+    /// <summary>
+    /// Disambiguates a set of same-named process/filament profile candidates against the resolved
+    /// machine profile, using the same compatibility rules <see cref="ProfilesService"/> applies
+    /// when browsing profiles for a selected machine. <c>Name</c> alone is not a unique key for
+    /// either <see cref="ProcessProfile"/> or <see cref="FilamentProfile"/> — OrcaSlicer commonly
+    /// ships process profiles with the same display name scoped to different printer models via
+    /// <c>CompatiblePrinters</c>/<c>PrinterModelId</c> — so picking the first name match could
+    /// silently snapshot an arbitrary, possibly incompatible profile onto the job (issue #1778
+    /// review finding). Returns <see langword="null"/> when the candidate set is ambiguous and no
+    /// candidate can be confidently matched to the resolved machine, so the caller bails to the
+    /// legacy worker-side path rather than guessing.
+    /// </summary>
+    private static T? SelectCompatibleProfile<T>(
+        List<T> candidates,
+        MachineProfile? machine,
+        Func<T, string?> compatiblePrintersSelector,
+        Func<T, Guid?>? printerModelIdSelector = null)
+        where T : class
+    {
+        if (candidates.Count <= 1)
+        {
+            return candidates.Count == 1 ? candidates[0] : null;
+        }
+
+        if (machine is not null)
+        {
+            T? byCompatiblePrinters = candidates.FirstOrDefault(c =>
+            {
+                string? compatiblePrinters = compatiblePrintersSelector(c);
+                return !string.IsNullOrWhiteSpace(compatiblePrinters) &&
+                    compatiblePrinters.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Any(cp => string.Equals(cp.Trim(), machine.Name, StringComparison.OrdinalIgnoreCase));
+            });
+            if (byCompatiblePrinters is not null)
+            {
+                return byCompatiblePrinters;
+            }
+
+            if (printerModelIdSelector is not null && machine.PrinterModelId.HasValue)
+            {
+                T? byModel = candidates.FirstOrDefault(c => printerModelIdSelector(c) == machine.PrinterModelId);
+                if (byModel is not null)
+                {
+                    return byModel;
+                }
+            }
+
+            // No candidate explicitly declares itself compatible with the resolved machine, but a
+            // candidate that declares no scoping at all (no CompatiblePrinters, no PrinterModelId)
+            // is model-agnostic by construction and safe to use.
+            T? modelAgnostic = candidates.FirstOrDefault(c =>
+                string.IsNullOrWhiteSpace(compatiblePrintersSelector(c)) &&
+                (printerModelIdSelector is null || printerModelIdSelector(c) is null));
+            if (modelAgnostic is not null)
+            {
+                return modelAgnostic;
+            }
+        }
+
+        // Ambiguous: multiple same-named candidates and none can be confidently tied to the
+        // resolved machine. Do not guess — defer to the legacy worker-side path.
+        return null;
     }
 
     /// <summary>
