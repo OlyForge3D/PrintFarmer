@@ -54,6 +54,10 @@ public class JobQueueController(
     /// Get queue overview with optional compatibility filtering.
     /// Filters printers by model, nozzle diameter, and/or material type.
     /// All filtering is case-insensitive. Nozzle matching uses ±0.01mm tolerance.
+    /// Access is scoped with a single batched
+    /// <see cref="IQueueResourceAuthorizationService.FilterAccessiblePrinterIdsAsync"/> call
+    /// (constant query count regardless of printer count) rather than looping
+    /// <see cref="IQueueResourceAuthorizationService.CanAccessPrinterAsync"/> per printer (#1729).
     /// </summary>
     /// <param name="model">Optional printer model name or slicer alias (e.g., "COREONEL", "Prusa MK4")</param>
     /// <param name="nozzle">Optional required nozzle diameter in mm (e.g., 0.4)</param>
@@ -75,18 +79,15 @@ public class JobQueueController(
                 return Ok(dtos);
             }
 
-            var authorized = new List<QueueOverviewDto>(dtos.Count);
-            foreach (QueueOverviewDto dto in dtos)
-            {
-                if (await resourceAuthorization.CanAccessPrinterAsync(
-                    User,
-                    dto.PrinterId,
-                    PrinterGroupAccessLevel.View,
-                    CancellationToken.None))
-                {
-                    authorized.Add(dto);
-                }
-            }
+            Guid[] printerIds = dtos.Select(dto => dto.PrinterId).Distinct().ToArray();
+            IReadOnlySet<Guid> allowedPrinterIds = await resourceAuthorization.FilterAccessiblePrinterIdsAsync(
+                User,
+                printerIds,
+                PrinterGroupAccessLevel.View,
+                CancellationToken.None);
+            List<QueueOverviewDto> authorized = dtos
+                .Where(dto => allowedPrinterIds.Contains(dto.PrinterId))
+                .ToList();
 
             return Ok(authorized);
         }
