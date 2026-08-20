@@ -19,6 +19,8 @@ import { createSlicerRegistryConnection } from '@/services/slicerRegistryHubConn
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import { ProcessProfileEditorModal } from '@/features/slicer/components/ProcessProfileEditorModal';
+import { MachineProfileSelectorModal, type MachineProfileChoice } from '@/features/slicer/components/job/MachineProfileSelectorModal';
+import { buildMachineProfileLabels, mentionsHighFlow } from '@/features/slicer/utils/machineProfileLabels';
 import {
   SlicerSettingsPanel,
   type OrcaProcessSettings,
@@ -40,7 +42,7 @@ import type { ModelListItem } from '@/types/models';
 import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Alert, Input, Select, ColorPicker, ProgressBar } from '@/common/components/ui';
-import { LayersIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon } from '@/common/components/icons/MdiIcons';
+import { LayersIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon, SwapHorizontalIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
 import { useSliceJobProgress } from '@/features/slicer/hooks/useSliceJobProgress';
@@ -152,8 +154,14 @@ function machineProfileMatchesNozzle(profile: OrcaMachineProfile | CustomProfile
   return Math.abs(profileNozzleDiameter - selectedDiameter) < NOZZLE_MATCH_TOLERANCE;
 }
 
+/**
+ * Variant detection for machine/process profile pairing.
+ *
+ * Delegates to the shared helper so profile labelling and HF/non-HF process
+ * filtering can never disagree about what counts as a high-flow profile.
+ */
 function profileMentionsHighFlow(text: string): boolean {
-  return /\bhf\b/i.test(text);
+  return mentionsHighFlow(text);
 }
 
 const DEFAULT_FILAMENT_COLOUR = '888888';
@@ -339,6 +347,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [selectedManufacturer, setSelectedManufacturer] = useState<string>('');
   const [selectedPrinterModel, setSelectedPrinterModel] = useState<string>('');
   const [selectedMachineProfileId, setSelectedMachineProfileId] = useState<string>('');
+  const [isMachinePickerOpen, setIsMachinePickerOpen] = useState(false);
   const [selectedNozzleFilter, setSelectedNozzleFilter] = useState<string>('');
   const [selectedFilamentProfileId, setSelectedFilamentProfileId] = useState<string>('');
 
@@ -1072,6 +1081,53 @@ export const NewSliceJobPage: React.FC = () => {
   }, [machineProfilesData, selectedNozzleDiameter]);
 
   const hasVisibleMachineProfiles = availableMachineProfiles.length > 0 || filteredCustomMachineProfiles.length > 0;
+
+  /**
+   * Every machine profile for this printer, unfiltered by nozzle.
+   *
+   * The picker does its own nozzle filtering, so it must receive the complete
+   * set — otherwise the current nozzle filter would hide the very profiles the
+   * user opened the picker to find.
+   */
+  const machineProfileChoices = useMemo<MachineProfileChoice[]>(() => {
+    const system = (machineProfilesData ?? []).map((profile) => ({
+      name: profile.name,
+      nozzleDiameter: getMachineProfileNozzleDiameter(profile),
+      isSystem: true,
+    }));
+    const custom = customMachineProfiles.map((profile) => ({
+      name: profile.name,
+      nozzleDiameter: getMachineProfileNozzleDiameter(profile),
+      isSystem: false,
+    }));
+    return [...custom, ...system];
+  }, [machineProfilesData, customMachineProfiles]);
+
+  /** Display label for the currently selected profile, nozzle token trimmed. */
+  const selectedMachineProfileLabel = useMemo(() => {
+    if (!selectedMachineProfileId) return '';
+    const labels = buildMachineProfileLabels(machineProfileChoices.map((c) => c.name));
+    return labels.get(selectedMachineProfileId) ?? selectedMachineProfileId;
+  }, [selectedMachineProfileId, machineProfileChoices]);
+
+  const selectedMachineNozzleDiameter = useMemo(() => {
+    return machineProfileChoices.find((c) => c.name === selectedMachineProfileId)?.nozzleDiameter;
+  }, [machineProfileChoices, selectedMachineProfileId]);
+
+  /**
+   * Commits a profile chosen in the picker.
+   *
+   * The nozzle filter is synced to the chosen profile's diameter so the
+   * nozzle-filtered lists that drive auto-selection and the "no profiles for
+   * this nozzle" warnings stay consistent with what the user picked.
+   */
+  const handleMachineProfileSelect = useCallback((profileName: string) => {
+    setSelectedMachineProfileId(profileName);
+    const chosen = machineProfileChoices.find((c) => c.name === profileName);
+    if (chosen?.nozzleDiameter !== undefined && chosen.nozzleDiameter > 0) {
+      setSelectedNozzleFilter(formatNozzleDiameter(chosen.nozzleDiameter));
+    }
+  }, [machineProfileChoices]);
 
   // Process profiles for the selected machine (from incremental query)
   const availableProcessProfiles = useMemo(() => {
@@ -2129,36 +2185,47 @@ export const NewSliceJobPage: React.FC = () => {
                       tabIndex={-1}
                     />
                     <div className="flex items-center gap-1">
-                      <Select
+                      {/* Single machine-profile control. Replaces the old paired
+                          machine-profile + nozzle dropdowns: in OrcaSlicer a machine
+                          profile IS (printer model x nozzle), and for Prusa CORE One two
+                          profiles share one nozzle diameter (standard vs HF), so nozzle
+                          alone can never identify a profile. Resolving both inside the
+                          picker also removes the old behaviour where changing the nozzle
+                          silently cleared the machine profile. */}
+                      <Button
+                        type="button"
+                        variant="unstyled"
                         id="machine-profile-select"
                         aria-label="Machine profile"
-                        value={selectedMachineProfileId}
-                        onChange={e => setSelectedMachineProfileId(e.target.value)}
-                        disabled={(availableMachineProfiles.length === 0 && filteredCustomMachineProfiles.length === 0) || isMachineProfilesLoading}
-                        containerClassName="flex-1 min-w-0"
-                        className={isMachineProfilesLoading ? 'opacity-50' : ''}
+                        aria-haspopup="dialog"
+                        aria-expanded={isMachinePickerOpen}
+                        onClick={() => setIsMachinePickerOpen(true)}
+                        disabled={machineProfileChoices.length === 0 || isMachineProfilesLoading}
+                        className={`group flex min-w-0 flex-1 items-center gap-2 rounded-md border border-pf-border bg-pf-bg-1 px-2.5 py-1.5 text-left transition-colors hover:border-pf-border-strong disabled:cursor-not-allowed disabled:opacity-60 ${isMachineProfilesLoading ? 'opacity-50' : ''}`}
                       >
-                        <option value="">{isMachineProfilesLoading ? 'Loading...' : 'Select machine...'}</option>
-                        {/* Custom profiles first with ★ indicator */}
-                        {filteredCustomMachineProfiles.length > 0 && (
-                          <option disabled className="text-pf-text-muted">── My Profiles ──</option>
+                        <span className="min-w-0 flex-1 truncate text-sm text-pf-text-primary">
+                          {isMachineProfilesLoading
+                            ? 'Loading...'
+                            : selectedMachineProfileLabel || 'Select machine...'}
+                        </span>
+                        {selectedMachineProfileId && profileMentionsHighFlow(selectedMachineProfileId) && (
+                          <span
+                            data-pf-radius="full"
+                            className="shrink-0 rounded-full bg-pf-info/15 px-1.5 py-0.5 text-[10px] font-semibold text-pf-info"
+                          >
+                            HF
+                          </span>
                         )}
-                        {filteredCustomMachineProfiles.map(profile => (
-                          <option key={`custom-${profile.id}`} value={profile.name}>
-                            ★ {profile.name}
-                          </option>
-                        ))}
-                        {/* System presets divider - only show if there are system profiles */}
-                        {availableMachineProfiles.length > 0 && (
-                          <option disabled className="text-pf-text-muted">── System Presets ──</option>
+                        {selectedMachineNozzleDiameter !== undefined && selectedMachineNozzleDiameter > 0 && (
+                          <span
+                            data-pf-radius="full"
+                            className="shrink-0 rounded-full bg-pf-accent/12 px-2 py-0.5 text-[11px] font-semibold text-pf-accent tabular-nums"
+                          >
+                            {formatNozzleDiameter(selectedMachineNozzleDiameter)}mm
+                          </span>
                         )}
-                        {/* System profiles */}
-                        {availableMachineProfiles.map(profile => (
-                          <option key={profile.name} value={profile.name}>
-                            {profile.name}
-                          </option>
-                        ))}
-                      </Select>
+                        <SwapHorizontalIcon className="w-4 h-4 shrink-0 text-pf-text-muted" ariaLabel="Change machine profile" />
+                      </Button>
                       <div className="relative shrink-0" ref={machineMenuRef}>
                         <Button
                           type="button"
@@ -2216,28 +2283,10 @@ export const NewSliceJobPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {nozzleOptions.length > 0 && (
-                    <Select
-                      label="Nozzle diameter"
-                      value={selectedNozzleFilter}
-                      onChange={(event) => {
-                        setSelectedNozzleFilter(event.target.value);
-                        setSelectedMachineProfileId('');
-                      }}
-                      disabled={isMachineProfilesLoading || nozzleOptions.length <= 1}
-                      className="w-full"
-                    >
-                      {nozzleOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
                 </>
               ) : (
                 <p className="text-xs text-pf-warning">
-                  Select a printer above to choose machine and nozzle profiles
+                  Select a printer above to choose a machine profile
                 </p>
               )}
 
@@ -2254,6 +2303,16 @@ export const NewSliceJobPage: React.FC = () => {
             )}
             </div>
           </div>
+
+          {/* Machine profile picker — owns both the nozzle facet and the profile choice */}
+          <MachineProfileSelectorModal
+            isOpen={isMachinePickerOpen}
+            profiles={machineProfileChoices}
+            selectedProfileName={selectedMachineProfileId}
+            onSelect={handleMachineProfileSelect}
+            onClose={() => setIsMachinePickerOpen(false)}
+            printerLabel={selectedPrinterForSlicing?.modelName}
+          />
 
           {/* FILAMENT PROFILE - cascading dropdown with manufacturer groups */}
           {/* Multi-toolhead: show per-extruder filament selectors */}

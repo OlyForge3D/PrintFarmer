@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -479,7 +479,7 @@ describe('NewSliceJobPage', () => {
       }, { timeout: 2000 });
     });
 
-    it('should show nozzle selection and filter machine profiles by selected nozzle diameter', async () => {
+    it('should let the user filter by nozzle and pick a machine profile in the picker', async () => {
       renderWithProviders(<NewSliceJobPage />);
 
       await waitFor(() => {
@@ -488,22 +488,38 @@ describe('NewSliceJobPage', () => {
 
       fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
 
-      const nozzleFilter = await screen.findByLabelText('Nozzle diameter');
-      const machineProfileSelect = await screen.findByLabelText('Machine profile');
+      // The machine profile control is now a dialog trigger, not a <select>.
+      const machineProfileTrigger = await screen.findByLabelText('Machine profile');
 
       await waitFor(() => {
-        expect(nozzleFilter).toBeVisible();
-        expect(machineProfileSelect).toBeVisible();
-        expect(nozzleFilter).toHaveValue('0.4');
-        expect(machineProfileSelect).toHaveValue('Prusa MK4 0.4 nozzle');
+        expect(machineProfileTrigger).toBeVisible();
+        // Nozzle is stated once, as a badge on the resolved profile, and the
+        // redundant nozzle token is trimmed from the label.
+        expect(machineProfileTrigger).toHaveTextContent('Prusa MK4');
+        expect(machineProfileTrigger).toHaveTextContent('0.4mm');
         expect(slicerProfilesService.getFilamentProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.4 nozzle'], undefined);
         expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.4 nozzle'], undefined);
       });
 
-      fireEvent.change(nozzleFilter, { target: { value: '0.6' } });
+      // There is no longer a standalone nozzle dropdown in the sidebar.
+      expect(screen.queryByLabelText('Nozzle diameter')).not.toBeInTheDocument();
 
+      fireEvent.click(machineProfileTrigger);
+
+      const nozzleFacet = await screen.findByRole('radiogroup', { name: 'Filter by nozzle diameter' });
+      fireEvent.click(within(nozzleFacet).getByRole('radio', { name: '0.6 mm' }));
+
+      // Filtering to 0.6 hides the 0.4 profile entirely.
       await waitFor(() => {
-        expect(machineProfileSelect).toHaveValue('Prusa MK4 0.6 nozzle');
+        expect(screen.queryByRole('radio', { name: /0\.4mm/ })).not.toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('radio', { name: /Prusa MK4.*0\.6mm/ }));
+
+      // Selecting commits both nozzle and profile in one step.
+      await waitFor(() => {
+        expect(machineProfileTrigger).toHaveTextContent('0.6mm');
+        expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.6 nozzle'], undefined);
       });
     });
 
@@ -534,13 +550,19 @@ describe('NewSliceJobPage', () => {
 
       fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
 
-      const machineProfileSelect = await screen.findByLabelText('Machine profile');
+      const machineProfileTrigger = await screen.findByLabelText('Machine profile');
 
       await waitFor(() => {
-        expect(machineProfileSelect).toHaveValue('Custom MK4 0.8 nozzle');
+        expect(machineProfileTrigger).toHaveTextContent('Custom MK4');
+        expect(machineProfileTrigger).toHaveTextContent('0.8mm');
       });
 
-      expect(screen.getByRole('option', { name: /Custom MK4 0\.8 nozzle/ })).toBeInTheDocument();
+      // The custom profile is reachable in the picker under My Profiles.
+      fireEvent.click(machineProfileTrigger);
+      const myProfiles = await screen.findByRole('radiogroup', { name: 'My machine profiles' });
+      expect(within(myProfiles).getByRole('radio', { name: /Custom MK4/ })).toBeInTheDocument();
+      fireEvent.keyDown(document, { key: 'Escape' });
+
       expect(screen.queryByText(/No machine profiles available/)).not.toBeInTheDocument();
 
       await act(async () => {
