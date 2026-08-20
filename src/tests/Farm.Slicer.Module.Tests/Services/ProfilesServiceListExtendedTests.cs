@@ -25,6 +25,62 @@ namespace Farm.Slicer.Module.Tests.Services;
 /// </summary>
 public class ProfilesServiceListExtendedTests
 {
+    /// <summary>
+    /// This is the actual contract Calibration Setup depends on (#1779): a single
+    /// <see cref="ProfilesService.ListExtendedAsync"/> call must return BOTH the standard and HF
+    /// variants of the same printer model side by side, each carrying its own distinct
+    /// <c>printerVariant</c>/<c>nozzleDiameter</c>. Neither the seeding-parity test nor the
+    /// isolated-extraction tests above prove this co-existence — they only prove HF groups can be
+    /// imported at all, and that extraction works on a single profile in isolation.
+    /// </summary>
+    [Fact]
+    public async Task ListExtendedAsync_StandardAndHfVariantsOfSameModel_BothReturnedWithDistinctFields()
+    {
+        // Arrange: two machine profiles for the same underlying printer model (same PrinterModelId),
+        // one standard and one HF, each with its own nozzle diameter / variant.
+        Guid sharedPrinterModelId = Guid.NewGuid();
+        MachineProfile standard = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Prusa CORE One",
+            Manufacturer = "Prusa Research",
+            SlicerType = SlicerType.OrcaSlicer,
+            PrinterModelId = sharedPrinterModelId,
+            SettingsJson = "{\"NozzleDiameter\": 0.4, \"PrinterVariant\": null}",
+            Hash = "hash-standard"
+        };
+        MachineProfile hf = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Prusa CORE One HF",
+            Manufacturer = "Prusa Research",
+            SlicerType = SlicerType.OrcaSlicer,
+            PrinterModelId = sharedPrinterModelId,
+            SettingsJson = "{\"NozzleDiameter\": 0.6, \"PrinterVariant\": \"HF\"}",
+            Hash = "hash-hf"
+        };
+
+        ProfilesService svc = CreateService(new List<MachineProfile> { standard, hf });
+
+        // Act
+        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(CancellationToken.None);
+
+        // Assert: both variants are present simultaneously, each with its own distinct fields.
+        Assert.Equal(2, result.MachineProfiles.Count);
+
+        MachineProfileListItemDto standardDto = Assert.Single(result.MachineProfiles, p => p.Name == "Prusa CORE One");
+        Assert.Equal(0.4, standardDto.NozzleDiameter);
+        Assert.Null(standardDto.PrinterVariant);
+
+        MachineProfileListItemDto hfDto = Assert.Single(result.MachineProfiles, p => p.Name == "Prusa CORE One HF");
+        Assert.Equal(0.6, hfDto.NozzleDiameter);
+        Assert.Equal("HF", hfDto.PrinterVariant);
+
+        // Sanity: the two variants are distinguishable from each other, not accidentally identical.
+        Assert.NotEqual(standardDto.NozzleDiameter, hfDto.NozzleDiameter);
+        Assert.NotEqual(standardDto.PrinterVariant, hfDto.PrinterVariant);
+    }
+
     [Fact]
     public async Task ListExtendedAsync_SettingsJsonContainsNozzleDiameterAndPrinterVariant_PopulatesDto()
     {
