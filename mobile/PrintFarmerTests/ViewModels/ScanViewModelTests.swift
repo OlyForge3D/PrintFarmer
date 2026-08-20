@@ -547,7 +547,7 @@ final class ScanViewModelTests: XCTestCase {
         SpoolmanFilament(
             id: id, name: name, material: "PLA", colorHex: "#000000", vendor: "Vendor",
             density: 1.24, diameter: 1.75, weight: 1000, spoolWeight: 200, price: 25,
-            settingsExtruderTemp: 215, settingsBedTemp: 60, articleNumber: nil,
+            settingsExtruderTemp: 215, settingsBedTemp: 60, articleNumber: nil, gtin: nil,
             comment: nil, multiColorHexes: nil, externalId: nil
         )
     }

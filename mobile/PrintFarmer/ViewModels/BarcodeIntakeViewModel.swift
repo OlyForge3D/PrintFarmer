@@ -5,6 +5,7 @@ import os
 final class BarcodeIntakeViewModel {
     var isScanning = false
     var lastScannedBarcode: String?
+    var lastResolvedFilament: SpoolmanFilament?
     var importedThisSession: [SpoolmanSpool] = []
     var pendingUnknownBarcode: String?
     var isBusy = false
@@ -12,6 +13,8 @@ final class BarcodeIntakeViewModel {
     var isViewActive = true
 
     var importedCount: Int { importedThisSession.count }
+    var lastResolvedBarcode: String? { lastResolvedFilament?.gtin }
+    var lastResolvedVendorSKU: String? { lastResolvedFilament?.articleNumber }
 
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "BarcodeIntake")
     private var barcodeService: (any BarcodeIntakeServiceProtocol)?
@@ -55,11 +58,14 @@ final class BarcodeIntakeViewModel {
         }
 
         lastScannedBarcode = trimmed
+        lastResolvedFilament = nil
         isBusy = true
         errorMessage = nil
 
         do {
-            if try await barcodeService.resolveFilament(barcode: trimmed) != nil {
+            let filament = try await barcodeService.resolveFilament(barcode: trimmed)
+            lastResolvedFilament = filament
+            if filament != nil {
                 let spool = try await barcodeService.importSpool(barcode: trimmed, fields: SpoolImportFields())
                 importedThisSession.insert(spool, at: 0)
                 pendingUnknownBarcode = nil
@@ -91,7 +97,7 @@ final class BarcodeIntakeViewModel {
         errorMessage = nil
 
         do {
-            _ = try await barcodeService.saveMapping(barcode: barcode, filamentId: filamentId)
+            lastResolvedFilament = try await barcodeService.saveMapping(barcode: barcode, filamentId: filamentId)
             let spool = try await barcodeService.importSpool(barcode: barcode, fields: SpoolImportFields())
             importedThisSession.insert(spool, at: 0)
             pendingUnknownBarcode = nil
