@@ -56,6 +56,12 @@ public sealed class QueueOutboxPublisherService(
         // NOTE: EventTypeJobAborted is deliberately excluded -- "abort" returns the job to
         // PrintJobStatus.Queued (see DispatchClaimService's abort handling), which is still
         // within the active set, so it is NOT a membership change.
+        //
+        // NOTE: EventTypeJobCopyCompleted is deliberately excluded -- a multi-copy job that
+        // has not finished all copies also returns to PrintJobStatus.Queued (requeued for the
+        // next copy), same as an abort. Only EventTypeJobCompleted (all copies done, job truly
+        // exits the active set) is membership-changing; see PrintJobCompletionService and
+        // PR #1741 review (Bishop).
     };
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

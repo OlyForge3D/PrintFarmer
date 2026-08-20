@@ -2100,6 +2100,17 @@ public sealed class DispatchClaimService(
     /// <summary>Event type emitted when a job is completed (all copies finished successfully).</summary>
     internal const string EventTypeJobCompleted = "PrintFarmer.Queue.JobCompleted.v1";
 
+    /// <summary>
+    /// Event type emitted when one copy of a multi-copy job finishes but
+    /// <c>CompletedCopies &lt; Copies</c>, so the job is requeued (status returns to
+    /// <c>Queued</c>) rather than leaving the active set. Distinct from
+    /// <see cref="EventTypeJobCompleted"/> so subscription-membership reconciliation is not
+    /// re-triggered for a transition that does not change the caller's active jobIds/projectIds
+    /// snapshot -- see PR #1741 review (Bishop): the job was Printing (active) and is now
+    /// Queued (still active), same as <see cref="EventTypeJobAborted"/>.
+    /// </summary>
+    internal const string EventTypeJobCopyCompleted = "PrintFarmer.Queue.JobCopyCompleted.v1";
+
     /// <summary>Event type emitted when a job transitions to Failed.</summary>
     internal const string EventTypeJobFailed = "PrintFarmer.Queue.JobFailed.v1";
 

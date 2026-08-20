@@ -59,6 +59,12 @@ public static class QueueLifecycleEventWriter
     /// <summary>Job completed (all copies finished successfully).</summary>
     public const string EventTypeJobCompleted = Dispatch.DispatchClaimService.EventTypeJobCompleted;
 
+    /// <summary>
+    /// One copy of a multi-copy job finished but the job requeued for the next copy (still
+    /// active; not membership-changing). See #1731 PR #1741 review (Bishop).
+    /// </summary>
+    public const string EventTypeJobCopyCompleted = Dispatch.DispatchClaimService.EventTypeJobCopyCompleted;
+
     /// <summary>Job transitioned to Failed.</summary>
     public const string EventTypeJobFailed = Dispatch.DispatchClaimService.EventTypeJobFailed;
 

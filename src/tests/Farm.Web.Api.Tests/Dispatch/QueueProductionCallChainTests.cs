@@ -4954,6 +4954,105 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task JobCompletion_MultiCopyRequeue_WritesNonMembershipEventAndSkipsHint()
+    {
+        // #1731 PR #1741 review (Bishop, round 2): the tests above seed synthetic outbox
+        // rows directly, which only proves the PUBLISHER's string match -- not that the
+        // real PRODUCER (PrintJobCompletionService) actually stays aligned with the
+        // "EventTypeJobCompleted only when the job truly exits the active set" contract.
+        // For a multi-copy job with CompletedCopies < Copies, MarkCurrentJobAsCompletedAsync
+        // sets the job's status back to Queued (still active) rather than Completed, so the
+        // producer must write EventTypeJobCopyCompleted (not EventTypeJobCompleted) or the
+        // publisher would wrongly re-fire the membership-discovery hint for an in-set
+        // transition. This test exercises the real production completion path end-to-end
+        // against a persisted multi-copy job, then feeds the REAL resulting outbox row
+        // through the REAL QueueOutboxPublisherService + QueueSubscriptionMembershipNotifier.
+        // Copies is an immutable calibration provenance field once persisted, so the
+        // multi-copy shape must be set at creation time (copies: 2) rather than mutated
+        // afterward — see AppDbContext.EnsureCalibrationJobFieldsAreImmutable.
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, copies: 2);
+
+        await using AppDbContext claimCtx = CreateContext();
+        DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .AcquireClaimAsync(new DispatchClaimRequest(
+                fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
+        claim.Success.Should().BeTrue(claim.ErrorDetail);
+
+        await using AppDbContext acceptCtx = CreateContext();
+        await CreateClaim(acceptCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .RecordBackendAcceptedAsync(claim.Attempt!.Id, "multi-copy-file.gcode");
+
+        await using AppDbContext completeCtx = CreateContext();
+        bool completed = await CreateCompletionService(completeCtx).MarkCurrentJobAsCompletedAsync(
+            fixture.PrinterId,
+            "complete",
+            new PrinterTerminalObservation(claim.Attempt.BackendFileName, claim.Attempt.Id));
+
+        completed.Should().BeTrue();
+
+        // Assert: the persisted job actually requeued for the next copy, not completed.
+        await using AppDbContext verify = CreateContext();
+        PrintJob persistedJob = await verify.PrintJobs.SingleAsync(j => j.Id == fixture.JobId);
+        persistedJob.Status.Should().Be(
+            PrintJobStatus.Queued,
+            "one of two copies finished -- the job must requeue for the next copy, not exit the active set");
+        persistedJob.CompletedCopies.Should().Be(1);
+
+        // Assert: the REAL producer wrote the non-membership-changing event type for this
+        // in-set transition, not EventTypeJobCompleted.
+        QueueDispatchOutbox completionEvent = await verify.QueueDispatchOutbox
+            .Where(e => e.AggregateId == fixture.JobId)
+            .OrderByDescending(e => e.Sequence)
+            .FirstAsync();
+        completionEvent.EventType.Should().Be(QueueLifecycleEventWriter.EventTypeJobCopyCompleted);
+        completionEvent.EventType.Should().NotBe(QueueLifecycleEventWriter.EventTypeJobCompleted);
+
+        // Feed the REAL outbox row through the REAL publisher + membership notifier and
+        // confirm the discovery hint is correctly skipped for this in-set transition.
+        var proxy = new Mock<IClientProxy>();
+        proxy
+            .Setup(client => client.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var clients = new Mock<IHubClients>();
+        clients
+            .Setup(client => client.Group(It.IsAny<string>()))
+            .Returns(proxy.Object);
+        var hub = new Mock<IHubContext<PrinterHub>>();
+        hub.Setup(context => context.Clients).Returns(clients.Object);
+        ServiceProvider provider = new ServiceCollection()
+            .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                _connectionString,
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+            .BuildServiceProvider();
+        await using (provider)
+        {
+            var membershipNotifier = new QueueSubscriptionMembershipNotifier(
+                hub.Object,
+                NullLogger<QueueSubscriptionMembershipNotifier>.Instance);
+            var publisher = new QueueOutboxPublisherService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                hub.Object,
+                NullLogger<QueueOutboxPublisherService>.Instance,
+                membershipNotifier);
+
+            await publisher.ProcessSingleEventAsync(completionEvent, CancellationToken.None);
+        }
+
+        proxy.Verify(
+            client => client.SendCoreAsync(
+                "queueresourceschanged",
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never,
+            "a multi-copy requeue-to-Queued transition does not change the caller's active jobIds/projectIds snapshot");
+    }
+
     private static bool IsExpectedQueueEnvelope(
         object?[] arguments,
         Guid calibrationAttemptId)
@@ -6577,7 +6676,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         AppDbContext db,
         bool withAck,
         PrinterBackend? backend = null,
-        PrinterCredential? credential = null)
+        PrinterCredential? credential = null,
+        int copies = 1)
     {
         Fixture baseFixture = await SeedCalibrationArtifactOnlyAsync(
             db,
@@ -6604,6 +6704,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             Priority = (int)PrintJobPriority.High,
             QueuePosition = 1,
             JobKind = JobKind.FilamentCalibration,
+            Copies = copies,
             RequiredFirmwareFamily = PrinterFirmwareFamily.Klipper,
             RequiredGcodeDialect = PrinterGcodeDialect.Klipper,
             RequiredSlicerEngine = "OrcaSlicer",
