@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Button } from '@/common/components/ui';
-import { PrinterIcon } from '@/common/components/icons/MdiIcons';
+import { PrinterIcon, SwapHorizontalIcon } from '@/common/components/icons/MdiIcons';
 import { PrinterImage } from '@/common/components/PrinterImage';
 import { PrinterSelectorModal } from '@/features/printers/components/PrinterSelectorModal';
 import type { ToolheadDto, MotionType } from '@/types/api';
@@ -108,7 +108,9 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
               type="button"
               variant="secondary"
               onClick={() => setIsModalOpen(true)}
-              className="min-w-0 flex-1 justify-start! p-3! rounded-lg!"
+              aria-haspopup="dialog"
+              aria-expanded={isModalOpen}
+              className="group min-w-0 flex-1 justify-start! p-3! rounded-lg!"
             >
               {selectedPrinter ? (
                 <div className="flex items-start gap-3 w-full text-left">
@@ -139,14 +141,26 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
                       {selectedPrinter.modelName && (
                         <div className="truncate">{selectedPrinter.modelName}</div>
                       )}
-                      {getPrimaryNozzleDiameter(selectedPrinter) && (
-                        <div>{getPrimaryNozzleDiameter(selectedPrinter)}mm nozzle</div>
-                      )}
                     </div>
                   </div>
 
-                  {/* Chevron indicator */}
-                  <svg className="w-4 h-4 text-pf-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  {/* Change affordance. Deliberately NOT a chevron-down: this button
+                      opens a dialog, and a chevron would promise a dropdown. The label
+                      reveals on hover and on keyboard focus so both routes get the cue.
+                      Below `sm` the text is hidden, so the icon carries the label there
+                      and is decorative above it — otherwise the button's accessible name
+                      would end "...Change Change printer". */}
+                  <div className="ml-auto shrink-0 flex items-center gap-1.5 text-pf-text-muted">
+                    <span className="hidden sm:inline text-[10px] font-medium uppercase tracking-wider opacity-0 transition-opacity duration-200 group-hover:opacity-80 group-focus-visible:opacity-80">
+                      Change
+                    </span>
+                    <span className="sm:hidden">
+                      <SwapHorizontalIcon className="w-4 h-4" ariaLabel="Change printer" />
+                    </span>
+                    <span aria-hidden="true" className="hidden sm:inline">
+                      <SwapHorizontalIcon className="w-4 h-4" />
+                    </span>
+                  </div>
                 </div>
               ) : (
                 <div className="flex items-center gap-3 text-pf-text-muted">
