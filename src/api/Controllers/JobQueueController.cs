@@ -284,25 +284,36 @@ public class JobQueueController(
         // So a gap between the client's cursor and the oldest surviving row proves
         // the client cannot be served incrementally and must resynchronize from a
         // full snapshot instead of silently missing events.
-        long? oldestSurviving = await db.QueueDispatchOutbox
+        //
+        // IMPORTANT: the expiry check and the candidate fetch below MUST come from
+        // the same query result, not two separate round-trips. Two independent
+        // queries would leave a window in which a concurrent retention-prune pass
+        // deletes rows between them, turning a should-be-410 into a 200 that
+        // silently skips the pruned sequence range. Deriving "expired" from the raw
+        // rows we already fetched for the response closes that race — there is only
+        // ever one read of QueueDispatchOutbox on this request path.
+        List<QueueDispatchOutbox> rawCandidates = await db.QueueDispatchOutbox
             .AsNoTracking()
+            .Where(evt => evt.Sequence > afterSequence)
             .OrderBy(evt => evt.Sequence)
-            .Select(evt => (long?)evt.Sequence)
-            .FirstOrDefaultAsync(ct);
+            .Take(Math.Min(2000, limit * 4))
+            .ToListAsync(ct);
 
         bool expired;
         long currentSequence;
-        if (oldestSurviving.HasValue)
+        if (rawCandidates.Count > 0)
         {
-            expired = oldestSurviving.Value > afterSequence + 1;
-            currentSequence = oldestSurviving.Value - 1;
+            long firstSurviving = rawCandidates[0].Sequence;
+            expired = firstSurviving > afterSequence + 1;
+            currentSequence = firstSurviving - 1;
         }
         else
         {
-            // Table is empty (fully pruned or nothing ever published). Fall back to
-            // the allocator's high-water mark: if events existed beyond the client's
-            // cursor but none survive, the cursor is expired; otherwise the client is
-            // already caught up.
+            // No surviving rows beyond the cursor in this fetch. Fall back to the
+            // allocator's high-water mark: if events were ever allocated beyond the
+            // client's cursor but none survive, the cursor is expired; otherwise the
+            // client is already caught up. The allocator counter is monotonic and is
+            // never affected by pruning, so this fallback query carries no race risk.
             long allocatedThrough = await db.OutboxSequenceStates
                 .AsNoTracking()
                 .Select(s => s.NextSequence)
@@ -322,15 +333,9 @@ public class JobQueueController(
             });
         }
 
-        List<QueueDispatchOutbox> candidates = await db.QueueDispatchOutbox
-            .AsNoTracking()
-            .Where(evt =>
-                evt.Sequence > afterSequence &&
-                evt.EventType != BedClearAcknowledgementService.BackendStartCommandEventType &&
-                evt.EventType != BackendControlCommandConsumerService.EventType)
-            .OrderBy(evt => evt.Sequence)
-            .Take(Math.Min(2000, limit * 4))
-            .ToListAsync(ct);
+        IEnumerable<QueueDispatchOutbox> candidates = rawCandidates.Where(evt =>
+            evt.EventType != BedClearAcknowledgementService.BackendStartCommandEventType &&
+            evt.EventType != BackendControlCommandConsumerService.EventType);
 
         var events = new List<QueueEventEnvelope>(limit);
         long nextSequence = afterSequence;

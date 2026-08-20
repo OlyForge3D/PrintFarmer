@@ -268,6 +268,50 @@ public class JobQueueControllerTests
     }
 
     [Fact]
+    public async Task GetChangesAsync_OldestSurvivingRowIsFilteredEventType_IsNotFalselyExpired()
+    {
+        // Regression test: the oldest surviving row right after the cursor is an
+        // internal event type that GetChangesAsync filters out of the response
+        // (BackendStartCommandEventType). The expiry check must be derived from the
+        // raw (unfiltered) row set, not the filtered candidate list — otherwise a
+        // filtered-out row would be invisible to the gap check and produce a false
+        // "cursor expired" verdict even though nothing was pruned.
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        await using var db = new AppDbContext(options);
+        Guid jobId = Guid.NewGuid();
+        QueueDispatchOutbox filteredEvent = CreateOutboxEvent(jobId, 6);
+        filteredEvent.EventType = BedClearAcknowledgementService.BackendStartCommandEventType;
+        db.QueueDispatchOutbox.AddRange(filteredEvent, CreateOutboxEvent(jobId, 7));
+        await db.SaveChangesAsync();
+
+        Mock<IQueueResourceAuthorizationService> authorization = new();
+        authorization
+            .Setup(service => service.CanAccessJobAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                jobId,
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        JobQueueController controller = CreateController(db, authorization.Object);
+
+        IActionResult result = await controller.GetChangesAsync(
+            afterSequence: 5,
+            limit: 100,
+            CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        object value = Assert.IsAssignableFrom<object>(ok.Value);
+        object? eventValue = value.GetType().GetProperty("events")?.GetValue(value);
+        List<QueueEventEnvelope> events = Assert.IsType<List<QueueEventEnvelope>>(eventValue);
+        Assert.Single(events);
+        Assert.Equal(7, events[0].Sequence);
+        Assert.Equal(7L, value.GetType().GetProperty("nextSequence")?.GetValue(value));
+    }
+
+    [Fact]
     public async Task GetChangesAsync_EmptyTableAfterFullPrune_ClientCaughtUp_IsNotExpired()
     {
         // The outbox has been fully pruned (empty), but the client's cursor already
