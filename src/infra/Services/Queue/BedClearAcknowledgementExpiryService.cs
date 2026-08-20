@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // </copyright>
 
+using System.Diagnostics;
 using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,7 +17,8 @@ namespace Farm.Infrastructure.Services.Queue;
 /// </summary>
 public sealed class BedClearAcknowledgementExpiryService(
     IServiceScopeFactory scopeFactory,
-    ILogger<BedClearAcknowledgementExpiryService> logger) : BackgroundService
+    ILogger<BedClearAcknowledgementExpiryService> logger,
+    BedClearAcknowledgementExpiryMetrics metrics) : BackgroundService
 {
     private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(15);
 
@@ -45,6 +47,7 @@ public sealed class BedClearAcknowledgementExpiryService(
 
     internal async Task ScanAsync(CancellationToken ct)
     {
+        var stopwatch = Stopwatch.StartNew();
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         IBedClearAcknowledgementService service =
@@ -60,5 +63,12 @@ public sealed class BedClearAcknowledgementExpiryService(
         {
             await service.InvalidateStaleAcknowledgementsAsync(printerId, ct);
         }
+
+        stopwatch.Stop();
+        metrics.RecordScan(printerIds.Count, stopwatch.Elapsed.TotalMilliseconds);
+        logger.LogInformation(
+            "Bed-clear acknowledgement scan pass: {ScannedCount} acknowledged printers, {ElapsedMs}ms.",
+            printerIds.Count,
+            stopwatch.Elapsed.TotalMilliseconds);
     }
 }
