@@ -257,6 +257,7 @@ public class JobQueueController(
     [HttpGet("changes")]
     [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status410Gone)]
     public async Task<IActionResult> GetChangesAsync(
         [FromQuery] long afterSequence = 0,
         [FromQuery] int limit = 100,
@@ -278,15 +279,64 @@ public class JobQueueController(
                 new { error = "queue_change_feed_unavailable" });
         }
 
-        List<QueueDispatchOutbox> candidates = await db.QueueDispatchOutbox
+        // Expired-cursor detection: QueueDispatchOutbox.Sequence is unique and
+        // monotonically allocated (see OutboxSequenceAllocator); the only way a
+        // sequence value ever goes missing from the table is retention pruning.
+        // So a gap between the client's cursor and the oldest surviving row proves
+        // the client cannot be served incrementally and must resynchronize from a
+        // full snapshot instead of silently missing events.
+        //
+        // IMPORTANT: the expiry check and the candidate fetch below MUST come from
+        // the same query result, not two separate round-trips. Two independent
+        // queries would leave a window in which a concurrent retention-prune pass
+        // deletes rows between them, turning a should-be-410 into a 200 that
+        // silently skips the pruned sequence range. Deriving "expired" from the raw
+        // rows we already fetched for the response closes that race — there is only
+        // ever one read of QueueDispatchOutbox on this request path.
+        List<QueueDispatchOutbox> rawCandidates = await db.QueueDispatchOutbox
             .AsNoTracking()
-            .Where(evt =>
-                evt.Sequence > afterSequence &&
-                evt.EventType != BedClearAcknowledgementService.BackendStartCommandEventType &&
-                evt.EventType != BackendControlCommandConsumerService.EventType)
+            .Where(evt => evt.Sequence > afterSequence)
             .OrderBy(evt => evt.Sequence)
             .Take(Math.Min(2000, limit * 4))
             .ToListAsync(ct);
+
+        bool expired;
+        long currentSequence;
+        if (rawCandidates.Count > 0)
+        {
+            long firstSurviving = rawCandidates[0].Sequence;
+            expired = firstSurviving > afterSequence + 1;
+            currentSequence = firstSurviving - 1;
+        }
+        else
+        {
+            // No surviving rows beyond the cursor in this fetch. Fall back to the
+            // allocator's high-water mark: if events were ever allocated beyond the
+            // client's cursor but none survive, the cursor is expired; otherwise the
+            // client is already caught up. The allocator counter is monotonic and is
+            // never affected by pruning, so this fallback query carries no race risk.
+            long allocatedThrough = await db.OutboxSequenceStates
+                .AsNoTracking()
+                .Select(s => s.NextSequence)
+                .FirstOrDefaultAsync(ct);
+            expired = allocatedThrough > afterSequence;
+            currentSequence = allocatedThrough;
+        }
+
+        if (expired)
+        {
+            return StatusCode(StatusCodes.Status410Gone, new
+            {
+                error = "cursor_expired",
+                detail = "The requested cursor is older than the retention window for queue " +
+                    "change events. Perform a full resynchronization instead of an incremental fetch.",
+                currentSequence,
+            });
+        }
+
+        List<QueueDispatchOutbox> candidates = rawCandidates.Where(evt =>
+            evt.EventType != BedClearAcknowledgementService.BackendStartCommandEventType &&
+            evt.EventType != BackendControlCommandConsumerService.EventType).ToList();
 
         Guid[] candidatePrinterIds = candidates
             .Where(evt =>

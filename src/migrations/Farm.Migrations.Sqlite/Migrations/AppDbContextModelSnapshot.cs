@@ -7019,6 +7019,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.HasIndex("PrinterId", "Outcome")
                         .HasDatabaseName("IX_QueueDispatchAttempts_Printer_Outcome");
 
+                    b.HasIndex("RequiresReconciliation", "TerminalAtUtc")
+                        .HasDatabaseName("IX_QueueDispatchAttempts_RequiresReconciliation_TerminalAt");
+
                     b.ToTable("QueueDispatchAttempts");
                 });
 
@@ -7147,6 +7150,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.HasIndex("Sequence")
                         .IsUnique()
                         .HasDatabaseName("UX_QueueDispatchOutbox_Sequence");
+
+                    b.HasIndex("Status", "CompletedAtUtc")
+                        .HasDatabaseName("IX_QueueDispatchOutbox_Status_CompletedAt");
 
                     b.HasIndex("Status", "RetryAfterUtc")
                         .HasDatabaseName("IX_QueueDispatchOutbox_Status_RetryAfterUtc");

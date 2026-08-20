@@ -646,6 +646,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .IsUnique()
             .HasDatabaseName("UX_QueueDispatchOutbox_Sequence");
 
+        // Retention prune predicate: Status IN (Published, DeadLettered) AND CompletedAtUtc < cutoff.
+        // Not covered by IX_QueueDispatchOutbox_Status_RetryAfterUtc (different second column).
+        _ = modelBuilder.Entity<QueueDispatchOutbox>()
+            .HasIndex(o => new { o.Status, o.CompletedAtUtc })
+            .HasDatabaseName("IX_QueueDispatchOutbox_Status_CompletedAt");
+
+        // Retention prune predicate: RequiresReconciliation = false AND TerminalAtUtc < cutoff.
+        // No existing index covers TerminalAtUtc.
+        _ = modelBuilder.Entity<QueueDispatchAttempt>()
+            .HasIndex(a => new { a.RequiresReconciliation, a.TerminalAtUtc })
+            .HasDatabaseName("IX_QueueDispatchAttempts_RequiresReconciliation_TerminalAt");
+
         // Audit lookup patterns: by resource, by printer, and chronologically.
         _ = modelBuilder.Entity<QueueOperationAudit>()
             .HasIndex(a => new { a.ResourceType, a.ResourceId })
