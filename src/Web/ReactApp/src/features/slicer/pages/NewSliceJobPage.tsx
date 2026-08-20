@@ -1103,10 +1103,19 @@ export const NewSliceJobPage: React.FC = () => {
     return [...custom, ...system];
   }, [machineProfilesData, customMachineProfiles]);
 
-  /** Display label for the currently selected profile, nozzle token trimmed. */
+  /**
+   * Display label for the currently selected profile, nozzle token trimmed.
+   *
+   * Scoped to the profiles sharing the selected nozzle — the same grouping the
+   * picker uses. Building labels across the whole set would collide for any
+   * multi-nozzle printer and fall back to raw names, defeating the trim.
+   */
   const selectedMachineProfileLabel = useMemo(() => {
     if (!selectedMachineProfileId) return '';
-    const labels = buildMachineProfileLabels(machineProfileChoices.map((c) => c.name));
+    const selected = machineProfileChoices.find((c) => c.name === selectedMachineProfileId);
+    if (!selected) return selectedMachineProfileId;
+    const sameNozzle = machineProfileChoices.filter((c) => c.nozzleDiameter === selected.nozzleDiameter);
+    const labels = buildMachineProfileLabels(sameNozzle.map((c) => c.name));
     return labels.get(selectedMachineProfileId) ?? selectedMachineProfileId;
   }, [selectedMachineProfileId, machineProfileChoices]);
 
@@ -2184,6 +2193,14 @@ export const NewSliceJobPage: React.FC = () => {
                       aria-hidden="true"
                       tabIndex={-1}
                     />
+                    {/* Visible caption only. NOT a <label htmlFor>: a button is a
+                        labelable element, so an associated label would override the
+                        button's content and the accessible name would lose the
+                        selected profile. The sr-only prefix inside the button carries
+                        the same wording for assistive tech. */}
+                    <span aria-hidden="true" className="block text-xs text-pf-text-muted">
+                      Machine profile
+                    </span>
                     <div className="flex items-center gap-1">
                       {/* Single machine-profile control. Replaces the old paired
                           machine-profile + nozzle dropdowns: in OrcaSlicer a machine
@@ -2196,13 +2213,19 @@ export const NewSliceJobPage: React.FC = () => {
                         type="button"
                         variant="unstyled"
                         id="machine-profile-select"
-                        aria-label="Machine profile"
                         aria-haspopup="dialog"
                         aria-expanded={isMachinePickerOpen}
                         onClick={() => setIsMachinePickerOpen(true)}
                         disabled={machineProfileChoices.length === 0 || isMachineProfilesLoading}
+                        title={machineProfileChoices.length === 0 && !isMachineProfilesLoading
+                          ? 'No machine profiles for this printer — use the options menu to import one'
+                          : undefined}
                         className={`group flex min-w-0 flex-1 items-center gap-2 rounded-md border border-pf-border bg-pf-bg-1 px-2.5 py-1.5 text-left transition-colors hover:border-pf-border-strong disabled:cursor-not-allowed disabled:opacity-60 ${isMachineProfilesLoading ? 'opacity-50' : ''}`}
                       >
+                        {/* The accessible name must carry the SELECTION, so it is built
+                            from content rather than an aria-label (which would override
+                            it and announce only "Machine profile"). */}
+                        <span className="sr-only">Machine profile: </span>
                         <span className="min-w-0 flex-1 truncate text-sm text-pf-text-primary">
                           {isMachineProfilesLoading
                             ? 'Loading...'
@@ -2224,7 +2247,9 @@ export const NewSliceJobPage: React.FC = () => {
                             {formatNozzleDiameter(selectedMachineNozzleDiameter)}mm
                           </span>
                         )}
-                        <SwapHorizontalIcon className="w-4 h-4 shrink-0 text-pf-text-muted" ariaLabel="Change machine profile" />
+                        <span aria-hidden="true" className="shrink-0">
+                          <SwapHorizontalIcon className="w-4 h-4 text-pf-text-muted" />
+                        </span>
                       </Button>
                       <div className="relative shrink-0" ref={machineMenuRef}>
                         <Button
@@ -2291,7 +2316,9 @@ export const NewSliceJobPage: React.FC = () => {
               )}
 
             {selectedPrinterId && machineProfilesData.length > 0 && !hasVisibleMachineProfiles && selectedNozzleDiameter !== undefined && (
-              <p className="text-xs text-pf-warning mt-1">No machine profiles available for the selected nozzle</p>
+              <p className="text-xs text-pf-warning mt-1">
+                No machine profiles available for the current nozzle. Open the machine profile picker to choose another.
+              </p>
             )}
             {selectedPrinterId && machineProfilesData.length === 0 && !hasVisibleMachineProfiles && selectedManufacturer && selectedPrinterModel && (
               <p className="text-xs text-pf-warning mt-1">No machine profiles available for this printer model</p>

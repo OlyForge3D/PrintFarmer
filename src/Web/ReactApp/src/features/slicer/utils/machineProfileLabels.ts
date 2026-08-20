@@ -25,13 +25,25 @@
 const NOZZLE_SUFFIX_PATTERN = /\s*[-–]?\s*\d+(?:\.\d+)?\s*(?:mm)?\s*nozzle\s*$/i;
 
 /**
- * Matches the high-flow marker as a standalone word so "HF" is detected but
- * words merely containing those letters are not.
+ * Matches the high-flow marker.
+ *
+ * Deliberately NOT `\bhf\b`: profile names ship both spaced and unspaced forms
+ * ("Prusa CORE One HF 0.4 nozzle", "Prusa MK4S HF0.4 nozzle"), and `\b` fails
+ * on the unspaced form because there is no word boundary between "F" and "0".
+ * That produced a row whose visible label ended in "HF" but carried no badge.
+ * The lookarounds still refuse letter-adjacent matches, so "HFX600" and
+ * "shelfhf" are not treated as high flow.
  */
-const HIGH_FLOW_PATTERN = /\bhf\b/i;
+const HIGH_FLOW_PATTERN = /(?:^|[^a-z])hf(?![a-z])/i;
 
 /**
  * True when the supplied text designates a high-flow variant.
+ *
+ * This is a NAME heuristic, not a verified hardware capability: for Prusa
+ * CORE One the standard and HF profiles share `nozzleDiameter` and
+ * `printerVariant`, and `nozzleType` is empty on both, so nothing structural
+ * distinguishes them. Callers must phrase user-facing copy accordingly rather
+ * than asserting volumetric limits as fact.
  *
  * Accepts free-form text (profile name, or a name joined with its
  * compatible-printer list) so callers can detect the variant from whichever
@@ -53,14 +65,23 @@ export function stripNozzleSuffix(name: string): string {
 }
 
 /**
- * Builds raw-name -> display-label pairs for a set of profiles shown together.
+ * Builds raw-name -> display-label pairs for profiles rendered TOGETHER.
+ *
+ * Pass only the rows that appear side by side — typically one nozzle group.
+ * Nozzle is constant within such a group, so trimming the nozzle token is both
+ * safe and unique there.
+ *
+ * Do NOT pass a printer's entire profile set: every multi-nozzle printer
+ * collides by construction ("Prusa CORE One 0.4 nozzle" and
+ * "Prusa CORE One 0.6 nozzle" both trim to "Prusa CORE One"), which would trip
+ * the fallback below and silently disable trimming everywhere.
  *
  * Stripping is applied only when every resulting label stays unique within the
- * set. If two profiles would collapse to the same label, the whole set falls
- * back to raw names: showing the redundant nozzle is much better than showing
- * two indistinguishable options.
+ * supplied set. If two would collapse, the whole set falls back to raw names:
+ * showing a redundant nozzle is much better than showing two indistinguishable
+ * options.
  *
- * @param names Raw profile names rendered in the same list.
+ * @param names Raw profile names rendered in the same group.
  * @returns Map keyed by raw name; values are the labels to display.
  */
 export function buildMachineProfileLabels(names: readonly string[]): Map<string, string> {

@@ -46,6 +46,13 @@ describe('mentionsHighFlow', () => {
     expect(mentionsHighFlow('prusa core one hf 0.4 nozzle')).toBe(true);
   });
 
+  it('detects the unspaced form, which a \\b-anchored pattern misses', () => {
+    // stripNozzleSuffix happily trims "HF0.4 nozzle" to a label ending in "HF",
+    // so detection must agree or the row shows "HF" with no badge.
+    expect(mentionsHighFlow('Prusa MK4S HF0.4 nozzle')).toBe(true);
+    expect(stripNozzleSuffix('Prusa MK4S HF0.4 nozzle')).toBe('Prusa MK4S HF');
+  });
+
   it('is false for standard profiles', () => {
     expect(mentionsHighFlow('Prusa CORE One 0.4 nozzle')).toBe(false);
     expect(mentionsHighFlow('Phrozen Arco 0.4 nozzle')).toBe(false);
@@ -54,6 +61,12 @@ describe('mentionsHighFlow', () => {
   it('does not match HF embedded inside a longer word', () => {
     expect(mentionsHighFlow('Shelfhorse 0.4 nozzle')).toBe(false);
     expect(mentionsHighFlow('HFX600 0.4 nozzle')).toBe(false);
+    expect(mentionsHighFlow('shelfhf')).toBe(false);
+  });
+
+  it('matches hyphen- and underscore-delimited forms', () => {
+    expect(mentionsHighFlow('MK4-HF-test')).toBe(true);
+    expect(mentionsHighFlow('MK4_HF_test')).toBe(true);
   });
 });
 
@@ -77,6 +90,25 @@ describe('buildMachineProfileLabels', () => {
 
     expect(labels.get('Prusa MK4 0.4 nozzle')).toBe('Prusa MK4 0.4 nozzle');
     expect(labels.get('Prusa MK4 0.6 nozzle')).toBe('Prusa MK4 0.6 nozzle');
+  });
+
+  it('documents why callers must scope the set to one nozzle group', () => {
+    // Passing a whole multi-nozzle printer collides by construction, which
+    // disables trimming for EVERY row — the bug this guard once caused.
+    const wholePrinter = buildMachineProfileLabels([
+      'Prusa CORE One 0.25 nozzle',
+      'Prusa CORE One 0.4 nozzle',
+      'Prusa CORE One HF 0.4 nozzle',
+    ]);
+    expect(wholePrinter.get('Prusa CORE One HF 0.4 nozzle')).toBe('Prusa CORE One HF 0.4 nozzle');
+
+    // Scoped to the 0.4 group, trimming is unique and therefore applies.
+    const oneGroup = buildMachineProfileLabels([
+      'Prusa CORE One 0.4 nozzle',
+      'Prusa CORE One HF 0.4 nozzle',
+    ]);
+    expect(oneGroup.get('Prusa CORE One 0.4 nozzle')).toBe('Prusa CORE One');
+    expect(oneGroup.get('Prusa CORE One HF 0.4 nozzle')).toBe('Prusa CORE One HF');
   });
 
   it('keys every supplied name, including on the fallback path', () => {

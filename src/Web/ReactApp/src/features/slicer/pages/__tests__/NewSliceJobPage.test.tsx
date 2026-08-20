@@ -188,6 +188,15 @@ vi.mock('@/services/slicerRegistry', () => ({
   }
 }));
 
+// Mock slicer engine registry (drives the version pin and the submit guard)
+vi.mock('@/services/slicerService', () => ({
+  slicerService: {
+    listEngines: vi.fn(() => Promise.resolve([
+      { engine: 'OrcaSlicer', versions: ['2.4.2'], versionEntries: [{ version: '2.4.2', available: true }], latest: '2.4.2' },
+    ])),
+  },
+}));
+
 // Mock slice job service
 vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
@@ -489,7 +498,7 @@ describe('NewSliceJobPage', () => {
       fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
 
       // The machine profile control is now a dialog trigger, not a <select>.
-      const machineProfileTrigger = await screen.findByLabelText('Machine profile');
+      const machineProfileTrigger = await screen.findByRole('button', { name: /^Machine profile:/ });
 
       await waitFor(() => {
         expect(machineProfileTrigger).toBeVisible();
@@ -497,8 +506,8 @@ describe('NewSliceJobPage', () => {
         // redundant nozzle token is trimmed from the label.
         expect(machineProfileTrigger).toHaveTextContent('Prusa MK4');
         expect(machineProfileTrigger).toHaveTextContent('0.4mm');
-        expect(slicerProfilesService.getFilamentProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.4 nozzle'], undefined);
-        expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.4 nozzle'], undefined);
+        expect(slicerProfilesService.getFilamentProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.4 nozzle'], expect.anything());
+        expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.4 nozzle'], expect.anything());
       });
 
       // There is no longer a standalone nozzle dropdown in the sidebar.
@@ -506,20 +515,70 @@ describe('NewSliceJobPage', () => {
 
       fireEvent.click(machineProfileTrigger);
 
-      const nozzleFacet = await screen.findByRole('radiogroup', { name: 'Filter by nozzle diameter' });
-      fireEvent.click(within(nozzleFacet).getByRole('radio', { name: '0.6 mm' }));
+      const nozzleFacet = await screen.findByRole('group', { name: 'Filter by nozzle diameter' });
+      fireEvent.click(within(nozzleFacet).getByRole('button', { name: /0\.6 mm/ }));
 
       // Filtering to 0.6 hides the 0.4 profile entirely.
       await waitFor(() => {
-        expect(screen.queryByRole('radio', { name: /0\.4mm/ })).not.toBeInTheDocument();
+        expect(screen.queryByRole('region', { name: '0.4 mm machine profiles' })).not.toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole('radio', { name: /Prusa MK4.*0\.6mm/ }));
+      const group06 = screen.getByRole('region', { name: '0.6 mm machine profiles' });
+      fireEvent.click(within(group06).getByRole('button', { name: /Prusa MK4/ }));
 
-      // Selecting commits both nozzle and profile in one step.
+      // Selecting commits both nozzle and profile in one step, and BOTH downstream
+      // compatibility queries must follow the newly chosen machine profile —
+      // a stale filament list is just as broken as a stale process list.
       await waitFor(() => {
         expect(machineProfileTrigger).toHaveTextContent('0.6mm');
-        expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.6 nozzle'], undefined);
+        expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenLastCalledWith(['Prusa MK4 0.6 nozzle'], expect.anything());
+        expect(slicerProfilesService.getFilamentProfilesForMachines).toHaveBeenLastCalledWith(['Prusa MK4 0.6 nozzle'], expect.anything());
+      });
+    });
+
+    it('keeps the canonical profile name as the value while showing a trimmed label', async () => {
+      // Prusa MK4S ships the unspaced "HF0.4" form, so this fixture exercises
+      // both halves of the contract: the trimmed label ("Prusa MK4S HF") differs
+      // from the canonical name, and HF detection must still fire.
+      //
+      // `getProcessProfilesForMachines` is called with [selectedMachineProfileId] —
+      // the exact state that NewSliceJobPage serializes as
+      // `slicerProfileJson.machineProfileName` — so asserting on it proves the
+      // trimmed label never leaks into the value sent to the slice API.
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
+        { name: 'Prusa MK4S 0.4 nozzle', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'MK4S' },
+        { name: 'Prusa MK4S HF0.4 nozzle', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'MK4S' },
+      ] as OrcaMachineProfile[]);
+
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      const machineProfileTrigger = await screen.findByRole('button', { name: /^Machine profile:/ });
+
+      await waitFor(() => {
+        expect(machineProfileTrigger).toBeEnabled();
+        expect(machineProfileTrigger).toHaveTextContent('Prusa MK4S');
+      });
+
+      fireEvent.click(machineProfileTrigger);
+
+      const group04 = await screen.findByRole('region', { name: '0.4 mm machine profiles' });
+      const rows = within(group04).getAllByRole('button');
+      const hfRow = rows.find((r) => /HF/.test(r.textContent ?? ''))!;
+
+      // The visible label is trimmed and carries the HF marker...
+      expect(hfRow.querySelector('span.truncate')?.textContent?.trim()).toBe('Prusa MK4S HF');
+      fireEvent.click(hfRow);
+
+      // ...while every downstream consumer receives the FULL canonical name.
+      await waitFor(() => {
+        expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenLastCalledWith(['Prusa MK4S HF0.4 nozzle'], expect.anything());
+        expect(slicerProfilesService.getFilamentProfilesForMachines).toHaveBeenLastCalledWith(['Prusa MK4S HF0.4 nozzle'], expect.anything());
       });
     });
 
@@ -550,7 +609,7 @@ describe('NewSliceJobPage', () => {
 
       fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
 
-      const machineProfileTrigger = await screen.findByLabelText('Machine profile');
+      const machineProfileTrigger = await screen.findByRole('button', { name: /^Machine profile:/ });
 
       await waitFor(() => {
         expect(machineProfileTrigger).toHaveTextContent('Custom MK4');
@@ -559,8 +618,8 @@ describe('NewSliceJobPage', () => {
 
       // The custom profile is reachable in the picker under My Profiles.
       fireEvent.click(machineProfileTrigger);
-      const myProfiles = await screen.findByRole('radiogroup', { name: 'My machine profiles' });
-      expect(within(myProfiles).getByRole('radio', { name: /Custom MK4/ })).toBeInTheDocument();
+      const myProfiles = await screen.findByRole('region', { name: 'My machine profiles' });
+      expect(within(myProfiles).getByRole('button', { name: /Custom MK4/ })).toBeInTheDocument();
       fireEvent.keyDown(document, { key: 'Escape' });
 
       expect(screen.queryByText(/No machine profiles available/)).not.toBeInTheDocument();

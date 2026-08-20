@@ -146,12 +146,20 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
 
                   {/* Change affordance. Deliberately NOT a chevron-down: this button
                       opens a dialog, and a chevron would promise a dropdown. The label
-                      reveals on hover and on keyboard focus so both routes get the cue. */}
+                      reveals on hover and on keyboard focus so both routes get the cue.
+                      Below `sm` the text is hidden, so the icon carries the label there
+                      and is decorative above it — otherwise the button's accessible name
+                      would end "...Change Change printer". */}
                   <div className="ml-auto shrink-0 flex items-center gap-1.5 text-pf-text-muted">
                     <span className="hidden sm:inline text-[10px] font-medium uppercase tracking-wider opacity-0 transition-opacity duration-200 group-hover:opacity-80 group-focus-visible:opacity-80">
                       Change
                     </span>
-                    <SwapHorizontalIcon className="w-4 h-4" ariaLabel="Change printer" />
+                    <span className="sm:hidden">
+                      <SwapHorizontalIcon className="w-4 h-4" ariaLabel="Change printer" />
+                    </span>
+                    <span aria-hidden="true" className="hidden sm:inline">
+                      <SwapHorizontalIcon className="w-4 h-4" />
+                    </span>
                   </div>
                 </div>
               ) : (
