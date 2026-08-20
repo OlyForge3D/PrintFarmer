@@ -613,13 +613,13 @@ public class GcodeFilesController(
     /// </summary>
     [HttpGet("download")]
     [HttpHead("download")]
-    [ProducesResponseType(typeof(FileContentResult), 200)]
+    [ProducesResponseType(typeof(PhysicalFileResult), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult> DownloadAsync([FromQuery] string path)
     {
         try
         {
-            (byte[] Bytes, string FileName)? result = await gcodeFilesService.DownloadAsync(path, HttpContext.RequestAborted);
+            (string FullPath, string FileName)? result = await gcodeFilesService.DownloadAsync(path, HttpContext.RequestAborted);
             if (result == null)
             {
                 return NotFound();
@@ -627,11 +627,12 @@ public class GcodeFilesController(
 
             if (HttpContext.Request.Method.Equals("HEAD", StringComparison.OrdinalIgnoreCase))
             {
-                Response.ContentLength = result.Value.Bytes.Length;
+                // Report Content-Length from file metadata only; never open/read the file for a HEAD request.
+                Response.ContentLength = new FileInfo(result.Value.FullPath).Length;
                 return new StatusCodeResult(200);
             }
 
-            return File(result.Value.Bytes, "application/octet-stream", result.Value.FileName);
+            return PhysicalFile(result.Value.FullPath, "application/octet-stream", result.Value.FileName, enableRangeProcessing: true);
         }
         catch (Exception ex)
         {

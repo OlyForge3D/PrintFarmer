@@ -92,6 +92,156 @@ public class GcodeFilesServiceTests
     }
 
     [Fact]
+    public async Task DownloadAsync_WithExistingFile_ReturnsPhysicalPathWithoutReadingContent()
+    {
+        // Arrange
+        string storageDir = Path.Join(Path.GetTempPath(), "pfarm-gcode-tests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(storageDir);
+        string fullPath = Path.Join(storageDir, "large.gcode");
+        byte[] content = new byte[1024];
+        await File.WriteAllBytesAsync(fullPath, content);
+
+        try
+        {
+            var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
+            var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
+            var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+            storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
+            var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
+            var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
+            var mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
+            var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
+            var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
+                thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
+
+            // Act
+            (string FullPath, string FileName)? result = await service.DownloadAsync("/large.gcode", CancellationToken.None);
+
+            // Assert - the service resolves the physical path/filename, it must never buffer file bytes.
+            result.Should().NotBeNull();
+            result!.Value.FullPath.Should().Be(fullPath);
+            result.Value.FileName.Should().Be("large.gcode");
+        }
+        finally
+        {
+            Directory.Delete(storageDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadAsync_WithMissingFile_ReturnsNull()
+    {
+        // Arrange
+        string storageDir = Path.Join(Path.GetTempPath(), "pfarm-gcode-tests", Guid.NewGuid().ToString());
+        var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
+        var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
+        var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
+        var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
+        var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
+        var mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
+        var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
+        var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
+            thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
+
+        // Act
+        (string FullPath, string FileName)? result = await service.DownloadAsync("/missing.gcode", CancellationToken.None);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_ById_WithExistingFile_ReturnsPhysicalPathWithoutReadingContent()
+    {
+        // Arrange
+        string storageDir = Path.Join(Path.GetTempPath(), "pfarm-gcode-tests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(storageDir);
+        string fileName = "byid.gcode";
+        string fullPath = Path.Join(storageDir, fileName);
+        await File.WriteAllBytesAsync(fullPath, new byte[2048]);
+
+        try
+        {
+            var fileId = Guid.NewGuid();
+            var gcodeFile = new GcodeFile
+            {
+                Id = fileId,
+                Name = fileName,
+                FileName = fileName,
+                FilePath = storageDir,
+                FileHash = "testhash",
+                FileSizeBytes = 2048,
+                UploadedAt = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                Source = GcodeSource.Upload
+            };
+
+            var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
+            repo.Setup(x => x.GetByIdWithIncludesAsync(fileId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(gcodeFile);
+            var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
+            var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+            var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
+            var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
+            var mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
+            var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
+            var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
+                thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
+
+            // Act
+            string? result = await service.DownloadFileAsync(fileId, "/app/wwwroot", CancellationToken.None);
+
+            // Assert
+            result.Should().Be(fullPath);
+        }
+        finally
+        {
+            Directory.Delete(storageDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_ById_WhenPhysicalFileMissing_ReturnsNull()
+    {
+        // Arrange
+        var fileId = Guid.NewGuid();
+        string storageDir = Path.Join(Path.GetTempPath(), "pfarm-gcode-tests", Guid.NewGuid().ToString());
+        var gcodeFile = new GcodeFile
+        {
+            Id = fileId,
+            Name = "missing.gcode",
+            FileName = "missing.gcode",
+            FilePath = storageDir,
+            FileHash = "testhash",
+            FileSizeBytes = 0,
+            UploadedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            Source = GcodeSource.Upload
+        };
+
+        var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
+        repo.Setup(x => x.GetByIdWithIncludesAsync(fileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
+        var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
+        var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
+        var mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
+        var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
+        var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
+            thumbnailExtractor.Object, mockFolderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
+
+        // Act
+        string? result = await service.DownloadFileAsync(fileId, "/app/wwwroot", CancellationToken.None);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
     public async Task FinalizeChunkedUploadAsync_PersistsMetadataAndRenamesFiles()
     {
         // Arrange
