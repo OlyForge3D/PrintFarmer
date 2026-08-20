@@ -137,6 +137,22 @@ describe('MachineProfileSelectorModal', () => {
     expect(system.some((r) => /My CORE One tune/.test(r.textContent ?? ''))).toBe(false);
   });
 
+  it('trims custom labels per nozzle so trigger and modal agree', () => {
+    renderModal({
+      profiles: [
+        ...CORE_ONE,
+        { name: 'My tune 0.4 nozzle', nozzleDiameter: 0.4, isSystem: false },
+        { name: 'My tune 0.6 nozzle', nozzleDiameter: 0.6, isSystem: false },
+      ],
+    });
+    // Trimming across ALL customs would collide ("My tune" twice) and revert
+    // both to raw names, while the trigger scopes to one nozzle and trims.
+    const names = rowsIn('My machine profiles').map(
+      (r) => r.querySelector('span.truncate')?.textContent?.trim(),
+    );
+    expect(names).toEqual(['★ My tune', '★ My tune']);
+  });
+
   it('hides the nozzle facet when there is only one nozzle', () => {
     renderModal({
       profiles: [{ name: 'Phrozen Arco 0.4 nozzle', nozzleDiameter: 0.4, isSystem: true }],

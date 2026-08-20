@@ -106,10 +106,29 @@ export function MachineProfileSelectorModal({
   }, [profiles, search, nozzleFilter]);
 
   const customProfiles = useMemo(() => visible.filter((p) => !p.isSystem), [visible]);
-  const customLabels = useMemo(
-    () => buildMachineProfileLabels(customProfiles.map((p) => p.name)),
-    [customProfiles],
-  );
+  /**
+   * Custom labels are bucketed by nozzle before trimming, matching how system
+   * groups are built. Trimming across all customs at once would collide for a
+   * user who keeps the same tune at two nozzles, reverting them to raw names
+   * while the trigger (which scopes to one nozzle) trimmed them.
+   */
+  const customLabels = useMemo(() => {
+    const byNozzle = new Map<number, string[]>();
+    customProfiles.forEach((p) => {
+      const key = typeof p.nozzleDiameter === 'number' && p.nozzleDiameter > 0
+        ? p.nozzleDiameter
+        : UNKNOWN_NOZZLE_KEY;
+      const bucket = byNozzle.get(key);
+      if (bucket) bucket.push(p.name);
+      else byNozzle.set(key, [p.name]);
+    });
+
+    const merged = new Map<string, string>();
+    byNozzle.forEach((names) => {
+      buildMachineProfileLabels(names).forEach((label, name) => merged.set(name, label));
+    });
+    return merged;
+  }, [customProfiles]);
 
   /**
    * System profiles bucketed by nozzle so same-nozzle variants sit together.

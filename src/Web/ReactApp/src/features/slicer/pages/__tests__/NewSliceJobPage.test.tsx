@@ -11,6 +11,7 @@ import type { OrcaMachineProfile, OrcaFilamentProfile, OrcaProcessProfile } from
 import { apiClient } from '../../../../services/api';
 import { slicerProfilesService } from '../../../../services/slicerProfilesService';
 import { slicerRegistry } from '../../../../services/slicerRegistry';
+import { sliceJobService } from '@/services/sliceJobService';
 
 // Mutable slicer-mode ref so individual describes can opt into Advanced mode.
 // Hoisted because vi.mock factories run before module-body initialization.
@@ -580,6 +581,123 @@ describe('NewSliceJobPage', () => {
         expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenLastCalledWith(['Prusa MK4S HF0.4 nozzle'], expect.anything());
         expect(slicerProfilesService.getFilamentProfilesForMachines).toHaveBeenLastCalledWith(['Prusa MK4S HF0.4 nozzle'], expect.anything());
       });
+    });
+
+    it('serializes the canonical profile name into the submitted slicerProfileJson', async () => {
+      // Guards the integration point, not just the serializer: a future edit
+      // passing selectedMachineProfileLabel into buildSlicerProfileJson would
+      // satisfy the util's own unit tests but fail here.
+      //
+      // MK4S ships the unspaced "HF0.4" form, so the trimmed label
+      // ("Prusa MK4S HF") differs from the canonical name, and MK4S avoids the
+      // CORE One-only process guard that would otherwise block submission.
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
+        { name: 'Prusa MK4S 0.4 nozzle', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'MK4S' },
+        { name: 'Prusa MK4S HF0.4 nozzle', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'MK4S' },
+      ] as OrcaMachineProfile[]);
+      vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue([
+        {
+          name: '0.20mm Standard @MK4S',
+          quality: 'Standard',
+          layerHeight: 0.2,
+          infillPercentage: 15,
+          printSpeed: 60,
+          supports: false,
+          compatiblePrinters: ['Prusa MK4S 0.4 nozzle', 'Prusa MK4S HF0.4 nozzle'],
+        },
+      ] as OrcaProcessProfile[]);
+
+      renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
+
+      await waitFor(() => {
+        expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      const machineProfileTrigger = await screen.findByRole('button', { name: /^Machine profile:/ });
+      await waitFor(() => {
+        expect(machineProfileTrigger).toBeEnabled();
+        expect(machineProfileTrigger).toHaveTextContent('Prusa MK4S');
+      });
+
+      fireEvent.click(machineProfileTrigger);
+      const group04 = await screen.findByRole('region', { name: '0.4 mm machine profiles' });
+      const hfRow = within(group04).getAllByRole('button').find((r) => /HF/.test(r.textContent ?? ''))!;
+      expect(hfRow.querySelector('span.truncate')?.textContent?.trim()).toBe('Prusa MK4S HF');
+      fireEvent.click(hfRow);
+
+      // A process preset must resolve before submission is allowed. Wait for it
+      // to settle, then read onSlice fresh — it is a useCallback closing over
+      // selectedProcessPresetId, so a handle captured earlier is stale and would
+      // always bail out on "Select a process profile".
+      await waitFor(() => {
+        expect(slicerProfilesService.getProcessProfilesForMachines)
+          .toHaveBeenLastCalledWith(['Prusa MK4S HF0.4 nozzle'], expect.anything());
+      });
+      await waitFor(() => {
+        const preset = document.querySelectorAll('select');
+        const processSelect = Array.from(preset).find((s) => s.value.startsWith('system:'));
+        expect(processSelect?.value).toBe('system:0.20mm Standard @MK4S');
+      });
+
+      const latestOnSlice = () =>
+        (slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as { onSlice?: (ids?: string[]) => void } | undefined)?.onSlice;
+
+      await waitFor(() => {
+        expect(latestOnSlice()).toBeTypeOf('function');
+      });
+
+      await act(async () => { latestOnSlice()!(); });
+
+      await waitFor(() => {
+        expect(sliceJobService.submitJob).toHaveBeenCalled();
+      }, { timeout: 3000 });
+
+      const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)?.[0] as { slicerProfileJson: string };
+      const profile = JSON.parse(request.slicerProfileJson) as { machineProfileName: string };
+      expect(profile.machineProfileName).toBe('Prusa MK4S HF0.4 nozzle');
+      expect(profile.machineProfileName).not.toBe('Prusa MK4S HF');
+    });
+
+    it('keeps the machine profile trigger focusable and explained when a printer has no profiles', async () => {
+      // `disabled` and `explainedDisabled` are two separate expressions that must
+      // stay in sync; without this, a future edit could silently drop the button
+      // out of the tab order and take its explanation with it.
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([]);
+      vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+        profiles: [],
+        totalCount: 0,
+        machineProfileCount: 0,
+        processProfileCount: 0,
+        filamentProfileCount: 0,
+      });
+
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      const trigger = await screen.findByRole('button', { name: /^Machine profile:/ });
+
+      await waitFor(() => {
+        expect(trigger).toHaveAttribute('aria-disabled', 'true');
+      });
+
+      // Reachable by keyboard, and the reason is discoverable.
+      expect(trigger).toHaveAttribute('tabindex', '0');
+      expect(trigger).not.toHaveAttribute('disabled');
+      expect(trigger).toHaveAttribute('title', expect.stringContaining('No machine profiles for this printer'));
+
+      // ...but still inert.
+      fireEvent.click(trigger);
+      expect(screen.queryByRole('dialog', { name: 'Select machine profile' })).not.toBeInTheDocument();
+
+      // The kebab remains the escape route to Import / Manage.
+      expect(screen.getByLabelText('Machine profile options menu')).toBeEnabled();
     });
 
     it('should keep custom machine profiles selectable when system profiles are unavailable', async () => {
