@@ -3861,6 +3861,70 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_MultiCopyBackendHistoryCompleted_RequeuesRemainingCopies()
+    {
+        // #1742: the CompletedOnBackend branch of the terminal-reconciliation switch
+        // used to set job.Status = Completed unconditionally once backend history
+        // proved the job finished, silently dropping any remaining copies for a
+        // Copies > 1 job caught by periodic reconciliation instead of a live terminal
+        // observation. Mirrors JobCompletion_MultiCopyRequeue_WritesNonMembershipEventAndSkipsHint
+        // and OrphanSync_MultiCopyPrintingJob_RequeuesRemainingCopiesInsteadOfCompleting but
+        // exercises the QueueReconciliationService history-driven producer path. Copies is
+        // an immutable calibration provenance field once persisted, so the multi-copy shape
+        // must be set at creation time (copies: 2).
+        const string backendJobId = "multi-copy-history";
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(backendJobId, copies: 2);
+        DateTime claimedAtUtc;
+        await using (AppDbContext read = CreateContext())
+        {
+            claimedAtUtc = (await read.QueueDispatchAttempts.SingleAsync(
+                candidate => candidate.Id == attemptId)).ClaimedAtUtc;
+        }
+
+        long providerTimestamp = new DateTimeOffset(
+            DateTime.SpecifyKind(claimedAtUtc, DateTimeKind.Utc))
+            .ToUnixTimeSeconds();
+        var printers = new Mock<IPrintersService>();
+        printers.Setup(service => service.GetStatusDtoAsync(
+                fixture.PrinterId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(
+                fixture.PrinterId,
+                IsOnline: true,
+                State: "idle"));
+        printers.Setup(service => service.ProbeHistoryJobAsync(
+                fixture.PrinterId,
+                backendJobId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(HistoryJobProbeResult.Found(new HistoryJob
+            {
+                JobId = backendJobId,
+                Filename = "multi-copy-history.gcode",
+                Status = "completed",
+                StartTime = providerTimestamp,
+            }));
+
+        await RunReconciliationAsync(printers.Object);
+
+        // The helper's expectedStatus/expectedEventType assertions double as the
+        // "must NOT write EventTypeJobCompleted for a non-terminal requeue" check
+        // (see its `if (expectedStatus != PrintJobStatus.Completed)` branch).
+        await AssertReconciledTerminalAsync(
+            fixture,
+            attemptId,
+            PrintJobStatus.Queued,
+            QueueLifecycleEventWriter.EventTypeJobCopyCompleted,
+            expectedFailureCode: null);
+
+        await using AppDbContext verify = CreateContext();
+        PrintJob persistedJob = await verify.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        persistedJob.CompletedCopies.Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
     public async Task Reconciler_FilenameOnlyOneSecondBeforeClaimFloor_RetainsEveryFence()
     {
         (Fixture fixture, Guid attemptId) =
@@ -4292,6 +4356,77 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 candidate.ReasonCode == "orphan_sync_completed");
         audit.ActorSubject.Should().Be(actorSubject);
         audit.Outcome.Should().Be(QueueAuditOutcomes.Success);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task OrphanSync_MultiCopyPrintingJob_RequeuesRemainingCopiesInsteadOfCompleting()
+    {
+        // #1742: SyncOrphanedPrintingJobsAsync's completion-state branch used to set
+        // job.Status = Completed unconditionally on a cached printer completion-state
+        // observation, silently dropping any remaining copies for a Copies > 1 job. This
+        // mirrors JobCompletion_MultiCopyRequeue_WritesNonMembershipEventAndSkipsHint but
+        // exercises the orphan-sync producer path instead of the primary completion path.
+        // Copies is an immutable calibration provenance field once persisted, so the
+        // multi-copy shape must be set at creation time (copies: 2).
+        string actorSubject = Guid.NewGuid().ToString();
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, copies: 2);
+        DispatchClaimService claimService = CreateClaim(
+            seed,
+            DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+        DispatchClaimResult claim = await claimService.AcquireClaimAsync(
+            new DispatchClaimRequest(
+                fixture.JobId,
+                fixture.PrinterId,
+                "operator-1",
+                "Manual",
+                fixture.AckKey,
+                null,
+                null));
+        claim.Success.Should().BeTrue(claim.ErrorDetail);
+        await claimService.RecordBackendAcceptedAsync(
+            claim.Attempt!.Id,
+            claim.Attempt.BackendFileName);
+
+        seed.ChangeTracker.Clear();
+        PrintJob printingJob = await seed.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        printingJob.ActualStartTime = DateTime.UtcNow.AddMinutes(-10);
+        printingJob.UpdatedAt = printingJob.ActualStartTime.Value;
+        await seed.SaveChangesAsync();
+
+        await using AppDbContext syncContext = CreateContext();
+        int synced = await CreateCompletionService(syncContext)
+            .SyncOrphanedPrintingJobsAsync(_ => "idle", actorSubject);
+
+        synced.Should().Be(1);
+
+        await using AppDbContext verify = CreateContext();
+        PrintJob persistedJob = await verify.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        persistedJob.Status.Should().Be(
+            PrintJobStatus.Queued,
+            "one of two copies finished -- the job must requeue for the next copy, not exit the active set");
+        persistedJob.CompletedCopies.Should().Be(1);
+
+        QueueOperationAudit audit = await verify.QueueOperationAudits.SingleAsync(
+            candidate =>
+                candidate.PrintJobId == fixture.JobId &&
+                candidate.Operation == QueueAuditOperations.Reconciliation &&
+                candidate.ReasonCode == "orphan_sync_copy_completed");
+        audit.ActorSubject.Should().Be(actorSubject);
+        audit.Outcome.Should().Be(QueueAuditOutcomes.Success);
+
+        // The REAL producer must write the non-membership-changing event type for this
+        // in-set transition, not EventTypeJobCompleted or EventTypeJobOrphanSynced.
+        QueueDispatchOutbox completionEvent = await verify.QueueDispatchOutbox
+            .Where(e => e.AggregateId == fixture.JobId)
+            .OrderByDescending(e => e.Sequence)
+            .FirstAsync();
+        completionEvent.EventType.Should().Be(QueueLifecycleEventWriter.EventTypeJobCopyCompleted);
+        completionEvent.EventType.Should().NotBe(QueueLifecycleEventWriter.EventTypeJobCompleted);
+        completionEvent.EventType.Should().NotBe(DispatchClaimService.EventTypeJobOrphanSynced);
     }
 
     // =========================================================================
@@ -5863,10 +5998,11 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     private async Task<(Fixture Fixture, Guid AttemptId)>
         SeedUnknownReconciliationAttemptAsync(
             string? backendJobId,
-            PrinterBackend? backend = null)
+            PrinterBackend? backend = null,
+            int copies = 1)
     {
         await using AppDbContext db = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(db, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(db, withAck: true, copies: copies);
         DispatchClaimService claimService = CreateClaim(
             db,
             DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));

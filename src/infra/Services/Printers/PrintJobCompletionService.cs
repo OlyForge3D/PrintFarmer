@@ -875,18 +875,36 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                     printerId,
                     currentPrinterState);
 
-                job.Status = PrintJobStatus.Completed;
+                // Multi-copy support (#1742): a completion-state observation only
+                // finishes the *current* copy. Increment CompletedCopies and only
+                // transition to Completed once all copies are done; otherwise
+                // requeue for the next copy, same as
+                // MarkCurrentJobAsCompletedAsync's primary completion loop.
+                DateTime observedCompletedAtUtc = DateTime.UtcNow;
                 job.ActiveExternalPrinterId = null;
-                job.ActualEndTime = DateTime.UtcNow;
+                job.CompletedCopies++;
 
-                if (job.ActualStartTime.HasValue)
+                if (job.CompletedCopies >= job.Copies)
                 {
-                    job.ActualPrintTime = job.ActualEndTime - job.ActualStartTime;
+                    job.Status = PrintJobStatus.Completed;
+                    job.ActualEndTime = observedCompletedAtUtc;
+
+                    if (job.ActualStartTime.HasValue)
+                    {
+                        job.ActualPrintTime = job.ActualEndTime - job.ActualStartTime;
+                    }
+
+                    completedJobIds.Add(job.Id);
+                }
+                else
+                {
+                    job.Status = PrintJobStatus.Queued;
+                    job.ActualStartTime = null;
+                    job.UpdatedAt = observedCompletedAtUtc;
                 }
 
                 syncedCount++;
                 printersToNotify.Add(printerId);
-                completedJobIds.Add(job.Id);
 
                 if (!terminalJobsByPrinter.TryGetValue(printerId, out var completedEntry))
                 {
@@ -931,11 +949,14 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                     printerId);
             }
 
-            if (job.Status is PrintJobStatus.Completed or PrintJobStatus.Failed)
+            if (job.Status is PrintJobStatus.Completed or PrintJobStatus.Failed or PrintJobStatus.Queued)
             {
-                string reasonCode = job.Status == PrintJobStatus.Completed
-                    ? "orphan_sync_completed"
-                    : "orphan_sync_failed";
+                string reasonCode = job.Status switch
+                {
+                    PrintJobStatus.Completed => "orphan_sync_completed",
+                    PrintJobStatus.Queued => "orphan_sync_copy_completed",
+                    _ => "orphan_sync_failed",
+                };
                 _ = QueueAuditWriter.Add(
                     _db,
                     actorSubject,
@@ -974,9 +995,17 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 // committed in the SAME SaveChangesAsync call as the lease releases.
                 foreach (PrintJob terminalJob in kv.Value.jobs)
                 {
-                    string eventType = terminalJob.Status == PrintJobStatus.Completed
-                        ? DispatchClaimService.EventTypeJobCompleted
-                        : DispatchClaimService.EventTypeJobOrphanSynced;
+                    string eventType = terminalJob.Status switch
+                    {
+                        PrintJobStatus.Completed => DispatchClaimService.EventTypeJobCompleted,
+
+                        // Multi-copy support (#1742): requeued for the next copy is an
+                        // in-set transition (Printing -> Queued), not a genuine exit from
+                        // the active set, so use the non-membership-changing event type --
+                        // same convention as MarkCurrentJobAsCompletedAsync.
+                        PrintJobStatus.Queued => DispatchClaimService.EventTypeJobCopyCompleted,
+                        _ => DispatchClaimService.EventTypeJobOrphanSynced,
+                    };
 
                     await WriteTerminalOutboxEventAsync(
                         terminalJob,
