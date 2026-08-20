@@ -18,8 +18,8 @@ import { PrinterModelDto } from '@/types/api';
 import {
   createBedVisualization,
   calculateOptimalCameraPosition,
-  generateNozzleGeometry,
 } from '@/common/utils/bedGeometryGenerator';
+import { useNozzleGeometry } from './useNozzleGeometry';
 
 export interface PrinterStatus {
   printerId: string;
@@ -60,8 +60,9 @@ const NozzleIndicator: React.FC<{
 }> = ({ position, nozzleDiameter = 0.4, isActive }) => {
   const meshRef = useRef<THREE.Mesh>(null);
 
-  // Create nozzle geometry
-  const nozzleGeometry = generateNozzleGeometry(nozzleDiameter);
+  // Reuse geometry across position/state re-renders; only diameter changes
+  // allocate a new one.
+  const nozzleGeometry = useNozzleGeometry(nozzleDiameter);
 
   return (
     <mesh
