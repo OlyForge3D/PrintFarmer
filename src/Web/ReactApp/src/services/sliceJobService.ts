@@ -82,6 +82,12 @@ export interface SliceJobStatusResponse {
   completedAt?: string;
   resultFileUrl?: string;
   errorMessage?: string;
+  /**
+   * Real worker-side failure detail (e.g. OrcaSlicer exit code/stderr or the
+   * exact profile resolution error). Only populated for farm admins; other
+   * callers only ever see the generic `errorMessage`.
+   */
+  errorDetail?: string;
   estimatedPrintTimeSeconds?: number;
   filamentUsedGrams?: number;
   workerId?: string;

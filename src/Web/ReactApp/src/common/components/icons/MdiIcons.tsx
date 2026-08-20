@@ -81,6 +81,7 @@ import {
   mdiChevronDoubleRight,
   mdiChevronDoubleLeft,
   mdiDotsVertical,
+  mdiSwapHorizontal,
   mdiCircleOutline,
   mdiDatabase,
   mdiFlask,
@@ -2319,6 +2320,34 @@ export function MoreVerticalIcon({ className = 'w-4 h-4', ariaLabel = 'More opti
       role="img"
     >
       <path fill="currentColor" d={mdiDotsVertical} />
+    </svg>
+  );
+}
+
+/**
+ * Swap horizontal icon
+ *
+ * Material Design icon component for "change this selection" affordances.
+ * Prefer this over a chevron when the control opens a dialog rather than a
+ * dropdown — a chevron-down promises a select and misleads the user.
+ *
+ * @component
+ * @preview ![swap-horizontal](https://unpkg.com/@mdi/svg@7.4.47/svg/swap-horizontal.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/swap-horizontal.svg
+ * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @returns {JSX.Element} SVG element
+ * @example
+ * <SwapHorizontalIcon className="w-4 h-4" ariaLabel="Change" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function SwapHorizontalIcon({ className = 'w-4 h-4', ariaLabel = 'Change' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiSwapHorizontal} />
     </svg>
   );
 }

@@ -2,6 +2,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure;
 using Farm.Infrastructure.PrinterCalibration;
@@ -51,7 +52,10 @@ public partial class SliceJobController(
     IPrinterAccessValidator? printerAccess = null,
     IModelStorageResolver? modelStorage = null,
     ICalibrationProfileResolver? profileResolver = null,
-    IOptions<JobDispatchRetrySettings>? retryOptions = null) : ControllerBase
+    IOptions<JobDispatchRetrySettings>? retryOptions = null,
+    IMachineProfileRepository? machineProfileRepository = null,
+    IProcessProfileRepository? processProfileRepository = null,
+    IFilamentProfileRepository? filamentProfileRepository = null) : ControllerBase
 {
     private readonly ISliceJobRepository _jobRepository = jobRepository;
     private readonly ISliceJobEventService _eventService = eventService;
@@ -68,6 +72,9 @@ public partial class SliceJobController(
     private readonly IPrinterAccessValidator? _printerAccess = printerAccess;
     private readonly IModelStorageResolver? _modelStorage = modelStorage;
     private readonly ICalibrationProfileResolver? _profileResolver = profileResolver;
+    private readonly IMachineProfileRepository? _machineProfileRepository = machineProfileRepository;
+    private readonly IProcessProfileRepository? _processProfileRepository = processProfileRepository;
+    private readonly IFilamentProfileRepository? _filamentProfileRepository = filamentProfileRepository;
     private readonly int _maxClaimRetries = Math.Max(
         0,
         retryOptions?.Value.MaxAttempts ?? new JobDispatchRetrySettings().MaxAttempts);
@@ -264,6 +271,13 @@ public partial class SliceJobController(
         {
             return profileFailure;
         }
+
+        // Named profile submissions (the only path the "New Slice Job" UI uses today) otherwise
+        // rely on the worker resolving names against its own bundled OrcaSlicer resources, which
+        // has no knowledge of database-stored custom/user profiles and fails immediately for any
+        // non-stock filament/machine/process name (issue #1768). Snapshot native JSON here when
+        // possible so the job is routed onto the same robust path as ID-based submissions.
+        await ResolveNamedProfilesAsync(job, userId, ct);
 
         try
         {
@@ -1110,25 +1124,34 @@ public partial class SliceJobController(
             resourceId);
     }
 
-    private static SliceJobStatusResponse MapToPublicStatusResponse(SliceJob job) => new()
+    private SliceJobStatusResponse MapToPublicStatusResponse(SliceJob job)
     {
-        Id = job.Id,
-        Status = job.Status,
-        ProgressPercent = job.ProgressPercent,
-        ProgressMessage = job.Status == SliceJobStatus.Processing
-            ? GetPublicProgressMessage(job.ProgressPercent)
-            : null,
-        QueuedAt = job.QueuedAt,
-        StartedAt = job.StartedAt,
-        CompletedAt = job.CompletedAt,
-        ErrorMessage = string.IsNullOrWhiteSpace(job.ErrorMessage) ? null : "Slicing failed.",
-        EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
-        FilamentUsedGrams = job.FilamentUsedGrams,
-        WorkerId = null,
-        ModelFileName = SanitizeFileName(job.ModelFileName, "model"),
-        SlicerEngine = SlicerEngineNames.Resolve(job),
-        ArtifactsRoute = $"/api/artifacts/job/{job.Id}",
-    };
+        bool isAdmin = PrintFarmerPermissions.IsFarmAdmin(User);
+        return new()
+        {
+            Id = job.Id,
+            Status = job.Status,
+            ProgressPercent = job.ProgressPercent,
+            ProgressMessage = job.Status == SliceJobStatus.Processing
+                ? GetPublicProgressMessage(job.ProgressPercent)
+                : null,
+            QueuedAt = job.QueuedAt,
+            StartedAt = job.StartedAt,
+            CompletedAt = job.CompletedAt,
+            ErrorMessage = string.IsNullOrWhiteSpace(job.ErrorMessage) ? null : "Slicing failed.",
+
+            // Non-admins never see the real detail (which may include worker container paths or
+            // internal file names); admins get it verbatim so they can diagnose failures like the
+            // profile-resolution error in issue #1768 without shelling into a worker.
+            ErrorDetail = isAdmin && !string.IsNullOrWhiteSpace(job.ErrorMessage) ? job.ErrorMessage : null,
+            EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
+            FilamentUsedGrams = job.FilamentUsedGrams,
+            WorkerId = null,
+            ModelFileName = SanitizeFileName(job.ModelFileName, "model"),
+            SlicerEngine = SlicerEngineNames.Resolve(job),
+            ArtifactsRoute = $"/api/artifacts/job/{job.Id}",
+        };
+    }
 
     private static WorkerSliceJobResponse MapToWorkerResponse(SliceJob job)
     {
@@ -1498,6 +1521,326 @@ public partial class SliceJobController(
         job.SlicerVersion = resolved.Machine.SlicerVersion ?? CalibrationContractConstants.SlicerVersion;
 
         return null;
+    }
+
+    /// <summary>
+    /// Resolves named machine/process/filament profiles embedded in <c>SlicerProfileJson</c>
+    /// against the database (system profiles plus this user's own) and snapshots native JSON onto
+    /// the job, mirroring <see cref="BindResolvedProfilesAsync"/>'s ID-based path.
+    /// </summary>
+    /// <remarks>
+    /// The "New Slice Job" UI only ever submits profile selections by name (never by ID), which
+    /// routes every real job through the worker's <c>ResolveProfileFromJsonAsync</c> — a lookup
+    /// that only knows the worker's own bundled OrcaSlicer resources and has no database access at
+    /// all. Any custom/user-owned profile name (e.g. a filament like "FilAr PLA Bronce") can never
+    /// resolve there, so the job fails immediately once the worker discovers it has no usable
+    /// profile set, before OrcaSlicer is even launched (issue #1768). Resolving names here — where
+    /// the database is available — and snapshotting the result the same way the ID-based path does
+    /// routes the job onto the already-robust <c>NativeProfiles</c> path instead.
+    ///
+    /// This only engages when all three names are present and all three resolve; a partial match
+    /// is deliberately left alone (rather than partially snapshotted) so the legacy worker-side
+    /// resolution remains the fallback for any name that is not yet mirrored into the database.
+    /// Multi-extruder submissions (which carry <c>extruderFilamentProfileNames</c>) are also left
+    /// alone since <see cref="Models.NativeSlicerProfiles"/> only carries a single filament
+    /// document. Process overrides and a single-filament colour override embedded in
+    /// <c>SlicerProfileJson</c> are re-applied onto the resolved JSON so this path does not
+    /// silently drop user customizations that the legacy path would otherwise have applied.
+    /// </remarks>
+    private async Task ResolveNamedProfilesAsync(SliceJob job, Guid userId, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(job.MachineProfileJson))
+        {
+            // Already bound via MachineProfileId/ProcessProfileId/FilamentProfileId above.
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(job.SlicerProfileJson) ||
+            _machineProfileRepository is null ||
+            _processProfileRepository is null ||
+            _filamentProfileRepository is null)
+        {
+            return;
+        }
+
+        // Only OrcaSlicer profiles are mirrored into the database today (see ProfilesService);
+        // other engines keep using the legacy worker-side name lookup unchanged.
+        if ((SlicerEngineType)job.SlicerEngine != SlicerEngineType.OrcaSlicer)
+        {
+            return;
+        }
+
+        JsonElement root;
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(job.SlicerProfileJson);
+            root = doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+
+        // Multi-extruder jobs still resolve per-extruder filaments worker-side; leave them alone.
+        if (root.TryGetProperty("extruderFilamentProfileNames", out JsonElement extrudersElem) &&
+            extrudersElem.ValueKind == JsonValueKind.Array &&
+            extrudersElem.GetArrayLength() > 0)
+        {
+            return;
+        }
+
+        string? machineName = GetJsonString(root, "machineProfileName");
+        string? processName = GetJsonString(root, "processProfileName");
+        string? filamentName = GetJsonString(root, "filamentProfileName");
+        if (string.IsNullOrWhiteSpace(machineName) ||
+            string.IsNullOrWhiteSpace(processName) ||
+            string.IsNullOrWhiteSpace(filamentName))
+        {
+            return;
+        }
+
+        IReadOnlyList<MachineProfile> machines =
+            await _machineProfileRepository.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId, ct);
+        MachineProfile? machine = machines.FirstOrDefault(m =>
+            string.Equals(m.Name, machineName, StringComparison.OrdinalIgnoreCase));
+
+        IReadOnlyList<ProcessProfile> processes =
+            await _processProfileRepository.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId, ct);
+        List<ProcessProfile> processCandidates = processes
+            .Where(p => string.Equals(p.Name, processName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        ProcessProfile? process = SelectCompatibleProfile(
+            processCandidates, machine, p => p.CompatiblePrinters, p => p.PrinterModelId);
+
+        IReadOnlyList<FilamentProfile> filaments =
+            await _filamentProfileRepository.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId, ct);
+        List<FilamentProfile> filamentCandidates = filaments
+            .Where(f => string.Equals(f.Name, filamentName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        FilamentProfile? filament = SelectCompatibleProfile(filamentCandidates, machine, f => f.CompatiblePrinters);
+
+        if (machine is null || process is null || filament is null ||
+            string.IsNullOrWhiteSpace(machine.RawJson) ||
+            string.IsNullOrWhiteSpace(process.RawJson) ||
+            string.IsNullOrWhiteSpace(filament.RawJson))
+        {
+            // Cannot fully replace the legacy path — NativeSlicerProfiles.FromJob requires all
+            // three documents, so a partial match is left for the worker-side fallback rather than
+            // snapshotting an incomplete set.
+            _logger.LogInformation(
+                "Named profile snapshot skipped for job {JobId}: machineFound={MachineFound}, processFound={ProcessFound}, filamentFound={FilamentFound}",
+                job.Id,
+                machine is not null,
+                process is not null,
+                filament is not null);
+            return;
+        }
+
+        // System/stock profiles imported by SlicersService store RawJson as a serialized CLR DTO
+        // (MachineProfileDto/ProcessProfileDto/FilamentProfileDto — see their "Settings" bag), not
+        // the flat native OrcaSlicer document NativeSlicerProfiles/WriteNativeProfilesAsync writes
+        // verbatim to disk. Only user-authored custom profiles saved through ProfilesService (which
+        // sanitizes RawJson to a flat native document) are safe to snapshot here. Snapshotting a
+        // DTO-shaped document would produce a machine/process/filament.json OrcaSlicer cannot parse,
+        // regressing stock-name submissions that previously worked via the legacy worker-side
+        // resolution. Bail (defer to the legacy path) rather than risk that.
+        if (!IsFlatNativeProfileJson(machine.RawJson) ||
+            !IsFlatNativeProfileJson(process.RawJson) ||
+            !IsFlatNativeProfileJson(filament.RawJson))
+        {
+            _logger.LogInformation(
+                "Named profile snapshot skipped for job {JobId}: one or more resolved profiles are not flat native JSON (likely a system/stock profile stored as a DTO); deferring to the legacy worker-side resolution",
+                job.Id);
+            return;
+        }
+
+        string processJson = ApplyProcessOverrides(process.RawJson, root);
+        string filamentJson = ApplyFilamentColourOverride(filament.RawJson, root);
+
+        job.MachineProfileJson = machine.RawJson;
+        job.ProcessProfileJson = processJson;
+        job.FilamentProfileJson = filamentJson;
+        job.MachineProfileSha256 = ComputeSha256(machine.RawJson);
+        job.ProcessProfileSha256 = ComputeSha256(processJson);
+        job.FilamentProfileSha256 = ComputeSha256(filamentJson);
+        job.SlicerDistribution = machine.SlicerDistribution ?? job.SlicerDistribution;
+        job.SlicerVersion = machine.SlicerVersion ?? job.SlicerVersion;
+    }
+
+    /// <summary>
+    /// Disambiguates a set of same-named process/filament profile candidates against the resolved
+    /// machine profile, using the same compatibility rules <see cref="ProfilesService"/> applies
+    /// when browsing profiles for a selected machine. <c>Name</c> alone is not a unique key for
+    /// either <see cref="ProcessProfile"/> or <see cref="FilamentProfile"/> — OrcaSlicer commonly
+    /// ships process profiles with the same display name scoped to different printer models via
+    /// <c>CompatiblePrinters</c>/<c>PrinterModelId</c> — so picking the first name match could
+    /// silently snapshot an arbitrary, possibly incompatible profile onto the job (issue #1778
+    /// review finding). Returns <see langword="null"/> when the candidate set is ambiguous and no
+    /// candidate can be confidently matched to the resolved machine, so the caller bails to the
+    /// legacy worker-side path rather than guessing.
+    /// </summary>
+    private static T? SelectCompatibleProfile<T>(
+        List<T> candidates,
+        MachineProfile? machine,
+        Func<T, string?> compatiblePrintersSelector,
+        Func<T, Guid?>? printerModelIdSelector = null)
+        where T : class
+    {
+        if (candidates.Count <= 1)
+        {
+            return candidates.Count == 1 ? candidates[0] : null;
+        }
+
+        if (machine is not null)
+        {
+            T? byCompatiblePrinters = candidates.FirstOrDefault(c =>
+            {
+                string? compatiblePrinters = compatiblePrintersSelector(c);
+                return !string.IsNullOrWhiteSpace(compatiblePrinters) &&
+                    compatiblePrinters.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Any(cp => string.Equals(cp.Trim(), machine.Name, StringComparison.OrdinalIgnoreCase));
+            });
+            if (byCompatiblePrinters is not null)
+            {
+                return byCompatiblePrinters;
+            }
+
+            if (printerModelIdSelector is not null && machine.PrinterModelId.HasValue)
+            {
+                T? byModel = candidates.FirstOrDefault(c => printerModelIdSelector(c) == machine.PrinterModelId);
+                if (byModel is not null)
+                {
+                    return byModel;
+                }
+            }
+
+            // No candidate explicitly declares itself compatible with the resolved machine, but a
+            // candidate that declares no scoping at all (no CompatiblePrinters, no PrinterModelId)
+            // is model-agnostic by construction and safe to use.
+            T? modelAgnostic = candidates.FirstOrDefault(c =>
+                string.IsNullOrWhiteSpace(compatiblePrintersSelector(c)) &&
+                (printerModelIdSelector is null || printerModelIdSelector(c) is null));
+            if (modelAgnostic is not null)
+            {
+                return modelAgnostic;
+            }
+        }
+
+        // Ambiguous: multiple same-named candidates and none can be confidently tied to the
+        // resolved machine. Do not guess — defer to the legacy worker-side path.
+        return null;
+    }
+
+    /// <summary>
+    /// Distinguishes a flat native OrcaSlicer profile document (snake_case keys, safe to write
+    /// verbatim) from a serialized CLR profile DTO (MachineProfileDto/ProcessProfileDto/
+    /// FilamentProfileDto), which always carries a top-level "Settings" bag and promoted
+    /// PascalCase properties that OrcaSlicer's own config parser does not understand.
+    /// </summary>
+    private static bool IsFlatNativeProfileJson(string rawJson)
+    {
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(rawJson);
+            return doc.RootElement.ValueKind == JsonValueKind.Object &&
+                !doc.RootElement.TryGetProperty("Settings", out _);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static string? GetJsonString(JsonElement root, string propertyName) =>
+        root.TryGetProperty(propertyName, out JsonElement element) && element.ValueKind == JsonValueKind.String
+            ? element.GetString()
+            : null;
+
+    /// <summary>
+    /// Applies the "overrides" object embedded in SlicerProfileJson onto a resolved native process
+    /// profile document, matching the per-key overwrite semantics of the worker's legacy
+    /// <c>ResolveProfileFromJsonAsync</c> path so this fast path does not drop user-tuned settings.
+    /// </summary>
+    private static string ApplyProcessOverrides(string rawJson, JsonElement root)
+    {
+        if (!root.TryGetProperty("overrides", out JsonElement overridesElem) ||
+            overridesElem.ValueKind != JsonValueKind.Object ||
+            !overridesElem.EnumerateObject().Any())
+        {
+            return rawJson;
+        }
+
+        try
+        {
+            if (JsonNode.Parse(rawJson) is not JsonObject obj)
+            {
+                return rawJson;
+            }
+
+            foreach (JsonProperty prop in overridesElem.EnumerateObject())
+            {
+                obj[prop.Name] = ToNativeOverrideValue(prop.Value);
+            }
+
+            return obj.ToJsonString();
+        }
+        catch (JsonException)
+        {
+            return rawJson;
+        }
+    }
+
+    /// <summary>
+    /// Converts a JSON override value to the shape native OrcaSlicer process JSON expects: every
+    /// scalar is written as a JSON string (matching <c>HttpJobPollerService</c>'s legacy override
+    /// mapping — string as-is, <c>true</c>/<c>false</c> as "1"/"0", numbers as their string form),
+    /// with arrays passed through as native arrays. OrcaSlicer's CLI parser rejects a process.json
+    /// containing raw numeric/boolean scalars, so preserving the override's original JSON type
+    /// (as a naive <c>JsonNode.Parse(GetRawText())</c> would) breaks any numeric or boolean
+    /// override even though the resolved base document is otherwise valid.
+    /// </summary>
+    private static JsonNode? ToNativeOverrideValue(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Array => JsonNode.Parse(value.GetRawText()),
+        JsonValueKind.String => JsonValue.Create(value.GetString() ?? string.Empty),
+        JsonValueKind.True => JsonValue.Create("1"),
+        JsonValueKind.False => JsonValue.Create("0"),
+        JsonValueKind.Number => JsonValue.Create(value.GetRawText()),
+        _ => JsonValue.Create(value.GetRawText())
+    };
+
+    /// <summary>
+    /// Applies the single-filament "filamentColour" override embedded in SlicerProfileJson onto a
+    /// resolved native filament profile document (cosmetic — preview/G-code metadata only).
+    /// </summary>
+    private static string ApplyFilamentColourOverride(string rawJson, JsonElement root)
+    {
+        if (!root.TryGetProperty("filamentColour", out JsonElement colourElem) ||
+            colourElem.ValueKind != JsonValueKind.String)
+        {
+            return rawJson;
+        }
+
+        string? colour = colourElem.GetString();
+        if (string.IsNullOrWhiteSpace(colour))
+        {
+            return rawJson;
+        }
+
+        try
+        {
+            if (JsonNode.Parse(rawJson) is not JsonObject obj)
+            {
+                return rawJson;
+            }
+
+            obj["filament_colour"] = new JsonArray(JsonValue.Create(colour));
+            return obj.ToJsonString();
+        }
+        catch (JsonException)
+        {
+            return rawJson;
+        }
     }
 
     /// <summary>Computes the uppercase hexadecimal SHA-256 of a UTF-8 payload.</summary>
