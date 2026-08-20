@@ -244,6 +244,74 @@ public class SpoolmanServiceTests
     }
 
     [Fact]
+    public async Task CreateFilamentInSpoolmanAsync_NormalizesGtinBeforeSending()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        string? capturedBody = null;
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
+            {
+                capturedBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        JsonSerializer.Serialize(new { id = 8, gtin = "00123456789012" }),
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            });
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
+
+        SpoolmanFilamentDto result = await svc.CreateFilamentInSpoolmanAsync(
+            new SpoolmanCreateFilamentRequest
+            {
+                Name = "PLA",
+                Material = "PLA",
+                Gtin = "123456789012",
+            },
+            CancellationToken.None);
+
+        using JsonDocument body = JsonDocument.Parse(capturedBody!);
+        Assert.Equal("00123456789012", body.RootElement.GetProperty("gtin").GetString());
+        Assert.Equal("00123456789012", result.Gtin);
+    }
+
+    [Fact]
+    public async Task CreateFilamentInSpoolmanAsync_InvalidGtin_RejectsBeforeSending()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        int requestCount = 0;
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
+            {
+                requestCount++;
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            });
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
+
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => svc.CreateFilamentInSpoolmanAsync(
+                new SpoolmanCreateFilamentRequest
+                {
+                    Name = "PLA",
+                    Material = "PLA",
+                    Gtin = "CODE-128-ABC",
+                },
+                CancellationToken.None));
+
+        Assert.Equal("request", exception.ParamName);
+        Assert.Equal(0, requestCount);
+    }
+
+    [Fact]
     public async Task UpdateFilamentInSpoolmanAsync_DoesNotInjectDensityOrDiameter()
     {
         // A partial update PATCHes only the fields set on the request; injecting defaults here

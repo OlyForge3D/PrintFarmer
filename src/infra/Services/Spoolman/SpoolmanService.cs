@@ -807,10 +807,20 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         // Spoolman requires density and diameter on create; both are omitted from the JSON
         // when null, which makes Spoolman reject the whole payload with HTTP 422. Backfill
         // sane defaults so clients that don't collect these fields still succeed.
+        string? normalizedGtin = request.Gtin;
+        if (request.Gtin is not null)
+        {
+            normalizedGtin = GtinNormalizer.Normalize(request.Gtin)
+                ?? throw new ArgumentException(
+                    "GTIN is not a valid GTIN-8/12/13/14 (bad length or check digit).",
+                    nameof(request));
+        }
+
         SpoolmanCreateFilamentRequest normalized = request with
         {
             Density = request.Density is > 0 ? request.Density : DefaultFilamentDensity,
             Diameter = request.Diameter is > 0 ? request.Diameter : DefaultFilamentDiameter,
+            Gtin = normalizedGtin,
         };
         string jsonBody = BuildFilamentJson(normalized);
 
