@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -411,12 +412,15 @@ public class ProfilesService(
         IReadOnlyList<MachineProfile> machineProfileEntities = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
         foreach (MachineProfile p in machineProfileEntities)
         {
+            (double? nozzleDiameter, string? printerVariant) = ExtractNozzleDiameterAndVariant(p.SettingsJson, p.RawJson);
             machineProfiles.Add(new MachineProfileListItemDto
             {
                 Id = p.Id,
                 Name = p.Name,
                 SlicerType = p.SlicerType.ToString(),
                 Manufacturer = p.Manufacturer ?? string.Empty,
+                NozzleDiameter = nozzleDiameter,
+                PrinterVariant = printerVariant,
                 IsDefault = p.IsDefault,
                 IsSystem = p.IsSystem,
                 IsPublic = p.IsPublic,
@@ -430,6 +434,64 @@ public class ProfilesService(
             FilamentProfiles = filamentProfiles,
             MachineProfiles = machineProfiles
         };
+    }
+
+    /// <summary>
+    /// Recovers the <c>NozzleDiameter</c> and <c>PrinterVariant</c> values (#1779) for a machine
+    /// profile from its stored settings JSON. These fields are not dedicated <see cref="MachineProfile"/>
+    /// columns, but are already preserved verbatim (PascalCase, per <see cref="MachineProfileDto"/>)
+    /// inside <see cref="MachineProfile.SettingsJson"/> (falling back to <see cref="MachineProfile.RawJson"/>)
+    /// by <see cref="IProfileParsingService.ParseAndPrepare"/>, so no schema migration is required.
+    /// Property lookup is case-insensitive; malformed/missing JSON yields (null, null) rather than throwing.
+    /// </summary>
+    private static (double? NozzleDiameter, string? PrinterVariant) ExtractNozzleDiameterAndVariant(string? settingsJson, string? rawJson)
+    {
+        string? json = !string.IsNullOrWhiteSpace(settingsJson) ? settingsJson : rawJson;
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return (null, null);
+            }
+
+            double? nozzleDiameter = null;
+            string? printerVariant = null;
+
+            foreach (JsonProperty prop in doc.RootElement.EnumerateObject())
+            {
+                if (nozzleDiameter is null && string.Equals(prop.Name, "NozzleDiameter", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (prop.Value.ValueKind == JsonValueKind.Number && prop.Value.TryGetDouble(out double numeric))
+                    {
+                        nozzleDiameter = numeric;
+                    }
+                    else if (prop.Value.ValueKind == JsonValueKind.String &&
+                        double.TryParse(prop.Value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed))
+                    {
+                        nozzleDiameter = parsed;
+                    }
+                }
+                else if (printerVariant is null && string.Equals(prop.Name, "PrinterVariant", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (prop.Value.ValueKind == JsonValueKind.String)
+                    {
+                        printerVariant = prop.Value.GetString();
+                    }
+                }
+            }
+
+            return (nozzleDiameter, printerVariant);
+        }
+        catch (JsonException)
+        {
+            return (null, null);
+        }
     }
 
     /// <summary>
@@ -1333,6 +1395,41 @@ public class ProfilesService(
     }
 
     /// <summary>
+    /// Builds the set of OrcaSlicer worker hierarchy model-group keys ("printer_model" values) that
+    /// should be imported for a given catalog. This is the base catalog model <c>Name</c>s PLUS every
+    /// OrcaSlicer alias configured for each model (#1779): the worker groups its <c>ByHierarchy</c>
+    /// structure by <c>printer_model</c>, and high-flow (HF) machine variants (e.g. "Prusa CORE One HF")
+    /// have their own distinct <c>printer_model</c> value that is never equal to the base catalog
+    /// model's own <c>Name</c> — only configured as an alias of it. Matching against base names alone
+    /// silently skips those alias-only hierarchy groups during seeding. Mirrors the alias resolution
+    /// already used correctly by <see cref="ImportSelectedProfilesForModelAsync"/>.
+    /// </summary>
+    private async Task<HashSet<string>> GetOrcaSlicerCatalogModelNamesAsync(IReadOnlyList<PrinterModelDto> catalogModels, CancellationToken ct)
+    {
+        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (PrinterModelDto model in catalogModels)
+        {
+            if (!string.IsNullOrWhiteSpace(model.Name))
+            {
+                names.Add(model.Name);
+            }
+
+            IEnumerable<SlicerModelAliasDto> aliases = await _catalogService.GetModelAliasesAsync(model.Id, ct);
+            foreach (SlicerModelAliasDto alias in aliases)
+            {
+                if (string.Equals(alias.SlicerType, "OrcaSlicer", StringComparison.OrdinalIgnoreCase) &&
+                    !string.IsNullOrWhiteSpace(alias.SlicerModelName))
+                {
+                    names.Add(alias.SlicerModelName.Trim());
+                }
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>
     /// Seeds the database with system OrcaSlicer profiles downloaded from the worker service.
     /// </summary>
     /// <param name="httpClient">The HttpClient to use for communicating with the OrcaSlicer worker service</param>
@@ -1393,7 +1490,7 @@ public class ProfilesService(
         (IReadOnlyList<PrinterModelDto> catalogModels, _) = await _catalogService.GetModelsAsync(null, ct);
 
         HashSet<string> catalogManufacturerNames = new HashSet<string>(catalogManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
-        HashSet<string> catalogModelNames = new HashSet<string>(catalogModels.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
+        HashSet<string> catalogModelNames = await GetOrcaSlicerCatalogModelNamesAsync(catalogModels, ct);
 
         foreach ((string? manufacturerKey, ManufacturerProfilesDto? manufacturerProfiles) in allProfiles.ByHierarchy)
         {
@@ -1626,7 +1723,7 @@ public class ProfilesService(
         (IReadOnlyList<PrinterModelDto> catalogModels, _) = await _catalogService.GetModelsAsync(null, ct);
 
         HashSet<string> catalogManufacturerNames = new HashSet<string>(catalogManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
-        HashSet<string> catalogModelNames = new HashSet<string>(catalogModels.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
+        HashSet<string> catalogModelNames = await GetOrcaSlicerCatalogModelNamesAsync(catalogModels, ct);
 
         foreach ((string? manufacturerKey, ManufacturerProfilesDto? manufacturerProfiles) in allProfiles.ByHierarchy)
         {

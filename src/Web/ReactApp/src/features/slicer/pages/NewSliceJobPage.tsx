@@ -706,6 +706,11 @@ export const NewSliceJobPage: React.FC = () => {
   const [modelFileUrl, setModelFileUrl] = useState('');
   const [modelFileName, setModelFileName] = useState('');
   const [selectedModelId, setSelectedModelId] = useState<string>(modelIdFromUrl);
+  // Bumped every time a library model is picked from the modal — including
+  // re-picking the model already selected — so the bed-add effect below is
+  // guaranteed to re-run and place a new instance even when `selectedModelId`
+  // itself doesn't change. See issue #1771 (duplicate model placement no-op).
+  const [modelPickNonce, setModelPickNonce] = useState(0);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   // Multi-model bed state — accumulates models added via the "+" button
   const [bedModels, setBedModels] = useState<LoadedModel[]>([]);
@@ -1585,6 +1590,15 @@ export const NewSliceJobPage: React.FC = () => {
     } catch { /* ignore */ }
   }, [STORAGE_KEYS.processProfileId, selectedProcessPresetId]);
 
+  // Identity of the bed-model instance created by the current pick — tracked
+  // so this effect can tell "the library model list just finished loading for
+  // the pick we already placed" (refresh that one instance's metadata) apart
+  // from "the user picked again" (place a brand-new instance). Without this,
+  // re-picking an already-placed library model would either not re-run this
+  // effect at all, or match the existing instance by library id and silently
+  // refresh it instead of adding a second one. See issue #1771.
+  const lastModelPickRef = useRef<{ selectedModelId: string; nonce: number; instanceId: string } | null>(null);
+
   // Derive model file URL when selected and add to bed
   useEffect(() => {
     if (selectedModelId) {
@@ -1594,18 +1608,28 @@ export const NewSliceJobPage: React.FC = () => {
       const fileName = mdl?.originalFileName || mdl?.fileName || 'model.stl';
       const viewerUrl = buildSlicerViewerModelUrl(apiBase, selectedModelId, fileName);
       const fileType = getSlicerViewerFileType(fileName);
+
+      const lastPick = lastModelPickRef.current;
+      const isSamePick = lastPick?.selectedModelId === selectedModelId && lastPick?.nonce === modelPickNonce;
+      // A fresh pick (new nonce) always gets its own instance id, even when
+      // re-picking the same library model — this is what lets the same model
+      // be placed on a second plate, or twice on the same plate.
+      const instanceId = isSamePick ? lastPick!.instanceId : `${selectedModelId}-${modelPickNonce}`;
+      lastModelPickRef.current = { selectedModelId, nonce: modelPickNonce, instanceId };
+
       queueMicrotask(() => {
         setModelFileUrl(modelUrl);
         if (mdl) {
           setModelFileName(fileName);
         }
-        // Add the model to the bed, or refresh its metadata once the model list loads.
+        // Add a new bed-model instance for this pick, or refresh its metadata
+        // once the model list loads (same pick, re-run via the `models` dep).
         setBedModels(prev => {
-          const existingModel = prev.find((model) => model.id === selectedModelId);
+          const existingModel = prev.find((model) => model.id === instanceId);
 
           if (existingModel) {
             return prev.map((model) =>
-              model.id === selectedModelId
+              model.id === instanceId
                 ? {
                     ...model,
                     url: modelUrl,
@@ -1619,7 +1643,8 @@ export const NewSliceJobPage: React.FC = () => {
 
           const offset = prev.length * 30; // offset each model so they don't overlap
           return [...prev, {
-            id: selectedModelId,
+            id: instanceId,
+            libraryModelId: selectedModelId,
             url: modelUrl,
             viewerUrl,
             fileName,
@@ -1631,7 +1656,7 @@ export const NewSliceJobPage: React.FC = () => {
         });
       });
     }
-  }, [selectedModelId, models]);
+  }, [selectedModelId, modelPickNonce, models]);
 
 
 
@@ -2890,6 +2915,7 @@ export const NewSliceJobPage: React.FC = () => {
             onClose={() => setModelPickerOpen(false)}
             onSelect={(model) => {
               setSelectedModelId(model.id);
+              setModelPickNonce((n) => n + 1);
               setModelFileUrl('');
               setModelFileName('');
             }}

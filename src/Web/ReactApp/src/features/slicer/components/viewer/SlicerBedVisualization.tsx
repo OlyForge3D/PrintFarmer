@@ -70,6 +70,12 @@ function PlateGroup({
 }
 
 export interface LoadedModel {
+  /**
+   * Unique bed-model *instance* id. Multiple instances may share the same
+   * `libraryModelId` (e.g. the same library model placed on two plates, or
+   * twice on one plate) — this id, not `libraryModelId`, is what plate
+   * assignment, selection, and transforms key off of. See issue #1771.
+   */
   id: string;
   url: string;
   viewerUrl?: string;
@@ -80,6 +86,14 @@ export interface LoadedModel {
   scale: [number, number, number];
   /** Pre-built geometry (e.g., from a cut operation) — bypasses URL loading */
   geometry?: THREE.BufferGeometry;
+  /**
+   * The source library model (3D model catalog entry) this instance was
+   * created from, if any. Undefined for instances with no library source
+   * (e.g. cut/split pieces, direct URL/text-tool additions). Used to resolve
+   * the backend-facing `model3DId` without conflating instance identity with
+   * library identity.
+   */
+  libraryModelId?: string;
 }
 
 export interface BedConfig {
