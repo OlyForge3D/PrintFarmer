@@ -369,6 +369,35 @@ public class JobQueueController(
     }
 
     /// <summary>
+    /// Returns the current outbox watermark (highest committed sequence) so a
+    /// client can seed its change-feed cursor at connect time instead of
+    /// starting from zero and replaying the entire durable outbox history on
+    /// every fresh page load (issue #1727). Cheap: a single MAX query with no
+    /// per-row authorization filtering, since only a number is exposed here,
+    /// never event content.
+    /// </summary>
+    [HttpGet("changes/watermark")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
+    [ProducesResponseType(typeof(QueueChangeWatermarkDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<QueueChangeWatermarkDto>> GetChangeWatermarkAsync(
+        CancellationToken ct = default)
+    {
+        if (db is null)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "queue_change_feed_unavailable" });
+        }
+
+        long latestSequence = await db.QueueDispatchOutbox
+            .AsNoTracking()
+            .Select(evt => (long?)evt.Sequence)
+            .MaxAsync(ct) ?? 0;
+
+        return Ok(new QueueChangeWatermarkDto(latestSequence));
+    }
+
+    /// <summary>
     /// Returns every current queue resource the authenticated actor may subscribe to.
     /// This snapshot is not paginated so reconnects cannot omit jobs beyond a UI page.
     /// </summary>
