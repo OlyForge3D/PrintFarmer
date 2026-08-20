@@ -40,6 +40,15 @@ public sealed class OctoPrintPollingService(
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
     private readonly ConcurrentDictionary<Guid, Task> _pollingLoops = new();
 
+    /// <summary>
+    /// Per-printer gate serializing "is the adapter missing?" checks against adapter construction.
+    /// Without this, the 30-second reconciliation loop and the 5-second <see cref="PollPrinterAsync"/>
+    /// fallback loop can both observe a missing adapter after an invalidation and each construct one,
+    /// with the loser's live WebSocket connection silently overwritten (and never disposed) in
+    /// <see cref="_webSocketAdapters"/>. See <see cref="EnsureWebSocketAdapter"/>.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, object> _adapterCreationLocks = new();
+
     // Polling interval for HTTP fallback
     private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(5);
 
@@ -282,6 +291,51 @@ public sealed class OctoPrintPollingService(
     }
 
     /// <summary>
+    /// Ensures exactly one up-to-date WebSocket adapter exists per printer, even when the 30-second
+    /// reconciliation loop and <see cref="PollPrinterAsync"/>'s per-tick check race to recreate a
+    /// missing or stale adapter after an invalidation or a credential change. Holds a per-printer
+    /// lock across the "does one exist and is it current?" check, any teardown of a stale adapter,
+    /// and the construction itself, so only one caller ever calls <see cref="CreateWebSocketAdapter"/>
+    /// for a given printer at a time; the loser observes the winner's adapter already present in
+    /// <see cref="_webSocketAdapters"/> (never a stale one mid-teardown) and returns it instead of
+    /// constructing — and leaking — a second live connection.
+    /// </summary>
+    private OctoPrintWebSocketAdapter EnsureWebSocketAdapter(Guid id, Printer printer, CancellationToken ct)
+    {
+        object gate = _adapterCreationLocks.GetOrAdd(id, static _ => new object());
+        lock (gate)
+        {
+            if (_webSocketAdapters.TryGetValue(id, out OctoPrintWebSocketAdapter? existing) && existing is not null)
+            {
+                bool credentialsChanged = _printerStates.TryGetValue(id, out PrinterPollingState? existingState)
+                    && (printer.ServerUrl != existingState.CreatedWithServerUrl
+                        || printer.Credential?.ApiKey != existingState.CreatedWithApiKey);
+
+                if (!credentialsChanged)
+                {
+                    return existing;
+                }
+
+                _logger.LogInformation("OctoPrint {Id}: Credentials changed, recreating adapter", id);
+                _webSocketAdapters.TryRemove(id, out _);
+                _pollingLoops.TryRemove(id, out _);
+                _printerStates.TryRemove(id, out _);
+
+                try
+                {
+                    existing.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "OctoPrint {Id}: error disposing stale WebSocket adapter before recreation", id);
+                }
+            }
+
+            return CreateWebSocketAdapter(id, printer, ct);
+        }
+    }
+
+    /// <summary>
     /// Main loop that continuously monitors and manages WebSocket connections for all OctoPrint printers.
     /// Discovers OctoPrint printers every 30 seconds and manages WebSocket + HTTP fallback for each.
     /// </summary>
@@ -301,45 +355,16 @@ public sealed class OctoPrintPollingService(
                     _logger.LogDebug("OctoPrintPollingService: Found {PrinterIdsCount} OctoPrint printers", printerIds.Count);
 
                     // Ensure WebSocket adapters and polling loops exist for all OctoPrint printers.
-                    // Also detect credential changes (ServerUrl, API key) and recreate adapters when needed.
+                    // EnsureWebSocketAdapter atomically detects a missing adapter or a credential
+                    // change (ServerUrl, API key) and recreates it under a single per-printer lock,
+                    // so this loop can never race PollPrinterAsync's own on-demand recreation below.
                     foreach (Guid id in printerIds)
                     {
                         printersById.TryGetValue(id, out Printer? current);
-                        bool needsNewAdapter = !_webSocketAdapters.ContainsKey(id);
 
-                        // Check for credential changes on existing adapters
-                        if (!needsNewAdapter && _printerStates.TryGetValue(id, out PrinterPollingState? existing))
+                        if (current != null)
                         {
-                            if (current != null)
-                            {
-                                string? currentApiKey = current.Credential?.ApiKey;
-                                bool credentialsChanged = current.ServerUrl != existing.CreatedWithServerUrl
-                                    || currentApiKey != existing.CreatedWithApiKey;
-
-                                if (credentialsChanged)
-                                {
-                                    _logger.LogInformation("OctoPrint {Id}: Credentials changed, recreating adapter", id);
-
-                                    // Tear down old adapter
-                                    if (_webSocketAdapters.TryRemove(id, out OctoPrintWebSocketAdapter? oldAdapter))
-                                    {
-                                        oldAdapter.Dispose();
-                                    }
-
-                                    _pollingLoops.TryRemove(id, out _);
-                                    _printerStates.TryRemove(id, out _);
-                                    needsNewAdapter = true;
-                                }
-                            }
-                        }
-
-                        if (needsNewAdapter)
-                        {
-                            Printer? printer = current;
-                            if (printer != null)
-                            {
-                                CreateWebSocketAdapter(id, printer, ct);
-                            }
+                            EnsureWebSocketAdapter(id, current, ct);
                         }
 
                         // Ensure polling loop exists (for HTTP fallback)
@@ -374,6 +399,7 @@ public sealed class OctoPrintPollingService(
                         adapter?.Dispose();
                         _pollingLoops.TryRemove(printerId, out _);
                         _printerStates.TryRemove(printerId, out _);
+                        _adapterCreationLocks.TryRemove(printerId, out _);
                         _logger.LogDebug("Stopped WebSocket and polling for OctoPrint printer {PrinterId}", printerId);
                     }
 
@@ -432,6 +458,7 @@ public sealed class OctoPrintPollingService(
                     // Printer is no longer OctoPrint, remove from polling
                     _pollingLoops.TryRemove(printerId, out _);
                     _printerStates.TryRemove(printerId, out _);
+                    _adapterCreationLocks.TryRemove(printerId, out _);
                     if (_webSocketAdapters.TryRemove(printerId, out OctoPrintWebSocketAdapter? adapter))
                     {
                         adapter?.Dispose();
@@ -450,7 +477,7 @@ public sealed class OctoPrintPollingService(
                     if (printer != null)
                     {
                         _logger.LogInformation("OctoPrint {PrinterId}: WebSocket adapter missing, recreating", printerId);
-                        wsAdapter = CreateWebSocketAdapter(printerId, printer, ct);
+                        wsAdapter = EnsureWebSocketAdapter(printerId, printer, ct);
                     }
                     else
                     {

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -36,6 +37,7 @@ public class OctoPrintPollingServiceCacheTests
     private readonly OctoPrintPollingService _service;
     private readonly MethodInfo _pollPrinterAsync;
     private readonly MethodInfo _onPrinterInvalidated;
+    private readonly MethodInfo _ensureWebSocketAdapter;
     private readonly FieldInfo _printerStatesField;
     private readonly FieldInfo _webSocketAdaptersField;
     private readonly Type _pollingStateType;
@@ -67,6 +69,7 @@ public class OctoPrintPollingServiceCacheTests
         Type serviceType = typeof(OctoPrintPollingService);
         _pollPrinterAsync = serviceType.GetMethod("PollPrinterAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _onPrinterInvalidated = serviceType.GetMethod("OnPrinterInvalidated", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        _ensureWebSocketAdapter = serviceType.GetMethod("EnsureWebSocketAdapter", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _printerStatesField = serviceType.GetField("_printerStates", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _webSocketAdaptersField = serviceType.GetField("_webSocketAdapters", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _pollingStateType = serviceType.GetNestedType("PrinterPollingState", BindingFlags.NonPublic)!;
@@ -197,5 +200,99 @@ public class OctoPrintPollingServiceCacheTests
             "waiting up to 30 seconds for the reconciliation loop, so an edited printer's new credentials " +
             "take effect immediately");
         GetCachedPrinter(printerId).Should().BeSameAs(printer);
+    }
+
+    [Fact]
+    public async Task EnsureWebSocketAdapter_ConcurrentCallers_OnlyOneAdapterIsConstructed()
+    {
+        // Regression test for PR #1786 review round 2 (Bishop/Hicks/Vasquez): the 30-second
+        // reconciliation loop and PollPrinterAsync's per-tick "adapter missing" check both used to
+        // call CreateWebSocketAdapter unconditionally, so a race after an invalidation could let both
+        // construct a live WebSocket connection, with the loser's connection silently overwritten (and
+        // never disposed) in _webSocketAdapters. EnsureWebSocketAdapter must serialize the
+        // check-and-create so only one caller ever constructs an adapter for a given printer.
+        Guid printerId = Guid.NewGuid();
+        var printer = new Printer
+        {
+            Id = printerId,
+            Name = "OctoPrint",
+            ServerUrl = "http://octo.local",
+            Backend = (int)PrinterBackend.OctoPrint,
+            Credential = PrinterCredential.FromApiKey("key"),
+        };
+
+        const int concurrency = 16;
+        using Barrier barrier = new(concurrency);
+        var tasks = new Task<OctoPrintWebSocketAdapter>[concurrency];
+        for (int i = 0; i < concurrency; i++)
+        {
+            tasks[i] = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                return (OctoPrintWebSocketAdapter)_ensureWebSocketAdapter.Invoke(_service, [printerId, printer, CancellationToken.None])!;
+            });
+        }
+
+        OctoPrintWebSocketAdapter[] results = await Task.WhenAll(tasks);
+
+        results.Distinct().Should().ContainSingle(
+            "concurrent recreation attempts for the same printer (e.g. the reconciliation loop racing " +
+            "PollPrinterAsync's on-demand recreation after an invalidation) must serialize on a single " +
+            "adapter construction so the loser doesn't silently overwrite (and leak) the winner's live " +
+            "WebSocket connection");
+
+        ((OctoPrintWebSocketAdapter)WebSocketAdapters[printerId]!).Should().BeSameAs(results[0]);
+    }
+
+    [Fact]
+    public async Task EnsureWebSocketAdapter_ConcurrentCallersWithChangedCredentials_DisposesStaleAdapterExactlyOnceAndSharesReplacement()
+    {
+        // Regression test for the residual race identified during round-2 review: the reconciliation
+        // loop's credential-changed teardown (TryRemove + Dispose) used to run outside any lock, so a
+        // concurrent PollPrinterAsync tick's "is one missing?" check could still observe (and return)
+        // the adapter that was about to be disposed. EnsureWebSocketAdapter folds the credential
+        // comparison, stale-adapter disposal, and construction of the replacement into one atomic
+        // per-printer critical section, so every concurrent caller either gets the single new adapter
+        // and the stale one is disposed exactly once - never zero, never twice.
+        Guid printerId = Guid.NewGuid();
+        var staleCredentialPrinter = new Printer
+        {
+            Id = printerId,
+            Name = "OctoPrint",
+            ServerUrl = "http://octo.local",
+            Backend = (int)PrinterBackend.OctoPrint,
+            Credential = PrinterCredential.FromApiKey("old-key"),
+        };
+        var updatedPrinter = new Printer
+        {
+            Id = printerId,
+            Name = "OctoPrint",
+            ServerUrl = "http://octo.local",
+            Backend = (int)PrinterBackend.OctoPrint,
+            Credential = PrinterCredential.FromApiKey("new-key"),
+        };
+
+        OctoPrintWebSocketAdapter staleAdapter = CreateFakeAdapter(printerId, staleCredentialPrinter);
+        SeedState(printerId, staleCredentialPrinter, staleAdapter);
+
+        const int concurrency = 16;
+        using Barrier barrier = new(concurrency);
+        var tasks = new Task<OctoPrintWebSocketAdapter>[concurrency];
+        for (int i = 0; i < concurrency; i++)
+        {
+            tasks[i] = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                return (OctoPrintWebSocketAdapter)_ensureWebSocketAdapter.Invoke(_service, [printerId, updatedPrinter, CancellationToken.None])!;
+            });
+        }
+
+        OctoPrintWebSocketAdapter[] results = await Task.WhenAll(tasks);
+
+        results.Distinct().Should().ContainSingle(
+            "concurrent callers observing a credential change on the same printer must serialize on a " +
+            "single replacement adapter, not each construct their own");
+        results[0].Should().NotBeSameAs(staleAdapter, "the stale, old-credential adapter must be replaced, not reused");
+        ((OctoPrintWebSocketAdapter)WebSocketAdapters[printerId]!).Should().BeSameAs(results[0]);
     }
 }
