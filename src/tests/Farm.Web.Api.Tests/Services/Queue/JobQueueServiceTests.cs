@@ -1304,6 +1304,34 @@ public class JobQueueServiceTests
         result.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task RemoveJobAsync_WithQueuedJob_NotifiesMembershipChanged()
+    {
+        // #1731 PR #1741 review (Bishop): job hard-deletion never writes an outbox event,
+        // so it must directly notify the membership notifier since the client's active
+        // jobIds/projectIds snapshot changes on this transition.
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
+        _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+        _mockRepo.Setup(x => x.RemoveAsync(job, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var membershipNotifier = new Mock<IQueueSubscriptionMembershipNotifier>();
+        membershipNotifier.Setup(x => x.NotifyMembershipChangedAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var service = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            membershipNotifier: membershipNotifier.Object);
+
+        bool result = await service.RemoveJobAsync(job.Id, CancellationToken.None);
+
+        result.Should().BeTrue();
+        membershipNotifier.Verify(
+            x => x.NotifyMembershipChangedAsync(It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     #endregion
 
     #region UpdateJobPriorityAsync Tests

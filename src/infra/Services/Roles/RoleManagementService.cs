@@ -5,13 +5,15 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Roles;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Authentication;
+using Farm.Infrastructure.Services.Queue;
 
 namespace Farm.Infrastructure.Services.Roles;
 
 /// <inheritdoc cref="IRoleManagementService"/>
 public partial class RoleManagementService(
     IRolesRepository roles,
-    IAuthAuditService authAuditService) : IRoleManagementService
+    IAuthAuditService authAuditService,
+    IQueueSubscriptionMembershipNotifier? membershipNotifier = null) : IRoleManagementService
 {
     private readonly IRolesRepository _roles = roles ?? throw new ArgumentNullException(nameof(roles));
     private readonly IAuthAuditService _authAuditService = authAuditService ?? throw new ArgumentNullException(nameof(authAuditService));
@@ -280,6 +282,7 @@ public partial class RoleManagementService(
         // review discussion.
         Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await _roles.BeginSerializableTransactionAsync(ct);
         RoleDetailDto? before;
+        bool memberCountMutated = false;
         try
         {
             // Reload role.IsActive inside the transaction: the entity above was loaded before
@@ -324,10 +327,12 @@ public partial class RoleManagementService(
                 if (targetRole is not null)
                 {
                     await _roles.ReassignMembersAsync(roleId, targetRole.Id, ct);
+                    memberCountMutated = true;
                 }
                 else if (cascade)
                 {
                     await _roles.RemoveMembersAsync(roleId, ct);
+                    memberCountMutated = true;
                 }
                 else
                 {
@@ -359,6 +364,14 @@ public partial class RoleManagementService(
         finally
         {
             await transaction.DisposeAsync();
+        }
+
+        // #1731: reassigning or removing every member of a deleted role changes which
+        // printers/groups those users are authorized to see, exactly like a single-user
+        // role change does -- notify whenever members were actually mutated.
+        if (memberCountMutated && membershipNotifier is not null)
+        {
+            await membershipNotifier.NotifyMembershipChangedAsync(ct);
         }
 
         await _authAuditService.LogRoleManagementEventAsync(
