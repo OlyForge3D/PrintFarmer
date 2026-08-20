@@ -682,7 +682,7 @@ export function PrintQueueDashboardPage() {
       {/* Tabbed Interface */}
       <Tabs activeTab={activeTab} onTabChange={setActiveTab}>
         <div data-tour="queue-tabs">
-          <Tabs.List>
+          <Tabs.List className="overflow-x-auto">
             <Tabs.Tab id="print-queue">Print Queue</Tabs.Tab>
             <Tabs.Tab id="timeline">Timeline</Tabs.Tab>
             <Tabs.Tab id="history">History</Tabs.Tab>

@@ -284,4 +284,51 @@ describe('Tabs', () => {
       consoleSpy.mockRestore();
     });
   });
+
+  // Regression coverage for issue #1754: on a 375px viewport the Print Queue
+  // tab strip (Print Queue / Timeline / History / Dispatch Log) had no wrap
+  // or scroll affordance, so the "Dispatch Log" tab was clipped off-screen
+  // and the page required horizontal scrolling. jsdom does not compute real
+  // layout, so this asserts the tab list scrolls its own content horizontally
+  // (instead of clipping it) rather than measuring pixel widths.
+  //
+  // `overflow-x-auto` is opted into per-consumer via `className` (the same
+  // convention MaintenanceDashboardPage already uses) rather than forced on
+  // the shared TabList by default: forcing it unconditionally would make
+  // `overflow-y` resolve to `auto` too (per the CSS Overflow spec, when only
+  // one axis is set to a non-`visible` value), which risks clipping the
+  // active tab's `-mb-px` seam across every one of TabList's other
+  // consumers. PrintQueueDashboardPage passes `overflow-x-auto` explicitly,
+  // exactly as reproduced below.
+  describe('Mobile control layout (issue #1754)', () => {
+    it('makes the tab list horizontally scrollable instead of clipping tabs', () => {
+      render(
+        <Tabs defaultTab="print-queue">
+          <Tabs.List aria-label="Print queue tabs" className="overflow-x-auto">
+            <Tabs.Tab id="print-queue">Print Queue</Tabs.Tab>
+            <Tabs.Tab id="timeline">Timeline</Tabs.Tab>
+            <Tabs.Tab id="history">History</Tabs.Tab>
+            <Tabs.Tab id="dispatch-log">Dispatch Log</Tabs.Tab>
+          </Tabs.List>
+          <Tabs.Panels>
+            <Tabs.Panel id="print-queue">Queue</Tabs.Panel>
+            <Tabs.Panel id="timeline">Timeline</Tabs.Panel>
+            <Tabs.Panel id="history">History</Tabs.Panel>
+            <Tabs.Panel id="dispatch-log">Dispatch Log</Tabs.Panel>
+          </Tabs.Panels>
+        </Tabs>
+      );
+
+      const tabList = screen.getByRole('tablist');
+      expect(tabList).toHaveClass('overflow-x-auto');
+      expect(tabList).not.toHaveClass('overflow-hidden');
+
+      // Dispatch Log — the specific tab reported clipped off-screen — must
+      // still be reachable in the accessibility tree and not shrunk below
+      // its content.
+      const dispatchLogTab = screen.getByRole('tab', { name: 'Dispatch Log' });
+      expect(dispatchLogTab).toBeVisible();
+      expect(dispatchLogTab).toHaveClass('shrink-0');
+    });
+  });
 });

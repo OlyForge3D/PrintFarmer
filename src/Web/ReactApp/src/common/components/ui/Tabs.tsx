@@ -149,7 +149,7 @@ const Tab: React.FC<TabProps> = ({
         }
       }}
       className={clsx(
-        'px-4 py-2 text-sm font-medium transition-colors rounded-none',
+        'px-4 py-2 text-sm font-medium transition-colors rounded-none shrink-0 whitespace-nowrap',
         'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
         isActive
           ? 'relative z-20 -mb-px border-l-0 border-t border-r-0 border-b-0 border-pf-border bg-pf-bg-0 text-pf-text-primary rounded-none'
