@@ -275,3 +275,83 @@ describe('SetupWizard first-run Spoolman bootstrap', () => {
     expect(mockLogin.mock.invocationCallOrder[0]).toBeLessThan(mockScanNetwork.mock.invocationCallOrder[0]);
   });
 });
+
+/**
+ * #1753 — at a 320x568 viewport, the wizard was centered with
+ * `min-h-screen flex items-center justify-center` and no scroll container.
+ * Its header began off-screen (y=-138) and the page could not scroll to
+ * reveal the form or the submit button, because #root itself is fixed at
+ * `height: 100vh; overflow: hidden` (see App.css) for the authenticated app
+ * shell's internal scroll panes, and the wizard inherited that clipping
+ * before any internal scroll region existed.
+ *
+ * jsdom does not perform real CSS layout, so this test locks in the
+ * behavioural/structural contract instead of pixel measurements: at a
+ * 320x568 viewport, a dedicated ancestor provides `overflow-y-auto` (so the
+ * browser will let the page scroll), that scrollable ancestor is a distinct
+ * element from the flex container that centers the card (avoiding the
+ * classic bug where centering and scrolling on the same flex element only
+ * lets you scroll to one side of the overflow), and the heading plus the
+ * final submit button remain reachable in the DOM.
+ */
+describe('SetupWizard narrow mobile viewport scrolling (#1753)', () => {
+  const originalInnerWidth = window.innerWidth;
+  const originalInnerHeight = window.innerHeight;
+
+  function setViewportSize(width: number, height: number) {
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: width });
+    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: height });
+    window.dispatchEvent(new Event('resize'));
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuthState.isAuthenticated = false;
+    mockNetworkScanState.availableInstances = [];
+    mockGetSetupStatus.mockResolvedValue({ needsSetup: true });
+    mockGetSetupBootstrap.mockResolvedValue({ baseUrl: '' });
+    mockGetSettings.mockResolvedValue({
+      enableDiscovery: true,
+      discoverySubnets: [],
+      clientTimeoutMs: 200,
+      requestDelayMs: 100,
+      maxConcurrentRequests: 20,
+      maxRetries: 2,
+      ports: [80],
+    });
+  });
+
+  afterEach(() => {
+    setViewportSize(originalInnerWidth, originalInnerHeight);
+  });
+
+  it('provides a scrollable ancestor separate from the centering container, reaching the submit button at 320x568', async () => {
+    setViewportSize(320, 568);
+    render(<SetupWizard onComplete={vi.fn()} />);
+
+    await screen.findByText('Initial configuration wizard');
+    expect(screen.getByRole('heading', { level: 1, name: 'Welcome to PrintFarmer' })).toBeInTheDocument();
+
+    const submitButton = screen.getByRole('button', { name: 'Create Admin & Continue' });
+
+    const scrollContainer = document.querySelector('.overflow-y-auto');
+    expect(scrollContainer).not.toBeNull();
+    // The scrollable element must not itself be the flex-centering element:
+    // centering and scrolling on the same flex container clips content above
+    // the fold and cannot be scrolled back into view (the root cause of #1753).
+    expect(scrollContainer?.className).not.toContain('items-center');
+    expect(scrollContainer?.contains(submitButton)).toBe(true);
+  });
+
+  it('keeps the same scroll structure at desktop widths (unchanged, not narrower-only)', async () => {
+    setViewportSize(1280, 800);
+    render(<SetupWizard onComplete={vi.fn()} />);
+
+    await screen.findByText('Initial configuration wizard');
+
+    const submitButton = screen.getByRole('button', { name: 'Create Admin & Continue' });
+    const scrollContainer = document.querySelector('.overflow-y-auto');
+    expect(scrollContainer).not.toBeNull();
+    expect(scrollContainer?.contains(submitButton)).toBe(true);
+  });
+});
