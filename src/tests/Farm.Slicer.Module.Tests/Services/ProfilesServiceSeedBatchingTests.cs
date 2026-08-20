@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Catalog;
@@ -33,6 +34,7 @@ public class ProfilesServiceSeedBatchingTests
     private const string ManufacturerName = "TestMfg";
     private const string ModelName = "TestModel";
     private const string WorkerHost = "http://worker";
+    private static readonly Guid ModelId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
     [Fact]
     public async Task SeedSystemProfilesFromWorkerAsync_SeedingTwice_DoesNotDuplicateProfiles()
@@ -195,6 +197,72 @@ public class ProfilesServiceSeedBatchingTests
         processRepo.Verify(r => r.AddAsync(It.IsAny<ProcessProfile>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
+    /// <summary>
+    /// Regression test for #1779: the OrcaSlicer worker groups HF (high-flow) machine variants
+    /// under their own <c>printer_model</c> hierarchy key (e.g. "TestModel HF") distinct from the
+    /// catalog model's own name ("TestModel"). Before the fix, <c>catalogModelNames</c> only
+    /// contained catalog model names, so the entire HF hierarchy group was silently skipped during
+    /// seeding. This test configures "TestModel HF" as a configured OrcaSlicer alias of the catalog
+    /// model and asserts both the base-name group AND the alias-only group are imported.
+    /// </summary>
+    [Fact]
+    public async Task SeedSystemProfilesFromWorkerAsync_HierarchyGroupKeyedByOrcaSlicerAlias_IsImported()
+    {
+        // Arrange: base-name hierarchy group has one machine profile, HF-alias hierarchy group has another.
+        const string HfModelName = "TestModel HF";
+        List<MachineProfileDto> baseMachineProfiles = new()
+        {
+            new MachineProfileDto { Name = "Machine A", Manufacturer = ManufacturerName }
+        };
+        List<MachineProfileDto> hfMachineProfiles = new()
+        {
+            new MachineProfileDto { Name = "Machine A HF", Manufacturer = ManufacturerName }
+        };
+
+        Mock<IMachineProfileRepository> machineRepo = new(MockBehavior.Loose);
+        Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Loose);
+        Mock<IProcessProfileRepository> processRepo = new(MockBehavior.Loose);
+
+        _ = machineRepo
+            .Setup(r => r.GetExistingSystemHashesAsync(It.IsAny<IEnumerable<string>>(), SlicerType.OrcaSlicer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<string>(StringComparer.Ordinal));
+
+        List<MachineProfile> persisted = new();
+        _ = machineRepo
+            .Setup(r => r.AddRangeAsync(It.IsAny<IEnumerable<MachineProfile>>(), It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<MachineProfile>, CancellationToken>((profiles, _) => persisted.AddRange(profiles))
+            .ReturnsAsync((IEnumerable<MachineProfile> profiles, CancellationToken _) => new List<MachineProfile>(profiles).Count);
+
+        // The catalog configures "TestModel HF" as a configured OrcaSlicer alias of the "TestModel" catalog model.
+        List<SlicerModelAliasDto> aliases = new()
+        {
+            new SlicerModelAliasDto(Guid.NewGuid(), ModelId, HfModelName, "OrcaSlicer")
+        };
+
+        ProfilesService svc = CreateService(
+            machineRepoOverride: machineRepo.Object,
+            filamentRepoOverride: filamentRepo.Object,
+            processRepoOverride: processRepo.Object,
+            modelAliases: aliases);
+
+        using HttpClient httpClient = CreateWorkerHttpClient(
+            BuildProfilesResponseJsonWithModelGroups(
+                new Dictionary<string, IReadOnlyList<MachineProfileDto>>
+                {
+                    [ModelName] = baseMachineProfiles,
+                    [HfModelName] = hfMachineProfiles
+                }));
+
+        // Act
+        dynamic result = await svc.SeedSystemProfilesFromWorkerAsync(httpClient, CancellationToken.None);
+
+        // Assert: both the base-name group and the alias-only (HF) group were imported.
+        Assert.Equal(2, (int)result.imported);
+        Assert.Equal(2, persisted.Count);
+        Assert.Contains(persisted, p => p.Name == "Machine A");
+        Assert.Contains(persisted, p => p.Name == "Machine A HF");
+    }
+
     private static string ComputeTestHash(string content)
     {
         return "hash-" + content.GetHashCode(StringComparison.Ordinal).ToString("x", System.Globalization.CultureInfo.InvariantCulture);
@@ -217,6 +285,44 @@ public class ProfilesServiceSeedBatchingTests
         {
             BaseAddress = null
         };
+    }
+
+    /// <summary>
+    /// Builds a worker response with multiple <c>printer_model</c> hierarchy groups under the same
+    /// manufacturer, keyed by the supplied model group names (e.g. a base catalog name plus an
+    /// HF-alias name). Used to regression-test #1779's alias-aware seeding.
+    /// </summary>
+    private static string BuildProfilesResponseJsonWithModelGroups(
+        IReadOnlyDictionary<string, IReadOnlyList<MachineProfileDto>> machineProfilesByModelGroupName)
+    {
+        Dictionary<string, PrinterModelProfilesDto> models = new();
+        int index = 0;
+        foreach (KeyValuePair<string, IReadOnlyList<MachineProfileDto>> group in machineProfilesByModelGroupName)
+        {
+            string modelKey = "model" + (++index).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            models[modelKey] = new PrinterModelProfilesDto
+            {
+                Name = group.Key,
+                ModelId = modelKey,
+                MachineProfiles = [.. group.Value],
+                FilamentProfiles = [],
+                ProcessProfiles = []
+            };
+        }
+
+        AllProfilesResponseDto response = new()
+        {
+            ByHierarchy = new Dictionary<string, ManufacturerProfilesDto>
+            {
+                [ManufacturerName] = new ManufacturerProfilesDto
+                {
+                    Name = ManufacturerName,
+                    Models = models
+                }
+            }
+        };
+
+        return JsonSerializer.Serialize(response);
     }
 
     private static string BuildProfilesResponseJson(
@@ -253,7 +359,8 @@ public class ProfilesServiceSeedBatchingTests
         IMachineProfileRepository machineRepoOverride,
         IFilamentProfileRepository filamentRepoOverride,
         IProcessProfileRepository processRepoOverride,
-        IProfileParsingService? parsingServiceOverride = null)
+        IProfileParsingService? parsingServiceOverride = null,
+        IReadOnlyList<SlicerModelAliasDto>? modelAliases = null)
     {
         Mock<IProfilesRepository> profilesRepo = new(MockBehavior.Loose);
         Mock<IUnitOfWork> unitOfWork = new(MockBehavior.Loose);
@@ -287,7 +394,12 @@ public class ProfilesServiceSeedBatchingTests
             .ReturnsAsync((new List<ManufacturerDto> { new(Guid.NewGuid(), ManufacturerName) }, (string?)null));
         _ = catalogService
             .Setup(c => c.GetModelsAsync(null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((new List<PrinterModelDto> { new(Guid.NewGuid(), ModelName, Guid.NewGuid()) }, (string?)null));
+            .ReturnsAsync((new List<PrinterModelDto> { new(ModelId, ModelName, Guid.NewGuid()) }, (string?)null));
+        // #1779: seed methods now resolve OrcaSlicer aliases per catalog model to include
+        // alias-only hierarchy groups (e.g. HF variants); default to no aliases configured.
+        _ = catalogService
+            .Setup(c => c.GetModelAliasesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(modelAliases ?? new List<SlicerModelAliasDto>());
 
         return new ProfilesService(
             profilesRepo.Object,
