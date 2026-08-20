@@ -291,11 +291,20 @@ describe('Tabs', () => {
   // and the page required horizontal scrolling. jsdom does not compute real
   // layout, so this asserts the tab list scrolls its own content horizontally
   // (instead of clipping it) rather than measuring pixel widths.
+  //
+  // `overflow-x-auto` is opted into per-consumer via `className` (the same
+  // convention MaintenanceDashboardPage already uses) rather than forced on
+  // the shared TabList by default: forcing it unconditionally would make
+  // `overflow-y` resolve to `auto` too (per the CSS Overflow spec, when only
+  // one axis is set to a non-`visible` value), which risks clipping the
+  // active tab's `-mb-px` seam across every one of TabList's other
+  // consumers. PrintQueueDashboardPage passes `overflow-x-auto` explicitly,
+  // exactly as reproduced below.
   describe('Mobile control layout (issue #1754)', () => {
     it('makes the tab list horizontally scrollable instead of clipping tabs', () => {
       render(
         <Tabs defaultTab="print-queue">
-          <Tabs.List aria-label="Print queue tabs">
+          <Tabs.List aria-label="Print queue tabs" className="overflow-x-auto">
             <Tabs.Tab id="print-queue">Print Queue</Tabs.Tab>
             <Tabs.Tab id="timeline">Timeline</Tabs.Tab>
             <Tabs.Tab id="history">History</Tabs.Tab>
