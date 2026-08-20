@@ -152,4 +152,55 @@ describe('Input', () => {
     expect(notCancelled).toBe(false);
     expect(input).not.toHaveFocus();
   });
+
+  it('should attach the wheel listener as non-passive so preventDefault() is effective', () => {
+    // Regression guard: React's onWheel prop is passive, which is exactly
+    // why a real, non-passive DOM listener is required for this fix to work
+    // in real browsers (fireEvent.wheel in jsdom doesn't reproduce passive-
+    // listener semantics, so this must be asserted directly against the
+    // addEventListener call).
+    const addEventListenerSpy = vi.spyOn(HTMLInputElement.prototype, 'addEventListener');
+
+    render(<Input type="number" placeholder="Amount" />);
+
+    const wheelCall = addEventListenerSpy.mock.calls.find(([eventName]) => eventName === 'wheel');
+    expect(wheelCall).toBeDefined();
+    expect(wheelCall?.[2]).toEqual(expect.objectContaining({ passive: false }));
+
+    addEventListenerSpy.mockRestore();
+  });
+
+  it('should not report spurious detach/attach on a caller-provided callback ref across rerenders', () => {
+    // Regression guard: `setRefs` must be stable across renders. An
+    // unmemoized callback ref would make React call the previous ref with
+    // `null` and the new one with the same node on every rerender, even
+    // though the underlying DOM node never changed — a false unmount/remount
+    // signal that could break consumers doing setup/cleanup in their ref.
+    const refCalls: Array<HTMLInputElement | null> = [];
+    const callbackRef = (node: HTMLInputElement | null) => {
+      refCalls.push(node);
+    };
+
+    const { rerender } = render(<Input ref={callbackRef} placeholder="Amount" />);
+    expect(refCalls).toEqual([expect.any(HTMLInputElement)]);
+
+    rerender(<Input ref={callbackRef} placeholder="Amount" />);
+    rerender(<Input ref={callbackRef} placeholder="Amount" />);
+
+    // Still just the single initial attach call — no spurious null/re-attach
+    // pairs from rerenders that didn't replace the DOM node.
+    expect(refCalls).toEqual([expect.any(HTMLInputElement)]);
+  });
+
+  it('should keep an object ref pointing at the same node across rerenders', () => {
+    const objectRef = { current: null as HTMLInputElement | null };
+
+    const { rerender } = render(<Input ref={objectRef} placeholder="Amount" />);
+    const initialNode = objectRef.current;
+    expect(initialNode).toBeInstanceOf(HTMLInputElement);
+
+    rerender(<Input ref={objectRef} placeholder="Amount" />);
+
+    expect(objectRef.current).toBe(initialNode);
+  });
 });

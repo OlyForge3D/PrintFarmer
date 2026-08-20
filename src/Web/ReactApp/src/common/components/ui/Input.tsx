@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import clsx from 'clsx';
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
@@ -55,14 +55,23 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
     return () => node.removeEventListener('wheel', handleNativeWheel);
   }, [inputNode, type]);
 
-  const setRefs = (node: HTMLInputElement | null) => {
-    setInputNode(node);
-    if (typeof ref === 'function') {
-      ref(node);
-    } else if (ref) {
-      (ref as React.MutableRefObject<HTMLInputElement | null>).current = node;
-    }
-  };
+  const setRefs = useCallback(
+    (node: HTMLInputElement | null) => {
+      // Only update state (and thus re-run the wheel-listener effect below)
+      // when the node instance actually changes. Without this guard, a new
+      // `setRefs` identity — or React's callback-ref detach/attach dance on
+      // rerender — would otherwise cause spurious `null -> node` updates and
+      // corresponding spurious detach/attach calls on any externally
+      // forwarded callback ref.
+      setInputNode((current) => (current === node ? current : node));
+      if (typeof ref === 'function') {
+        ref(node);
+      } else if (ref) {
+        (ref as React.MutableRefObject<HTMLInputElement | null>).current = node;
+      }
+    },
+    [ref]
+  );
 
   return (
     <input
