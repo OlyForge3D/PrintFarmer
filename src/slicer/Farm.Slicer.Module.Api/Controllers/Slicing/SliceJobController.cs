@@ -1631,6 +1631,24 @@ public partial class SliceJobController(
             return;
         }
 
+        // System/stock profiles imported by SlicersService store RawJson as a serialized CLR DTO
+        // (MachineProfileDto/ProcessProfileDto/FilamentProfileDto — see their "Settings" bag), not
+        // the flat native OrcaSlicer document NativeSlicerProfiles/WriteNativeProfilesAsync writes
+        // verbatim to disk. Only user-authored custom profiles saved through ProfilesService (which
+        // sanitizes RawJson to a flat native document) are safe to snapshot here. Snapshotting a
+        // DTO-shaped document would produce a machine/process/filament.json OrcaSlicer cannot parse,
+        // regressing stock-name submissions that previously worked via the legacy worker-side
+        // resolution. Bail (defer to the legacy path) rather than risk that.
+        if (!IsFlatNativeProfileJson(machine.RawJson) ||
+            !IsFlatNativeProfileJson(process.RawJson) ||
+            !IsFlatNativeProfileJson(filament.RawJson))
+        {
+            _logger.LogInformation(
+                "Named profile snapshot skipped for job {JobId}: one or more resolved profiles are not flat native JSON (likely a system/stock profile stored as a DTO); deferring to the legacy worker-side resolution",
+                job.Id);
+            return;
+        }
+
         string processJson = ApplyProcessOverrides(process.RawJson, root);
         string filamentJson = ApplyFilamentColourOverride(filament.RawJson, root);
 
@@ -1642,6 +1660,26 @@ public partial class SliceJobController(
         job.FilamentProfileSha256 = ComputeSha256(filamentJson);
         job.SlicerDistribution = machine.SlicerDistribution ?? job.SlicerDistribution;
         job.SlicerVersion = machine.SlicerVersion ?? job.SlicerVersion;
+    }
+
+    /// <summary>
+    /// Distinguishes a flat native OrcaSlicer profile document (snake_case keys, safe to write
+    /// verbatim) from a serialized CLR profile DTO (MachineProfileDto/ProcessProfileDto/
+    /// FilamentProfileDto), which always carries a top-level "Settings" bag and promoted
+    /// PascalCase properties that OrcaSlicer's own config parser does not understand.
+    /// </summary>
+    private static bool IsFlatNativeProfileJson(string rawJson)
+    {
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(rawJson);
+            return doc.RootElement.ValueKind == JsonValueKind.Object &&
+                !doc.RootElement.TryGetProperty("Settings", out _);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static string? GetJsonString(JsonElement root, string propertyName) =>
@@ -1672,7 +1710,7 @@ public partial class SliceJobController(
 
             foreach (JsonProperty prop in overridesElem.EnumerateObject())
             {
-                obj[prop.Name] = JsonNode.Parse(prop.Value.GetRawText());
+                obj[prop.Name] = ToNativeOverrideValue(prop.Value);
             }
 
             return obj.ToJsonString();
@@ -1682,6 +1720,25 @@ public partial class SliceJobController(
             return rawJson;
         }
     }
+
+    /// <summary>
+    /// Converts a JSON override value to the shape native OrcaSlicer process JSON expects: every
+    /// scalar is written as a JSON string (matching <c>HttpJobPollerService</c>'s legacy override
+    /// mapping — string as-is, <c>true</c>/<c>false</c> as "1"/"0", numbers as their string form),
+    /// with arrays passed through as native arrays. OrcaSlicer's CLI parser rejects a process.json
+    /// containing raw numeric/boolean scalars, so preserving the override's original JSON type
+    /// (as a naive <c>JsonNode.Parse(GetRawText())</c> would) breaks any numeric or boolean
+    /// override even though the resolved base document is otherwise valid.
+    /// </summary>
+    private static JsonNode? ToNativeOverrideValue(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Array => JsonNode.Parse(value.GetRawText()),
+        JsonValueKind.String => JsonValue.Create(value.GetString() ?? string.Empty),
+        JsonValueKind.True => JsonValue.Create("1"),
+        JsonValueKind.False => JsonValue.Create("0"),
+        JsonValueKind.Number => JsonValue.Create(value.GetRawText()),
+        _ => JsonValue.Create(value.GetRawText())
+    };
 
     /// <summary>
     /// Applies the single-filament "filamentColour" override embedded in SlicerProfileJson onto a

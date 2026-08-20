@@ -118,6 +118,100 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime
         _ = process.RootElement.GetProperty("layer_height").GetString().Should().Be("0.28");
     }
 
+    [Fact(DisplayName = "A numeric process override is stringified to match the native OrcaSlicer JSON schema")]
+    public async Task Submit_WithNumericProcessOverride_StringifiesOverrideValue()
+    {
+        // Regression coverage: OrcaSlicer's CLI parser requires every scalar in process.json to be
+        // a JSON string (see HttpJobPollerService's legacy override mapping). A naive
+        // JsonNode.Parse(GetRawText()) merge would instead preserve the override's original JS
+        // number/boolean type, producing a process.json OrcaSlicer's CLI rejects.
+        Guid userId = await GetAuthenticatedUserIdAsync();
+        await AddProfilesAsync(userId, filamentName: CustomFilamentName);
+
+        string slicerProfileJson = JsonSerializer.Serialize(new
+        {
+            machineProfileName = "Test Machine",
+            processProfileName = "Test Process",
+            filamentProfileName = CustomFilamentName,
+            overrides = new Dictionary<string, object>
+            {
+                ["some_numeric_setting"] = 30,
+                ["some_boolean_setting"] = true,
+            },
+        });
+
+        HttpResponseMessage submit = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = userId,
+            ModelFileUrl = "models/test.stl",
+            ModelFileName = "test.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            SlicerProfileJson = slicerProfileJson,
+        });
+        _ = submit.StatusCode.Should().Be(HttpStatusCode.Created, await submit.Content.ReadAsStringAsync());
+
+        WorkerSliceJobResponse claimed = await ClaimAsync();
+
+        using JsonDocument process = JsonDocument.Parse(claimed.ProcessProfileJson!);
+        JsonElement numeric = process.RootElement.GetProperty("some_numeric_setting");
+        JsonElement boolean = process.RootElement.GetProperty("some_boolean_setting");
+        _ = numeric.ValueKind.Should().Be(JsonValueKind.String, "OrcaSlicer's CLI requires every scalar as a JSON string");
+        _ = numeric.GetString().Should().Be("30");
+        _ = boolean.ValueKind.Should().Be(JsonValueKind.String);
+        _ = boolean.GetString().Should().Be("1");
+    }
+
+    [Fact(DisplayName = "A named submission that resolves to a system/stock profile stored as a DTO defers to the legacy worker-side path")]
+    public async Task Submit_WithSystemProfileStoredAsDto_DoesNotSnapshotNativeProfiles()
+    {
+        // Regression coverage for a critical review finding: system/stock profiles imported by
+        // SlicersService store RawJson as a serialized CLR DTO (MachineProfileDto/etc, carrying a
+        // "Settings" bag), not flat native OrcaSlicer JSON. Snapshotting that DTO verbatim onto
+        // NativeProfiles would produce a machine/process/filament.json OrcaSlicer's CLI cannot
+        // parse, regressing stock-name submissions that previously worked via the legacy
+        // worker-side resolution (which correctly unwraps ".Settings" before writing native JSON).
+        // The fix must detect this shape and bail rather than snapshot it.
+        Guid userId = await GetAuthenticatedUserIdAsync();
+        await AddProfilesAsync(userId, filamentName: CustomFilamentName);
+
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+            MachineProfile stockMachine = await db.MachineProfiles.SingleAsync(m => m.Name == "Test Machine");
+            // Mirrors SlicersService's system-profile seeding shape: a serialized DTO with promoted
+            // properties plus a "Settings" bag, not flat native JSON.
+            stockMachine.RawJson = """{"Name":"Test Machine","Settings":{"printer_model":"Test"}}""";
+            _ = await db.SaveChangesAsync();
+        }
+
+        string slicerProfileJson = JsonSerializer.Serialize(new
+        {
+            machineProfileName = "Test Machine",
+            processProfileName = "Test Process",
+            filamentProfileName = CustomFilamentName,
+        });
+
+        HttpResponseMessage submit = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = userId,
+            ModelFileUrl = "models/test.stl",
+            ModelFileName = "test.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            SlicerProfileJson = slicerProfileJson,
+        });
+        _ = submit.StatusCode.Should().Be(HttpStatusCode.Created, await submit.Content.ReadAsStringAsync());
+        SubmitSliceJobResponse submitted = await submit.Content.ReadFromJsonAsync<SubmitSliceJobResponse>()
+            ?? throw new InvalidOperationException("Missing submit response.");
+
+        await using AsyncServiceScope verifyScope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        SliceJob job = await verifyDb.SliceJobs.AsNoTracking().SingleAsync(value => value.Id == submitted.JobId);
+
+        _ = job.MachineProfileJson.Should().BeNullOrEmpty();
+        _ = job.ProcessProfileJson.Should().BeNullOrEmpty();
+        _ = job.FilamentProfileJson.Should().BeNullOrEmpty();
+    }
+
     [Fact(DisplayName = "A profile name that cannot be resolved leaves the job on the legacy worker-side path untouched")]
     public async Task Submit_WithUnresolvableProfileName_DoesNotSnapshotNativeProfiles()
     {
