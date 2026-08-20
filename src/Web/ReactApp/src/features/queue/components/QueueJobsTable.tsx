@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import { Button, ProgressBar, Select, Spinner } from "@/common/components/ui";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import { PrintJobPriority, type DispatchUploadProgressDto } from "@/types/api";
@@ -227,6 +227,7 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
       <tbody
         ref={ref}
         data-index={virtualIndex}
+        data-job-id={jobId}
         aria-label={`Print job: ${fileName}${deadlineState === "overdue" ? ", overdue deadline" : deadlineState === "due-soon" ? ", due soon" : ""}`}
         tabIndex={0}
         onClick={() => onEdit?.(jobId)}
@@ -549,13 +550,20 @@ interface QueueJobsTableFrameProps {
   containerRef?: React.Ref<HTMLDivElement>;
   /** Total logical `<tr>` count (header + all job rows), set only on the virtualized path. */
   ariaRowCount?: number;
+  onFocusCapture?: React.FocusEventHandler<HTMLDivElement>;
+  onBlurCapture?: React.FocusEventHandler<HTMLDivElement>;
   children: ReactNode;
 }
 
 /** Shared outer wrapper/`<table>`/`<colgroup>`/`<thead>` for both table variants. */
-function QueueJobsTableFrame({ containerRef, ariaRowCount, children }: QueueJobsTableFrameProps) {
+function QueueJobsTableFrame({ containerRef, ariaRowCount, onFocusCapture, onBlurCapture, children }: QueueJobsTableFrameProps) {
   return (
-    <div ref={containerRef} className="border border-pf-border rounded-lg bg-pf-bg-1 overflow-hidden">
+    <div
+      ref={containerRef}
+      className="border border-pf-border rounded-lg bg-pf-bg-1 overflow-hidden"
+      {...(onFocusCapture ? { onFocusCapture } : {})}
+      {...(onBlurCapture ? { onBlurCapture } : {})}
+    >
       <div className="overflow-x-auto">
         <table
           className="w-full table-fixed text-sm"
@@ -640,13 +648,21 @@ function SmallQueueJobsTable({ jobs, ...rowProps }: QueueJobsTableVariantProps) 
  * This keeps native `<table>` semantics (and the browser's own AX tree)
  * intact instead of reimplementing table roles by hand.
  *
- * Trade-off: browser find-in-page can't match text in rows that are
- * currently unmounted because they're scrolled out of view.
+ * Trade-off: browser find-in-page and the app's print stylesheet (which
+ * forces `overflow: visible` under `[data-main-content]` so scrolled
+ * content prints in full) can't reach rows that are currently unmounted
+ * because they're scrolled out of view — the same trade-off already
+ * accepted, unremarked, by `PrinterCardGrid`.
+ *
+ * A focused row is force-kept in the virtualizer's rendered range (see the
+ * `rangeExtractor` below) even if it scrolls outside the overscan window,
+ * so keyboard focus never silently falls back to `<body>`.
  */
 function VirtualizedQueueJobsTable({ jobs, ...rowProps }: QueueJobsTableVariantProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
   const [scrollMargin, setScrollMargin] = useState(0);
+  const [focusedJobId, setFocusedJobId] = useState<string | undefined>();
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -691,6 +707,17 @@ function VirtualizedQueueJobsTable({ jobs, ...rowProps }: QueueJobsTableVariantP
     estimateSize: () => QUEUE_ROW_ESTIMATED_HEIGHT_PX,
     overscan: QUEUE_ROW_OVERSCAN,
     scrollMargin,
+    rangeExtractor: (range: Range) => {
+      const indexes = new Set(defaultRangeExtractor(range));
+      // Keep a focused row mounted even if it scrolls outside the overscan
+      // window (e.g. a mouse-wheel scroll while a row has keyboard focus),
+      // so focus never silently falls back to <body>.
+      const focusedJobIndex = focusedJobId ? jobs.findIndex((jobWrapper) => jobWrapper.job.id === focusedJobId) : -1;
+      if (focusedJobIndex >= 0) {
+        indexes.add(focusedJobIndex);
+      }
+      return [...indexes].sort((left, right) => left - right);
+    },
   });
 
   const virtualRows = rowVirtualizer.getVirtualItems();
@@ -701,7 +728,19 @@ function VirtualizedQueueJobsTable({ jobs, ...rowProps }: QueueJobsTableVariantP
   const paddingBottom = lastVirtualRow ? totalSize - (lastVirtualRow.end - scrollMargin) : totalSize;
 
   return (
-    <QueueJobsTableFrame containerRef={containerRef} ariaRowCount={1 + jobs.length * 2}>
+    <QueueJobsTableFrame
+      containerRef={containerRef}
+      ariaRowCount={1 + jobs.length * 2}
+      onFocusCapture={(event) => {
+        const row = (event.target as HTMLElement).closest<HTMLElement>("[data-job-id]");
+        if (row?.dataset.jobId) setFocusedJobId(row.dataset.jobId);
+      }}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setFocusedJobId(undefined);
+        }
+      }}
+    >
       {paddingTop > 0 && (
         <tbody aria-hidden="true">
           <tr>

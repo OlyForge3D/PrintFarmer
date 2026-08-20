@@ -20,24 +20,38 @@ const ROW_HEIGHT = 84;
 let windowStart = 0;
 let windowEnd = 3;
 
+interface MockRange {
+  startIndex: number;
+  endIndex: number;
+  overscan: number;
+  count: number;
+}
+
 interface MockVirtualizerOptions {
   count: number;
   overscan: number;
   scrollMargin: number;
+  rangeExtractor?: (range: MockRange) => number[];
 }
 
 vi.mock("@tanstack/react-virtual", () => ({
+  defaultRangeExtractor: (range: MockRange) => {
+    const indexes = [];
+    for (let index = range.startIndex; index <= range.endIndex; index++) indexes.push(index);
+    return indexes;
+  },
   useVirtualizer: (options: MockVirtualizerOptions) => {
     const clampedEnd = Math.min(windowEnd, options.count - 1);
-    const items = [];
-    for (let index = windowStart; index <= clampedEnd; index++) {
-      items.push({
-        index,
-        key: `row-${index}`,
-        start: options.scrollMargin + index * ROW_HEIGHT,
-        end: options.scrollMargin + (index + 1) * ROW_HEIGHT,
-      });
-    }
+    const range: MockRange = { startIndex: windowStart, endIndex: clampedEnd, overscan: options.overscan, count: options.count };
+    const indexes = options.rangeExtractor
+      ? options.rangeExtractor(range)
+      : Array.from({ length: clampedEnd - windowStart + 1 }, (_, i) => windowStart + i);
+    const items = indexes.map((index) => ({
+      index,
+      key: `row-${index}`,
+      start: options.scrollMargin + index * ROW_HEIGHT,
+      end: options.scrollMargin + (index + 1) * ROW_HEIGHT,
+    }));
     return {
       getVirtualItems: () => items,
       getTotalSize: () => options.count * ROW_HEIGHT,
@@ -208,6 +222,35 @@ describe("QueueJobsTable virtualization", () => {
     fireEvent.keyDown(visibleBody, { key: "Enter" });
 
     expect(onEdit).toHaveBeenCalledWith("job-5");
+  });
+
+  it("keeps a focused row mounted even after it scrolls outside the windowed range", () => {
+    windowStart = 5;
+    windowEnd = 8;
+    const jobs = createJobs(QUEUE_TABLE_VIRTUALIZATION_THRESHOLD + 30);
+
+    const { container, rerender } = render(<QueueJobsTable jobs={jobs} />);
+
+    const rowFive = container.querySelector('[data-job-id="job-5"]') as HTMLElement;
+    expect(rowFive).toBeInTheDocument();
+    fireEvent.focus(rowFive);
+
+    // Simulate a mouse-wheel scroll (independent of Tab) that moves the
+    // windowed range well past the focused row.
+    windowStart = 20;
+    windowEnd = 23;
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <QueueJobsTable jobs={jobs} />
+      </QueryClientProvider>,
+    );
+
+    // The focused row must still be in the DOM (force-included by the
+    // rangeExtractor) so focus never silently falls back to <body>.
+    expect(container.querySelector('[data-job-id="job-5"]')).toBeInTheDocument();
+    expect(screen.getByText(jobs[5].gcodeFile!.fileName)).toBeInTheDocument();
+    // The new windowed range (20-23) is also mounted alongside it.
+    expect(screen.getByText(jobs[20].gcodeFile!.fileName)).toBeInTheDocument();
   });
 
   it("re-renders correctly when the filtered jobs list identity changes", () => {
