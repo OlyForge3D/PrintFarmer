@@ -23,13 +23,15 @@ public sealed class FlashForgePollingService(
     ILogger<FlashForgePollingService> logger,
     IPrinterStatusCacheWriter statusCacheWriter,
     IFilamentCoverageBroadcaster? coverageBroadcaster = null,
-    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable
+    IMutationWatermarkReader? watermarkReader = null,
+    IPrinterCacheInvalidator? printerCacheInvalidator = null) : IHostedService, IDisposable
 {
     private readonly ILogger<FlashForgePollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
     private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+    private readonly IPrinterCacheInvalidator? _printerCacheInvalidator = printerCacheInvalidator;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
     private readonly ConcurrentDictionary<Guid, Task> _pollingLoops = new();
@@ -78,16 +80,40 @@ public sealed class FlashForgePollingService(
         /// restart, since this state is in-memory only), so the first message is never suppressed.
         /// </summary>
         public PrinterStatusUpdate? LastBroadcastUpdate { get; set; }
+
+        /// <summary>
+        /// Cached, fully decrypted printer row, refreshed by the 30-second reconciliation loop or
+        /// cleared by an explicit invalidation (see <see cref="IPrinterCacheInvalidator"/>). Avoids
+        /// re-querying the database and re-decrypting credentials on every poll tick (issue #1763).
+        /// </summary>
+        public Printer? CachedPrinter { get; set; }
     }
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("FlashForgePollingService starting");
+        if (_printerCacheInvalidator is not null)
+        {
+            _printerCacheInvalidator.Subscribe(OnPrinterInvalidated);
+        }
 #pragma warning disable VSTHRD003 // Avoid awaiting or returning a Task representing work that was not started within this context
         _ = _mainLoop = Task.Run(() => RunAsync(_cts.Token), _cts.Token);
 #pragma warning restore VSTHRD003
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Invoked when a printer's persisted row has changed (e.g. edited via the API). Drops the
+    /// cached copy so the next poll tick re-reads the row from the database instead of waiting
+    /// for the next 30-second reconciliation pass.
+    /// </summary>
+    private void OnPrinterInvalidated(Guid printerId)
+    {
+        if (_printerStates.TryGetValue(printerId, out PrinterPollingState? state))
+        {
+            state.CachedPrinter = null;
+        }
     }
 
     /// <inheritdoc />
@@ -121,6 +147,11 @@ public sealed class FlashForgePollingService(
     /// <inheritdoc />
     public void Dispose()
     {
+        if (_printerCacheInvalidator is not null)
+        {
+            _printerCacheInvalidator.Unsubscribe(OnPrinterInvalidated);
+        }
+
         _cts?.Dispose();
         _pollingLoops.Clear();
     }
@@ -137,8 +168,19 @@ public sealed class FlashForgePollingService(
             {
                 try
                 {
-                    List<Guid> printerIds = await GetFlashForgePrinterIdsAsync(ct);
+                    // Get list of FlashForge printers (fully decrypted), refreshing the per-printer
+                    // cache used by PollPrinterAsync (issue #1763)
+                    List<Printer> printers = await GetFlashForgePrintersAsync(ct);
+                    List<Guid> printerIds = printers.Select(p => p.Id).ToList();
                     _logger.LogDebug("FlashForgePollingService: Found {Count} FlashForge printers", printerIds.Count);
+
+                    foreach (Printer printer in printers)
+                    {
+                        PrinterPollingState refreshState = _printerStates.GetOrAdd(
+                            printer.Id,
+                            _ => new PrinterPollingState { PrinterId = printer.Id, LastKnownIsOnline = false });
+                        refreshState.CachedPrinter = printer;
+                    }
 
                     // Ensure polling loops exist for all FlashForge printers
                     foreach (Guid id in printerIds.Where(id => !_pollingLoops.ContainsKey(id)))
@@ -192,7 +234,16 @@ public sealed class FlashForgePollingService(
         {
             try
             {
-                Printer? printer = await GetPrinterAsync(printerId, ct);
+                // Get printer details - use the cached row refreshed by the 30s reconciliation
+                // loop (or by an explicit invalidation) instead of re-querying the database
+                // every tick (issue #1763). Fall back to a fresh read only on a cache miss.
+                Printer? printer = state.CachedPrinter;
+                if (printer is null)
+                {
+                    printer = await GetPrinterAsync(printerId, ct);
+                    state.CachedPrinter = printer;
+                }
+
                 if (printer?.Backend != (int)PrinterBackend.FlashForge)
                 {
                     _pollingLoops.TryRemove(printerId, out _);
@@ -398,14 +449,13 @@ public sealed class FlashForgePollingService(
     }
 
     /// <summary>
-    /// Gets the list of all FlashForge printer IDs from the database.
+    /// Gets all FlashForge printers (fully decrypted) from the database.
     /// </summary>
-    private async Task<List<Guid>> GetFlashForgePrinterIdsAsync(CancellationToken ct)
+    private async Task<List<Printer>> GetFlashForgePrintersAsync(CancellationToken ct)
     {
         using IServiceScope scope = _scopeFactory.CreateScope();
         IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-        List<Printer> printers = await unitOfWork.Printers.GetByBackendAsync(PrinterBackend.FlashForge, ct);
-        return printers.Select(p => p.Id).ToList();
+        return await unitOfWork.Printers.GetByBackendAsync(PrinterBackend.FlashForge, ct);
     }
 
     /// <summary>

@@ -26,13 +26,15 @@ public sealed class OctoPrintPollingService(
     ILogger<OctoPrintPollingService> logger,
     IPrinterStatusCacheWriter statusCacheWriter,
     IFilamentCoverageBroadcaster? coverageBroadcaster = null,
-    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable
+    IMutationWatermarkReader? watermarkReader = null,
+    IPrinterCacheInvalidator? printerCacheInvalidator = null) : IHostedService, IDisposable
 {
     private readonly ILogger<OctoPrintPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
     private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+    private readonly IPrinterCacheInvalidator? _printerCacheInvalidator = printerCacheInvalidator;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, OctoPrintWebSocketAdapter> _webSocketAdapters = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
@@ -93,15 +95,39 @@ public sealed class OctoPrintPollingService(
         /// restart, since this state is in-memory only), so the first message is never suppressed.
         /// </summary>
         public PrinterStatusUpdate? LastBroadcastUpdate { get; set; }
+
+        /// <summary>
+        /// Cached, fully decrypted printer row, refreshed by the 30-second reconciliation loop or
+        /// cleared by an explicit invalidation (see <see cref="IPrinterCacheInvalidator"/>). Avoids
+        /// re-querying the database and re-decrypting credentials on every poll tick (issue #1763).
+        /// </summary>
+        public Printer? CachedPrinter { get; set; }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("OctoPrintPollingService starting");
+        if (_printerCacheInvalidator is not null)
+        {
+            _printerCacheInvalidator.Subscribe(OnPrinterInvalidated);
+        }
 #pragma warning disable VSTHRD003 // Avoid awaiting or returning a Task representing work that was not started within this context
         _ = _mainLoop = Task.Run(() => RunAsync(_cts.Token), _cts.Token);
 #pragma warning restore VSTHRD003
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Invoked when a printer's persisted row has changed (e.g. edited via the API). Drops the
+    /// cached copy so the next poll tick re-reads the row from the database instead of waiting
+    /// for the next 30-second reconciliation pass.
+    /// </summary>
+    private void OnPrinterInvalidated(Guid printerId)
+    {
+        if (_printerStates.TryGetValue(printerId, out PrinterPollingState? state))
+        {
+            state.CachedPrinter = null;
+        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -133,6 +159,11 @@ public sealed class OctoPrintPollingService(
 
     public void Dispose()
     {
+        if (_printerCacheInvalidator is not null)
+        {
+            _printerCacheInvalidator.Unsubscribe(OnPrinterInvalidated);
+        }
+
         // Signal cancellation to background loops first, then dispose adapters and clear collections.
         try
         {
@@ -181,20 +212,22 @@ public sealed class OctoPrintPollingService(
             {
                 try
                 {
-                    // Get list of OctoPrint printers from database
-                    List<Guid> printerIds = await GetOctoPrintPrinterIdsAsync(ct);
+                    // Get list of OctoPrint printers (fully decrypted) from database
+                    List<Printer> printers = await GetOctoPrintPrintersAsync(ct);
+                    Dictionary<Guid, Printer> printersById = printers.ToDictionary(p => p.Id);
+                    List<Guid> printerIds = printers.Select(p => p.Id).ToList();
                     _logger.LogDebug("OctoPrintPollingService: Found {PrinterIdsCount} OctoPrint printers", printerIds.Count);
 
                     // Ensure WebSocket adapters and polling loops exist for all OctoPrint printers.
                     // Also detect credential changes (ServerUrl, API key) and recreate adapters when needed.
                     foreach (Guid id in printerIds)
                     {
+                        printersById.TryGetValue(id, out Printer? current);
                         bool needsNewAdapter = !_webSocketAdapters.ContainsKey(id);
 
                         // Check for credential changes on existing adapters
                         if (!needsNewAdapter && _printerStates.TryGetValue(id, out PrinterPollingState? existing))
                         {
-                            Printer? current = await GetPrinterAsync(id, ct);
                             if (current != null)
                             {
                                 string? currentApiKey = current.Credential?.ApiKey;
@@ -220,7 +253,7 @@ public sealed class OctoPrintPollingService(
 
                         if (needsNewAdapter)
                         {
-                            Printer? printer = await GetPrinterAsync(id, ct);
+                            Printer? printer = current;
                             if (printer != null)
                             {
                                 // Get the OctoPrint client from a scoped context
@@ -277,6 +310,19 @@ public sealed class OctoPrintPollingService(
                             _pollingLoops.TryAdd(id, pollingLoop);
                             _logger.LogDebug("Started HTTP polling fallback loop for OctoPrint printer {Id}", id);
                         }
+
+                        // Refresh the cached printer row used by PollPrinterAsync's per-tick HTTP
+                        // fallback loop, so it doesn't need its own per-tick database read (issue #1763).
+                        if (current != null)
+                        {
+                            PrinterPollingState cacheState = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState
+                            {
+                                PrinterId = printerId,
+                                LastKnownIsOnline = false,
+                                LastApiState = "unset"
+                            });
+                            cacheState.CachedPrinter = current;
+                        }
                     }
 
                     // Remove adapters and polling loops for printers that are no longer OctoPrint
@@ -330,8 +376,16 @@ public sealed class OctoPrintPollingService(
         {
             try
             {
-                // Get printer details
-                Printer? printer = await GetPrinterAsync(printerId, ct);
+                // Get printer details - use the cached row refreshed by the 30s reconciliation
+                // loop (or by an explicit invalidation) instead of re-querying the database
+                // every tick (issue #1763). Fall back to a fresh read only on a cache miss.
+                Printer? printer = state.CachedPrinter;
+                if (printer is null)
+                {
+                    printer = await GetPrinterAsync(printerId, ct);
+                    state.CachedPrinter = printer;
+                }
+
                 if (printer?.Backend != (int)PrinterBackend.OctoPrint)
                 {
                     // Printer is no longer OctoPrint, remove from polling
@@ -583,14 +637,13 @@ public sealed class OctoPrintPollingService(
     }
 
     /// <summary>
-    /// Gets the list of all OctoPrint printer IDs from the database.
+    /// Gets all OctoPrint printers (fully decrypted) from the database.
     /// </summary>
-    private async Task<List<Guid>> GetOctoPrintPrinterIdsAsync(CancellationToken ct)
+    private async Task<List<Printer>> GetOctoPrintPrintersAsync(CancellationToken ct)
     {
         using IServiceScope scope = _scopeFactory.CreateScope();
         IPrintersRepository repo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
-        List<Printer> printers = await repo.GetByBackendAsync(PrinterBackend.OctoPrint, ct);
-        return printers.Select(p => p.Id).ToList();
+        return await repo.GetByBackendAsync(PrinterBackend.OctoPrint, ct);
     }
 
     /// <summary>

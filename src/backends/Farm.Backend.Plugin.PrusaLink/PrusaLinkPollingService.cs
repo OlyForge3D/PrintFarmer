@@ -24,13 +24,15 @@ public sealed class PrusaLinkPollingService(
     ILogger<PrusaLinkPollingService> logger,
     IPrinterStatusCacheWriter statusCacheWriter,
     IFilamentCoverageBroadcaster? coverageBroadcaster = null,
-    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable
+    IMutationWatermarkReader? watermarkReader = null,
+    IPrinterCacheInvalidator? printerCacheInvalidator = null) : IHostedService, IDisposable
 {
     private readonly ILogger<PrusaLinkPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
     private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+    private readonly IPrinterCacheInvalidator? _printerCacheInvalidator = printerCacheInvalidator;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
     private readonly ConcurrentDictionary<Guid, Task> _pollingLoops = new();
@@ -75,15 +77,40 @@ public sealed class PrusaLinkPollingService(
         /// restart, since this state is in-memory only), so the first message is never suppressed.
         /// </summary>
         public PrinterStatusUpdate? LastBroadcastUpdate { get; set; }
+
+        /// <summary>
+        /// Cached, fully-decrypted printer row, refreshed by the 30-second reconciliation tick
+        /// (or on-demand after an <see cref="IPrinterCacheInvalidator"/> invalidation). Reading
+        /// this instead of re-querying the database every poll tick is the fix for issue #1763.
+        /// Null immediately after invalidation, forcing exactly one fresh read on the next tick.
+        /// </summary>
+        public Printer? CachedPrinter { get; set; }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("PrusaLinkPollingService starting");
+        if (_printerCacheInvalidator is not null)
+        {
+            _printerCacheInvalidator.Subscribe(OnPrinterInvalidated);
+        }
+
 #pragma warning disable VSTHRD003 // Avoid awaiting or returning a Task representing work that was not started within this context
         _ = _mainLoop = Task.Run(() => RunAsync(_cts.Token), _cts.Token);
 #pragma warning restore VSTHRD003
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Drops the cached printer row for the given printer so the next poll tick re-reads it
+    /// from the database. Called when <see cref="IPrinterCacheInvalidator"/> reports an edit.
+    /// </summary>
+    private void OnPrinterInvalidated(Guid printerId)
+    {
+        if (_printerStates.TryGetValue(printerId, out PrinterPollingState? state))
+        {
+            state.CachedPrinter = null;
+        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -115,6 +142,11 @@ public sealed class PrusaLinkPollingService(
 
     public void Dispose()
     {
+        if (_printerCacheInvalidator is not null)
+        {
+            _printerCacheInvalidator.Unsubscribe(OnPrinterInvalidated);
+        }
+
         _cts?.Dispose();
         _pollingLoops.Clear();
     }
@@ -131,9 +163,23 @@ public sealed class PrusaLinkPollingService(
             {
                 try
                 {
-                    // Get list of PrusaLink printers from database
-                    List<Guid> printerIds = await GetPrusaLinkPrinterIdsAsync(ct);
+                    // Get all PrusaLink printers from database (fully decrypted). Reusing this
+                    // bulk, already-decrypted result to seed/refresh each printer's cached row
+                    // avoids the per-tick re-query fixed by issue #1763.
+                    List<Printer> printers = await GetPrusaLinkPrintersAsync(ct);
+                    List<Guid> printerIds = printers.Select(p => p.Id).ToList();
                     _logger.LogDebug("PrusaLinkPollingService: Found {PrinterIdsCount} PrusaLink printers", printerIds.Count);
+
+                    // Refresh (or seed) the cached printer row for every known printer before
+                    // starting any new polling loops, so PollPrinterAsync never observes a
+                    // missing cache for a printer this reconciliation pass already saw.
+                    foreach (Printer printer in printers)
+                    {
+#pragma warning disable S6612 // Capturing printer in lambda is intentional and safe
+                        PrinterPollingState refreshState = _printerStates.GetOrAdd(printer.Id, _ => new PrinterPollingState { PrinterId = printer.Id, LastKnownIsOnline = false });
+#pragma warning restore S6612
+                        refreshState.CachedPrinter = printer;
+                    }
 
                     // Ensure polling loops exist for all PrusaLink printers
                     foreach (Guid id in printerIds.Where(id => !_pollingLoops.ContainsKey(id)))
@@ -187,8 +233,18 @@ public sealed class PrusaLinkPollingService(
         {
             try
             {
-                // Get printer details
-                Printer? printer = await GetPrinterAsync(printerId, ct);
+                // Get printer details - use the cached row refreshed by the 30s reconciliation
+                // loop (or by an explicit invalidation) instead of re-querying the database
+                // every tick (issue #1763). Fall back to a fresh read only on a cache miss,
+                // which happens once right after invalidation or if this loop somehow started
+                // before the cache was ever populated.
+                Printer? printer = state.CachedPrinter;
+                if (printer is null)
+                {
+                    printer = await GetPrinterAsync(printerId, ct);
+                    state.CachedPrinter = printer;
+                }
+
                 if (printer?.Backend != (int)PrinterBackend.PrusaLink)
                 {
                     // Printer is no longer PrusaLink, remove from polling
@@ -390,14 +446,13 @@ public sealed class PrusaLinkPollingService(
     }
 
     /// <summary>
-    /// Gets the list of all PrusaLink printer IDs from the database.
+    /// Gets all PrusaLink printers (fully decrypted) from the database.
     /// </summary>
-    private async Task<List<Guid>> GetPrusaLinkPrinterIdsAsync(CancellationToken ct)
+    private async Task<List<Printer>> GetPrusaLinkPrintersAsync(CancellationToken ct)
     {
         using IServiceScope scope = _scopeFactory.CreateScope();
         IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
-        List<Printer> printers = await unitOfWork.Printers.GetByBackendAsync(PrinterBackend.PrusaLink, ct);
-        return printers.Select(p => p.Id).ToList();
+        return await unitOfWork.Printers.GetByBackendAsync(PrinterBackend.PrusaLink, ct);
     }
 
     /// <summary>

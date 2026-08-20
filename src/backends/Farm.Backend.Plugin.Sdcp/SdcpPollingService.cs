@@ -25,13 +25,15 @@ public sealed class SdcpPollingService(
     ILogger<SdcpPollingService> logger,
     IPrinterStatusCacheWriter statusCacheWriter,
     IFilamentCoverageBroadcaster? coverageBroadcaster = null,
-    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
+    IMutationWatermarkReader? watermarkReader = null,
+    IPrinterCacheInvalidator? printerCacheInvalidator = null) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
 {
     private readonly ILogger<SdcpPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
     private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+    private readonly IPrinterCacheInvalidator? _printerCacheInvalidator = printerCacheInvalidator;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
     private readonly ConcurrentDictionary<Guid, Task> _pollingLoops = new();
@@ -72,15 +74,39 @@ public sealed class SdcpPollingService(
         /// restart, since this state is in-memory only), so the first message is never suppressed.
         /// </summary>
         public PrinterStatusUpdate? LastBroadcastUpdate { get; set; }
+
+        /// <summary>
+        /// Cached, fully decrypted printer row, refreshed by the 30-second reconciliation loop or
+        /// cleared by an explicit invalidation (see <see cref="IPrinterCacheInvalidator"/>). Avoids
+        /// re-querying the database and re-decrypting credentials on every poll tick (issue #1763).
+        /// </summary>
+        public Printer? CachedPrinter { get; set; }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("SdcpPollingService starting");
+        if (_printerCacheInvalidator is not null)
+        {
+            _printerCacheInvalidator.Subscribe(OnPrinterInvalidated);
+        }
 #pragma warning disable VSTHRD003 // Avoid awaiting or returning a Task representing work that was not started within this context
         _ = _mainLoop = Task.Run(() => RunAsync(_cts.Token), _cts.Token);
 #pragma warning restore VSTHRD003
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Invoked when a printer's persisted row has changed (e.g. edited via the API). Drops the
+    /// cached copy so the next poll tick re-reads the row from the database instead of waiting
+    /// for the next 30-second reconciliation pass.
+    /// </summary>
+    private void OnPrinterInvalidated(Guid printerId)
+    {
+        if (_printerStates.TryGetValue(printerId, out PrinterPollingState? state))
+        {
+            state.CachedPrinter = null;
+        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -112,6 +138,11 @@ public sealed class SdcpPollingService(
 
     public void Dispose()
     {
+        if (_printerCacheInvalidator is not null)
+        {
+            _printerCacheInvalidator.Unsubscribe(OnPrinterInvalidated);
+        }
+
         _cts?.Dispose();
         _pollingLoops.Clear();
     }
@@ -128,9 +159,19 @@ public sealed class SdcpPollingService(
             {
                 try
                 {
-                    // Get list of SDCP printers from database
-                    List<Guid> printerIds = await GetSdcpPrinterIdsAsync(ct);
+                    // Get list of SDCP printers (fully decrypted) from database, refreshing the
+                    // per-printer cache used by PollPrinterAsync (issue #1763)
+                    List<Printer> printers = await GetSdcpPrintersAsync(ct);
+                    List<Guid> printerIds = printers.Select(p => p.Id).ToList();
                     _logger.LogDebug("SdcpPollingService: Found {PrinterIdsCount} SDCP printers", printerIds.Count);
+
+                    foreach (Printer printer in printers)
+                    {
+                        PrinterPollingState refreshState = _printerStates.GetOrAdd(
+                            printer.Id,
+                            _ => new PrinterPollingState { PrinterId = printer.Id, LastKnownIsOnline = false });
+                        refreshState.CachedPrinter = printer;
+                    }
 
                     // Ensure polling loops exist for all SDCP printers
                     foreach (Guid id in printerIds.Where(id => !_pollingLoops.ContainsKey(id)))
@@ -184,8 +225,16 @@ public sealed class SdcpPollingService(
         {
             try
             {
-                // Get printer details
-                Printer? printer = await GetPrinterAsync(printerId, ct);
+                // Get printer details - use the cached row refreshed by the 30s reconciliation
+                // loop (or by an explicit invalidation) instead of re-querying the database
+                // every tick (issue #1763). Fall back to a fresh read only on a cache miss.
+                Printer? printer = state.CachedPrinter;
+                if (printer is null)
+                {
+                    printer = await GetPrinterAsync(printerId, ct);
+                    state.CachedPrinter = printer;
+                }
+
                 if (printer?.Backend != (int)PrinterBackend.SDCP)
                 {
                     // Printer is no longer SDCP, remove from polling
@@ -411,14 +460,13 @@ public sealed class SdcpPollingService(
     }
 
     /// <summary>
-    /// Gets the list of all SDCP printer IDs from the database.
+    /// Gets all SDCP printers (fully decrypted) from the database.
     /// </summary>
-    private async Task<List<Guid>> GetSdcpPrinterIdsAsync(CancellationToken ct)
+    private async Task<List<Printer>> GetSdcpPrintersAsync(CancellationToken ct)
     {
         using IServiceScope scope = _scopeFactory.CreateScope();
         IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>();
-        List<Printer> printers = await unitOfWork.Printers.GetByBackendAsync(PrinterBackend.SDCP, ct);
-        return printers.Select(p => p.Id).ToList();
+        return await unitOfWork.Printers.GetByBackendAsync(PrinterBackend.SDCP, ct);
     }
 
     /// <summary>
