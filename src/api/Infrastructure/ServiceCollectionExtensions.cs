@@ -197,6 +197,12 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService, Farm.Infrastructure.Services.Queue.Dispatch.DispatchClaimService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IBedClearAcknowledgementService, Farm.Infrastructure.Services.Queue.BedClearAcknowledgementService>();
 
+        // #1731: direct membership-change SignalR hint, wired into printer-group/printer/user mutations.
+        // Singleton: its only dependencies are IHubContext<PrinterHub> and ILogger, both
+        // singleton-safe, and QueueOutboxPublisherService (a singleton-lifetime
+        // BackgroundService) also needs to inject it directly without opening its own scope.
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Queue.IQueueSubscriptionMembershipNotifier, Farm.Infrastructure.Services.Queue.QueueSubscriptionMembershipNotifier>();
+
         // Material equivalence clusters
         _ = services.AddScoped<Farm.Infrastructure.Services.MaterialClusters.IMaterialClusterService, Farm.Infrastructure.Services.MaterialClusters.MaterialClusterService>();
 

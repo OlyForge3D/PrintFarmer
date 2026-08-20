@@ -248,12 +248,25 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         // Emit a durable lifecycle event so the outbox publisher broadcasts the completion
         // to authorized groups. Written in the SAME transaction as the status change.
+        //
+        // #1731 PR #1741 review (Bishop): for a multi-copy job that has not finished all
+        // copies, the loop above sets primaryJob.Status back to Queued (not Completed) --
+        // the job stays in the active set. Using EventTypeJobCompleted unconditionally here
+        // would make QueueOutboxPublisherService re-fire the subscription-membership hint for
+        // an in-set transition, since that event type is (correctly) treated as
+        // membership-changing for the real terminal-completion case. Use the distinct,
+        // non-membership-changing EventTypeJobCopyCompleted for the "requeued for next copy"
+        // case so only a genuine exit from the active set re-triggers reconciliation.
+        bool allCopiesDone = primaryJob.Status == PrintJobStatus.Completed;
+        string completionEventType = allCopiesDone
+            ? DispatchClaimService.EventTypeJobCompleted
+            : DispatchClaimService.EventTypeJobCopyCompleted;
         await WriteTerminalOutboxEventAsync(
             primaryJob,
             printerId,
-            DispatchClaimService.EventTypeJobCompleted,
+            completionEventType,
             failureCode: null,
-            extraDetails: new { completionState, allCopiesDone = true },
+            extraDetails: new { completionState, allCopiesDone },
             ct);
 
         await _db.SaveChangesAsync(ct);
