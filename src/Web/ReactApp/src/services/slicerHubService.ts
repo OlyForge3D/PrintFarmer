@@ -267,9 +267,15 @@ export class SlicerHubService {
   }
 
   onJobEvent(jobId: string, callback: (event: SliceJobEvent) => void): () => void {
-    const channel = `SliceJob_${jobId}`;
-    this.connection?.on(channel, callback);
-    return () => { this.connection?.off(channel, callback); };
+    // The server broadcasts every slice job event under the single method name
+    // 'slicejobevent' (see SliceJobEventService.BroadcastEventAsync). Per-job scoping
+    // is done via the 'Job-{jobId}' SignalR group, not a per-job method name, so the
+    // handler must listen on 'slicejobevent' and filter by event.jobId here.
+    const handler = (event: SliceJobEvent) => {
+      if (event.jobId === jobId) callback(event);
+    };
+    this.connection?.on('slicejobevent', handler);
+    return () => { this.connection?.off('slicejobevent', handler); };
   }
 
   onUserJobEvent(callback: (event: SliceJobEvent) => void): () => void {
