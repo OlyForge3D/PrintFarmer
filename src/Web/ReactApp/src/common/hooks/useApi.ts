@@ -1841,7 +1841,24 @@ export function useCostsByMaterial(days?: number, startDate?: string, endDate?: 
 export function useCostsByJob(days?: number, startDate?: string, endDate?: string, options?: QueryOptions<import("@/types/api").CostByJob[]>) {
   return useQuery({
     queryKey: queryKeys.costsByJob(days, startDate, endDate),
-    queryFn: () => apiClient.getCostsByJob(days, startDate, endDate),
+    queryFn: async () => {
+      // The endpoint is keyset-paginated server-side (issue #1734); this loop aggregates
+      // every page into the flat array the dashboard already expects, so callers of this
+      // hook don't need to change. A safety cap guards against an unexpected infinite loop.
+      const MAX_PAGES = 100;
+      const items: import("@/types/api").CostByJob[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const result = await apiClient.getCostsByJob(days, startDate, endDate, cursor);
+        items.push(...result.items);
+        if (!result.nextCursor) {
+          return items;
+        }
+        cursor = result.nextCursor;
+      }
+      console.warn(`useCostsByJob: hit the ${MAX_PAGES}-page safety cap; results may be incomplete.`);
+      return items;
+    },
     staleTime: 300_000, // 5 minutes
     ...options,
   });

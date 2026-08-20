@@ -55,7 +55,28 @@ public interface IStatisticsService
     Task<List<CostByMaterialDto>> GetCostsByMaterialAsync(int? days, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default);
 
     /// <summary>
-    /// Returns per-job cost breakdowns for completed jobs.
+    /// Returns a keyset-paginated page of per-job cost breakdowns for completed jobs,
+    /// ordered by completion time descending. The requested <paramref name="pageSize"/>
+    /// is clamped server-side to <see cref="StatisticsService.MaxCostsByJobPageSize"/>
+    /// regardless of caller input, so the response payload is always bounded.
     /// </summary>
-    Task<List<CostByJobDto>> GetCostsByJobAsync(int? days, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default);
+    /// <param name="days">Number of trailing days to include when <paramref name="startDate"/> is not provided.</param>
+    /// <param name="startDate">Optional inclusive start of the date range.</param>
+    /// <param name="endDate">Optional inclusive end of the date range.</param>
+    /// <param name="cursor">
+    /// Opaque cursor returned as <c>NextCursor</c> from a previous call, or <c>null</c> to
+    /// request the first page.
+    /// </param>
+    /// <param name="pageSize">
+    /// Requested page size. Defaults to <see cref="StatisticsService.DefaultCostsByJobPageSize"/>
+    /// and is clamped to <see cref="StatisticsService.MaxCostsByJobPageSize"/>.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<CostByJobPageDto> GetCostsByJobAsync(
+        int? days,
+        DateTime? startDate = null,
+        DateTime? endDate = null,
+        string? cursor = null,
+        int? pageSize = null,
+        CancellationToken ct = default);
 }

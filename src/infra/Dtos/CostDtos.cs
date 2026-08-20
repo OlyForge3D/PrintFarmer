@@ -148,6 +148,19 @@ public class CostByJobDto
 }
 
 /// <summary>
+/// A single keyset-paginated page of per-job cost breakdowns.
+/// </summary>
+public class CostByJobPageDto
+{
+    public List<CostByJobDto> Items { get; set; } = [];
+
+    /// <summary>
+    /// Opaque cursor to request the next page, or <c>null</c> when this is the last page.
+    /// </summary>
+    public string? NextCursor { get; set; }
+}
+
+/// <summary>
 /// Request to update job cost with manual overrides.
 /// </summary>
 public class UpdateJobCostRequest
