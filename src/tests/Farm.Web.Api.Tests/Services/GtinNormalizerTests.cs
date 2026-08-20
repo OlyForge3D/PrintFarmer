@@ -69,12 +69,26 @@ public class GtinNormalizerTests
     public void Normalize_NonAsciiDecimalDigits_AreNotTreatedAsDigits()
     {
         // char.IsDigit(char) matches any Unicode "Nd" decimal digit (e.g. Arabic-Indic
-        // U+0660-U+0669), not just ASCII '0'-'9'. Filtering on IsDigit would let these through
-        // and then corrupt the checksum arithmetic (which assumes `c - '0'` is 0-9). Stripping
-        // must be ASCII-only, so an Arabic-Indic rendering of a valid barcode should strip down
-        // to nothing usable and be rejected, not silently accepted as if it were ASCII digits.
-        const string arabicIndicDigits = "\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669\u0660\u0661\u0662"; // "123456789012" in Arabic-Indic
+        // U+0660-U+0669), not just ASCII '0'-'9'. If stripping used IsDigit, these characters
+        // would survive filtering and get treated as digits with value `c - '0'` (a huge,
+        // out-of-range number for a non-ASCII code point), corrupting the checksum arithmetic.
+        //
+        // This exact string is a deliberately engineered counter-example, not an arbitrary one:
+        // it replaces 3 of the 11 payload digits of the valid GTIN-12 "123456789012" with their
+        // Arabic-Indic equivalents at positions whose GS1 weights (two weight-1, one weight-3)
+        // sum to a multiple of 5. Because the Arabic-Indic code point offset from '0' is 0x630
+        // (1584), which is congruent to 4 mod 10, replacing digits whose total weight is a
+        // multiple of 5 shifts the mod-10 checksum by a multiple of 10 -- i.e. by zero. So under
+        // the old buggy `IsDigit` filter, all 12 characters would count as "digits" (a *valid*
+        // length), and the corrupted checksum arithmetic would *still validate* by this
+        // engineered coincidence, silently producing a normalized "GTIN" that itself embeds
+        // non-ASCII characters. This was verified against the pre-fix implementation.
+        //
+        // The ASCII-only filter strips the 3 Arabic-Indic characters entirely, leaving only 9
+        // ASCII digits ("356789012") -- an invalid length -- so the fixed code correctly rejects
+        // this input instead of silently corrupting it.
+        const string mixedAsciiAndArabicIndicDigits = "\u0661\u06623\u066456789012";
 
-        GtinNormalizer.Normalize(arabicIndicDigits).Should().BeNull();
+        GtinNormalizer.Normalize(mixedAsciiAndArabicIndicDigits).Should().BeNull();
     }
 }
