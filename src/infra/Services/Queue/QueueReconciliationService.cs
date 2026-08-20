@@ -409,6 +409,10 @@ public sealed class QueueReconciliationService(
                     PrintJobStatus.Cancelled => "reconciliation_cancelled",
                     _ => "reconciliation_completed",
                 };
+
+                // Multi-copy support (#1742): stays true unless the block below finds
+                // a multi-copy job with CompletedCopies < Copies remaining.
+                bool allCopiesDone = true;
                 attempt.Outcome = DispatchAttemptOutcome.Accepted;
                 attempt.BackendAcceptedAtUtc ??= DateTime.UtcNow;
                 attempt.ErrorCode = terminalStatus == PrintJobStatus.Completed
@@ -432,19 +436,46 @@ public sealed class QueueReconciliationService(
                     attempt.PrintJob.Status.OccupiesPrinter())
                 {
                     PrintJobStatus fromStatus = attempt.PrintJob.Status;
-                    attempt.PrintJob.Status = terminalStatus;
-                    attempt.PrintJob.ActualEndTime ??= DateTime.UtcNow;
+                    PrintJobStatus appliedStatus = terminalStatus;
+
+                    // Multi-copy support (#1742): a CompletedOnBackend outcome only
+                    // finishes the *current* copy. Increment CompletedCopies and only
+                    // transition to Completed once all copies are done; otherwise
+                    // requeue for the next copy, same as
+                    // MarkCurrentJobAsCompletedAsync's primary completion loop and
+                    // SyncOrphanedPrintingJobsAsync's orphan-sync path. Failed/Cancelled
+                    // outcomes are genuinely terminal regardless of copy count, so they
+                    // are left untouched.
+                    if (terminalStatus == PrintJobStatus.Completed)
+                    {
+                        attempt.PrintJob.CompletedCopies++;
+                        allCopiesDone =
+                            attempt.PrintJob.CompletedCopies >= attempt.PrintJob.Copies;
+                        appliedStatus = allCopiesDone
+                            ? PrintJobStatus.Completed
+                            : PrintJobStatus.Queued;
+                    }
+
+                    attempt.PrintJob.Status = appliedStatus;
+
+                    if (appliedStatus == PrintJobStatus.Queued)
+                    {
+                        attempt.PrintJob.ActualStartTime = null;
+                    }
+                    else
+                    {
+                        attempt.PrintJob.ActualEndTime ??= DateTime.UtcNow;
+                    }
+
                     attempt.PrintJob.FailureReason =
-                        terminalStatus == PrintJobStatus.Completed
+                        appliedStatus is PrintJobStatus.Completed or PrintJobStatus.Queued
                             ? null
                             : attempt.ErrorDetail;
                     attempt.PrintJob.UpdatedAt = DateTime.UtcNow;
-                    AddHistory(
-                        db,
-                        attempt.PrintJob.Id,
-                        fromStatus,
-                        terminalStatus,
-                        $"Backend history proved {terminalStatus.ToString().ToLowerInvariant()}.");
+                    string historyMessage = allCopiesDone
+                        ? $"Backend history proved {terminalStatus.ToString().ToLowerInvariant()}."
+                        : "Backend history proved completed; more copies remaining, requeued for next copy.";
+                    AddHistory(db, attempt.PrintJob.Id, fromStatus, appliedStatus, historyMessage);
                 }
 
                 if (activeState.ActiveDispatchAttemptId == attempt.Id)
@@ -463,6 +494,9 @@ public sealed class QueueReconciliationService(
                 string auditOutcome = terminalStatus == PrintJobStatus.Completed
                     ? QueueAuditOutcomes.Success
                     : QueueAuditOutcomes.Failed;
+                string auditReasonCode = allCopiesDone
+                    ? reconciliationReason
+                    : "reconciliation_copy_completed";
                 _ = QueueAuditWriter.Add(
                     db,
                     attempt.ActorSubject,
@@ -473,11 +507,12 @@ public sealed class QueueReconciliationService(
                     printerId: attempt.PrinterId,
                     printJobId: attempt.PrintJobId,
                     dispatchAttemptId: attempt.Id,
-                    reasonCode: reconciliationReason,
+                    reasonCode: auditReasonCode,
                     detail: new
                     {
                         startPathKind = attempt.StartPathKind,
                         terminalStatus = terminalStatus.ToString(),
+                        allCopiesDone,
                     });
 
                 await FinalizeBackendStartCommandAsync(
@@ -500,6 +535,13 @@ public sealed class QueueReconciliationService(
                             DispatchClaimService.EventTypeJobFailed,
                         PrintJobStatus.Cancelled =>
                             DispatchClaimService.EventTypeJobCancelled,
+
+                        // Multi-copy support (#1742): requeued for the next copy is an
+                        // in-set transition (occupied -> Queued), not a genuine exit from
+                        // the active set, so use the non-membership-changing event type --
+                        // same convention as MarkCurrentJobAsCompletedAsync and
+                        // SyncOrphanedPrintingJobsAsync.
+                        _ when !allCopiesDone => DispatchClaimService.EventTypeJobCopyCompleted,
                         _ => DispatchClaimService.EventTypeJobCompleted,
                     };
                     string? failureCode = terminalStatus == PrintJobStatus.Completed
@@ -518,7 +560,7 @@ public sealed class QueueReconciliationService(
                             attempt.PrintJobId.Value,
                             attempt.PrinterId,
                             attempt.Id,
-                            terminalStatus.ToString(),
+                            (allCopiesDone ? terminalStatus : PrintJobStatus.Queued).ToString(),
                             attempt.PrintJob?.JobKind?.ToString() ?? nameof(JobKind.Standard),
                             failureCode: failureCode),
                         ct);
