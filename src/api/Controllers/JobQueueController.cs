@@ -304,11 +304,34 @@ public class JobQueueController(
             candidatePrinterIds,
             PrinterGroupAccessLevel.View,
             ct);
-        IReadOnlySet<Guid> accessibleJobIds = await resourceAuthorization.FilterActorAccessibleJobIdsAsync(
-            QueueActorIdentity.Resolve(User),
-            candidateJobIds,
-            PrinterGroupAccessLevel.View,
-            ct);
+
+        // Mirror the old per-item CanAccessJobAsync semantics exactly: it short-circuited on
+        // the claims-based farm-admin check (PrintFarmerPermissions.IsFarmAdmin) before ever
+        // resolving a user id, and it degraded to "deny" (rather than throwing) when the
+        // principal had no parseable NameIdentifier/sub claim. FilterActorAccessibleJobIdsAsync
+        // only has a DB-backed admin check, and QueueActorIdentity.Resolve throws on an
+        // unparseable subject, so both cases must be handled here before delegating to it.
+        IReadOnlySet<Guid> accessibleJobIds;
+        if (candidateJobIds.Length == 0)
+        {
+            accessibleJobIds = new HashSet<Guid>();
+        }
+        else if (PrintFarmerPermissions.IsFarmAdmin(User))
+        {
+            accessibleJobIds = candidateJobIds.ToHashSet();
+        }
+        else if (!PrintFarmerPermissions.TryGetUserId(User, out _))
+        {
+            accessibleJobIds = new HashSet<Guid>();
+        }
+        else
+        {
+            accessibleJobIds = await resourceAuthorization.FilterActorAccessibleJobIdsAsync(
+                QueueActorIdentity.Resolve(User),
+                candidateJobIds,
+                PrinterGroupAccessLevel.View,
+                ct);
+        }
 
         var events = new List<QueueEventEnvelope>(limit);
         long nextSequence = afterSequence;
