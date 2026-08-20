@@ -193,6 +193,181 @@ public class StatisticsServicePerformanceTests
         Assert.Contains("ActualPrintTime", ticksSql, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("postgres")]
+    [InlineData("sqlserver")]
+    public void CostsSummaryAggregate_TranslatesAcrossSupportedProviders(string provider)
+    {
+        var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
+        switch (provider)
+        {
+            case "sqlite":
+                optionsBuilder.UseSqlite("Data Source=:memory:");
+                break;
+            case "postgres":
+                optionsBuilder.UseNpgsql("Host=localhost;Database=printfarmer");
+                break;
+            case "sqlserver":
+                optionsBuilder.UseSqlServer("Server=(localdb)\\MSSQLLocalDB;Database=printfarmer");
+                break;
+            default:
+                throw new XunitException($"Unsupported provider test case: {provider}");
+        }
+
+        using var db = new AppDbContext(optionsBuilder.Options);
+        string sql = StatisticsService.BuildCostsSummaryAggregateQuery(db.Set<PrintJob>()).ToQueryString();
+
+        Assert.Contains("GROUP BY", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GetCostsSummaryAsync_UsesTwoDatabaseCommandsAndMatchesInMemoryAggregation()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var interceptor = new CommandCountingInterceptor();
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+
+        await using var db = new AppDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        DateTime now = DateTime.UtcNow;
+
+        var completedJobs = new[]
+        {
+            new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "cost-1.gcode",
+                Status = PrintJobStatus.Completed,
+                QueuedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+                ActualEndTime = now,
+                TotalCostUsd = 10.111m,
+                MaterialCostUsd = 5.001m,
+                EnergyCostUsd = 2.002m,
+                MachineTimeCostUsd = 2.003m,
+                LaborCostUsd = 1.105m,
+                FilamentName = "PLA-Red",
+            },
+            new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "cost-2.gcode",
+                Status = PrintJobStatus.Completed,
+                QueuedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+                ActualEndTime = now,
+                TotalCostUsd = 4.220m,
+                MaterialCostUsd = 1.500m,
+                EnergyCostUsd = 1.000m,
+                MachineTimeCostUsd = 1.000m,
+                LaborCostUsd = 0.720m,
+                FilamentName = "PETG-Black",
+            },
+            new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "cost-3-no-cost-data.gcode",
+                Status = PrintJobStatus.Completed,
+                QueuedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+                ActualEndTime = now,
+                TotalCostUsd = null,
+            },
+            new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "cost-4-failed.gcode",
+                Status = PrintJobStatus.Failed,
+                QueuedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+                ActualEndTime = now,
+                TotalCostUsd = 99.0m,
+                MaterialCostUsd = 50.0m,
+                EnergyCostUsd = 20.0m,
+            },
+        };
+        db.PrintJobs.AddRange(completedJobs);
+        await db.SaveChangesAsync();
+        interceptor.Reset();
+
+        CostStatisticsSummaryDto result = await new StatisticsService(db).GetCostsSummaryAsync(null);
+
+        // Two round trips: the GroupBy(_ => 1)-equivalent aggregate, plus the
+        // most-expensive-material lookup. No per-row entity materialization.
+        Assert.Equal(2, interceptor.CommandCount);
+
+        // Exact decimal equality against values manually summed from only the
+        // two completed jobs that have cost data (matches pre-change semantics).
+        Assert.Equal(14.331m, result.TotalCostUsd);
+        Assert.Equal(2, result.JobsWithCostData);
+        Assert.Equal(6.501m, result.TotalMaterialCostUsd);
+        Assert.Equal(3.002m, result.TotalEnergyCostUsd);
+        Assert.Equal(3.003m, result.TotalMachineTimeCostUsd);
+        Assert.Equal(1.825m, result.TotalLaborCostUsd);
+        Assert.Equal(14.331m / 2, result.AverageCostPerJobUsd);
+        Assert.Equal("PLA-Red", result.MostExpensiveMaterial);
+        Assert.Equal(10.111m, result.MostExpensiveMaterialCost);
+    }
+
+    [Fact]
+    public async Task GetCostsSummaryAsync_WithEmptyDateRange_ReturnsAllZerosNotNull()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var db = new AppDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        DateTime now = DateTime.UtcNow;
+
+        db.PrintJobs.Add(new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "outside-range.gcode",
+            Status = PrintJobStatus.Completed,
+            QueuedAt = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+            ActualEndTime = now.AddDays(-100),
+            TotalCostUsd = 42.0m,
+            MaterialCostUsd = 20.0m,
+            EnergyCostUsd = 10.0m,
+            MachineTimeCostUsd = 8.0m,
+            LaborCostUsd = 4.0m,
+            FilamentName = "PLA",
+        });
+        await db.SaveChangesAsync();
+
+        // A date range that excludes every job, exercising the empty-aggregate path.
+        CostStatisticsSummaryDto result = await new StatisticsService(db)
+            .GetCostsSummaryAsync(null, startDate: now.AddDays(-1), endDate: now);
+
+        Assert.Equal(0m, result.TotalCostUsd);
+        Assert.Equal(0, result.JobsWithCostData);
+        Assert.Equal(0m, result.TotalMaterialCostUsd);
+        Assert.Equal(0m, result.TotalEnergyCostUsd);
+        Assert.Equal(0m, result.TotalMachineTimeCostUsd);
+        Assert.Equal(0m, result.TotalLaborCostUsd);
+        Assert.Equal(0m, result.AverageCostPerJobUsd);
+        Assert.Null(result.MostExpensiveMaterial);
+        Assert.Equal(0m, result.MostExpensiveMaterialCost);
+    }
+
     private sealed class CommandCountingInterceptor : DbCommandInterceptor
     {
         public int CommandCount { get; private set; }

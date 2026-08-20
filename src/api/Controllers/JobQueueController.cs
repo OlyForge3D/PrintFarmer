@@ -334,9 +334,55 @@ public class JobQueueController(
             });
         }
 
-        IEnumerable<QueueDispatchOutbox> candidates = rawCandidates.Where(evt =>
+        List<QueueDispatchOutbox> candidates = rawCandidates.Where(evt =>
             evt.EventType != BedClearAcknowledgementService.BackendStartCommandEventType &&
-            evt.EventType != BackendControlCommandConsumerService.EventType);
+            evt.EventType != BackendControlCommandConsumerService.EventType).ToList();
+
+        Guid[] candidatePrinterIds = candidates
+            .Where(evt =>
+                string.Equals(evt.AggregateType, nameof(Printer), StringComparison.Ordinal) &&
+                evt.PrinterId.HasValue)
+            .Select(evt => evt.PrinterId!.Value)
+            .Distinct()
+            .ToArray();
+        Guid[] candidateJobIds = candidates
+            .Where(evt => !string.Equals(evt.AggregateType, nameof(Printer), StringComparison.Ordinal))
+            .Select(evt => evt.AggregateId)
+            .Distinct()
+            .ToArray();
+        IReadOnlySet<Guid> accessiblePrinterIds = await resourceAuthorization.FilterAccessiblePrinterIdsAsync(
+            User,
+            candidatePrinterIds,
+            PrinterGroupAccessLevel.View,
+            ct);
+
+        // Mirror the old per-item CanAccessJobAsync semantics exactly: it short-circuited on
+        // the claims-based farm-admin check (PrintFarmerPermissions.IsFarmAdmin) before ever
+        // resolving a user id, and it degraded to "deny" (rather than throwing) when the
+        // principal had no parseable NameIdentifier/sub claim. FilterActorAccessibleJobIdsAsync
+        // only has a DB-backed admin check, and QueueActorIdentity.Resolve throws on an
+        // unparseable subject, so both cases must be handled here before delegating to it.
+        IReadOnlySet<Guid> accessibleJobIds;
+        if (candidateJobIds.Length == 0)
+        {
+            accessibleJobIds = new HashSet<Guid>();
+        }
+        else if (PrintFarmerPermissions.IsFarmAdmin(User))
+        {
+            accessibleJobIds = candidateJobIds.ToHashSet();
+        }
+        else if (!PrintFarmerPermissions.TryGetUserId(User, out _))
+        {
+            accessibleJobIds = new HashSet<Guid>();
+        }
+        else
+        {
+            accessibleJobIds = await resourceAuthorization.FilterActorAccessibleJobIdsAsync(
+                QueueActorIdentity.Resolve(User),
+                candidateJobIds,
+                PrinterGroupAccessLevel.View,
+                ct);
+        }
 
         var events = new List<QueueEventEnvelope>(limit);
         long nextSequence = afterSequence;
@@ -347,17 +393,8 @@ public class JobQueueController(
                 evt.AggregateType,
                 nameof(Printer),
                 StringComparison.Ordinal)
-                ? evt.PrinterId.HasValue &&
-                  await resourceAuthorization.CanAccessPrinterAsync(
-                      User,
-                      evt.PrinterId.Value,
-                      PrinterGroupAccessLevel.View,
-                      ct)
-                : await resourceAuthorization.CanAccessJobAsync(
-                    User,
-                    evt.AggregateId,
-                    PrinterGroupAccessLevel.View,
-                    ct);
+                ? evt.PrinterId.HasValue && accessiblePrinterIds.Contains(evt.PrinterId.Value)
+                : accessibleJobIds.Contains(evt.AggregateId);
             if (!canAccess)
             {
                 continue;
