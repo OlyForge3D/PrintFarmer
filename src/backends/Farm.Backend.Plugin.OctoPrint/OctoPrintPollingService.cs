@@ -122,11 +122,38 @@ public sealed class OctoPrintPollingService(
     /// cached copy so the next poll tick re-reads the row from the database instead of waiting
     /// for the next 30-second reconciliation pass.
     /// </summary>
+    /// <remarks>
+    /// Unlike the other backends, OctoPrint's primary transport is a long-lived
+    /// <see cref="OctoPrintWebSocketAdapter"/> that is otherwise only torn down/recreated by the
+    /// 30-second reconciliation loop's credential-change comparison. Clearing
+    /// <see cref="PrinterPollingState.CachedPrinter"/> alone would leave that adapter connected
+    /// with the printer's old URL/API key for up to 30 seconds after an edit. Tear the adapter
+    /// down here too so <see cref="PollPrinterAsync"/> recreates it (with the new connection
+    /// details) on its very next tick, matching the immediate-invalidation behavior of the other
+    /// three backends.
+    /// </remarks>
     private void OnPrinterInvalidated(Guid printerId)
     {
         if (_printerStates.TryGetValue(printerId, out PrinterPollingState? state))
         {
             state.CachedPrinter = null;
+
+            // Force the next reconciliation pass (or on-demand recreation in PollPrinterAsync)
+            // to treat this printer as needing a fresh adapter, even if it hasn't run yet.
+            state.CreatedWithServerUrl = null;
+            state.CreatedWithApiKey = null;
+        }
+
+        if (_webSocketAdapters.TryRemove(printerId, out OctoPrintWebSocketAdapter? adapter))
+        {
+            try
+            {
+                adapter.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "OctoPrint {PrinterId}: error disposing WebSocket adapter during invalidation", printerId);
+            }
         }
     }
 
@@ -200,6 +227,61 @@ public sealed class OctoPrintPollingService(
     }
 
     /// <summary>
+    /// Creates a new WebSocket adapter for the given printer, stores it and its polling state,
+    /// and starts a background connection attempt. Shared by the 30-second reconciliation loop
+    /// and by <see cref="PollPrinterAsync"/>'s on-demand recreation after an invalidation removed
+    /// the previous adapter, so both paths construct the adapter identically.
+    /// </summary>
+    private OctoPrintWebSocketAdapter CreateWebSocketAdapter(Guid id, Printer printer, CancellationToken ct)
+    {
+        // Get the OctoPrint client from a scoped context
+        // (scoped services cannot be injected directly into singletons)
+        using IServiceScope scope = _scopeFactory.CreateScope();
+        IOctoPrintClient octoPrintClient = scope.ServiceProvider.GetRequiredService<IOctoPrintClient>();
+
+        var adapter = new OctoPrintWebSocketAdapter(
+            id,
+            printer,
+            _logger,
+            octoPrintClient,
+            _hub,
+            _statusCacheWriter,
+            _coverageBroadcaster,
+            watermarkReader);
+
+        _webSocketAdapters[id] = adapter;
+        PrinterPollingState state = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState
+        {
+            PrinterId = printerId,
+            LastKnownIsOnline = false,
+            LastApiState = "unset",
+            WebSocketAdapter = adapter
+        });
+        state.WebSocketAdapter = adapter;
+        state.CreatedWithServerUrl = printer.ServerUrl;
+        state.CreatedWithApiKey = printer.Credential?.ApiKey;
+        state.CachedPrinter = printer;
+
+        _logger.LogDebug("Created WebSocket adapter for OctoPrint printer {Id}", id);
+
+        // Attempt WebSocket connection in background
+        _ = Task.Run(
+            async () =>
+        {
+            try
+            {
+                await adapter.ConnectAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "WebSocket connection failed for {Id}, will use HTTP polling", id);
+            }
+        }, ct);
+
+        return adapter;
+    }
+
+    /// <summary>
     /// Main loop that continuously monitors and manages WebSocket connections for all OctoPrint printers.
     /// Discovers OctoPrint printers every 30 seconds and manages WebSocket + HTTP fallback for each.
     /// </summary>
@@ -256,48 +338,7 @@ public sealed class OctoPrintPollingService(
                             Printer? printer = current;
                             if (printer != null)
                             {
-                                // Get the OctoPrint client from a scoped context
-                                // (scoped services cannot be injected directly into singletons)
-                                using IServiceScope scope = _scopeFactory.CreateScope();
-                                IOctoPrintClient octoPrintClient = scope.ServiceProvider.GetRequiredService<IOctoPrintClient>();
-
-                                var adapter = new OctoPrintWebSocketAdapter(
-                                    id,
-                                    printer,
-                                    _logger,
-                                    octoPrintClient,
-                                    _hub,
-                                    _statusCacheWriter,
-                                    _coverageBroadcaster,
-                                    watermarkReader);
-
-                                _webSocketAdapters.TryAdd(id, adapter);
-                                PrinterPollingState state = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState
-                                {
-                                    PrinterId = printerId,
-                                    LastKnownIsOnline = false,
-                                    LastApiState = "unset",
-                                    WebSocketAdapter = adapter
-                                });
-                                state.WebSocketAdapter = adapter;
-                                state.CreatedWithServerUrl = printer.ServerUrl;
-                                state.CreatedWithApiKey = printer.Credential?.ApiKey;
-
-                                _logger.LogDebug("Created WebSocket adapter for OctoPrint printer {Id}", id);
-
-                                // Attempt WebSocket connection in background
-                                _ = Task.Run(
-                                    async () =>
-                                {
-                                    try
-                                    {
-                                        await adapter.ConnectAsync(ct);
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogDebug(ex, "WebSocket connection failed for {Id}, will use HTTP polling", id);
-                                    }
-                                }, ct);
+                                CreateWebSocketAdapter(id, printer, ct);
                             }
                         }
 
@@ -399,12 +440,24 @@ public sealed class OctoPrintPollingService(
                     return;
                 }
 
-                // Get WebSocket adapter for this printer
+                // Get WebSocket adapter for this printer. It may be missing here because an
+                // invalidation (printer edited) just tore down the old adapter along with the
+                // stale CachedPrinter above — recreate it immediately from the printer row we
+                // just resolved, rather than waiting for the next 30-second reconciliation pass
+                // to notice the missing adapter and recreate it (issue #1763 follow-up).
                 if (!_webSocketAdapters.TryGetValue(printerId, out OctoPrintWebSocketAdapter? wsAdapter) || wsAdapter == null)
                 {
-                    _logger.LogWarning("OctoPrint {PrinterId}: WebSocket adapter not found", printerId);
-                    await Task.Delay(PollingInterval, ct);
-                    continue;
+                    if (printer != null)
+                    {
+                        _logger.LogInformation("OctoPrint {PrinterId}: WebSocket adapter missing, recreating", printerId);
+                        wsAdapter = CreateWebSocketAdapter(printerId, printer, ct);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("OctoPrint {PrinterId}: WebSocket adapter not found", printerId);
+                        await Task.Delay(PollingInterval, ct);
+                        continue;
+                    }
                 }
 
                 // Skip polling if WebSocket is connected (primary transport)
