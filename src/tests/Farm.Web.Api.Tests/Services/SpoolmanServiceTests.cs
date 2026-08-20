@@ -246,8 +246,8 @@ public class SpoolmanServiceTests
     [Fact]
     public async Task UpdateFilamentInSpoolmanAsync_DoesNotInjectDensityOrDiameter()
     {
-        // A barcode mapping PATCHes only article_number; injecting defaults here would
-        // silently overwrite the filament's real density and diameter.
+        // A partial update PATCHes only the fields set on the request; injecting defaults here
+        // would silently overwrite the filament's real density and diameter.
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
         _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
         Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
@@ -274,6 +274,36 @@ public class SpoolmanServiceTests
         Assert.False(body.RootElement.TryGetProperty("density", out _));
         Assert.False(body.RootElement.TryGetProperty("diameter", out _));
         Assert.Equal("6971170411231", body.RootElement.GetProperty("article_number").GetString());
+    }
+
+    [Fact]
+    public async Task UpdateFilamentInSpoolmanAsync_SerializesGtinField()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        string? capturedBody = null;
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
+            {
+                capturedBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new { id = 9 }), Encoding.UTF8, "application/json")
+                };
+            });
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
+
+        _ = await svc.UpdateFilamentInSpoolmanAsync(
+            9,
+            new SpoolmanCreateFilamentRequest { Gtin = "00123456789012" },
+            CancellationToken.None);
+
+        using JsonDocument body = JsonDocument.Parse(capturedBody!);
+        Assert.False(body.RootElement.TryGetProperty("article_number", out _));
+        Assert.Equal("00123456789012", body.RootElement.GetProperty("gtin").GetString());
     }
 
     [Fact]

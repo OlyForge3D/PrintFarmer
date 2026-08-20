@@ -8,6 +8,7 @@ using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Exceptions;
 using Farm.Infrastructure.Logging;
+using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
@@ -274,7 +275,7 @@ public class SpoolmanController(
     /// <returns>The created spool.</returns>
     /// <response code="201">Returns the created spool.</response>
     /// <response code="400">If the barcode is empty.</response>
-    /// <response code="404">If no filament has the requested barcode in articleNumber.</response>
+    /// <response code="404">If no filament has a matching gtin (or legacy articleNumber).</response>
     /// <response code="500">If Spoolman import fails unexpectedly.</response>
     [RequirePermission("spoolman", "admin")]
     [HttpPost("spools/by-barcode")]
@@ -692,7 +693,8 @@ public class SpoolmanController(
     }
 
     /// <summary>
-    /// Resolves a scanned retail barcode to the filament whose articleNumber exactly matches it.
+    /// Resolves a scanned retail barcode to the filament whose normalized GTIN-14 gtin matches
+    /// it, falling back to an exact articleNumber match for legacy filaments.
     /// </summary>
     /// <param name="code">Barcode value from the query string.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -760,14 +762,15 @@ public class SpoolmanController(
     }
 
     /// <summary>
-    /// Saves a barcode mapping by setting the target filament's articleNumber field in Spoolman.
-    /// Duplicate articleNumbers are allowed; lookup resolves collisions deterministically to the lowest filament ID.
+    /// Saves a barcode mapping by normalizing it to a 14-digit GTIN and setting the target
+    /// filament's gtin field in Spoolman. articleNumber is never written by this endpoint.
+    /// Duplicate gtins are allowed; lookup resolves collisions deterministically to the lowest filament ID.
     /// </summary>
     /// <param name="request">Barcode and target filament ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The updated filament.</returns>
     /// <response code="200">Returns the updated filament.</response>
-    /// <response code="400">If the barcode or filament ID is invalid.</response>
+    /// <response code="400">If the barcode fails GTIN validation (bad length or check digit) or the filament ID is invalid.</response>
     /// <response code="404">If the target filament does not exist.</response>
     /// <response code="500">If saving fails unexpectedly.</response>
     [RequirePermission("spoolman", "admin")]
@@ -788,6 +791,20 @@ public class SpoolmanController(
         if (request.FilamentId is null or <= 0)
         {
             return BadRequest(new { message = "FilamentId is required" });
+        }
+
+        if (GtinNormalizer.Normalize(request.Barcode) is null)
+        {
+            await LogBarcodeScanAsync(
+                request.Barcode.Trim(),
+                BarcodeScanAction.Mapping,
+                BarcodeScanOutcome.Error,
+                StatusCodes.Status400BadRequest,
+                request.FilamentId,
+                null,
+                "Barcode is not a valid GTIN-8/12/13/14 (bad length or check digit).");
+
+            return BadRequest(new { message = "Barcode is not a valid GTIN-8/12/13/14 (bad length or check digit)." });
         }
 
         try
@@ -1377,6 +1394,13 @@ public class SpoolmanController(
             : $"Spoolman returned {(int)ex.StatusCode.Value} ({ex.StatusCode.Value}).";
     }
 
+    // Matches BarcodeScanLogConfiguration's HasMaxLength(256) for the Barcode column. Scan
+    // attempts are logged for diagnostics even when the barcode is invalid/unmatched, so the
+    // raw (possibly attacker-controlled) value must be bounded before it reaches EF Core --
+    // otherwise an oversized value can throw a data-truncation exception at the database on
+    // providers that enforce column length (turning a clean 400 into an unhandled 500).
+    private const int BarcodeLogMaxLength = 256;
+
     private async Task LogBarcodeScanAsync(
         string barcode,
         BarcodeScanAction action,
@@ -1390,7 +1414,7 @@ public class SpoolmanController(
         await barcodeScanLogService.LogAsync(new BarcodeScanLog
         {
             Timestamp = DateTime.UtcNow,
-            Barcode = barcode,
+            Barcode = barcode.Length > BarcodeLogMaxLength ? barcode[..BarcodeLogMaxLength] : barcode,
             Action = action,
             Outcome = outcome,
             HttpStatus = httpStatus,
