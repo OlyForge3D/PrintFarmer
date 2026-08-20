@@ -200,6 +200,62 @@ public class JobQueueControllerTests
     }
 
     [Fact]
+    public async Task GetChangeWatermarkAsync_EmptyOutbox_ReturnsZero()
+    {
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        await using var db = new AppDbContext(options);
+        Mock<IQueueResourceAuthorizationService> authorization = new();
+        JobQueueController controller = CreateController(db, authorization.Object);
+
+        ActionResult<QueueChangeWatermarkDto> result =
+            await controller.GetChangeWatermarkAsync(CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        QueueChangeWatermarkDto dto = Assert.IsType<QueueChangeWatermarkDto>(ok.Value);
+        Assert.Equal(0, dto.LatestSequence);
+    }
+
+    [Fact]
+    public async Task GetChangeWatermarkAsync_PopulatedOutbox_ReturnsMaxSequence()
+    {
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        await using var db = new AppDbContext(options);
+        Guid jobId = Guid.NewGuid();
+        db.QueueDispatchOutbox.AddRange(
+            CreateOutboxEvent(jobId, 1),
+            CreateOutboxEvent(jobId, 5),
+            CreateOutboxEvent(jobId, 3));
+        await db.SaveChangesAsync();
+
+        Mock<IQueueResourceAuthorizationService> authorization = new();
+        JobQueueController controller = CreateController(db, authorization.Object);
+
+        ActionResult<QueueChangeWatermarkDto> result =
+            await controller.GetChangeWatermarkAsync(CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        QueueChangeWatermarkDto dto = Assert.IsType<QueueChangeWatermarkDto>(ok.Value);
+        Assert.Equal(5, dto.LatestSequence);
+    }
+
+    [Fact]
+    public async Task GetChangeWatermarkAsync_DbUnavailable_ReturnsServiceUnavailable()
+    {
+        IActionResult result = await _controller.GetChangeWatermarkAsync(CancellationToken.None) is ActionResult<QueueChangeWatermarkDto> typed
+            ? typed.Result!
+            : throw new InvalidOperationException("Unexpected result type.");
+
+        ObjectResult response = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, response.StatusCode);
+    }
+
+    [Fact]
     public async Task DispatchJobAsync_MissingIfMatch_Returns428()
     {
         Guid jobId = Guid.NewGuid();

@@ -194,3 +194,14 @@ public sealed record QueueSubscriptionResourcesDto(
     IReadOnlyList<Guid> PrinterIds,
     IReadOnlyList<Guid> JobIds,
     IReadOnlyList<Guid> ProjectIds);
+
+/// <summary>
+/// Current outbox watermark (highest committed <see cref="QueueDispatchOutbox.Sequence"/>).
+/// Lets a client seed its change-feed cursor at connect time instead of
+/// starting from zero and replaying the entire durable outbox history on
+/// every fresh page load (issue #1727).
+/// </summary>
+/// <param name="LatestSequence">
+/// Highest committed sequence in the outbox, or 0 when the outbox is empty.
+/// </param>
+public sealed record QueueChangeWatermarkDto(long LatestSequence);

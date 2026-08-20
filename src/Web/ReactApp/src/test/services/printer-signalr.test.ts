@@ -46,6 +46,7 @@ const api = vi.hoisted(() => ({
     consoleLoggingEnabled: false,
   })),
   getQueueChanges: vi.fn(),
+  getQueueChangeWatermark: vi.fn(async () => ({ latestSequence: 0 })),
 }));
 
 vi.mock("@microsoft/signalr", () => ({
@@ -116,6 +117,8 @@ describe("PrinterSignalRService queue cursor recovery", () => {
     signalr.builder.build.mockClear();
     signalr.eventHandlers.clear();
     api.getQueueChanges.mockReset();
+    api.getQueueChangeWatermark.mockClear();
+    api.getQueueChangeWatermark.mockResolvedValue({ latestSequence: 0 });
     localStorage.clear();
   });
 
@@ -266,6 +269,96 @@ describe("PrinterSignalRService queue cursor recovery", () => {
       expect(received.map((event) => event.sequence)).toEqual([1, 2])
     );
     expect(api.getQueueChanges).toHaveBeenNthCalledWith(2, 1);
+    service.dispose();
+  });
+
+  it("seeds the cursor from the server watermark on a fresh connect instead of replaying full outbox history", async () => {
+    api.getQueueChangeWatermark.mockResolvedValue({ latestSequence: 500 });
+    api.getQueueChanges.mockResolvedValueOnce({
+      afterSequence: 500,
+      nextSequence: 500,
+      hasMore: false,
+      events: [],
+    });
+    const service = new PrinterSignalRService();
+    const received: QueueEventEnvelope[] = [];
+    service.onQueueEvent((event) => received.push(event));
+    await vi.waitFor(() =>
+      expect(signalr.eventHandlers.has("queueevent")).toBe(true)
+    );
+
+    await service.connect();
+
+    expect(api.getQueueChangeWatermark).toHaveBeenCalledTimes(1);
+    expect(api.getQueueChanges).toHaveBeenCalledWith(500);
+    expect(api.getQueueChanges).not.toHaveBeenCalledWith(0);
+    expect(received).toEqual([]);
+    service.dispose();
+  });
+
+  it("still catches up a real gap after a seeded reconnect", async () => {
+    api.getQueueChangeWatermark.mockResolvedValue({ latestSequence: 500 });
+    api.getQueueChanges
+      .mockResolvedValueOnce({
+        afterSequence: 500,
+        nextSequence: 500,
+        hasMore: false,
+        events: [],
+      })
+      .mockResolvedValueOnce({
+        afterSequence: 500,
+        nextSequence: 502,
+        hasMore: false,
+        events: [queueEvent(501), queueEvent(502)],
+      });
+    const service = new PrinterSignalRService();
+    const received: QueueEventEnvelope[] = [];
+    service.onQueueEvent((event) => received.push(event));
+    await vi.waitFor(() =>
+      expect(signalr.eventHandlers.has("queueevent")).toBe(true)
+    );
+    await service.connect();
+    expect(api.getQueueChanges).toHaveBeenNthCalledWith(1, 500);
+
+    // Simulate genuine missed events accumulating while disconnected, then a
+    // reconnect: the seeded cursor (500) must still drive real gap recovery,
+    // not be treated as "nothing missed" just because it isn't 0.
+    signalr.getReconnectHandler()?.();
+
+    await vi.waitFor(() =>
+      expect(received.map((event) => event.sequence)).toEqual([501, 502])
+    );
+    expect(api.getQueueChanges).toHaveBeenNthCalledWith(2, 500);
+    // The watermark is only fetched once per service instance lifetime.
+    expect(api.getQueueChangeWatermark).toHaveBeenCalledTimes(1);
+    service.dispose();
+  });
+
+  it("is a no-op on reconnect with no gap after the cursor has been seeded", async () => {
+    api.getQueueChangeWatermark.mockResolvedValue({ latestSequence: 500 });
+    api.getQueueChanges.mockResolvedValue({
+      afterSequence: 500,
+      nextSequence: 500,
+      hasMore: false,
+      events: [],
+    });
+    const service = new PrinterSignalRService();
+    const received: QueueEventEnvelope[] = [];
+    service.onQueueEvent((event) => received.push(event));
+    await vi.waitFor(() =>
+      expect(signalr.eventHandlers.has("queueevent")).toBe(true)
+    );
+    await service.connect();
+    api.getQueueChanges.mockClear();
+
+    signalr.getReconnectHandler()?.();
+
+    await vi.waitFor(() =>
+      expect(api.getQueueChanges).toHaveBeenCalledWith(500)
+    );
+    expect(received).toEqual([]);
+    // Still only ever seeded once.
+    expect(api.getQueueChangeWatermark).toHaveBeenCalledTimes(1);
     service.dispose();
   });
 });

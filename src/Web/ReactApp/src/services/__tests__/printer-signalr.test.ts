@@ -52,6 +52,7 @@ const signalRTestState = vi.hoisted(() => {
     builder,
     getSettings: vi.fn(),
     getQueueChanges: vi.fn(),
+    getQueueChangeWatermark: vi.fn(),
     triggerClose: () => closeHandler?.(),
     triggerReconnecting: () => reconnectingHandler?.(),
     triggerReconnected: () => reconnectedHandler?.(),
@@ -84,6 +85,7 @@ vi.mock('@/services/api', () => ({
   apiClient: {
     getSettings: signalRTestState.getSettings,
     getQueueChanges: signalRTestState.getQueueChanges,
+    getQueueChangeWatermark: signalRTestState.getQueueChangeWatermark,
   },
 }));
 
@@ -119,6 +121,9 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       hasMore: false,
       events: [],
     });
+    signalRTestState.getQueueChangeWatermark.mockResolvedValue({
+      latestSequence: 0,
+    });
   });
 
   describe('PrinterSignalRService debug exposure gating', () => {
@@ -149,6 +154,9 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
         nextSequence: 0,
         hasMore: false,
         events: [],
+      });
+      signalRTestState.getQueueChangeWatermark.mockResolvedValue({
+        latestSequence: 0,
       });
       localStorage.clear();
       window.PrintFarmerDebug = undefined;
@@ -262,6 +270,9 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
         hasMore: false,
         events: [],
       });
+      signalRTestState.getQueueChangeWatermark.mockResolvedValue({
+        latestSequence: 0,
+      });
       localStorage.clear();
       window.PrintFarmerDebug = undefined;
     });
@@ -311,6 +322,108 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       );
       expect(printerSignalRService.getQueueSubscriptionSnapshot().lastSequence)
         .toBe(1);
+      printerSignalRService.dispose();
+    });
+
+    it('seeds the cursor from the server watermark on a fresh connect instead of replaying full outbox history', async () => {
+      signalRTestState.getQueueChangeWatermark.mockResolvedValue({
+        latestSequence: 750,
+      });
+      signalRTestState.getQueueChanges.mockResolvedValueOnce({
+        afterSequence: 750,
+        nextSequence: 750,
+        hasMore: false,
+        events: [],
+      });
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      const callback = vi.fn();
+      printerSignalRService.onQueueEvent(callback);
+
+      await printerSignalRService.connect();
+
+      expect(signalRTestState.getQueueChangeWatermark).toHaveBeenCalledTimes(1);
+      expect(signalRTestState.getQueueChanges).toHaveBeenCalledWith(750);
+      expect(signalRTestState.getQueueChanges).not.toHaveBeenCalledWith(0);
+      expect(callback).not.toHaveBeenCalled();
+      printerSignalRService.dispose();
+    });
+
+    it('still catches up a real gap on reconnect after the cursor has been seeded', async () => {
+      signalRTestState.getQueueChangeWatermark.mockResolvedValue({
+        latestSequence: 750,
+      });
+      signalRTestState.getQueueChanges
+        .mockResolvedValueOnce({
+          afterSequence: 750,
+          nextSequence: 750,
+          hasMore: false,
+          events: [],
+        })
+        .mockResolvedValueOnce({
+          afterSequence: 750,
+          nextSequence: 752,
+          hasMore: false,
+          events: [
+            {
+              schemaVersion: '2',
+              eventId: 'event-751',
+              sequence: 751,
+              eventType: 'queue.updated',
+              occurredAtUtc: '2026-07-28T00:00:03Z',
+            },
+            {
+              schemaVersion: '2',
+              eventId: 'event-752',
+              sequence: 752,
+              eventType: 'queue.updated',
+              occurredAtUtc: '2026-07-28T00:00:04Z',
+            },
+          ],
+        });
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      const sequences: number[] = [];
+      printerSignalRService.onQueueEvent((event) => sequences.push(event.sequence));
+
+      await printerSignalRService.connect();
+      expect(signalRTestState.getQueueChanges).toHaveBeenNthCalledWith(1, 750);
+
+      // A genuine gap accumulates while disconnected; the reconnect must
+      // still catch it up from the seeded (non-zero) cursor.
+      signalRTestState.triggerReconnected();
+      await flushMicrotasks();
+
+      expect(sequences).toEqual([751, 752]);
+      expect(signalRTestState.getQueueChanges).toHaveBeenNthCalledWith(2, 750);
+      expect(signalRTestState.getQueueChangeWatermark).toHaveBeenCalledTimes(1);
+      printerSignalRService.dispose();
+    });
+
+    it('is a no-op on reconnect with no gap after the cursor has been seeded', async () => {
+      signalRTestState.getQueueChangeWatermark.mockResolvedValue({
+        latestSequence: 750,
+      });
+      signalRTestState.getQueueChanges.mockResolvedValue({
+        afterSequence: 750,
+        nextSequence: 750,
+        hasMore: false,
+        events: [],
+      });
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      const callback = vi.fn();
+      printerSignalRService.onQueueEvent(callback);
+
+      await printerSignalRService.connect();
+      signalRTestState.getQueueChanges.mockClear();
+
+      signalRTestState.triggerReconnected();
+      await flushMicrotasks();
+
+      expect(signalRTestState.getQueueChanges).toHaveBeenCalledWith(750);
+      expect(callback).not.toHaveBeenCalled();
+      expect(signalRTestState.getQueueChangeWatermark).toHaveBeenCalledTimes(1);
       printerSignalRService.dispose();
     });
 
@@ -876,6 +989,9 @@ describe('PrinterSignalRService settings reload on authentication', () => {
     });
     signalRTestState.connection.stop.mockImplementation(async () => {
       signalRTestState.connection.state = 'Disconnected';
+    });
+    signalRTestState.getQueueChangeWatermark.mockResolvedValue({
+      latestSequence: 0,
     });
     window.PrintFarmerDebug = undefined;
     localStorage.clear();

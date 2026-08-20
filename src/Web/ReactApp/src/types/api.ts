@@ -2277,6 +2277,15 @@ export interface QueueSubscriptionResources {
 }
 
 /**
+ * Current outbox watermark (highest committed sequence) used to seed a fresh
+ * client's change-feed cursor without replaying the entire QueueDispatchOutbox
+ * history on every page load (issue #1727).
+ */
+export interface QueueChangeWatermark {
+  latestSequence: number;
+}
+
+/**
  * Queue overview DTO - provides printer availability and queue status
  * Used for displaying available printers when queueing a print job
  */
