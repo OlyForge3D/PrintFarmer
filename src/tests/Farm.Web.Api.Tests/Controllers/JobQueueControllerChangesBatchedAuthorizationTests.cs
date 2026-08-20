@@ -558,7 +558,7 @@ public class JobQueueControllerChangesBatchedAuthorizationTests
     /// which <see cref="JobQueueController.GetChangesAsync"/> does not catch.
     /// </summary>
     [Fact]
-    public async Task GetChangesAsync_UnresolvableSubject_DoesNotThrowAndReturnsOnlyOpenPrinterEvents()
+    public async Task GetChangesAsync_UnresolvableSubject_DoesNotThrowAndReturnsNoEvents()
     {
         (
             DbContextOptions<AppDbContext> options,
