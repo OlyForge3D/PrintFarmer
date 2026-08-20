@@ -6,6 +6,7 @@ on:
       - 'scripts/deploy-docker.sh'
       - 'scripts/docker/**'
       - 'tests/**'
+      - 'deploy/nginx/**'
       - '.github/workflows/deployment-tests.yml'
   push:
     branches:
@@ -16,6 +17,7 @@ on:
       - 'scripts/deploy-docker.sh'
       - 'scripts/docker/**'
       - 'tests/**'
+      - 'deploy/nginx/**'
       - '.github/workflows/deployment-tests.yml'
 
 permissions:
@@ -77,3 +79,17 @@ jobs:
 
       - name: Run interactive_prompt_harness.sh
         run: bash tests/interactive_prompt_harness.sh
+
+      # Issue #1692: enforce the #1687 nginx routing regression test in CI.
+      # test-compose-generator.sh as a whole remains out of scope per #1308,
+      # but this single function guards deploy/nginx/nginx-proxy-split.conf
+      # against a silent port-dropping redirect regression and needs only
+      # bash/grep/awk (via setup/teardown in the same file), so it's cheap
+      # to run directly here without pulling in the full suite.
+      - name: Run nginx 3d-models routing regression test
+        run: |
+          source tests/test-framework.sh
+          source tests/test-compose-generator.sh
+          setup
+          test_model_thumbnail_replacement_routing
+          teardown
