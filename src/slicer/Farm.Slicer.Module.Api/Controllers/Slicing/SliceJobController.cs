@@ -179,6 +179,15 @@ public partial class SliceJobController(
                     return BadRequest($"Invalid model file URL: must be an absolute HTTP(S) URL. Got: '{url}'");
                 }
 
+                // Same Desktop-scope gap as the single modelFileUrl/model3DId paths below: a
+                // multi-model URL can also reference a stored library model
+                // ("/api/3d-models/file/{id}") rather than an external location, and the worker
+                // later dereferences it with no per-caller scope check (issue #1770 follow-up).
+                if (TryGetStoredModelId(resolved, out _) && IsDesktopTokenMissingModelScope())
+                {
+                    return SlicerApiProblems.ResourceForbidden(this);
+                }
+
                 resolvedModelUrls.Add(resolved);
             }
         }
@@ -890,6 +899,21 @@ public partial class SliceJobController(
             && Guid.TryParse(candidate, out model3DId);
     }
 
+    /// <summary>
+    /// True when the caller is a Desktop-exchange token (issue #838) that was never granted
+    /// ModelRead or LibrarySync scope. Since #1770 made stored-model lookups succeed for any
+    /// existing library model rather than just the caller's own uploads, every submission path
+    /// that can resolve to a stored model3DId - model3DId itself, or a modelFileUrl/modelFileUrls
+    /// entry pointing at "/api/3d-models/file/{id}" - must apply this guard identically, or a
+    /// submit-only-scoped Desktop token could route around it via whichever form skips the check.
+    /// Normal login/session tokens carry no DesktopScopeClaims.TokenUse claim and are unaffected,
+    /// exactly as DesktopScopeAuthorizationHandler behaves for attribute-gated endpoints.
+    /// </summary>
+    private bool IsDesktopTokenMissingModelScope() =>
+        User.HasClaim(Farm.Infrastructure.Authorization.DesktopScopeClaims.TokenUse, Farm.Infrastructure.Authorization.DesktopScopeClaims.DesktopExchangeTokenUse)
+        && !User.HasClaim(Farm.Infrastructure.Authorization.DesktopScopeClaims.Scope, "ModelRead")
+        && !User.HasClaim(Farm.Infrastructure.Authorization.DesktopScopeClaims.Scope, "LibrarySync");
+
     /// <summary>Uploads a verified artifact for a job owned by the authenticated worker.</summary>
     /// <param name="id">The claimed job ID.</param>
     /// <param name="file">The artifact bytes.</param>
@@ -1412,12 +1436,25 @@ public partial class SliceJobController(
     {
         if (request.Model3DId is not { } model3DId)
         {
-            return string.IsNullOrWhiteSpace(request.ModelFileUrl)
-                ? SlicerApiProblems.InvalidRequest(
+            if (string.IsNullOrWhiteSpace(request.ModelFileUrl))
+            {
+                return SlicerApiProblems.InvalidRequest(
                     this,
                     "model_reference_required",
-                    "Supply model3DId for stored models, or modelFileUrl for a previously stored key.")
-                : null;
+                    "Supply model3DId for stored models, or modelFileUrl for a previously stored key.");
+            }
+
+            // The legacy modelFileUrl form can also reference a stored library model
+            // ("/api/3d-models/file/{id}") rather than an external location. The worker later
+            // dereferences that URL via TryGetStoredModelId with no per-caller scope check, so this
+            // path needs the identical Desktop-scope guard as the model3DId path below or a
+            // submit-only-scoped Desktop token could route around it (issue #1770 follow-up).
+            if (TryGetStoredModelId(request.ModelFileUrl, out _) && IsDesktopTokenMissingModelScope())
+            {
+                return SlicerApiProblems.ResourceForbidden(this);
+            }
+
+            return null;
         }
 
         if (_modelStorage is null)
@@ -1433,9 +1470,7 @@ public partial class SliceJobController(
         // granted ModelRead/LibrarySync access to. Normal login/session tokens - which carry no
         // DesktopScopeClaims.TokenUse claim - are unaffected, exactly as DesktopScopeAuthorizationHandler
         // behaves for attribute-gated endpoints.
-        if (User.HasClaim(Farm.Infrastructure.Authorization.DesktopScopeClaims.TokenUse, Farm.Infrastructure.Authorization.DesktopScopeClaims.DesktopExchangeTokenUse)
-            && !User.HasClaim(Farm.Infrastructure.Authorization.DesktopScopeClaims.Scope, "ModelRead")
-            && !User.HasClaim(Farm.Infrastructure.Authorization.DesktopScopeClaims.Scope, "LibrarySync"))
+        if (IsDesktopTokenMissingModelScope())
         {
             return SlicerApiProblems.ResourceForbidden(this);
         }

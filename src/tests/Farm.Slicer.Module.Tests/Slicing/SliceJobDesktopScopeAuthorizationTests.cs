@@ -285,4 +285,82 @@ public sealed class SliceJobDesktopScopeAuthorizationTests : IAsyncLifetime
 
         _ = response.StatusCode.Should().Be(HttpStatusCode.Created, body);
     }
+
+    /// <summary>
+    /// The legacy <c>modelFileUrl</c> form can also point at a stored library model via the
+    /// "/api/3d-models/file/{id}" route rather than an external location. Ralph/Vasquez's follow-up
+    /// finding: <c>BindStoredModelAsync</c>'s original guard only covered <c>model3DId</c>, so a
+    /// Desktop-exchange token lacking ModelRead/LibrarySync could route around it by submitting the
+    /// same stored model through <c>modelFileUrl</c> instead - the worker later dereferences that URL
+    /// via <c>TryGetStoredModelId</c> with no per-caller scope check. This must be forbidden
+    /// identically to the model3DId path.
+    /// </summary>
+    [Fact(DisplayName =
+        "A Desktop token holding only slicing:submit cannot reference a stored model via modelFileUrl")]
+    public async Task SlicingSubmitOnlyToken_CannotReferenceLibraryModelViaModelFileUrl()
+    {
+        (Guid modelId, _) = await AddStoredModelAsync(Guid.NewGuid());
+        using HttpClient client = await ExchangeClientAsync(ApiKeyScope.SlicingSubmit);
+
+        HttpResponseMessage response = await client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = _ownerId,
+            ModelFileUrl = $"/api/3d-models/file/{modelId}",
+            ModelFileName = "calibration.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+        });
+
+        _ = response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            "the legacy modelFileUrl form must be guarded identically to model3DId (issue #1770 follow-up)");
+        _ = (await ReadCodeAsync(response)).Should().Be("resource_forbidden");
+    }
+
+    /// <summary>
+    /// Same gap as <see cref="SlicingSubmitOnlyToken_CannotReferenceLibraryModelViaModelFileUrl"/> but
+    /// for the multi-model <c>modelFileUrls</c> array (each entry is checked independently in
+    /// <c>SubmitAsync</c>'s URL-resolution loop, not inside <c>BindStoredModelAsync</c>).
+    /// </summary>
+    [Fact(DisplayName =
+        "A Desktop token holding only slicing:submit cannot reference a stored model via modelFileUrls")]
+    public async Task SlicingSubmitOnlyToken_CannotReferenceLibraryModelViaModelFileUrls()
+    {
+        (Guid modelId, _) = await AddStoredModelAsync(Guid.NewGuid());
+        string storedUrl = $"/api/3d-models/file/{modelId}";
+        using HttpClient client = await ExchangeClientAsync(ApiKeyScope.SlicingSubmit);
+
+        HttpResponseMessage response = await client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = _ownerId,
+            ModelFileUrl = storedUrl,
+            ModelFileUrls = [storedUrl],
+            ModelFileName = "calibration.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+        });
+
+        _ = response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            "the multi-model modelFileUrls form must be guarded identically to model3DId (issue #1770 follow-up)");
+        _ = (await ReadCodeAsync(response)).Should().Be("resource_forbidden");
+    }
+
+    [Fact(DisplayName =
+        "A Desktop token holding slicing:submit + ModelRead can reference a stored model via modelFileUrl")]
+    public async Task SlicingSubmitTokenWithModelRead_CanReferenceLibraryModelViaModelFileUrl()
+    {
+        (Guid modelId, _) = await AddStoredModelAsync(Guid.NewGuid());
+        using HttpClient client = await ExchangeClientAsync(
+            ApiKeyScope.SlicingSubmit | ApiKeyScope.ModelRead);
+
+        HttpResponseMessage response = await client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = _ownerId,
+            ModelFileUrl = $"/api/3d-models/file/{modelId}",
+            ModelFileName = "calibration.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+        });
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Created, body);
+    }
 }
