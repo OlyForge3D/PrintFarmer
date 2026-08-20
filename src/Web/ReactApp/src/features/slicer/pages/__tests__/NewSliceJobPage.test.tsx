@@ -280,10 +280,18 @@ const slicerWorkspaceSpy = vi.fn();
 
 vi.mock('@/features/slicer/components/viewer/SlicerWorkspace', () => ({
   SlicerWorkspace: (props: {
-    models?: Array<{ id: string; url: string; viewerUrl?: string; fileType: string }>;
+    models?: Array<{ id: string; libraryModelId?: string; url: string; viewerUrl?: string; fileType: string }>;
+    onAddModel?: () => void;
   }) => {
     slicerWorkspaceSpy(props);
-    return <div data-testid="slicer-workspace">Slicer Workspace</div>;
+    return (
+      <div data-testid="slicer-workspace">
+        Slicer Workspace
+        {props.onAddModel && (
+          <button type="button" onClick={props.onAddModel}>Add model</button>
+        )}
+      </div>
+    );
   },
 }));
 
@@ -913,15 +921,69 @@ describe('NewSliceJobPage', () => {
 
       await waitFor(() => {
         const lastWorkspaceProps = slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as {
-          models?: Array<{ id: string; url: string; viewerUrl?: string; fileType: string }>;
+          models?: Array<{ id: string; libraryModelId?: string; url: string; viewerUrl?: string; fileType: string }>;
         } | undefined;
-        const selectedModel = lastWorkspaceProps?.models?.find((model) => model.id === 'model-3d-1');
+        const selectedModel = lastWorkspaceProps?.models?.find((model) => model.libraryModelId === 'model-3d-1');
 
         expect(selectedModel).toEqual(expect.objectContaining({
           url: expect.stringMatching(/\/3d-models\/file\/model-3d-1$/),
           viewerUrl: expect.stringMatching(/\/3d-models\/file\/model-3d-1$/),
           fileType: '3mf',
         }));
+      });
+    });
+  });
+
+  describe('Duplicate model placement (issue #1771)', () => {
+    // Regression test: a library model could only ever be placed once — either
+    // re-selecting it for a second plate, or picking it twice on the same
+    // plate, silently no-opped because the bed-model instance was keyed
+    // directly on the library model id. See root-cause detail in
+    // NewSliceJobPage.tsx's model-pick effect.
+    async function openPickerAndSelect(label: string) {
+      act(() => {
+        fireEvent.click(screen.getByRole('button', { name: /add model/i }));
+      });
+      const option = await screen.findByRole('option', { name: new RegExp(label.replace(/\./g, '\\.')) });
+      act(() => {
+        fireEvent.doubleClick(option);
+      });
+    }
+
+    it('placing the same library model twice creates two distinct bed-model instances sharing one libraryModelId', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('printer-select')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('slicer-workspace')).toBeInTheDocument();
+      });
+
+      await openPickerAndSelect('test-model.stl');
+
+      await waitFor(() => {
+        const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
+        expect(models).toHaveLength(1);
+        expect(models[0].libraryModelId).toBe('model-stl-1');
+      });
+      const firstInstanceId = (slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [])[0].id;
+
+      // Re-select the SAME library model a second time (mirrors picking it
+      // again for a second plate, or twice on the same plate — the underlying
+      // cause is identical per the issue's acceptance criteria).
+      await openPickerAndSelect('test-model.stl');
+
+      await waitFor(() => {
+        const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
+        expect(models).toHaveLength(2);
+        expect(models.every((m: { libraryModelId?: string }) => m.libraryModelId === 'model-stl-1')).toBe(true);
+        // Distinct bed-model instance ids so plate assignment / addModelToActivePlate fires.
+        const ids = models.map((m: { id: string }) => m.id);
+        expect(new Set(ids).size).toBe(2);
+        expect(ids).toContain(firstInstanceId);
       });
     });
   });

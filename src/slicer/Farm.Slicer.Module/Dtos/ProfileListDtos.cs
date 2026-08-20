@@ -104,6 +104,19 @@ public class MachineProfileListItemDto : IProfileListItem
 
     public string Manufacturer { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Nozzle diameter in millimeters (e.g. 0.4, 0.6), recovered from the profile's stored
+    /// settings JSON. Null when the underlying profile did not carry this value. Needed to
+    /// distinguish same-diameter standard/high-flow (HF) machine variants.
+    /// </summary>
+    public double? NozzleDiameter { get; set; }
+
+    /// <summary>
+    /// OrcaSlicer printer variant discriminator (e.g. "HF"), recovered from the profile's
+    /// stored settings JSON when present.
+    /// </summary>
+    public string? PrinterVariant { get; set; }
+
     public bool IsDefault { get; set; }
 
     public bool IsSystem { get; set; }

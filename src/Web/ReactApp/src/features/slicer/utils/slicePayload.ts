@@ -69,13 +69,20 @@ export function buildSlicePayloadModels(activePlateModels: LoadedModel[]): Slice
  * possibly-undefined `modelFileUrls` was the direct cause of the
  * "Cannot read properties of undefined (reading 'length')" crash in
  * issue #1709.
+ *
+ * `primary.id` is a bed-model *instance* id, which may not equal the library
+ * model id — a library model placed twice (issue #1771) produces two
+ * instances with distinct ids sharing one `libraryModelId`. Prefer
+ * `libraryModelId` so the backend still links the job to the correct
+ * catalog model; fall back to `id` for instances with no library source
+ * (e.g. cut pieces) and finally to the caller-supplied `selectedModelId`.
  */
 export function resolveModel3DId(
   payload: SlicePayloadModels,
   selectedModelId?: string,
 ): string | undefined {
   return payload.sliceableCount <= 1
-    ? payload.primary?.id || selectedModelId || undefined
+    ? payload.primary?.libraryModelId || payload.primary?.id || selectedModelId || undefined
     : undefined;
 }
 
