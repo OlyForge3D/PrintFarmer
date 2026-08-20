@@ -2,6 +2,8 @@ import Foundation
 @testable import PrintFarmer
 
 final class MockBarcodeIntakeService: BarcodeIntakeServiceProtocol, @unchecked Sendable {
+    /// Represents the deterministic filament selected by the server; the mock does not
+    /// index by GTIN because multiple filament records may share the same value.
     var filamentToResolve: SpoolmanFilament?
     var filamentToSave: SpoolmanFilament?
     var spoolToImport: SpoolmanSpool?

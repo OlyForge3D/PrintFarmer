@@ -97,7 +97,7 @@ final class AddSpoolViewModelTests: XCTestCase {
             id: 1, name: "PLA Basic", material: "PLA", colorHex: "#000000",
             vendor: "Prusament", density: 1.24, diameter: 1.75, weight: 1000,
             spoolWeight: 200, price: 25.0, settingsExtruderTemp: 215,
-            settingsBedTemp: 60, articleNumber: nil, comment: nil,
+            settingsBedTemp: 60, articleNumber: nil, gtin: nil, comment: nil,
             multiColorHexes: nil, externalId: nil
         )
 
@@ -221,7 +221,7 @@ final class AddSpoolViewModelTests: XCTestCase {
             id: 42, name: "PLA Basic", material: "PLA", colorHex: "#000000",
             vendor: "Prusament", density: 1.24, diameter: 1.75, weight: 1000,
             spoolWeight: 200, price: 25.0, settingsExtruderTemp: 215,
-            settingsBedTemp: 60, articleNumber: nil, comment: nil,
+            settingsBedTemp: 60, articleNumber: nil, gtin: nil, comment: nil,
             multiColorHexes: nil, externalId: nil
         )
         viewModel.filaments = [filament]
@@ -242,7 +242,7 @@ final class AddSpoolViewModelTests: XCTestCase {
             id: 42, name: "PETG Basic", material: "PETG", colorHex: nil,
             vendor: "Generic", density: nil, diameter: nil, weight: nil,
             spoolWeight: nil, price: nil, settingsExtruderTemp: nil,
-            settingsBedTemp: nil, articleNumber: nil, comment: nil,
+            settingsBedTemp: nil, articleNumber: nil, gtin: nil, comment: nil,
             multiColorHexes: nil, externalId: nil
         )
         viewModel.filaments = [filament]
@@ -262,7 +262,7 @@ final class AddSpoolViewModelTests: XCTestCase {
             id: 10, name: "PLA", material: "pla", colorHex: nil,
             vendor: "prusament", density: nil, diameter: nil, weight: nil,
             spoolWeight: nil, price: nil, settingsExtruderTemp: nil,
-            settingsBedTemp: nil, articleNumber: nil, comment: nil,
+            settingsBedTemp: nil, articleNumber: nil, gtin: nil, comment: nil,
             multiColorHexes: nil, externalId: nil
         )
         viewModel.filaments = [filament]

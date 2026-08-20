@@ -49,6 +49,37 @@ final class BarcodeIntakeServiceTests: XCTestCase {
         XCTAssertEqual(filament?.id, 123)
     }
 
+    func testSaveMappingPostsRawBarcodeAndDecodesDistinctGtinAndArticleNumber() async throws {
+        let rawBarcode = "0850078714923"
+        mockAPIClient.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/spoolman/barcodes")
+
+            guard let body = request.capturedHTTPBody(),
+                  let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+                XCTFail("Expected JSON barcode mapping body")
+                return (TestData.httpResponse(url: request.url, statusCode: 400), Data())
+            }
+            XCTAssertEqual(json["barcode"] as? String, rawBarcode)
+            XCTAssertEqual(json["filamentId"] as? Int, 701)
+
+            let response = """
+            {
+              "id": 701,
+              "name": "PolyLite PLA",
+              "articleNumber": "PM70820",
+              "gtin": "00850078714923"
+            }
+            """
+            return (TestData.httpResponse(url: request.url, statusCode: 200), Data(response.utf8))
+        }
+
+        let filament = try await service.saveMapping(barcode: rawBarcode, filamentId: 701)
+
+        XCTAssertEqual(filament.gtin, "00850078714923")
+        XCTAssertEqual(filament.articleNumber, "PM70820")
+    }
+
     func testImportSpoolDecodesFullCreatedBackendResponse() async throws {
         mockAPIClient.stubResponse(
             json: """
@@ -166,6 +197,7 @@ final class BarcodeIntakeServiceTests: XCTestCase {
               "settingsExtruderTemp": 215,
               "settingsBedTemp": 60,
               "articleNumber": "PLA-GB-1000",
+              "gtin": "00123456789012",
               "comment": "Resolved from barcode",
               "multiColorHexes": "#111111,#222222",
               "externalId": "ext-701"
@@ -184,6 +216,8 @@ final class BarcodeIntakeServiceTests: XCTestCase {
         XCTAssertEqual(filament?.diameter, 1.75)
         XCTAssertEqual(filament?.settingsExtruderTemp, 215)
         XCTAssertEqual(filament?.settingsBedTemp, 60)
+        XCTAssertEqual(filament?.articleNumber, "PLA-GB-1000")
+        XCTAssertEqual(filament?.gtin, "00123456789012")
         XCTAssertEqual(filament?.multiColorHexes, "#111111,#222222")
         XCTAssertEqual(filament?.externalId, "ext-701")
     }
@@ -198,6 +232,25 @@ final class BarcodeIntakeServiceTests: XCTestCase {
         XCTAssertNil(filament?.material)
         XCTAssertNil(filament?.colorHex)
         XCTAssertNil(filament?.vendor)
+        XCTAssertNil(filament?.articleNumber)
+        XCTAssertNil(filament?.gtin)
+    }
+
+    func testResolveFilamentDecodesLegacyArticleNumberWithoutGtin() async throws {
+        mockAPIClient.stubResponse(
+            json: """
+            {
+              "id": 703,
+              "name": "Legacy PLA",
+              "articleNumber": "012345678905"
+            }
+            """
+        )
+
+        let filament = try await service.resolveFilament(barcode: "012345678905")
+
+        XCTAssertEqual(filament?.articleNumber, "012345678905")
+        XCTAssertNil(filament?.gtin)
     }
 
     func testResolveFilamentRethrowsNon404Errors() async {
@@ -223,14 +276,16 @@ final class BarcodeIntakeServiceTests: XCTestCase {
             colorHex: "#000000",
             weight: 1000,
             spoolWeight: 200,
-            articleNumber: "000123"
+            articleNumber: "PM70820",
+            gtin: "00123456789012"
         )
 
         let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
 
         XCTAssertEqual(json?["vendorId"] as? Int, 42)
         XCTAssertNil(json?["vendor"])
-        XCTAssertEqual(json?["articleNumber"] as? String, "000123")
+        XCTAssertEqual(json?["articleNumber"] as? String, "PM70820")
+        XCTAssertEqual(json?["gtin"] as? String, "00123456789012")
     }
 
     // MARK: - Filament create payload (issue #1067)
@@ -243,7 +298,7 @@ final class BarcodeIntakeServiceTests: XCTestCase {
             colorHex: "#808080",
             weight: 1000,
             spoolWeight: 200,
-            articleNumber: "6971170411231"
+            gtin: "6971170411231"
         )
 
         // Spoolman rejects a filament create with HTTP 422 when either field is missing.
@@ -253,7 +308,8 @@ final class BarcodeIntakeServiceTests: XCTestCase {
         let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
         XCTAssertNotNil(json?["density"])
         XCTAssertNotNil(json?["diameter"])
-        XCTAssertEqual(json?["articleNumber"] as? String, "6971170411231")
+        XCTAssertEqual(json?["gtin"] as? String, "6971170411231")
+        XCTAssertNil(json?["articleNumber"])
     }
 
     func testNewFilamentKeepsCallerSuppliedDensityAndDiameter() {
