@@ -287,6 +287,29 @@ public class JobQueueController(
             .Take(Math.Min(2000, limit * 4))
             .ToListAsync(ct);
 
+        Guid[] candidatePrinterIds = candidates
+            .Where(evt =>
+                string.Equals(evt.AggregateType, nameof(Printer), StringComparison.Ordinal) &&
+                evt.PrinterId.HasValue)
+            .Select(evt => evt.PrinterId!.Value)
+            .Distinct()
+            .ToArray();
+        Guid[] candidateJobIds = candidates
+            .Where(evt => !string.Equals(evt.AggregateType, nameof(Printer), StringComparison.Ordinal))
+            .Select(evt => evt.AggregateId)
+            .Distinct()
+            .ToArray();
+        IReadOnlySet<Guid> accessiblePrinterIds = await resourceAuthorization.FilterAccessiblePrinterIdsAsync(
+            User,
+            candidatePrinterIds,
+            PrinterGroupAccessLevel.View,
+            ct);
+        IReadOnlySet<Guid> accessibleJobIds = await resourceAuthorization.FilterActorAccessibleJobIdsAsync(
+            QueueActorIdentity.Resolve(User),
+            candidateJobIds,
+            PrinterGroupAccessLevel.View,
+            ct);
+
         var events = new List<QueueEventEnvelope>(limit);
         long nextSequence = afterSequence;
         foreach (QueueDispatchOutbox evt in candidates)
@@ -296,17 +319,8 @@ public class JobQueueController(
                 evt.AggregateType,
                 nameof(Printer),
                 StringComparison.Ordinal)
-                ? evt.PrinterId.HasValue &&
-                  await resourceAuthorization.CanAccessPrinterAsync(
-                      User,
-                      evt.PrinterId.Value,
-                      PrinterGroupAccessLevel.View,
-                      ct)
-                : await resourceAuthorization.CanAccessJobAsync(
-                    User,
-                    evt.AggregateId,
-                    PrinterGroupAccessLevel.View,
-                    ct);
+                ? evt.PrinterId.HasValue && accessiblePrinterIds.Contains(evt.PrinterId.Value)
+                : accessibleJobIds.Contains(evt.AggregateId);
             if (!canAccess)
             {
                 continue;
