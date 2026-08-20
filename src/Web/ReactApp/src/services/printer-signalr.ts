@@ -430,6 +430,7 @@ export class PrinterSignalRService {
   private manualReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private lastQueueSequence = 0;
   private queueDrain: Promise<void> | null = null;
+  private cursorSeeded = false;
 
   constructor() {
     // Module-import time runs before the user has authenticated. Only fire the
@@ -640,6 +641,15 @@ export class PrinterSignalRService {
         console.info("[printerSignalR] starting connection");
       }
       await connection.start();
+      if (!this.isCurrentConnectionIntent(connection, intentGeneration)) {
+        await this.stopConnection(connection);
+        return;
+      }
+      // Seed the durable cursor from the server watermark BEFORE joining any
+      // SignalR groups, so a fresh page load never replays the full outbox
+      // history (issue #1727). Anything written between this snapshot and
+      // finishing group joins is still picked up by drainQueueChanges below.
+      await this.ensureQueueCursorSeeded();
       if (!this.isCurrentConnectionIntent(connection, intentGeneration)) {
         await this.stopConnection(connection);
         return;
@@ -1014,6 +1024,32 @@ export class PrinterSignalRService {
     }
   }
 
+  /**
+   * Seeds `lastQueueSequence` from the server's current outbox watermark so a
+   * fresh page load does not replay the entire durable QueueDispatchOutbox
+   * history from sequence 0 (issue #1727). Only ever advances the cursor
+   * (never regresses it) and only takes effect once per service instance:
+   * after the first successful seed, every subsequent reconnect continues to
+   * drain from the real, already-advanced cursor exactly as before, so
+   * genuine gap recovery is unaffected. On failure this is left unseeded so
+   * a later connect/reconnect attempt can retry; that session simply falls
+   * back to today's from-cursor-0 drain instead of losing the optimization
+   * permanently.
+   */
+  private async ensureQueueCursorSeeded(): Promise<void> {
+    if (this.cursorSeeded) return;
+    try {
+      const watermark = await apiClient.getQueueChangeWatermark();
+      this.lastQueueSequence = Math.max(
+        this.lastQueueSequence,
+        watermark.latestSequence
+      );
+      this.cursorSeeded = true;
+    } catch (error) {
+      console.error("[printerSignalR] failed to seed queue cursor watermark:", error);
+    }
+  }
+
   private async drainQueueChanges(): Promise<void> {
     if (this.queueDrain) {
       await this.queueDrain;
@@ -1140,6 +1176,11 @@ export class PrinterSignalRService {
     connection: HubConnection,
     connectionEpoch: number
   ): Promise<void> {
+    // Safety net: normally a no-op (the initial connect already seeded the
+    // cursor), but retries seeding here if that first attempt failed, rather
+    // than leaving this reconnect stuck on an unseeded cursor.
+    await this.ensureQueueCursorSeeded();
+    if (!this.isCurrentConnectionEpoch(connection, connectionEpoch)) return;
     await this.restoreResourceSubscriptions(connection, connectionEpoch);
     if (!this.isCurrentConnectionEpoch(connection, connectionEpoch)) return;
     await this.drainQueueChanges();

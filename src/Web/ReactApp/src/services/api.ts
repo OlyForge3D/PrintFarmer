@@ -59,6 +59,7 @@ import {
   BedClearAcknowledgementResult,
   QueueChangeFeed,
   QueueSubscriptionResources,
+  QueueChangeWatermark,
   QueueHistoryPageDto,
   QueueOverviewDto,
   QueueStatsDto,
@@ -3009,6 +3010,19 @@ export class ApiClient {
   async getQueueSubscriptionResources(): Promise<QueueSubscriptionResources> {
     const response = await this.client.get<QueueSubscriptionResources>(
       "/job-queue/subscription-resources"
+    );
+    return response.data;
+  }
+
+  /**
+   * Fetches the current outbox watermark so the SignalR client can seed its
+   * change-feed cursor at connect time instead of replaying the entire
+   * durable outbox history from sequence 0 on every fresh page load
+   * (issue #1727).
+   */
+  async getQueueChangeWatermark(): Promise<QueueChangeWatermark> {
+    const response = await this.client.get<QueueChangeWatermark>(
+      "/job-queue/changes/watermark"
     );
     return response.data;
   }
