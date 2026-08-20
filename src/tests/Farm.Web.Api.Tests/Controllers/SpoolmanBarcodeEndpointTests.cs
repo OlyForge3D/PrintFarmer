@@ -192,6 +192,24 @@ public class SpoolmanBarcodeEndpointTests
     }
 
     [Fact]
+    public async Task SaveBarcodeMappingAsync_OversizedBarcode_LogsTruncatedValueWithoutThrowing()
+    {
+        // Longer than BarcodeScanLogConfiguration's HasMaxLength(256): must never reach the
+        // audit log untruncated, and must never throw before returning a clean 400.
+        string oversizedBarcode = new('9', 300);
+        SpoolmanBarcodeMappingRequest request = new() { Barcode = oversizedBarcode, FilamentId = 7 };
+
+        ActionResult<SpoolmanFilamentDto> result = await controller.SaveBarcodeMappingAsync(request, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        barcodeScanLogServiceMock.Verify(
+            s => s.LogAsync(
+                It.Is<BarcodeScanLog>(l => l.Barcode.Length == 256),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task SaveBarcodeMappingAsync_ServiceThrows_LogsErrorOutcome()
     {
         const string barcode = "123456789012";

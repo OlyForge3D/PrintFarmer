@@ -1394,6 +1394,13 @@ public class SpoolmanController(
             : $"Spoolman returned {(int)ex.StatusCode.Value} ({ex.StatusCode.Value}).";
     }
 
+    // Matches BarcodeScanLogConfiguration's HasMaxLength(256) for the Barcode column. Scan
+    // attempts are logged for diagnostics even when the barcode is invalid/unmatched, so the
+    // raw (possibly attacker-controlled) value must be bounded before it reaches EF Core --
+    // otherwise an oversized value can throw a data-truncation exception at the database on
+    // providers that enforce column length (turning a clean 400 into an unhandled 500).
+    private const int BarcodeLogMaxLength = 256;
+
     private async Task LogBarcodeScanAsync(
         string barcode,
         BarcodeScanAction action,
@@ -1407,7 +1414,7 @@ public class SpoolmanController(
         await barcodeScanLogService.LogAsync(new BarcodeScanLog
         {
             Timestamp = DateTime.UtcNow,
-            Barcode = barcode,
+            Barcode = barcode.Length > BarcodeLogMaxLength ? barcode[..BarcodeLogMaxLength] : barcode,
             Action = action,
             Outcome = outcome,
             HttpStatus = httpStatus,

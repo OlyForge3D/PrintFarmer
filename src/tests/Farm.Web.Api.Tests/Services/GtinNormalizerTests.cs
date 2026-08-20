@@ -91,4 +91,15 @@ public class GtinNormalizerTests
 
         GtinNormalizer.Normalize(mixedAsciiAndArabicIndicDigits).Should().BeNull();
     }
+
+    [Fact]
+    public void Normalize_OversizedRawInput_ReturnsNullWithoutScanningWholeString()
+    {
+        // Not a realistic scanned barcode: exercises the early length-bound guard that rejects
+        // arbitrarily long (attacker-controlled) input before it reaches the digit-filtering
+        // LINQ pass, so an oversized string is never fully scanned/allocated.
+        string oversized = new('1', 10_000);
+
+        GtinNormalizer.Normalize(oversized).Should().BeNull();
+    }
 }

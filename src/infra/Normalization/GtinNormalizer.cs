@@ -10,17 +10,29 @@ public static class GtinNormalizer
 {
     private const int GtinLength = 14;
 
+    // A formatted GTIN-14 with separators (dashes/spaces) between every digit is well under
+    // this many characters. Rejecting oversized raw input up front avoids scanning an
+    // attacker-controlled arbitrarily long string with the digit filter below before the
+    // (always-failing) length check would otherwise catch it.
+    private const int MaxRawLength = 64;
+
     /// <summary>
     /// Normalizes a scanned barcode to a 14-digit GTIN.
     /// </summary>
     /// <param name="barcode">Raw scanned barcode value, in any GTIN-8/12/13/14 form.</param>
     /// <returns>
     /// The barcode left-zero-padded to 14 digits, or <c>null</c> if the input is null/empty,
-    /// contains no digits, is not 8/12/13/14 digits long, or fails the GS1 mod-10 check digit.
+    /// longer than a plausible formatted barcode, contains no digits, is not 8/12/13/14 digits
+    /// long, or fails the GS1 mod-10 check digit.
     /// </returns>
     public static string? Normalize(string? barcode)
     {
         if (string.IsNullOrWhiteSpace(barcode))
+        {
+            return null;
+        }
+
+        if (barcode.Length > MaxRawLength)
         {
             return null;
         }
