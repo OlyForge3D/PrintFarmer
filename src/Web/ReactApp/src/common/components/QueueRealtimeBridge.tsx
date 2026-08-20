@@ -7,19 +7,141 @@ import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueS
 
 const resourceRefreshRetryDelaysMs = [100, 250, 500] as const;
 
+// #1731: event types that can only ever reflect a single printer's physical/backend
+// actuation state (bed-clear acknowledgement lifecycle, backend pause/resume/cancel
+// commands). These can never add/remove a job, project, or printer from the queue, so
+// when every event accumulated since the last authoritative refresh matches one of
+// these, invalidateAuthority narrows its invalidation to just the printers key instead
+// of the full query-key set. Any other/unknown event type falls back to the full set --
+// this narrowing is deliberately conservative, since under-invalidating risks stale UI.
+const printerActuationOnlyEventTypeSubstrings = [
+  'BedClear',
+  'BackendControl',
+  'PhysicalControl',
+] as const;
+
+function isPrinterActuationOnlyEventType(eventType: string | undefined | null): boolean {
+  if (!eventType) return false;
+  return printerActuationOnlyEventTypeSubstrings.some((substring) =>
+    eventType.includes(substring)
+  );
+}
+
+/**
+ * Extracted verbatim from the original single-pipeline implementation (#1731): a
+ * generation-counter/retry-backoff loop that coalesces bursts of triggers into a
+ * single in-flight run, retries a failed run with backoff, and restarts if a new
+ * trigger arrived while retrying. Parameterized so it can independently drive the
+ * invalidation pipeline and the subscription-reconciliation pipeline, which #1731
+ * splits apart so that ordinary queue events only drive the former.
+ */
+function createCoalescedRefresher(run: () => Promise<void>, isDisposed: () => boolean) {
+  let refreshInFlight: Promise<void> | null = null;
+  let requestedGeneration = 0;
+  let completedGeneration = 0;
+  let exhaustedGeneration = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let resolveRetryDelay: (() => void) | undefined;
+
+  const waitForRetryDelay = (delayMs: number) =>
+    new Promise<void>((resolve) => {
+      resolveRetryDelay = resolve;
+      retryTimer = setTimeout(() => {
+        retryTimer = undefined;
+        resolveRetryDelay = undefined;
+        resolve();
+      }, delayMs);
+    });
+
+  const startRefreshLoop = () => {
+    if (refreshInFlight || isDisposed()) return;
+    refreshInFlight = (async () => {
+      while (
+        completedGeneration < requestedGeneration &&
+        exhaustedGeneration < requestedGeneration &&
+        !isDisposed()
+      ) {
+        const targetGeneration = requestedGeneration;
+        let refreshed = false;
+        for (
+          let attempt = 0;
+          attempt <= resourceRefreshRetryDelaysMs.length && !isDisposed();
+          attempt += 1
+        ) {
+          try {
+            await run();
+            completedGeneration = targetGeneration;
+            refreshed = true;
+            break;
+          } catch (error) {
+            console.error(
+              '[QueueRealtimeBridge] authoritative refresh failed',
+              error
+            );
+            if (isDisposed() || attempt === resourceRefreshRetryDelaysMs.length) {
+              break;
+            }
+            await waitForRetryDelay(resourceRefreshRetryDelaysMs[attempt]);
+          }
+        }
+
+        if (!refreshed && requestedGeneration === targetGeneration) {
+          exhaustedGeneration = targetGeneration;
+          return;
+        }
+      }
+    })().finally(() => {
+      refreshInFlight = null;
+      if (
+        completedGeneration < requestedGeneration &&
+        exhaustedGeneration < requestedGeneration &&
+        !isDisposed()
+      ) {
+        startRefreshLoop();
+      }
+    });
+  };
+
+  const trigger = () => {
+    if (!isDisposed()) {
+      requestedGeneration += 1;
+      startRefreshLoop();
+    }
+    return refreshInFlight;
+  };
+
+  const dispose = () => {
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = undefined;
+    resolveRetryDelay?.();
+    resolveRetryDelay = undefined;
+  };
+
+  return { trigger, dispose };
+}
+
 export function QueueRealtimeBridge() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
     let disposed = false;
-    let refreshInFlight: Promise<void> | null = null;
-    let requestedRefreshGeneration = 0;
-    let completedRefreshGeneration = 0;
-    let exhaustedRefreshGeneration = 0;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    let resolveRetryDelay: (() => void) | undefined;
+    const isDisposed = () => disposed;
+
+    // #1731: event types accumulated since the last invalidateAuthority run, drained
+    // (and used to narrow the invalidation) at the start of each run.
+    const pendingEventTypes = new Set<string>();
 
     const invalidateAuthority = async () => {
+      const eventTypes = Array.from(pendingEventTypes);
+      pendingEventTypes.clear();
+
+      if (eventTypes.length > 0 && eventTypes.every(isPrinterActuationOnlyEventType)) {
+        // Every accumulated event since the last run is a single-printer physical/
+        // backend actuation -- only that printer's own state can have changed.
+        await queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+        return;
+      }
+
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.jobQueue() }),
         queryClient.invalidateQueries({ queryKey: ['queue-jobs'] }),
@@ -38,7 +160,14 @@ export function QueueRealtimeBridge() {
     const reconcileSubscriptions = async () => {
       const [resources, printers] = await Promise.all([
         apiClient.getQueueSubscriptionResources(),
-        apiClient.getPrinters(),
+        // #1731: reuse whatever invalidateAuthority (or any mounted usePrinters()
+        // consumer) already fetched/is fetching for this key instead of always
+        // issuing a duplicate, uncached GET. staleTime matches usePrinters().
+        queryClient.ensureQueryData({
+          queryKey: queryKeys.printers,
+          queryFn: () => apiClient.getPrinters(),
+          staleTime: 30000,
+        }),
       ]);
       if (disposed) return;
       await printerSignalRService.replaceQueueResourceSubscriptions({
@@ -54,77 +183,20 @@ export function QueueRealtimeBridge() {
       }
     };
 
-    const waitForRetryDelay = (delayMs: number) =>
-      new Promise<void>((resolve) => {
-        resolveRetryDelay = resolve;
-        retryTimer = setTimeout(() => {
-          retryTimer = undefined;
-          resolveRetryDelay = undefined;
-          resolve();
-        }, delayMs);
-      });
+    const invalidateRefresher = createCoalescedRefresher(
+      invalidateAuthority,
+      isDisposed
+    );
+    const reconcileRefresher = createCoalescedRefresher(
+      reconcileSubscriptions,
+      isDisposed
+    );
 
-    const startRefreshLoop = () => {
-      if (refreshInFlight || disposed) return;
-      refreshInFlight = (async () => {
-        while (
-          completedRefreshGeneration < requestedRefreshGeneration &&
-          exhaustedRefreshGeneration < requestedRefreshGeneration &&
-          !disposed
-        ) {
-          const targetGeneration = requestedRefreshGeneration;
-          let refreshed = false;
-          for (
-            let attempt = 0;
-            attempt <= resourceRefreshRetryDelaysMs.length && !disposed;
-            attempt += 1
-          ) {
-            try {
-              await invalidateAuthority();
-              await reconcileSubscriptions();
-              completedRefreshGeneration = targetGeneration;
-              refreshed = true;
-              break;
-            } catch (error) {
-              console.error(
-                '[QueueRealtimeBridge] authoritative refresh failed',
-                error
-              );
-              if (
-                disposed ||
-                attempt === resourceRefreshRetryDelaysMs.length
-              ) {
-                break;
-              }
-              await waitForRetryDelay(
-                resourceRefreshRetryDelaysMs[attempt]
-              );
-            }
-          }
-
-          if (!refreshed && requestedRefreshGeneration === targetGeneration) {
-            exhaustedRefreshGeneration = targetGeneration;
-            return;
-          }
-        }
-      })().finally(() => {
-        refreshInFlight = null;
-        if (
-          completedRefreshGeneration < requestedRefreshGeneration &&
-          exhaustedRefreshGeneration < requestedRefreshGeneration &&
-          !disposed
-        ) {
-          startRefreshLoop();
-        }
-      });
-    };
-
-    const refreshAuthority = () => {
-      if (!disposed) {
-        requestedRefreshGeneration += 1;
-        startRefreshLoop();
-      }
-      return refreshInFlight;
+    const refreshInvalidateOnly = () => invalidateRefresher.trigger();
+    const refreshBoth = () => {
+      const invalidatePromise = invalidateRefresher.trigger();
+      const reconcilePromise = reconcileRefresher.trigger();
+      return Promise.all([invalidatePromise, reconcilePromise]);
     };
 
     const unsubscribeQueue = printerSignalRService.onQueueEvent((event) => {
@@ -138,18 +210,23 @@ export function QueueRealtimeBridge() {
           queryKey: queryKeys.scheduledJob(event.jobId),
         });
       }
-      void refreshAuthority();
+      // #1731: ordinary queue events (job status/dispatch/bed-clear lifecycle) can
+      // never change *which* printers/jobs/projects a client is subscribed to, so
+      // they only drive the invalidation pipeline -- subscription reconciliation
+      // (and its printers/resources refetch) is reserved for onQueueResourcesChanged.
+      pendingEventTypes.add(event.eventType);
+      void refreshInvalidateOnly();
     });
     const unsubscribeConnection =
       printerSignalRService.onConnectionStateChange((connected) => {
-        if (connected) void refreshAuthority();
+        if (connected) void refreshBoth();
       });
     const unsubscribeResources =
       printerSignalRService.onQueueResourcesChanged?.(() => {
-        void refreshAuthority();
+        void refreshBoth();
       }) ?? (() => {});
 
-    void refreshAuthority();
+    void refreshBoth();
     void printerSignalRService.connect();
 
     return () => {
@@ -157,10 +234,8 @@ export function QueueRealtimeBridge() {
       unsubscribeQueue();
       unsubscribeConnection();
       unsubscribeResources();
-      if (retryTimer) clearTimeout(retryTimer);
-      retryTimer = undefined;
-      resolveRetryDelay?.();
-      resolveRetryDelay = undefined;
+      invalidateRefresher.dispose();
+      reconcileRefresher.dispose();
       const lifecycle = printerSignalRService as typeof printerSignalRService & {
         releaseQueueResourceSubscriptionsAndDisconnect?: () => Promise<void>;
       };

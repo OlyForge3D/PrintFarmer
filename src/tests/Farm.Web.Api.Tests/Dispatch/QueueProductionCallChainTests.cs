@@ -4743,7 +4743,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task OutboxPublisher_SendsPayloadFreeDiscoveryAndPersistedEnvelope()
+    public async Task OutboxPublisher_SkipsDiscoveryHintAndSendsPersistedEnvelope()
     {
         Guid calibrationAttemptId = Guid.NewGuid();
         QueueDispatchOutbox row;
@@ -4797,10 +4797,15 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             await publisher.ProcessSingleEventAsync(row, CancellationToken.None);
         }
 
+        // #1731: the outbox publisher no longer broadcasts "queueresourceschanged" for
+        // ordinary job/dispatch/bed-clear lifecycle events -- that hint is now sent only
+        // by IQueueSubscriptionMembershipNotifier, invoked directly from the actual
+        // membership-changing mutation points (see
+        // PrinterGroupServiceMembershipNotificationTests for that coverage).
         proxy.Verify(client => client.SendCoreAsync(
             "queueresourceschanged",
-            It.Is<object?[]>(arguments => arguments.Length == 0),
-            It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<object?[]>(),
+            It.IsAny<CancellationToken>()), Times.Never);
         proxy.Verify(client => client.SendCoreAsync(
             "queueevent",
             It.Is<object?[]>(arguments =>

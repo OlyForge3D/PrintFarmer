@@ -37,13 +37,20 @@ public class UsersService(
     IAuthenticationService authService,
     IPasswordHashingService passwordHashingService,
     IEffectivePermissionsRevocationService revocationService,
-    IAuthAuditService authAuditService) : IUsersService
+    IAuthAuditService authAuditService,
+    Farm.Infrastructure.Services.Queue.IQueueSubscriptionMembershipNotifier? membershipNotifier = null) : IUsersService
 {
     private readonly IUsersRepository _users = users ?? throw new ArgumentNullException(nameof(users));
     private readonly IAuthenticationService _authService = authService ?? throw new ArgumentNullException(nameof(authService));
     private readonly IPasswordHashingService _passwordHashingService = passwordHashingService ?? throw new ArgumentNullException(nameof(passwordHashingService));
     private readonly IEffectivePermissionsRevocationService _revocationService = revocationService ?? throw new ArgumentNullException(nameof(revocationService));
     private readonly IAuthAuditService _authAuditService = authAuditService ?? throw new ArgumentNullException(nameof(authAuditService));
+
+    // Optional (#1731): direct membership-change SignalR hint, notified when a user's role
+    // assignment changes (a role can gate printer-group access, changing which printers a
+    // queue-reader client is authorized to subscribe to). Nullable so unit tests that build
+    // UsersService directly need not supply it.
+    private readonly Farm.Infrastructure.Services.Queue.IQueueSubscriptionMembershipNotifier? _membershipNotifier = membershipNotifier;
 
     /// <summary>
     /// Retrieves all user accounts from the system.
@@ -195,6 +202,14 @@ public class UsersService(
                     revokedSessionCount,
                     ipAddress,
                     cancellationToken: ct).ConfigureAwait(false);
+
+                // #1731: a role's access rules can gate which printer groups a user can
+                // see/subscribe to, so a role assignment change can change subscription
+                // membership for that user's queue-reader connections.
+                if (_membershipNotifier is not null)
+                {
+                    await _membershipNotifier.NotifyMembershipChangedAsync(ct).ConfigureAwait(false);
+                }
             }
         }
 

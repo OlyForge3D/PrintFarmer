@@ -181,11 +181,17 @@ public sealed class QueueOutboxPublisherService(
 
             List<Task> sends = new();
 
-            // Payload-free discovery hint. Queue readers learn only that their authorized
-            // resource snapshot may have changed; REST performs the actual ACL-filtered read.
-            sends.Add(
-                hub.Clients.Group(AuthorizedHubGroups.QueueReaders)
-                    .SendAsync("queueresourceschanged", ct));
+            // #1731: the "queueresourceschanged" discovery hint used to be sent here,
+            // unconditionally, for every outbox event. Every event type flowing through
+            // this outbox is a job/dispatch/bed-clear lifecycle event -- none of them can
+            // change which printers/jobs/projects a client is authorized to see -- so that
+            // broadcast made every queue event trigger a client-side subscription
+            // reconciliation (2 REST calls + resubscribe) for no reason. Membership can
+            // only actually change via printer create/delete/reassignment, printer-group
+            // membership changes, or user role changes, none of which are outbox events.
+            // Those mutation points now call IQueueSubscriptionMembershipNotifier directly
+            // (see PrinterGroupService/PrintersService/UsersService), which is both more
+            // precise and lower latency than waiting for this poller.
 
             // Job-scoped group: narrower delivery for clients watching this specific job.
             if (string.Equals(evt.AggregateType, nameof(PrintJob), StringComparison.Ordinal))

@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.PrinterGroups;
+using Farm.Infrastructure.Services.Queue;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -13,7 +14,8 @@ namespace Farm.Infrastructure.Services.PrinterGroups;
 public class PrinterGroupService(
     IPrinterGroupRepository repository,
     AppDbContext db,
-    ILogger<PrinterGroupService> logger) : IPrinterGroupService
+    ILogger<PrinterGroupService> logger,
+    IQueueSubscriptionMembershipNotifier? membershipNotifier = null) : IPrinterGroupService
 {
     public async Task<IReadOnlyList<PrinterGroupDto>> ListAllAsync(CancellationToken ct)
     {
@@ -103,6 +105,12 @@ public class PrinterGroupService(
         await repository.SaveChangesAsync(ct);
 
         logger.LogInformation("Deleted printer group '{Name}' ({Id})", LogSanitizer.Sanitize(group.Name), group.Id);
+        // #1731: deleting a group can drop printers from it (cascade or reassignment),
+        // changing which printers a queue reader is authorized to subscribe to.
+        if (membershipNotifier is not null)
+        {
+            await membershipNotifier.NotifyMembershipChangedAsync(ct);
+        }
     }
 
     public async Task AddPrinterAsync(Guid groupId, Guid printerId, CancellationToken ct)
@@ -140,6 +148,12 @@ public class PrinterGroupService(
         await repository.SaveChangesAsync(ct);
 
         logger.LogInformation("Added printer '{PrinterName}' to group '{GroupName}'", LogSanitizer.Sanitize(printer.Name), LogSanitizer.Sanitize(group.Name));
+        // #1731: reassigning a printer to a different group changes which queue-reader
+        // clients are authorized to subscribe to it -- mandatory membership-change hint.
+        if (membershipNotifier is not null)
+        {
+            await membershipNotifier.NotifyMembershipChangedAsync(ct);
+        }
     }
 
     public async Task RemovePrinterAsync(Guid groupId, Guid printerId, CancellationToken ct)
@@ -160,6 +174,11 @@ public class PrinterGroupService(
         await repository.SaveChangesAsync(ct);
 
         logger.LogInformation("Removed printer '{PrinterName}' from group '{GroupName}'", LogSanitizer.Sanitize(printer.Name), LogSanitizer.Sanitize(group.Name));
+        // #1731: removing a printer from a group changes its authorized-subscription membership.
+        if (membershipNotifier is not null)
+        {
+            await membershipNotifier.NotifyMembershipChangedAsync(ct);
+        }
     }
 
     public async Task<IReadOnlyList<PrinterGroupAccessDto>> GetAccessRulesAsync(Guid groupId, CancellationToken ct)

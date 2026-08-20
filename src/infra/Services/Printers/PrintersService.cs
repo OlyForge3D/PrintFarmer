@@ -97,7 +97,8 @@ public class PrintersService(
     IFilamentCoverageSpoolResolver spoolResolver,
     Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null,
     Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? activityAccumulator = null,
-    IConfiguration? configuration = null) : IPrintersService
+    IConfiguration? configuration = null,
+    Farm.Infrastructure.Services.Queue.IQueueSubscriptionMembershipNotifier? membershipNotifier = null) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -125,6 +126,11 @@ public class PrintersService(
     // unit tests that build PrintersService directly need not supply it. Used to discard a printer's
     // accumulated telemetry when it is deleted.
     private readonly Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? _activityAccumulator = activityAccumulator;
+
+    // Optional (#1731): direct membership-change SignalR hint, notified after RemoveAsync
+    // deletes a printer (changes queue-reader subscription eligibility). Nullable so unit
+    // tests that build PrintersService directly need not supply it.
+    private readonly Farm.Infrastructure.Services.Queue.IQueueSubscriptionMembershipNotifier? _membershipNotifier = membershipNotifier;
 
     /// <summary>
     /// Re-probe cadence (hours) for <see cref="RefreshDetectedFirmwareIdentityAsync"/>, configurable via
@@ -827,6 +833,14 @@ public class PrintersService(
         // remarks on RefreshDetectedFirmwareIdentityAsync/DetectFirmwareIdentityAsync), which
         // is the structural fix for the write-side of this same round-7 finding.
         FirmwareIdentityWriteLocks.TryRemove(p.Id, out _);
+
+        // #1731: a deleted printer changes which printers a queue-reader client is
+        // authorized to subscribe to. RemoveAsync above already committed (see remarks
+        // above), so it is safe to notify here.
+        if (_membershipNotifier is not null)
+        {
+            await _membershipNotifier.NotifyMembershipChangedAsync(ct);
+        }
     }
 
     /// <summary>
