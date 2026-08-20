@@ -175,16 +175,17 @@ public interface IGcodeFilesService
     Task<bool> DeleteFilesAsync(IEnumerable<Guid> fileIds, CancellationToken ct);
 
     /// <summary>
-    /// Downloads a G-code file by its virtual path.
+    /// Resolves a G-code file by its virtual path to its physical location for streaming.
     /// </summary>
     /// <param name="path">Virtual path to the file to download (e.g., '/folder/file.gcode').</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>Tuple of file bytes and suggested filename, or null if file not found.</returns>
+    /// <returns>Tuple of the resolved physical file path and suggested filename, or null if file not found.</returns>
     /// <remarks>
-    /// Returns the complete file contents suitable for HTTP response transmission. Filename is suitable
+    /// Does not read the file contents. Callers should stream the file from the returned physical path
+    /// (e.g. via <c>PhysicalFileResult</c>) rather than buffering it into memory. Filename is suitable
     /// for Content-Disposition header.
     /// </remarks>
-    Task<(byte[] Bytes, string FileName)?> DownloadAsync(string path, CancellationToken ct);
+    Task<(string FullPath, string FileName)?> DownloadAsync(string path, CancellationToken ct);
 
     /// <summary>
     /// Gets the file path for a G-code file by its ID.
@@ -326,18 +327,19 @@ public interface IGcodeFilesService
     Task<bool> DeleteFileAsync(Guid id, CancellationToken ct);
 
     /// <summary>
-    /// Downloads a G-code file by ID, returning its complete contents.
+    /// Resolves a G-code file by ID to its physical path for streaming.
     /// </summary>
     /// <param name="id">Unique identifier of the file to download.</param>
     /// <param name="webRootPath">Application web root path (used for path resolution).</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>Complete file contents as byte array, or null if file not found or cannot be read.</returns>
+    /// <returns>The resolved physical file path, or null if file not found or cannot be read.</returns>
     /// <remarks>
-    /// Returns the raw file contents suitable for HTTP response transmission. Checks both database record
-    /// and filesystem existence before returning. Returns null if file metadata exists but physical file
-    /// has been deleted.
+    /// Does not read the file contents. Callers should stream the file from the returned physical path
+    /// (e.g. via <c>PhysicalFileResult</c>) rather than buffering it into memory. Checks both database
+    /// record and filesystem existence before returning. Returns null if file metadata exists but physical
+    /// file has been deleted.
     /// </remarks>
-    Task<byte[]?> DownloadFileAsync(Guid id, string webRootPath, CancellationToken ct);
+    Task<string?> DownloadFileAsync(Guid id, string webRootPath, CancellationToken ct);
 
     #endregion
 }

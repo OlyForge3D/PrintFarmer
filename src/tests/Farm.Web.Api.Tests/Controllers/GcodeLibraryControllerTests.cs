@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure;
+﻿using System.IO;
+using Farm.Infrastructure;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services.Gcode;
 using Microsoft.AspNetCore.Hosting;
@@ -273,27 +274,51 @@ public class GcodeLibraryControllerTests
     }
 
     [Fact]
-    public async Task DownloadFileAsync_WithValidId_ReturnsFileContent()
+    public async Task DownloadFileAsync_WithValidId_ReturnsPhysicalFileWithRangeProcessing()
     {
         // Arrange
         var fileId = Guid.NewGuid();
         var file = new GcodeFileDto(Id: fileId, FileName: "test.gcode", FileSize: 1024, UploadedAt: DateTime.UtcNow);
-        byte[] fileBytes = new byte[] { 1, 2, 3, 4 };
+        string fullPath = Path.Combine(Path.GetTempPath(), "test.gcode");
 
         _gcodeServiceMock
             .Setup(s => s.GetFileAsync(fileId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(file);
         _gcodeServiceMock
             .Setup(s => s.DownloadFileAsync(fileId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(fileBytes);
+            .ReturnsAsync(fullPath);
 
         // Act
         IActionResult result = await _controller.DownloadFileAsync(fileId);
 
         // Assert
-        FileContentResult fileResult = Assert.IsType<FileContentResult>(result);
+        PhysicalFileResult fileResult = Assert.IsType<PhysicalFileResult>(result);
         Assert.Equal("application/octet-stream", fileResult.ContentType);
         Assert.Equal("test.gcode", fileResult.FileDownloadName);
+        Assert.Equal(fullPath, fileResult.FileName);
+        Assert.True(fileResult.EnableRangeProcessing);
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_WhenPhysicalFileMissing_ReturnsNotFound()
+    {
+        // Arrange
+        var fileId = Guid.NewGuid();
+        var file = new GcodeFileDto(Id: fileId, FileName: "test.gcode", FileSize: 1024, UploadedAt: DateTime.UtcNow);
+
+        _gcodeServiceMock
+            .Setup(s => s.GetFileAsync(fileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(file);
+        _gcodeServiceMock
+            .Setup(s => s.DownloadFileAsync(fileId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+
+        // Act
+        IActionResult result = await _controller.DownloadFileAsync(fileId);
+
+        // Assert
+        NotFoundObjectResult notFoundResult = Assert.IsType<NotFoundObjectResult>(result);
+        Assert.Equal("Physical file not found on disk", notFoundResult.Value);
     }
 
     [Fact]

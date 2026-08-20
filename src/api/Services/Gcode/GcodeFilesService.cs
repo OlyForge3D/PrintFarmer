@@ -1157,28 +1157,28 @@ public class GcodeFilesService(
     }
 
     /// <summary>
-    /// Downloads a G-code file by reading it from disk and returning the bytes and filename.
+    /// Resolves a G-code file's virtual path to its physical location and filename, for streaming.
     /// </summary>
     /// <param name="path">Virtual path to the file</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>Tuple of file bytes and filename, or null if file not found</returns>
+    /// <returns>Tuple of the resolved physical file path and filename, or null if file not found</returns>
     /// <remarks>
-    /// This method resolves the virtual path to the physical file location and reads the entire file into memory.
-    /// For large files, consider streaming instead of reading all bytes at once.
+    /// This method resolves the virtual path to the physical file location without reading its contents.
+    /// Callers should stream the file (e.g. via <see cref="Microsoft.AspNetCore.Mvc.PhysicalFileResult"/>)
+    /// rather than buffering it into memory.
     /// </remarks>
-    public async Task<(byte[] Bytes, string FileName)?> DownloadAsync(string path, CancellationToken ct)
+    public Task<(string FullPath, string FileName)?> DownloadAsync(string path, CancellationToken ct)
     {
         // Resolve path using IStoragePathService
         var (_, fullFilePath, _) = ResolveVirtualPath(path, _storagePathService.GetGcodeStorageDirectory());
 
         if (!File.Exists(fullFilePath))
         {
-            return null;
+            return Task.FromResult<(string FullPath, string FileName)?>(null);
         }
 
-        byte[] bytes = await File.ReadAllBytesAsync(fullFilePath, ct);
         string fileName = Path.GetFileName(fullFilePath);
-        return (bytes, fileName);
+        return Task.FromResult<(string FullPath, string FileName)?>((fullFilePath, fileName));
     }
 
     public async Task<string?> GetFilePathAsync(Guid id, CancellationToken ct)
@@ -1899,14 +1899,13 @@ public class GcodeFilesService(
     }
 
     /// <summary>
-    /// Downloads a G-code file by ID, returning its complete contents.
+    /// Resolves a G-code file by ID to its physical path, for streaming.
     /// </summary>
     /// <param name="id">Unique identifier of the file to download.</param>
     /// <param name="webRootPath">Application web root path (used for path resolution).</param>
     /// <param name="ct">Cancellation token for canceling async operation.</param>
     /// <returns>
-    /// Complete file contents as byte array suitable for HTTP response transmission, or null if file
-    /// not found in database or cannot be read from filesystem.
+    /// The resolved physical file path, or null if file not found in database or cannot be read from filesystem.
     /// </returns>
     /// <remarks>
     /// <para>
@@ -1914,11 +1913,11 @@ public class GcodeFilesService(
     /// if the file metadata exists but the physical file has been deleted or moved.
     /// </para>
     /// <para>
-    /// The returned byte array can be directly written to an HTTP response stream. No additional
-    /// encoding or transformation is performed.
+    /// Does not read the file contents. Callers should stream the file from the returned physical path
+    /// (e.g. via <see cref="Microsoft.AspNetCore.Mvc.PhysicalFileResult"/>) rather than buffering it into memory.
     /// </para>
     /// </remarks>
-    public async Task<byte[]?> DownloadFileAsync(Guid id, string webRootPath, CancellationToken ct)
+    public async Task<string?> DownloadFileAsync(Guid id, string webRootPath, CancellationToken ct)
     {
         GcodeFile? file = await _gcodeRepo.GetByIdWithIncludesAsync(id, ct);
         if (file == null)
@@ -1932,7 +1931,7 @@ public class GcodeFilesService(
         }
 
         string fullPath = Path.Join(file.FilePath, file.FileName);
-        return !System.IO.File.Exists(fullPath) ? null : await System.IO.File.ReadAllBytesAsync(fullPath, ct);
+        return System.IO.File.Exists(fullPath) ? fullPath : null;
     }
 
     /// <summary>

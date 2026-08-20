@@ -178,7 +178,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
     /// <param name="id">The unique identifier of the G-code file to download.</param>
     [HttpGet("{id}/download")]
     [Authorize(Policy = "ModelRead")]
-    [ProducesResponseType(typeof(FileContentResult), 200)]
+    [ProducesResponseType(typeof(PhysicalFileResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<IActionResult> DownloadFileAsync(Guid id)
@@ -191,8 +191,10 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
                 return NotFound($"G-code file with ID {id} not found");
             }
 
-            byte[]? bytes = await gcodeService.DownloadFileAsync(id, env.WebRootPath ?? env.ContentRootPath, CancellationToken.None);
-            return bytes == null ? NotFound("Physical file not found on disk") : File(bytes, "application/octet-stream", dto.FileName);
+            string? fullPath = await gcodeService.DownloadFileAsync(id, env.WebRootPath ?? env.ContentRootPath, CancellationToken.None);
+            return fullPath == null
+                ? NotFound("Physical file not found on disk")
+                : PhysicalFile(fullPath, "application/octet-stream", dto.FileName, enableRangeProcessing: true);
         }
         catch (Exception ex)
         {
