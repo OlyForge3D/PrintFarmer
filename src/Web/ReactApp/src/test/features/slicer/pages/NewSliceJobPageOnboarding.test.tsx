@@ -53,6 +53,15 @@ vi.mock('@/services/slicerRegistry', () => ({
   },
 }));
 
+// Mock the registered-engines lookup (GET /api/slicers/engines) used to detect
+// a healthy worker independently of imported database profiles (issue #1760).
+const mockListEngines = vi.fn();
+vi.mock('@/services/slicerService', () => ({
+  slicerService: {
+    listEngines: (...args: unknown[]) => mockListEngines(...args),
+  },
+}));
+
 // Mock slice job service
 vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
@@ -181,6 +190,9 @@ function renderPage(route = '/slicer') {
 describe('NewSliceJobPage — Onboarding', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no registered engines (matches prior test behavior where the
+    // apiClient mock returned an empty array for every GET).
+    mockListEngines.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -292,5 +304,48 @@ describe('NewSliceJobPage — Onboarding', () => {
     expect(screen.getByText(/Import printer profiles or create custom ones/)).toBeInTheDocument();
     expect(screen.getByTestId('import-profiles-button')).toBeInTheDocument();
     expect(screen.getByTestId('create-custom-profile-button')).toBeInTheDocument();
+  });
+
+  it('does not show onboarding when a healthy worker is registered, even with zero imported profiles (issue #1760)', async () => {
+    // Reproduces the bug: no machine profiles have been imported into the
+    // database (e.g. every registered printer's model lacks an OrcaSlicer
+    // alias), but a healthy OrcaSlicer worker is registered and can serve
+    // profiles live via the per-model lookup instead.
+    mockListExtended.mockResolvedValue({
+      machineProfiles: [],
+      filamentProfiles: [],
+      processProfiles: [],
+    });
+    mockListEngines.mockResolvedValue([
+      {
+        engine: 'OrcaSlicer',
+        versions: ['2.4.2'],
+        versionEntries: [{ version: '2.4.2', available: true }],
+        latest: '2.4.2',
+      },
+    ]);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('printer-slicer-selector')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('onboarding-banner')).not.toBeInTheDocument();
+  });
+
+  it('still shows onboarding when there are no imported profiles and no registered engine', async () => {
+    mockListExtended.mockResolvedValue({
+      machineProfiles: [],
+      filamentProfiles: [],
+      processProfiles: [],
+    });
+    mockListEngines.mockResolvedValue([]);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('onboarding-banner')).toBeInTheDocument();
+    });
   });
 });
