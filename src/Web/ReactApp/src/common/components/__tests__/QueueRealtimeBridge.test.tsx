@@ -589,4 +589,71 @@ describe('QueueRealtimeBridge', () => {
     );
     expect(mocks.onQueueEvent).toHaveBeenCalledTimes(2);
   });
+
+  it('#1731 (Vasquez review): periodically self-heals subscriptions on a bounded fallback cadence, even with no hint at all', async () => {
+    vi.useFakeTimers();
+    try {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      render(
+        <QueryClientProvider client={queryClient}>
+          <QueueRealtimeBridge />
+        </QueryClientProvider>
+      );
+
+      // Initial mount reconciles once (unchanged from today).
+      await vi.waitFor(() =>
+        expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledTimes(1)
+      );
+      mocks.replaceQueueResourceSubscriptions.mockClear();
+
+      // No membership-changed hint, connection change, or queue event arrives at
+      // all -- e.g. a dropped/failed queueresourceschanged send for an
+      // access-revoking mutation (Vasquez review: the hint is best-effort and
+      // swallows broadcast failures). The bounded periodic fallback must still
+      // re-run reconciliation once the interval elapses, as a self-heal.
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await vi.waitFor(() =>
+        expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledTimes(1)
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('#1731 (Vasquez review): the periodic self-heal does not fire within the window covered by the zero-refetch burst acceptance test', async () => {
+    vi.useFakeTimers();
+    try {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      render(
+        <QueryClientProvider client={queryClient}>
+          <QueueRealtimeBridge />
+        </QueryClientProvider>
+      );
+
+      await vi.waitFor(() =>
+        expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledTimes(1)
+      );
+      mocks.replaceQueueResourceSubscriptions.mockClear();
+      mocks.getQueueSubscriptionResources.mockClear();
+      mocks.getPrinters.mockClear();
+
+      // A burst of ordinary queue events well inside the self-heal interval must
+      // still produce zero reconciliations -- the periodic fallback must not
+      // erode the core #1731 perf fix within its own cadence.
+      mocks.emitQueueEvent({ printerId: 'p1', jobId: 'job-1' });
+      mocks.emitQueueEvent({ printerId: 'p2', jobId: 'job-2' });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(mocks.getQueueSubscriptionResources).not.toHaveBeenCalled();
+      expect(mocks.getPrinters).not.toHaveBeenCalled();
+      expect(mocks.replaceQueueResourceSubscriptions).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

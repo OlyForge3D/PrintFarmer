@@ -46,6 +46,16 @@ public static class QueueLifecycleEventWriter
 
     // ── Job lifecycle events ────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Job entered the queue (transitions to Queued). Membership-changing: this is when a
+    /// job first appears in <c>GetSubscriptionResourcesAsync</c>'s active jobIds/projectIds
+    /// snapshot (see #1731 PR #1741 review, Bishop).
+    /// </summary>
+    public const string EventTypeJobQueued = "PrintFarmer.Queue.JobQueued.v1";
+
+    /// <summary>Calibration job entered the queue. Membership-changing, same as <see cref="EventTypeJobQueued"/>.</summary>
+    public const string EventTypeCalibrationJobQueued = "PrintFarmer.Queue.CalibrationJobQueued.v1";
+
     /// <summary>Job completed (all copies finished successfully).</summary>
     public const string EventTypeJobCompleted = Dispatch.DispatchClaimService.EventTypeJobCompleted;
 

@@ -23,12 +23,40 @@ namespace Farm.Infrastructure.Services.Queue;
 public sealed class QueueOutboxPublisherService(
     IServiceScopeFactory scopeFactory,
     IHubContext<PrinterHub> hub,
-    ILogger<QueueOutboxPublisherService> logger) : BackgroundService
+    ILogger<QueueOutboxPublisherService> logger,
+    IQueueSubscriptionMembershipNotifier? membershipNotifier = null) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RetryBackoffBase = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan StaleLeaseAge = TimeSpan.FromMinutes(10);
     private const int MaxAttempts = 10;
+
+    // #1731 follow-up (Bishop's PR #1741 review): "subscription resources" isn't only
+    // printer/group/role authorization -- GetSubscriptionResourcesAsync also snapshots the
+    // caller's CURRENT active jobIds/projectIds (PrintJobStatus Queued/Assigned/Starting/
+    // Printing/Paused). An ordinary queue event can add or remove a job from that active
+    // set without any authorization change, e.g. a brand-new queued job, or a job's terminal
+    // completion/failure/cancellation. The client's "queueevent" SignalR groups are
+    // job/printer/project-scoped, so a client not yet subscribed to a genuinely new job or
+    // project would silently miss its events until some unrelated reconnect/membership
+    // change happened -- that's a correctness regression, not just a latency tradeoff.
+    // These are exactly the event types where a job enters or leaves that active set;
+    // everything else (dispatch progress, pause/resume, bed-clear, physical actuation,
+    // reconciliation-absent-returns-to-Assigned) is a transition WITHIN the active set and
+    // does not change subscription-resources membership.
+    private static readonly HashSet<string> MembershipChangingEventTypes = new(StringComparer.Ordinal)
+    {
+        QueueLifecycleEventWriter.EventTypeJobQueued,
+        QueueLifecycleEventWriter.EventTypeCalibrationJobQueued,
+        QueueLifecycleEventWriter.EventTypeJobCompleted,
+        QueueLifecycleEventWriter.EventTypeJobFailed,
+        QueueLifecycleEventWriter.EventTypeJobCancelled,
+        QueueLifecycleEventWriter.EventTypeJobOrphanSynced,
+
+        // NOTE: EventTypeJobAborted is deliberately excluded -- "abort" returns the job to
+        // PrintJobStatus.Queued (see DispatchClaimService's abort handling), which is still
+        // within the active set, so it is NOT a membership change.
+    };
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -182,16 +210,30 @@ public sealed class QueueOutboxPublisherService(
             List<Task> sends = new();
 
             // #1731: the "queueresourceschanged" discovery hint used to be sent here,
-            // unconditionally, for every outbox event. Every event type flowing through
-            // this outbox is a job/dispatch/bed-clear lifecycle event -- none of them can
-            // change which printers/jobs/projects a client is authorized to see -- so that
-            // broadcast made every queue event trigger a client-side subscription
-            // reconciliation (2 REST calls + resubscribe) for no reason. Membership can
-            // only actually change via printer create/delete/reassignment, printer-group
-            // membership changes, or user role changes, none of which are outbox events.
-            // Those mutation points now call IQueueSubscriptionMembershipNotifier directly
-            // (see PrinterGroupService/PrintersService/UsersService), which is both more
-            // precise and lower latency than waiting for this poller.
+            // unconditionally, for every outbox event. Most event types flowing through this
+            // outbox are dispatch-progress/bed-clear lifecycle events that cannot change
+            // subscription-resources membership, so broadcasting the hint for every one of
+            // them made every queue event trigger a client-side subscription reconciliation
+            // (2 REST calls + resubscribe) for no reason.
+            //
+            // Authorization-driven membership changes (printer create/delete/reassignment,
+            // printer-group membership, user role changes) are not outbox events at all --
+            // those mutation points call IQueueSubscriptionMembershipNotifier directly (see
+            // PrinterGroupService/PrintersService/UsersService/RoleManagementService), which
+            // is both more precise and lower latency than waiting for this poller.
+            //
+            // #1731 PR #1741 review (Bishop): GetSubscriptionResourcesAsync's snapshot also
+            // includes the caller's CURRENT active jobIds/projectIds (PrintJobStatus Queued/
+            // Assigned/Starting/Printing/Paused), and ordinary queue lifecycle events CAN
+            // change that without any authorization change -- a brand-new queued job, or a
+            // job leaving the active set on completion/failure/cancellation. Those ARE outbox
+            // events, so MembershipChangingEventTypes (above) narrowly re-fires the same hint
+            // for exactly those transitions, below.
+            if (membershipNotifier is not null &&
+                MembershipChangingEventTypes.Contains(evt.EventType))
+            {
+                sends.Add(membershipNotifier.NotifyMembershipChangedAsync(ct));
+            }
 
             // Job-scoped group: narrower delivery for clients watching this specific job.
             if (string.Equals(evt.AggregateType, nameof(PrintJob), StringComparison.Ordinal))

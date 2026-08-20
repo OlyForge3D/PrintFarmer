@@ -54,6 +54,7 @@ public class JobQueueService : IJobQueueService
     private readonly IDbOutboxSequenceAllocator? _sequenceAllocator;
     private readonly IQueuePositionAllocator? _positionAllocator;
     private readonly IQueueResourceAuthorizationService? _resourceAuthorization;
+    private readonly IQueueSubscriptionMembershipNotifier? _membershipNotifier;
 
     /// <summary>
     /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -72,6 +73,12 @@ public class JobQueueService : IJobQueueService
     /// <param name="sequenceAllocator">Optional outbox sequence allocator for cross-process monotonic ordering; required when <paramref name="db"/> is provided</param>
     /// <param name="positionAllocator">Optional provider-native allocator for unique monotonic queue positions.</param>
     /// <param name="resourceAuthorization">Optional service-boundary resource authorization.</param>
+    /// <param name="membershipNotifier">
+    /// Optional #1731 subscription-membership hint notifier. Job hard-deletion
+    /// (<see cref="RemoveJobCoreAsync"/>) bypasses the outbox entirely, so it is the one
+    /// membership-changing job transition that needs a direct call here rather than relying
+    /// on <see cref="QueueOutboxPublisherService"/>'s narrowed outbox-event handling.
+    /// </param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
     public JobQueueService(
         IQueueRepository repo,
@@ -87,7 +94,8 @@ public class JobQueueService : IJobQueueService
         AppDbContext? db = null,
         IDbOutboxSequenceAllocator? sequenceAllocator = null,
         IQueuePositionAllocator? positionAllocator = null,
-        IQueueResourceAuthorizationService? resourceAuthorization = null)
+        IQueueResourceAuthorizationService? resourceAuthorization = null,
+        IQueueSubscriptionMembershipNotifier? membershipNotifier = null)
     {
         ArgumentNullException.ThrowIfNull(repo);
         ArgumentNullException.ThrowIfNull(dataService);
@@ -106,6 +114,7 @@ public class JobQueueService : IJobQueueService
         _sequenceAllocator = sequenceAllocator;
         _positionAllocator = positionAllocator;
         _resourceAuthorization = resourceAuthorization;
+        _membershipNotifier = membershipNotifier;
     }
 
     /// <summary>
@@ -584,7 +593,7 @@ public class JobQueueService : IJobQueueService
                 JobStatus = job.Status.ToString(),
                 JobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard),
                 PrinterConfigRevision = job.PinnedPrinterConfigRevision,
-                EventType = "PrintFarmer.Queue.CalibrationJobQueued.v1",
+                EventType = QueueLifecycleEventWriter.EventTypeCalibrationJobQueued,
                 SchemaVersion = QueueEventSchemaVersions.Current,
                 PayloadJson = BuildCalibrationQueueOutboxPayload(job),
                 Status = QueueOutboxEventStatus.Pending,
@@ -657,7 +666,7 @@ public class JobQueueService : IJobQueueService
                     ProjectId = job.ProjectId,
                     JobStatus = job.Status.ToString(),
                     JobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard),
-                    EventType = "PrintFarmer.Queue.JobQueued.v1",
+                    EventType = QueueLifecycleEventWriter.EventTypeJobQueued,
                     SchemaVersion = QueueEventSchemaVersions.Current,
                     PayloadJson = BuildCalibrationQueueOutboxPayload(job),
                     Status = QueueOutboxEventStatus.Pending,
@@ -874,6 +883,16 @@ public class JobQueueService : IJobQueueService
                 priorAssignedPrinterId.Value,
                 FilamentCoverageChangeReasons.QueueChanged,
                 ct).ConfigureAwait(false);
+        }
+
+        // #1731 PR #1741 review (Bishop): job hard-deletion removes it from
+        // GetSubscriptionResourcesAsync's active jobIds/projectIds snapshot but never writes
+        // an outbox event (there is nothing left to broadcast job/printer/project-scoped
+        // "queueevent" data for), so QueueOutboxPublisherService's narrowed membership-event
+        // handling can never see this transition. Notify directly instead.
+        if (_membershipNotifier is not null)
+        {
+            await _membershipNotifier.NotifyMembershipChangedAsync(ct);
         }
 
         return true;

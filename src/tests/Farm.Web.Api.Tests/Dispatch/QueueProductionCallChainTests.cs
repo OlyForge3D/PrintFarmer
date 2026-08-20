@@ -4813,6 +4813,147 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Theory]
+    [Trait("Category", "DbHeavy")]
+    [InlineData("PrintFarmer.Queue.JobQueued.v1")]
+    [InlineData("PrintFarmer.Queue.CalibrationJobQueued.v1")]
+    [InlineData("PrintFarmer.Queue.JobCompleted.v1")]
+    [InlineData("PrintFarmer.Queue.JobFailed.v1")]
+    [InlineData("PrintFarmer.Queue.JobCancelled.v1")]
+    [InlineData("PrintFarmer.Queue.JobOrphanSynced.v1")]
+    public async Task OutboxPublisher_SendsDiscoveryHintForMembershipChangingJobTransitions(
+        string membershipChangingEventType)
+    {
+        // #1731 PR #1741 review (Bishop): GetSubscriptionResourcesAsync's active jobIds/
+        // projectIds snapshot changes on these transitions even with no authorization
+        // change -- the outbox publisher must still narrowly re-fire the discovery hint
+        // for exactly this set, not just skip it unconditionally as before.
+        QueueDispatchOutbox row;
+        await using (AppDbContext seed = CreateContext())
+        {
+            await seed.Database.MigrateAsync();
+            await using var transaction = await seed.Database.BeginTransactionAsync();
+            row = new QueueDispatchOutbox
+            {
+                Id = Guid.NewGuid(),
+                Sequence = await new DbOutboxSequenceAllocator().AllocateAsync(seed),
+                AggregateType = nameof(PrintJob),
+                AggregateId = Guid.NewGuid(),
+                EventType = membershipChangingEventType,
+                SchemaVersion = QueueEventSchemaVersions.Current,
+                PayloadJson = "{}",
+                Status = QueueOutboxEventStatus.Processing,
+                CreatedAtUtc = DateTime.UtcNow,
+            };
+            seed.QueueDispatchOutbox.Add(row);
+            await seed.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+
+        var proxy = new Mock<IClientProxy>();
+        proxy
+            .Setup(client => client.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var clients = new Mock<IHubClients>();
+        clients
+            .Setup(client => client.Group(It.IsAny<string>()))
+            .Returns(proxy.Object);
+        var hub = new Mock<IHubContext<PrinterHub>>();
+        hub.Setup(context => context.Clients).Returns(clients.Object);
+        ServiceProvider provider = new ServiceCollection()
+            .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                _connectionString,
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+            .BuildServiceProvider();
+        await using (provider)
+        {
+            var membershipNotifier = new QueueSubscriptionMembershipNotifier(
+                hub.Object,
+                NullLogger<QueueSubscriptionMembershipNotifier>.Instance);
+            var publisher = new QueueOutboxPublisherService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                hub.Object,
+                NullLogger<QueueOutboxPublisherService>.Instance,
+                membershipNotifier);
+
+            await publisher.ProcessSingleEventAsync(row, CancellationToken.None);
+        }
+
+        proxy.Verify(client => client.SendCoreAsync(
+            "queueresourceschanged",
+            It.IsAny<object?[]>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task OutboxPublisher_SkipsDiscoveryHintForJobAbortedEvent()
+    {
+        // "abort" returns the job to PrintJobStatus.Queued (still active), so unlike
+        // JobCancelled/JobCompleted/JobFailed it must NOT re-trigger the discovery hint.
+        QueueDispatchOutbox row;
+        await using (AppDbContext seed = CreateContext())
+        {
+            await seed.Database.MigrateAsync();
+            await using var transaction = await seed.Database.BeginTransactionAsync();
+            row = new QueueDispatchOutbox
+            {
+                Id = Guid.NewGuid(),
+                Sequence = await new DbOutboxSequenceAllocator().AllocateAsync(seed),
+                AggregateType = nameof(PrintJob),
+                AggregateId = Guid.NewGuid(),
+                EventType = QueueLifecycleEventWriter.EventTypeJobAborted,
+                SchemaVersion = QueueEventSchemaVersions.Current,
+                PayloadJson = "{}",
+                Status = QueueOutboxEventStatus.Processing,
+                CreatedAtUtc = DateTime.UtcNow,
+            };
+            seed.QueueDispatchOutbox.Add(row);
+            await seed.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+
+        var proxy = new Mock<IClientProxy>();
+        proxy
+            .Setup(client => client.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var clients = new Mock<IHubClients>();
+        clients
+            .Setup(client => client.Group(It.IsAny<string>()))
+            .Returns(proxy.Object);
+        var hub = new Mock<IHubContext<PrinterHub>>();
+        hub.Setup(context => context.Clients).Returns(clients.Object);
+        ServiceProvider provider = new ServiceCollection()
+            .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                _connectionString,
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+            .BuildServiceProvider();
+        await using (provider)
+        {
+            var membershipNotifier = new QueueSubscriptionMembershipNotifier(
+                hub.Object,
+                NullLogger<QueueSubscriptionMembershipNotifier>.Instance);
+            var publisher = new QueueOutboxPublisherService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                hub.Object,
+                NullLogger<QueueOutboxPublisherService>.Instance,
+                membershipNotifier);
+
+            await publisher.ProcessSingleEventAsync(row, CancellationToken.None);
+        }
+
+        proxy.Verify(client => client.SendCoreAsync(
+            "queueresourceschanged",
+            It.IsAny<object?[]>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private static bool IsExpectedQueueEnvelope(
         object?[] arguments,
         Guid calibrationAttemptId)

@@ -7,6 +7,21 @@ import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueS
 
 const resourceRefreshRetryDelaysMs = [100, 250, 500] as const;
 
+// #1731 PR #1741 review (Vasquez): the narrowed `queueresourceschanged` hint is a
+// single best-effort SignalR send -- QueueSubscriptionMembershipNotifier swallows
+// broadcast failures so the mutation that triggered it never fails, and removing the
+// old unconditional per-outbox-event broadcast removed the incidental self-heal that
+// used to paper over any dropped hint. A missed hint for an access-revoking mutation
+// (printer moved out of a group the caller can no longer see, role downgrade, etc.)
+// could otherwise leave an already-connected client permanently over-subscribed with
+// no recovery path. This bounded periodic fallback re-runs the full reconciliation
+// (and its invalidation) on a slow cadence regardless of any missed/failed hint, so a
+// dropped notification is corrected within one interval instead of never. The interval
+// is intentionally long -- this is defense-in-depth, not the primary correctness path,
+// and must never fire within the short window covered by the "burst of ordinary
+// events produces zero refetch" acceptance test.
+const periodicSelfHealIntervalMs = 60_000;
+
 // #1731: event types that can only ever reflect a single printer's physical/backend
 // actuation state (bed-clear acknowledgement lifecycle, backend pause/resume/cancel
 // commands). These can never add/remove a job, project, or printer from the queue, so
@@ -254,8 +269,15 @@ export function QueueRealtimeBridge() {
     void refreshBoth();
     void printerSignalRService.connect();
 
+    // #1731 (Vasquez review): bounded periodic self-heal -- see
+    // periodicSelfHealIntervalMs above.
+    const selfHealTimer = setInterval(() => {
+      if (!disposed) void refreshBoth();
+    }, periodicSelfHealIntervalMs);
+
     return () => {
       disposed = true;
+      clearInterval(selfHealTimer);
       unsubscribeQueue();
       unsubscribeConnection();
       unsubscribeResources();
