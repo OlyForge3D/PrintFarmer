@@ -345,7 +345,7 @@ public class SpoolmanServiceTests
     }
 
     [Fact]
-    public async Task UpdateFilamentInSpoolmanAsync_SerializesGtinField()
+    public async Task UpdateFilamentInSpoolmanAsync_NormalizesGtinField()
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();
         _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
@@ -366,12 +366,39 @@ public class SpoolmanServiceTests
 
         _ = await svc.UpdateFilamentInSpoolmanAsync(
             9,
-            new SpoolmanCreateFilamentRequest { Gtin = "00123456789012" },
+            new SpoolmanCreateFilamentRequest { Gtin = "123456789012" },
             CancellationToken.None);
 
         using JsonDocument body = JsonDocument.Parse(capturedBody!);
         Assert.False(body.RootElement.TryGetProperty("article_number", out _));
         Assert.Equal("00123456789012", body.RootElement.GetProperty("gtin").GetString());
+    }
+
+    [Fact]
+    public async Task UpdateFilamentInSpoolmanAsync_InvalidGtin_RejectsBeforeSending()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        int requestCount = 0;
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
+            {
+                requestCount++;
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            });
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
+
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => svc.UpdateFilamentInSpoolmanAsync(
+                9,
+                new SpoolmanCreateFilamentRequest { Gtin = "CODE-128-ABC" },
+                CancellationToken.None));
+
+        Assert.Equal("request", exception.ParamName);
+        Assert.Equal(0, requestCount);
     }
 
     [Fact]

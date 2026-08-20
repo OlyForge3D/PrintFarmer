@@ -807,21 +807,11 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         // Spoolman requires density and diameter on create; both are omitted from the JSON
         // when null, which makes Spoolman reject the whole payload with HTTP 422. Backfill
         // sane defaults so clients that don't collect these fields still succeed.
-        string? normalizedGtin = request.Gtin;
-        if (request.Gtin is not null)
-        {
-            normalizedGtin = GtinNormalizer.Normalize(request.Gtin)
-                ?? throw new ArgumentException(
-                    "GTIN is not a valid GTIN-8/12/13/14 (bad length or check digit).",
-                    nameof(request));
-        }
-
-        SpoolmanCreateFilamentRequest normalized = request with
+        SpoolmanCreateFilamentRequest normalized = NormalizeGtin(request with
         {
             Density = request.Density is > 0 ? request.Density : DefaultFilamentDensity,
             Diameter = request.Diameter is > 0 ? request.Diameter : DefaultFilamentDiameter,
-            Gtin = normalizedGtin,
-        };
+        });
         string jsonBody = BuildFilamentJson(normalized);
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -846,7 +836,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/filament/{filamentId}";
-        string jsonBody = BuildFilamentJson(request);
+        string jsonBody = BuildFilamentJson(NormalizeGtin(request));
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(15));
@@ -1127,6 +1117,21 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
         string trimmed = value.Trim();
         return trimmed.Length <= 500 ? trimmed : trimmed[..500];
+    }
+
+    private static SpoolmanCreateFilamentRequest NormalizeGtin(SpoolmanCreateFilamentRequest request)
+    {
+        if (request.Gtin is null)
+        {
+            return request;
+        }
+
+        string normalizedGtin = GtinNormalizer.Normalize(request.Gtin)
+            ?? throw new ArgumentException(
+                "GTIN is not a valid GTIN-8/12/13/14 (bad length or check digit).",
+                nameof(request));
+
+        return request with { Gtin = normalizedGtin };
     }
 
     private static string BuildFilamentJson(SpoolmanCreateFilamentRequest request)
