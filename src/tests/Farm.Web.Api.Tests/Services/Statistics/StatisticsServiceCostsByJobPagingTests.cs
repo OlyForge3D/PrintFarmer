@@ -201,6 +201,44 @@ public class StatisticsServiceCostsByJobPagingTests
     }
 
     [Theory]
+    [InlineData(long.MaxValue)]
+    [InlineData(long.MinValue)]
+    public void CostByJobCursor_TryDecode_RejectsOutOfRangeCompletedAtTicks(long forgedTicks)
+    {
+        // A well-formed (valid Base64Url + JSON + schema version + non-empty GUID) but forged
+        // cursor whose "ca" value falls outside DateTime's representable tick range must be
+        // rejected by TryDecode itself, not merely happen to surface as a 400 further downstream
+        // when the caller reconstructs a DateTime from it (bishop/vasquez review finding).
+        string token = EncodeForgedCursor(forgedTicks, Guid.NewGuid());
+
+        bool decoded = CostByJobCursor.TryDecode(token, out CostByJobCursor? cursor);
+
+        Assert.False(decoded);
+        Assert.Null(cursor);
+    }
+
+    [Fact]
+    public void CostByJobCursor_TryDecode_AcceptsBoundaryTicksValues()
+    {
+        Assert.True(CostByJobCursor.TryDecode(EncodeForgedCursor(DateTime.MinValue.Ticks, Guid.NewGuid()), out _));
+        Assert.True(CostByJobCursor.TryDecode(EncodeForgedCursor(DateTime.MaxValue.Ticks, Guid.NewGuid()), out _));
+    }
+
+    /// <summary>
+    /// Builds a cursor token in the exact wire format <see cref="CostByJobCursor.Encode"/> uses,
+    /// but allowing an arbitrary (including out-of-range) ticks value that
+    /// <see cref="CostByJobCursor.FromRow"/> could never itself produce — simulating a forged
+    /// or corrupted cursor from an untrusted caller.
+    /// </summary>
+    private static string EncodeForgedCursor(long ticks, Guid jobId)
+    {
+        var envelope = new { v = CostByJobCursor.SchemaVersion, ca = ticks, id = jobId };
+        byte[] json = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(envelope);
+        string base64 = Convert.ToBase64String(json);
+        return base64.TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    }
+
+    [Theory]
     [InlineData("sqlite")]
     [InlineData("postgres")]
     [InlineData("sqlserver")]

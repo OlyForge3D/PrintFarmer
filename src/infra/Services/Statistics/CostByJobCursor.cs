@@ -81,6 +81,14 @@ public sealed record CostByJobCursor(
                 return false;
             }
 
+            // A forged cursor could carry an out-of-range tick count; reject it here so the
+            // "TryDecode never throws" contract holds regardless of what the caller does with
+            // the ticks afterwards (e.g. reconstructing a DateTime).
+            if (envelope.CompletedAtTicks < DateTime.MinValue.Ticks || envelope.CompletedAtTicks > DateTime.MaxValue.Ticks)
+            {
+                return false;
+            }
+
             cursor = new CostByJobCursor(envelope.CompletedAtTicks, envelope.JobId);
             return true;
         }
