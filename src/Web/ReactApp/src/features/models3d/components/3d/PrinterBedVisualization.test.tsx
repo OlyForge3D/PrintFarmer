@@ -4,18 +4,9 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { NozzleIndicator, PrinterBedVisualization } from './PrinterBedVisualization';
+import { PrinterBedVisualization } from './PrinterBedVisualization';
 import { PrinterModelDto } from '@/types/api';
 import type { PrinterStatus } from './PrinterBedVisualization';
-import { generateNozzleGeometry } from '@/common/utils/bedGeometryGenerator';
-
-vi.mock('@/common/utils/bedGeometryGenerator', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/common/utils/bedGeometryGenerator')>();
-  return {
-    ...actual,
-    generateNozzleGeometry: vi.fn(actual.generateNozzleGeometry),
-  };
-});
 
 // Mock canvas-related APIs
  
@@ -218,50 +209,6 @@ describe('PrinterBedVisualization Component', () => {
       );
 
       expect(container).toBeInTheDocument();
-    });
-
-    it('reuses nozzle geometry until the diameter changes and disposes owned geometry', () => {
-      const geometryFactory = vi.mocked(generateNozzleGeometry);
-      geometryFactory.mockClear();
-
-      const { rerender, unmount } = render(
-        <NozzleIndicator
-          position={testStatus.nozzlePosition!}
-          isActive={false}
-          nozzleDiameter={0.4}
-        />
-      );
-
-      expect(geometryFactory).toHaveBeenCalledTimes(1);
-      const firstGeometry = geometryFactory.mock.results[0].value;
-      const firstDispose = vi.spyOn(firstGeometry, 'dispose');
-
-      rerender(
-        <NozzleIndicator
-          position={{ x: 150, y: 150, z: 20 }}
-          isActive
-          nozzleDiameter={0.4}
-        />
-      );
-
-      expect(geometryFactory).toHaveBeenCalledTimes(1);
-
-      rerender(
-        <NozzleIndicator
-          position={testStatus.nozzlePosition!}
-          isActive={false}
-          nozzleDiameter={0.6}
-        />
-      );
-
-      expect(geometryFactory).toHaveBeenCalledTimes(2);
-      expect(firstDispose).toHaveBeenCalledOnce();
-
-      const secondGeometry = geometryFactory.mock.results[1].value;
-      const secondDispose = vi.spyOn(secondGeometry, 'dispose');
-      unmount();
-
-      expect(secondDispose).toHaveBeenCalledOnce();
     });
 
     it('handles missing nozzle position', () => {

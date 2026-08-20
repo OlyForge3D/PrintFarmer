@@ -18,7 +18,6 @@ import { PrinterModelDto } from '@/types/api';
 import {
   createBedVisualization,
   calculateOptimalCameraPosition,
-  generateNozzleGeometry,
 } from '@/common/utils/bedGeometryGenerator';
 
 export interface PrinterStatus {
@@ -53,31 +52,20 @@ export interface PrinterBedVisualizationProps {
  * Nozzle Indicator Component
  * Renders a visual indicator for the nozzle position
  */
-export const NozzleIndicator: React.FC<{
+const NozzleIndicator: React.FC<{
   position: { x: number; y: number; z: number };
   nozzleDiameter?: number;
   isActive: boolean;
 }> = ({ position, nozzleDiameter = 0.4, isActive }) => {
   const meshRef = useRef<THREE.Mesh>(null);
 
-  const nozzleGeometry = useMemo(
-    () => generateNozzleGeometry(nozzleDiameter),
-    [nozzleDiameter]
-  );
-
-  useEffect(
-    () => () => nozzleGeometry.dispose(),
-    [nozzleGeometry]
-  );
-
   return (
     <mesh
       ref={meshRef}
       position={[position.x, position.z, position.y]}
-      geometry={nozzleGeometry}
-      dispose={null}
       rotation={[Math.PI, 0, 0]} // Point downward
     >
+      <coneGeometry args={[nozzleDiameter / 2, nozzleDiameter * 3, 8]} />
       <meshPhongMaterial
         color={isActive ? 0xff6600 : 0xffaa33} // Darker when idle
         emissive={isActive ? 0xff4400 : 0xffaa00}
