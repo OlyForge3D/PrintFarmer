@@ -850,6 +850,7 @@ public static class ServiceCollectionExtensions
             // Drives atomic claim, awaited backend execution, crash recovery, and retry.
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BackendStartCommandConsumerService>();
 
+            _ = services.AddSingleton<Farm.Infrastructure.Services.Queue.BedClearAcknowledgementExpiryMetrics>();
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BedClearAcknowledgementExpiryService>();
 
             // Durable attempt-fenced cancel/abort hardware command consumer.
