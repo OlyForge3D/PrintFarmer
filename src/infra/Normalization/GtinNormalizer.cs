@@ -25,7 +25,7 @@ public static class GtinNormalizer
             return null;
         }
 
-        string digits = new(barcode.Where(char.IsDigit).ToArray());
+        string digits = new(barcode.Where(c => c is >= '0' and <= '9').ToArray());
 
         if (digits.Length is not (8 or 12 or 13 or 14))
         {

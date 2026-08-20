@@ -64,4 +64,17 @@ public class GtinNormalizerTests
         // rejected rather than persisted.
         GtinNormalizer.Normalize("04850807Z").Should().BeNull();
     }
+
+    [Fact]
+    public void Normalize_NonAsciiDecimalDigits_AreNotTreatedAsDigits()
+    {
+        // char.IsDigit(char) matches any Unicode "Nd" decimal digit (e.g. Arabic-Indic
+        // U+0660-U+0669), not just ASCII '0'-'9'. Filtering on IsDigit would let these through
+        // and then corrupt the checksum arithmetic (which assumes `c - '0'` is 0-9). Stripping
+        // must be ASCII-only, so an Arabic-Indic rendering of a valid barcode should strip down
+        // to nothing usable and be rejected, not silently accepted as if it were ASCII digits.
+        const string arabicIndicDigits = "\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669\u0660\u0661\u0662"; // "123456789012" in Arabic-Indic
+
+        GtinNormalizer.Normalize(arabicIndicDigits).Should().BeNull();
+    }
 }
