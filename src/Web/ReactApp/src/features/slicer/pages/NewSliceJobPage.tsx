@@ -15,6 +15,7 @@ import { slicerRegistry } from '@/services/slicerRegistry';
 import { assetService } from '@/services/assetService';
 import { apiClient } from '@/services/api';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
+import { getErrorMessage } from '@/common/utils/apiErrors';
 import { createSlicerRegistryConnection } from '@/services/slicerRegistryHubConnection';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
@@ -1672,7 +1673,7 @@ export const NewSliceJobPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['slice-jobs'] });
     },
     onError: (err: unknown) => {
-      setError(err instanceof Error ? err.message : 'Failed to submit job');
+      setError(getErrorMessage(err, 'Failed to submit job'));
     }
   });
 

@@ -68,30 +68,45 @@ public sealed record ModelResolutionResult(
 /// API-local absolute paths are never dereferenced, which removes the SSRF, traversal, local-file
 /// read and internal-service probing surface that a free-form model location would create.
 /// </remarks>
+/// <remarks>
+/// Access policy (issue #1770): the 3D model library is a shared, farm-wide resource. Every
+/// authenticated caller can already list, view details for, and download the bytes of any stored
+/// model via <c>Model3DFilesController</c> (its list/details/file/thumbnail routes carry no
+/// per-uploader check). Resolution here intentionally mirrors that rule rather than re-imposing a
+/// stricter one: any authenticated caller may reference any model that exists in the library,
+/// regardless of who uploaded it or whether the uploader is recorded at all. This closes the
+/// contradiction where the picker offered a model that slice-submit then refused. The
+/// <c>requestingUserId</c> parameter is retained for audit logging and as a hook for a future
+/// per-model visibility model; it is not compared to the model's recorded uploader. The only
+/// rejection this resolver still enforces is that the referenced model must actually exist (and,
+/// for <see cref="OpenAsync"/>, that its bytes are present and intact) — that remains the
+/// fail-closed protection: a bare/guessed model ID cannot be used to fabricate access to bytes
+/// that were never stored.
+/// </remarks>
 public interface IModelStorageResolver
 {
     /// <summary>
-    /// Opens the stored bytes for a model owned by <paramref name="ownerUserId"/>.
+    /// Opens the stored bytes for a model in the shared library.
     /// </summary>
     /// <param name="model3DId">Stored model identity.</param>
-    /// <param name="ownerUserId">The user whose ownership must cover the model.</param>
+    /// <param name="requestingUserId">The requesting user, recorded for audit purposes only.</param>
     /// <param name="expectedSha256">Optional recorded hash that the stored bytes must still match.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The resolution outcome; the caller disposes any returned stream.</returns>
     Task<ModelResolutionResult> OpenAsync(
         Guid model3DId,
-        Guid ownerUserId,
+        Guid requestingUserId,
         string? expectedSha256,
         CancellationToken ct);
 
     /// <summary>
-    /// Reads the stored provenance for a model without opening its bytes.
+    /// Reads the stored provenance for a model in the shared library, without opening its bytes.
     /// </summary>
     /// <param name="model3DId">Stored model identity.</param>
-    /// <param name="ownerUserId">The user whose ownership must cover the model.</param>
+    /// <param name="requestingUserId">The requesting user, recorded for audit purposes only.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>The stored model when it exists and is owned by the caller; otherwise <see langword="null"/>.</returns>
-    Task<Model3D?> FindOwnedAsync(Guid model3DId, Guid ownerUserId, CancellationToken ct);
+    /// <returns>The stored model when it exists in the library; otherwise <see langword="null"/>.</returns>
+    Task<Model3D?> FindOwnedAsync(Guid model3DId, Guid requestingUserId, CancellationToken ct);
 }
 
 /// <summary>
@@ -110,16 +125,18 @@ public sealed class Model3DStorageResolver(
     private readonly ILogger<Model3DStorageResolver> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc/>
-    public async Task<Model3D?> FindOwnedAsync(Guid model3DId, Guid ownerUserId, CancellationToken ct)
+    public async Task<Model3D?> FindOwnedAsync(Guid model3DId, Guid requestingUserId, CancellationToken ct)
     {
-        Model3D? model = await _models.GetByIdAsync(model3DId, ct);
-        return model is not null && IsOwnedBy(model, ownerUserId) ? model : null;
+        // Shared-library policy (#1770): any authenticated caller may resolve any existing model,
+        // matching Model3DFilesController's list/details/download routes. requestingUserId is not
+        // compared against the recorded uploader — see the IModelStorageResolver remarks.
+        return await _models.GetByIdAsync(model3DId, ct);
     }
 
     /// <inheritdoc/>
     public async Task<ModelResolutionResult> OpenAsync(
         Guid model3DId,
-        Guid ownerUserId,
+        Guid requestingUserId,
         string? expectedSha256,
         CancellationToken ct)
     {
@@ -129,11 +146,8 @@ public sealed class Model3DStorageResolver(
             return ModelResolutionResult.Failed(ModelResolutionFailure.NotFound);
         }
 
-        if (!IsOwnedBy(model, ownerUserId))
-        {
-            return ModelResolutionResult.Failed(ModelResolutionFailure.Forbidden);
-        }
-
+        // Shared-library policy (#1770): no per-uploader ownership check here — see the
+        // IModelStorageResolver remarks. requestingUserId is accepted for future audit logging.
         if (!TryResolveStoredPath(model, out string storedPath))
         {
             return ModelResolutionResult.Failed(ModelResolutionFailure.BytesUnavailable);
@@ -177,11 +191,6 @@ public sealed class Model3DStorageResolver(
         byte[] hash = await SHA256.HashDataAsync(stream, ct);
         return Convert.ToHexString(hash);
     }
-
-    // Fail closed: a model with no recorded uploader is not "owned by everyone". Only an exact
-    // match on the recorded uploader grants access, matching Model3DFileService's ownership check.
-    private static bool IsOwnedBy(Model3D model, Guid ownerUserId) =>
-        model.UploadedByUserId == ownerUserId;
 
     private static string? Normalize(string? hash) =>
         string.IsNullOrWhiteSpace(hash) ? null : hash.Trim().Replace("-", string.Empty, StringComparison.Ordinal);

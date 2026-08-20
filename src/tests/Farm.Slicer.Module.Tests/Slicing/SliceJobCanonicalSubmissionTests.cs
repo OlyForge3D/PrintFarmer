@@ -156,10 +156,10 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
         _ = (await response.Content.ReadAsStringAsync()).Should().Contain("solid canonical-test-model");
     }
 
-    [Fact(DisplayName = "A stored model owned by another user is not resolvable")]
-    public async Task Submit_WithForeignStoredModel_ReturnsBadRequest()
+    [Fact(DisplayName = "A stored model owned by another user is resolvable (shared library, issue #1770)")]
+    public async Task Submit_WithForeignStoredModel_Succeeds()
     {
-        (Guid modelId, _) = await AddStoredModelAsync(Guid.NewGuid());
+        (Guid modelId, string sha256) = await AddStoredModelAsync(Guid.NewGuid());
 
         HttpResponseMessage response = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
         {
@@ -168,22 +168,50 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
             ModelFileName = "calibration.stl",
             SlicerEngine = SlicerEngineType.OrcaSlicer,
         });
+        SubmitSliceJobResponse submitted = await response.Content.ReadFromJsonAsync<SubmitSliceJobResponse>()
+            ?? throw new InvalidOperationException("Missing submit response.");
 
-        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        _ = (await ReadCodeAsync(response)).Should().Be("model_not_found");
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        SliceJob job = await db.SliceJobs.AsNoTracking().SingleAsync(value => value.Id == submitted.JobId);
+        _ = job.Model3DId.Should().Be(modelId);
+        _ = job.ModelSha256.Should().Be(sha256);
     }
 
-    [Fact(DisplayName = "A stored model with no recorded uploader is not resolvable by any caller")]
-    public async Task Submit_WithUnattributedStoredModel_ReturnsBadRequest()
+    [Fact(DisplayName = "A stored model with no recorded uploader is resolvable (shared library, issue #1770)")]
+    public async Task Submit_WithUnattributedStoredModel_Succeeds()
     {
-        // Fails closed: a NULL UploadedByUserId is not "owned by everyone". Legacy or corrupted
-        // rows without a recorded uploader must never be adoptable by an arbitrary caller.
-        (Guid modelId, _) = await AddStoredModelAsync(ownerId: null);
+        // Shared-library policy: a NULL UploadedByUserId (legacy/seeded/imported rows) is treated
+        // the same as any other library model, matching the list/download routes which never
+        // checked uploader identity in the first place.
+        (Guid modelId, string sha256) = await AddStoredModelAsync(ownerId: null);
 
         HttpResponseMessage response = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
         {
             UserId = await GetAuthenticatedUserIdAsync(),
             Model3DId = modelId,
+            ModelFileName = "calibration.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+        });
+        SubmitSliceJobResponse submitted = await response.Content.ReadFromJsonAsync<SubmitSliceJobResponse>()
+            ?? throw new InvalidOperationException("Missing submit response.");
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        SliceJob job = await db.SliceJobs.AsNoTracking().SingleAsync(value => value.Id == submitted.JobId);
+        _ = job.Model3DId.Should().Be(modelId);
+        _ = job.ModelSha256.Should().Be(sha256);
+    }
+
+    [Fact(DisplayName = "A nonexistent stored model id still fails closed with 400")]
+    public async Task Submit_WithNonexistentStoredModel_ReturnsBadRequest()
+    {
+        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = Guid.NewGuid(),
+            Model3DId = Guid.NewGuid(),
             ModelFileName = "calibration.stl",
             SlicerEngine = SlicerEngineType.OrcaSlicer,
         });
