@@ -19,6 +19,13 @@ vi.mock('../hooks/usePartsInventory', () => ({
   useReorderCandidates: () => ({ data: [] }),
 }));
 
+vi.mock('@/common/hooks/useSystemCapabilities', () => ({
+  useSystemCapabilities: () => ({
+    data: { operatorFeatures: { printedPartsInventoryEnabled: true } },
+    status: 'success',
+  }),
+}));
+
 import { PartsInventoryPage } from '../pages/PartsInventoryPage';
 
 function renderAt(path: string) {
