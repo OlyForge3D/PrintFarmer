@@ -1,4 +1,5 @@
 import {
+  Fragment,
   forwardRef,
   useLayoutEffect,
   useMemo,
@@ -656,7 +657,20 @@ function SmallQueueJobsTable({ jobs, ...rowProps }: QueueJobsTableVariantProps) 
  *
  * A focused row is force-kept in the virtualizer's rendered range (see the
  * `rangeExtractor` below) even if it scrolls outside the overscan window,
- * so keyboard focus never silently falls back to `<body>`.
+ * so keyboard focus never silently falls back to `<body>`. Because that can
+ * make the rendered range non-contiguous (e.g. a focused row far above the
+ * visible window plus the window itself), a spacer `<tbody>` is rendered
+ * before *every* row whose `start` offset doesn't immediately follow the
+ * previous rendered row's `end` — not just once at the very top — so the
+ * gap between non-adjacent rendered rows still occupies correct table
+ * space instead of collapsing them together.
+ *
+ * `getItemKey` is keyed by `job.id` (not the default index-based identity)
+ * because the queue refetches continuously and jobs can be inserted,
+ * removed, or reordered between renders; without a stable key the
+ * virtualizer's per-index measurement cache can apply a stale height/offset
+ * to whatever job now occupies that index, causing incorrect spacer math
+ * and a visible jump/blank flash mid-scroll.
  */
 function VirtualizedQueueJobsTable({ jobs, ...rowProps }: QueueJobsTableVariantProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -707,6 +721,11 @@ function VirtualizedQueueJobsTable({ jobs, ...rowProps }: QueueJobsTableVariantP
     estimateSize: () => QUEUE_ROW_ESTIMATED_HEIGHT_PX,
     overscan: QUEUE_ROW_OVERSCAN,
     scrollMargin,
+    // Keyed by job id (not the default index-based identity) so that
+    // insertions/removals/reorders in the polled/SignalR-refreshed job list
+    // don't apply a stale measurement to whatever job now sits at a given
+    // index — see the doc comment above.
+    getItemKey: (index) => jobs[index]?.job.id ?? index,
     rangeExtractor: (range: Range) => {
       const indexes = new Set(defaultRangeExtractor(range));
       // Keep a focused row mounted even if it scrolls outside the overscan
@@ -748,19 +767,35 @@ function VirtualizedQueueJobsTable({ jobs, ...rowProps }: QueueJobsTableVariantP
           </tr>
         </tbody>
       )}
-      {virtualRows.map((virtualRow) => {
+      {virtualRows.map((virtualRow, virtualRowPosition) => {
         const jobWrapper = jobs[virtualRow.index];
         if (!jobWrapper) return null;
+        // The rangeExtractor above can force-include a focused row that's
+        // outside the visible/overscanned window, making the rendered range
+        // non-contiguous. Render a spacer for the gap before this row
+        // whenever it doesn't immediately follow the previous rendered row,
+        // not just once at the very top — otherwise skipped rows in the
+        // middle would collapse to zero height.
+        const previousVirtualRow = virtualRows[virtualRowPosition - 1];
+        const gapBeforeRow = previousVirtualRow ? virtualRow.start - previousVirtualRow.end : 0;
         return (
-          <QueueJobRowGroup
-            key={jobWrapper.job.id}
-            ref={rowVirtualizer.measureElement}
-            jobWrapper={jobWrapper}
-            isLastJob={virtualRow.index === jobs.length - 1}
-            virtualIndex={virtualRow.index}
-            ariaRowIndexBase={virtualRow.index * 2 + 2}
-            {...rowProps}
-          />
+          <Fragment key={jobWrapper.job.id}>
+            {gapBeforeRow > 0 && (
+              <tbody aria-hidden="true">
+                <tr>
+                  <td colSpan={QUEUE_TABLE_COLUMN_COUNT} style={{ height: gapBeforeRow, padding: 0, border: 0 }} />
+                </tr>
+              </tbody>
+            )}
+            <QueueJobRowGroup
+              ref={rowVirtualizer.measureElement}
+              jobWrapper={jobWrapper}
+              isLastJob={virtualRow.index === jobs.length - 1}
+              virtualIndex={virtualRow.index}
+              ariaRowIndexBase={virtualRow.index * 2 + 2}
+              {...rowProps}
+            />
+          </Fragment>
         );
       })}
       {paddingBottom > 0 && (

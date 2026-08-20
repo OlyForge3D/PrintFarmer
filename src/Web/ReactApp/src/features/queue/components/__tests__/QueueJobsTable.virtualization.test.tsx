@@ -19,6 +19,11 @@ import "@testing-library/jest-dom";
 const ROW_HEIGHT = 84;
 let windowStart = 0;
 let windowEnd = 3;
+// Captures the real `getItemKey` option passed by QueueJobsTable so tests can
+// assert it's actually wired (keyed by job.id, not the default index-based
+// identity) without needing the mock to reimplement TanStack's internal
+// measurement cache.
+let capturedGetItemKey: ((index: number) => string | number) | undefined;
 
 interface MockRange {
   startIndex: number;
@@ -32,6 +37,7 @@ interface MockVirtualizerOptions {
   overscan: number;
   scrollMargin: number;
   rangeExtractor?: (range: MockRange) => number[];
+  getItemKey?: (index: number) => string | number;
 }
 
 vi.mock("@tanstack/react-virtual", () => ({
@@ -41,6 +47,7 @@ vi.mock("@tanstack/react-virtual", () => ({
     return indexes;
   },
   useVirtualizer: (options: MockVirtualizerOptions) => {
+    capturedGetItemKey = options.getItemKey;
     const clampedEnd = Math.min(windowEnd, options.count - 1);
     const range: MockRange = { startIndex: windowStart, endIndex: clampedEnd, overscan: options.overscan, count: options.count };
     const indexes = options.rangeExtractor
@@ -48,7 +55,7 @@ vi.mock("@tanstack/react-virtual", () => ({
       : Array.from({ length: clampedEnd - windowStart + 1 }, (_, i) => windowStart + i);
     const items = indexes.map((index) => ({
       index,
-      key: `row-${index}`,
+      key: options.getItemKey ? options.getItemKey(index) : `row-${index}`,
       start: options.scrollMargin + index * ROW_HEIGHT,
       end: options.scrollMargin + (index + 1) * ROW_HEIGHT,
     }));
@@ -138,6 +145,7 @@ describe("QueueJobsTable virtualization", () => {
   beforeEach(() => {
     windowStart = 0;
     windowEnd = 3;
+    capturedGetItemKey = undefined;
   });
 
   it("renders every job directly (no virtualizer wiring) at/under the threshold", () => {
@@ -224,10 +232,11 @@ describe("QueueJobsTable virtualization", () => {
     expect(onEdit).toHaveBeenCalledWith("job-5");
   });
 
-  it("keeps a focused row mounted even after it scrolls outside the windowed range", () => {
+  it("keeps a focused row mounted even after it scrolls outside the windowed range, with a spacer for the gap it creates", () => {
     windowStart = 5;
     windowEnd = 8;
-    const jobs = createJobs(QUEUE_TABLE_VIRTUALIZATION_THRESHOLD + 30);
+    const totalJobs = QUEUE_TABLE_VIRTUALIZATION_THRESHOLD + 30;
+    const jobs = createJobs(totalJobs);
 
     const { container, rerender } = render(<QueueJobsTable jobs={jobs} />);
 
@@ -236,7 +245,8 @@ describe("QueueJobsTable virtualization", () => {
     fireEvent.focus(rowFive);
 
     // Simulate a mouse-wheel scroll (independent of Tab) that moves the
-    // windowed range well past the focused row.
+    // windowed range well past the focused row, making the rendered range
+    // non-contiguous: [5, 20, 21, 22, 23].
     windowStart = 20;
     windowEnd = 23;
     rerender(
@@ -251,6 +261,76 @@ describe("QueueJobsTable virtualization", () => {
     expect(screen.getByText(jobs[5].gcodeFile!.fileName)).toBeInTheDocument();
     // The new windowed range (20-23) is also mounted alongside it.
     expect(screen.getByText(jobs[20].gcodeFile!.fileName)).toBeInTheDocument();
+    // Rows 6-19 (14 rows) are skipped in between — they must not collapse
+    // into nothing; a dedicated middle spacer must occupy that gap in
+    // addition to the top (rows 0-4) and bottom (rows 24-49) spacers,
+    // otherwise the table's total height/scroll math would be wrong.
+    const hiddenBodies = Array.from(container.querySelectorAll("tbody[aria-hidden]"));
+    expect(hiddenBodies).toHaveLength(3);
+    const heights = hiddenBodies.map((tbody) => parseFloat((tbody.querySelector("td") as HTMLElement).style.height));
+    expect(heights[0]).toBeCloseTo(5 * ROW_HEIGHT, 0); // rows 0-4, before the focused row
+    expect(heights[1]).toBeCloseTo(14 * ROW_HEIGHT, 0); // rows 6-19, the gap the focused row creates
+    expect(heights[2]).toBeCloseTo(26 * ROW_HEIGHT, 0); // rows 24-49, after the window
+  });
+
+  it("keys virtualized rows by job.id (not index) so reordering, inserting, or removing jobs can't misapply a stale row", () => {
+    windowStart = 0;
+    windowEnd = 2;
+    const jobs = createJobs(QUEUE_TABLE_VIRTUALIZATION_THRESHOLD + 10);
+
+    const { rerender } = render(<QueueJobsTable jobs={jobs} />);
+
+    expect(capturedGetItemKey).toBeDefined();
+    expect(capturedGetItemKey!(0)).toBe(jobs[0].job.id);
+    expect(capturedGetItemKey!(2)).toBe(jobs[2].job.id);
+    expect(screen.getByText(jobs[0].gcodeFile!.fileName)).toBeInTheDocument();
+
+    // Insert a new job at the front (e.g. a poll/SignalR update surfacing a
+    // newly queued job) while the windowed range (indices 0-2) is unchanged.
+    const insertedJob: QueuedPrintJobWithFileMetaDto = {
+      ...jobs[0],
+      id: "job-inserted",
+      job: { ...jobs[0].job, id: "job-inserted" },
+      gcodeFile: { ...jobs[0].gcodeFile!, fileName: "inserted.gcode" },
+    };
+    const jobsAfterInsert = [insertedJob, ...jobs];
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <QueueJobsTable jobs={jobsAfterInsert} />
+      </QueryClientProvider>,
+    );
+
+    // Index 0 now maps to the newly inserted job, not the original job[0] —
+    // getItemKey (and the rendered content) must follow the new job at that
+    // index rather than reusing stale identity/measurement for job[0].
+    expect(capturedGetItemKey!(0)).toBe("job-inserted");
+    expect(screen.getByText("inserted.gcode")).toBeInTheDocument();
+    expect(screen.getByText(jobs[0].gcodeFile!.fileName)).toBeInTheDocument();
+
+    // Reorder (swap indices 0 and 1) — e.g. a priority change re-sorting the
+    // queue. The item key at each index must follow the job, not the slot.
+    const reordered = [jobsAfterInsert[1], jobsAfterInsert[0], ...jobsAfterInsert.slice(2)];
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <QueueJobsTable jobs={reordered} />
+      </QueryClientProvider>,
+    );
+
+    expect(capturedGetItemKey!(0)).toBe(reordered[0].job.id);
+    expect(capturedGetItemKey!(1)).toBe(reordered[1].job.id);
+    expect(screen.getByText(jobs[0].gcodeFile!.fileName)).toBeInTheDocument();
+
+    // Remove a job from the front — indices shift, and the key at index 0
+    // must reflect whatever job now actually occupies it.
+    const afterRemoval = reordered.slice(1);
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <QueueJobsTable jobs={afterRemoval} />
+      </QueryClientProvider>,
+    );
+
+    expect(capturedGetItemKey!(0)).toBe(afterRemoval[0].job.id);
+    expect(screen.getByText(afterRemoval[0].gcodeFile!.fileName)).toBeInTheDocument();
   });
 
   it("re-renders correctly when the filtered jobs list identity changes", () => {
