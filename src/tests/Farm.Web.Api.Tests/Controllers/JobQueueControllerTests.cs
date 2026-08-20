@@ -165,19 +165,19 @@ public class JobQueueControllerTests
 
         Mock<IQueueResourceAuthorizationService> authorization = new();
         authorization
-            .Setup(service => service.CanAccessJobAsync(
+            .Setup(service => service.FilterAccessiblePrinterIdsAsync(
                 It.IsAny<ClaimsPrincipal>(),
-                allowedJobId,
+                It.IsAny<IReadOnlyCollection<Guid>>(),
                 PrinterGroupAccessLevel.View,
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
+            .ReturnsAsync(new HashSet<Guid>());
         authorization
-            .Setup(service => service.CanAccessJobAsync(
-                It.IsAny<ClaimsPrincipal>(),
-                deniedJobId,
+            .Setup(service => service.FilterActorAccessibleJobIdsAsync(
+                It.IsAny<string>(),
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Contains(allowedJobId) && ids.Contains(deniedJobId)),
                 PrinterGroupAccessLevel.View,
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
+            .ReturnsAsync(new HashSet<Guid> { allowedJobId });
         JobQueueController controller = CreateController(db, authorization.Object);
 
         IActionResult result = await controller.GetChangesAsync(
@@ -197,6 +197,62 @@ public class JobQueueControllerTests
             evt.EventType == BedClearAcknowledgementService.BackendStartCommandEventType);
         Assert.Equal(3L, value.GetType().GetProperty("nextSequence")?.GetValue(value));
         Assert.Equal(false, value.GetType().GetProperty("hasMore")?.GetValue(value));
+    }
+
+    [Fact]
+    public async Task GetChangeWatermarkAsync_EmptyOutbox_ReturnsZero()
+    {
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        await using var db = new AppDbContext(options);
+        Mock<IQueueResourceAuthorizationService> authorization = new();
+        JobQueueController controller = CreateController(db, authorization.Object);
+
+        ActionResult<QueueChangeWatermarkDto> result =
+            await controller.GetChangeWatermarkAsync(CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        QueueChangeWatermarkDto dto = Assert.IsType<QueueChangeWatermarkDto>(ok.Value);
+        Assert.Equal(0, dto.LatestSequence);
+    }
+
+    [Fact]
+    public async Task GetChangeWatermarkAsync_PopulatedOutbox_ReturnsMaxSequence()
+    {
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        await using var db = new AppDbContext(options);
+        Guid jobId = Guid.NewGuid();
+        db.QueueDispatchOutbox.AddRange(
+            CreateOutboxEvent(jobId, 1),
+            CreateOutboxEvent(jobId, 5),
+            CreateOutboxEvent(jobId, 3));
+        await db.SaveChangesAsync();
+
+        Mock<IQueueResourceAuthorizationService> authorization = new();
+        JobQueueController controller = CreateController(db, authorization.Object);
+
+        ActionResult<QueueChangeWatermarkDto> result =
+            await controller.GetChangeWatermarkAsync(CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        QueueChangeWatermarkDto dto = Assert.IsType<QueueChangeWatermarkDto>(ok.Value);
+        Assert.Equal(5, dto.LatestSequence);
+    }
+
+    [Fact]
+    public async Task GetChangeWatermarkAsync_DbUnavailable_ReturnsServiceUnavailable()
+    {
+        IActionResult result = await _controller.GetChangeWatermarkAsync(CancellationToken.None) is ActionResult<QueueChangeWatermarkDto> typed
+            ? typed.Result!
+            : throw new InvalidOperationException("Unexpected result type.");
+
+        ObjectResult response = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, response.StatusCode);
     }
 
     [Fact]

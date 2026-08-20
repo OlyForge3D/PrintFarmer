@@ -284,21 +284,26 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             query = query.Where(j => j.ActualEndTime <= effectiveEnd.Value);
         }
 
-        var jobs = await query.ToListAsync(ct);
+        // Aggregate server-side (mirrors BuildSummaryAggregateQuery below) instead of
+        // materializing every matching PrintJob just to sum a handful of scalars.
+        // The GroupBy produces zero or one row: Enumerable.Sum() over an empty list
+        // safely yields 0 for the empty date-range case, no null-handling required.
+        List<CostsSummaryAggregate> aggregateParts = await BuildCostsSummaryAggregateQuery(query)
+            .ToListAsync(ct);
 
-        decimal totalCost = jobs.Sum(j => j.TotalCostUsd ?? 0m);
-        int jobCount = jobs.Count;
-        decimal totalMaterial = jobs.Sum(j => j.MaterialCostUsd ?? 0m);
-        decimal totalEnergy = jobs.Sum(j => j.EnergyCostUsd ?? 0m);
-        decimal totalMachine = jobs.Sum(j => j.MachineTimeCostUsd ?? 0m);
-        decimal totalLabor = jobs.Sum(j => j.LaborCostUsd ?? 0m);
+        decimal totalCost = aggregateParts.Sum(part => part.TotalCost);
+        decimal totalMaterial = aggregateParts.Sum(part => part.MaterialCost);
+        decimal totalEnergy = aggregateParts.Sum(part => part.EnergyCost);
+        decimal totalMachine = aggregateParts.Sum(part => part.MachineCost);
+        decimal totalLabor = aggregateParts.Sum(part => part.LaborCost);
+        int jobCount = aggregateParts.Sum(part => part.JobCount);
 
-        var materialGroups = jobs
-            .Where(j => !string.IsNullOrEmpty(j.FilamentName) && j.TotalCostUsd.HasValue)
+        var materialGroup = await query
+            .Where(j => !string.IsNullOrEmpty(j.FilamentName))
             .GroupBy(j => j.FilamentName!)
-            .Select(g => new { Material = g.Key, Cost = g.Sum(j => j.TotalCostUsd!.Value) })
+            .Select(g => new { Material = g.Key, Cost = g.Sum(j => j.TotalCostUsd ?? 0m) })
             .OrderByDescending(g => g.Cost)
-            .FirstOrDefault();
+            .FirstOrDefaultAsync(ct);
 
         return new CostStatisticsSummaryDto
         {
@@ -309,9 +314,27 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             TotalEnergyCostUsd = totalEnergy,
             TotalMachineTimeCostUsd = totalMachine,
             TotalLaborCostUsd = totalLabor,
-            MostExpensiveMaterial = materialGroups?.Material,
-            MostExpensiveMaterialCost = materialGroups?.Cost ?? 0m,
+            MostExpensiveMaterial = materialGroup?.Material,
+            MostExpensiveMaterialCost = materialGroup?.Cost ?? 0m,
         };
+    }
+
+    // Builds the single server-side aggregate projection backing GetCostsSummaryAsync.
+    // Internal (not private) so provider-translation tests can call ToQueryString() on it
+    // directly, mirroring BuildSummaryAggregateQuery above.
+    internal static IQueryable<CostsSummaryAggregate> BuildCostsSummaryAggregateQuery(IQueryable<PrintJob> query)
+    {
+        // The key must reference a real column because SQL Server rejects constant-only
+        // GROUP BY expressions (see BuildSummaryAggregateQuery for the same constraint).
+        return query
+            .GroupBy(j => j.Id != Guid.Empty)
+            .Select(g => new CostsSummaryAggregate(
+                g.Sum(j => j.TotalCostUsd ?? 0m),
+                g.Sum(j => j.MaterialCostUsd ?? 0m),
+                g.Sum(j => j.EnergyCostUsd ?? 0m),
+                g.Sum(j => j.MachineTimeCostUsd ?? 0m),
+                g.Sum(j => j.LaborCostUsd ?? 0m),
+                g.Count()));
     }
 
     /// <inheritdoc />
@@ -513,4 +536,12 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
         int Cancelled,
         decimal TotalCost,
         double TotalFilamentGrams);
+
+    internal sealed record CostsSummaryAggregate(
+        decimal TotalCost,
+        decimal MaterialCost,
+        decimal EnergyCost,
+        decimal MachineCost,
+        decimal LaborCost,
+        int JobCount);
 }

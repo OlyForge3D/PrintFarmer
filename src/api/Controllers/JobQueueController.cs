@@ -288,6 +288,52 @@ public class JobQueueController(
             .Take(Math.Min(2000, limit * 4))
             .ToListAsync(ct);
 
+        Guid[] candidatePrinterIds = candidates
+            .Where(evt =>
+                string.Equals(evt.AggregateType, nameof(Printer), StringComparison.Ordinal) &&
+                evt.PrinterId.HasValue)
+            .Select(evt => evt.PrinterId!.Value)
+            .Distinct()
+            .ToArray();
+        Guid[] candidateJobIds = candidates
+            .Where(evt => !string.Equals(evt.AggregateType, nameof(Printer), StringComparison.Ordinal))
+            .Select(evt => evt.AggregateId)
+            .Distinct()
+            .ToArray();
+        IReadOnlySet<Guid> accessiblePrinterIds = await resourceAuthorization.FilterAccessiblePrinterIdsAsync(
+            User,
+            candidatePrinterIds,
+            PrinterGroupAccessLevel.View,
+            ct);
+
+        // Mirror the old per-item CanAccessJobAsync semantics exactly: it short-circuited on
+        // the claims-based farm-admin check (PrintFarmerPermissions.IsFarmAdmin) before ever
+        // resolving a user id, and it degraded to "deny" (rather than throwing) when the
+        // principal had no parseable NameIdentifier/sub claim. FilterActorAccessibleJobIdsAsync
+        // only has a DB-backed admin check, and QueueActorIdentity.Resolve throws on an
+        // unparseable subject, so both cases must be handled here before delegating to it.
+        IReadOnlySet<Guid> accessibleJobIds;
+        if (candidateJobIds.Length == 0)
+        {
+            accessibleJobIds = new HashSet<Guid>();
+        }
+        else if (PrintFarmerPermissions.IsFarmAdmin(User))
+        {
+            accessibleJobIds = candidateJobIds.ToHashSet();
+        }
+        else if (!PrintFarmerPermissions.TryGetUserId(User, out _))
+        {
+            accessibleJobIds = new HashSet<Guid>();
+        }
+        else
+        {
+            accessibleJobIds = await resourceAuthorization.FilterActorAccessibleJobIdsAsync(
+                QueueActorIdentity.Resolve(User),
+                candidateJobIds,
+                PrinterGroupAccessLevel.View,
+                ct);
+        }
+
         var events = new List<QueueEventEnvelope>(limit);
         long nextSequence = afterSequence;
         foreach (QueueDispatchOutbox evt in candidates)
@@ -297,17 +343,8 @@ public class JobQueueController(
                 evt.AggregateType,
                 nameof(Printer),
                 StringComparison.Ordinal)
-                ? evt.PrinterId.HasValue &&
-                  await resourceAuthorization.CanAccessPrinterAsync(
-                      User,
-                      evt.PrinterId.Value,
-                      PrinterGroupAccessLevel.View,
-                      ct)
-                : await resourceAuthorization.CanAccessJobAsync(
-                    User,
-                    evt.AggregateId,
-                    PrinterGroupAccessLevel.View,
-                    ct);
+                ? evt.PrinterId.HasValue && accessiblePrinterIds.Contains(evt.PrinterId.Value)
+                : accessibleJobIds.Contains(evt.AggregateId);
             if (!canAccess)
             {
                 continue;
@@ -366,6 +403,35 @@ public class JobQueueController(
             hasMore,
             events,
         });
+    }
+
+    /// <summary>
+    /// Returns the current outbox watermark (highest committed sequence) so a
+    /// client can seed its change-feed cursor at connect time instead of
+    /// starting from zero and replaying the entire durable outbox history on
+    /// every fresh page load (issue #1727). Cheap: a single MAX query with no
+    /// per-row authorization filtering, since only a number is exposed here,
+    /// never event content.
+    /// </summary>
+    [HttpGet("changes/watermark")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
+    [ProducesResponseType(typeof(QueueChangeWatermarkDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<QueueChangeWatermarkDto>> GetChangeWatermarkAsync(
+        CancellationToken ct = default)
+    {
+        if (db is null)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "queue_change_feed_unavailable" });
+        }
+
+        long latestSequence = await db.QueueDispatchOutbox
+            .AsNoTracking()
+            .Select(evt => (long?)evt.Sequence)
+            .MaxAsync(ct) ?? 0;
+
+        return Ok(new QueueChangeWatermarkDto(latestSequence));
     }
 
     /// <summary>
