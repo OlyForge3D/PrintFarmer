@@ -174,10 +174,17 @@ export function QueueRealtimeBridge() {
     const reconcileSubscriptions = async () => {
       const [resources, printers] = await Promise.all([
         apiClient.getQueueSubscriptionResources(),
-        // #1731: reuse whatever invalidateAuthority (or any mounted usePrinters()
-        // consumer) already fetched/is fetching for this key instead of always
-        // issuing a duplicate, uncached GET. staleTime matches usePrinters().
-        queryClient.ensureQueryData({
+        // #1731 (Vasquez review): ensureQueryData() returns already-cached data
+        // unconditionally whenever it is defined, regardless of invalidation/staleness,
+        // unless revalidateIfStale is set -- and even then it still returns the stale
+        // value synchronously, only kicking off a background refetch for *future* reads.
+        // That would silently defeat the whole point of this hint: reconcileSubscriptions
+        // only runs on an actual membership-change/connect/mount trigger, so it must see
+        // fresh data on exactly those occasions. fetchQuery() checks isInvalidated/staleness
+        // itself and refetches when needed, while still deduping against any in-flight
+        // fetch for the same key (e.g. one invalidateAuthority's own invalidateQueries just
+        // triggered) and returning the cached value untouched when it is still fresh.
+        queryClient.fetchQuery({
           queryKey: queryKeys.printers,
           queryFn: () => apiClient.getPrinters(),
           staleTime: 30000,

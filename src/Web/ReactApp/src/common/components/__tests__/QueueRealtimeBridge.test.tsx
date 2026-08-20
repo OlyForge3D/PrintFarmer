@@ -236,7 +236,49 @@ describe('QueueRealtimeBridge', () => {
     expect(mocks.getQueueSubscriptionResources).toHaveBeenCalledTimes(1);
   });
 
-  it('#1731: reconciliation reuses the printers cache instead of issuing a duplicate getPrinters request', async () => {
+  it('#1731: reconciliation dedupes its printers fetch against an already in-flight fetch for the same key, instead of issuing a second parallel GET', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <QueueRealtimeBridge />
+      </QueryClientProvider>
+    );
+    await waitFor(() =>
+      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledTimes(1)
+    );
+    expect(mocks.getPrinters).toHaveBeenCalledTimes(1);
+
+    // Every reconciliation trigger (resources-changed/connect/mount) is always paired
+    // with a *forced* full invalidation of the printers key (see forceFullInvalidation),
+    // so reconciliation always sees printers data as invalidated and must genuinely
+    // refetch it -- see the "invalidated" test above. What #1731's switch to
+    // queryClient.fetchQuery() actually buys over a raw apiClient.getPrinters() call is
+    // deduping with a fetch *already in flight* for the same key -- e.g. an app page
+    // using usePrinters() that reacted to the very same invalidation. Simulate that here:
+    // start a fetch for the printers key ourselves (standing in for that other consumer)
+    // and hold it open, then trigger the reconciliation and confirm it reuses that
+    // single in-flight request rather than calling getPrinters() again.
+    const inFlightPrinters = deferred<{ id: string }[]>();
+    mocks.getPrinters.mockReturnValueOnce(inFlightPrinters.promise);
+    await queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+    const concurrentFetch = queryClient.fetchQuery({
+      queryKey: queryKeys.printers,
+      queryFn: mocks.getPrinters,
+      staleTime: 30000,
+    });
+
+    mocks.emitResourcesChanged();
+    inFlightPrinters.resolve([{ id: 'visible-printer' }]);
+    await concurrentFetch;
+    await waitFor(() =>
+      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledTimes(2)
+    );
+    expect(mocks.getPrinters).toHaveBeenCalledTimes(2);
+  });
+
+  it('#1731 (Vasquez review): reconciliation refetches printers when the cache was invalidated, instead of silently reusing stale data', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -251,13 +293,25 @@ describe('QueueRealtimeBridge', () => {
     );
     expect(mocks.getPrinters).toHaveBeenCalledTimes(1);
 
-    // A second reconciliation (resources-changed hint) within the printers query's
-    // 30s staleTime must reuse the cached data rather than issuing another GET.
+    // Simulate invalidateAuthority's own invalidateQueries call for the printers key
+    // (e.g. from an unrelated invalidation run) marking the cached entry stale/invalidated,
+    // without clearing its cached data. A membership-change hint's reconciliation must
+    // still see this and refetch -- reusing ensureQueryData()'s unconditional
+    // return-cached-data-if-defined behavior here would silently serve the stale printer
+    // list forever.
+    await queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+    mocks.getPrinters.mockResolvedValueOnce([{ id: 'newly-authorized-printer' }]);
+
     mocks.emitResourcesChanged();
     await waitFor(() =>
       expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledTimes(2)
     );
-    expect(mocks.getPrinters).toHaveBeenCalledTimes(1);
+    expect(mocks.getPrinters).toHaveBeenCalledTimes(2);
+    expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        printerIds: expect.arrayContaining(['newly-authorized-printer']),
+      })
+    );
   });
 
   it('#1731: a burst of only actuation-only events (bed-clear/backend-control) invalidates just the printers key', async () => {
