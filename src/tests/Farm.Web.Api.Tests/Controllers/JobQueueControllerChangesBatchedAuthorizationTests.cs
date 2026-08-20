@@ -88,6 +88,14 @@ public class JobQueueControllerChangesBatchedAuthorizationTests
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
     }
 
+    /// <summary>
+    /// A principal with no NameIdentifier/sub claim at all -- neither
+    /// <c>PrintFarmerPermissions.TryGetUserId</c> nor <c>QueueActorIdentity.Resolve</c> can
+    /// resolve a user id for it.
+    /// </summary>
+    private static ClaimsPrincipal CreatePrincipalWithNoResolvableSubject() =>
+        new(new ClaimsIdentity([], "TestAuth"));
+
     private static QueueDispatchOutbox CreatePrinterEvent(Guid printerId, long sequence) => new()
     {
         Id = Guid.NewGuid(),
@@ -489,6 +497,99 @@ public class JobQueueControllerChangesBatchedAuthorizationTests
         events.Should().OnlyContain(evt => evt.PrinterId == accessiblePrinterId);
         events.Should().NotContain(evt => evt.PrinterId == deniedPrinterId);
         events.Should().NotContain(evt => evt.JobId != null);
+    }
+
+    /// <summary>
+    /// Regression test for the parity fix on top of the batched job-authorization path:
+    /// <c>FilterActorAccessibleJobIdsAsync</c>'s farm-admin check is DB-backed
+    /// (<c>UserRoles</c>/<c>Roles</c>), independent of the claims-based
+    /// <c>PrintFarmerPermissions.IsFarmAdmin</c> short-circuit used by the printer path and by
+    /// the old per-item <c>CanAccessJobAsync</c>. A principal that is a farm admin *only* via a
+    /// seeded <c>UserRoles</c> row -- with no <c>ClaimTypes.Role</c> claim on the principal
+    /// itself -- must still receive every job event, exercising the controller's final `else`
+    /// branch (delegation to <c>FilterActorAccessibleJobIdsAsync</c>, whose own DB-backed
+    /// <c>IsFarmAdminAsync</c> check must fire) rather than the claims short-circuit added
+    /// earlier in <see cref="JobQueueController.GetChangesAsync"/>.
+    /// </summary>
+    [Fact]
+    public async Task GetChangesAsync_DbOnlyFarmAdminWithoutClaim_ReturnsEveryJobEvent()
+    {
+        (
+            DbContextOptions<AppDbContext> options,
+            _,
+            _,
+            Guid adminUserId,
+            Guid accessiblePrinterId,
+            Guid deniedPrinterId,
+            Guid accessibleJobId,
+            Guid deniedJobId) = await SeedScenarioAsync();
+
+        await using var db = new AppDbContext(options);
+        var authorization = new QueueResourceAuthorizationService(db);
+        // No isFarmAdmin claim -- adminUserId's admin-ness comes only from the seeded
+        // UserRoles row, forcing FilterActorAccessibleJobIdsAsync's own DB-backed
+        // IsFarmAdminAsync check to be what grants access, not the controller's claims
+        // short-circuit.
+        JobQueueController controller = CreateController(db, authorization, CreatePrincipal(adminUserId));
+
+        IActionResult result = await controller.GetChangesAsync(
+            afterSequence: 0,
+            limit: 500,
+            CancellationToken.None);
+
+        List<QueueEventEnvelope> events = GetEvents(result);
+
+        // Job events: DB-backed admin check grants full access. Printer events: the printer
+        // path's claims-based check does NOT see this principal as admin (no role claim), so
+        // it falls back to the ordinary ACL -- the no-group printer stays open by design, but
+        // the group-restricted printer is denied since adminUserId holds no matching role.
+        events.Should().HaveCount(300);
+        events.Should().Contain(evt => evt.JobId == accessibleJobId);
+        events.Should().Contain(evt => evt.JobId == deniedJobId);
+        events.Should().Contain(evt => evt.PrinterId == accessiblePrinterId);
+        events.Should().NotContain(evt => evt.PrinterId == deniedPrinterId);
+    }
+
+    /// <summary>
+    /// Regression test for the parity fix: a principal with no parseable NameIdentifier/sub
+    /// claim must degrade to "no job access" -- matching the old per-item
+    /// <c>CanAccessJobAsync</c>'s <c>TryGetUserId</c>-based graceful deny -- rather than
+    /// throwing <c>UnauthorizedAccessException</c> out of <c>QueueActorIdentity.Resolve</c>,
+    /// which <see cref="JobQueueController.GetChangesAsync"/> does not catch.
+    /// </summary>
+    [Fact]
+    public async Task GetChangesAsync_UnresolvableSubject_DoesNotThrowAndReturnsOnlyOpenPrinterEvents()
+    {
+        (
+            DbContextOptions<AppDbContext> options,
+            _,
+            _,
+            _,
+            Guid accessiblePrinterId,
+            Guid deniedPrinterId,
+            _,
+            _) = await SeedScenarioAsync();
+
+        await using var db = new AppDbContext(options);
+        var authorization = new QueueResourceAuthorizationService(db);
+        JobQueueController controller = CreateController(
+            db,
+            authorization,
+            CreatePrincipalWithNoResolvableSubject());
+
+        Func<Task<IActionResult>> act = () => controller.GetChangesAsync(
+            afterSequence: 0,
+            limit: 500,
+            CancellationToken.None);
+
+        IActionResult result = (await act.Should().NotThrowAsync()).Subject;
+        List<QueueEventEnvelope> events = GetEvents(result);
+
+        // Both FilterAccessiblePrinterIdsAsync and the job branch's TryGetUserId guard deny
+        // everything for an unresolvable subject -- the no-group printer's "open to everyone"
+        // rule only applies once TryGetUserId succeeds, so for this principal every event,
+        // including the open printer, is denied.
+        events.Should().BeEmpty();
     }
 
     private sealed class CommandCountingInterceptor : DbCommandInterceptor
