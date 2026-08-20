@@ -144,6 +144,13 @@ public class SliceJobStatusResponse
 
     public string? ErrorMessage { get; set; }
 
+    /// <summary>
+    /// Real worker-side failure detail (e.g. OrcaSlicer exit code/stderr or the exact profile
+    /// resolution error), populated only for farm admins. Never returned to non-admin callers,
+    /// who only ever see the generic <see cref="ErrorMessage"/>.
+    /// </summary>
+    public string? ErrorDetail { get; set; }
+
     public int? EstimatedPrintTimeSeconds { get; set; }
 
     public decimal? FilamentUsedGrams { get; set; }
