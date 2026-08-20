@@ -214,4 +214,76 @@ describe('SlicerWorkspace multi-plate', () => {
       expect(onSlice).toHaveBeenCalledWith(['A']);
     });
   });
+
+  // Regression coverage for issue #1771: the same LIBRARY model can now be
+  // picked more than once, producing distinct bed-model instances (see the
+  // nonce-suffixed id scheme in NewSliceJobPage.tsx). This exercises the
+  // reported bug's actual path end-to-end at the plate-assignment layer:
+  // create a second plate, switch to it, then add a second instance of the
+  // same library model — and assert it lands on the ACTIVE (second) plate
+  // with correct per-plate model counts, not just that two instances exist.
+  it('placing the same library model a second time while a different plate is active assigns the new instance to that active plate', async () => {
+    const onModelTransform = vi.fn();
+    // First pick of library model "model-a": instance id 'model-a-0' per the
+    // NewSliceJobPage `${selectedModelId}-${modelPickNonce}` id scheme.
+    const firstInstance = model('model-a-0', [10, 10, 5]);
+
+    const { rerender } = render(
+      <SlicerWorkspace
+        bedConfig={bedConfig}
+        models={[]}
+        onModelTransform={onModelTransform}
+      />,
+    );
+    // Mount empty, then add the first instance via rerender: SlicerWorkspace
+    // only assigns newly-added model ids to the active plate when its
+    // `models` prop *changes* after mount, not for the very first render.
+    rerender(
+      <SlicerWorkspace
+        bedConfig={bedConfig}
+        models={[firstInstance]}
+        onModelTransform={onModelTransform}
+      />,
+    );
+
+    // Plate 1 is active and holds the first instance.
+    await waitFor(() => {
+      const plates = lastBedProps.plates as Array<{ id: string; active: boolean; modelIds: string[] }>;
+      const plate1 = plates.find(p => p.active)!;
+      expect(plate1.modelIds).toEqual(['model-a-0']);
+    });
+
+    // Create Plate 2 — it auto-activates and starts empty.
+    fireEvent.click(screen.getByTitle('Add Plate'));
+    await waitFor(() => {
+      const plates = lastBedProps.plates as Array<{ id: string; active: boolean; modelIds: string[] }>;
+      expect(plates).toHaveLength(2);
+      expect(plates.find(p => p.active)!.modelIds).toEqual([]);
+    });
+
+    // Re-pick the SAME library model a second time: NewSliceJobPage now
+    // generates a fresh, distinct instance id ('model-a-1') rather than
+    // silently no-op'ing or reusing the existing instance.
+    const secondInstance = model('model-a-1', [-10, -10, 5]);
+    rerender(
+      <SlicerWorkspace
+        bedConfig={bedConfig}
+        models={[firstInstance, secondInstance]}
+        onModelTransform={onModelTransform}
+      />,
+    );
+
+    await waitFor(() => {
+      const plates = lastBedProps.plates as Array<{ id: string; active: boolean; modelIds: string[] }>;
+      const plate1 = plates.find(p => !p.active)!;
+      const plate2 = plates.find(p => p.active)!;
+
+      // The new instance is assigned to the ACTIVE plate (Plate 2) only —
+      // it must not silently stay off every plate, and it must not land
+      // back on Plate 1 alongside the first instance.
+      expect(plate2.modelIds).toEqual(['model-a-1']);
+      // Plate 1's original instance is untouched — correct per-plate counts.
+      expect(plate1.modelIds).toEqual(['model-a-0']);
+    });
+  });
 });
