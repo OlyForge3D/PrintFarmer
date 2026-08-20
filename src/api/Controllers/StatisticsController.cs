@@ -248,15 +248,19 @@ public class StatisticsController(IStatisticsService statisticsService) : Contro
     }
 
     /// <summary>
-    /// Returns per-job cost breakdowns for completed print jobs.
+    /// Returns a keyset-paginated page of per-job cost breakdowns for completed print jobs,
+    /// ordered by completion time descending. Page size is capped server-side regardless of
+    /// the requested value (issue #1734).
     /// </summary>
     [HttpGet("costs/by-job")]
-    [ProducesResponseType(typeof(List<CostByJobDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(CostByJobPageDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetCostsByJobAsync(
         [FromQuery] int? days,
         [FromQuery] DateTime? startDate = null,
         [FromQuery] DateTime? endDate = null,
+        [FromQuery] string? cursor = null,
+        [FromQuery] int? pageSize = null,
         CancellationToken ct = default)
     {
         IActionResult? validationError = ValidateDateRange(startDate, endDate);
@@ -265,7 +269,14 @@ public class StatisticsController(IStatisticsService statisticsService) : Contro
             return validationError;
         }
 
-        var result = await _statisticsService.GetCostsByJobAsync(days, startDate, endDate, ct);
-        return Ok(result);
+        try
+        {
+            var result = await _statisticsService.GetCostsByJobAsync(days, startDate, endDate, cursor, pageSize, ct);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 }

@@ -4572,6 +4572,11 @@ export interface CostByJob {
   completedAt?: string;
 }
 
+export interface CostByJobPage {
+  items: CostByJob[];
+  nextCursor: string | null;
+}
+
 export interface CostOverTime {
   date: string;
   totalCostUsd: number;

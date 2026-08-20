@@ -5143,13 +5143,19 @@ export class ApiClient {
     return response.data;
   }
 
-  async getCostsByJob(days?: number, startDate?: string, endDate?: string): Promise<import("@/types/api").CostByJob[]> {
+  async getCostsByJob(days?: number, startDate?: string, endDate?: string, cursor?: string, pageSize?: number): Promise<import("@/types/api").CostByJobPage> {
     const params: Record<string, string | number> = {};
     if (startDate && endDate) {
       params.startDate = startDate;
       params.endDate = endDate;
     } else if (days !== undefined) {
       params.days = days;
+    }
+    if (cursor) {
+      params.cursor = cursor;
+    }
+    if (pageSize !== undefined) {
+      params.pageSize = pageSize;
     }
     const response = await this.client.get('/statistics/costs/by-job', {
       params: Object.keys(params).length > 0 ? params : undefined,

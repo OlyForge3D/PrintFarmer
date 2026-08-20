@@ -58,6 +58,20 @@ public interface IPrintFarmerTelemetryService
     /// <param name="operation">The type of operation performed.</param>
     /// <param name="recordCount">The number of records affected.</param>
     void RecordDatabaseOperation(string table, string operation, int recordCount);
+
+    /// <summary>
+    /// Records metrics for a single page returned from a keyset/seek-paginated query, so
+    /// response row counts and payload sizes are measurable in production without a manual
+    /// spike (issue #1734).
+    /// </summary>
+    /// <param name="endpoint">The endpoint or query being paginated.</param>
+    /// <param name="rowCount">The number of rows returned on this page.</param>
+    /// <param name="payloadBytes">The serialized size of the returned page, in bytes.</param>
+    /// <param name="cappedToMaxPageSize">
+    /// Whether the caller's requested page size exceeded the server-side maximum and was
+    /// clamped down.
+    /// </param>
+    void RecordPagedQuery(string endpoint, int rowCount, long payloadBytes, bool cappedToMaxPageSize);
 }
 
 public sealed class PrintFarmerTelemetryService : IPrintFarmerTelemetryService, IDisposable
@@ -72,6 +86,9 @@ public sealed class PrintFarmerTelemetryService : IPrintFarmerTelemetryService, 
     private readonly Counter<long> _databaseOperationsCounter;
     private readonly Histogram<double> _slicerJobDuration;
     private readonly Histogram<long> _fileSizes;
+    private readonly Counter<long> _pagedQueryRowsCounter;
+    private readonly Histogram<long> _pagedQueryPayloadBytes;
+    private readonly Counter<long> _pagedQueryCappedCounter;
 
     public PrintFarmerTelemetryService()
     {
@@ -117,6 +134,20 @@ public sealed class PrintFarmerTelemetryService : IPrintFarmerTelemetryService, 
         _databaseOperationsCounter = _meter.CreateCounter<long>(
             "printfarmer_database_operations_total",
             description: "Total number of database operations");
+
+        // Paged query metrics
+        _pagedQueryRowsCounter = _meter.CreateCounter<long>(
+            "printfarmer_paged_query_rows_total",
+            description: "Total number of rows returned across paged query pages");
+
+        _pagedQueryPayloadBytes = _meter.CreateHistogram<long>(
+            "printfarmer_paged_query_payload_bytes",
+            unit: "bytes",
+            description: "Serialized payload size of a single paged query page, in bytes");
+
+        _pagedQueryCappedCounter = _meter.CreateCounter<long>(
+            "printfarmer_paged_query_capped_total",
+            description: "Total number of paged query requests whose requested page size was clamped to the server-side maximum");
     }
 
     public Activity? StartActivity(string name, ActivityKind kind = ActivityKind.Internal)
@@ -192,6 +223,22 @@ public sealed class PrintFarmerTelemetryService : IPrintFarmerTelemetryService, 
         };
 
         _databaseOperationsCounter.Add(1, tags);
+    }
+
+    public void RecordPagedQuery(string endpoint, int rowCount, long payloadBytes, bool cappedToMaxPageSize)
+    {
+        KeyValuePair<string, object?>[] tags = new[]
+        {
+            new KeyValuePair<string, object?>("endpoint", endpoint),
+        };
+
+        _pagedQueryRowsCounter.Add(rowCount, tags);
+        _pagedQueryPayloadBytes.Record(payloadBytes, tags);
+
+        if (cappedToMaxPageSize)
+        {
+            _pagedQueryCappedCounter.Add(1, tags);
+        }
     }
 
     private static string GetStatusClass(int statusCode)

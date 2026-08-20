@@ -1,6 +1,8 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Text.Json;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Telemetry;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Services.Statistics;
@@ -8,9 +10,20 @@ namespace Farm.Infrastructure.Services.Statistics;
 /// <summary>
 /// Service for computing aggregated print statistics.
 /// </summary>
-public class StatisticsService(AppDbContext db) : IStatisticsService
+public class StatisticsService(AppDbContext db, IPrintFarmerTelemetryService? telemetry = null) : IStatisticsService
 {
+    /// <summary>Default page size for <see cref="GetCostsByJobAsync"/> when the caller omits one.</summary>
+    public const int DefaultCostsByJobPageSize = 200;
+
+    /// <summary>
+    /// Server-side maximum page size for <see cref="GetCostsByJobAsync"/>. Requested page
+    /// sizes are clamped to this value regardless of caller input, so the response payload
+    /// is always bounded (issue #1734).
+    /// </summary>
+    public const int MaxCostsByJobPageSize = 500;
+
     private readonly AppDbContext _db = db;
+    private readonly IPrintFarmerTelemetryService? _telemetry = telemetry;
 
     /// <summary>
     /// Resolves the effective date range from query parameters.
@@ -471,13 +484,30 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
     }
 
     /// <inheritdoc/>
-    public async Task<List<CostByJobDto>> GetCostsByJobAsync(int? days, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
+    public async Task<CostByJobPageDto> GetCostsByJobAsync(
+        int? days,
+        DateTime? startDate = null,
+        DateTime? endDate = null,
+        string? cursor = null,
+        int? pageSize = null,
+        CancellationToken ct = default)
     {
         var (effectiveStart, effectiveEnd) = ResolveEffectiveDateRange(days, startDate, endDate);
 
+        int requestedPageSize = pageSize ?? DefaultCostsByJobPageSize;
+        bool cappedToMaxPageSize = requestedPageSize > MaxCostsByJobPageSize;
+        int effectivePageSize = Math.Clamp(requestedPageSize, 1, MaxCostsByJobPageSize);
+
+        CostByJobCursor? decodedCursor = null;
+        if (cursor is not null && !CostByJobCursor.TryDecode(cursor, out decodedCursor))
+        {
+            throw new ArgumentException("Invalid pagination cursor.", nameof(cursor));
+        }
+
+        // Dropped the AssignedPrinter/GcodeFile Include()s here: none of their navigation
+        // properties beyond the two scalar names below are used, and both names are
+        // already projected without eager-loading the full related entities (issue #1734).
         var query = _db.PrintJobs
-            .Include(j => j.AssignedPrinter)
-            .Include(j => j.GcodeFile)
             .Where(j => j.Status == PrintJobStatus.Completed && j.TotalCostUsd.HasValue);
 
         if (effectiveStart.HasValue)
@@ -490,8 +520,19 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             query = query.Where(j => j.ActualEndTime <= effectiveEnd.Value);
         }
 
+        if (decodedCursor is not null)
+        {
+            DateTime cursorCompletedAt = new(decodedCursor.CompletedAtTicks, DateTimeKind.Utc);
+            Guid cursorJobId = decodedCursor.JobId;
+            query = query.Where(j =>
+                (j.ActualEndTime ?? DateTime.MinValue) < cursorCompletedAt ||
+                ((j.ActualEndTime ?? DateTime.MinValue) == cursorCompletedAt && j.Id.CompareTo(cursorJobId) < 0));
+        }
+
+        // Fetch one extra row to detect whether a next page exists without a second round trip.
         var rows = await query
-            .OrderByDescending(j => j.ActualEndTime)
+            .OrderByDescending(j => j.ActualEndTime ?? DateTime.MinValue)
+            .ThenByDescending(j => j.Id)
             .Select(j => new
             {
                 j.Id,
@@ -509,9 +550,16 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
                 j.ActualPrintTime,
                 j.ActualEndTime,
             })
+            .Take(effectivePageSize + 1)
             .ToListAsync(ct);
 
-        return rows.Select(j => new CostByJobDto
+        bool hasNextPage = rows.Count > effectivePageSize;
+        if (hasNextPage)
+        {
+            rows.RemoveAt(rows.Count - 1);
+        }
+
+        List<CostByJobDto> items = rows.Select(j => new CostByJobDto
         {
             JobId = j.Id,
             JobName = j.Name ?? j.GcodeFileName ?? "Untitled",
@@ -527,6 +575,21 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             PrintTimeSeconds = j.ActualPrintTime?.TotalSeconds,
             CompletedAt = j.ActualEndTime,
         }).ToList();
+
+        string? nextCursor = null;
+        if (hasNextPage)
+        {
+            var last = rows[^1];
+            nextCursor = CostByJobCursor.FromRow(last.ActualEndTime, last.Id).Encode();
+        }
+
+        if (_telemetry is not null)
+        {
+            long payloadBytes = JsonSerializer.SerializeToUtf8Bytes(items).LongLength;
+            _telemetry.RecordPagedQuery("costs/by-job", items.Count, payloadBytes, cappedToMaxPageSize);
+        }
+
+        return new CostByJobPageDto { Items = items, NextCursor = nextCursor };
     }
 
     internal sealed record StatisticsSummaryAggregate(
