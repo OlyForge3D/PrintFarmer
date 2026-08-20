@@ -162,6 +162,36 @@ public class QueueRetentionPruneServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RunOnce_DispatchAttempts_OnlyPrunesRowsOlderThanWindow_BoundaryRespected()
+    {
+        DateTime now = DateTime.UtcNow;
+        QueueRetentionSettings settings = new() { DispatchAttemptRetentionDays = 30 };
+
+        // Just inside the window: must survive.
+        QueueDispatchAttempt insideWindow = MakeAttempt(now.AddDays(-29), requiresReconciliation: false);
+        // Just outside the window: must be pruned.
+        QueueDispatchAttempt outsideWindow = MakeAttempt(now.AddDays(-31), requiresReconciliation: false);
+
+        using (AppDbContext seed = new(_options))
+        {
+            seed.QueueDispatchAttempts.AddRange(insideWindow, outsideWindow);
+            _ = await seed.SaveChangesAsync(CancellationToken.None);
+        }
+
+        using ServiceProvider sp = BuildRootProvider();
+        QueueRetentionPruneService svc = CreateSut(sp, settings);
+        await svc.RunOnceAsync(CancellationToken.None);
+
+        using AppDbContext verify = new(_options);
+        List<Guid> remaining = await verify.QueueDispatchAttempts
+            .Select(a => a.Id)
+            .ToListAsync(CancellationToken.None);
+        _ = remaining.Should().BeEquivalentTo(
+            [insideWindow.Id],
+            "only the attempt past the retention window should be pruned");
+    }
+
+    [Fact]
     public async Task RunOnce_OperationAudits_UsesIndependentWindow_NotOutboxWindow()
     {
         DateTime now = DateTime.UtcNow;
@@ -192,6 +222,36 @@ public class QueueRetentionPruneServiceTests : IDisposable
         _ = remaining.Should().BeEquivalentTo(
             [recentAudit.Id],
             "operation audits must use their own 180-day window, independent of the outbox window");
+    }
+
+    [Fact]
+    public async Task RunOnce_OperationAudits_OnlyPrunesRowsOlderThanWindow_BoundaryRespected()
+    {
+        DateTime now = DateTime.UtcNow;
+        QueueRetentionSettings settings = new() { OperationAuditRetentionDays = 180 };
+
+        // Just inside the window: must survive.
+        QueueOperationAudit insideWindow = MakeAudit(now.AddDays(-179));
+        // Just outside the window: must be pruned.
+        QueueOperationAudit outsideWindow = MakeAudit(now.AddDays(-181));
+
+        using (AppDbContext seed = new(_options))
+        {
+            seed.QueueOperationAudits.AddRange(insideWindow, outsideWindow);
+            _ = await seed.SaveChangesAsync(CancellationToken.None);
+        }
+
+        using ServiceProvider sp = BuildRootProvider();
+        QueueRetentionPruneService svc = CreateSut(sp, settings);
+        await svc.RunOnceAsync(CancellationToken.None);
+
+        using AppDbContext verify = new(_options);
+        List<Guid> remaining = await verify.QueueOperationAudits
+            .Select(a => a.Id)
+            .ToListAsync(CancellationToken.None);
+        _ = remaining.Should().BeEquivalentTo(
+            [insideWindow.Id],
+            "only the audit past the retention window should be pruned");
     }
 
     [Fact]
@@ -284,5 +344,20 @@ public class QueueRetentionPruneServiceTests : IDisposable
 
         Func<Task> act = () => svc.RunOnceAsync(CancellationToken.None);
         _ = await act.Should().NotThrowAsync("the prune loop must tolerate transient database failures");
+    }
+
+    [Fact]
+    public async Task RunOnce_CancelledToken_ReturnsCleanlyWithoutThrowing()
+    {
+        // Graceful shutdown mid-pass must not surface OperationCanceledException to the
+        // BackgroundService host loop; RunOnceAsync must swallow it and return.
+        using ServiceProvider sp = BuildRootProvider();
+        QueueRetentionPruneService svc = CreateSut(sp);
+
+        using CancellationTokenSource cts = new();
+        cts.Cancel();
+
+        Func<Task> act = () => svc.RunOnceAsync(cts.Token);
+        _ = await act.Should().NotThrowAsync("a cancelled token must be swallowed for graceful shutdown");
     }
 }
