@@ -821,59 +821,71 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
 
   return (
-    <div className="min-h-screen bg-pf-bg-0 flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl bg-pf-bg-1 border border-pf-border shadow-xl rounded-lg p-8">
-        {initializing ? (
-          // Show initialization spinner
-          (<div className="text-center py-16">
-            <div className="flex items-center justify-center gap-4 mb-6">
-              <div className="flex items-center gap-3">
-                <PrintFarmerLogoIcon decorative className="h-14 w-14 text-pf-accent" />
-                <div className="flex flex-col items-start">
-                  <h1 className="text-2xl font-bold text-pf-text-primary">Welcome to PrintFarmer</h1>
-                  <p className="text-pf-text-secondary text-sm">Initializing system...</p>
+    // The app shell fixes #root at `height: 100vh; overflow: hidden` (see App.css) so its
+    // normal pages can manage their own internal scroll regions. The setup wizard replaces
+    // the whole shell before that layout exists, so it must provide its own scroll container:
+    // this outer div is a plain block (not itself a flex/centering context) with
+    // `overflow-y-auto`, filling #root's height. Centering happens in the inner flex div,
+    // which is only `min-h-full` (grows taller than the viewport when content demands it)
+    // rather than a fixed height. Centering *and* scrolling on the same flex element would
+    // clip content above/below viewport bounds — browsers only let you scroll to see one
+    // side of flex-centered overflow, never both (see #1753) — so the two concerns are split
+    // across separate nested elements.
+    <div className="h-full min-h-screen w-full overflow-y-auto bg-pf-bg-0">
+      <div className="min-h-full flex items-center justify-center p-4">
+        <div className="w-full max-w-2xl bg-pf-bg-1 border border-pf-border shadow-xl rounded-lg p-8">
+          {initializing ? (
+            // Show initialization spinner
+            (<div className="text-center py-16">
+              <div className="flex items-center justify-center gap-4 mb-6">
+                <div className="flex items-center gap-3">
+                  <PrintFarmerLogoIcon decorative className="h-14 w-14 text-pf-accent" />
+                  <div className="flex flex-col items-start">
+                    <h1 className="text-2xl font-bold text-pf-text-primary">Welcome to PrintFarmer</h1>
+                    <p className="text-pf-text-secondary text-sm">Initializing system...</p>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="flex items-center justify-center gap-3 mb-4">
-              <div className="pf-animate-spin h-6 w-6 border-b-2 border-pf-accent rounded-full"></div>
-              <span className="text-pf-text-secondary">
-                {healthStatus?.kind === 'detailed' && healthStatus.startup 
-                  ? `Phase: ${healthStatus.startup.phase}` 
-                  : 'Starting up...'}
-              </span>
-            </div>
-            {globalError && (
-              <div className="mt-4 p-4 bg-pf-error/10 border border-pf-error/30 rounded-lg">
-                <div className="text-sm text-pf-error">{globalError}</div>
+              <div className="flex items-center justify-center gap-3 mb-4">
+                <div className="pf-animate-spin h-6 w-6 border-b-2 border-pf-accent rounded-full"></div>
+                <span className="text-pf-text-secondary">
+                  {healthStatus?.kind === 'detailed' && healthStatus.startup 
+                    ? `Phase: ${healthStatus.startup.phase}` 
+                    : 'Starting up...'}
+                </span>
               </div>
-            )}
-          </div>)
-        ) : (
-          // Show setup wizard once initialized
-          (<>
-            <div className="flex items-center gap-4 mb-6">
-              <div className="flex items-center gap-3">
-                <PrintFarmerLogoIcon decorative className="h-14 w-14 text-pf-accent" />
-                <div className="flex flex-col items-start">
-                  <h1 className="text-2xl font-bold text-pf-text-primary">Welcome to PrintFarmer</h1>
-                  <p className="text-pf-text-secondary text-sm">Initial configuration wizard</p>
+              {globalError && (
+                <div className="mt-4 p-4 bg-pf-error/10 border border-pf-error/30 rounded-lg">
+                  <div className="text-sm text-pf-error">{globalError}</div>
+                </div>
+              )}
+            </div>)
+          ) : (
+            // Show setup wizard once initialized
+            (<>
+              <div className="flex items-center gap-4 mb-6">
+                <div className="flex items-center gap-3">
+                  <PrintFarmerLogoIcon decorative className="h-14 w-14 text-pf-accent" />
+                  <div className="flex flex-col items-start">
+                    <h1 className="text-2xl font-bold text-pf-text-primary">Welcome to PrintFarmer</h1>
+                    <p className="text-pf-text-secondary text-sm">Initial configuration wizard</p>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="mb-4 flex items-center gap-2 text-xs flex-wrap">
-              {['Account','Network','Spoolman','Summary'].map((label, idx) => (
-                <div key={label} className={`px-2 py-1 rounded-sm ${idx===step ? 'bg-pf-accent-bg text-[var(--pf-on-accent)]':'bg-pf-bg-2 text-pf-text-secondary'}`}>{idx+1}. {label}</div>
-              ))}
-            </div>
-            {globalError && step !== 3 && <div className="mb-4 text-sm text-pf-error" role="alert">{globalError}</div>}
-            {step === 0 && renderAccountStep()}
-            {step === 1 && renderNetworkStep()}
-            {step === 2 && renderSpoolmanStep()}
-            {step === 3 && renderSummaryStep()}
-            <div className="mt-6 text-center text-xs text-pf-text-tertiary">You can change these settings later in the Settings page.</div>
-          </>)
-        )}
+              <div className="mb-4 flex items-center gap-2 text-xs flex-wrap">
+                {['Account','Network','Spoolman','Summary'].map((label, idx) => (
+                  <div key={label} className={`px-2 py-1 rounded-sm ${idx===step ? 'bg-pf-accent-bg text-[var(--pf-on-accent)]':'bg-pf-bg-2 text-pf-text-secondary'}`}>{idx+1}. {label}</div>
+                ))}
+              </div>
+              {globalError && step !== 3 && <div className="mb-4 text-sm text-pf-error" role="alert">{globalError}</div>}
+              {step === 0 && renderAccountStep()}
+              {step === 1 && renderNetworkStep()}
+              {step === 2 && renderSpoolmanStep()}
+              {step === 3 && renderSummaryStep()}
+              <div className="mt-6 text-center text-xs text-pf-text-tertiary">You can change these settings later in the Settings page.</div>
+            </>)
+          )}
+        </div>
       </div>
     </div>
   );
