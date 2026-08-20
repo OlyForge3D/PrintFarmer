@@ -479,6 +479,27 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 ct);
         }
 
+        if (matches.Count == 0 && normalizedGtin is not null)
+        {
+            // The server-side `gtin=` filter is an exact string match, so it only finds
+            // records whose stored value is already normalized to 14 digits. A filament
+            // whose `gtin` was populated outside PrintFarmer's own write path (e.g. directly
+            // in Spoolman, or via a future import) may still store the equivalent UPC-12 or
+            // EAN-13 form. Spoolman answering with zero rows for that filter is NOT the same
+            // as the filter request failing, so the earlier "page is null" fallback never
+            // triggers for this case -- fall back to an unfiltered full scan comparing
+            // normalized GTIN values so the UPC-12 <-> EAN-13 equivalence acceptance
+            // criterion holds regardless of how the stored value was formatted.
+            matches = await CollectBarcodeMatchesAsync(
+                baseUrl,
+                pageSize,
+                articleNumberFilter: null,
+                gtinFilter: null,
+                isMatch: filament => string.Equals(GtinNormalizer.Normalize(filament.Gtin), normalizedGtin, StringComparison.Ordinal),
+                debugFilterName: "gtin (full scan)",
+                ct);
+        }
+
         if (matches.Count == 0)
         {
             return null;

@@ -91,19 +91,23 @@ public class SpoolmanBarcodeServiceTests
     }
 
     [Fact]
-    public async Task GetFilamentByBarcodeAsync_MatchesNormalizedGtin()
+    public async Task GetFilamentByBarcodeAsync_StoredGtinAlreadyNormalized_MatchesViaServerSideFilterDirectly()
     {
-        // Stored gtin "0123456789012" (13-digit) normalizes the same as the scanned 12-digit
-        // barcode below: leading zeros never change the GS1 mod-10 check digit.
+        // Stored gtin is already the normalized 14-digit form (as written by
+        // SaveBarcodeMappingAsync), so the server-side exact-match `gtin=` filter finds it
+        // directly -- this must succeed without ever needing the unfiltered full-scan
+        // fallback exercised by the tests above.
+        const string storedGtin = "00123456789012";
         using ServiceHarness harness = CreateService(req =>
         {
             if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
             {
-                object[] filaments =
-                [
-                    new { id = 5, name = "Match", gtin = "0123456789012", material = "PLA" },
-                ];
-                return JsonResponse(filaments, totalCount: "1");
+                string? gtinParam = GetQueryParam(req, "gtin");
+                object[] filaments = [new { id = 5, name = "Match", gtin = storedGtin, material = "PLA" }];
+
+                return gtinParam == storedGtin
+                    ? JsonResponse(filaments, totalCount: "1")
+                    : JsonResponse(Array.Empty<object>(), totalCount: "0");
             }
 
             return new HttpResponseMessage(HttpStatusCode.NotFound);
@@ -118,14 +122,35 @@ public class SpoolmanBarcodeServiceTests
     [Fact]
     public async Task GetFilamentByBarcodeAsync_ScannedUpc12ResolvesFilamentStoredAsEan13()
     {
+        // Stored gtin "0123456789012" (13-digit, not zero-padded to 14) is logically the same
+        // product as the scanned UPC-12 below, but a real Spoolman server-side `gtin=` filter
+        // does an EXACT STRING match: the normalized 14-digit search value
+        // ("00123456789012") does not equal the stored 13-digit value, so the filtered query
+        // legitimately returns zero rows. This handler enforces that exact-match semantics
+        // (instead of ignoring the query string) so the test genuinely exercises the
+        // unfiltered full-scan fallback, not just the client-side isMatch predicate.
+        const string storedGtin = "0123456789012";
         using ServiceHarness harness = CreateService(req =>
         {
             if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
             {
-                object[] filaments =
-                [
-                    new { id = 11, name = "Ean13Stored", gtin = "0123456789012", material = "PLA" },
-                ];
+                object[] filaments = [new { id = 11, name = "Ean13Stored", gtin = storedGtin, material = "PLA" }];
+                string? gtinParam = GetQueryParam(req, "gtin");
+                string? articleNumberParam = GetQueryParam(req, "article_number");
+
+                if (gtinParam is not null)
+                {
+                    return gtinParam == storedGtin
+                        ? JsonResponse(filaments, totalCount: "1")
+                        : JsonResponse(Array.Empty<object>(), totalCount: "0");
+                }
+
+                if (articleNumberParam is not null)
+                {
+                    return JsonResponse(Array.Empty<object>(), totalCount: "0");
+                }
+
+                // Unfiltered full scan: the fallback this test exercises.
                 return JsonResponse(filaments, totalCount: "1");
             }
 
@@ -142,14 +167,32 @@ public class SpoolmanBarcodeServiceTests
     [Fact]
     public async Task GetFilamentByBarcodeAsync_ScannedEan13ResolvesFilamentStoredAsUpc12()
     {
+        // Mirror of the test above: stored gtin "123456789012" (12-digit) is logically the
+        // same product as the scanned EAN-13 below, but the normalized 14-digit search value
+        // does not exact-match the stored 12-digit value, so the filtered query returns zero
+        // rows and resolution must fall back to the unfiltered full scan.
+        const string storedGtin = "123456789012";
         using ServiceHarness harness = CreateService(req =>
         {
             if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
             {
-                object[] filaments =
-                [
-                    new { id = 12, name = "Upc12Stored", gtin = "123456789012", material = "PLA" },
-                ];
+                object[] filaments = [new { id = 12, name = "Upc12Stored", gtin = storedGtin, material = "PLA" }];
+                string? gtinParam = GetQueryParam(req, "gtin");
+                string? articleNumberParam = GetQueryParam(req, "article_number");
+
+                if (gtinParam is not null)
+                {
+                    return gtinParam == storedGtin
+                        ? JsonResponse(filaments, totalCount: "1")
+                        : JsonResponse(Array.Empty<object>(), totalCount: "0");
+                }
+
+                if (articleNumberParam is not null)
+                {
+                    return JsonResponse(Array.Empty<object>(), totalCount: "0");
+                }
+
+                // Unfiltered full scan: the fallback this test exercises.
                 return JsonResponse(filaments, totalCount: "1");
             }
 
@@ -347,6 +390,26 @@ public class SpoolmanBarcodeServiceTests
         HttpClient http = new(handler) { BaseAddress = new Uri("http://spoolman.local") };
         SpoolmanService service = new(http, settings.Object, logger.Object);
         return new ServiceHarness(service, http, handler);
+    }
+
+    /// <summary>
+    /// Reads a single query string parameter's raw (unescaped) value from a request URI, or
+    /// null if absent. Used by fake handlers to simulate Spoolman's real exact-string-match
+    /// filtering behavior instead of ignoring the query string.
+    /// </summary>
+    private static string? GetQueryParam(HttpRequestMessage req, string name)
+    {
+        string query = req.RequestUri!.Query.TrimStart('?');
+        foreach (string pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            string[] kv = pair.Split('=', 2);
+            if (kv.Length == 2 && kv[0] == name)
+            {
+                return Uri.UnescapeDataString(kv[1]);
+            }
+        }
+
+        return null;
     }
 
     private static HttpResponseMessage JsonResponse(object value, string? totalCount = null)
