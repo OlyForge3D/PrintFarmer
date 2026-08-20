@@ -101,6 +101,17 @@ describe('slicePayload', () => {
       const payload = buildSlicePayloadModels([model({ id: 'a' }), model({ id: 'b' })]);
       expect(resolveModel3DId(payload, 'a')).toBeUndefined();
     });
+
+    // Regression test for issue #1771: bed-model instance ids are no longer
+    // guaranteed to equal the library model id (the same library model can be
+    // placed as multiple distinct instances), so `model3DId` must prefer the
+    // instance's `libraryModelId` over its opaque `id`.
+    it('prefers libraryModelId over the instance id when both are present', () => {
+      const payload = buildSlicePayloadModels([
+        model({ id: 'model-a-1', libraryModelId: 'model-a' }),
+      ]);
+      expect(resolveModel3DId(payload, undefined)).toBe('model-a');
+    });
   });
 
   describe('diffProcessOverrides', () => {
