@@ -202,11 +202,7 @@ public class SpoolmanBarcodeEndpointTests
         ActionResult<SpoolmanFilamentDto> result = await controller.SaveBarcodeMappingAsync(request, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
-        barcodeScanLogServiceMock.Verify(
-            s => s.LogAsync(
-                It.Is<BarcodeScanLog>(l => l.Barcode.Length == 256),
-                It.IsAny<CancellationToken>()),
-            Times.Once);
+        VerifyLogged(BarcodeScanAction.Mapping, BarcodeScanOutcome.Error, 400, matchedFilamentId: 7, expectedBarcodeLength: 256);
     }
 
     [Fact]
@@ -390,7 +386,8 @@ public class SpoolmanBarcodeEndpointTests
         BarcodeScanOutcome outcome,
         int httpStatus,
         int? matchedFilamentId = null,
-        int? createdSpoolId = null)
+        int? createdSpoolId = null,
+        int? expectedBarcodeLength = null)
     {
         barcodeScanLogServiceMock.Verify(
             s => s.LogAsync(
@@ -399,7 +396,8 @@ public class SpoolmanBarcodeEndpointTests
                     && l.Outcome == outcome
                     && l.HttpStatus == httpStatus
                     && l.MatchedFilamentId == matchedFilamentId
-                    && l.CreatedSpoolId == createdSpoolId),
+                    && l.CreatedSpoolId == createdSpoolId
+                    && (expectedBarcodeLength == null || l.Barcode.Length == expectedBarcodeLength)),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }

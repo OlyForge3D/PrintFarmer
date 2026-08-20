@@ -93,13 +93,19 @@ public class GtinNormalizerTests
     }
 
     [Fact]
-    public void Normalize_OversizedRawInput_ReturnsNullWithoutScanningWholeString()
+    public void Normalize_OversizedRawInput_ReturnsNullEvenWhenDigitsWouldOtherwiseBeValid()
     {
-        // Not a realistic scanned barcode: exercises the early length-bound guard that rejects
-        // arbitrarily long (attacker-controlled) input before it reaches the digit-filtering
-        // LINQ pass, so an oversized string is never fully scanned/allocated.
-        string oversized = new('1', 10_000);
+        // Embeds a genuinely valid GTIN-13 ("4006381333931", from the valid-barcode theory
+        // above) padded with enough non-digit separators to push the RAW input past the
+        // MaxRawLength guard. Without the early length-bound guard, digit-filtering would
+        // still extract "4006381333931" -- a valid 13-digit payload with a correct check
+        // digit -- and Normalize would return a non-null result despite the absurd raw
+        // length. With the guard, the raw length is rejected up front regardless of what
+        // digits it contains, so this test actually distinguishes the guarded code path from
+        // the old (unguarded) one, unlike a test using an all-digit oversized string (which
+        // the pre-existing 8/12/13/14 length check would already reject on its own).
+        string oversizedButDigitsValid = new string('-', 60) + "4006381333931";
 
-        GtinNormalizer.Normalize(oversized).Should().BeNull();
+        GtinNormalizer.Normalize(oversizedButDigitsValid).Should().BeNull();
     }
 }
