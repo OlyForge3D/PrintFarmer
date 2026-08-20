@@ -999,6 +999,10 @@ export class PrinterSignalRService {
       let hasMore = true;
       while (hasMore && cursor < event.sequence) {
         const feed = await apiClient.getQueueChanges(cursor);
+        if (feed.expired) {
+          this.handleQueueCursorExpired(feed.currentSequence ?? cursor);
+          return;
+        }
         for (const missed of feed.events) {
           if (missed.sequence > this.lastQueueSequence) {
             this.emitQueueEvent(missed);
@@ -1065,6 +1069,10 @@ export class PrinterSignalRService {
     let hasMore = true;
     while (hasMore) {
       const feed = await apiClient.getQueueChanges(cursor);
+      if (feed.expired) {
+        this.handleQueueCursorExpired(feed.currentSequence ?? cursor);
+        return;
+      }
       for (const event of feed.events) {
         if (event.sequence > this.lastQueueSequence) {
           this.emitQueueEvent(event);
@@ -1080,6 +1088,24 @@ export class PrinterSignalRService {
       this.lastQueueSequence = Math.max(this.lastQueueSequence, cursor);
       hasMore = feed.hasMore;
     }
+  }
+
+  /**
+   * Handles a "cursor expired — resynchronize" response from the change-feed API
+   * (410 Gone; the requested cursor is older than the server's retention window).
+   * Advances the local cursor past the gap so incremental fetching does not loop
+   * forever, and notifies subscribers so they perform a full authoritative refetch
+   * instead of silently missing events.
+   */
+  private handleQueueCursorExpired(currentSequence: number): void {
+    this.lastQueueSequence = Math.max(this.lastQueueSequence, currentSequence);
+    this.queueResourcesChangedCallbacks.forEach((callback) => {
+      try {
+        callback();
+      } catch (error) {
+        console.error("Queue resource callback error:", error);
+      }
+    });
   }
 
   private emitQueueEvent(event: QueueEventEnvelope): void {

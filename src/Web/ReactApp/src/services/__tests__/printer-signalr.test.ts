@@ -325,6 +325,65 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       printerSignalRService.dispose();
     });
 
+    it('advances the cursor and notifies subscribers instead of looping when the initial drain reports an expired cursor', async () => {
+      signalRTestState.getQueueChanges.mockResolvedValueOnce({
+        afterSequence: 0,
+        nextSequence: 0,
+        hasMore: false,
+        events: [],
+        expired: true,
+        currentSequence: 500,
+      });
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      const resourcesChangedCallback = vi.fn();
+      printerSignalRService.onQueueResourcesChanged(resourcesChangedCallback);
+
+      await printerSignalRService.connect();
+
+      expect(signalRTestState.getQueueChanges).toHaveBeenCalledTimes(1);
+      expect(resourcesChangedCallback).toHaveBeenCalledOnce();
+      expect(printerSignalRService.getQueueSubscriptionSnapshot().lastSequence)
+        .toBe(500);
+      printerSignalRService.dispose();
+    });
+
+    it('advances the cursor and notifies subscribers instead of replaying when a sequence-gap fetch reports an expired cursor', async () => {
+      signalRTestState.getQueueChanges.mockResolvedValueOnce({
+        afterSequence: 0,
+        nextSequence: 0,
+        hasMore: false,
+        events: [],
+        expired: true,
+        currentSequence: 99,
+      });
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      const eventCallback = vi.fn();
+      const resourcesChangedCallback = vi.fn();
+      printerSignalRService.onQueueEvent(eventCallback);
+      printerSignalRService.onQueueResourcesChanged(resourcesChangedCallback);
+
+      // A live event arrives far ahead of the local cursor (0), forcing the
+      // gap-fill path in handleQueueEvent to fetch missed events.
+      signalRTestState.connectionHandlers.get('queueevent')?.({
+        schemaVersion: '3',
+        eventId: 'event-100',
+        sequence: 100,
+        eventType: 'queue.updated',
+        occurredAtUtc: '2026-07-28T00:00:00Z',
+      });
+      await flushMicrotasks();
+
+      // The gap-fill fetch reported the cursor as expired, so the live event
+      // itself must not be delivered as if nothing were missed.
+      expect(eventCallback).not.toHaveBeenCalled();
+      expect(resourcesChangedCallback).toHaveBeenCalledOnce();
+      expect(printerSignalRService.getQueueSubscriptionSnapshot().lastSequence)
+        .toBe(99);
+      printerSignalRService.dispose();
+    });
+
     it('seeds the cursor from the server watermark on a fresh connect instead of replaying full outbox history', async () => {
       signalRTestState.getQueueChangeWatermark.mockResolvedValue({
         latestSequence: 750,

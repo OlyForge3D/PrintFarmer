@@ -2981,10 +2981,30 @@ export class ApiClient {
     afterSequence = 0,
     limit = 100
   ): Promise<QueueChangeFeed> {
-    const response = await this.client.get<QueueChangeFeed>("/job-queue/changes", {
-        params: { afterSequence, limit },
-    });
-    return response.data;
+    try {
+      const response = await this.client.get<QueueChangeFeed>("/job-queue/changes", {
+          params: { afterSequence, limit },
+      });
+      return response.data;
+    } catch (error) {
+      // 410 Gone: the requested cursor is older than the retention window.
+      // The server still returns a structured body (error: "cursor_expired",
+      // currentSequence) — surface it as a QueueChangeFeed with expired=true so
+      // callers resynchronize instead of treating this like a network failure.
+      if (axios.isAxiosError(error) && error.response?.status === 410) {
+        const body = error.response.data as { currentSequence?: number } | undefined;
+        const currentSequence = body?.currentSequence ?? afterSequence;
+        return {
+          afterSequence,
+          nextSequence: currentSequence,
+          hasMore: false,
+          events: [],
+          expired: true,
+          currentSequence,
+        };
+      }
+      throw error;
+    }
   }
 
   async getQueueSubscriptionResources(): Promise<QueueSubscriptionResources> {

@@ -75,6 +75,12 @@ public static class BackgroundServicesStartup
         // Electricity Module - prune PowerReading rows older than 90 days, runs daily
         services.AddHostedService<Farm.Infrastructure.Services.Electricity.PowerReadingPruneService>();
 
+        // Queue Module - prune QueueDispatchOutbox/QueueDispatchAttempts/QueueOperationAudits
+        // rows past their independently configured retention windows (issue #1728).
+        services.Configure<Farm.Infrastructure.Services.Queue.QueueRetentionSettings>(
+            configuration.GetSection(Farm.Infrastructure.Services.Queue.QueueRetentionSettings.SectionName));
+        services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueRetentionPruneService>();
+
         // Electricity Module - poll enabled PowerMonitor records, persist PowerReading rows,
         // and aggregate KwhUsed for completed print jobs
         services.AddHostedService<Farm.Web.Api.Services.PowerMonitor.PowerMonitorPollingService>();
