@@ -221,7 +221,12 @@ export const NewSliceJobPage: React.FC = () => {
     Advanced: null,
   });
 
-  // Check if ANY machine profiles exist in the system (for onboarding detection)
+  // Check if ANY machine profiles exist in the system (for onboarding detection).
+  // This only reflects profiles that have been imported into the database
+  // (see slicerProfilesService.listExtended / ProfilesController.ListExtendedAsync)
+  // and is NOT the same signal as "a healthy OrcaSlicer worker is available" —
+  // the for-model machine profile lookup below queries the worker live and does
+  // not require anything to have been imported first (issue #1760).
   const { data: profilesSummary, isLoading: isProfilesSummaryLoading } = useQuery({
     queryKey: ['slicerProfilesExtended'],
     queryFn: () => slicerProfilesService.listExtended(),
@@ -237,11 +242,18 @@ export const NewSliceJobPage: React.FC = () => {
    * shown in the UI when 2+ versions are registered.
    */
   const [selectedEngineVersion, setSelectedEngineVersion] = useState<string | undefined>(undefined);
-  const { data: registeredEngines } = useQuery<SlicerEngineInfo[]>({
+  const { data: registeredEngines, isLoading: isRegisteredEnginesLoading } = useQuery<SlicerEngineInfo[]>({
     queryKey: ['slicer-engines-registry'],
     queryFn: () => slicerService.listEngines(),
     staleTime: 300_000,
   });
+  // A healthy, registered OrcaSlicer/PrusaSlicer worker means live per-model
+  // profile lookups (GET .../profiles/machine/for-model/{id}) can succeed even
+  // when nothing has been imported into the database yet. Gating onboarding on
+  // hasAnyMachineProfiles alone incorrectly showed the "Get started with
+  // slicing" screen for a fully healthy worker whenever the currently
+  // registered printer models simply hadn't had profiles imported (issue #1760).
+  const hasRegisteredEngine = (registeredEngines?.length ?? 0) > 0;
   const engineName = selectedSlicerId === 1 ? 'OrcaSlicer' : 'PrusaSlicer';
   const engineInfo = useMemo(
     () => registeredEngines?.find(e => (e?.engine ?? '').toLowerCase() === engineName.toLowerCase()),
@@ -1986,8 +1998,17 @@ export const NewSliceJobPage: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  // Show onboarding banner when no machine profiles exist and loading is complete
-  if (!isProfilesSummaryLoading && !hasAnyMachineProfiles) {
+  // Show onboarding banner only when the installation truly has no usable
+  // profile source at all: nothing imported into the database AND no
+  // registered OrcaSlicer/PrusaSlicer worker to fall back to. A healthy
+  // worker can serve machine profiles live (per-model lookups below query the
+  // worker directly), so it must never be treated the same as "unconfigured".
+  // When a worker is registered but the *selected* printer's model has no
+  // matching profile, that is a specific, actionable mismatch communicated
+  // inline further down the page (e.g. "No machine profiles available for
+  // this printer model" / the clone-profiles prompt) — not full onboarding
+  // (issue #1760).
+  if (!isProfilesSummaryLoading && !isRegisteredEnginesLoading && !hasAnyMachineProfiles && !hasRegisteredEngine) {
     return (
       <PageTemplate
         title="New Slice Job"
