@@ -10,7 +10,7 @@
  * - Temperature and state displays
  */
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
@@ -53,21 +53,29 @@ export interface PrinterBedVisualizationProps {
  * Nozzle Indicator Component
  * Renders a visual indicator for the nozzle position
  */
-const NozzleIndicator: React.FC<{
+export const NozzleIndicator: React.FC<{
   position: { x: number; y: number; z: number };
   nozzleDiameter?: number;
   isActive: boolean;
 }> = ({ position, nozzleDiameter = 0.4, isActive }) => {
   const meshRef = useRef<THREE.Mesh>(null);
 
-  // Create nozzle geometry
-  const nozzleGeometry = generateNozzleGeometry(nozzleDiameter);
+  const nozzleGeometry = useMemo(
+    () => generateNozzleGeometry(nozzleDiameter),
+    [nozzleDiameter]
+  );
+
+  useEffect(
+    () => () => nozzleGeometry.dispose(),
+    [nozzleGeometry]
+  );
 
   return (
     <mesh
       ref={meshRef}
       position={[position.x, position.z, position.y]}
       geometry={nozzleGeometry}
+      dispose={null}
       rotation={[Math.PI, 0, 0]} // Point downward
     >
       <meshPhongMaterial
@@ -93,12 +101,7 @@ const BedScene: React.FC<PrinterBedVisualizationProps> = ({
   const { camera } = useThree();
   const bedGroupRef = useRef<THREE.Group>(null);
   const controlsRef = useRef<InstanceType<typeof OrbitControls> | null>(null);
-  const [autoRotateEnabled, setAutoRotateEnabled] = useState(autoRotate);
-
-  // Sync autoRotate prop to state
-  useEffect(() => {
-    setAutoRotateEnabled(autoRotate);
-  }, [autoRotate]);
+  const autoRotateEnabled = autoRotate;
 
   useEffect(() => {
     // Initialize scene
