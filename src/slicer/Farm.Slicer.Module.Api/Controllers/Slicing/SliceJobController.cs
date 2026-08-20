@@ -1402,6 +1402,21 @@ public partial class SliceJobController(
             return StatusCode(StatusCodes.Status503ServiceUnavailable);
         }
 
+        // The class-level slicing:submit permission is intentionally broad enough that a
+        // Desktop-exchange token issued only for calibration generation (issue #838) legitimately
+        // holds it. Since #1770 made model3DId lookups succeed for any existing library model
+        // rather than just the caller's own uploads, a submit-only-scoped Desktop token could
+        // otherwise reference (and thereby read the contents of) an arbitrary model it was never
+        // granted ModelRead/LibrarySync access to. Normal login/session tokens - which carry no
+        // DesktopScopeClaims.TokenUse claim - are unaffected, exactly as DesktopScopeAuthorizationHandler
+        // behaves for attribute-gated endpoints.
+        if (User.HasClaim(Farm.Infrastructure.Authorization.DesktopScopeClaims.TokenUse, Farm.Infrastructure.Authorization.DesktopScopeClaims.DesktopExchangeTokenUse)
+            && !User.HasClaim(Farm.Infrastructure.Authorization.DesktopScopeClaims.Scope, "ModelRead")
+            && !User.HasClaim(Farm.Infrastructure.Authorization.DesktopScopeClaims.Scope, "LibrarySync"))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
+        }
+
         Model3D? model = await _modelStorage.FindOwnedAsync(model3DId, userId, ct);
         if (model is null)
         {
