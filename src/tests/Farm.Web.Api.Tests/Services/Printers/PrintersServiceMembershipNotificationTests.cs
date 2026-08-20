@@ -13,10 +13,11 @@ using Moq;
 namespace Farm.Web.Api.Tests.Services.Printers;
 
 /// <summary>
-/// #1731: verifies PrintersService.RemoveAsync notifies IQueueSubscriptionMembershipNotifier
-/// exactly once after a printer is deleted (deletion changes which printers a queue-reader
-/// client is authorized to subscribe to), and that the notifier is optional (existing call
-/// sites that do not supply one keep working unchanged).
+/// #1731: verifies PrintersService.AddAsync and RemoveAsync notify
+/// IQueueSubscriptionMembershipNotifier exactly once after a printer is created or deleted
+/// (both change which printers a queue-reader client is authorized to subscribe to), and
+/// that the notifier is optional (existing call sites that do not supply one keep working
+/// unchanged).
 /// </summary>
 public class PrintersServiceMembershipNotificationTests
 {
@@ -57,6 +58,54 @@ public class PrintersServiceMembershipNotificationTests
         PrintersService service = CreateService(unitOfWork.Object, membershipNotifier: null);
 
         Func<Task> act = () => service.RemoveAsync(printer, CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    /// <summary>
+    /// #1731 (Hicks review, round 1): a newly created printer with no group assignment is
+    /// visible to every non-admin authenticated user (see
+    /// QueueResourceAuthorizationService), so creation changes the authorized-subscription
+    /// set for already-connected clients exactly like delete/reassign does.
+    /// IPrintersRepository.AddAsync self-commits, so it is safe to notify inline.
+    /// </summary>
+    [Fact]
+    public async Task AddAsync_NotifiesMembershipChangedExactlyOnce()
+    {
+        Printer printer = CreatePrinter();
+        var printersRepository = new Mock<IPrintersRepository>();
+        printersRepository
+            .Setup(r => r.AddAsync(printer, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(u => u.Printers).Returns(printersRepository.Object);
+
+        var notifier = new Mock<IQueueSubscriptionMembershipNotifier>();
+        notifier
+            .Setup(n => n.NotifyMembershipChangedAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        PrintersService service = CreateService(unitOfWork.Object, notifier.Object);
+
+        await service.AddAsync(printer, CancellationToken.None);
+
+        notifier.Verify(n => n.NotifyMembershipChangedAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AddAsync_WithoutNotifier_DoesNotThrow()
+    {
+        Printer printer = CreatePrinter();
+        var printersRepository = new Mock<IPrintersRepository>();
+        printersRepository
+            .Setup(r => r.AddAsync(printer, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(u => u.Printers).Returns(printersRepository.Object);
+
+        PrintersService service = CreateService(unitOfWork.Object, membershipNotifier: null);
+
+        Func<Task> act = () => service.AddAsync(printer, CancellationToken.None);
 
         await act.Should().NotThrowAsync();
     }

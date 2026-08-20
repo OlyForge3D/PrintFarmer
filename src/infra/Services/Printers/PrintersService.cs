@@ -798,6 +798,17 @@ public class PrintersService(
         // Encrypt sensitive data before saving
         EncryptSensitiveData(p);
         await _unitOfWork.Printers.AddAsync(p, ct);
+
+        // #1731: a newly created printer without an existing group assignment is visible
+        // to every non-admin authenticated user (see QueueResourceAuthorizationService),
+        // so creation changes the authorized-subscription set for already-connected
+        // clients exactly like delete/reassign does. IPrintersRepository.AddAsync above
+        // self-commits (see EfPrintersRepository.AddAsync), so the row is durably
+        // persisted by this point and it is safe to notify here.
+        if (_membershipNotifier is not null)
+        {
+            await _membershipNotifier.NotifyMembershipChangedAsync(ct);
+        }
     }
 
     /// <summary>
