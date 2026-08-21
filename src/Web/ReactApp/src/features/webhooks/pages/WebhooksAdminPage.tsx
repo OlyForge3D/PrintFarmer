@@ -79,7 +79,7 @@ export function WebhooksAdminPage({ embedded = false }: EmbeddablePageProps) {
  title="Webhooks"
  icon={ExternalLinkIcon}
  actions={
- <Button variant="primary" onClick={() => setShowCreateModal(true)} iconLeft={<PlusIcon className="w-4 h-4" />}>
+ <Button data-testid="add-webhook-action" variant="primary" onClick={() => setShowCreateModal(true)} iconLeft={<PlusIcon className="w-4 h-4" />}>
    Add Webhook
  </Button>
  }
@@ -183,7 +183,7 @@ function WebhookCard({ webhook, onEdit, onDelete, onTest, onToggleActive, onView
  const hasFailures = webhook.consecutiveFailures > 0;
 
  return (
- <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-4">
+ <article aria-label={`${webhook.name} webhook`} className="bg-pf-bg-1 rounded-lg border border-pf-border p-4">
  <div className="flex items-start justify-between gap-4">
  <div className="min-w-0 flex-1">
  <div className="flex items-center gap-2">
@@ -235,7 +235,7 @@ function WebhookCard({ webhook, onEdit, onDelete, onTest, onToggleActive, onView
  </Button>
  </div>
  </div>
- </div>
+ </article>
  );
 }
 
@@ -315,12 +315,12 @@ function WebhookFormModal({ webhook, eventTypes, onClose, onSubmit, isSubmitting
  <form onSubmit={handleSubmit} className="space-y-4">
  {formError && <Alert variant="error">{formError}</Alert>}
 
- <FormField label="Name" required>
- <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="My webhook" />
+ <FormField label="Name" htmlFor="webhook-name" required>
+ <Input id="webhook-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="My webhook" />
  </FormField>
 
- <FormField label="URL" required>
- <Input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/webhook" />
+ <FormField label="URL" htmlFor="webhook-url" required>
+ <Input id="webhook-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/webhook" />
  </FormField>
 
  <FormField label="Secret" hint="Optional. Used to sign payloads with HMAC-SHA256.">

@@ -1,5 +1,7 @@
 import { test, expect } from '../fixtures/emulator-setup';
 
+const TEST_TAG_NAME = `E2E Test Tag ${Date.now()}`;
+
 /**
  * Admin Tags CRUD E2E Tests — Emulator-backed
  *
@@ -53,23 +55,13 @@ test.describe('Admin Tags — Emulator', () => {
       .waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => {});
     await page.waitForTimeout(500);
 
-    // Look for a create/add tag button
-    const createButton = page.getByRole('button', { name: /create|add|new/i }).first();
-    const hasCreate = await createButton.isVisible({ timeout: 5_000 }).catch(() => false);
+    const createButton = page.getByTestId('add-tag-action');
+    await expect(createButton).toBeVisible({ timeout: 5_000 });
+    await createButton.click();
 
-    if (hasCreate) {
-      await createButton.click();
-      await page.waitForTimeout(500);
-
-      // A form or modal should appear with name input
-      const nameInput = page.locator('input[name="name"], input[placeholder*="name" i], input[placeholder*="tag" i]').first();
-      const hasNameInput = await nameInput.isVisible().catch(() => false);
-      expect(hasNameInput).toBeTruthy();
-    } else {
-      // Inline creation — look for input field directly on the page
-      const inlineInput = page.locator('input').first();
-      expect(await inlineInput.isVisible().catch(() => false)).toBeTruthy();
-    }
+    const dialog = page.getByRole('dialog', { name: 'Create New Tag', exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('textbox', { name: 'Tag Name', exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
@@ -77,50 +69,32 @@ test.describe('Admin Tags — Emulator', () => {
   test('can create a new tag', async ({ page }) => {
     await page.waitForTimeout(1_000);
 
-    const createButton = page.getByRole('button', { name: /create|add|new/i }).first();
-    const hasCreate = await createButton.isVisible().catch(() => false);
+    const createButton = page.getByTestId('add-tag-action');
+    await expect(createButton).toBeVisible({ timeout: 5_000 });
+    await createButton.click();
 
-    if (hasCreate) {
-      await createButton.click();
-      await page.waitForTimeout(500);
-    }
+    const dialog = page.getByRole('dialog', { name: 'Create New Tag', exact: true });
+    await expect(dialog).toBeVisible();
+    const nameInput = dialog.getByRole('textbox', { name: 'Tag Name', exact: true });
+    await expect(nameInput).toBeVisible();
+    await nameInput.fill(TEST_TAG_NAME);
 
-    // Fill in tag name
-    const nameInput = page.locator('input[name="name"], input[placeholder*="name" i], input[placeholder*="tag" i]').first();
-    if (await nameInput.isVisible().catch(() => false)) {
-      await nameInput.fill('E2E Test Tag');
+    const saveButton = dialog.getByRole('button', { name: 'Create tag', exact: true });
+    await expect(saveButton).toBeVisible();
+    await saveButton.click();
 
-      // Submit the form
-      const saveButton = page.getByRole('button', { name: /save|create|add|submit/i }).first();
-      if (await saveButton.isVisible().catch(() => false)) {
-        await saveButton.click();
-        await page.waitForTimeout(1_000);
-
-        // Tag should appear in the list
-        const bodyText = await page.locator('body').textContent() ?? '';
-        expect(bodyText).toContain('E2E Test Tag');
-      }
-    }
+    await expect(dialog).toBeHidden();
+    await expect(page.getByRole('cell', { name: TEST_TAG_NAME, exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
 
   test('tags have color indicators', async ({ page }) => {
-    await page.waitForTimeout(1_000);
-
-    // Tags typically display with colored circles/badges
-    const colorElements = page.locator(
-      '[style*="background-color"], ' +
-      '[class*="color"], ' +
-      'div[style*="background"], ' +
-      'span[style*="background"]'
-    );
-
-    // If tags exist, they should have color indicators
-    const bodyText = await page.locator('body').textContent() ?? '';
-    if (/E2E Test Tag/i.test(bodyText)) {
-      expect(await colorElements.count()).toBeGreaterThan(0);
-    }
+    const tagRow = page.getByRole('row').filter({
+      has: page.getByRole('cell', { name: TEST_TAG_NAME, exact: true }),
+    });
+    await expect(tagRow).toBeVisible();
+    expect(await tagRow.locator('div[style*="background-color"]').count()).toBeGreaterThan(0);
 
     expect(criticalErrors()).toHaveLength(0);
   });
@@ -145,28 +119,21 @@ test.describe('Admin Tags — Emulator', () => {
   });
 
   test('can delete a tag', async ({ page }) => {
-    await page.waitForTimeout(1_000);
+    const tagCell = page.getByRole('cell', { name: TEST_TAG_NAME, exact: true });
+    const tagRow = page.getByRole('row').filter({ has: tagCell });
+    await expect(tagRow).toBeVisible();
 
-    // Look for delete button on an existing tag
-    const deleteButton = page.locator('button').filter({ hasText: /delete|remove/i }).first();
-    const hasDelete = await deleteButton.isVisible().catch(() => false);
+    const deleteResponsePromise = page.waitForResponse((response) =>
+      response.request().method() === 'DELETE'
+      && /\/api\/tags\/[^/]+$/.test(new URL(response.url()).pathname)
+    );
+    await tagRow.getByRole('button', { name: 'Delete tag', exact: true }).click();
+    const deleteResponse = await deleteResponsePromise;
+    expect(deleteResponse.ok()).toBe(true);
 
-    if (!hasDelete) {
-      // May be an icon button — look for trash/delete icon buttons
-      const iconDeleteBtn = page.locator('button[aria-label*="delete" i], button[aria-label*="remove" i]').first();
-      const hasIconDelete = await iconDeleteBtn.isVisible().catch(() => false);
-      if (hasIconDelete) {
-        await iconDeleteBtn.click();
-        await page.waitForTimeout(500);
-
-        // Confirm deletion if dialog appears
-        const confirmBtn = page.getByRole('button', { name: /confirm|yes|delete/i }).first();
-        if (await confirmBtn.isVisible().catch(() => false)) {
-          await confirmBtn.click();
-          await page.waitForTimeout(1_000);
-        }
-      }
-    }
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('cell', { name: TEST_TAG_NAME, exact: true })).toHaveCount(0);
 
     expect(criticalErrors()).toHaveLength(0);
   });

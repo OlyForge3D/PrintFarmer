@@ -1,5 +1,7 @@
 import { test, expect } from '../fixtures/emulator-setup';
 
+const TEST_GROUP_NAME = `E2E Test Group ${Date.now()}`;
+
 /**
  * Printer Groups CRUD E2E Tests — Emulator-backed
  *
@@ -42,7 +44,7 @@ test.describe('Printer Groups — Emulator', () => {
     expect(hasGroupContent).toBeTruthy();
 
     // Create group button
-    const createButton = page.getByRole('button', { name: /create|add|new/i }).first();
+    const createButton = page.getByTestId('create-printer-group-action');
     await expect(createButton).toBeVisible({ timeout: 5_000 });
 
     expect(criticalErrors()).toHaveLength(0);
@@ -51,21 +53,14 @@ test.describe('Printer Groups — Emulator', () => {
   test('can open create group modal', async ({ page }) => {
     await page.waitForTimeout(1_000);
 
-    const createButton = page.getByRole('button', { name: /create|add|new/i }).first();
+    const createButton = page.getByTestId('create-printer-group-action');
     await expect(createButton).toBeVisible({ timeout: 5_000 });
     await createButton.click();
     await page.waitForTimeout(500);
 
-    // Modal should open with name input
-    const nameInput = page.locator(
-      'input[name="name"], ' +
-      'input[placeholder*="name" i], ' +
-      'input[placeholder*="group" i], ' +
-      'input[placeholder*="fleet" i], ' +
-      '[role="dialog"] input[type="text"]'
-    ).first();
-    const hasNameInput = await nameInput.isVisible().catch(() => false);
-    expect(hasNameInput).toBeTruthy();
+    const modal = page.getByRole('dialog', { name: 'Create Printer Group', exact: true });
+    await expect(modal).toBeVisible({ timeout: 5_000 });
+    await expect(modal.getByRole('textbox', { name: 'Name', exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
@@ -73,69 +68,56 @@ test.describe('Printer Groups — Emulator', () => {
   test('can create a new printer group', async ({ page }) => {
     await page.waitForTimeout(1_000);
 
-    const createButton = page.getByRole('button', { name: /create|add|new/i }).first();
+    const createButton = page.getByTestId('create-printer-group-action');
     await expect(createButton).toBeVisible({ timeout: 5_000 });
     await createButton.click();
     await page.waitForTimeout(500);
 
-    // Scope all form interactions to the modal dialog
-    const modal = page.locator('[role="dialog"]');
+    const modal = page.getByRole('dialog', { name: 'Create Printer Group', exact: true });
     await expect(modal).toBeVisible({ timeout: 5_000 });
 
-    const nameInput = modal.locator('input[type="text"], input[name="name"]').first();
-    if (await nameInput.isVisible().catch(() => false)) {
-      await nameInput.fill('E2E Test Group');
+    const nameInput = modal.getByRole('textbox', { name: 'Name', exact: true });
+    await expect(nameInput).toBeVisible();
+    await nameInput.fill(TEST_GROUP_NAME);
 
-      const saveButton = modal.getByRole('button', { name: /^create$|^save$|^submit$/i }).first();
-      if (await saveButton.isVisible().catch(() => false)) {
-        await saveButton.click();
-        await page.waitForTimeout(2_000);
+    const saveButton = modal.getByRole('button', { name: 'Create Group', exact: true });
+    await expect(saveButton).toBeVisible();
+    await saveButton.click();
 
-        // Group should appear in the list OR modal closed successfully
-        const modalGone = await modal.isHidden().catch(() => true);
-        if (modalGone) {
-          const bodyText = await page.locator('body').textContent() ?? '';
-          expect(bodyText).toContain('E2E Test Group');
-        }
-      }
-    }
+    await expect(modal).toBeHidden();
+    await expect(page.getByText(TEST_GROUP_NAME, { exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
 
   test('group cards display printer count', async ({ page }) => {
-    await page.waitForTimeout(1_000);
-
-    const bodyText = await page.locator('body').textContent() ?? '';
-    if (/E2E Test Group/i.test(bodyText)) {
-      // Group card should show printer count (0 initially)
-      const groupCard = page.locator('[data-testid*="group-card"], div').filter({ hasText: 'E2E Test Group' }).first();
-      const hasCard = await groupCard.isVisible().catch(() => false);
-      expect(hasCard).toBeTruthy();
-    }
+    const groupCard = page.getByRole('article', {
+      name: `${TEST_GROUP_NAME} printer group`,
+      exact: true,
+    });
+    await expect(groupCard).toBeVisible();
+    await expect(groupCard.getByText('0 printers', { exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
 
   test('group cards have edit and delete actions', async ({ page }) => {
-    await page.waitForTimeout(1_000);
-
-    const bodyText = await page.locator('body').textContent() ?? '';
-    if (/E2E Test Group/i.test(bodyText)) {
-      // At least one action type should exist
-      const allActionButtons = page.locator('button');
-      expect(await allActionButtons.count()).toBeGreaterThan(1);
-    }
+    const groupCard = page.getByRole('article', {
+      name: `${TEST_GROUP_NAME} printer group`,
+      exact: true,
+    });
+    await expect(groupCard.getByRole('button', { name: 'Edit group', exact: true })).toBeVisible();
+    await expect(groupCard.getByRole('button', { name: 'Delete group', exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
 
-  test('empty state shows when no groups exist', async ({ page }) => {
-    await page.waitForTimeout(1_000);
-
-    // Page should have content regardless of group count
-    const content = page.locator('main, [role="main"], #root');
-    await expect(content.first()).toBeVisible();
+  test('created group remains visible after reload', async ({ page }) => {
+    await expect(page.getByRole('article', {
+      name: `${TEST_GROUP_NAME} printer group`,
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'No printer groups yet', exact: true })).toBeHidden();
 
     expect(criticalErrors()).toHaveLength(0);
   });

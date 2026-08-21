@@ -285,7 +285,10 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
   const showInlineAttention = Boolean(cameraAttention) && !imageError && (hasStream || hasSnapshot);
 
   return (
-    <div className="rounded-lg shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col">
+    <article
+      aria-label={`${camera.name} camera`}
+      className="rounded-lg shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col"
+    >
       {/* Camera feed */}
       <div ref={previewContainerRef} className="relative w-full aspect-video bg-pf-bg-2">
         {cameraMode === 'stream' && hasStream && activeUrl ? (
@@ -453,6 +456,6 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
           </div>
         </div>
       </div>
-    </div>
+    </article>
   );
 }
