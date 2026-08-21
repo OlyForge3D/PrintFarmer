@@ -26,17 +26,46 @@ public sealed class OctoPrintPollingService(
     ILogger<OctoPrintPollingService> logger,
     IPrinterStatusCacheWriter statusCacheWriter,
     IFilamentCoverageBroadcaster? coverageBroadcaster = null,
-    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable
+    IMutationWatermarkReader? watermarkReader = null,
+    IPrinterCacheInvalidator? printerCacheInvalidator = null) : IHostedService, IDisposable
 {
     private readonly ILogger<OctoPrintPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
     private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+    private readonly IPrinterCacheInvalidator? _printerCacheInvalidator = printerCacheInvalidator;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, OctoPrintWebSocketAdapter> _webSocketAdapters = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
     private readonly ConcurrentDictionary<Guid, Task> _pollingLoops = new();
+
+    /// <summary>
+    /// Per-printer gate serializing "is the adapter missing?" checks against adapter construction.
+    /// Without this, the 30-second reconciliation loop and the 5-second <see cref="PollPrinterAsync"/>
+    /// fallback loop can both observe a missing adapter after an invalidation and each construct one,
+    /// with the loser's live WebSocket connection silently overwritten (and never disposed) in
+    /// <see cref="_webSocketAdapters"/>. See <see cref="EnsureWebSocketAdapter"/>.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, object> _adapterCreationLocks = new();
+
+    /// <summary>
+    /// Durable, monotonically increasing per-printer invalidation counter, bumped by
+    /// <see cref="OnPrinterInvalidated"/> under the per-printer <see cref="_adapterCreationLocks"/>
+    /// gate every time that printer is invalidated -- regardless of whether a
+    /// <see cref="PrinterPollingState"/> currently exists for it. Unlike a generation counter kept
+    /// on <see cref="PrinterPollingState"/> itself, entries here are never removed (mirroring the
+    /// deliberate non-removal of <see cref="_adapterCreationLocks"/> entries below), so the fence
+    /// survives a printer's polling state being absent (never yet seen) or torn down and recreated
+    /// (e.g. by the inactive-printer cleanup in <see cref="ReconcilePrintersOnceAsync"/> or the
+    /// no-longer-OctoPrint branch in <see cref="PollPrinterAsync"/>) between a caller's snapshot and
+    /// its publish. Without this, an invalidation for a printer with no live
+    /// <see cref="PrinterPollingState"/> at that moment was silently dropped, and a stale row
+    /// snapshotted just before that invalidation could still be published afterwards because the
+    /// freshly (re)created state's generation always started back at its default -- matching
+    /// whatever fallback generation the stale caller had captured.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, long> _invalidationGenerations = new();
 
     // Polling interval for HTTP fallback
     private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(5);
@@ -93,15 +122,109 @@ public sealed class OctoPrintPollingService(
         /// restart, since this state is in-memory only), so the first message is never suppressed.
         /// </summary>
         public PrinterStatusUpdate? LastBroadcastUpdate { get; set; }
+
+        /// <summary>
+        /// Cached, fully decrypted printer row, refreshed by the 30-second reconciliation loop or
+        /// cleared by an explicit invalidation (see <see cref="IPrinterCacheInvalidator"/>). Avoids
+        /// re-querying the database and re-decrypting credentials on every poll tick (issue #1763).
+        /// </summary>
+        public Printer? CachedPrinter { get; set; }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("OctoPrintPollingService starting");
+        if (_printerCacheInvalidator is not null)
+        {
+            _printerCacheInvalidator.Subscribe(OnPrinterInvalidated);
+        }
 #pragma warning disable VSTHRD003 // Avoid awaiting or returning a Task representing work that was not started within this context
         _ = _mainLoop = Task.Run(() => RunAsync(_cts.Token), _cts.Token);
 #pragma warning restore VSTHRD003
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Invoked when a printer's persisted row has changed (e.g. edited via the API). Drops the
+    /// cached copy so the next poll tick re-reads the row from the database instead of waiting
+    /// for the next 30-second reconciliation pass.
+    /// </summary>
+    /// <remarks>
+    /// Unlike the other backends, OctoPrint's primary transport is a long-lived
+    /// <see cref="OctoPrintWebSocketAdapter"/> that is otherwise only torn down/recreated by the
+    /// 30-second reconciliation loop's credential-change comparison. Clearing
+    /// <see cref="PrinterPollingState.CachedPrinter"/> alone would leave that adapter connected
+    /// with the printer's old URL/API key for up to 30 seconds after an edit. Tear the adapter
+    /// down here too so <see cref="PollPrinterAsync"/> recreates it (with the new connection
+    /// details) on its very next tick, matching the immediate-invalidation behavior of the other
+    /// three backends.
+    ///
+    /// This runs synchronously on the caller's thread -- for the real invalidation source,
+    /// <see cref="IPrinterCacheInvalidator"/>, that is the HTTP request thread handling the printer
+    /// edit (see <c>PrintersController.UpdateAsync</c>). <see cref="OctoPrintWebSocketAdapter.Dispose"/>
+    /// can block for up to 5 seconds waiting for its receive loop to end, so neither the lock
+    /// acquisition nor the disposal itself may happen while any other caller could be blocked on
+    /// that same wait: the gate is held only long enough to atomically detach the state/adapter,
+    /// and the actual `Dispose()` call is offloaded to the thread pool so the edit request returns
+    /// immediately regardless of how long teardown takes.
+    /// </remarks>
+    private void OnPrinterInvalidated(Guid printerId)
+    {
+        // Take the same per-printer gate EnsureWebSocketAdapter uses, so an invalidation can never
+        // interleave with an in-flight adapter construction: either it runs fully before the
+        // construction begins (the fresh adapter picks up the cleared state and is built with
+        // current credentials since CreateWebSocketAdapter re-reads the printer passed to it), or
+        // fully after (the just-published adapter is torn down immediately, exactly as intended).
+        object gate = _adapterCreationLocks.GetOrAdd(printerId, static _ => new object());
+        OctoPrintWebSocketAdapter? adapterToDispose;
+        lock (gate)
+        {
+            if (_printerStates.TryGetValue(printerId, out PrinterPollingState? state))
+            {
+                state.CachedPrinter = null;
+
+                // Force the next reconciliation pass (or on-demand recreation in PollPrinterAsync)
+                // to treat this printer as needing a fresh adapter, even if it hasn't run yet.
+                state.CreatedWithServerUrl = null;
+                state.CreatedWithApiKey = null;
+            }
+
+            // Bump the durable, independent invalidation counter unconditionally -- even when no
+            // PrinterPollingState currently exists for this printer (never seen yet, or torn down
+            // by cleanup between a caller's pre-fetch snapshot and its publish). Keying the fence
+            // off PrinterPollingState itself let a caller who snapshotted "no state" (fallback
+            // generation 0) still publish a stale row it fetched, because a freshly (re)created
+            // state's generation always started back at that same default -- silently matching the
+            // stale caller's snapshot. Using this separate, never-removed dictionary as the sole
+            // source of truth for generations closes that gap: any invalidation for this printer id
+            // is recorded here regardless of polling-state lifecycle, so a caller whose snapshot
+            // predates it always sees a mismatch. See EnsureWebSocketAdapter's
+            // <paramref name="expectedGeneration"/> doc for how this pairing is enforced.
+            _invalidationGenerations.AddOrUpdate(printerId, 1, static (_, current) => current + 1);
+
+            // TryRemove is atomic; only detach the adapter here, never dispose it while the gate
+            // is held (that would block any other caller -- e.g. a concurrent EnsureWebSocketAdapter
+            // reconnect on the reconciliation loop -- for up to 5 seconds waiting on this same lock).
+            _webSocketAdapters.TryRemove(printerId, out adapterToDispose);
+        }
+
+        if (adapterToDispose is not null)
+        {
+            // Dispose off the calling thread. For the real caller (the HTTP request thread editing
+            // this printer) this guarantees the edit returns immediately instead of stalling for up
+            // to 5 seconds on OctoPrintWebSocketAdapter.Dispose()'s receive-loop wait.
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    adapterToDispose.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "OctoPrint {PrinterId}: error disposing WebSocket adapter during invalidation", printerId);
+                }
+            });
+        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -133,6 +256,11 @@ public sealed class OctoPrintPollingService(
 
     public void Dispose()
     {
+        if (_printerCacheInvalidator is not null)
+        {
+            _printerCacheInvalidator.Unsubscribe(OnPrinterInvalidated);
+        }
+
         // Signal cancellation to background loops first, then dispose adapters and clear collections.
         try
         {
@@ -169,6 +297,162 @@ public sealed class OctoPrintPollingService(
     }
 
     /// <summary>
+    /// Creates a new WebSocket adapter for the given printer, stores it and its polling state,
+    /// and starts a background connection attempt. Shared by the 30-second reconciliation loop
+    /// and by <see cref="PollPrinterAsync"/>'s on-demand recreation after an invalidation removed
+    /// the previous adapter, so both paths construct the adapter identically.
+    /// </summary>
+    private OctoPrintWebSocketAdapter CreateWebSocketAdapter(Guid id, Printer printer, CancellationToken ct)
+    {
+        // Get the OctoPrint client from a scoped context
+        // (scoped services cannot be injected directly into singletons)
+        using IServiceScope scope = _scopeFactory.CreateScope();
+        IOctoPrintClient octoPrintClient = scope.ServiceProvider.GetRequiredService<IOctoPrintClient>();
+
+        var adapter = new OctoPrintWebSocketAdapter(
+            id,
+            printer,
+            _logger,
+            octoPrintClient,
+            _hub,
+            _statusCacheWriter,
+            _coverageBroadcaster,
+            watermarkReader);
+
+        _webSocketAdapters[id] = adapter;
+        PrinterPollingState state = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState
+        {
+            PrinterId = printerId,
+            LastKnownIsOnline = false,
+            LastApiState = "unset",
+            WebSocketAdapter = adapter
+        });
+        state.WebSocketAdapter = adapter;
+        state.CreatedWithServerUrl = printer.ServerUrl;
+        state.CreatedWithApiKey = printer.Credential?.ApiKey;
+        state.CachedPrinter = printer;
+
+        _logger.LogDebug("Created WebSocket adapter for OctoPrint printer {Id}", id);
+
+        // Attempt WebSocket connection in background
+        _ = Task.Run(
+            async () =>
+        {
+            try
+            {
+                await adapter.ConnectAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "WebSocket connection failed for {Id}, will use HTTP polling", id);
+            }
+        }, ct);
+
+        return adapter;
+    }
+
+    /// <summary>
+    /// Ensures exactly one up-to-date WebSocket adapter exists per printer, even when the 30-second
+    /// reconciliation loop and <see cref="PollPrinterAsync"/>'s per-tick check race to recreate a
+    /// missing or stale adapter after an invalidation or a credential change. Holds a per-printer
+    /// lock across the "does one exist and is it current?" check and the construction itself, so
+    /// only one caller ever calls <see cref="CreateWebSocketAdapter"/> for a given printer at a
+    /// time; the loser observes the winner's adapter already present in
+    /// <see cref="_webSocketAdapters"/> (atomically detached from any stale predecessor, never one
+    /// mid-teardown) and returns it instead of constructing — and leaking — a second live
+    /// connection. Any stale adapter is detached from <see cref="_webSocketAdapters"/> while the
+    /// lock is held (an atomic dictionary op) but is only actually disposed after the lock is
+    /// released, so this gate is never held across <see cref="OctoPrintWebSocketAdapter.Dispose"/>'s
+    /// up-to-5-second wait -- a concurrent <see cref="OnPrinterInvalidated"/> call (potentially on
+    /// an HTTP request thread) must never block on that.
+    /// </summary>
+    /// <param name="id">The printer id to ensure an adapter exists for.</param>
+    /// <param name="printer">
+    /// The printer row to construct/reconnect the adapter with. Ignored (and the currently
+    /// published adapter, if any, returned instead) when <paramref name="expectedGeneration"/> is
+    /// stale -- see that parameter's doc.
+    /// </param>
+    /// <param name="ct">Cancellation token propagated to the adapter's connection/receive loop.</param>
+    /// <param name="expectedGeneration">
+    /// The <see cref="_invalidationGenerations"/> value the caller observed at the same moment it
+    /// captured <paramref name="printer"/>, before it could acquire the per-printer gate. If the
+    /// current generation has since moved on (an invalidation raced the caller's capture),
+    /// <paramref name="printer"/> is a stale snapshot and must not be used to construct or publish an
+    /// adapter -- doing so would silently undo the invalidation. Pass <see langword="null"/> (the
+    /// default, used by the 30-second reconciliation loop) to skip this check when the caller's
+    /// printer data is always freshly read in the same tick with no earlier capture to race.
+    /// </param>
+    private OctoPrintWebSocketAdapter? EnsureWebSocketAdapter(Guid id, Printer printer, CancellationToken ct, long? expectedGeneration = null)
+    {
+        object gate = _adapterCreationLocks.GetOrAdd(id, static _ => new object());
+        OctoPrintWebSocketAdapter? staleAdapterToDispose = null;
+        OctoPrintWebSocketAdapter? result;
+        lock (gate)
+        {
+            if (expectedGeneration.HasValue
+                && _invalidationGenerations.GetOrAdd(id, 0L) != expectedGeneration.Value)
+            {
+                // An invalidation (or another caller) changed this printer's state after the caller
+                // captured `printer` but before it could reach this gate. Decline to construct from
+                // that now-stale snapshot; return whatever adapter currently exists (possibly none)
+                // and let the caller's next tick re-resolve a fresh printer row before retrying.
+                _logger.LogDebug(
+                    "OctoPrint {Id}: cache generation changed since caller captured its printer snapshot, declining to construct from stale data",
+                    id);
+                return _webSocketAdapters.TryGetValue(id, out OctoPrintWebSocketAdapter? staleGenerationAdapter)
+                    ? staleGenerationAdapter
+                    : null;
+            }
+
+            if (_webSocketAdapters.TryGetValue(id, out OctoPrintWebSocketAdapter? existing) && existing is not null)
+            {
+                bool credentialsChanged = _printerStates.TryGetValue(id, out PrinterPollingState? existingState)
+                    && (printer.ServerUrl != existingState.CreatedWithServerUrl
+                        || printer.Credential?.ApiKey != existingState.CreatedWithApiKey);
+
+                if (!credentialsChanged)
+                {
+                    return existing;
+                }
+
+                _logger.LogInformation("OctoPrint {Id}: Credentials changed, recreating adapter", id);
+
+                // Only drop the stale adapter itself. Do NOT remove this printer's entry from
+                // _pollingLoops/_printerStates: PollPrinterAsync's HTTP fallback loop is already
+                // running with a captured reference to the existing PrinterPollingState object, and
+                // CreateWebSocketAdapter below (via _printerStates.GetOrAdd) will find and update
+                // that same shared object in place. Removing them here would let the reconciliation
+                // loop see "no polling loop" on its next pass and spawn a second, independent
+                // PollPrinterAsync task for this printer while the original keeps running forever on
+                // its own now-orphaned state object — a permanent per-edit leak of background loops.
+                //
+                // TryRemove is atomic; Dispose() itself is deferred until after the lock is released
+                // below (see staleAdapterToDispose) so this gate is never held for the up-to-5-second
+                // wait inside OctoPrintWebSocketAdapter.Dispose() -- a concurrent OnPrinterInvalidated
+                // (potentially blocking an HTTP request thread) must never wait on that.
+                _webSocketAdapters.TryRemove(id, out _);
+                staleAdapterToDispose = existing;
+            }
+
+            result = CreateWebSocketAdapter(id, printer, ct);
+        }
+
+        if (staleAdapterToDispose is not null)
+        {
+            try
+            {
+                staleAdapterToDispose.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "OctoPrint {Id}: error disposing stale WebSocket adapter before recreation", id);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Main loop that continuously monitors and manages WebSocket connections for all OctoPrint printers.
     /// Discovers OctoPrint printers every 30 seconds and manages WebSocket + HTTP fallback for each.
     /// </summary>
@@ -181,114 +465,7 @@ public sealed class OctoPrintPollingService(
             {
                 try
                 {
-                    // Get list of OctoPrint printers from database
-                    List<Guid> printerIds = await GetOctoPrintPrinterIdsAsync(ct);
-                    _logger.LogDebug("OctoPrintPollingService: Found {PrinterIdsCount} OctoPrint printers", printerIds.Count);
-
-                    // Ensure WebSocket adapters and polling loops exist for all OctoPrint printers.
-                    // Also detect credential changes (ServerUrl, API key) and recreate adapters when needed.
-                    foreach (Guid id in printerIds)
-                    {
-                        bool needsNewAdapter = !_webSocketAdapters.ContainsKey(id);
-
-                        // Check for credential changes on existing adapters
-                        if (!needsNewAdapter && _printerStates.TryGetValue(id, out PrinterPollingState? existing))
-                        {
-                            Printer? current = await GetPrinterAsync(id, ct);
-                            if (current != null)
-                            {
-                                string? currentApiKey = current.Credential?.ApiKey;
-                                bool credentialsChanged = current.ServerUrl != existing.CreatedWithServerUrl
-                                    || currentApiKey != existing.CreatedWithApiKey;
-
-                                if (credentialsChanged)
-                                {
-                                    _logger.LogInformation("OctoPrint {Id}: Credentials changed, recreating adapter", id);
-
-                                    // Tear down old adapter
-                                    if (_webSocketAdapters.TryRemove(id, out OctoPrintWebSocketAdapter? oldAdapter))
-                                    {
-                                        oldAdapter.Dispose();
-                                    }
-
-                                    _pollingLoops.TryRemove(id, out _);
-                                    _printerStates.TryRemove(id, out _);
-                                    needsNewAdapter = true;
-                                }
-                            }
-                        }
-
-                        if (needsNewAdapter)
-                        {
-                            Printer? printer = await GetPrinterAsync(id, ct);
-                            if (printer != null)
-                            {
-                                // Get the OctoPrint client from a scoped context
-                                // (scoped services cannot be injected directly into singletons)
-                                using IServiceScope scope = _scopeFactory.CreateScope();
-                                IOctoPrintClient octoPrintClient = scope.ServiceProvider.GetRequiredService<IOctoPrintClient>();
-
-                                var adapter = new OctoPrintWebSocketAdapter(
-                                    id,
-                                    printer,
-                                    _logger,
-                                    octoPrintClient,
-                                    _hub,
-                                    _statusCacheWriter,
-                                    _coverageBroadcaster,
-                                    watermarkReader);
-
-                                _webSocketAdapters.TryAdd(id, adapter);
-                                PrinterPollingState state = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState
-                                {
-                                    PrinterId = printerId,
-                                    LastKnownIsOnline = false,
-                                    LastApiState = "unset",
-                                    WebSocketAdapter = adapter
-                                });
-                                state.WebSocketAdapter = adapter;
-                                state.CreatedWithServerUrl = printer.ServerUrl;
-                                state.CreatedWithApiKey = printer.Credential?.ApiKey;
-
-                                _logger.LogDebug("Created WebSocket adapter for OctoPrint printer {Id}", id);
-
-                                // Attempt WebSocket connection in background
-                                _ = Task.Run(
-                                    async () =>
-                                {
-                                    try
-                                    {
-                                        await adapter.ConnectAsync(ct);
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogDebug(ex, "WebSocket connection failed for {Id}, will use HTTP polling", id);
-                                    }
-                                }, ct);
-                            }
-                        }
-
-                        // Ensure polling loop exists (for HTTP fallback)
-                        if (!_pollingLoops.ContainsKey(id))
-                        {
-#pragma warning disable S6612 // Use the loop variable instead of capturing
-                            var pollingLoop = Task.Run(() => PollPrinterAsync(id, ct), ct);
-#pragma warning restore S6612
-                            _pollingLoops.TryAdd(id, pollingLoop);
-                            _logger.LogDebug("Started HTTP polling fallback loop for OctoPrint printer {Id}", id);
-                        }
-                    }
-
-                    // Remove adapters and polling loops for printers that are no longer OctoPrint
-                    var inactiveIds = _webSocketAdapters.Keys.Except(printerIds).ToList();
-                    foreach (Guid printerId in inactiveIds)
-                    {
-                        _webSocketAdapters.TryRemove(printerId, out OctoPrintWebSocketAdapter? adapter);
-                        adapter?.Dispose();
-                        _pollingLoops.TryRemove(printerId, out _);
-                        _printerStates.TryRemove(printerId, out _);
-                        _logger.LogDebug("Stopped WebSocket and polling for OctoPrint printer {PrinterId}", printerId);
-                    }
+                    await ReconcilePrintersOnceAsync(ct);
 
                     // Check every 30 seconds for printer list changes
                     await Task.Delay(TimeSpan.FromSeconds(30), ct);
@@ -307,6 +484,128 @@ public sealed class OctoPrintPollingService(
         catch (OperationCanceledException)
         {
             _logger.LogInformation("OctoPrintPollingService main loop cancelled");
+        }
+    }
+
+    /// <summary>
+    /// Runs a single reconciliation pass: discovers current OctoPrint printers, ensures WebSocket
+    /// adapters and HTTP polling loops exist, refreshes each printer's cached row, and removes
+    /// state for printers that are no longer OctoPrint. Extracted from <see cref="RunAsync"/> (which
+    /// just loops this every 30 seconds) so it can be invoked directly and deterministically in
+    /// tests.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GetOctoPrintPrintersAsync"/> reads every OctoPrint printer's current row in one
+    /// batch, which takes an unpredictable amount of time relative to a concurrent
+    /// <see cref="OnPrinterInvalidated"/> call for one of those printers. Without a fence, this
+    /// pass could read a printer's row before an edit invalidates it, then -- after the
+    /// invalidation has already cleared the cache, bumped <see cref="_invalidationGenerations"/>,
+    /// and torn down the adapter -- go on to republish that now-stale row into both the adapter
+    /// (via <see cref="EnsureWebSocketAdapter"/>) and <see cref="PrinterPollingState.CachedPrinter"/>,
+    /// silently undoing the invalidation for up to another 30 seconds. To close this, this method
+    /// captures each printer id's <see cref="_invalidationGenerations"/> value *before* the batch
+    /// fetch starts, then -- under the same per-printer <see cref="_adapterCreationLocks"/> gate
+    /// <see cref="OnPrinterInvalidated"/> uses -- only republishes the fetched row if the generation
+    /// is still unchanged. Reading the snapshot from <see cref="_invalidationGenerations"/> itself
+    /// (rather than from each printer's <see cref="PrinterPollingState"/>, which may not exist yet
+    /// for a never-before-seen printer, or may be torn down and recreated by cleanup below before
+    /// this method re-checks it) is what makes the fence hold even across polling-state lifecycle
+    /// changes: a printer with no prior state has no prior <see cref="_invalidationGenerations"/>
+    /// entry either, but an invalidation racing the fetch still creates/bumps one, so the later
+    /// comparison correctly observes a mismatch instead of a coincidental default-vs-default match.
+    /// </remarks>
+    private async Task ReconcilePrintersOnceAsync(CancellationToken ct)
+    {
+        // Snapshot every printer id's durable invalidation generation before the batch fetch below
+        // can observe a stale row relative to a concurrent invalidation. Reading directly from
+        // _invalidationGenerations (not _printerStates) means a printer never seen before is
+        // captured too: GetOrAdd below returns 0 for it here, and if OnPrinterInvalidated bumps that
+        // same id in the meantime, its own GetOrAdd creates the entry at 1 -- so the later
+        // equality check still correctly detects the race instead of both sides defaulting to a
+        // match.
+        Dictionary<Guid, long> generationsBeforeFetch = _invalidationGenerations.ToDictionary(
+            kvp => kvp.Key,
+            kvp => kvp.Value);
+
+        // Get list of OctoPrint printers (fully decrypted) from database
+        List<Printer> printers = await GetOctoPrintPrintersAsync(ct);
+        Dictionary<Guid, Printer> printersById = printers.ToDictionary(p => p.Id);
+        List<Guid> printerIds = printers.Select(p => p.Id).ToList();
+        _logger.LogDebug("OctoPrintPollingService: Found {PrinterIdsCount} OctoPrint printers", printerIds.Count);
+
+        // Ensure WebSocket adapters and polling loops exist for all OctoPrint printers.
+        // EnsureWebSocketAdapter atomically detects a missing adapter or a credential
+        // change (ServerUrl, API key) and recreates it under a single per-printer lock,
+        // so this loop can never race PollPrinterAsync's own on-demand recreation below.
+        foreach (Guid id in printerIds)
+        {
+            printersById.TryGetValue(id, out Printer? current);
+            long capturedGeneration = generationsBeforeFetch.TryGetValue(id, out long gen) ? gen : 0;
+
+            if (current != null)
+            {
+                // Pass the pre-fetch generation so a racing invalidation makes this decline to
+                // construct/recreate from the now-stale row, exactly like PollPrinterAsync's own
+                // on-demand recreation does.
+                EnsureWebSocketAdapter(id, current, ct, capturedGeneration);
+            }
+
+            // Ensure polling loop exists (for HTTP fallback)
+            if (!_pollingLoops.ContainsKey(id))
+            {
+#pragma warning disable S6612 // Use the loop variable instead of capturing
+                var pollingLoop = Task.Run(() => PollPrinterAsync(id, ct), ct);
+#pragma warning restore S6612
+                _pollingLoops.TryAdd(id, pollingLoop);
+                _logger.LogDebug("Started HTTP polling fallback loop for OctoPrint printer {Id}", id);
+            }
+
+            // Refresh the cached printer row used by PollPrinterAsync's per-tick HTTP
+            // fallback loop, so it doesn't need its own per-tick database read (issue #1763).
+            if (current != null)
+            {
+                PrinterPollingState cacheState = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState
+                {
+                    PrinterId = printerId,
+                    LastKnownIsOnline = false,
+                    LastApiState = "unset"
+                });
+
+                // Gate the write-back under the same per-printer lock OnPrinterInvalidated uses,
+                // and only publish if nothing invalidated this printer since the pre-fetch snapshot
+                // above -- otherwise this fetch raced an invalidation and republishing it would
+                // silently undo that invalidation.
+                object gate = _adapterCreationLocks.GetOrAdd(id, static _ => new object());
+                lock (gate)
+                {
+                    if (_invalidationGenerations.GetOrAdd(id, 0L) == capturedGeneration)
+                    {
+                        cacheState.CachedPrinter = current;
+                    }
+                }
+            }
+        }
+
+        // Remove adapters and polling loops for printers that are no longer OctoPrint
+        var inactiveIds = _webSocketAdapters.Keys.Except(printerIds).ToList();
+        foreach (Guid printerId in inactiveIds)
+        {
+            _webSocketAdapters.TryRemove(printerId, out OctoPrintWebSocketAdapter? adapter);
+            adapter?.Dispose();
+            _pollingLoops.TryRemove(printerId, out _);
+            _printerStates.TryRemove(printerId, out _);
+
+            // Deliberately do NOT remove this printer's entry from _adapterCreationLocks.
+            // Doing so is not itself synchronized against the gate it removes: a caller
+            // could be holding or waiting on this exact lock object at the moment it's
+            // dropped from the dictionary, after which a subsequent EnsureWebSocketAdapter
+            // call would GetOrAdd a brand-new lock object for the same printer id, and the
+            // old holder/waiter plus the new caller could then run their "serialized"
+            // critical sections concurrently -- reintroducing the double-construction race
+            // this locking scheme exists to prevent. Leaving the entry in place costs one
+            // small object per distinct printer id ever seen by this service instance,
+            // which is bounded and negligible.
+            _logger.LogDebug("Stopped WebSocket and polling for OctoPrint printer {PrinterId}", printerId);
         }
     }
 
@@ -330,11 +629,51 @@ public sealed class OctoPrintPollingService(
         {
             try
             {
-                // Get printer details
-                Printer? printer = await GetPrinterAsync(printerId, ct);
+                // Get printer details - use the cached row refreshed by the 30s reconciliation
+                // loop (or by an explicit invalidation) instead of re-querying the database
+                // every tick (issue #1763). Fall back to a fresh read only on a cache miss.
+                //
+                // Capture the generation BEFORE reading CachedPrinter (not after): if an
+                // invalidation lands in the gap between these two reads, it has already cleared
+                // CachedPrinter by the time we read it, so we correctly fall into the cache-miss
+                // branch below instead of pairing an old printer snapshot with the invalidation's
+                // new generation number (which would make EnsureWebSocketAdapter's fence below
+                // wrongly accept it as current). See EnsureWebSocketAdapter's
+                // <paramref name="expectedGeneration"/> doc for how this pairing is enforced.
+                long capturedGeneration = _invalidationGenerations.GetOrAdd(printerId, 0L);
+                Printer? printer = state.CachedPrinter;
+                if (printer is null)
+                {
+                    printer = await GetPrinterAsync(printerId, ct);
+
+                    // Only publish this fetch into the shared cache if no invalidation raced it
+                    // while the fetch was in flight (an async continuation can resume long after
+                    // the underlying query completes, so a same-thread "before/after" read here
+                    // isn't enough -- reuse EnsureWebSocketAdapter's own gate so this check is
+                    // atomic with any concurrent OnPrinterInvalidated call). Deliberately do NOT
+                    // re-read the generation after the fetch: doing so let a fetch that raced an
+                    // invalidation pick up the invalidation's *new* generation number alongside
+                    // the *old* printer row it already captured, silently re-validating stale data
+                    // (round 5 review finding). If the generation moved on, leave CachedPrinter as
+                    // whatever it currently is (do not overwrite with our possibly-stale fetch) --
+                    // the unchanged capturedGeneration below still causes EnsureWebSocketAdapter to
+                    // correctly decline, and the next tick will re-resolve fresh data/generation.
+                    object gate = _adapterCreationLocks.GetOrAdd(printerId, static _ => new object());
+                    lock (gate)
+                    {
+                        if (_invalidationGenerations.GetOrAdd(printerId, 0L) == capturedGeneration)
+                        {
+                            state.CachedPrinter = printer;
+                        }
+                    }
+                }
+
                 if (printer?.Backend != (int)PrinterBackend.OctoPrint)
                 {
-                    // Printer is no longer OctoPrint, remove from polling
+                    // Printer is no longer OctoPrint, remove from polling. Leave this printer's
+                    // _adapterCreationLocks entry in place (see the matching cleanup in RunAsync
+                    // for why removing it is unsafe) -- it's a single small object, bounded by the
+                    // number of distinct printer ids this service instance has ever seen.
                     _pollingLoops.TryRemove(printerId, out _);
                     _printerStates.TryRemove(printerId, out _);
                     if (_webSocketAdapters.TryRemove(printerId, out OctoPrintWebSocketAdapter? adapter))
@@ -345,12 +684,33 @@ public sealed class OctoPrintPollingService(
                     return;
                 }
 
-                // Get WebSocket adapter for this printer
+                // Get WebSocket adapter for this printer. It may be missing here because an
+                // invalidation (printer edited) just tore down the old adapter along with the
+                // stale CachedPrinter above — recreate it immediately from the printer row we
+                // just resolved, rather than waiting for the next 30-second reconciliation pass
+                // to notice the missing adapter and recreate it (issue #1763 follow-up).
                 if (!_webSocketAdapters.TryGetValue(printerId, out OctoPrintWebSocketAdapter? wsAdapter) || wsAdapter == null)
                 {
-                    _logger.LogWarning("OctoPrint {PrinterId}: WebSocket adapter not found", printerId);
-                    await Task.Delay(PollingInterval, ct);
-                    continue;
+                    if (printer != null)
+                    {
+                        _logger.LogInformation("OctoPrint {PrinterId}: WebSocket adapter missing, recreating", printerId);
+                        wsAdapter = EnsureWebSocketAdapter(printerId, printer, ct, capturedGeneration);
+                        if (wsAdapter == null)
+                        {
+                            // EnsureWebSocketAdapter declined to build from our snapshot because an
+                            // invalidation raced it (see its expectedGeneration doc). Our CachedPrinter
+                            // is now stale/cleared, so skip this tick and let the next one re-resolve
+                            // fresh data (and the current generation) before retrying.
+                            await Task.Delay(PollingInterval, ct);
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("OctoPrint {PrinterId}: WebSocket adapter not found", printerId);
+                        await Task.Delay(PollingInterval, ct);
+                        continue;
+                    }
                 }
 
                 // Skip polling if WebSocket is connected (primary transport)
@@ -583,14 +943,13 @@ public sealed class OctoPrintPollingService(
     }
 
     /// <summary>
-    /// Gets the list of all OctoPrint printer IDs from the database.
+    /// Gets all OctoPrint printers (fully decrypted) from the database.
     /// </summary>
-    private async Task<List<Guid>> GetOctoPrintPrinterIdsAsync(CancellationToken ct)
+    private async Task<List<Printer>> GetOctoPrintPrintersAsync(CancellationToken ct)
     {
         using IServiceScope scope = _scopeFactory.CreateScope();
         IPrintersRepository repo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
-        List<Printer> printers = await repo.GetByBackendAsync(PrinterBackend.OctoPrint, ct);
-        return printers.Select(p => p.Id).ToList();
+        return await repo.GetByBackendAsync(PrinterBackend.OctoPrint, ct);
     }
 
     /// <summary>
