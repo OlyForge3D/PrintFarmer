@@ -325,7 +325,7 @@ public class PrusaLinkPollingServiceCacheTests
             long capturedGeneration = GetInvalidationGeneration(printerId);
 
             var tasks = new Task[2];
-            tasks[0] = Task.Run(() => _tryPublishCachedPrinter.Invoke(_service, [printerId, printer, capturedGeneration, state]));
+            tasks[0] = Task.Run(() => _tryPublishCachedPrinter.Invoke(_service, [printerId, printer, capturedGeneration, state, null]));
             tasks[1] = Task.Run(() => _onPrinterInvalidated.Invoke(_service, [printerId]));
 
             await Task.WhenAll(tasks);
@@ -337,5 +337,73 @@ public class PrusaLinkPollingServiceCacheTests
                 "the bump) must leave the cache empty rather than resurrecting the stale printer " +
                 "snapshot captured before either ran");
         }
+    }
+
+    /// <summary>
+    /// Regression test for the second round of review on the concurrency stress test above
+    /// (Hicks and Vasquez): 200 rounds of unconstrained <c>Task.Run</c> racing is still only
+    /// probabilistic evidence -- it never *proves* the two calls are mutually exclusive, it only
+    /// shows the invariant held in however many interleavings the thread pool happened to produce.
+    /// This test instead forces the exact interleaving deterministically, using the
+    /// <c>onGenerationCheckPassedForTestingOnly</c> seam added to <c>TryPublishCachedPrinter</c>:
+    /// the publish call is paused *while still holding the per-printer <c>_cacheGates</c> lock*,
+    /// immediately after its generation check has passed but before it writes
+    /// <c>CachedPrinter</c>. A concurrent <c>OnPrinterInvalidated</c> call is then started and
+    /// positively observed to NOT complete while the publish call holds the lock paused -- proving
+    /// real mutual exclusion by direct observation, not by absence of a failure over many
+    /// iterations. Only after that is confirmed is the publish call allowed to resume (completing
+    /// its write), at which point the waiting invalidation call proceeds and clears the cache.
+    /// </summary>
+    [Fact]
+    public async Task TryPublishCachedPrinter_PausedInsideLockAfterGenerationCheck_BlocksConcurrentOnPrinterInvalidatedUntilReleased()
+    {
+        Guid printerId = Guid.NewGuid();
+        object state = GetOrCreateEmptyState(printerId);
+        var printer = new Printer { Id = printerId, Name = "Stale", ServerUrl = "http://prusa.local", Backend = (int)PrinterBackend.PrusaLink };
+        long capturedGeneration = GetInvalidationGeneration(printerId);
+
+        using ManualResetEventSlim insideCriticalSection = new(initialState: false);
+        using ManualResetEventSlim releasePublish = new(initialState: false);
+
+        Task publishTask = Task.Run(() =>
+        {
+            void OnGenerationCheckPassed()
+            {
+                insideCriticalSection.Set();
+                // Blocking wait is intentional and safe here: this callback runs synchronously
+                // inside TryPublishCachedPrinter's `lock (gate)` block, on a dedicated thread-pool
+                // thread reserved for exactly this purpose by Task.Run -- it must hold the lock
+                // open until the test explicitly releases it.
+                releasePublish.Wait();
+            }
+
+            _tryPublishCachedPrinter.Invoke(_service, [printerId, printer, capturedGeneration, state, (Action)OnGenerationCheckPassed]);
+        });
+
+        insideCriticalSection.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue(
+            "the publish call must reach its paused callback inside the lock within the timeout");
+
+        Task invalidateTask = Task.Run(() => _onPrinterInvalidated.Invoke(_service, [printerId]));
+
+        // The invalidation call needs the same _cacheGates lock the paused publish call is still
+        // holding, so it must not be able to complete yet. A generous bounded wait (rather than a
+        // fixed sleep) keeps this fast when it genuinely blocks, while still giving a
+        // false-negative-prone regression (e.g. the lock silently removed) ample time to complete
+        // and be caught.
+        Task completedFirst = await Task.WhenAny(invalidateTask, Task.Delay(TimeSpan.FromMilliseconds(500)));
+        completedFirst.Should().NotBeSameAs(invalidateTask,
+            "OnPrinterInvalidated must genuinely block on the same per-printer lock while " +
+            "TryPublishCachedPrinter's critical section is paused mid-way through -- if it were " +
+            "able to complete here, the two calls are not actually serialized on the same lock");
+
+        releasePublish.Set();
+
+        await Task.WhenAll(publishTask, invalidateTask);
+
+        GetCachedPrinter(printerId).Should().BeNull(
+            "once released, the paused publish completes its now-stale write, and the invalidation " +
+            "that was blocked behind it then runs and clears the cache -- the same end state as the " +
+            "probabilistic test above, but this time reached via a provably forced, not merely " +
+            "likely, interleaving");
     }
 }

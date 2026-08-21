@@ -164,13 +164,21 @@ public sealed class SdcpPollingService(
     /// sites (the 30s reconciliation loop and the per-tick cache-miss fallback) so a single test can
     /// exercise this critical section for both callers at once.
     /// </summary>
-    private void TryPublishCachedPrinter(Guid printerId, Printer printer, long capturedGeneration, PrinterPollingState state)
+    /// <param name="onGenerationCheckPassedForTestingOnly">
+    /// Test-only seam, always null in production. When supplied, it is invoked synchronously
+    /// while <paramref name="state"/>'s <c>gate</c> is still held, immediately after the
+    /// generation check passes but before the write -- letting a test deterministically pause
+    /// inside the critical section and prove a concurrent <see cref="OnPrinterInvalidated"/>
+    /// call genuinely blocks on the same lock rather than merely being unlikely to interleave.
+    /// </param>
+    private void TryPublishCachedPrinter(Guid printerId, Printer printer, long capturedGeneration, PrinterPollingState state, Action? onGenerationCheckPassedForTestingOnly = null)
     {
         object gate = _cacheGates.GetOrAdd(printerId, static _ => new object());
         lock (gate)
         {
             if (_invalidationGenerations.GetOrAdd(printerId, 0L) == capturedGeneration)
             {
+                onGenerationCheckPassedForTestingOnly?.Invoke();
                 state.CachedPrinter = printer;
             }
         }
