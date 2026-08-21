@@ -597,6 +597,11 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusSnapshotReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
+
+        // Register the printer cache invalidator (issue #1763): singleton pub/sub letting
+        // PrintersController.UpdateAsync tell backend polling services to drop a cached Printer
+        // row immediately after an edit, instead of waiting for the next 30s reconciliation tick.
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterCacheInvalidator, Farm.Infrastructure.Services.Printers.PrinterCacheInvalidator>();
         _ = services.AddSingleton(TimeProvider.System);
 
         // Register the per-tool activity accumulator (issue #711, round-14). Singleton so the

@@ -23,16 +23,47 @@ public sealed class FlashForgePollingService(
     ILogger<FlashForgePollingService> logger,
     IPrinterStatusCacheWriter statusCacheWriter,
     IFilamentCoverageBroadcaster? coverageBroadcaster = null,
-    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable
+    IMutationWatermarkReader? watermarkReader = null,
+    IPrinterCacheInvalidator? printerCacheInvalidator = null) : IHostedService, IDisposable
 {
     private readonly ILogger<FlashForgePollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
     private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+    private readonly IPrinterCacheInvalidator? _printerCacheInvalidator = printerCacheInvalidator;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
     private readonly ConcurrentDictionary<Guid, Task> _pollingLoops = new();
+
+    /// <summary>
+    /// Durable per-printer invalidation counter, kept independent of <see cref="PrinterPollingState"/>
+    /// so it survives that state's teardown/recreation (e.g. the printer briefly leaving and
+    /// re-entering this backend). Entries are never removed. <see cref="OnPrinterInvalidated"/>
+    /// unconditionally bumps a printer's entry; both <see cref="RunAsync"/> and
+    /// <see cref="PollPrinterAsync"/> snapshot a printer's generation before an in-flight database
+    /// read and only publish that read's result to <see cref="PrinterPollingState.CachedPrinter"/>
+    /// if the generation is still unchanged afterward — otherwise an invalidation raced the read
+    /// and the (possibly stale) result is used for this tick only, never cached.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, long> _invalidationGenerations = new();
+
+    /// <summary>
+    /// Per-printer gate serializing <see cref="OnPrinterInvalidated"/>'s generation-bump-and-clear
+    /// against every write-back site's generation-check-and-publish (<see cref="RunAsync"/> and
+    /// <see cref="PollPrinterAsync"/>). Without this, "check generation, then write
+    /// <see cref="PrinterPollingState.CachedPrinter"/>" is two independent, unsynchronized
+    /// operations: a thread can pass the check, then be preempted before its write while
+    /// <see cref="OnPrinterInvalidated"/> runs and clears the cache, then resume and overwrite the
+    /// just-cleared cache with its (now provably stale) fetch result — silently undoing the
+    /// invalidation. Taking this lock around both the bump/clear and each check/write makes the
+    /// two sequences mutually exclusive, closing that race. Entries are never removed (matching
+    /// <see cref="_invalidationGenerations"/>'s non-removal policy), for the same reason: removing
+    /// a lock object while another thread might be holding or waiting on it would let a
+    /// subsequently created replacement lock run concurrently with the old one, reintroducing the
+    /// exact race this gate exists to prevent.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, object> _cacheGates = new();
 
     /// <summary>
     /// Polling interval for FlashForge printers.
@@ -78,16 +109,86 @@ public sealed class FlashForgePollingService(
         /// restart, since this state is in-memory only), so the first message is never suppressed.
         /// </summary>
         public PrinterStatusUpdate? LastBroadcastUpdate { get; set; }
+
+        /// <summary>
+        /// Cached, fully decrypted printer row, refreshed by the 30-second reconciliation loop or
+        /// cleared by an explicit invalidation (see <see cref="IPrinterCacheInvalidator"/>). Avoids
+        /// re-querying the database and re-decrypting credentials on every poll tick (issue #1763).
+        /// </summary>
+        public Printer? CachedPrinter { get; set; }
     }
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("FlashForgePollingService starting");
+        if (_printerCacheInvalidator is not null)
+        {
+            _printerCacheInvalidator.Subscribe(OnPrinterInvalidated);
+        }
 #pragma warning disable VSTHRD003 // Avoid awaiting or returning a Task representing work that was not started within this context
         _ = _mainLoop = Task.Run(() => RunAsync(_cts.Token), _cts.Token);
 #pragma warning restore VSTHRD003
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Invoked when a printer's persisted row has changed (e.g. edited via the API). Drops the
+    /// cached copy so the next poll tick re-reads the row from the database instead of waiting
+    /// for the next 30-second reconciliation pass.
+    /// </summary>
+    private void OnPrinterInvalidated(Guid printerId)
+    {
+        // Take the same per-printer gate every write-back site uses, so this can never
+        // interleave with an in-flight fetch's check-then-write: either the bump/clear runs
+        // fully before the write-back's check (which then correctly observes a mismatch), or
+        // fully after (the just-published stale row is immediately cleared again).
+        object gate = _cacheGates.GetOrAdd(printerId, static _ => new object());
+        lock (gate)
+        {
+            // Bump unconditionally (even if no PrinterPollingState exists yet) so an invalidation
+            // that races a first-ever fetch for this printer is still durably recorded.
+            _invalidationGenerations.AddOrUpdate(printerId, 1, static (_, current) => current + 1);
+
+            if (_printerStates.TryGetValue(printerId, out PrinterPollingState? state))
+            {
+                state.CachedPrinter = null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Publishes <paramref name="printer"/> into <paramref name="state"/>.CachedPrinter only if no
+    /// invalidation has raced the fetch that produced it -- i.e. only if the current invalidation
+    /// generation for this printer still matches <paramref name="capturedGeneration"/>, the value
+    /// observed *before* the fetch began. Runs under the same per-printer <see cref="_cacheGates"/>
+    /// lock <see cref="OnPrinterInvalidated"/> uses, so the generation check and the publish are
+    /// atomic with respect to a concurrent invalidation: either this call's check-and-publish runs
+    /// fully before an invalidation's bump-and-clear (which then correctly observes the freshly
+    /// published row and clears it again), or fully after it (this call then observes the bumped
+    /// generation and declines to publish) -- there is no window in which a stale check can pass
+    /// and then have its write silently undo a subsequent invalidation. Shared by both write-back
+    /// sites (the 30s reconciliation loop and the per-tick cache-miss fallback) so a single test can
+    /// exercise this critical section for both callers at once.
+    /// </summary>
+    /// <param name="onGenerationCheckPassedForTestingOnly">
+    /// Test-only seam, always null in production. When supplied, it is invoked synchronously
+    /// while <paramref name="state"/>'s <c>gate</c> is still held, immediately after the
+    /// generation check passes but before the write -- letting a test deterministically pause
+    /// inside the critical section and prove a concurrent <see cref="OnPrinterInvalidated"/>
+    /// call genuinely blocks on the same lock rather than merely being unlikely to interleave.
+    /// </param>
+    private void TryPublishCachedPrinter(Guid printerId, Printer printer, long capturedGeneration, PrinterPollingState state, Action? onGenerationCheckPassedForTestingOnly = null)
+    {
+        object gate = _cacheGates.GetOrAdd(printerId, static _ => new object());
+        lock (gate)
+        {
+            if (_invalidationGenerations.GetOrAdd(printerId, 0L) == capturedGeneration)
+            {
+                onGenerationCheckPassedForTestingOnly?.Invoke();
+                state.CachedPrinter = printer;
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -121,6 +222,11 @@ public sealed class FlashForgePollingService(
     /// <inheritdoc />
     public void Dispose()
     {
+        if (_printerCacheInvalidator is not null)
+        {
+            _printerCacheInvalidator.Unsubscribe(OnPrinterInvalidated);
+        }
+
         _cts?.Dispose();
         _pollingLoops.Clear();
     }
@@ -137,8 +243,25 @@ public sealed class FlashForgePollingService(
             {
                 try
                 {
-                    List<Guid> printerIds = await GetFlashForgePrinterIdsAsync(ct);
+                    // Get list of FlashForge printers (fully decrypted), refreshing the per-printer
+                    // cache used by PollPrinterAsync (issue #1763)
+                    Dictionary<Guid, long> generationSnapshot = _invalidationGenerations.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+                    List<Printer> printers = await GetFlashForgePrintersAsync(ct);
+                    List<Guid> printerIds = printers.Select(p => p.Id).ToList();
                     _logger.LogDebug("FlashForgePollingService: Found {Count} FlashForge printers", printerIds.Count);
+
+                    foreach (Printer printer in printers)
+                    {
+                        PrinterPollingState refreshState = _printerStates.GetOrAdd(
+                            printer.Id,
+                            _ => new PrinterPollingState { PrinterId = printer.Id, LastKnownIsOnline = false });
+
+                        // Only publish if no invalidation raced the fetch above; otherwise this
+                        // row may already be stale and the next tick's cache-miss re-read (or the
+                        // next reconciliation pass) will pick up the fresh value instead.
+                        long capturedGeneration = generationSnapshot.GetValueOrDefault(printer.Id, 0L);
+                        TryPublishCachedPrinter(printer.Id, printer, capturedGeneration, refreshState);
+                    }
 
                     // Ensure polling loops exist for all FlashForge printers
                     foreach (Guid id in printerIds.Where(id => !_pollingLoops.ContainsKey(id)))
@@ -192,7 +315,24 @@ public sealed class FlashForgePollingService(
         {
             try
             {
-                Printer? printer = await GetPrinterAsync(printerId, ct);
+                // Get printer details - use the cached row refreshed by the 30s reconciliation
+                // loop (or by an explicit invalidation) instead of re-querying the database
+                // every tick (issue #1763). Fall back to a fresh read only on a cache miss.
+                Printer? printer = state.CachedPrinter;
+                if (printer is null)
+                {
+                    long capturedGeneration = _invalidationGenerations.GetOrAdd(printerId, 0L);
+                    printer = await GetPrinterAsync(printerId, ct);
+
+                    // Only cache the result if no invalidation raced this fetch; otherwise leave
+                    // the cache empty so the very next tick re-reads instead of resurrecting a
+                    // row that may already be stale.
+                    if (printer is not null)
+                    {
+                        TryPublishCachedPrinter(printerId, printer, capturedGeneration, state);
+                    }
+                }
+
                 if (printer?.Backend != (int)PrinterBackend.FlashForge)
                 {
                     _pollingLoops.TryRemove(printerId, out _);
@@ -398,14 +538,13 @@ public sealed class FlashForgePollingService(
     }
 
     /// <summary>
-    /// Gets the list of all FlashForge printer IDs from the database.
+    /// Gets all FlashForge printers (fully decrypted) from the database.
     /// </summary>
-    private async Task<List<Guid>> GetFlashForgePrinterIdsAsync(CancellationToken ct)
+    private async Task<List<Printer>> GetFlashForgePrintersAsync(CancellationToken ct)
     {
         using IServiceScope scope = _scopeFactory.CreateScope();
         IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-        List<Printer> printers = await unitOfWork.Printers.GetByBackendAsync(PrinterBackend.FlashForge, ct);
-        return printers.Select(p => p.Id).ToList();
+        return await unitOfWork.Printers.GetByBackendAsync(PrinterBackend.FlashForge, ct);
     }
 
     /// <summary>
