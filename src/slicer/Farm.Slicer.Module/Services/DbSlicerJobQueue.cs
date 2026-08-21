@@ -85,7 +85,7 @@ public class DbSlicerJobQueue(
             workerId,
             claimToken,
             errorMessage,
-            cancellationToken);
+            ct: cancellationToken);
         ThrowIfClaimLost(failed, job.Id);
     }
 
