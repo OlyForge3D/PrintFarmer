@@ -55,6 +55,18 @@ public sealed class CalibrationGenerationController(ICalibrationGenerationSaga s
             return AuthenticationProblem();
         }
 
+        // Final-verification options reference an existing library model by ID (issue #1770 follow-up:
+        // Model3DStorageResolver no longer enforces uploader ownership, so any authenticated caller can
+        // resolve any stored model). A Desktop-exchange token that only carries Calibration.Generate +
+        // Slicing.Submit scope must not be able to use that as a back door to reference a library model
+        // it was never granted ModelRead/LibrarySync access to - the same guard applied to POST
+        // /api/slice and the legacy /api/slicer/slice-model/{modelId} route.
+        if (request.Options?.Model3DId is Guid &&
+            DesktopScopeClaims.IsMissingModelScope(User))
+        {
+            return Problem(StatusCodes.Status403Forbidden, "resource_forbidden");
+        }
+
         CalibrationApiResult<CalibrationOrchestrationStatusDto> result = await _saga.CreateOrResumeAsync(
             projectId,
             attemptId,
