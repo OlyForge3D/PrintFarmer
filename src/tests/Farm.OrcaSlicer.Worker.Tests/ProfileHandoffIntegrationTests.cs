@@ -105,6 +105,44 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
         _ = filamentJson.Should().NotContain("\"filamentProfile\"");
         _ = File.Exists(Path.Join(captureDirectory, "orca-invoked.txt")).Should().BeTrue();
 
+        // ── issue #1768 ──────────────────────────────────────────────────────
+        // OrcaSlicer decides whether a process preset may be used with a machine preset by
+        // comparing each entry of the process document's `compatible_printers` against the
+        // MACHINE document's system preset name. When the machine document's `from` is not
+        // "system" it derives that name from `inherits` rather than `name`, so emitting the
+        // vendor bundle's internal base ("fdm_machine_common") there made OrcaSlicer reject
+        // such submissions with CLI_PROCESS_NOT_COMPATIBLE (-17) about a second in, before
+        // slicing any geometry. Proven against Phrozen Arco 0.4 nozzle, a `from`: "User"
+        // preset. Presets shipping `from`: "system" resolve by name and are unaffected, and
+        // process profiles carrying only `compatible_printers_condition` fail for a separate
+        // reason tracked in #1795.
+        //
+        // These assertions run against the documents GenerateProfileJsonFilesAsync actually
+        // wrote, so reverting the fix at its call site fails this test.
+        using JsonDocument writtenMachine = JsonDocument.Parse(machineJson);
+        string emittedInherits = writtenMachine.RootElement.GetProperty("inherits").GetString()!;
+
+        _ = emittedInherits.Should().Be(
+            "Test Machine",
+            "the emitted machine document must declare the system preset it snapshots, which is the profile's Name");
+        _ = emittedInherits.Should().NotBe(
+            "fdm_machine_common",
+            "the vendor bundle's internal base is never listed as a compatible printer");
+        _ = emittedInherits.Should().NotBe(
+            "Test Machine Model",
+            "the printer model is a plausible-looking but wrong choice — OrcaSlicer matches on the preset name");
+
+        // The full invariant OrcaSlicer enforces, asserted across both pipeline-produced documents.
+        using JsonDocument writtenProcess = JsonDocument.Parse(processJson);
+        string[] compatiblePrinters = writtenProcess.RootElement
+            .GetProperty("compatible_printers")
+            .EnumerateArray()
+            .Select(element => element.GetString()!)
+            .ToArray();
+        _ = compatiblePrinters.Should().Contain(
+            emittedInherits,
+            "otherwise OrcaSlicer exits -17 (CLI_PROCESS_NOT_COMPATIBLE) without slicing");
+
         CompleteSliceJobRequest? completed = JsonSerializer.Deserialize<CompleteSliceJobRequest>(
             terminal.Body,
             new JsonSerializerOptions(JsonSerializerDefaults.Web));
@@ -215,11 +253,21 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
                 new MachineProfileDto
                 {
                     Name = "Test Machine",
-                    PrinterModel = "Test Machine",
+
+                    // Deliberately distinct from Name. The emitted machine document's `inherits`
+                    // must carry the profile's NAME (the system preset OrcaSlicer matches
+                    // `compatible_printers` against), not its printer model. Keeping these two
+                    // values different is what lets the assertion in the test above tell the
+                    // correct property from a plausible-looking wrong one. See issue #1768.
+                    PrinterModel = "Test Machine Model",
                     Settings = new Dictionary<string, object>
                     {
-                        ["printer_model"] = "Test Machine",
+                        ["printer_model"] = "Test Machine Model",
                         ["nozzle_diameter"] = new List<string> { "0.4" },
+
+                        // Stock vendor profiles arrive carrying the bundle's internal base here;
+                        // reproducing that is what makes the rewrite observable.
+                        ["inherits"] = "fdm_machine_common",
                     },
                 },
             ]);
@@ -249,6 +297,11 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
                     Settings = new Dictionary<string, object>
                     {
                         ["layer_height"] = "0.2",
+
+                        // OrcaSlicer matches these entries against the MACHINE document's
+                        // `inherits` value, so this is the other half of the invariant the
+                        // test above asserts on the pipeline-produced documents.
+                        ["compatible_printers"] = new List<string> { "Test Machine" },
                     },
                 },
             ]);
