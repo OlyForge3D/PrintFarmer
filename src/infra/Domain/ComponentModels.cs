@@ -159,19 +159,73 @@ public class NozzleModelDefinition : HardwareModel
     public int? MaxTemp { get; set; }
 
     /// <summary>
-    /// The material type of this nozzle (Brass, HardenedSteel, StainlessSteel, etc.).
+    /// FK to the nozzle material catalog (Brass, HardenedSteel, StainlessSteel, etc., or a
+    /// user-defined custom material). Replaces the previous <c>NozzleType</c> enum column
+    /// (see #1824) - <see cref="NozzleMaterial"/> is now the source of truth for hardness and
+    /// default max temperature.
     /// </summary>
-    public NozzleType NozzleType { get; set; } = NozzleType.Brass;
+    public Guid NozzleMaterialId { get; set; }
+
+    /// <summary>
+    /// Navigation to the nozzle material catalog entry. Must be included (e.g.
+    /// <c>.Include(n => n.NozzleMaterial)</c>) for <see cref="NozzleType"/> and
+    /// <see cref="IsHardened"/> below to resolve correctly.
+    /// </summary>
+    public NozzleMaterial? NozzleMaterial { get; set; }
+
+    /// <summary>
+    /// Legacy enum view of this nozzle's material, derived from <see cref="NozzleMaterial"/>.Name.
+    /// Not persisted - kept only for wire-contract stability until the catalog UI/API's material
+    /// serialization is revisited (epic #1823, slice 3). Falls back to <see cref="Domain.NozzleType.Unknown"/>
+    /// for custom (non-built-in) materials whose name does not match a legacy enum member.
+    /// </summary>
+    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+    public NozzleType NozzleType => NozzleMaterial is not null && Enum.TryParse<NozzleType>(NozzleMaterial.Name, out NozzleType parsed)
+        ? parsed
+        : NozzleType.Unknown;
 
     /// <summary>
     /// Whether this nozzle is hardened for abrasive filaments.
-    /// Computed from NozzleType - not persisted to database.
+    /// Computed from <see cref="NozzleMaterial"/> - not persisted to database.
     /// </summary>
     [System.ComponentModel.DataAnnotations.Schema.NotMapped]
-    public bool IsHardened => NozzleType is NozzleType.HardenedSteel or NozzleType.TungstenCarbide or NozzleType.Abrasive;
+    public bool IsHardened => NozzleMaterial?.IsHardened ?? false;
 
     /// <summary>
     /// The nozzle interface type (determines which hotends this nozzle fits).
     /// </summary>
     public NozzleInterfaceType NozzleInterface { get; set; } = NozzleInterfaceType.V6;
+}
+
+/// <summary>
+/// A user-editable nozzle material catalog entry (e.g., Brass, HardenedSteel, or a
+/// custom material). Introduced by #1824 as the foundation for epic #1823 ("Option B"):
+/// a farm administrator will be able to add materials from the catalog UI without a
+/// code change or redeploy. <see cref="IsBuiltIn"/> distinguishes the seeded rows backing
+/// the legacy <see cref="NozzleType"/> enum from user-created custom materials.
+/// </summary>
+public class NozzleMaterial
+{
+    public Guid Id { get; set; }
+
+    /// <summary>Material name (e.g., "Brass", "HardenedSteel", or a custom name).</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Whether nozzles made of this material are hardened/abrasion-resistant. Drives
+    /// abrasive-filament dispatch gating (see <c>DispatchScorer.ScoreNozzleHardness</c>).
+    /// </summary>
+    public bool IsHardened { get; set; }
+
+    /// <summary>Default maximum temperature rating in °C for nozzles of this material.</summary>
+    public int DefaultMaxTemp { get; set; }
+
+    /// <summary>
+    /// True for the built-in rows seeded from the legacy <see cref="NozzleType"/> enum
+    /// members; false for user-created custom materials.
+    /// </summary>
+    public bool IsBuiltIn { get; set; }
+
+    /// <summary>Optional description or notes about this material.</summary>
+    public string? Description { get; set; }
 }

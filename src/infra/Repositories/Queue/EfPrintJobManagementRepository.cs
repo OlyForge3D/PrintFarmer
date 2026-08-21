@@ -547,6 +547,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             .Include(p => p.Model)
             .Include(p => p.Toolheads)
                 .ThenInclude(t => t.NozzleModel)
+                    .ThenInclude(n => n!.NozzleMaterial)
             .Where(p => p.IsAvailable)
             .ToListAsync(ct);
     }

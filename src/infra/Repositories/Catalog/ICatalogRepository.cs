@@ -135,6 +135,15 @@ public interface ICatalogRepository
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, NozzleType NozzleType, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// Looks up a nozzle material by exact name (e.g. "Brass", "HardenedSteel"). Used to
+    /// resolve the legacy <see cref="NozzleType"/> enum on the nozzle model CRUD wire
+    /// contract to the new <c>NozzleMaterialId</c> foreign key (see #1824).
+    /// </summary>
+    /// <param name="name">The nozzle material name to look up.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<Domain.NozzleMaterial?> GetNozzleMaterialByNameAsync(string name, CancellationToken ct = default);
+
     // Component model methods - Get By Id
 
     /// <summary>Gets a hotend model definition by ID.</summary>

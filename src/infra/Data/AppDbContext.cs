@@ -155,6 +155,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<NozzleModelDefinition> NozzleModelDefinitions => Set<NozzleModelDefinition>();
 
+    // Nozzle material catalog (#1824) - built-in rows seed the legacy NozzleType enum
+    // members; user-created custom materials are added via the catalog UI (epic #1823).
+    public DbSet<NozzleMaterial> NozzleMaterials => Set<NozzleMaterial>();
+
     // Printer Maintenance Module
     public DbSet<PrinterStatistics> PrinterStatisticsSet => Set<PrinterStatistics>();
 

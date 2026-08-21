@@ -75,12 +75,21 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
         printer.IsAvailable = true;
         printer.IsEnabled = true;
 
+        NozzleMaterial? nozzleMaterial = _context.NozzleMaterials.Local.FirstOrDefault(m => m.Name == nameof(NozzleType.Brass))
+            ?? _context.NozzleMaterials.FirstOrDefault(m => m.Name == nameof(NozzleType.Brass));
+        if (nozzleMaterial is null)
+        {
+            nozzleMaterial = new NozzleMaterial { Id = Guid.NewGuid(), Name = nameof(NozzleType.Brass), IsBuiltIn = true, DefaultMaxTemp = 260 };
+            _context.NozzleMaterials.Add(nozzleMaterial);
+        }
+
         NozzleModelDefinition nozzle = new()
         {
             Id = Guid.NewGuid(),
             Name = "Brass 0.4",
             Diameter = 0.4,
-            NozzleType = NozzleType.Brass,
+            NozzleMaterialId = nozzleMaterial.Id,
+            NozzleMaterial = nozzleMaterial,
             ManufacturerId = mfg.Id,
         };
         _context.NozzleModelDefinitions.Add(nozzle);

@@ -116,6 +116,7 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
                 .ThenInclude(m => m!.Aliases)
             .Include(p => p.Toolheads)
                 .ThenInclude(t => t.NozzleModel)
+                    .ThenInclude(n => n!.NozzleMaterial)
             .AsSplitQuery()
             .Where(p => p.IsAvailable)
             .ToListAsync(ct);
@@ -140,6 +141,7 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
                 .ThenInclude(m => m!.Aliases)
             .Include(p => p.Toolheads)
                 .ThenInclude(t => t.NozzleModel)
+                    .ThenInclude(n => n!.NozzleMaterial)
             .AsSplitQuery()
             .Where(p => p.IsAvailable)
             .ToListAsync(ct);

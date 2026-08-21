@@ -97,6 +97,7 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
             .Include(p => p.Toolheads).ThenInclude(t => t.ExtruderModel)
             .Include(p => p.Toolheads).ThenInclude(t => t.ToolheadModelDef)
             .Include(p => p.Toolheads).ThenInclude(t => t.NozzleModel)
+                .ThenInclude(n => n!.NozzleMaterial)
             .Include(p => p.BedType)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
 

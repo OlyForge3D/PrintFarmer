@@ -13,7 +13,9 @@ public class NozzleModelDefinitionConfiguration : IEntityTypeConfiguration<Nozzl
         _ = builder.Property(n => n.Description).HasMaxLength(512);
         _ = builder.Property(n => n.MaxTemp).HasDefaultValue(500);
 
-        // IsHardened is a computed property marked [NotMapped] - do not configure it here
+        // NozzleType and IsHardened are computed properties marked [NotMapped] - do not
+        // configure them here. NozzleMaterial (via NozzleMaterialId) is the persisted source
+        // of truth (see #1824).
 
         // Foreign Key to Manufacturer
         _ = builder.HasOne(n => n.Manufacturer)
@@ -21,8 +23,15 @@ public class NozzleModelDefinitionConfiguration : IEntityTypeConfiguration<Nozzl
             .HasForeignKey(n => n.ManufacturerId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // Foreign Key to NozzleMaterial
+        _ = builder.HasOne(n => n.NozzleMaterial)
+            .WithMany()
+            .HasForeignKey(n => n.NozzleMaterialId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         // Index for lookups
         _ = builder.HasIndex(n => n.ManufacturerId);
         _ = builder.HasIndex(n => n.Name);
+        _ = builder.HasIndex(n => n.NozzleMaterialId);
     }
 }

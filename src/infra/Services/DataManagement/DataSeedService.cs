@@ -839,6 +839,16 @@ public class DataSeedService : IDataSeedService
 
         _logger.LogInformation("[SeedData] Seeding {NozzlesCount} nozzle models", nozzles.Count);
 
+        // Built-in materials are seeded by the #1824 data migration with names matching the
+        // legacy NozzleType enum member names, so this is a direct name lookup.
+        Dictionary<string, Guid> materialsByName = await _context.NozzleMaterials
+            .ToDictionaryAsync(m => m.Name, m => m.Id, StringComparer.OrdinalIgnoreCase);
+
+        if (!materialsByName.TryGetValue(nameof(NozzleType.Brass), out Guid defaultMaterialId))
+        {
+            _logger.LogWarning("[SeedData] Built-in nozzle material '{Material}' not found, nozzle seeding may be incomplete", nameof(NozzleType.Brass));
+        }
+
         foreach (NozzleModelSeedDto dto in nozzles)
         {
             if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
@@ -849,12 +859,21 @@ public class DataSeedService : IDataSeedService
                 continue;
             }
 
-            // Parse nozzle type
-            NozzleType nozzleType = NozzleType.Brass;
-            if (!string.IsNullOrEmpty(dto.NozzleType) &&
-                Enum.TryParse<NozzleType>(dto.NozzleType.Replace(" ", string.Empty), out NozzleType parsedType))
+            // Resolve the nozzle material by name, falling back to Brass for missing/unrecognized values
+            Guid nozzleMaterialId = defaultMaterialId;
+            if (!string.IsNullOrEmpty(dto.NozzleType))
             {
-                nozzleType = parsedType;
+                string normalizedName = dto.NozzleType.Replace(" ", string.Empty);
+                if (materialsByName.TryGetValue(normalizedName, out Guid parsedMaterialId))
+                {
+                    nozzleMaterialId = parsedMaterialId;
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "[SeedData] Nozzle material '{NozzleType}' not found for nozzle '{Name}', defaulting to Brass",
+                        dto.NozzleType, dto.Name);
+                }
             }
 
             NozzleModelDefinition? existing = await _context.NozzleModelDefinitions
@@ -869,7 +888,7 @@ public class DataSeedService : IDataSeedService
                     ManufacturerId = manufacturerId,
                     Diameter = dto.Diameter,
                     MaxTemp = dto.MaxTemp,
-                    NozzleType = nozzleType,
+                    NozzleMaterialId = nozzleMaterialId,
                     Description = dto.Description,
                     Url = dto.Url
                 });
@@ -878,7 +897,7 @@ public class DataSeedService : IDataSeedService
             {
                 existing.Diameter = dto.Diameter;
                 existing.MaxTemp = dto.MaxTemp;
-                existing.NozzleType = nozzleType;
+                existing.NozzleMaterialId = nozzleMaterialId;
                 existing.Description = dto.Description;
                 existing.Url = dto.Url;
             }

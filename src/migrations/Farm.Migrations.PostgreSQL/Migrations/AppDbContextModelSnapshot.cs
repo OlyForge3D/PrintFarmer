@@ -4548,6 +4548,44 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("PushSubscriptions");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.NozzleMaterial", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("DefaultMaxTemp")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(500);
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<bool>("IsBuiltIn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsHardened")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("NozzleMaterials");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.NozzleModelDefinition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4577,8 +4615,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<int>("NozzleInterface")
                         .HasColumnType("integer");
 
-                    b.Property<int>("NozzleType")
-                        .HasColumnType("integer");
+                    b.Property<Guid>("NozzleMaterialId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Url")
                         .HasColumnType("text");
@@ -4588,6 +4626,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("ManufacturerId");
 
                     b.HasIndex("Name");
+
+                    b.HasIndex("NozzleMaterialId");
 
                     b.ToTable("NozzleModelDefinitions");
                 });
@@ -9213,7 +9253,15 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Farm.Infrastructure.Domain.NozzleMaterial", "NozzleMaterial")
+                        .WithMany()
+                        .HasForeignKey("NozzleMaterialId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("Manufacturer");
+
+                    b.Navigation("NozzleMaterial");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PartHarvestOutputSnapshot", b =>

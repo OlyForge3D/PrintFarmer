@@ -58,6 +58,7 @@ public sealed class CatalogCache(IMemoryCache cache, IOptions<CatalogCacheOption
             .Include(m => m.Toolheads).ThenInclude(t => t.ExtruderModel)
             .Include(m => m.Toolheads).ThenInclude(t => t.ToolheadModelDef)
             .Include(m => m.Toolheads).ThenInclude(t => t.NozzleModel)
+                .ThenInclude(n => n!.NozzleMaterial)
             .AsSplitQuery()
             .AsQueryable();
         if (manufacturerId is Guid mid2)

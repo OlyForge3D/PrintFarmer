@@ -270,6 +270,7 @@ public class DispatchScorer(
                 .ThenInclude(m => m!.Aliases)
             .Include(p => p.Toolheads)
                 .ThenInclude(t => t.NozzleModel)
+                    .ThenInclude(n => n!.NozzleMaterial)
             .Include(p => p.DispatchState)
             .AsSplitQuery()
             .AsNoTracking()
