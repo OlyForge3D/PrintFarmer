@@ -127,54 +127,36 @@ test.describe('Admin Webhooks — Emulator', () => {
   });
 
   test('webhook cards display status and URL', async ({ page }) => {
-    await page.waitForTimeout(1_000);
-
-    // Check for actual webhook card content (not just "webhook" in page title/nav)
-    const webhookCards = page.locator('[class*="card"], [class*="webhook"], tr').filter({
-      hasText: /example\.com|https?:\/\//i,
+    const webhookCard = page.getByRole('article', {
+      name: `${TEST_WEBHOOK_NAME} webhook`,
+      exact: true,
     });
-    const hasCards = (await webhookCards.count()) > 0;
-
-    if (hasCards) {
-      // Look for status badges
-      const statusBadges = page.locator('span, div').filter({ hasText: /active|inactive|enabled|disabled/i });
-      const hasStatus = (await statusBadges.count()) > 0;
-      expect(hasStatus).toBeTruthy();
-    }
-    // If no webhook cards, the create test may have failed (API format) — acceptable
+    await expect(webhookCard).toBeVisible();
+    await expect(webhookCard.getByText('https://example.com/webhook', { exact: true })).toBeVisible();
+    await expect(webhookCard.getByText(/^(Active|Inactive)$/)).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
 
   test('webhook has action buttons (edit, delete, test)', async ({ page }) => {
-    await page.waitForTimeout(1_000);
-
-    const bodyText = await page.locator('body').textContent() ?? '';
-    if (/E2E Test Webhook/i.test(bodyText)) {
-      // Should have action buttons
-      const actionButtons = page.locator(
-        'button[aria-label*="edit" i], ' +
-        'button[aria-label*="delete" i], ' +
-        'button[aria-label*="test" i], ' +
-        'button[title*="edit" i], ' +
-        'button[title*="delete" i], ' +
-        'button[title*="test" i]'
-      );
-
-      const buttonCount = await actionButtons.count();
-      expect(buttonCount).toBeGreaterThan(0);
-    }
+    const webhookCard = page.getByRole('article', {
+      name: `${TEST_WEBHOOK_NAME} webhook`,
+      exact: true,
+    });
+    await expect(webhookCard.getByRole('button', { name: 'Send test event', exact: true })).toBeVisible();
+    await expect(webhookCard.getByRole('button', { name: 'View deliveries', exact: true })).toBeVisible();
+    await expect(webhookCard.getByRole('button', { name: 'Edit webhook', exact: true })).toBeVisible();
+    await expect(webhookCard.getByRole('button', { name: 'Delete webhook', exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
 
-  test('empty state shows when no webhooks exist', async ({ page }) => {
-    await page.waitForTimeout(1_000);
-
-    // If no webhooks, should show empty state or create CTA
-    const bodyText = await page.locator('body').textContent() ?? '';
-    const hasContent = bodyText.length > 100;
-    expect(hasContent).toBeTruthy();
+  test('created webhook remains visible after reload', async ({ page }) => {
+    await expect(page.getByRole('article', {
+      name: `${TEST_WEBHOOK_NAME} webhook`,
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByText('No webhooks configured', { exact: true })).toBeHidden();
 
     expect(criticalErrors()).toHaveLength(0);
   });

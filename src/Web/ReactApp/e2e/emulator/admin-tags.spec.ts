@@ -90,21 +90,11 @@ test.describe('Admin Tags — Emulator', () => {
   });
 
   test('tags have color indicators', async ({ page }) => {
-    await page.waitForTimeout(1_000);
-
-    // Tags typically display with colored circles/badges
-    const colorElements = page.locator(
-      '[style*="background-color"], ' +
-      '[class*="color"], ' +
-      'div[style*="background"], ' +
-      'span[style*="background"]'
-    );
-
-    // If tags exist, they should have color indicators
-    const bodyText = await page.locator('body').textContent() ?? '';
-    if (/E2E Test Tag/i.test(bodyText)) {
-      expect(await colorElements.count()).toBeGreaterThan(0);
-    }
+    const tagRow = page.getByRole('row').filter({
+      has: page.getByRole('cell', { name: TEST_TAG_NAME, exact: true }),
+    });
+    await expect(tagRow).toBeVisible();
+    expect(await tagRow.locator('div[style*="background-color"]').count()).toBeGreaterThan(0);
 
     expect(criticalErrors()).toHaveLength(0);
   });
@@ -129,28 +119,11 @@ test.describe('Admin Tags — Emulator', () => {
   });
 
   test('can delete a tag', async ({ page }) => {
-    await page.waitForTimeout(1_000);
-
-    // Look for delete button on an existing tag
-    const deleteButton = page.locator('button').filter({ hasText: /delete|remove/i }).first();
-    const hasDelete = await deleteButton.isVisible().catch(() => false);
-
-    if (!hasDelete) {
-      // May be an icon button — look for trash/delete icon buttons
-      const iconDeleteBtn = page.locator('button[aria-label*="delete" i], button[aria-label*="remove" i]').first();
-      const hasIconDelete = await iconDeleteBtn.isVisible().catch(() => false);
-      if (hasIconDelete) {
-        await iconDeleteBtn.click();
-        await page.waitForTimeout(500);
-
-        // Confirm deletion if dialog appears
-        const confirmBtn = page.getByRole('button', { name: /confirm|yes|delete/i }).first();
-        if (await confirmBtn.isVisible().catch(() => false)) {
-          await confirmBtn.click();
-          await page.waitForTimeout(1_000);
-        }
-      }
-    }
+    const tagCell = page.getByRole('cell', { name: TEST_TAG_NAME, exact: true });
+    const tagRow = page.getByRole('row').filter({ has: tagCell });
+    await expect(tagRow).toBeVisible();
+    await tagRow.getByRole('button', { name: 'Delete tag', exact: true }).click();
+    await expect(tagCell).toBeHidden();
 
     expect(criticalErrors()).toHaveLength(0);
   });

@@ -183,7 +183,7 @@ function WebhookCard({ webhook, onEdit, onDelete, onTest, onToggleActive, onView
  const hasFailures = webhook.consecutiveFailures > 0;
 
  return (
- <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-4">
+ <article aria-label={`${webhook.name} webhook`} className="bg-pf-bg-1 rounded-lg border border-pf-border p-4">
  <div className="flex items-start justify-between gap-4">
  <div className="min-w-0 flex-1">
  <div className="flex items-center gap-2">
@@ -235,7 +235,7 @@ function WebhookCard({ webhook, onEdit, onDelete, onTest, onToggleActive, onView
  </Button>
  </div>
  </div>
- </div>
+ </article>
  );
 }
 
