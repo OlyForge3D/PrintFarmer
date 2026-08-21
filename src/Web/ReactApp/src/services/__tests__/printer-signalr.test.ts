@@ -9,6 +9,24 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+// Default `connection.invoke` behavior for tests that don't care about a
+// specific hub method's return value. `SubscribeToPrintersAsync` echoes the
+// requested ids back (i.e. "fully authorized") so tests that only set up
+// desired printer state via `replaceQueueResourceSubscriptions`/`connect`
+// without asserting on authorization semantics keep their printers in
+// subscribed state, matching the old singular `SubscribeToPrinterAsync`
+// invoke's unconditional "resolved == success" semantics. Tests that need to
+// exercise partial-authorization/rejection override this per-test.
+async function defaultInvokeImplementation(
+  method: string,
+  arg?: unknown
+): Promise<unknown> {
+  if (method === 'SubscribeToPrintersAsync') {
+    return arg;
+  }
+  return undefined;
+}
+
 const signalRTestState = vi.hoisted(() => {
   const connectionHandlers = new Map<string, (...args: unknown[]) => void>();
   let closeHandler: (() => void) | undefined;
@@ -108,7 +126,7 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
     signalRTestState.connection.stop.mockImplementation(async () => {
       signalRTestState.connection.state = 'Disconnected';
     });
-    signalRTestState.connection.invoke.mockResolvedValue(undefined);
+    signalRTestState.connection.invoke.mockImplementation(defaultInvokeImplementation);
     signalRTestState.getSettings.mockResolvedValue({
       logLevel: 'Information',
       consoleLoggingEnabled: false,
@@ -144,7 +162,7 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       signalRTestState.connection.stop.mockImplementation(async () => {
         signalRTestState.connection.state = 'Disconnected';
       });
-      signalRTestState.connection.invoke.mockResolvedValue(undefined);
+      signalRTestState.connection.invoke.mockImplementation(defaultInvokeImplementation);
       signalRTestState.getSettings.mockResolvedValue({
         logLevel: 'Information',
         consoleLoggingEnabled: false,
@@ -259,7 +277,7 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       signalRTestState.connection.stop.mockImplementation(async () => {
         signalRTestState.connection.state = 'Disconnected';
       });
-      signalRTestState.connection.invoke.mockResolvedValue(undefined);
+      signalRTestState.connection.invoke.mockImplementation(defaultInvokeImplementation);
       signalRTestState.getSettings.mockResolvedValue({
         logLevel: 'Information',
         consoleLoggingEnabled: false,
@@ -626,10 +644,15 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       const subscribeStarted = deferred<void>();
       const releaseSubscribe = deferred<void>();
       signalRTestState.connection.invoke.mockImplementation(
-        async (method: string, id: string) => {
-          if (method === 'SubscribeToPrinterAsync' && id === 'printer-a') {
+        async (method: string, ids: string[]) => {
+          if (
+            method === 'SubscribeToPrintersAsync' &&
+            Array.isArray(ids) &&
+            ids.includes('printer-a')
+          ) {
             subscribeStarted.resolve();
             await releaseSubscribe.promise;
+            return ids;
           }
         }
       );
@@ -809,7 +832,7 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
         printerSignalRService.getQueueSubscriptionSnapshot().jobIds
       ).toEqual([]);
 
-      signalRTestState.connection.invoke.mockResolvedValue(undefined);
+      signalRTestState.connection.invoke.mockImplementation(defaultInvokeImplementation);
       signalRTestState.triggerReconnected();
       await flushMicrotasks();
 

@@ -13,7 +13,16 @@ const signalr = vi.hoisted(() => {
     stop: vi.fn(async () => {
       connection.state = "Disconnected";
     }),
-    invoke: vi.fn(async () => undefined),
+    // Default echoes the requested ids back for SubscribeToPrintersAsync (i.e.
+    // "fully authorized"), matching the old singular SubscribeToPrinterAsync's
+    // unconditional "resolved == success" semantics for tests that don't
+    // exercise partial-authorization. Tests needing that override it below.
+    invoke: vi.fn(async (method: string, arg?: unknown) => {
+      if (method === "SubscribeToPrintersAsync") {
+        return arg;
+      }
+      return undefined;
+    }),
     on: vi.fn((name: string, handler: (payload: unknown) => void) => {
       eventHandlers.set(name, handler);
     }),
@@ -113,7 +122,15 @@ describe("PrinterSignalRService queue cursor recovery", () => {
     signalr.connection.start.mockClear();
     signalr.connection.stop.mockClear();
     signalr.connection.invoke.mockReset();
-    signalr.connection.invoke.mockResolvedValue(undefined);
+    signalr.connection.invoke.mockImplementation(async (
+      method: string,
+      arg?: unknown
+    ) => {
+      if (method === "SubscribeToPrintersAsync") {
+        return arg;
+      }
+      return undefined;
+    });
     signalr.builder.build.mockClear();
     signalr.eventHandlers.clear();
     api.getQueueChanges.mockReset();

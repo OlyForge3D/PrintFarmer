@@ -982,10 +982,20 @@ export class PrinterSignalRService {
           operations.push(() => this.applyUnsubscribeFromProject(id));
         }
       }
+      // Printers: batch every newly-desired printer into one
+      // SubscribeToPrintersAsync invocation instead of one SubscribeToPrinterAsync
+      // call per printer (#1764) — this is the dominant fleet-wide subscribe path
+      // (QueueRealtimeBridge reconciles against the full printer list here).
+      const printersToSubscribe: string[] = [];
       for (const id of nextPrinters) {
         if (!this.subscribedPrinters.has(id)) {
-          operations.push(() => this.applySubscribeToPrinter(id));
+          printersToSubscribe.push(id);
         }
+      }
+      if (printersToSubscribe.length > 0) {
+        operations.push(async () => {
+          await this.applySubscribeToPrinters(printersToSubscribe);
+        });
       }
       for (const id of nextJobs) {
         if (!this.subscribedQueueJobs.has(id)) {
