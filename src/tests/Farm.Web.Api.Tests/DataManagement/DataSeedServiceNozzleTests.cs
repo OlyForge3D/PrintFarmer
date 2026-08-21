@@ -105,6 +105,11 @@ public sealed class DataSeedServiceNozzleTests
 
         await SeedAsync(Dto(nozzleInterface: "Volcano"));
 
+        // Assert exactly one row so this stays a genuine update-branch test: if the upsert
+        // lookup ever regressed into inserting a duplicate, the assertion below would
+        // otherwise depend on which row FirstOrDefaultAsync happened to return.
+        (await _context.NozzleModelDefinitions.CountAsync()).Should().Be(1);
+
         NozzleModelDefinition? seeded = await FindAsync("Diamondback Volcano");
         seeded!.NozzleInterface.Should().Be(NozzleInterfaceType.Volcano);
         seeded.NozzleType.Should().Be(NozzleType.Diamond);

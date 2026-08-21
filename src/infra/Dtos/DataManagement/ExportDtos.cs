@@ -192,7 +192,8 @@ public class NozzleModelExportDto
     /// <summary>
     /// Nozzle material, as the <c>NozzleType</c> enum name (e.g. "Brass", "Diamond").
     /// Stored by name rather than ordinal so a future enum renumbering cannot silently
-    /// remap restored rows. Unrecognized or absent values restore as Brass.
+    /// remap restored rows. An absent value (a backup pre-dating this field) restores as
+    /// Brass; a present-but-unrecognized value rejects the row rather than guessing.
     /// </summary>
     public string? NozzleType { get; set; }
 
