@@ -1252,53 +1252,44 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                         "Job {JobId}: could not build the 3MF project; falling back to auto-arrange, so the requested layout is lost.",
                         job.Id);
                     placement = DowngradeToAutoArrange(placement);
-
-                    if (placement.NonUniformScaleDropped)
-                    {
-                        _logger.LogWarning(
-                            "Job {JobId}: model has non-uniform scale but the 3MF project could not be built; " +
-                            "OrcaSlicer will apply an isotropic scale on the CLI instead of the requested per-axis scale.",
-                            job.Id);
-                    }
-                }
-
-                break;
-
-            case PlacementStrategy.SourcePlacement:
-                _logger.LogWarning(
-                    "Job {JobId}: inputs are 3MF, so the workspace layout cannot be re-embedded. " +
-                    "Falling back to the placement stored in the source file.",
-                    job.Id);
-
-                if (placement.NonUniformScaleDropped)
-                {
-                    _logger.LogWarning(
-                        "Job {JobId}: model has non-uniform scale but 3MF inputs cannot be re-embedded; " +
-                        "OrcaSlicer will apply an isotropic scale on the CLI instead of the requested per-axis scale.",
-                        job.Id);
                 }
 
                 break;
 
             default:
-                if (placement.PositionDropped)
-                {
+                break;
+        }
+
+        // Extracted as a pure function (DescribePlacementWarnings) so the logging decision
+        // itself is unit-testable, not just the PlacementPlan flags it reads — issue #1799 was
+        // partly about a degradation that shipped with no way to prove it was ever surfaced.
+        foreach (PlacementWarningKind warningKind in DescribePlacementWarnings(placement))
+        {
+            switch (warningKind)
+            {
+                case PlacementWarningKind.SourcePlacementFallback:
+                    _logger.LogWarning(
+                        "Job {JobId}: inputs are 3MF, so the workspace layout cannot be re-embedded. " +
+                        "Falling back to the placement stored in the source file.",
+                        job.Id);
+                    break;
+
+                case PlacementWarningKind.LayoutNotEmbedded:
                     _logger.LogWarning(
                         "Job {JobId}: the requested layout could not be embedded (inputs are not all STL, or the " +
                         "bed centre could not be determined); letting OrcaSlicer auto-arrange instead.",
                         job.Id);
-                }
+                    break;
 
-                if (placement.NonUniformScaleDropped)
-                {
+                case PlacementWarningKind.NonUniformScaleFlattened:
                     _logger.LogWarning(
                         "Job {JobId}: model has non-uniform scale but it could not be embedded in a 3MF project " +
-                        "(inputs are not all STL, or the bed centre could not be determined); OrcaSlicer will apply " +
-                        "an isotropic scale instead of the requested per-axis scale.",
+                        "(inputs are not all STL, the bed centre could not be determined, or the project could " +
+                        "not be built); OrcaSlicer will apply an isotropic scale instead of the requested " +
+                        "per-axis scale.",
                         job.Id);
-                }
-
-                break;
+                    break;
+            }
         }
 
         // Create a named pipe for real-time progress from OrcaSlicer
@@ -1862,6 +1853,25 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     }
 
     /// <summary>
+    /// The kinds of placement-degradation warnings <see cref="DescribePlacementWarnings"/> can
+    /// report, kept as an enum rather than free-form strings so each is logged with a
+    /// compile-time constant message template (CA2254) at the single call site in
+    /// <c>RunOrcaSlicerAsync</c>, while the *decision* of which kinds apply remains a plain,
+    /// unit-testable function of a <see cref="PlacementPlan"/>.
+    /// </summary>
+    internal enum PlacementWarningKind
+    {
+        /// <summary>The requested layout/position could not be embedded; auto-arrange was used instead.</summary>
+        LayoutNotEmbedded,
+
+        /// <summary>3MF inputs cannot be re-embedded, so the placement stored in the source file was kept.</summary>
+        SourcePlacementFallback,
+
+        /// <summary>A non-uniform per-axis scale could not be embedded, so it was flattened to an isotropic CLI <c>--scale</c>.</summary>
+        NonUniformScaleFlattened,
+    }
+
+    /// <summary>
     /// Resolved placement for a slice job: the arrange flag, the (position-free) CLI transform
     /// flags, and the per-model transform JSON to embed when a 3MF project is built.
     /// </summary>
@@ -1971,7 +1981,19 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // lands it off the bed and trips OrcaSlicer's CLI_OBJECTS_PARTLY_INSIDE check. This is
         // also the path for mixed STL+3MF jobs and for OBJ/PLY/STEP, none of which can be
         // placed faithfully. Any non-uniform scale here is likewise flattened to isotropic.
-        return new PlacementPlan(PlacementStrategy.AutoArrange, "--arrange 1", primaryFlags, transforms, needsEmbedding, anyNonUniformScale);
+        //
+        // PositionDropped intentionally reports only the position/layout half of needsEmbedding
+        // (anyCustomPosition || secondaryTransforms), not anyNonUniformScale — a scale-only job
+        // reaching this branch has no layout to lose, and NonUniformScaleDropped already covers
+        // the scale degradation on its own. Conflating the two would produce a misleading
+        // "requested layout could not be embedded" warning for a job that never asked for one.
+        return new PlacementPlan(
+            PlacementStrategy.AutoArrange,
+            "--arrange 1",
+            primaryFlags,
+            transforms,
+            anyCustomPosition || secondaryTransforms,
+            anyNonUniformScale);
     }
 
     /// <summary>
@@ -1988,14 +2010,57 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             ? BuildTransformFlags(plan.ModelTransforms[0])
             : default;
 
+        // Only the primary model's flags are recovered — OrcaSlicer's CLI transform flags
+        // apply to a single model, so a secondary model's transform was never emitted here even
+        // before this fix. But a non-uniform scale on ANY model in the job is lost by this
+        // downgrade (the 3MF project that would have baked it per-model no longer exists), so
+        // the drop must be reported even when it is a secondary model's scale, not the
+        // primary's.
+        bool anyNonUniformScale = plan.ModelTransforms.Any(t => BuildTransformFlags(t).HasNonUniformScale);
+
         return plan with
         {
             Strategy = PlacementStrategy.AutoArrange,
             ArrangeFlag = "--arrange 1",
             TransformFlags = primary.Flags,
             PositionDropped = true,
-            NonUniformScaleDropped = primary.HasNonUniformScale,
+            NonUniformScaleDropped = anyNonUniformScale,
         };
+    }
+
+    /// <summary>
+    /// Decide which degradation warnings, if any, apply to a resolved <see cref="PlacementPlan"/>.
+    /// Extracted as a pure function — separate from the <c>_logger.LogWarning</c> calls in the
+    /// caller — specifically so the logging *decision* is unit-testable on its own, rather than
+    /// only the <see cref="PlacementPlan"/> flags it reads. Issue #1799's acceptance criteria
+    /// required the scale degradation to be logged, not merely tracked internally.
+    /// </summary>
+    /// <param name="placement">The (possibly downgraded) placement plan actually used.</param>
+    /// <returns>
+    /// The kinds of degradation warnings, if any, that apply to this plan. Empty when the plan
+    /// needed no degradation warning (in particular, always empty for
+    /// <see cref="PlacementStrategy.ThreeMfProject"/>, since that strategy means nothing was
+    /// dropped).
+    /// </returns>
+    internal static IReadOnlyList<PlacementWarningKind> DescribePlacementWarnings(PlacementPlan placement)
+    {
+        var warnings = new List<PlacementWarningKind>();
+
+        if (placement.Strategy == PlacementStrategy.SourcePlacement)
+        {
+            warnings.Add(PlacementWarningKind.SourcePlacementFallback);
+        }
+        else if (placement.PositionDropped)
+        {
+            warnings.Add(PlacementWarningKind.LayoutNotEmbedded);
+        }
+
+        if (placement.NonUniformScaleDropped)
+        {
+            warnings.Add(PlacementWarningKind.NonUniformScaleFlattened);
+        }
+
+        return warnings;
     }
 
     /// <summary>
