@@ -601,6 +601,19 @@
       }
     },
     {
+      "id": "calibration-generation-pinned-orca-cli-rotation-tests",
+      "destinationPath": "src/tests/Farm.Web.IntegrationTests/Calibration/PinnedOrcaCliRotationTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1802"
+      ],
+      "statement": "Independent PrintFarmer test implementation exercising the real OrcaSlicer 2.4.2 CLI inside the pinned worker container against a multi-axis, negative-Z rotation for issue #1802, comparing measured G-code geometry against an expected size computed independently from the viewer's rotation matrix; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-21",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-generation-pinned-orca-profile-catalog",
       "destinationPath": "src/tests/Farm.Web.IntegrationTests/Calibration/PinnedOrcaProfileCatalog.cs",
       "referenceUrls": [
