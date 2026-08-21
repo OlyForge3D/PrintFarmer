@@ -29,4 +29,22 @@ public static class DesktopScopeClaims
     /// audit traceability. Not a secret - safe to include and to log.
     /// </summary>
     public const string ApiKeyId = "api_key_id";
+
+    /// <summary>
+    /// True when <paramref name="user"/> is a Desktop-exchange token (issue #838) that was never
+    /// granted ModelRead or LibrarySync scope. Since #1770 made stored-model lookups succeed for
+    /// any existing library model rather than just the caller's own uploads, every endpoint that
+    /// can resolve a caller-supplied model reference (model3DId, a modelFileUrl/modelFileUrls entry
+    /// pointing at a stored model route, or a legacy model-by-ID submission) must apply this guard
+    /// identically, or a submit-only-scoped Desktop token could route around it via whichever entry
+    /// point skips the check. Normal login/session tokens carry no <see cref="TokenUse"/> claim and
+    /// are unaffected, exactly as <c>DesktopScopeAuthorizationHandler</c> behaves for
+    /// attribute-gated endpoints.
+    /// </summary>
+    /// <param name="user">The authenticated caller's claims principal.</param>
+    /// <returns><see langword="true"/> if the caller must be refused model access.</returns>
+    public static bool IsMissingModelScope(System.Security.Claims.ClaimsPrincipal user) =>
+        user.HasClaim(TokenUse, DesktopExchangeTokenUse)
+        && !user.HasClaim(Scope, "ModelRead")
+        && !user.HasClaim(Scope, "LibrarySync");
 }
