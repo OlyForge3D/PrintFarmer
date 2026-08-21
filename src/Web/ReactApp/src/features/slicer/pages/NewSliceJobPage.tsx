@@ -43,7 +43,7 @@ import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
 import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Alert, Input, Select, ColorPicker, ProgressBar, InfoTooltip } from '@/common/components/ui';
+import { Button, Alert, Input, Select, ColorPicker, ProgressBar } from '@/common/components/ui';
 import { LayersIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon, SwapHorizontalIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
@@ -259,7 +259,6 @@ export const NewSliceJobPage: React.FC = () => {
     () => registeredEngines?.find(e => (e?.engine ?? '').toLowerCase() === engineName.toLowerCase()),
     [registeredEngines, engineName],
   );
-  const versionsForEngine = useMemo(() => engineInfo?.versions ?? [], [engineInfo]);
   const versionEntriesForEngine = useMemo(() => engineInfo?.versionEntries ?? [], [engineInfo]);
   // Backend-computed "newest online-available" version. The backend returns
   // `null` in the legacy-single-worker case (no SlicerService rows registered
@@ -2151,50 +2150,21 @@ export const NewSliceJobPage: React.FC = () => {
              On narrow screens: slides over as fixed-width panel when toggled open. */}
         <div className={`${sidebarOpen ? 'absolute top-0 left-0 bottom-0 z-40 w-96 lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:w-96 space-y-1.5 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto bg-pf-bg-2 shadow-xl lg:shadow-none`}>
 
-          {/* SLICER SELECTION - Card selector with OrcaSlicer logo */}
+          {/* SLICER ENGINE + VERSION — one panel, because a version only means
+               anything relative to its engine (mirrors printer + machine profile).
+               `versionEntriesForEngine` is passed RAW: SlicerSelector filters for
+               display only, and the submit guard below still needs the unfiltered
+               list to detect "engine registered but zero available workers". */}
           <SlicerSelector
             selectedSlicerId={selectedSlicerId}
             onSlicerChange={setSelectedSlicerId}
             engineOptions={engineOptions}
+            versionEntries={versionEntriesForEngine}
+            latestVersion={latestAvailableForEngine}
+            selectedVersion={selectedEngineVersion}
+            onVersionChange={setSelectedEngineVersion}
+            engineName={engineName}
           />
-
-          {/* ENGINE VERSION PIN (issue #578) — shown when 2+ versions are registered.
-               Unavailable versions (no online worker) are rendered disabled so a
-               user cannot pin a job that will hang in the queue forever. */}
-          {versionsForEngine.length > 1 && (
-            <div className="bg-pf-panel border border-pf-border rounded-lg p-2.5">
-              <div className="flex items-center gap-1 mb-1.5">
-                <label htmlFor="slicer-engine-version" className="block text-sm font-semibold text-pf-text-primary">
-                  Engine version
-                </label>
-                <InfoTooltip
-                  content={
-                    <>
-                      Pins the slice job to a specific {engineName} engine. Leave on Latest
-                      unless you need a particular version for compatibility. Versions
-                      marked "offline" have no worker currently registered and cannot claim jobs.
-                    </>
-                  }
-                  label="More information about engine version"
-                />
-              </div>
-              <Select
-                id="slicer-engine-version"
-                value={selectedEngineVersion ?? ''}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setSelectedEngineVersion(v === '' ? undefined : v);
-                }}
-              >
-                <option value="">Latest ({latestAvailableForEngine ?? '—'})</option>
-                {versionEntriesForEngine.map(entry => (
-                  <option key={entry.version} value={entry.version} disabled={!entry.available}>
-                    {entry.version}{entry.available ? '' : ' (offline)'}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          )}
 
           {/* PRINTER + MACHINE SELECTION - one compact flow */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-2.5 space-y-2">

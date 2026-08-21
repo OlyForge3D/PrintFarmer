@@ -267,11 +267,40 @@ vi.mock('../../components/job', () => ({
       {accessory && <div data-testid="printer-selector-accessory">{accessory}</div>}
     </div>
   ),
-  SlicerSelector: ({ onSlicerChange }: { selectedSlicerId: string; onSlicerChange: (id: string) => void }) => (
-    <div data-testid="slicer-selector">
+  // Version selection now lives INSIDE SlicerSelector (one panel for engine +
+  // version), so its behaviour is covered by SlicerSelector's own unit tests.
+  // Here we only surface the forwarded props so the page's wiring contract —
+  // especially passing RAW, unfiltered versionEntries — stays under test.
+  SlicerSelector: ({
+    onSlicerChange,
+    versionEntries,
+    latestVersion,
+    engineName,
+    onVersionChange,
+  }: {
+    selectedSlicerId: string;
+    onSlicerChange: (id: string) => void;
+    versionEntries?: Array<{ version: string; available: boolean }>;
+    latestVersion?: string;
+    engineName?: string;
+    onVersionChange?: (v: string | undefined) => void;
+  }) => (
+    // Flat, primitive attributes only — the version entries are surfaced as
+    // two comma-joined lists rather than embedded JSON so the assertions stay
+    // readable and no raw object is interpolated into JSX.
+    <div
+      data-testid="slicer-selector"
+      data-all-versions={(versionEntries ?? []).map(v => v.version).join(',')}
+      data-available-versions={(versionEntries ?? []).filter(v => v.available).map(v => v.version).join(',')}
+      data-latest-version={latestVersion ?? ''}
+      data-engine-name={engineName ?? ''}
+    >
       <select data-testid="slicer-select" aria-label="Select slicer" onChange={(e) => onSlicerChange(e.target.value)}>
         <option value="orcaslicer">OrcaSlicer</option>
       </select>
+      <button type="button" data-testid="pin-version-2-3-1" onClick={() => onVersionChange?.('2.3.1')}>
+        pin 2.3.1
+      </button>
     </div>
   ),
   SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
@@ -1127,9 +1156,15 @@ describe('NewSliceJobPage', () => {
     });
   });
 
-  describe('Engine Version (issue #1773)', () => {
+  describe('Engine Version wiring (issues #1772, #1773)', () => {
+    /**
+     * The reported case: 2.3.1 is in the plugin registry but has no online
+     * worker. The page must still forward the RAW, unfiltered entries —
+     * SlicerSelector hides unpickable versions at render time, while the
+     * submit guard needs the full list to detect "engine registered but zero
+     * available workers" (an emptied list reads as "nothing to check").
+     */
     beforeEach(() => {
-      // Only rendered when 2+ versions are registered for the engine.
       vi.mocked(slicerService.listEngines).mockResolvedValue([
         {
           engine: 'OrcaSlicer',
@@ -1143,48 +1178,40 @@ describe('NewSliceJobPage', () => {
       ]);
     });
 
-    it('shows the Engine version label without the helper text rendered permanently inline', async () => {
+    it('forwards the raw unfiltered version entries to the slicer selector', async () => {
       renderWithProviders(<NewSliceJobPage />);
 
       await waitFor(() => {
-        expect(screen.getByLabelText('Engine version')).toBeInTheDocument();
+        const selector = screen.getByTestId('slicer-selector');
+        // 2.3.1 must still reach the component (the submit guard needs it)
+        // even though the component will not offer it to the user.
+        expect(selector).toHaveAttribute('data-all-versions', '2.4.2,2.3.1');
+        expect(selector).toHaveAttribute('data-available-versions', '2.4.2');
       });
-
-      // The old permanent helper paragraph must no longer be visible by
-      // default. The tooltip keeps its content in the DOM for
-      // aria-describedby wiring, but it must carry the `hidden` class
-      // (not be an always-visible <p>) until the trigger is hovered/focused.
-      const helperText = screen.getByText(/Pins the slice job to a specific/i);
-      expect(helperText.closest('[role="tooltip"]')).not.toBeNull();
-      expect(helperText.closest('[role="tooltip"]')?.className).toContain('hidden');
     });
 
-    it('exposes the guidance text via an aria-describedby-wired info tooltip on the label', async () => {
+    it('forwards the backend-resolved latest version and engine name', async () => {
       renderWithProviders(<NewSliceJobPage />);
 
-      let engineVersionLabel: HTMLElement;
       await waitFor(() => {
-        engineVersionLabel = screen.getByText('Engine version');
-        expect(engineVersionLabel).toBeInTheDocument();
+        const selector = screen.getByTestId('slicer-selector');
+        expect(selector).toHaveAttribute('data-latest-version', '2.4.2');
+        expect(selector).toHaveAttribute('data-engine-name', 'OrcaSlicer');
+      });
+    });
+
+    it('does not render a standalone Engine version group box beside the engine panel', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('slicer-selector')).toBeInTheDocument();
       });
 
-      const infoButton = screen.getByRole('button', { name: 'More information about engine version' });
-      expect(infoButton).toBeInTheDocument();
-
-      const describedBy = infoButton.getAttribute('aria-describedby');
-      expect(describedBy).toBeTruthy();
-
-      // The guidance text is present in the DOM (available on demand) even
-      // though it isn't visible until the tooltip opens.
-      const tooltip = document.getElementById(describedBy!);
-      expect(tooltip).toHaveTextContent(/Pins the slice job to a specific OrcaSlicer engine/i);
-      expect(tooltip).toHaveTextContent(/Versions marked "offline" have no worker currently registered/i);
-
-      // Keyboard-operable: focusing the trigger reveals the tooltip content.
-      act(() => {
-        infoButton.focus();
-      });
-      expect(tooltip?.className).not.toContain('hidden');
+      // Engine and version are one decision in one panel now, so the page
+      // must not emit its own separate version control.
+      expect(screen.queryByLabelText('Engine version')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'More information about engine version' }))
+        .not.toBeInTheDocument();
     });
   });
 });

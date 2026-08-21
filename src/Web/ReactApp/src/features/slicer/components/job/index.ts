@@ -1,5 +1,6 @@
 // Barrel export for slice job components
 export { SlicerSelector } from './SlicerSelector';
+export type { SlicerVersionChoice } from './SlicerSelector';
 export { PrinterSlicerSelector } from './PrinterSlicerSelector';
 export type { PrinterForSlicing } from './PrinterSlicerSelector';
 export { PrinterProfileSelector } from './PrinterProfileSelector';
