@@ -58,7 +58,6 @@ public class SlicersServiceHfProfileSeedingTests
     private const string HfModelName = "Prusa CORE One HF";
     private const string BaseProfileName = "Prusa CORE One 0.4 nozzle";
     private const string HfProfileName = "Prusa CORE One HF 0.4 nozzle";
-    private const string LegacySeedLockKey = "SystemOrcaSlicerProfilesSeedLock";
 
     /// <summary>
     /// The core regression: the HF hierarchy group is reachable only through a configured OrcaSlicer
@@ -126,53 +125,57 @@ public class SlicersServiceHfProfileSeedingTests
     }
 
     /// <summary>
-    /// The reason every prior fix was invisible in production: the seed latch is a run-once flag, so
-    /// an already-seeded deployment never re-ran the corrected seed. The versioned latch must let a
-    /// deployment that completed the legacy lock — and therefore already holds system profiles —
-    /// run once more and backfill only the missing rows.
+    /// Guards the seed's once-only contract: a second registration must not re-run it. The positive
+    /// assertion comes first so this cannot silently pass by seeding nothing at all.
     /// </summary>
     [Fact]
-    public async Task RegisterAsync_DeploymentSeededUnderLegacyLock_BackfillsMissingHfProfile()
-    {
-        SeedHarness harness = new();
-
-        // Simulate a deployment seeded by the previous version: the legacy latch is "completed" and
-        // system profiles already exist, including the base variant but NOT the HF one.
-        harness.MarkLockCompleted(LegacySeedLockKey);
-        harness.ExistingSystemProcessProfiles.Add(new ProcessProfile
-        {
-            Id = Guid.NewGuid(),
-            Name = "0.20mm Standard @CORE One",
-            SlicerType = SlicerType.OrcaSlicer,
-            IsSystem = true,
-            Hash = "pre-existing-process-hash"
-        });
-
-        await harness.RegisterOrcaWorkerAsync();
-
-        Assert.Contains(harness.PersistedMachineProfiles, p => p.Name == HfProfileName);
-        Assert.NotEqual(LegacySeedLockKey, harness.AcquiredLockKey);
-    }
-
-    /// <summary>
-    /// The versioned latch must still prevent repeated full seeds: once it reports completed, a
-    /// subsequent registration does no work at all.
-    /// </summary>
-    [Fact]
-    public async Task RegisterAsync_VersionedLockAlreadyCompleted_DoesNotReseed()
+    public async Task RegisterAsync_SeedAlreadyCompleted_DoesNotReseed()
     {
         SeedHarness harness = new();
         await harness.RegisterOrcaWorkerAsync();
 
         int afterFirstSeed = harness.PersistedMachineProfiles.Count;
+        Assert.Equal(2, afterFirstSeed);
+
         await harness.RegisterOrcaWorkerAsync();
 
         Assert.Equal(afterFirstSeed, harness.PersistedMachineProfiles.Count);
     }
 
     /// <summary>
+    /// Idempotency must not rest on the content hash. That hash is SHA256 over the serialized worker
+    /// DTO, so any DTO shape change between releases changes every hash — <c>MachineProfileDto</c>
+    /// gained <c>IsHighFlowNozzle</c> in #1806. A hash-only guard would treat an already-imported
+    /// profile as new and re-insert it, which the real UNIQUE (Name, SlicerType) index rejects.
+    /// </summary>
+    [Fact]
+    public async Task RegisterAsync_ExistingProfileWithStaleHashFromOlderDtoShape_IsNotDuplicated()
+    {
+        SeedHarness harness = new();
+
+        harness.PersistedMachineProfiles.Add(new MachineProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = BaseProfileName,
+            Manufacturer = ManufacturerName,
+            SlicerType = SlicerType.OrcaSlicer,
+            IsSystem = true,
+
+            // A hash produced by a previous release's DTO shape — it cannot match today's.
+            Hash = "STALE-HASH-FROM-OLDER-DTO-SHAPE"
+        });
+
+        await harness.RegisterOrcaWorkerAsync();
+
+        Assert.Single(harness.PersistedMachineProfiles, p => p.Name == BaseProfileName);
+        Assert.Contains(harness.PersistedMachineProfiles, p => p.Name == HfProfileName);
+        Assert.Equal(2, harness.PersistedMachineProfiles.Count);
+    }
+
+    /// <summary>
     /// A hierarchy group that is neither a catalog model name nor a configured alias must still be
-    /// skipped — the fix widens matching to aliases, it does not disable catalog filtering.
+    /// skipped — the fix widens matching to aliases, it does not disable catalog filtering. The
+    /// positive assertion is included so this cannot pass by seeding nothing.
     /// </summary>
     [Fact]
     public async Task RegisterAsync_HierarchyGroupThatIsNeitherCatalogNameNorAlias_IsStillSkipped()
@@ -182,6 +185,7 @@ public class SlicersServiceHfProfileSeedingTests
 
         await harness.RegisterOrcaWorkerAsync();
 
+        Assert.Contains(harness.PersistedMachineProfiles, p => p.Name == HfProfileName);
         Assert.DoesNotContain(harness.PersistedMachineProfiles, p => p.Name == "Prusa MK4S 0.4 nozzle");
     }
 
@@ -207,8 +211,6 @@ public class SlicersServiceHfProfileSeedingTests
         public List<MachineProfile> PersistedMachineProfiles { get; } = new();
 
         public List<ProcessProfile> ExistingSystemProcessProfiles { get; } = new();
-
-        public string? AcquiredLockKey { get; private set; }
 
         public void MarkLockCompleted(string key) => _locks[key] = "completed";
 
@@ -339,7 +341,7 @@ public class SlicersServiceHfProfileSeedingTests
                 CreateProcessProfileRepository().Object,
                 CreateFilamentProfileRepository().Object,
                 CreateMachineProfileRepository().Object,
-                new Mock<IMachineModelProfileRepository>(MockBehavior.Loose).Object,
+                CreateMachineModelProfileRepository().Object,
                 CreateCatalogService().Object,
                 CreateAliasService().Object,
                 CreateSettingsService().Object,
@@ -380,6 +382,14 @@ public class SlicersServiceHfProfileSeedingTests
             Mock<IFilamentProfileRepository> mock = new(MockBehavior.Loose);
             _ = mock.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<FilamentProfile>());
+            return mock;
+        }
+
+        private static Mock<IMachineModelProfileRepository> CreateMachineModelProfileRepository()
+        {
+            Mock<IMachineModelProfileRepository> mock = new(MockBehavior.Loose);
+            _ = mock.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<MachineModelProfile>());
             return mock;
         }
 
@@ -427,7 +437,6 @@ public class SlicersServiceHfProfileSeedingTests
                     }
 
                     _locks[key] = "in-progress";
-                    AcquiredLockKey = key;
                     return true;
                 });
             _ = mock.Setup(s => s.CompleteLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -443,11 +452,12 @@ public class SlicersServiceHfProfileSeedingTests
 
         private string BuildHierarchyJson()
         {
+            // The real worker keys each model entry by the printer_model value itself and serializes
+            // camelCase on the wire; mirror both so the fixture cannot pass where production fails.
             Dictionary<string, PrinterModelProfilesDto> models = new(StringComparer.Ordinal);
-            int index = 0;
             foreach (KeyValuePair<string, List<MachineProfileDto>> group in _hierarchy)
             {
-                models["model" + (++index).ToString(CultureInfo.InvariantCulture)] = new PrinterModelProfilesDto
+                models[group.Key] = new PrinterModelProfilesDto
                 {
                     Name = group.Key,
                     ModelId = group.Key,
@@ -457,20 +467,22 @@ public class SlicersServiceHfProfileSeedingTests
                 };
             }
 
-            return JsonSerializer.Serialize(new AllProfilesResponseDto
-            {
-                ByHierarchy = new Dictionary<string, ManufacturerProfilesDto>(StringComparer.Ordinal)
+            return JsonSerializer.Serialize(
+                new AllProfilesResponseDto
                 {
-                    [ManufacturerName] = new ManufacturerProfilesDto { Name = ManufacturerName, Models = models }
-                },
+                    ByHierarchy = new Dictionary<string, ManufacturerProfilesDto>(StringComparer.Ordinal)
+                    {
+                        [ManufacturerName] = new ManufacturerProfilesDto { Name = ManufacturerName, Models = models }
+                    },
 
-                // The real worker emits the legacy flat collections alongside the hierarchy, and the
-                // seed treats an entirely empty set of them as "worker has no profiles" and bails.
-                MachineProfiles = new Dictionary<string, IList<MachineProfileDto>>(StringComparer.Ordinal)
-                {
-                    [ManufacturerName] = _hierarchy.Values.SelectMany(p => p).ToList()
-                }
-            });
+                    // The real worker emits the legacy flat collections alongside the hierarchy, and the
+                    // seed treats an entirely empty set of them as "worker has no profiles" and bails.
+                    MachineProfiles = new Dictionary<string, IList<MachineProfileDto>>(StringComparer.Ordinal)
+                    {
+                        [ManufacturerName] = _hierarchy.Values.SelectMany(p => p).ToList()
+                    }
+                },
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         }
 
         private static HttpResponseMessage JsonResponse(string json)

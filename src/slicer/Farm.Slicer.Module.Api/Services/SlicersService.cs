@@ -957,10 +957,10 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
     /// <summary>
     /// Seed OrcaSlicer profiles from the worker into the database on registration.
-    /// This happens automatically when an OrcaSlicer worker registers, so profiles are available immediately.
-    /// Uses a versioned distributed lock so seeding runs at most once per seed-logic version, even with
-    /// multiple concurrent worker registrations. The seed body is idempotent: every profile is looked up
-    /// by content hash before insert, so a re-run only backfills rows that are genuinely missing.
+    /// Only runs when a worker opts in via <c>SeedProfilesOnRegistration</c> (push seeding); the
+    /// default is pull-based, where profiles are imported on demand as printers are added.
+    /// Only seeds if no system OrcaSlicer profiles exist yet, and uses a distributed lock so seeding
+    /// happens once even with multiple concurrent worker registrations.
     /// Profiles are filtered to only include those for manufacturers and models in the catalog.
     /// </summary>
     private async Task SeedProfilesFromWorkerAsync(
@@ -968,14 +968,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         CancellationToken ct)
     {
         string workerHost = worker.Host ?? string.Empty;
-
-        // #1779: the lock is a run-once latch — TryAcquireLockAsync returns false forever once the key is
-        // "completed". A deployment seeded before the alias fix below therefore kept its incomplete profile
-        // set indefinitely, and shipping the fix changed nothing in production (the bug was reported as
-        // still reproducing twice after it was "fixed"). Bumping the key lets already-seeded deployments
-        // run the corrected seed exactly once to backfill the alias-keyed hierarchy groups that were
-        // previously skipped. Bump this suffix again whenever a seed-logic change must reach existing installs.
-        const string SEED_LOCK_KEY = "SystemOrcaSlicerProfilesSeedLock:v2";
+        const string SEED_LOCK_KEY = "SystemOrcaSlicerProfilesSeedLock";
 
         try
         {
@@ -989,10 +982,39 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
             _logger.LogInformation("[SeedProfilesFromWorker] Acquired distributed lock for profile seeding");
 
-            // NOTE: deliberately no "system profiles already exist" early exit here. On a deployment that
-            // was seeded by an earlier version, profiles DO already exist while the alias-keyed groups are
-            // still missing, so bailing out on mere existence would defeat the backfill this versioned lock
-            // is here to perform. Per-profile hash checks below make the pass safely idempotent.
+            // Early exit: Verify no system profiles exist (double-check after acquiring lock)
+            IReadOnlyList<ProcessProfile> existingSystemProfiles = await _profileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+            if (existingSystemProfiles.Any(p => p.IsSystem))
+            {
+                _logger.LogInformation("[SeedProfilesFromWorker] System OrcaSlicer profiles already exist, skipping seed (detected after acquiring lock)");
+                await _settingsService.CompleteLockAsync(SEED_LOCK_KEY, ct);
+                return;
+            }
+
+            // #1779: guard inserts on profile NAME, not on the content hash the per-profile checks in this
+            // method use. The hash is SHA256 over the serialized worker DTO, so any change to a DTO's shape
+            // between releases changes every hash — MachineProfileDto gained IsHighFlowNozzle in #1806, for
+            // example — leaving a hash check unable to recognise profiles it already imported. Because
+            // MachineProfile carries a UNIQUE index on (Name, SlicerType), re-inserting one does not merely
+            // duplicate a row, it throws and leaves the failed entity tracked, which can then block the very
+            // HF inserts this fix is about. OrcaSlicer profile names are unique within a bundle and are what
+            // compatible_printers references, so the name is the stable natural key for a system profile.
+            // Loading them once also replaces one database roundtrip per profile with one query per type.
+            HashSet<string> existingMachineModelNames = await LoadExistingSystemProfileNamesAsync(
+                async token => (await _machineModelProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, token)).Select(p => p.Name), ct);
+            HashSet<string> existingMachineNames = await LoadExistingSystemProfileNamesAsync(
+                async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.IsSystem).Select(p => p.Name), ct);
+            HashSet<string> existingFilamentNames = await LoadExistingSystemProfileNamesAsync(
+                async token => (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.IsSystem).Select(p => p.Name), ct);
+            HashSet<string> existingProcessNames = await LoadExistingSystemProfileNamesAsync(
+                async token => (await _profileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.IsSystem).Select(p => p.Name), ct);
+
+            _logger.LogInformation(
+                "[SeedProfilesFromWorker] Existing system profiles: {MachineModelCount} machine model, {MachineCount} machine, {FilamentCount} filament, {ProcessCount} process",
+                existingMachineModelNames.Count,
+                existingMachineNames.Count,
+                existingFilamentNames.Count,
+                existingProcessNames.Count);
 
             // Call the worker's /api/profiles endpoint which now returns AllProfilesResponseDto with all three profile types
             string workerUrl = workerHost.TrimEnd('/');
@@ -1072,6 +1094,13 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                     {
                         try
                         {
+                            if (existingMachineModelNames.Contains((modelProfile.Name ?? string.Empty).Trim()))
+                            {
+                                continue;
+                            }
+
+                            _ = existingMachineModelNames.Add((modelProfile.Name ?? string.Empty).Trim());
+
                             string profileJson = JsonSerializer.Serialize(modelProfile);
                             string profileHash = ComputeProfileHash(profileJson);
 
@@ -1173,6 +1202,13 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                             {
                                 try
                                 {
+                                    if (existingMachineNames.Contains((machineProfile.Name ?? string.Empty).Trim()))
+                                    {
+                                        continue;
+                                    }
+
+                                    _ = existingMachineNames.Add((machineProfile.Name ?? string.Empty).Trim());
+
                                     string profileJson = JsonSerializer.Serialize(machineProfile);
                                     string profileHash = ComputeProfileHash(profileJson);
 
@@ -1240,6 +1276,14 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                             {
                                 try
                                 {
+                                    string filamentName = string.IsNullOrEmpty(filamentProfile.Name) ? filamentProfile.Material : filamentProfile.Name;
+                                    if (existingFilamentNames.Contains((filamentName ?? string.Empty).Trim()))
+                                    {
+                                        continue;
+                                    }
+
+                                    _ = existingFilamentNames.Add((filamentName ?? string.Empty).Trim());
+
                                     string profileJson = JsonSerializer.Serialize(filamentProfile);
                                     string profileHash = ComputeProfileHash(profileJson);
 
@@ -1305,6 +1349,16 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                             {
                                 try
                                 {
+                                    string processName = string.IsNullOrEmpty(processProfile.Name)
+                                        ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)"
+                                        : processProfile.Name;
+                                    if (existingProcessNames.Contains(processName.Trim()))
+                                    {
+                                        continue;
+                                    }
+
+                                    _ = existingProcessNames.Add(processName.Trim());
+
                                     string profileJson = JsonSerializer.Serialize(processProfile);
                                     string profileHash = ComputeProfileHash(profileJson);
 
@@ -1404,5 +1458,22 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         using SHA256 sha256 = SHA256.Create();
         byte[] hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(profileJson));
         return Convert.ToHexString(hashedBytes);
+    }
+
+    /// <summary>
+    /// Loads the names of already-persisted system OrcaSlicer profiles of one type into a
+    /// case-insensitive set, used as the seed's stable idempotency key (#1779). A failure here must
+    /// not silently degrade into an empty set, because an empty set would be indistinguishable from
+    /// "nothing imported yet" and would let the seed duplicate the whole catalog — so it propagates
+    /// to the caller's handler, which clears the lock so the seed can be retried later.
+    /// </summary>
+    private static async Task<HashSet<string>> LoadExistingSystemProfileNamesAsync(
+        Func<CancellationToken, Task<IEnumerable<string>>> load,
+        CancellationToken ct)
+    {
+        IEnumerable<string> names = await load(ct);
+        return new HashSet<string>(
+            names.Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name.Trim()),
+            StringComparer.OrdinalIgnoreCase);
     }
 }

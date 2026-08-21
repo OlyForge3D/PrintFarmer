@@ -1068,6 +1068,30 @@ public class ProfilesService(
     /// staged entity individually via <paramref name="addSingleAsync"/>, so one bad row in a
     /// batch never drops the other already-valid rows in that same batch.
     /// </remarks>
+    /// <summary>
+    /// Loads the names of already-persisted system OrcaSlicer profiles of one type into a
+    /// case-insensitive set, used as the seed's stable idempotency key (#1779). Failures propagate
+    /// rather than degrading to an empty set, because an empty set is indistinguishable from
+    /// "nothing imported yet" and would let a re-seed collide with the UNIQUE (Name, SlicerType) index.
+    /// </summary>
+    private static async Task<HashSet<string>> LoadExistingSystemProfileNamesAsync(
+        Func<CancellationToken, Task<IEnumerable<string>>> load,
+        CancellationToken ct)
+    {
+        IEnumerable<string> names = await load(ct);
+        return new HashSet<string>(
+            names.Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name.Trim()),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <remarks>
+    /// De-duplicates on BOTH the content hash and the profile name (#1779). Hash alone is not
+    /// sufficient: it is computed over the serialized worker DTO, so any DTO shape change between
+    /// releases shifts every hash and makes previously-imported profiles look new. Since profile
+    /// tables carry a UNIQUE index on (Name, SlicerType), re-inserting one throws rather than merely
+    /// duplicating. <paramref name="existingNames"/> is mutated as rows are staged so that a name
+    /// appearing in several hierarchy groups — routine for filament profiles — is staged only once.
+    /// </remarks>
     private static async Task<(List<TEntity> Added, int Skipped)> StageAndCommitBatchAsync<TDto, TEntity>(
         IEnumerable<TDto> dtos,
         Func<TDto, (string Hash, TEntity Entity)> buildEntity,
@@ -1075,6 +1099,8 @@ public class ProfilesService(
         Func<IEnumerable<string>, CancellationToken, Task<HashSet<string>>> getExistingHashesAsync,
         Func<IEnumerable<TEntity>, CancellationToken, Task<int>> addRangeAsync,
         Func<TEntity, CancellationToken, Task> addSingleAsync,
+        Func<TEntity, string?> nameSelector,
+        HashSet<string> existingNames,
         CancellationToken ct)
     {
         List<(string Hash, TEntity Entity)> candidates = new();
@@ -1106,6 +1132,13 @@ public class ProfilesService(
         foreach ((string hash, TEntity entity) in candidates)
         {
             if (existingHashes.Contains(hash) || !stagedHashes.Add(hash))
+            {
+                skipped++;
+                continue;
+            }
+
+            string name = (nameSelector(entity) ?? string.Empty).Trim();
+            if (name.Length > 0 && !existingNames.Add(name))
             {
                 skipped++;
                 continue;
@@ -1466,6 +1499,15 @@ public class ProfilesService(
         HashSet<string> catalogManufacturerNames = new HashSet<string>(catalogManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
         HashSet<string> catalogModelNames = await GetOrcaSlicerCatalogModelNamesAsync(catalogModels, ct);
 
+        // #1779: name-keyed idempotency so a re-run of this non-destructive seed backfills only the
+        // genuinely missing profiles instead of colliding with the UNIQUE (Name, SlicerType) index.
+        HashSet<string> existingMachineNames = await LoadExistingSystemProfileNamesAsync(
+            async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.IsSystem).Select(p => p.Name), ct);
+        HashSet<string> existingFilamentNames = await LoadExistingSystemProfileNamesAsync(
+            async token => (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.IsSystem).Select(p => p.Name), ct);
+        HashSet<string> existingProcessNames = await LoadExistingSystemProfileNamesAsync(
+            async token => (await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.IsSystem).Select(p => p.Name), ct);
+
         foreach ((string? manufacturerKey, ManufacturerProfilesDto? manufacturerProfiles) in allProfiles.ByHierarchy)
         {
             if (!catalogManufacturerNames.Contains(manufacturerKey ?? string.Empty))
@@ -1524,6 +1566,8 @@ public class ProfilesService(
                         (hashes, hCt) => _machineProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
                         _machineProfileRepo.AddRangeAsync,
                         _machineProfileRepo.AddAsync,
+                        p => p.Name,
+                        existingMachineNames,
                         ct);
 
                     imported += added.Count;
@@ -1568,6 +1612,7 @@ public class ProfilesService(
                         (hashes, hCt) => _filamentProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
                         _filamentProfileRepo.AddRangeAsync,
                         _filamentProfileRepo.AddAsync,
+                        p => p.Name, existingFilamentNames,
                         ct);
 
                     imported += added.Count;
@@ -1612,6 +1657,7 @@ public class ProfilesService(
                         (hashes, hCt) => _processProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
                         _processProfileRepo.AddRangeAsync,
                         _processProfileRepo.AddAsync,
+                        p => p.Name, existingProcessNames,
                         ct);
 
                     imported += added.Count;
@@ -1699,6 +1745,13 @@ public class ProfilesService(
         HashSet<string> catalogManufacturerNames = new HashSet<string>(catalogManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
         HashSet<string> catalogModelNames = await GetOrcaSlicerCatalogModelNamesAsync(catalogModels, ct);
 
+        // Force-reseed deletes all system profiles first, so these start empty; they still prevent a
+        // profile name that appears under several hierarchy groups — routine for filament profiles
+        // shared across models — from being staged twice into the UNIQUE (Name, SlicerType) index.
+        HashSet<string> reseedMachineNames = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> reseedFilamentNames = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> reseedProcessNames = new(StringComparer.OrdinalIgnoreCase);
+
         foreach ((string? manufacturerKey, ManufacturerProfilesDto? manufacturerProfiles) in allProfiles.ByHierarchy)
         {
             if (!catalogManufacturerNames.Contains(manufacturerKey ?? string.Empty))
@@ -1756,6 +1809,7 @@ public class ProfilesService(
                         (hashes, hCt) => _machineProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
                         _machineProfileRepo.AddRangeAsync,
                         _machineProfileRepo.AddAsync,
+                        p => p.Name, reseedMachineNames,
                         ct);
 
                     foreach (MachineProfile addedProfile in added)
@@ -1811,6 +1865,7 @@ public class ProfilesService(
                         (hashes, hCt) => _filamentProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
                         _filamentProfileRepo.AddRangeAsync,
                         _filamentProfileRepo.AddAsync,
+                        p => p.Name, reseedFilamentNames,
                         ct);
 
                     foreach (FilamentProfile addedProfile in added)
@@ -1867,6 +1922,7 @@ public class ProfilesService(
                         (hashes, hCt) => _processProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
                         _processProfileRepo.AddRangeAsync,
                         _processProfileRepo.AddAsync,
+                        p => p.Name, reseedProcessNames,
                         ct);
 
                     foreach (ProcessProfile addedProfile in added)
