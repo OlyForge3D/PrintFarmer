@@ -1635,16 +1635,22 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // where extract(Ry(y')) returns (π, y, π) — so the X, Y and Z contributions sum back to
         // the intended triple modulo 2π.
         //
-        // The extract(Ry(y')) → π step depends on the SIGN OF THE ZERO in the (1,0) entry:
-        // atan2(+0, cos y') with cos y' < 0 gives +π and takes no correction, whereas atan2(-0, ·)
-        // would trip Eigen's res[0] < 0 branch and yield 0, putting the Y contribution off by π.
+        // That extract(Ry(y')) → π step reads atan2(m10, cos y') with cos y' < 0, so it depends
+        // on m10 being +0 rather than -0: atan2(-0, negative) would return -π, trip Eigen's
+        // res[0] < 0 branch, and yield 0 instead of π — rotating the result by Rz(π).
         //
-        // NormalizeAngle is what guarantees that +0, so it is NOT cosmetic wrapping. For Ry(θ)
-        // the (1,0) entry is 2yx + 2wz with x = z = +0, so its sign follows sin(θ/2) and
-        // cos(θ/2); both are negative — giving -0 — only when θ < -180°. Confining the emitted
-        // angle to (-π, π] forces cos(θ/2) ≥ 0 and hence +0. Do NOT remove the normalisation on
-        // the grounds that rotation matrices are 2π-periodic: that is true of the matrices and
-        // false of the sign of zero.
+        // It holds unconditionally, and by IEEE rule rather than by luck. Eigen builds the
+        // quaternion as vec() = sin(θ/2)·axis, so for UnitY the x and z components are ±0
+        // carrying sin(θ/2)'s sign. m10 is then 2·x·y + 2·z·w: the first term's factors BOTH
+        // carry sign(sin(θ/2)), so it is +0 for every θ, while the second may be -0 — and
+        // round-to-nearest gives (+0) + (-0) = +0. Eigen's direct AngleAxis::toRotationMatrix
+        // path reaches +0 the same way, though Model.cpp takes the quaternion path. Verified by
+        // execution over both paths and both signs of θ.
+        //
+        // NormalizeAngle is therefore NOT required for correctness, and nothing here depends on
+        // the emitted angle's range: q(θ±2π) = -q(θ) and the matrix is quadratic in the
+        // quaternion, so Ry(θ) and Ry(θ±2π) are bit-identical including zero signs. It is kept
+        // only so the emitted flags stay legible rather than values like "--rotate-y 270.00".
         if (outZ < 0)
         {
             outX = NormalizeAngle(outX - Math.PI);
