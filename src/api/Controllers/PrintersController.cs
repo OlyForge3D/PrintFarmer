@@ -78,7 +78,8 @@ public class PrintersController(
     Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService? dispatchClaimService = null,
     Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService? queueResourceAuthorization = null,
     Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService? physicalActuationService = null,
-    AppDbContext? appDbContext = null)
+    AppDbContext? appDbContext = null,
+    Farm.Infrastructure.Services.Printers.IPrinterCacheInvalidator? printerCacheInvalidator = null)
     : ControllerBase
 {
     private const int MaxHistoryQueryEntries = 2000;
@@ -87,6 +88,7 @@ public class PrintersController(
     private readonly Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService? _queueResourceAuthorization = queueResourceAuthorization;
     private readonly Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService? _physicalActuationService = physicalActuationService;
     private readonly AppDbContext? _appDbContext = appDbContext;
+    private readonly Farm.Infrastructure.Services.Printers.IPrinterCacheInvalidator? _printerCacheInvalidator = printerCacheInvalidator;
     private readonly ILogger<PrintersController> _logger = logger;
     private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
@@ -2234,6 +2236,11 @@ public class PrintersController(
         {
             return PrinterRevisionConflict();
         }
+
+        // The edit is now durably committed - tell every backend polling service to drop any
+        // cached copy of this printer so the very next poll tick re-reads the row (with fresh
+        // credentials/URL/backend) instead of polling stale data for up to 30 seconds (#1763).
+        _printerCacheInvalidator?.Invalidate(p.Id);
 
         WritePrinterEtag(p);
 
