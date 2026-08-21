@@ -1,7 +1,9 @@
 ﻿using System.Buffers.Binary;
 using System.Globalization;
 using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
+using System.Xml;
 using System.Xml.Linq;
 
 namespace Farm.OrcaSlicer.Worker.Services;
@@ -13,7 +15,7 @@ namespace Farm.OrcaSlicer.Worker.Services;
 /// </summary>
 internal static class ThreeMfProjectBuilder
 {
-    private static readonly XNamespace Ns3Mf = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02";
+    private const string Ns3MfUri = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02";
     private static readonly XNamespace NsContentTypes = "http://schemas.openxmlformats.org/package/2006/content-types";
     private static readonly XNamespace NsRelationships = "http://schemas.openxmlformats.org/package/2006/relationships";
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
@@ -65,14 +67,6 @@ internal static class ThreeMfProjectBuilder
 
         string outputPath = Path.Join(outputDirectory, "project.3mf");
 
-        var meshes = new List<MeshData>(models.Count);
-        foreach (ModelEntry model in models)
-        {
-            meshes.Add(ParseBinaryStl(model.FilePath));
-        }
-
-        XDocument modelDoc = BuildModelXml(models, meshes, bedCenter);
-
         using FileStream fs = File.Create(outputPath);
         using ZipArchive zip = new(fs, ZipArchiveMode.Create);
 
@@ -80,46 +74,152 @@ internal static class ThreeMfProjectBuilder
         WriteRelationships(zip);
 
         ZipArchiveEntry entry = zip.CreateEntry("3D/3dmodel.model", CompressionLevel.Optimal);
-        using (Stream stream = entry.Open())
+        using Stream stream = entry.Open();
+        using XmlWriter writer = XmlWriter.Create(stream, new XmlWriterSettings
         {
-            modelDoc.Save(stream);
+            Encoding = new UTF8Encoding(false),
+            Indent = false,
+            CloseOutput = false,
+        });
+
+        // Written as a stream rather than an XDocument: this path is now the default for any
+        // positioned model, and a materialised tree costs roughly an order of magnitude more
+        // memory than the STL itself (one element plus attributes per vertex and triangle).
+        // Meshes are parsed one at a time for the same reason — only the tiny MeshBounds of
+        // each model is retained for the build section.
+        writer.WriteStartDocument();
+        writer.WriteStartElement("model", Ns3MfUri);
+        writer.WriteAttributeString("unit", "millimeter");
+
+        var bounds = new List<MeshBounds>(models.Count);
+
+        writer.WriteStartElement("resources", Ns3MfUri);
+        for (int i = 0; i < models.Count; i++)
+        {
+            MeshData mesh = ParseBinaryStl(models[i].FilePath);
+            bounds.Add(ComputeBounds(mesh));
+            WriteObject(writer, i + 1, mesh);
         }
+
+        writer.WriteEndElement();
+
+        writer.WriteStartElement("build", Ns3MfUri);
+        for (int i = 0; i < models.Count; i++)
+        {
+            writer.WriteStartElement("item", Ns3MfUri);
+            writer.WriteAttributeString("objectid", (i + 1).ToString(Inv));
+            writer.WriteAttributeString("transform", BuildItemTransform(models[i].TransformJson, bounds[i], bedCenter));
+            writer.WriteEndElement();
+        }
+
+        writer.WriteEndElement();
+
+        writer.WriteEndElement();
+        writer.WriteEndDocument();
 
         return outputPath;
     }
 
+    private static void WriteObject(XmlWriter writer, int objectId, MeshData mesh)
+    {
+        writer.WriteStartElement("object", Ns3MfUri);
+        writer.WriteAttributeString("id", objectId.ToString(Inv));
+        writer.WriteAttributeString("type", "model");
+
+        writer.WriteStartElement("mesh", Ns3MfUri);
+
+        writer.WriteStartElement("vertices", Ns3MfUri);
+        foreach ((float x, float y, float z) in mesh.Vertices)
+        {
+            writer.WriteStartElement("vertex", Ns3MfUri);
+            writer.WriteAttributeString("x", x.ToString("G9", Inv));
+            writer.WriteAttributeString("y", y.ToString("G9", Inv));
+            writer.WriteAttributeString("z", z.ToString("G9", Inv));
+            writer.WriteEndElement();
+        }
+
+        writer.WriteEndElement();
+
+        writer.WriteStartElement("triangles", Ns3MfUri);
+        foreach ((int v1, int v2, int v3) in mesh.Triangles)
+        {
+            writer.WriteStartElement("triangle", Ns3MfUri);
+            writer.WriteAttributeString("v1", v1.ToString(Inv));
+            writer.WriteAttributeString("v2", v2.ToString(Inv));
+            writer.WriteAttributeString("v3", v3.ToString(Inv));
+            writer.WriteEndElement();
+        }
+
+        writer.WriteEndElement();
+
+        writer.WriteEndElement();
+        writer.WriteEndElement();
+    }
+
+    /// <summary>
+    /// Hard ceiling on triangles accepted from a single STL.
+    /// <para>
+    /// This path used to run only for multi-model jobs with secondary transforms; it is now the
+    /// default for any positioned model, so it is reached by ordinary user uploads. Both the
+    /// vertex dictionary and the emitted XML scale with this count, so it is bounded explicitly
+    /// rather than trusting a 32-bit count read straight out of an untrusted file header.
+    /// 5M triangles is ~250 MB of binary STL — far above any realistic print — and exceeding it
+    /// throws, which engages the caller's auto-arrange fallback instead of failing the job.
+    /// </para>
+    /// </summary>
+    internal const int MaxTriangles = 5_000_000;
+
+    private const int StlHeaderBytes = 84;
+    private const int StlTriangleBytes = 50;
+
     /// <summary>
     /// Parse a binary STL file into deduplicated vertices and triangle indices.
+    /// The file is read incrementally so a large model never has to be materialised as a single
+    /// byte array, and the triangle count is validated against <see cref="MaxTriangles"/> and
+    /// the real file length before anything is allocated.
     /// </summary>
     internal static MeshData ParseBinaryStl(string filePath)
     {
-        byte[] data = File.ReadAllBytes(filePath);
-        if (data.Length < 84)
+        using FileStream file = new(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        long length = file.Length;
+        if (length < StlHeaderBytes)
         {
-            throw new InvalidOperationException($"STL file too small ({data.Length} bytes): {filePath}");
+            throw new InvalidOperationException($"STL file too small ({length} bytes): {filePath}");
         }
 
-        uint triangleCount = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(80, 4));
-        long expectedSize = 84 + ((long)triangleCount * 50);
-        if (data.Length < expectedSize)
+        Span<byte> header = stackalloc byte[StlHeaderBytes];
+        file.ReadExactly(header);
+        uint triangleCount = BinaryPrimitives.ReadUInt32LittleEndian(header[80..]);
+
+        if (triangleCount > MaxTriangles)
         {
             throw new InvalidOperationException(
-                $"STL file size mismatch: expected at least {expectedSize} bytes for {triangleCount} triangles, got {data.Length}");
+                $"STL file declares too many triangles ({triangleCount}, limit {MaxTriangles}): {filePath}");
+        }
+
+        long expectedSize = StlHeaderBytes + ((long)triangleCount * StlTriangleBytes);
+        if (length < expectedSize)
+        {
+            throw new InvalidOperationException(
+                $"STL file size mismatch: expected at least {expectedSize} bytes for {triangleCount} triangles, got {length}");
         }
 
         var vertexMap = new Dictionary<(float, float, float), int>();
         var vertices = new List<(float X, float Y, float Z)>();
         var triangles = new List<(int V1, int V2, int V3)>((int)triangleCount);
 
-        int offset = 84;
+        using BufferedStream buffered = new(file, 1 << 16);
+        Span<byte> record = stackalloc byte[StlTriangleBytes];
+
         for (uint t = 0; t < triangleCount; t++)
         {
-            offset += 12; // skip normal vector
-            int v1 = ReadAndDeduplicateVertex(data, ref offset, vertexMap, vertices);
-            int v2 = ReadAndDeduplicateVertex(data, ref offset, vertexMap, vertices);
-            int v3 = ReadAndDeduplicateVertex(data, ref offset, vertexMap, vertices);
+            buffered.ReadExactly(record);
+
+            // Layout: 12 bytes normal (skipped), 3 × 12 bytes vertex, 2 bytes attribute count.
+            int v1 = DeduplicateVertex(record.Slice(12, 12), vertexMap, vertices);
+            int v2 = DeduplicateVertex(record.Slice(24, 12), vertexMap, vertices);
+            int v3 = DeduplicateVertex(record.Slice(36, 12), vertexMap, vertices);
             triangles.Add((v1, v2, v3));
-            offset += 2; // skip attribute byte count
         }
 
         return new MeshData(vertices, triangles);
@@ -241,27 +341,42 @@ internal static class ThreeMfProjectBuilder
         FormatMatrix(ComputeLinear(rx, ry, rz, sx, sy, sz), tx, ty, tz);
 
     /// <summary>
-    /// Upper-left 3×3 of the row-vector transform: Scale × (Rx × Ry × Rz), row-major.
+    /// Upper-left 3×3 of the row-vector transform: Scale × Rotation.
+    /// <para>
+    /// The rotation must match the workspace viewer, which is the ground truth for what the user
+    /// placed. A three.js <c>&lt;group rotation={[rx,ry,rz]}&gt;</c> uses the default Euler order
+    /// <c>'XYZ'</c> — column-vector <c>R = Rx·Ry·Rz</c>. Transposed into 3MF's row-vector
+    /// convention that is <c>Rz·Ry·Rx</c>, which is NOT the same as appending X, then Y, then Z
+    /// here: the two conventions agree only when at most one component is non-zero. Getting it
+    /// backwards therefore looks fine in every single-axis test while silently mis-orienting
+    /// every auto-oriented model, since <c>autoOrient.ts</c> derives its Euler from a quaternion
+    /// and normally yields two or three non-zero components.
+    /// </para>
+    /// <para>
+    /// Oracle (three.js, order 'XYZ', rotation = [π/2, 0, π/2]):
+    /// (1,0,0) → (0,0,1), (0,1,0) → (-1,0,0), (0,0,1) → (0,-1,0).
+    /// </para>
+    /// <para>Scale is applied before rotation, matching three.js' T·R·S group composition.</para>
     /// </summary>
     private static double[] ComputeLinear(double rx, double ry, double rz, double sx, double sy, double sz)
     {
-        double cosRx = Math.Cos(rx), sinRx = Math.Sin(rx);
-        double cosRy = Math.Cos(ry), sinRy = Math.Sin(ry);
-        double cosRz = Math.Cos(rz), sinRz = Math.Sin(rz);
+        double cosX = Math.Cos(rx), sinX = Math.Sin(rx);
+        double cosY = Math.Cos(ry), sinY = Math.Sin(ry);
+        double cosZ = Math.Cos(rz), sinZ = Math.Sin(rz);
 
         return
         [
-            sx * cosRy * cosRz,
-            sx * cosRy * sinRz,
-            sx * -sinRy,
+            sx * cosY * cosZ,
+            sx * ((cosX * sinZ) + (sinX * cosZ * sinY)),
+            sx * ((sinX * sinZ) - (cosX * cosZ * sinY)),
 
-            sy * ((sinRx * sinRy * cosRz) - (cosRx * sinRz)),
-            sy * ((sinRx * sinRy * sinRz) + (cosRx * cosRz)),
-            sy * sinRx * cosRy,
+            sy * -cosY * sinZ,
+            sy * ((cosX * cosZ) - (sinX * sinZ * sinY)),
+            sy * ((sinX * cosZ) + (cosX * sinZ * sinY)),
 
-            sz * ((cosRx * sinRy * cosRz) + (sinRx * sinRz)),
-            sz * ((cosRx * sinRy * sinRz) - (sinRx * cosRz)),
-            sz * cosRx * cosRy,
+            sz * sinY,
+            sz * -sinX * cosY,
+            sz * cosX * cosY,
         ];
     }
 
@@ -296,16 +411,14 @@ internal static class ThreeMfProjectBuilder
         }
     }
 
-    private static int ReadAndDeduplicateVertex(
-        byte[] data,
-        ref int offset,
+    private static int DeduplicateVertex(
+        ReadOnlySpan<byte> vertexBytes,
         Dictionary<(float X, float Y, float Z), int> vertexMap,
         List<(float X, float Y, float Z)> vertices)
     {
-        float x = BinaryPrimitives.ReadSingleLittleEndian(data.AsSpan(offset));
-        float y = BinaryPrimitives.ReadSingleLittleEndian(data.AsSpan(offset + 4));
-        float z = BinaryPrimitives.ReadSingleLittleEndian(data.AsSpan(offset + 8));
-        offset += 12;
+        float x = BinaryPrimitives.ReadSingleLittleEndian(vertexBytes);
+        float y = BinaryPrimitives.ReadSingleLittleEndian(vertexBytes[4..]);
+        float z = BinaryPrimitives.ReadSingleLittleEndian(vertexBytes[8..]);
 
         var key = (x, y, z);
         if (vertexMap.TryGetValue(key, out int index))
@@ -317,62 +430,6 @@ internal static class ThreeMfProjectBuilder
         vertices.Add(key);
         vertexMap[key] = index;
         return index;
-    }
-
-    private static XDocument BuildModelXml(
-        IReadOnlyList<ModelEntry> models,
-        List<MeshData> meshes,
-        (double X, double Y) bedCenter)
-    {
-        var resources = new XElement(Ns3Mf + "resources");
-        var buildSection = new XElement(Ns3Mf + "build");
-
-        for (int i = 0; i < models.Count; i++)
-        {
-            int objectId = i + 1;
-            MeshData mesh = meshes[i];
-
-            var verticesEl = new XElement(Ns3Mf + "vertices");
-            foreach (var (x, y, z) in mesh.Vertices)
-            {
-                verticesEl.Add(new XElement(
-                    Ns3Mf + "vertex",
-                    new XAttribute("x", x.ToString("G9", Inv)),
-                    new XAttribute("y", y.ToString("G9", Inv)),
-                    new XAttribute("z", z.ToString("G9", Inv))));
-            }
-
-            var trianglesEl = new XElement(Ns3Mf + "triangles");
-            foreach (var (v1, v2, v3) in mesh.Triangles)
-            {
-                trianglesEl.Add(new XElement(
-                    Ns3Mf + "triangle",
-                    new XAttribute("v1", v1),
-                    new XAttribute("v2", v2),
-                    new XAttribute("v3", v3)));
-            }
-
-            resources.Add(new XElement(
-                Ns3Mf + "object",
-                new XAttribute("id", objectId),
-                new XAttribute("type", "model"),
-                new XElement(Ns3Mf + "mesh", verticesEl, trianglesEl)));
-
-            var item = new XElement(
-                Ns3Mf + "item",
-                new XAttribute("objectid", objectId),
-                new XAttribute("transform", BuildItemTransform(models[i].TransformJson, ComputeBounds(mesh), bedCenter)));
-
-            buildSection.Add(item);
-        }
-
-        return new XDocument(
-            new XDeclaration("1.0", "UTF-8", null),
-            new XElement(
-                Ns3Mf + "model",
-                new XAttribute("unit", "millimeter"),
-                resources,
-                buildSection));
     }
 
     private static void WriteContentTypes(ZipArchive zip)

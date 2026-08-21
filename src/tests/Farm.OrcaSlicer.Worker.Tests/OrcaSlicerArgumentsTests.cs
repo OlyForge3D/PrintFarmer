@@ -59,7 +59,6 @@ public class OrcaSlicerArgumentsTests
             PositionedTransform,
             modelFileTransforms: null,
             modelPaths: [ModelStl],
-            inputsAreStl: true,
             bedCenterKnown: true);
 
         plan.Strategy.Should().Be(PlacementStrategy.ThreeMfProject);
@@ -80,7 +79,6 @@ public class OrcaSlicerArgumentsTests
             PositionedTransform,
             modelFileTransforms: null,
             modelPaths: [ModelStl],
-            inputsAreStl: true,
             bedCenterKnown: true);
 
         string args = ComposeForPlan(plan, ProjectThreeMf, ModelStl);
@@ -99,10 +97,24 @@ public class OrcaSlicerArgumentsTests
             PositionedTransform,
             modelFileTransforms: null,
             modelPaths: [ModelStl],
-            inputsAreStl: true,
             bedCenterKnown: true);
 
-        ComposeForPlan(plan, ProjectThreeMf, ModelStl).Should().NotContain("--center");
+        // Deliberately composed with the flags BuildTransformFlags actually produces for this
+        // transform, NOT with plan.TransformFlags: the 3MF branch hard-codes the latter to
+        // empty, so asserting on it would pass even with --center fully reintroduced.
+        string args = BuildOrcaSlicerArguments(
+            plan.ArrangeFlag,
+            BuildTransformFlags(PositionedTransform).Flags,
+            string.Empty,
+            string.Empty,
+            MachineJson,
+            ProcessJson,
+            FilamentJson,
+            OutputDir,
+            [ProjectThreeMf]);
+
+        args.Should().NotContain("--center");
+        args.Should().NotContain("--align-xy");
     }
 
     /// <summary>
@@ -117,7 +129,6 @@ public class OrcaSlicerArgumentsTests
             PositionedTransform,
             modelFileTransforms: null,
             modelPaths: [ModelStl],
-            inputsAreStl: true,
             bedCenterKnown: false);
 
         plan.Strategy.Should().Be(PlacementStrategy.AutoArrange);
@@ -140,7 +151,6 @@ public class OrcaSlicerArgumentsTests
             OriginTransform,
             modelFileTransforms: null,
             modelPaths: [ModelStl],
-            inputsAreStl: true,
             bedCenterKnown: true);
 
         plan.Strategy.Should().Be(PlacementStrategy.AutoArrange);
@@ -163,7 +173,6 @@ public class OrcaSlicerArgumentsTests
             rotated,
             modelFileTransforms: null,
             modelPaths: [ModelStl],
-            inputsAreStl: true,
             bedCenterKnown: true);
 
         plan.Strategy.Should().Be(PlacementStrategy.AutoArrange);
@@ -182,7 +191,6 @@ public class OrcaSlicerArgumentsTests
             modelTransformJson: null,
             modelFileTransforms: null,
             modelPaths: [ModelStl],
-            inputsAreStl: true,
             bedCenterKnown: true);
 
         plan.Strategy.Should().Be(PlacementStrategy.AutoArrange);
@@ -201,7 +209,6 @@ public class OrcaSlicerArgumentsTests
             modelTransformJson: null,
             modelFileTransforms: [OriginTransform, PositionedTransform],
             modelPaths: ["/work/a.stl", "/work/b.stl"],
-            inputsAreStl: true,
             bedCenterKnown: true);
 
         plan.Strategy.Should().Be(PlacementStrategy.ThreeMfProject);
@@ -221,7 +228,6 @@ public class OrcaSlicerArgumentsTests
             modelTransformJson: null,
             modelFileTransforms: [OriginTransform, null],
             modelPaths: ["/work/a.stl", "/work/b.stl"],
-            inputsAreStl: true,
             bedCenterKnown: true);
 
         plan.Strategy.Should().Be(PlacementStrategy.AutoArrange);
@@ -259,13 +265,12 @@ public class OrcaSlicerArgumentsTests
     #region Non-STL inputs
 
     [Fact]
-    public void PositionedNonStlInput_KeepsSourcePlacementWithoutCenterFlag()
+    public void PositionedThreeMfInput_KeepsSourcePlacementWithoutCenterFlag()
     {
         PlacementPlan plan = PlanPlacement(
             PositionedTransform,
             modelFileTransforms: null,
             modelPaths: ["/work/model.3mf"],
-            inputsAreStl: false,
             bedCenterKnown: true);
 
         plan.Strategy.Should().Be(PlacementStrategy.SourcePlacement);
@@ -273,6 +278,97 @@ public class OrcaSlicerArgumentsTests
         plan.PositionDropped.Should().BeTrue();
 
         ComposeForPlan(plan, ProjectThreeMf, "/work/model.3mf").Should().NotContain("--center");
+    }
+
+    /// <summary>
+    /// Only 3MF stores its own bed placement. OBJ/PLY/STEP/STP load at raw mesh or CAD
+    /// coordinates, so <c>--arrange 0</c> would strand them wherever the file happens to sit —
+    /// off the bed, tripping OrcaSlicer's CLI_OBJECTS_PARTLY_INSIDE check.
+    /// </summary>
+    [Theory]
+    [InlineData("/work/model.obj")]
+    [InlineData("/work/model.ply")]
+    [InlineData("/work/model.step")]
+    [InlineData("/work/model.stp")]
+    public void PositionedFormatWithoutOwnPlacement_AutoArranges(string modelPath)
+    {
+        PlacementPlan plan = PlanPlacement(
+            PositionedTransform,
+            modelFileTransforms: null,
+            modelPaths: [modelPath],
+            bedCenterKnown: true);
+
+        plan.Strategy.Should().Be(PlacementStrategy.AutoArrange);
+        plan.ArrangeFlag.Should().Be("--arrange 1");
+        plan.PositionDropped.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// A mixed STL + 3MF job cannot be re-meshed (not all STL) and does not uniformly carry its
+    /// own placement (not all 3MF), so it must auto-arrange. Routing it to <c>--arrange 0</c>
+    /// would leave the STL half at raw mesh coordinates.
+    /// </summary>
+    [Fact]
+    public void MixedStlAndThreeMfInputs_AutoArrange()
+    {
+        PlacementPlan plan = PlanPlacement(
+            modelTransformJson: null,
+            modelFileTransforms: [null, """{"rotation":[0,0,1.5707963],"scale":[1,1,1],"position":[0,0,0]}"""],
+            modelPaths: ["/work/a.stl", "/work/b.3mf"],
+            bedCenterKnown: true);
+
+        plan.Strategy.Should().Be(PlacementStrategy.AutoArrange);
+        plan.ArrangeFlag.Should().Be("--arrange 1");
+    }
+
+    #endregion
+
+    #region Runtime downgrade
+
+    /// <summary>
+    /// When the 3MF project cannot be built (for example an ASCII STL, or one over the triangle
+    /// budget), the plan is rewritten to auto-arrange. Rotation and scale must be recovered as
+    /// CLI flags, the layout is recorded as dropped, and no positional flag may appear.
+    /// </summary>
+    [Fact]
+    public void DowngradeToAutoArrange_RecoversRotationAndScaleFlags()
+    {
+        string rotatedAndPositioned =
+            """{"rotation":[1.5707963,0,0],"scale":[2,2,2],"position":[30,0,0]}""";
+
+        PlacementPlan plan = PlanPlacement(
+            rotatedAndPositioned,
+            modelFileTransforms: null,
+            modelPaths: [ModelStl],
+            bedCenterKnown: true);
+        plan.Strategy.Should().Be(PlacementStrategy.ThreeMfProject);
+
+        PlacementPlan downgraded = DowngradeToAutoArrange(plan);
+
+        downgraded.Strategy.Should().Be(PlacementStrategy.AutoArrange);
+        downgraded.ArrangeFlag.Should().Be("--arrange 1");
+        downgraded.PositionDropped.Should().BeTrue();
+        downgraded.TransformFlags.Should().Contain("--rotate-x 90.00");
+        downgraded.TransformFlags.Should().Contain("--scale 2.0000");
+        downgraded.TransformFlags.Should().NotContain("--center");
+
+        // The downgraded plan keeps the original STL, not the project that failed to build.
+        Compose(downgraded, ModelStl).Should().EndWith("\"/work/DumpTruck.stl\"");
+    }
+
+    [Fact]
+    public void DowngradeToAutoArrange_NoTransforms_ProducesNoFlags()
+    {
+        PlacementPlan plan = PlanPlacement(
+            modelTransformJson: null,
+            modelFileTransforms: null,
+            modelPaths: [ModelStl],
+            bedCenterKnown: true);
+
+        PlacementPlan downgraded = DowngradeToAutoArrange(plan);
+
+        downgraded.TransformFlags.Should().BeEmpty();
+        downgraded.ArrangeFlag.Should().Be("--arrange 1");
     }
 
     #endregion
@@ -292,7 +388,7 @@ public class OrcaSlicerArgumentsTests
     [Fact]
     public void PlanPlacement_NullModelPaths_Throws()
     {
-        Action act = () => PlanPlacement(null, null, null!, true, true);
+        Action act = () => PlanPlacement(null, null, null!, true);
 
         act.Should().Throw<ArgumentNullException>();
     }
@@ -329,3 +425,4 @@ public class OrcaSlicerArgumentsTests
 
     #endregion
 }
+

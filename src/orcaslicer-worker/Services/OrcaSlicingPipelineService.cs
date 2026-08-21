@@ -733,14 +733,12 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // coordinate (both --center and --align-xy are commented out of CLITransformConfigDef),
         // so any model carrying a custom position has its placement embedded in a 3MF project
         // instead. See PlanPlacement.
-        (double X, double Y)? bedCenter = await TryReadBedCenterAsync(machineJson, cancellationToken);
-        bool allStl = modelPaths.All(p => p.EndsWith(".stl", StringComparison.OrdinalIgnoreCase));
+        (double X, double Y)? bedCenter = await TryReadBedCenterAsync(machineJson, job.Id, cancellationToken);
 
         PlacementPlan placement = PlanPlacement(
             job.ModelTransformJson,
             job.ModelFileTransforms,
             modelPaths,
-            allStl,
             bedCenter.HasValue);
 
         List<string> effectiveModelPaths = modelPaths;
@@ -762,29 +760,23 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 {
                     effectiveModelPaths = [ThreeMfProjectBuilder.Build(entries, workDir, bedCenter.Value)];
                 }
-                catch (Exception ex) when (ex is InvalidOperationException or IOException)
+                catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
                 {
-                    // Only binary STL can be re-meshed into a project. Rather than failing the
-                    // whole job, let OrcaSlicer auto-arrange — the layout is lost but the slice
-                    // succeeds, and the reason is recorded here.
+                    // Only a binary STL within the triangle budget can be re-meshed into a
+                    // project. Rather than failing the whole job, let OrcaSlicer auto-arrange —
+                    // the layout is lost but the slice succeeds, and the reason is recorded here.
                     _logger.LogError(
                         ex,
                         "Job {JobId}: could not build the 3MF project; falling back to auto-arrange, so the requested layout is lost.",
                         job.Id);
-                    placement = placement with
-                    {
-                        Strategy = PlacementStrategy.AutoArrange,
-                        ArrangeFlag = "--arrange 1",
-                        TransformFlags = BuildTransformFlags(placement.ModelTransforms[0]).Flags,
-                        PositionDropped = true,
-                    };
+                    placement = DowngradeToAutoArrange(placement);
                 }
 
                 break;
 
             case PlacementStrategy.SourcePlacement:
                 _logger.LogWarning(
-                    "Job {JobId}: inputs are not all STL, so workspace positions cannot be embedded. " +
+                    "Job {JobId}: inputs are 3MF, so the workspace layout cannot be re-embedded. " +
                     "Falling back to the placement stored in the source file.",
                     job.Id);
                 break;
@@ -793,8 +785,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 if (placement.PositionDropped)
                 {
                     _logger.LogWarning(
-                        "Job {JobId}: workspace positions could not be embedded (machine profile has no usable " +
-                        "printable_area, so the bed centre is unknown); letting OrcaSlicer auto-arrange instead.",
+                        "Job {JobId}: the requested layout could not be embedded (inputs are not all STL, or the " +
+                        "bed centre could not be determined); letting OrcaSlicer auto-arrange instead.",
                         job.Id);
                 }
 
@@ -1335,9 +1327,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     /// <summary>
     /// Parsed transform result: CLI flags and whether a custom position was specified.
-    /// <see cref="Flags"/> never contains a positional flag — OrcaSlicer 2.4.2 has none.
-    /// When <see cref="HasCustomPosition"/> is true the caller must embed the placement in a
-    /// 3MF project (see <see cref="PlanPlacement"/>).
+    /// <see cref="Flags"/> must never contain a positional flag — OrcaSlicer 2.4.2 has none,
+    /// and passing one aborts the run before slicing (issue #1794). When
+    /// <see cref="HasCustomPosition"/> is true the caller embeds the placement in a 3MF project
+    /// instead; see <see cref="PlanPlacement"/>.
     /// </summary>
     internal readonly record struct TransformResult(string Flags, bool HasCustomPosition);
 
@@ -1387,14 +1380,12 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// <param name="modelTransformJson">Primary model transform for single-model jobs.</param>
     /// <param name="modelFileTransforms">Per-model transforms for multi-model jobs.</param>
     /// <param name="modelPaths">Downloaded model files, in order.</param>
-    /// <param name="inputsAreStl">True when every input file is an STL.</param>
     /// <param name="bedCenterKnown">True when the machine profile yielded a bed centre.</param>
     /// <returns>The placement plan.</returns>
     internal static PlacementPlan PlanPlacement(
         string? modelTransformJson,
         IReadOnlyList<string?>? modelFileTransforms,
         IReadOnlyList<string> modelPaths,
-        bool inputsAreStl,
         bool bedCenterKnown)
     {
         ArgumentNullException.ThrowIfNull(modelPaths);
@@ -1418,23 +1409,51 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             ? BuildTransformFlags(transforms[0]).Flags
             : string.Empty;
 
+        // Only STL can be re-meshed into a project we control.
+        bool inputsAreStl = modelPaths.Count > 0
+            && modelPaths.All(p => p.EndsWith(".stl", StringComparison.OrdinalIgnoreCase));
+
+        // Only 3MF carries its own bed placement. OBJ/PLY/STEP/STP load at raw mesh or CAD
+        // coordinates, so "--arrange 0" would strand them wherever the file happens to sit.
+        bool inputsCarryOwnPlacement = modelPaths.Count > 0
+            && modelPaths.All(p => p.EndsWith(".3mf", StringComparison.OrdinalIgnoreCase));
+
         if (needsEmbedding && inputsAreStl && bedCenterKnown)
         {
             // Rotation and scale are baked into the 3MF matrix, so no CLI transform flags.
             return new PlacementPlan(PlacementStrategy.ThreeMfProject, "--arrange 0", string.Empty, transforms, false);
         }
 
-        if (needsEmbedding && !inputsAreStl)
+        if (needsEmbedding && inputsCarryOwnPlacement)
         {
             // A 3MF input already carries its own placement; keep it rather than re-arranging.
             return new PlacementPlan(PlacementStrategy.SourcePlacement, "--arrange 0", primaryFlags, transforms, true);
         }
 
-        // Nothing to place (or nowhere to place it): auto-arrange. Never "--arrange 0" without an
-        // embedded placement — that would leave the model at raw mesh coordinates, which lands it
-        // off the bed and trips OrcaSlicer's CLI_OBJECTS_PARTLY_INSIDE check.
+        // Nothing to place (or nowhere to place it): auto-arrange. Never "--arrange 0" without
+        // an embedded placement — that would leave the model at raw mesh coordinates, which
+        // lands it off the bed and trips OrcaSlicer's CLI_OBJECTS_PARTLY_INSIDE check. This is
+        // also the path for mixed STL+3MF jobs and for OBJ/PLY/STEP, none of which can be
+        // placed faithfully.
         return new PlacementPlan(PlacementStrategy.AutoArrange, "--arrange 1", primaryFlags, transforms, needsEmbedding);
     }
+
+    /// <summary>
+    /// Rewrite a plan to plain auto-arrange, used when the chosen mechanism turned out to be
+    /// unavailable at runtime (for example the 3MF project could not be built). The requested
+    /// layout is lost, which <see cref="PlacementPlan.PositionDropped"/> records so the caller
+    /// can say so in the log; rotation and scale are recovered as CLI flags.
+    /// </summary>
+    internal static PlacementPlan DowngradeToAutoArrange(PlacementPlan plan) =>
+        plan with
+        {
+            Strategy = PlacementStrategy.AutoArrange,
+            ArrangeFlag = "--arrange 1",
+            TransformFlags = plan.ModelTransforms.Count > 0
+                ? BuildTransformFlags(plan.ModelTransforms[0]).Flags
+                : string.Empty,
+            PositionDropped = true,
+        };
 
     /// <summary>
     /// Compose the OrcaSlicer CLI argument string. The first model is positional; any
@@ -1470,25 +1489,35 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// Workspace model positions are relative to the bed centre, so this offset is what maps
     /// them into the coordinate space OrcaSlicer places 3MF build items in.
     /// </summary>
-    /// <returns>The bed centre, or <see langword="null"/> when the profile has no usable
-    /// <c>printable_area</c>.</returns>
-    private static async Task<(double X, double Y)?> TryReadBedCenterAsync(
+    /// <returns>The bed centre, or <see langword="null"/> when the profile cannot be read or has
+    /// no usable <c>printable_area</c>.</returns>
+    private async Task<(double X, double Y)?> TryReadBedCenterAsync(
         string machineProfilePath,
+        Guid jobId,
         CancellationToken cancellationToken)
     {
+        string json;
         try
         {
-            string json = await File.ReadAllTextAsync(machineProfilePath, cancellationToken);
-            return TryReadBedCenter(json);
+            json = await File.ReadAllTextAsync(machineProfilePath, cancellationToken);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // Distinguished from "profile parsed but has no printable_area" so the placement
+            // warning downstream is not blamed on profile content that was never read.
+            _logger.LogWarning(ex, "Job {JobId}: could not read the machine profile to determine the bed centre.", jobId);
             return null;
         }
-        catch (UnauthorizedAccessException)
+
+        (double X, double Y)? center = TryReadBedCenter(json);
+        if (center is null)
         {
-            return null;
+            _logger.LogWarning(
+                "Job {JobId}: machine profile has no usable printable_area, so the bed centre is unknown.",
+                jobId);
         }
+
+        return center;
     }
 
     /// <summary>
@@ -1562,10 +1591,18 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
                 // Workspace is Z-up with XY bed plane (camera.up = [0,0,1]).
                 // rotation[0]=X, rotation[1]=Y, rotation[2]=Z — same axes as OrcaSlicer.
-                double rotXDeg = rot[0] * radToDeg;
-                if (Math.Abs(rotXDeg) > epsilon)
+                //
+                // ORDER MATTERS. OrcaSlicer applies --rotate* options in command-line order
+                // (CLI::setup records opt_order, and the transform loop walks m_transforms in
+                // that order), each as a rotation about a world axis. The workspace viewer uses
+                // three.js' default Euler order 'XYZ', i.e. column-vector Rx·Ry·Rz, which is
+                // produced by applying Z first, then Y, then X. Emitting X→Y→Z instead yields
+                // 'ZYX' and silently mis-orients any model with more than one non-zero rotation
+                // component — which is the normal output of auto-orient. Keep Z, Y, X.
+                double rotZDeg = rot[2] * radToDeg;
+                if (Math.Abs(rotZDeg) > epsilon)
                 {
-                    flags.Append(CultureInfo.InvariantCulture, $" --rotate-x {rotXDeg:F2}");
+                    flags.Append(CultureInfo.InvariantCulture, $" --rotate {rotZDeg:F2}");
                 }
 
                 double rotYDeg = rot[1] * radToDeg;
@@ -1574,11 +1611,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                     flags.Append(CultureInfo.InvariantCulture, $" --rotate-y {rotYDeg:F2}");
                 }
 
-                // Z-rotation (around up axis) = OrcaSlicer --rotate (yaw)
-                double rotZDeg = rot[2] * radToDeg;
-                if (Math.Abs(rotZDeg) > epsilon)
+                double rotXDeg = rot[0] * radToDeg;
+                if (Math.Abs(rotXDeg) > epsilon)
                 {
-                    flags.Append(CultureInfo.InvariantCulture, $" --rotate {rotZDeg:F2}");
+                    flags.Append(CultureInfo.InvariantCulture, $" --rotate-x {rotXDeg:F2}");
                 }
             }
 
@@ -1603,11 +1639,20 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             // Workspace is Z-up with XY bed plane — same as OrcaSlicer.
             // position[0]=X (bed), position[1]=Y (bed), position[2]=Z (height).
             //
-            // No position flag is emitted: OrcaSlicer 2.4.2 compiles both --center and
-            // --align-xy out of CLITransformConfigDef, so passing either is fatal
-            // ("Invalid option --center", exit 254 / CLI_INVALID_PARAMS — issue #1794).
-            // A custom position is instead reported through HasCustomPosition so callers can
-            // embed it in a 3MF project, which is the only placement mechanism the CLI supports.
+            // DO NOT add a positional flag here. OrcaSlicer 2.4.2 compiles both `center` and
+            // `align_xy` out of CLITransformConfigDef, so passing either is fatal: the CLI
+            // answers "Invalid option --center", dumps its usage, and exits 254
+            // (CLI_INVALID_PARAMS) without slicing anything (issue #1794).
+            //
+            // A custom position is reported through HasCustomPosition instead, and embedded in
+            // a 3MF project by PlanPlacement — the only placement mechanism this CLI supports.
+            // If a future OrcaSlicer restores a positional option, adding it back here is NOT
+            // sufficient on its own: placement is coupled to the arrange flag, so PlanPlacement
+            // must change in the same commit.
+            //
+            // Guarded by BuildTransformFlagsTests.BuildTransformFlags_NeverEmitsUnsupportedPositionalFlags
+            // and OrcaSlicerArgumentsTests. Those tests failing means the defect is back — they
+            // are not stale, so do not "fix" them by relaxing the assertion.
             if (root.TryGetProperty("position", out JsonElement posEl) && posEl.ValueKind == JsonValueKind.Array)
             {
                 double[] pos = new double[3];

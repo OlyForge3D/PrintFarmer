@@ -171,6 +171,46 @@ public class ThreeMfProjectBuilderTests : IDisposable
         act.Should().Throw<InvalidOperationException>().WithMessage("*size mismatch*");
     }
 
+    /// <summary>
+    /// The triangle count is read straight from an untrusted file header and drives every
+    /// allocation in the parse. Since this path is now the default for any positioned model, a
+    /// header claiming an absurd count must be rejected before anything is allocated — the
+    /// caller turns the throw into an auto-arrange fallback rather than exhausting the worker.
+    /// </summary>
+    [Fact]
+    public void ParseBinaryStl_TriangleCountOverBudget_ThrowsBeforeAllocating()
+    {
+        string path = Path.Join(_tempDir, "huge-header.stl");
+        using (FileStream fs = File.Create(path))
+        using (BinaryWriter bw = new(fs))
+        {
+            bw.Write(new byte[80]);
+            bw.Write((uint)ThreeMfProjectBuilder.MaxTriangles + 1);
+        }
+
+        Action act = () => ThreeMfProjectBuilder.ParseBinaryStl(path);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*too many triangles*");
+    }
+
+    /// <summary>
+    /// An ASCII STL decodes bytes 80..84 as a nonsense triangle count, so it must be rejected
+    /// rather than parsed into garbage geometry.
+    /// </summary>
+    [Fact]
+    public void ParseBinaryStl_AsciiStl_Throws()
+    {
+        string path = Path.Join(_tempDir, "ascii.stl");
+        File.WriteAllText(
+            path,
+            "solid cube\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n"
+            + "      vertex 0 1 0\n    endloop\n  endfacet\nendsolid cube\n");
+
+        Action act = () => ThreeMfProjectBuilder.ParseBinaryStl(path);
+
+        act.Should().Throw<InvalidOperationException>();
+    }
+
     #endregion
 
     #region BuildItemTransform Tests
@@ -253,7 +293,27 @@ public class ThreeMfProjectBuilderTests : IDisposable
         double[] m = ParseTransformValues(BuildItemTransform(json, bounds, (110, 110)));
 
         // Raw mesh spans Z 0..24; after the transform its bottom must be at Z=0.
-        m[11].Should().BeApproximately(0, 1e-6);
+        (double _, double _, double bottomZ) = MapPoint(m, 0, 0, 0);
+        bottomZ.Should().BeApproximately(0, 1e-6);
+    }
+
+    /// <summary>
+    /// A non-zero <c>position.z</c> lifts the model above the bed, exactly as the viewer does.
+    /// Without this, dropping the <c>pos[2]</c> term from the Z target would go unnoticed.
+    /// </summary>
+    [Fact]
+    public void BuildItemTransform_RaisedZPosition_LiftsModelByThatAmount()
+    {
+        var bounds = new MeshBounds(CenterX: 0, CenterY: 0, CenterZ: 12, HalfHeight: 12);
+        string json = """{"rotation":[0,0,0],"scale":[1,1,1],"position":[0,0,30]}""";
+
+        double[] m = ParseTransformValues(BuildItemTransform(json, bounds, (110, 110)));
+
+        // Mesh bottom (raw Z=0) must end up 30 mm above the bed, and the centre 30+12 above it.
+        (double _, double _, double bottomZ) = MapPoint(m, 0, 0, 0);
+        (double _, double _, double centreZ) = MapPoint(m, 0, 0, 12);
+        bottomZ.Should().BeApproximately(30, 1e-6);
+        centreZ.Should().BeApproximately(42, 1e-6);
     }
 
     [Fact]
@@ -275,6 +335,78 @@ public class ThreeMfProjectBuilderTests : IDisposable
         m[1].Should().BeApproximately(2, 1e-6);
         m[3].Should().BeApproximately(-2, 1e-6);
         m[4].Should().BeApproximately(0, 1e-6);
+    }
+
+    /// <summary>
+    /// Multi-axis rotations are the case where Euler order actually matters, and the only case a
+    /// single-axis test cannot detect. The expected values are the three.js result for
+    /// <c>new THREE.Euler(π/2, 0, π/2)</c> with its default order 'XYZ' — the exact object the
+    /// workspace viewer constructs — computed independently of this implementation.
+    /// If these fail, the emitted orientation no longer matches what the user approved on screen.
+    /// </summary>
+    [Fact]
+    public void BuildItemTransform_MultiAxisRotation_MatchesViewerEulerOrderXyz()
+    {
+        double halfPi = Math.PI / 2;
+        string json = $$"""{"rotation":[{{halfPi.ToString("R", Inv)}},0,{{halfPi.ToString("R", Inv)}}],"scale":[1,1,1],"position":[0,0,0]}""";
+
+        double[] m = ParseTransformValues(BuildItemTransform(json, OriginBounds, (0, 0)));
+
+        (double x1, double y1, double z1) = MapPoint(m, 1, 0, 0);
+        x1.Should().BeApproximately(0, 1e-9);
+        y1.Should().BeApproximately(0, 1e-9);
+        z1.Should().BeApproximately(1, 1e-9);
+
+        (double x2, double y2, double z2) = MapPoint(m, 0, 1, 0);
+        x2.Should().BeApproximately(-1, 1e-9);
+        y2.Should().BeApproximately(0, 1e-9);
+        z2.Should().BeApproximately(0, 1e-9);
+
+        (double x3, double y3, double z3) = MapPoint(m, 0, 0, 1);
+        x3.Should().BeApproximately(0, 1e-9);
+        y3.Should().BeApproximately(-1, 1e-9);
+        z3.Should().BeApproximately(0, 1e-9);
+    }
+
+    /// <summary>
+    /// A second, unrelated multi-axis oracle so the order cannot be satisfied by coincidence.
+    /// three.js <c>Euler(π/2, π/2, 0)</c>, order 'XYZ': (1,0,0) → (0,1,0), (0,0,1) → (1,0,0).
+    /// </summary>
+    [Fact]
+    public void BuildItemTransform_MultiAxisRotationXThenY_MatchesViewer()
+    {
+        double halfPi = Math.PI / 2;
+        string json = $$"""{"rotation":[{{halfPi.ToString("R", Inv)}},{{halfPi.ToString("R", Inv)}},0],"scale":[1,1,1],"position":[0,0,0]}""";
+
+        double[] m = ParseTransformValues(BuildItemTransform(json, OriginBounds, (0, 0)));
+
+        (double x1, double y1, double z1) = MapPoint(m, 1, 0, 0);
+        x1.Should().BeApproximately(0, 1e-9);
+        y1.Should().BeApproximately(1, 1e-9);
+        z1.Should().BeApproximately(0, 1e-9);
+
+        (double x2, double y2, double z2) = MapPoint(m, 0, 0, 1);
+        x2.Should().BeApproximately(1, 1e-9);
+        y2.Should().BeApproximately(0, 1e-9);
+        z2.Should().BeApproximately(0, 1e-9);
+    }
+
+    /// <summary>
+    /// Rotation must be applied about the mesh's own bounding-box centre even for multi-axis
+    /// rotations, and the result still translated onto the bed centre.
+    /// </summary>
+    [Fact]
+    public void BuildItemTransform_MultiAxisRotationOffOriginMesh_StillCentersOnBed()
+    {
+        double halfPi = Math.PI / 2;
+        var bounds = new MeshBounds(CenterX: 40, CenterY: -25, CenterZ: 5, HalfHeight: 5);
+        string json = $$"""{"rotation":[{{halfPi.ToString("R", Inv)}},0,{{halfPi.ToString("R", Inv)}}],"scale":[1,1,1],"position":[10,20,0]}""";
+
+        double[] m = ParseTransformValues(BuildItemTransform(json, bounds, (110, 110)));
+
+        (double X, double Y, double _) = MapPoint(m, 40, -25, 5);
+        X.Should().BeApproximately(120, 1e-6);
+        Y.Should().BeApproximately(130, 1e-6);
     }
 
     #endregion

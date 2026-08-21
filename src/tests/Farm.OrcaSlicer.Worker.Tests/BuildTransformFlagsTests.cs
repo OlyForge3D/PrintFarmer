@@ -239,6 +239,29 @@ public class BuildTransformFlagsTests
     }
 
     /// <summary>
+    /// OrcaSlicer applies <c>--rotate*</c> options in command-line order, each about a world
+    /// axis. The workspace viewer uses three.js' default Euler order 'XYZ' (column-vector
+    /// Rx·Ry·Rz), which is reproduced by rotating Z first, then Y, then X. Emitting X→Y→Z
+    /// instead gives 'ZYX' and mis-orients any multi-axis rotation — invisible to a
+    /// single-axis test, so the order is pinned here explicitly.
+    /// </summary>
+    [Fact]
+    public void BuildTransformFlags_MultiAxisRotation_EmitsZThenYThenX()
+    {
+        string json = """{"rotation":[0.5235987755982988,0.7853981633974483,1.5707963267948966],"scale":[1,1,1],"position":[0,0,0]}""";
+
+        TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
+
+        int z = result.Flags.IndexOf("--rotate 90.00", StringComparison.Ordinal);
+        int y = result.Flags.IndexOf("--rotate-y 45.00", StringComparison.Ordinal);
+        int x = result.Flags.IndexOf("--rotate-x 30.00", StringComparison.Ordinal);
+
+        z.Should().BeGreaterThanOrEqualTo(0);
+        y.Should().BeGreaterThan(z, "Y must be applied after Z");
+        x.Should().BeGreaterThan(y, "X must be applied after Y");
+    }
+
+    /// <summary>
     /// Regression guard for #1794: <c>--center</c> is not a valid OrcaSlicer 2.4.2 option
     /// (it is commented out of <c>CLITransformConfigDef</c>), so it must never appear in the
     /// flags for ANY transform shape. Passing it aborts the run with exit 254.
