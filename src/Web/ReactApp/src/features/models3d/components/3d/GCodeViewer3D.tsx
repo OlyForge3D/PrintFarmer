@@ -204,7 +204,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
   const settingsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     const service = serviceRef.current;
 
     const loadGCode = async () => {
@@ -212,22 +212,26 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
         // parseGCodeDetailed fetches gcodeUrl itself (in a Web Worker when
         // available) so the raw G-code text never round-trips through this
         // component or across the worker boundary as a structured-clone
-        // payload — see #1788.
-        const result = await service.parseGCodeDetailed(gcodeUrl);
-        if (cancelled) return;
+        // payload — see #1788. Passing `controller.signal` lets a rapid
+        // gcodeUrl change actually cancel the superseded parse (terminating
+        // the worker if it's still running) instead of merely ignoring its
+        // result once it eventually resolves — an abandoned parse would
+        // otherwise keep monopolizing the shared worker and head-of-line
+        // block the newer request.
+        const result = await service.parseGCodeDetailed(gcodeUrl, controller.signal);
         setParseResult(result);
         setCurrentLayer(result.layerCount - 1);
         setEnabledTools(new Set(result.tools));
         setLoading(false);
       } catch (err) {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         setError(err instanceof Error ? err.message : 'Failed to parse G-code');
         setLoading(false);
       }
     };
 
     loadGCode();
-    return () => { cancelled = true; };
+    return () => { controller.abort(); };
   }, [gcodeUrl]);
 
   useEffect(() => {

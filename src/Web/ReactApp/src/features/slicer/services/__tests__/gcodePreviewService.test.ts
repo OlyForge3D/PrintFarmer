@@ -148,6 +148,26 @@ describe('GcodePreviewService.parseGCodeDetailed (no Worker — main-thread fall
     await expect(parsePromise).rejects.toThrow();
     expect(capturedSignal?.aborted).toBe(true);
   });
+
+  it('aborts an in-flight fallback fetch when the caller supersedes it via AbortSignal, not just dispose()', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    global.fetch = vi.fn((_url: string, init?: RequestInit) => {
+      capturedSignal = init?.signal ?? undefined;
+      return new Promise<never>((_resolve, reject) => {
+        capturedSignal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    });
+
+    // Simulates GCodeViewer3D switching gcodeUrl before the previous parse
+    // resolved: the caller's own AbortController — not disposal — must
+    // cancel the superseded request (#1808 review finding).
+    const controller = new AbortController();
+    const parsePromise = service.parseGCodeDetailed('/stale.gcode', controller.signal);
+    controller.abort();
+
+    await expect(parsePromise).rejects.toThrow();
+    expect(capturedSignal?.aborted).toBe(true);
+  });
 });
 
 describe('GcodePreviewService.parseGCodeDetailed (Worker path)', () => {
@@ -225,6 +245,49 @@ describe('GcodePreviewService.parseGCodeDetailed (Worker path)', () => {
 
     const service = createGcodePreviewService();
     await expect(service.parseGCodeDetailed('/print.gcode')).rejects.toThrow('boom');
+    service.dispose();
+  });
+
+  it('rejects immediately without contacting the Worker when the signal is already aborted', async () => {
+    const service = createGcodePreviewService();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(service.parseGCodeDetailed('/print.gcode', controller.signal)).rejects.toThrow(/abort/i);
+    expect(FakeWorker.instances).toHaveLength(0);
+
+    service.dispose();
+  });
+
+  it('terminates and recreates the Worker when the caller aborts a superseded parse (#1808 concurrency finding)', async () => {
+    // Never resolves on its own — simulates a stale parse that's still
+    // running in the shared worker when a newer request supersedes it.
+    class SlowFakeWorker extends FakeWorker {
+      postMessage = vi.fn();
+    }
+    (globalThis as unknown as { Worker: unknown }).Worker = SlowFakeWorker;
+
+    const service = createGcodePreviewService();
+    const controller = new AbortController();
+
+    const stalePromise = service.parseGCodeDetailed('/huge-stale.gcode', controller.signal);
+    expect(FakeWorker.instances).toHaveLength(1);
+
+    controller.abort();
+
+    await expect(stalePromise).rejects.toThrow(/abort/i);
+    // The worker executing the stale parse is killed outright — cooperative
+    // cancellation isn't possible mid-synchronous-parse, so termination is
+    // the only way to stop it from monopolizing the shared worker.
+    expect(FakeWorker.instances[0].terminated).toBe(true);
+
+    // A newer request isn't queued behind the terminated worker: a fresh
+    // one is created lazily and resolves independently.
+    (globalThis as unknown as { Worker: unknown }).Worker = FakeWorker;
+    const freshResult = await service.parseGCodeDetailed('/new.gcode');
+    expect(FakeWorker.instances).toHaveLength(2);
+    expect(freshResult.layerCount).toBe(3);
+
     service.dispose();
   });
 });

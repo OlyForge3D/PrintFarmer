@@ -109,8 +109,15 @@ export interface IGcodePreviewService {
    * Takes the G-code file's URL, not its text: the parse runs in a Web
    * Worker that fetches the file itself, so the raw text never round-trips
    * across the worker boundary as a structured-clone payload (#1788).
+   *
+   * `signal` lets a caller cancel a specific in-flight request — e.g. when
+   * the requested `gcodeUrl` changes before the previous parse finished.
+   * Because the worker executes each parse synchronously, a superseded
+   * request cannot be interrupted cooperatively; cancelling it terminates
+   * and recreates the worker so the newer request isn't head-of-line
+   * blocked behind a stale (possibly huge/malformed) parse.
    */
-  parseGCodeDetailed(gcodeUrl: string): Promise<DetailedParsedGCode>;
+  parseGCodeDetailed(gcodeUrl: string, signal?: AbortSignal): Promise<DetailedParsedGCode>;
   dispose(): void;
 }
 
@@ -211,13 +218,38 @@ export function createGcodePreviewService(): IGcodePreviewService {
       return { layers, layerCount: layers.length };
     },
 
-    async parseGCodeDetailed(gcodeUrl: string): Promise<DetailedParsedGCode> {
+    async parseGCodeDetailed(gcodeUrl: string, signal?: AbortSignal): Promise<DetailedParsedGCode> {
+      if (signal?.aborted) {
+        throw new DOMException('Parse aborted', 'AbortError');
+      }
+
       if (isWorkerSupported()) {
         const w = ensureWorker();
         const requestId = ++requestSeq;
 
         const buffers = await new Promise<DetailedParseBuffers>((resolve, reject) => {
-          pending.set(requestId, { resolve, reject });
+          // The worker parses synchronously and can't be interrupted
+          // cooperatively mid-parse, so cancelling a superseded request
+          // terminates the worker outright (dropping any other requests
+          // still queued behind it) rather than merely ignoring its
+          // result — otherwise a stale/huge parse would keep monopolizing
+          // the shared worker and head-of-line block whatever superseded
+          // it (#1788).
+          const onAbort = () => {
+            if (worker) {
+              worker.terminate();
+              worker = null;
+            }
+            rejectAllPending(new DOMException('Parse aborted', 'AbortError'));
+          };
+          const cleanup = () => signal?.removeEventListener('abort', onAbort);
+
+          pending.set(requestId, {
+            resolve: (value) => { cleanup(); resolve(value); },
+            reject: (error) => { cleanup(); reject(error); },
+          });
+          signal?.addEventListener('abort', onAbort, { once: true });
+
           w.postMessage({ requestId, gcodeUrl });
         });
 
@@ -228,15 +260,19 @@ export function createGcodePreviewService(): IGcodePreviewService {
       // browsers, jsdom test environment): run the same parsing core
       // synchronously on the main thread. Tracked via AbortController so
       // dispose() can cancel it, mirroring the Worker path's pending-request
-      // rejection.
+      // rejection; an external `signal` is forwarded onto the same
+      // controller so a superseding request cancels this fetch too.
       const controller = new AbortController();
       fallbackControllers.add(controller);
+      const onAbort = () => controller.abort();
+      signal?.addEventListener('abort', onAbort, { once: true });
       try {
         const gcodeText = await fetchGCodeText(gcodeUrl, controller.signal);
         const buffers = parseDetailedLayersCore(gcodeText);
         return buffersToDetailedParsedGCode(buffers);
       } finally {
         fallbackControllers.delete(controller);
+        signal?.removeEventListener('abort', onAbort);
       }
     },
 

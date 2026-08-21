@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import { GCodeViewer } from '../GCodeViewer3D';
 import { SELECTABLE_THEMES } from '@/design-system/themes/registry';
 import type { IGcodePreviewService, DetailedParsedGCode, DetailedLayer } from '@/features/slicer/services';
@@ -211,8 +211,42 @@ describe('GCodeViewer3D', () => {
     render(<GCodeViewer gcodeUrl="/test.gcode" service={service} />);
 
     await waitFor(() => {
-      expect(service.parseGCodeDetailed).toHaveBeenCalledWith('/test.gcode');
+      expect(service.parseGCodeDetailed).toHaveBeenCalledWith('/test.gcode', expect.any(AbortSignal));
     });
+  });
+
+  it('cancels the superseded parse via AbortSignal when gcodeUrl changes before it resolves (#1808 concurrency finding)', async () => {
+    const service = createMockService();
+    let resolveFirst: ((value: DetailedParsedGCode) => void) | undefined;
+    (service.parseGCodeDetailed as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => new Promise<DetailedParsedGCode>((resolve) => { resolveFirst = resolve; }),
+    );
+
+    const { rerender } = render(<GCodeViewer gcodeUrl="/stale.gcode" service={service} />);
+
+    await waitFor(() => {
+      expect(service.parseGCodeDetailed).toHaveBeenCalledWith('/stale.gcode', expect.any(AbortSignal));
+    });
+    const staleSignal = (service.parseGCodeDetailed as ReturnType<typeof vi.fn>).mock.calls[0][1] as AbortSignal;
+    expect(staleSignal.aborted).toBe(false);
+
+    // Switching gcodeUrl before the stale parse resolves must abort the
+    // signal passed for it — this is what lets the service terminate the
+    // worker running it, rather than merely ignoring its eventual result.
+    rerender(<GCodeViewer gcodeUrl="/new.gcode" service={service} />);
+
+    expect(staleSignal.aborted).toBe(true);
+    await waitFor(() => {
+      expect(service.parseGCodeDetailed).toHaveBeenCalledWith('/new.gcode', expect.any(AbortSignal));
+    });
+
+    // Resolving the superseded (now-aborted) request afterwards must not
+    // clobber state derived from the newer request.
+    await act(async () => {
+      resolveFirst?.({ layers: [], layerCount: 0, tools: [] });
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('renders tool filter when multiple tools present', async () => {
