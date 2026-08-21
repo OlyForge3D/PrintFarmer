@@ -425,16 +425,45 @@ public class ModelAnalysisServiceTests : IDisposable
         ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".3mf", CancellationToken.None);
 
         // DtdProcessing.Prohibit means the DOCTYPE itself throws an XmlException inside
-        // XmlReader before any entity reference is ever resolved. Pin the specific
-        // ValidationErrors marker the XmlException catch clause produces
-        // ("Model part XML is malformed or unsafe"), not just IsValid=false: a bare IsValid
-        // check would also pass if the entity were resolved and parsing later failed for an
-        // unrelated reason (e.g. "declares no printable mesh"), which would not actually prove
-        // the DOCTYPE/entity was rejected.
+        // XmlReader before any entity reference is ever resolved. .NET's XmlReader raises a
+        // distinct, stable message ("DTD is prohibited...") only for that specific rejection,
+        // which ModelAnalysisService maps to its own "prohibited DOCTYPE" marker in a dedicated
+        // catch clause (separate from the generic malformed-XML catch used for unrelated
+        // XmlExceptions, e.g. an unclosed tag). Asserting on that specific marker — not just
+        // IsValid=false, and not the generic "malformed or unsafe" marker either — proves the
+        // DOCTYPE/entity was rejected for the DTD-prohibition reason specifically: a bare
+        // IsValid check, or the shared generic marker, would also pass if the entity had been
+        // resolved and parsing later failed for a wholly unrelated reason.
+        Assert.NotNull(result);
+        Assert.False(result!.IsValid);
+        Assert.NotNull(result.ValidationErrors);
+        Assert.Contains("Model part XML declares a prohibited DOCTYPE", result.ValidationErrors!);
+    }
+
+    [Fact]
+    public async Task AnalyzeModelAsync_ThreeMfWithMalformedXmlAndNoDoctype_ReturnsGenericMalformedError()
+    {
+        // No DOCTYPE at all here — this is ordinary XML well-formedness breakage (a mismatched
+        // end tag). It must fall into the *other* catch clause and produce the generic
+        // "malformed or unsafe" marker, not the DTD-specific one, proving the two branches added
+        // for the XXE test above are actually distinguished by cause and not just by label.
+        string malformedXml =
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+            "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">" +
+            "<resources><object id=\"1\" type=\"model\"><mesh>" +
+            "<vertices><vertex x=\"0\" y=\"0\" z=\"0\"/></vertices><triangles></triangles>" +
+            "</mesh></object></resources>" +
+            "<build><item objectid=\"1\"/></build>";
+        byte[] bytes = BuildThreeMf(malformedXml);
+        string path = WriteFile("malformed.3mf", bytes);
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".3mf", CancellationToken.None);
+
         Assert.NotNull(result);
         Assert.False(result!.IsValid);
         Assert.NotNull(result.ValidationErrors);
         Assert.Contains("Model part XML is malformed or unsafe", result.ValidationErrors!);
+        Assert.DoesNotContain("Model part XML declares a prohibited DOCTYPE", result.ValidationErrors!);
     }
 
     [Fact]
