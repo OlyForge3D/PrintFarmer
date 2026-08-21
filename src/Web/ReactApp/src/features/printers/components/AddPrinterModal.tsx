@@ -16,6 +16,38 @@ interface AddPrinterModalProps {
   onSuccess: () => void;
 }
 
+/** Maximum printer name length enforced by the backend (`CreatePrinterValidator`). */
+const PRINTER_NAME_MAX_LENGTH = 100;
+const PRINTER_NAME_LENGTH_ERROR = `Printer name must be between 1 and ${PRINTER_NAME_MAX_LENGTH} characters`;
+
+/**
+ * Converts a PascalCase key (as produced by ASP.NET's `ModelState`/`SerializableError`)
+ * to the camelCase key used by the frontend form state.
+ */
+function toCamelCase(key: string): string {
+  return key.length > 0 ? key.charAt(0).toLowerCase() + key.slice(1) : key;
+}
+
+/**
+ * Extracts per-field validation errors from a 400 response body.
+ * Handles both `{ errors: { Field: ["message"] } }` (ValidationProblemDetails) and
+ * the flat `{ Field: ["message"] }` shape returned by `BadRequest(ModelState)`.
+ */
+function extractFieldErrors(data: Record<string, unknown>): Record<string, string[]> {
+  const errorsField = data.errors;
+  const source = (errorsField && typeof errorsField === 'object')
+    ? errorsField as Record<string, unknown>
+    : data;
+
+  const result: Record<string, string[]> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (Array.isArray(value) && value.every(item => typeof item === 'string')) {
+      result[toCamelCase(key)] = value as string[];
+    }
+  }
+  return result;
+}
+
 /**
  * Content component for the Add Printer modal
  */
@@ -154,6 +186,8 @@ function AddPrinterModalContent({
     
     if (!formData.name.trim()) {
       errors.name = ['Printer name is required'];
+    } else if (formData.name.trim().length > PRINTER_NAME_MAX_LENGTH) {
+      errors.name = [PRINTER_NAME_LENGTH_ERROR];
     }
     
     if (!formData.serverUrl.trim()) {
@@ -194,12 +228,18 @@ function AddPrinterModalContent({
       onSuccess();
       handleClose();
     } catch (err: unknown) {
-      const error = err as Record<string, unknown>;
-      if (error?.response && (error.response as Record<string, unknown>)?.status === 400 && ((error.response as Record<string, unknown>)?.data as Record<string, unknown>)?.errors) {
-        // Handle validation errors from the server
-        setValidationErrors((error.response as Record<string, unknown>).data as Record<string, string[]>);
+      const error = err as { response?: { status?: number; data?: unknown } };
+      const data = error?.response?.data;
+      if (error?.response?.status === 400 && data && typeof data === 'object') {
+        const fieldErrors = extractFieldErrors(data as Record<string, unknown>);
+        if (Object.keys(fieldErrors).length > 0) {
+          // Handle validation errors from the server
+          setValidationErrors(prev => ({ ...prev, ...fieldErrors }));
+        } else {
+          setError((data as Record<string, unknown>).message as string || 'Failed to add printer');
+        }
       } else {
-        setError(((error.response as Record<string, unknown>)?.data as Record<string, unknown>)?.message as string || 'Failed to add printer');
+        setError('Failed to add printer');
       }
       console.error('Add printer error:', err);
     } finally {
@@ -308,6 +348,7 @@ function AddPrinterModalContent({
                   onChange={(e) => handleInputChange('name', e.target.value)}
                   placeholder="My 3D Printer"
                   aria-label="Printer name"
+                  maxLength={PRINTER_NAME_MAX_LENGTH}
                 />
               </FormField>
 
