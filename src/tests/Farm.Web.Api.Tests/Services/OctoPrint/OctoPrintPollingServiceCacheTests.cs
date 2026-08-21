@@ -229,7 +229,7 @@ public class OctoPrintPollingServiceCacheTests
             tasks[i] = Task.Run(() =>
             {
                 barrier.SignalAndWait();
-                return (OctoPrintWebSocketAdapter)_ensureWebSocketAdapter.Invoke(_service, [printerId, printer, CancellationToken.None])!;
+                return (OctoPrintWebSocketAdapter)_ensureWebSocketAdapter.Invoke(_service, [printerId, printer, CancellationToken.None, null])!;
             });
         }
 
@@ -283,7 +283,7 @@ public class OctoPrintPollingServiceCacheTests
             tasks[i] = Task.Run(() =>
             {
                 barrier.SignalAndWait();
-                return (OctoPrintWebSocketAdapter)_ensureWebSocketAdapter.Invoke(_service, [printerId, updatedPrinter, CancellationToken.None])!;
+                return (OctoPrintWebSocketAdapter)_ensureWebSocketAdapter.Invoke(_service, [printerId, updatedPrinter, CancellationToken.None, null])!;
             });
         }
 
@@ -330,7 +330,7 @@ public class OctoPrintPollingServiceCacheTests
         SeedState(printerId, staleCredentialPrinter, staleAdapter);
         object originalStateObject = PrinterStates[printerId]!;
 
-        _ensureWebSocketAdapter.Invoke(_service, [printerId, updatedPrinter, CancellationToken.None]);
+        _ensureWebSocketAdapter.Invoke(_service, [printerId, updatedPrinter, CancellationToken.None, null]);
 
         PrinterStates.Contains(printerId).Should().BeTrue(
             "a credential change must never remove the printer's tracking entry -- doing so orphans " +
@@ -342,6 +342,79 @@ public class OctoPrintPollingServiceCacheTests
             "the already-running polling loop's captured PrinterPollingState reference must be updated " +
             "in place (new adapter, new credentials) rather than replaced, so a single loop instance " +
             "continues to serve this printer across a credential change");
+    }
+
+    [Fact]
+    public void EnsureWebSocketAdapter_StaleGenerationSnapshot_DeclinesToPublishFromStalePrinterData()
+    {
+        // Regression test for the round-4 review finding (Hicks, Warning): PollPrinterAsync used to
+        // read state.CachedPrinter (and, before this fix, nothing about a generation) before it could
+        // acquire the per-printer gate, then later call EnsureWebSocketAdapter with that snapshot. If
+        // OnPrinterInvalidated ran in between -- clearing the cache and disposing the adapter under
+        // the gate -- EnsureWebSocketAdapter would still happily reconstruct and publish a *new*
+        // adapter built from the caller's now-stale printer argument, silently undoing the
+        // invalidation until the next 30-second reconciliation pass corrected it. The generation fence
+        // must make EnsureWebSocketAdapter decline to construct from a printer snapshot whose
+        // generation no longer matches the current one.
+        Guid printerId = Guid.NewGuid();
+        var originalPrinter = new Printer
+        {
+            Id = printerId,
+            Name = "OctoPrint",
+            ServerUrl = "http://octo.local",
+            Backend = (int)PrinterBackend.OctoPrint,
+            Credential = PrinterCredential.FromApiKey("original-key"),
+        };
+
+        // Seed state with an adapter so a generation of 0 is established, then simulate a poll tick
+        // capturing `originalPrinter` and generation 0 *before* an invalidation runs.
+        OctoPrintWebSocketAdapter originalAdapter = CreateFakeAdapter(printerId, originalPrinter);
+        SeedState(printerId, originalPrinter, originalAdapter);
+        long capturedGeneration = (long)_pollingStateType.GetProperty("CacheGeneration")!.GetValue(PrinterStates[printerId])!;
+
+        // Now the printer is edited: invalidation runs (bumping the generation, clearing the cache,
+        // and disposing/removing the adapter) *after* the caller above captured its stale snapshot.
+        _onPrinterInvalidated.Invoke(_service, [printerId]);
+        WebSocketAdapters.Contains(printerId).Should().BeFalse("invalidation must have torn down the adapter");
+
+        // The caller now reaches EnsureWebSocketAdapter with its pre-invalidation snapshot and the
+        // generation it captured beforehand -- which no longer matches the post-invalidation state.
+        object? result = _ensureWebSocketAdapter.Invoke(_service, [printerId, originalPrinter, CancellationToken.None, capturedGeneration]);
+
+        result.Should().BeNull(
+            "a stale generation must make EnsureWebSocketAdapter decline to construct an adapter from " +
+            "the caller's pre-invalidation printer snapshot -- publishing one would silently undo the " +
+            "invalidation until the next reconciliation pass");
+        WebSocketAdapters.Contains(printerId).Should().BeFalse(
+            "no adapter must be published from the stale snapshot; the caller is expected to skip this " +
+            "tick and re-resolve fresh data (and the current generation) before retrying");
+        GetCachedPrinter(printerId).Should().BeNull(
+            "the invalidation's cache clear must not be undone by the stale caller's snapshot");
+    }
+
+    [Fact]
+    public void EnsureWebSocketAdapter_MatchingGenerationSnapshot_ConstructsNormally()
+    {
+        // Companion to the stale-generation test above: when the caller's captured generation still
+        // matches (no invalidation raced it), EnsureWebSocketAdapter must behave exactly as before --
+        // constructing and publishing a fresh adapter when none exists yet.
+        Guid printerId = Guid.NewGuid();
+        var printer = new Printer
+        {
+            Id = printerId,
+            Name = "OctoPrint",
+            ServerUrl = "http://octo.local",
+            Backend = (int)PrinterBackend.OctoPrint,
+            Credential = PrinterCredential.FromApiKey("key"),
+        };
+        SeedState(printerId, printer, adapter: null);
+        long capturedGeneration = (long)_pollingStateType.GetProperty("CacheGeneration")!.GetValue(PrinterStates[printerId])!;
+
+        object? result = _ensureWebSocketAdapter.Invoke(_service, [printerId, printer, CancellationToken.None, capturedGeneration]);
+
+        result.Should().NotBeNull("a matching generation must not block normal adapter construction");
+        WebSocketAdapters.Contains(printerId).Should().BeTrue();
+        ((OctoPrintWebSocketAdapter)WebSocketAdapters[printerId]!).Should().BeSameAs(result);
     }
 
     [Fact]
@@ -369,9 +442,9 @@ public class OctoPrintPollingServiceCacheTests
         for (int i = 0; i < rounds; i++)
         {
             var tasks = new Task[4];
-            tasks[0] = Task.Run(() => _ensureWebSocketAdapter.Invoke(_service, [printerId, printer, CancellationToken.None]));
+            tasks[0] = Task.Run(() => _ensureWebSocketAdapter.Invoke(_service, [printerId, printer, CancellationToken.None, null]));
             tasks[1] = Task.Run(() => _onPrinterInvalidated.Invoke(_service, [printerId]));
-            tasks[2] = Task.Run(() => _ensureWebSocketAdapter.Invoke(_service, [printerId, printer, CancellationToken.None]));
+            tasks[2] = Task.Run(() => _ensureWebSocketAdapter.Invoke(_service, [printerId, printer, CancellationToken.None, null]));
             tasks[3] = Task.Run(() => _onPrinterInvalidated.Invoke(_service, [printerId]));
 
             await Task.WhenAll(tasks);
