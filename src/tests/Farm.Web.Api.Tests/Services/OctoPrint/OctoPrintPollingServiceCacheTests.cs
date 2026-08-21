@@ -43,6 +43,7 @@ public class OctoPrintPollingServiceCacheTests
     private readonly FieldInfo _printerStatesField;
     private readonly FieldInfo _webSocketAdaptersField;
     private readonly FieldInfo _pollingLoopsField;
+    private readonly FieldInfo _invalidationGenerationsField;
     private readonly Type _pollingStateType;
 
     public OctoPrintPollingServiceCacheTests()
@@ -77,6 +78,7 @@ public class OctoPrintPollingServiceCacheTests
         _printerStatesField = serviceType.GetField("_printerStates", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _webSocketAdaptersField = serviceType.GetField("_webSocketAdapters", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _pollingLoopsField = serviceType.GetField("_pollingLoops", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        _invalidationGenerationsField = serviceType.GetField("_invalidationGenerations", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _pollingStateType = serviceType.GetNestedType("PrinterPollingState", BindingFlags.NonPublic)!;
     }
 
@@ -85,6 +87,18 @@ public class OctoPrintPollingServiceCacheTests
     private IDictionary WebSocketAdapters => (IDictionary)_webSocketAdaptersField.GetValue(_service)!;
 
     private IDictionary PollingLoops => (IDictionary)_pollingLoopsField.GetValue(_service)!;
+
+    /// <summary>
+    /// Reads the durable, per-printer invalidation generation counter directly (bypassing
+    /// <c>GetOrAdd</c>'s side effect of creating a missing entry), returning 0 for a printer id
+    /// with no entry yet -- matching the fallback the production code itself uses when snapshotting
+    /// a printer's generation for the very first time.
+    /// </summary>
+    private long GetInvalidationGeneration(Guid printerId)
+    {
+        var generations = (IDictionary)_invalidationGenerationsField.GetValue(_service)!;
+        return generations.Contains(printerId) ? (long)generations[printerId]! : 0L;
+    }
 
     private OctoPrintWebSocketAdapter CreateFakeAdapter(Guid printerId, Printer printer) => new(
         printerId,
@@ -346,6 +360,71 @@ public class OctoPrintPollingServiceCacheTests
     }
 
     [Fact]
+    public async Task ReconcilePrintersOnceAsync_InvalidationRacesInFlightBatchFetchForNeverBeforeSeenPrinter_DoesNotPublishStaleData()
+    {
+        // Regression test for PR #1786 round 7 review (Hicks): the round-7 fence keyed its
+        // pre-fetch generation snapshot off PrinterPollingState.CacheGeneration, defaulting to 0
+        // for a printer with no prior state. A printer this service instance has never seen before
+        // (or whose state was just torn down, e.g. by inactive-printer cleanup) has no state --
+        // so if an edit invalidated it while the batch fetch for the very tick that first observes
+        // it was in flight, OnPrinterInvalidated had no state to bump either, and the freshly
+        // (re)created state after the fetch resolved would start back at generation 0 -- matching
+        // the caller's fallback snapshot and letting the stale row through anyway. The fix moves the
+        // fence to a separate, durable _invalidationGenerations dictionary that OnPrinterInvalidated
+        // always bumps regardless of polling-state existence, so this same race must now be caught
+        // even for a printer with no PrinterPollingState at snapshot time.
+        Guid printerId = Guid.NewGuid();
+        var stalePrinter = new Printer
+        {
+            Id = printerId,
+            Name = "OctoPrint",
+            ServerUrl = "http://octo.local",
+            Backend = (int)PrinterBackend.OctoPrint,
+            Credential = PrinterCredential.FromApiKey("stale-key"),
+        };
+
+        // Deliberately do NOT call SeedState: this printer has no PrinterPollingState, adapter, or
+        // polling loop yet -- exactly the "never before seen" scenario the finding describes.
+        PrinterStates.Contains(printerId).Should().BeFalse("this test only means what it claims if no prior state exists for this printer");
+
+        // Pre-seed a completed "polling loop" so ReconcilePrintersOnceAsync doesn't spawn a real,
+        // unmocked PollPrinterAsync background task for this printer.
+        PollingLoops[printerId] = Task.CompletedTask;
+
+        TaskCompletionSource fetchStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<List<Printer>> fetchResult = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _printersRepository
+            .Setup(r => r.GetByBackendAsync(PrinterBackend.OctoPrint, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                fetchStarted.TrySetResult();
+                return fetchResult.Task;
+            });
+
+        Task reconcileTask = (Task)_reconcilePrintersOnceAsync.Invoke(_service, [CancellationToken.None])!;
+
+        // Deterministically wait until the reconciliation pass has started (and is awaiting) the
+        // batch fetch before simulating a concurrent edit + invalidation for this never-before-seen
+        // printer.
+        await fetchStarted.Task;
+        _onPrinterInvalidated.Invoke(_service, [printerId]);
+
+        // Now let the in-flight batch fetch resolve with the row it captured -- conceptually the
+        // pre-edit row, even though this instance had never cached anything for this printer before.
+        fetchResult.SetResult([stalePrinter]);
+
+        await reconcileTask;
+
+        GetCachedPrinter(printerId).Should().BeNull(
+            "a batch fetch for a never-before-seen printer that raced an invalidation must not " +
+            "publish its stale row into CachedPrinter, even though there was no prior " +
+            "PrinterPollingState for OnPrinterInvalidated to bump a generation on");
+        WebSocketAdapters.Contains(printerId).Should().BeFalse(
+            "no WebSocket adapter should be constructed for a never-before-seen printer from a " +
+            "batch-fetched snapshot that predates the invalidation racing that fetch");
+    }
+
+    [Fact]
     public async Task EnsureWebSocketAdapter_ConcurrentCallers_OnlyOneAdapterIsConstructed()
     {
         // Regression test for PR #1786 review round 2 (Bishop/Hicks/Vasquez): the 30-second
@@ -513,7 +592,7 @@ public class OctoPrintPollingServiceCacheTests
         // capturing `originalPrinter` and generation 0 *before* an invalidation runs.
         OctoPrintWebSocketAdapter originalAdapter = CreateFakeAdapter(printerId, originalPrinter);
         SeedState(printerId, originalPrinter, originalAdapter);
-        long capturedGeneration = (long)_pollingStateType.GetProperty("CacheGeneration")!.GetValue(PrinterStates[printerId])!;
+        long capturedGeneration = GetInvalidationGeneration(printerId);
 
         // Now the printer is edited: invalidation runs (bumping the generation, clearing the cache,
         // and disposing/removing the adapter) *after* the caller above captured its stale snapshot.
@@ -551,7 +630,7 @@ public class OctoPrintPollingServiceCacheTests
             Credential = PrinterCredential.FromApiKey("key"),
         };
         SeedState(printerId, printer, adapter: null);
-        long capturedGeneration = (long)_pollingStateType.GetProperty("CacheGeneration")!.GetValue(PrinterStates[printerId])!;
+        long capturedGeneration = GetInvalidationGeneration(printerId);
 
         object? result = _ensureWebSocketAdapter.Invoke(_service, [printerId, printer, CancellationToken.None, capturedGeneration]);
 

@@ -49,6 +49,24 @@ public sealed class OctoPrintPollingService(
     /// </summary>
     private readonly ConcurrentDictionary<Guid, object> _adapterCreationLocks = new();
 
+    /// <summary>
+    /// Durable, monotonically increasing per-printer invalidation counter, bumped by
+    /// <see cref="OnPrinterInvalidated"/> under the per-printer <see cref="_adapterCreationLocks"/>
+    /// gate every time that printer is invalidated -- regardless of whether a
+    /// <see cref="PrinterPollingState"/> currently exists for it. Unlike a generation counter kept
+    /// on <see cref="PrinterPollingState"/> itself, entries here are never removed (mirroring the
+    /// deliberate non-removal of <see cref="_adapterCreationLocks"/> entries below), so the fence
+    /// survives a printer's polling state being absent (never yet seen) or torn down and recreated
+    /// (e.g. by the inactive-printer cleanup in <see cref="ReconcilePrintersOnceAsync"/> or the
+    /// no-longer-OctoPrint branch in <see cref="PollPrinterAsync"/>) between a caller's snapshot and
+    /// its publish. Without this, an invalidation for a printer with no live
+    /// <see cref="PrinterPollingState"/> at that moment was silently dropped, and a stale row
+    /// snapshotted just before that invalidation could still be published afterwards because the
+    /// freshly (re)created state's generation always started back at its default -- matching
+    /// whatever fallback generation the stale caller had captured.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, long> _invalidationGenerations = new();
+
     // Polling interval for HTTP fallback
     private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(5);
 
@@ -111,24 +129,6 @@ public sealed class OctoPrintPollingService(
         /// re-querying the database and re-decrypting credentials on every poll tick (issue #1763).
         /// </summary>
         public Printer? CachedPrinter { get; set; }
-
-        /// <summary>
-        /// Monotonically increasing counter bumped by <see cref="OnPrinterInvalidated"/> (under the
-        /// per-printer <see cref="_adapterCreationLocks"/> gate) every time this printer is
-        /// invalidated. <see cref="PollPrinterAsync"/> captures this alongside <see cref="CachedPrinter"/>
-        /// (generation read first, so a racing invalidation is observed as a cleared
-        /// <see cref="CachedPrinter"/> rather than a mismatched-but-newer generation number paired with
-        /// stale data) before it can acquire that gate; <see cref="EnsureWebSocketAdapter"/> then
-        /// re-checks it once inside the gate to detect whether an invalidation raced the caller's
-        /// snapshot. <see cref="PollPrinterAsync"/> also gates any write-back of a cache-miss fetch
-        /// behind this same comparison, so a fetch that raced an invalidation can never republish
-        /// stale data into <see cref="CachedPrinter"/> itself for a later tick to wrongly treat as
-        /// current once the generation stops moving. Without this fence, a poll tick could capture a
-        /// printer row moments before an edit invalidates it, then still publish an adapter (or a
-        /// cached row) built from that now-stale row after the invalidation completed -- silently
-        /// undoing the invalidation.
-        /// </summary>
-        public long CacheGeneration { get; set; }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -187,15 +187,20 @@ public sealed class OctoPrintPollingService(
                 // to treat this printer as needing a fresh adapter, even if it hasn't run yet.
                 state.CreatedWithServerUrl = null;
                 state.CreatedWithApiKey = null;
-
-                // Bump the generation so EnsureWebSocketAdapter can detect (under this same gate)
-                // whether a caller's already-captured printer snapshot predates this invalidation.
-                // Without this, PollPrinterAsync could capture the old row, this invalidation could
-                // run and clear everything above, and then PollPrinterAsync could still go on to
-                // construct and publish an adapter from that now-stale snapshot -- silently undoing
-                // the invalidation until the next reconciliation pass.
-                state.CacheGeneration++;
             }
+
+            // Bump the durable, independent invalidation counter unconditionally -- even when no
+            // PrinterPollingState currently exists for this printer (never seen yet, or torn down
+            // by cleanup between a caller's pre-fetch snapshot and its publish). Keying the fence
+            // off PrinterPollingState itself let a caller who snapshotted "no state" (fallback
+            // generation 0) still publish a stale row it fetched, because a freshly (re)created
+            // state's generation always started back at that same default -- silently matching the
+            // stale caller's snapshot. Using this separate, never-removed dictionary as the sole
+            // source of truth for generations closes that gap: any invalidation for this printer id
+            // is recorded here regardless of polling-state lifecycle, so a caller whose snapshot
+            // predates it always sees a mismatch. See EnsureWebSocketAdapter's
+            // <paramref name="expectedGeneration"/> doc for how this pairing is enforced.
+            _invalidationGenerations.AddOrUpdate(printerId, 1, static (_, current) => current + 1);
 
             // TryRemove is atomic; only detach the adapter here, never dispose it while the gate
             // is held (that would block any other caller -- e.g. a concurrent EnsureWebSocketAdapter
@@ -369,9 +374,9 @@ public sealed class OctoPrintPollingService(
     /// </param>
     /// <param name="ct">Cancellation token propagated to the adapter's connection/receive loop.</param>
     /// <param name="expectedGeneration">
-    /// The <see cref="PrinterPollingState.CacheGeneration"/> value the caller observed at the same
-    /// moment it captured <paramref name="printer"/>, before it could acquire the per-printer gate.
-    /// If the current generation has since moved on (an invalidation raced the caller's capture),
+    /// The <see cref="_invalidationGenerations"/> value the caller observed at the same moment it
+    /// captured <paramref name="printer"/>, before it could acquire the per-printer gate. If the
+    /// current generation has since moved on (an invalidation raced the caller's capture),
     /// <paramref name="printer"/> is a stale snapshot and must not be used to construct or publish an
     /// adapter -- doing so would silently undo the invalidation. Pass <see langword="null"/> (the
     /// default, used by the 30-second reconciliation loop) to skip this check when the caller's
@@ -385,8 +390,7 @@ public sealed class OctoPrintPollingService(
         lock (gate)
         {
             if (expectedGeneration.HasValue
-                && _printerStates.TryGetValue(id, out PrinterPollingState? currentState)
-                && currentState.CacheGeneration != expectedGeneration.Value)
+                && _invalidationGenerations.GetOrAdd(id, 0L) != expectedGeneration.Value)
             {
                 // An invalidation (or another caller) changed this printer's state after the caller
                 // captured `printer` but before it could reach this gate. Decline to construct from
@@ -495,23 +499,33 @@ public sealed class OctoPrintPollingService(
     /// batch, which takes an unpredictable amount of time relative to a concurrent
     /// <see cref="OnPrinterInvalidated"/> call for one of those printers. Without a fence, this
     /// pass could read a printer's row before an edit invalidates it, then -- after the
-    /// invalidation has already cleared the cache, bumped <see cref="PrinterPollingState.CacheGeneration"/>,
+    /// invalidation has already cleared the cache, bumped <see cref="_invalidationGenerations"/>,
     /// and torn down the adapter -- go on to republish that now-stale row into both the adapter
     /// (via <see cref="EnsureWebSocketAdapter"/>) and <see cref="PrinterPollingState.CachedPrinter"/>,
     /// silently undoing the invalidation for up to another 30 seconds. To close this, this method
-    /// captures each known printer's generation *before* the batch fetch starts, then -- under the
-    /// same per-printer <see cref="_adapterCreationLocks"/> gate <see cref="OnPrinterInvalidated"/>
-    /// uses -- only republishes the fetched row if the generation is still unchanged. A printer
-    /// with no prior state (first time seen) has no earlier generation to race, so it is always
-    /// safe to publish.
+    /// captures each printer id's <see cref="_invalidationGenerations"/> value *before* the batch
+    /// fetch starts, then -- under the same per-printer <see cref="_adapterCreationLocks"/> gate
+    /// <see cref="OnPrinterInvalidated"/> uses -- only republishes the fetched row if the generation
+    /// is still unchanged. Reading the snapshot from <see cref="_invalidationGenerations"/> itself
+    /// (rather than from each printer's <see cref="PrinterPollingState"/>, which may not exist yet
+    /// for a never-before-seen printer, or may be torn down and recreated by cleanup below before
+    /// this method re-checks it) is what makes the fence hold even across polling-state lifecycle
+    /// changes: a printer with no prior state has no prior <see cref="_invalidationGenerations"/>
+    /// entry either, but an invalidation racing the fetch still creates/bumps one, so the later
+    /// comparison correctly observes a mismatch instead of a coincidental default-vs-default match.
     /// </remarks>
     private async Task ReconcilePrintersOnceAsync(CancellationToken ct)
     {
-        // Snapshot each currently-known printer's generation before the batch fetch below can
-        // observe a stale row relative to a concurrent invalidation.
-        Dictionary<Guid, long> generationsBeforeFetch = _printerStates.ToDictionary(
+        // Snapshot every printer id's durable invalidation generation before the batch fetch below
+        // can observe a stale row relative to a concurrent invalidation. Reading directly from
+        // _invalidationGenerations (not _printerStates) means a printer never seen before is
+        // captured too: GetOrAdd below returns 0 for it here, and if OnPrinterInvalidated bumps that
+        // same id in the meantime, its own GetOrAdd creates the entry at 1 -- so the later
+        // equality check still correctly detects the race instead of both sides defaulting to a
+        // match.
+        Dictionary<Guid, long> generationsBeforeFetch = _invalidationGenerations.ToDictionary(
             kvp => kvp.Key,
-            kvp => kvp.Value.CacheGeneration);
+            kvp => kvp.Value);
 
         // Get list of OctoPrint printers (fully decrypted) from database
         List<Printer> printers = await GetOctoPrintPrintersAsync(ct);
@@ -564,7 +578,7 @@ public sealed class OctoPrintPollingService(
                 object gate = _adapterCreationLocks.GetOrAdd(id, static _ => new object());
                 lock (gate)
                 {
-                    if (cacheState.CacheGeneration == capturedGeneration)
+                    if (_invalidationGenerations.GetOrAdd(id, 0L) == capturedGeneration)
                     {
                         cacheState.CachedPrinter = current;
                     }
@@ -626,7 +640,7 @@ public sealed class OctoPrintPollingService(
                 // new generation number (which would make EnsureWebSocketAdapter's fence below
                 // wrongly accept it as current). See EnsureWebSocketAdapter's
                 // <paramref name="expectedGeneration"/> doc for how this pairing is enforced.
-                long capturedGeneration = state.CacheGeneration;
+                long capturedGeneration = _invalidationGenerations.GetOrAdd(printerId, 0L);
                 Printer? printer = state.CachedPrinter;
                 if (printer is null)
                 {
@@ -647,7 +661,7 @@ public sealed class OctoPrintPollingService(
                     object gate = _adapterCreationLocks.GetOrAdd(printerId, static _ => new object());
                     lock (gate)
                     {
-                        if (state.CacheGeneration == capturedGeneration)
+                        if (_invalidationGenerations.GetOrAdd(printerId, 0L) == capturedGeneration)
                         {
                             state.CachedPrinter = printer;
                         }
