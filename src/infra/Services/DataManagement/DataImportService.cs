@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Globalization;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -592,6 +593,25 @@ public class DataImportService : IDataImportService
                 NozzleModelDefinition? existing = await _context.NozzleModelDefinitions
                     .FirstOrDefaultAsync(n => n.Name == dto.Name && n.ManufacturerId == manufacturer.Id, ct);
 
+                // A present-but-unparseable value is corruption, not a legacy backup, and must
+                // not fall back: a misspelled "NotHardened" on an abrasion-resistant material
+                // would resolve through Auto back to hardened, silently re-admitting the nozzle
+                // to abrasive dispatch. Reject the row instead so the operator is told.
+                if (!TryParseExportedEnum(dto.NozzleType, NozzleType.Brass, out NozzleType nozzleType))
+                {
+                    errors.Add(
+                        $"Failed to import nozzle '{LogSanitizer.Sanitize(dto.Name)}': unrecognized nozzleType '{LogSanitizer.Sanitize(dto.NozzleType)}'");
+                    continue;
+                }
+
+                if (!TryParseExportedEnum(
+                        dto.HardnessOverride, NozzleHardnessOverride.Auto, out NozzleHardnessOverride hardnessOverride))
+                {
+                    errors.Add(
+                        $"Failed to import nozzle '{LogSanitizer.Sanitize(dto.Name)}': unrecognized hardnessOverride '{LogSanitizer.Sanitize(dto.HardnessOverride)}'");
+                    continue;
+                }
+
                 if (existing == null)
                 {
                     _context.NozzleModelDefinitions.Add(new NozzleModelDefinition
@@ -601,6 +621,8 @@ public class DataImportService : IDataImportService
                         ManufacturerId = manufacturer.Id,
                         Diameter = dto.Diameter,
                         MaxTemp = dto.MaxTemp,
+                        NozzleType = nozzleType,
+                        HardnessOverride = hardnessOverride,
                         NozzleInterface = (NozzleInterfaceType)dto.NozzleInterface,
                         Description = dto.Description
                     });
@@ -610,6 +632,8 @@ public class DataImportService : IDataImportService
                 {
                     existing.Diameter = dto.Diameter;
                     existing.MaxTemp = dto.MaxTemp;
+                    existing.NozzleType = nozzleType;
+                    existing.HardnessOverride = hardnessOverride;
                     existing.NozzleInterface = (NozzleInterfaceType)dto.NozzleInterface;
                     existing.Description = dto.Description;
                     imported++;
@@ -624,6 +648,48 @@ public class DataImportService : IDataImportService
 
         await _context.SaveChangesAsync(ct);
         return imported;
+    }
+
+    /// <summary>
+    /// Parses an enum exported by name, distinguishing an absent field from a corrupt one.
+    /// <para>
+    /// A null or empty value means the backup pre-dates the field, which is benign and yields
+    /// <paramref name="fallback"/>. A present-but-unparseable value means corruption or a newer
+    /// schema; that returns <c>false</c> so the caller can reject the row rather than silently
+    /// substituting a default, which for hardness could be the unsafe direction.
+    /// </para>
+    /// </summary>
+    /// <typeparam name="TEnum">The enum type to parse into.</typeparam>
+    /// <param name="rawValue">Exported enum name, or null for a pre-field backup.</param>
+    /// <param name="fallback">Value to use when the field is absent.</param>
+    /// <param name="value">The parsed value, or <paramref name="fallback"/> when absent.</param>
+    /// <returns><c>false</c> only when a non-empty value could not be parsed.</returns>
+    private static bool TryParseExportedEnum<TEnum>(string? rawValue, TEnum fallback, out TEnum value)
+        where TEnum : struct, Enum
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            value = fallback;
+            return true;
+        }
+
+        // Reject numeric input outright. Enum.TryParse happily maps "5" onto a defined
+        // member, which would quietly reintroduce the ordinal coupling that exporting by
+        // name exists to avoid — Enum.IsDefined only rejects *undefined* ordinals.
+        if (long.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+        {
+            value = fallback;
+            return false;
+        }
+
+        if (Enum.TryParse(rawValue, true, out TEnum parsed) && Enum.IsDefined(parsed))
+        {
+            value = parsed;
+            return true;
+        }
+
+        value = fallback;
+        return false;
     }
 
     private async Task<int> ImportLocationsAsync(List<LocationExportDto> locations, ImportMode mode, List<string> errors, CancellationToken ct)

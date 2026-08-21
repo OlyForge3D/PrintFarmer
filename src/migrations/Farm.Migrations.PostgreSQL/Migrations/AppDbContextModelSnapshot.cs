@@ -4561,6 +4561,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<double>("Diameter")
                         .HasColumnType("double precision");
 
+                    b.Property<int>("HardnessOverride")
+                        .HasColumnType("integer");
+
                     b.Property<Guid>("ManufacturerId")
                         .HasColumnType("uuid");
 

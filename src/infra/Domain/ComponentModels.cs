@@ -159,16 +159,42 @@ public class NozzleModelDefinition : HardwareModel
     public int? MaxTemp { get; set; }
 
     /// <summary>
-    /// The material type of this nozzle (Brass, HardenedSteel, StainlessSteel, etc.).
+    /// The material type of this nozzle (Brass, HardenedSteel, Diamond, etc.).
     /// </summary>
     public NozzleType NozzleType { get; set; } = NozzleType.Brass;
 
     /// <summary>
+    /// Per-model override for <see cref="IsHardened"/>. Defaults to
+    /// <see cref="NozzleHardnessOverride.Auto"/>, which derives hardness from
+    /// <see cref="NozzleType"/>.
+    /// </summary>
+    public NozzleHardnessOverride HardnessOverride { get; set; } = NozzleHardnessOverride.Auto;
+
+    /// <summary>
     /// Whether this nozzle is hardened for abrasive filaments.
-    /// Computed from NozzleType - not persisted to database.
+    /// Resolved from <see cref="HardnessOverride"/>, falling back to the hardness implied
+    /// by <see cref="NozzleType"/>. Not persisted to the database.
     /// </summary>
     [System.ComponentModel.DataAnnotations.Schema.NotMapped]
-    public bool IsHardened => NozzleType is NozzleType.HardenedSteel or NozzleType.TungstenCarbide or NozzleType.Abrasive;
+    public bool IsHardened => HardnessOverride switch
+    {
+        NozzleHardnessOverride.Hardened => true,
+        NozzleHardnessOverride.NotHardened => false,
+        _ => IsHardenedByMaterial(NozzleType)
+    };
+
+    /// <summary>
+    /// The hardness implied by a nozzle material, used when no explicit override is set.
+    /// </summary>
+    /// <param name="nozzleType">The nozzle material to evaluate.</param>
+    /// <returns><c>true</c> when the material is abrasion-resistant.</returns>
+    public static bool IsHardenedByMaterial(NozzleType nozzleType) =>
+        nozzleType is NozzleType.HardenedSteel
+            or NozzleType.TungstenCarbide
+            or NozzleType.Abrasive
+            or NozzleType.Diamond
+            or NozzleType.Ruby
+            or NozzleType.ToolSteel;
 
     /// <summary>
     /// The nozzle interface type (determines which hotends this nozzle fits).

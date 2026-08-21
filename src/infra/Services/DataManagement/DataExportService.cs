@@ -239,6 +239,8 @@ public class DataExportService : IDataExportService
             ManufacturerName = n.Manufacturer?.Name ?? "Unknown",
             Diameter = n.Diameter,
             MaxTemp = n.MaxTemp,
+            NozzleType = n.NozzleType.ToString(),
+            HardnessOverride = n.HardnessOverride.ToString(),
             NozzleInterface = (int)n.NozzleInterface,
             Description = n.Description
         }).ToList();
