@@ -35,6 +35,7 @@ public class DataSeedService : IDataSeedService
         await SeedManufacturersAsync();
         await SeedFilamentTypesAsync();
         await SeedBedTypesAsync();
+        await SeedNozzleMaterialsAsync();  // Must come before component models so nozzle seeding can resolve materials
         await SeedComponentModelsAsync();  // Must come before printer models so toolhead defaults exist
         await SeedPrinterModelsAsync();
         await SeedMaintenanceTasksAsync();
@@ -171,6 +172,56 @@ public class DataSeedService : IDataSeedService
         catch (Exception ex)
         {
             _logger.LogError(ex, "[SeedData] Error seeding bed types: {Message}", ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Seeds the built-in NozzleMaterial catalog rows, one per legacy NozzleType enum member.
+    /// These are also seeded by the AddNozzleMaterialCatalog data migration for deployed
+    /// databases; this method covers local dev/test setups that use
+    /// <c>DatabaseFacade.EnsureCreated</c> instead of applying migrations, where the migration's
+    /// data-seed SQL never runs. Values and fixed IDs are kept in sync with the migration so both
+    /// paths produce identical rows.
+    /// </summary>
+    public async Task SeedNozzleMaterialsAsync()
+    {
+        try
+        {
+            var builtInMaterials = new (Guid Id, string Name, bool IsHardened, int DefaultMaxTemp, string Description)[]
+            {
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000001"), nameof(NozzleType.Brass), false, 260, "Standard brass nozzle - not abrasion resistant"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000002"), nameof(NozzleType.HardenedSteel), true, 300, "Hardened steel nozzle - abrasion resistant"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000003"), nameof(NozzleType.StainlessSteel), false, 300, "Stainless steel nozzle - food safe, not abrasion resistant"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000004"), nameof(NozzleType.TungstenCarbide), true, 500, "Tungsten carbide nozzle - highly abrasion resistant"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000005"), nameof(NozzleType.Abrasive), true, 500, "Generic abrasion-resistant nozzle material"),
+            };
+
+            _logger.LogInformation("[SeedData] Seeding {Count} built-in nozzle materials", builtInMaterials.Length);
+
+            foreach ((Guid id, string name, bool isHardened, int defaultMaxTemp, string description) in builtInMaterials)
+            {
+                bool exists = await _context.NozzleMaterials.AnyAsync(m => m.Name == name);
+                if (!exists)
+                {
+                    _context.NozzleMaterials.Add(new NozzleMaterial
+                    {
+                        Id = id,
+                        Name = name,
+                        IsHardened = isHardened,
+                        DefaultMaxTemp = defaultMaxTemp,
+                        IsBuiltIn = true,
+                        Description = description,
+                    });
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("[SeedData] Nozzle materials seeded successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SeedData] Error seeding nozzle materials: {Message}", ex.Message);
             throw;
         }
     }
