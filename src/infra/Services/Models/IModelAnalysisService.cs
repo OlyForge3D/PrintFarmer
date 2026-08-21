@@ -7,7 +7,22 @@
 /// <param name="DimensionY">The Y-axis dimension in millimeters, or null if unavailable.</param>
 /// <param name="DimensionZ">The Z-axis dimension in millimeters, or null if unavailable.</param>
 /// <param name="TriangleCount">The number of triangles in the mesh, or null if unavailable.</param>
-public record ModelAnalysisResult(double? DimensionX, double? DimensionY, double? DimensionZ, int? TriangleCount);
+/// <param name="IsValid">
+/// Whether the file could actually be read as a 3D model: the archive/binary structure opened
+/// and at least one triangle of real geometry was found. This is deliberately narrow — it is
+/// <b>not</b> a printability, orientability, or slicing pre-flight check (see issue #1811); a
+/// model can be geometrically valid here and still fail to slice for reasons like footprint or
+/// orientation. False is reserved for files that are structurally unreadable as a model (empty,
+/// truncated, corrupt archive, or a mesh with zero triangles).
+/// </param>
+/// <param name="ValidationErrors">Human-readable reasons the geometry could not be fully read, or null when none.</param>
+public record ModelAnalysisResult(
+    double? DimensionX,
+    double? DimensionY,
+    double? DimensionZ,
+    int? TriangleCount,
+    bool IsValid = true,
+    IReadOnlyList<string>? ValidationErrors = null);
 
 /// <summary>
 /// Service for analyzing 3D model files to extract metadata such as dimensions and triangle count.

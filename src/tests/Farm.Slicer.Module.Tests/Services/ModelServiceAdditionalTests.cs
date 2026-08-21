@@ -267,4 +267,104 @@ public class ModelServiceAdditionalTests : IDisposable
 
         _ = await Assert.ThrowsAsync<InvalidOperationException>(() => service.UploadModelAsync(file, CancellationToken.None));
     }
+
+    /// <summary>
+    /// Before #1814, <c>IsValid</c> was hardcoded to <c>true</c> on upload regardless of what
+    /// analysis found. This pins that a real, structurally-invalid analysis result (e.g. a mesh
+    /// with no triangles) is now propagated onto the persisted model, along with its validation
+    /// errors serialized as JSON.
+    /// </summary>
+    [Fact]
+    public async Task UploadModelAsync_AnalysisReturnsInvalid_PropagatesIsValidFalseAndValidationErrors()
+    {
+        IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
+        Mock<ILogger<Model3DFileService>> mockLogger = new Mock<ILogger<Model3DFileService>>();
+
+        Model3D? added = null;
+        Mock<IModel3DFileRepository> mockRepo = new Mock<IModel3DFileRepository>(MockBehavior.Strict);
+        _ = mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Model3D?)null);
+        _ = mockRepo.Setup(r => r.AddAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>()))
+            .Callback<Model3D, CancellationToken>((m, _) => added = m)
+            .Returns(Task.CompletedTask);
+        _ = mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        Mock<IModelAnalysisService> mockAnalysis = new Mock<IModelAnalysisService>(MockBehavior.Strict);
+        _ = mockAnalysis.Setup(a => a.AnalyzeModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ModelAnalysisResult(
+                null,
+                null,
+                null,
+                0,
+                IsValid: false,
+                ValidationErrors: ["No triangles found in mesh"]));
+
+        Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
+        _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _ = mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
+            .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
+
+        Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock();
+
+        var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        string tempDir = Path.Join(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
+        mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
+
+        Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object, mockAnalysis.Object);
+
+        IFormFile file = CreateFormFile("file", "content", "model.stl");
+
+        Model3DUploadResultDto result = await service.UploadModelAsync(file, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.NotNull(added);
+        Assert.False(added!.IsValid);
+        Assert.NotNull(added.ValidationErrors);
+        Assert.Contains("No triangles found in mesh", added.ValidationErrors);
+    }
+
+    /// <summary>
+    /// When analysis returns null (unsupported format, e.g. OBJ/PLY/STEP), the model must remain
+    /// listed (<c>IsValid = true</c>): "not analyzed" must never be inferred as "invalid" — that
+    /// would silently hide unrelated formats from the library (#1814).
+    /// </summary>
+    [Fact]
+    public async Task UploadModelAsync_AnalysisReturnsNull_KeepsIsValidTrue()
+    {
+        IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
+        Mock<ILogger<Model3DFileService>> mockLogger = new Mock<ILogger<Model3DFileService>>();
+
+        Model3D? added = null;
+        Mock<IModel3DFileRepository> mockRepo = new Mock<IModel3DFileRepository>(MockBehavior.Strict);
+        _ = mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Model3D?)null);
+        _ = mockRepo.Setup(r => r.AddAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>()))
+            .Callback<Model3D, CancellationToken>((m, _) => added = m)
+            .Returns(Task.CompletedTask);
+        _ = mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        Mock<IModelAnalysisService> mockAnalysis = new Mock<IModelAnalysisService>(MockBehavior.Strict);
+        _ = mockAnalysis.Setup(a => a.AnalyzeModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ModelAnalysisResult?)null);
+
+        Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
+        _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _ = mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
+            .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
+
+        Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock();
+
+        var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        string tempDir = Path.Join(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
+        mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
+
+        Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object, mockAnalysis.Object);
+
+        IFormFile file = CreateFormFile("file", "content", "model.obj");
+
+        Model3DUploadResultDto result = await service.UploadModelAsync(file, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.NotNull(added);
+        Assert.True(added!.IsValid);
+        Assert.Null(added.ValidationErrors);
+    }
 }
