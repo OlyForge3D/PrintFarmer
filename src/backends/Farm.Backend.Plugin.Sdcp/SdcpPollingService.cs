@@ -39,6 +39,18 @@ public sealed class SdcpPollingService(
     private readonly ConcurrentDictionary<Guid, Task> _pollingLoops = new();
     private readonly ConcurrentDictionary<Guid, PrinterConnectionHealth> _connectionHealth = new();
 
+    /// <summary>
+    /// Durable per-printer invalidation counter, kept independent of <see cref="PrinterPollingState"/>
+    /// so it survives that state's teardown/recreation (e.g. the printer briefly leaving and
+    /// re-entering this backend). Entries are never removed. <see cref="OnPrinterInvalidated"/>
+    /// unconditionally bumps a printer's entry; both <see cref="RunAsync"/> and
+    /// <see cref="PollPrinterAsync"/> snapshot a printer's generation before an in-flight database
+    /// read and only publish that read's result to <see cref="PrinterPollingState.CachedPrinter"/>
+    /// if the generation is still unchanged afterward — otherwise an invalidation raced the read
+    /// and the (possibly stale) result is used for this tick only, never cached.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, long> _invalidationGenerations = new();
+
     // Polling interval for SDCP printers (same as PrusaLink)
     private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(5);
 
@@ -103,6 +115,10 @@ public sealed class SdcpPollingService(
     /// </summary>
     private void OnPrinterInvalidated(Guid printerId)
     {
+        // Bump unconditionally (even if no PrinterPollingState exists yet) so an invalidation
+        // that races a first-ever fetch for this printer is still durably recorded.
+        _invalidationGenerations.AddOrUpdate(printerId, 1, static (_, current) => current + 1);
+
         if (_printerStates.TryGetValue(printerId, out PrinterPollingState? state))
         {
             state.CachedPrinter = null;
@@ -161,6 +177,7 @@ public sealed class SdcpPollingService(
                 {
                     // Get list of SDCP printers (fully decrypted) from database, refreshing the
                     // per-printer cache used by PollPrinterAsync (issue #1763)
+                    Dictionary<Guid, long> generationSnapshot = _invalidationGenerations.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
                     List<Printer> printers = await GetSdcpPrintersAsync(ct);
                     List<Guid> printerIds = printers.Select(p => p.Id).ToList();
                     _logger.LogDebug("SdcpPollingService: Found {PrinterIdsCount} SDCP printers", printerIds.Count);
@@ -170,7 +187,15 @@ public sealed class SdcpPollingService(
                         PrinterPollingState refreshState = _printerStates.GetOrAdd(
                             printer.Id,
                             _ => new PrinterPollingState { PrinterId = printer.Id, LastKnownIsOnline = false });
-                        refreshState.CachedPrinter = printer;
+
+                        // Only publish if no invalidation raced the fetch above; otherwise this
+                        // row may already be stale and the next tick's cache-miss re-read (or the
+                        // next reconciliation pass) will pick up the fresh value instead.
+                        long capturedGeneration = generationSnapshot.GetValueOrDefault(printer.Id, 0L);
+                        if (_invalidationGenerations.GetOrAdd(printer.Id, 0L) == capturedGeneration)
+                        {
+                            refreshState.CachedPrinter = printer;
+                        }
                     }
 
                     // Ensure polling loops exist for all SDCP printers
@@ -231,8 +256,16 @@ public sealed class SdcpPollingService(
                 Printer? printer = state.CachedPrinter;
                 if (printer is null)
                 {
+                    long capturedGeneration = _invalidationGenerations.GetOrAdd(printerId, 0L);
                     printer = await GetPrinterAsync(printerId, ct);
-                    state.CachedPrinter = printer;
+
+                    // Only cache the result if no invalidation raced this fetch; otherwise leave
+                    // the cache empty so the very next tick re-reads instead of resurrecting a
+                    // row that may already be stale.
+                    if (_invalidationGenerations.GetOrAdd(printerId, 0L) == capturedGeneration)
+                    {
+                        state.CachedPrinter = printer;
+                    }
                 }
 
                 if (printer?.Backend != (int)PrinterBackend.SDCP)

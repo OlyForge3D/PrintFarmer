@@ -2,7 +2,7 @@
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Backend.Plugin.PrusaLink;
+using Farm.Backend.Plugin.FlashForge;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
@@ -17,28 +17,27 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.PrusaLink;
+namespace Farm.Web.Api.Tests.Services.FlashForge;
 
 /// <summary>
 /// Unit tests for the printer-row caching + invalidation behavior added to
-/// <see cref="PrusaLinkPollingService"/> for issue #1763. Before this change, every 5s poll tick
-/// re-opened a DI scope and re-queried (and re-decrypted) the printer row via
-/// <c>GetPrinterAsync</c>. Now <c>PollPrinterAsync</c> only reads the row once - it is seeded by
-/// the 30s reconciliation loop and cleared explicitly on printer edit - so steady-state polling
-/// does zero per-tick DB reads for the printer row.
+/// <see cref="FlashForgePollingService"/> for issue #1763, and the durable invalidation-generation
+/// fence added afterward (PR #1786 review) to close a race where <c>PollPrinterAsync</c>'s
+/// cache-miss fallback could publish a stale row if an invalidation arrived while the fetch was
+/// still in flight.
 /// </summary>
-public class PrusaLinkPollingServiceCacheTests
+public class FlashForgePollingServiceCacheTests
 {
-    private readonly Mock<IPrusaLinkClient> _prusaLinkClient = new(MockBehavior.Loose);
+    private readonly Mock<IFlashForgeClient> _flashForgeClient = new(MockBehavior.Loose);
     private readonly Mock<IPrintersRepository> _printersRepository = new(MockBehavior.Loose);
     private readonly Mock<IUnitOfWork> _unitOfWork = new(MockBehavior.Loose);
-    private readonly PrusaLinkPollingService _service;
+    private readonly FlashForgePollingService _service;
     private readonly MethodInfo _pollPrinterAsync;
     private readonly MethodInfo _onPrinterInvalidated;
     private readonly FieldInfo _printerStatesField;
     private readonly Type _pollingStateType;
 
-    public PrusaLinkPollingServiceCacheTests()
+    public FlashForgePollingServiceCacheTests()
     {
         _unitOfWork.Setup(u => u.Printers).Returns(_printersRepository.Object);
 
@@ -47,7 +46,7 @@ public class PrusaLinkPollingServiceCacheTests
             NullLogger<ManagedSpoolProviderHelper>.Instance);
 
         Mock<IServiceProvider> serviceProvider = new(MockBehavior.Loose);
-        serviceProvider.Setup(p => p.GetService(typeof(IPrusaLinkClient))).Returns(_prusaLinkClient.Object);
+        serviceProvider.Setup(p => p.GetService(typeof(IFlashForgeClient))).Returns(_flashForgeClient.Object);
         serviceProvider.Setup(p => p.GetService(typeof(IUnitOfWork))).Returns(_unitOfWork.Object);
         serviceProvider.Setup(p => p.GetService(typeof(ManagedSpoolProviderHelper))).Returns(spoolProvider);
 
@@ -63,20 +62,20 @@ public class PrusaLinkPollingServiceCacheTests
         Mock<IHubContext<PrinterHub>> hub = new();
         hub.Setup(h => h.Clients).Returns(clients.Object);
 
-        _service = new PrusaLinkPollingService(
+        _service = new FlashForgePollingService(
             hub: hub.Object,
             scopeFactory: scopeFactory.Object,
-            logger: NullLogger<PrusaLinkPollingService>.Instance,
+            logger: NullLogger<FlashForgePollingService>.Instance,
             statusCacheWriter: new Mock<IPrinterStatusCacheWriter>(MockBehavior.Loose).Object);
 
-        Type serviceType = typeof(PrusaLinkPollingService);
+        Type serviceType = typeof(FlashForgePollingService);
         _pollPrinterAsync = serviceType.GetMethod("PollPrinterAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _onPrinterInvalidated = serviceType.GetMethod("OnPrinterInvalidated", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _printerStatesField = serviceType.GetField("_printerStates", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _pollingStateType = serviceType.GetNestedType("PrinterPollingState", BindingFlags.NonPublic)!;
     }
 
-    private static PrusaCompositeStatus IdleStatus() => new(
+    private static PrinterCompositeStatus IdleStatus() => new(
         IsOnline: true,
         State: "IDLE",
         Progress: null,
@@ -85,11 +84,6 @@ public class PrusaLinkPollingServiceCacheTests
         CameraStreamUrl: null,
         CameraSnapshotUrl: null);
 
-    /// <summary>
-    /// Seeds <c>_printerStates</c> with a pre-populated <c>CachedPrinter</c>, mirroring what the
-    /// 30s main loop does today - so tests can exercise <c>PollPrinterAsync</c>'s steady-state
-    /// (cache-hit) path directly without needing to drive the real reconciliation loop.
-    /// </summary>
     private void SeedCachedPrinter(Guid printerId, Printer printer)
     {
         var states = (System.Collections.IDictionary)_printerStatesField.GetValue(_service)!;
@@ -107,11 +101,11 @@ public class PrusaLinkPollingServiceCacheTests
         return state is null ? null : (Printer?)_pollingStateType.GetProperty("CachedPrinter")!.GetValue(state);
     }
 
-    private async Task RunOneTickAsync(Guid printerId, PrusaCompositeStatus status)
+    private async Task RunOneTickAsync(Guid printerId, PrinterCompositeStatus status)
     {
         using CancellationTokenSource cts = new();
-        _prusaLinkClient
-            .Setup(c => c.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+        _flashForgeClient
+            .Setup(c => c.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
                 cts.Cancel();
@@ -132,7 +126,7 @@ public class PrusaLinkPollingServiceCacheTests
     public async Task PollPrinterAsync_CachedPrinterPresent_DoesNotQueryRepository()
     {
         Guid printerId = Guid.NewGuid();
-        var printer = new Printer { Id = printerId, Name = "Cached Printer", ServerUrl = "http://prusa.local", Backend = (int)PrinterBackend.PrusaLink };
+        var printer = new Printer { Id = printerId, Name = "Cached Printer", ServerUrl = "192.168.1.50", Backend = (int)PrinterBackend.FlashForge };
         SeedCachedPrinter(printerId, printer);
 
         await RunOneTickAsync(printerId, IdleStatus());
@@ -145,7 +139,7 @@ public class PrusaLinkPollingServiceCacheTests
     public async Task PollPrinterAsync_NoCachedPrinter_FallsBackToRepositoryAndPopulatesCache()
     {
         Guid printerId = Guid.NewGuid();
-        var printer = new Printer { Id = printerId, Name = "Fallback Printer", ServerUrl = "http://prusa.local", Backend = (int)PrinterBackend.PrusaLink };
+        var printer = new Printer { Id = printerId, Name = "Fallback Printer", ServerUrl = "192.168.1.50", Backend = (int)PrinterBackend.FlashForge };
         _printersRepository
             .Setup(r => r.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(printer);
@@ -160,7 +154,7 @@ public class PrusaLinkPollingServiceCacheTests
     public void OnPrinterInvalidated_MatchingPrinterId_ClearsCachedPrinter()
     {
         Guid printerId = Guid.NewGuid();
-        var printer = new Printer { Id = printerId, Backend = (int)PrinterBackend.PrusaLink };
+        var printer = new Printer { Id = printerId, Backend = (int)PrinterBackend.FlashForge };
         SeedCachedPrinter(printerId, printer);
 
         _onPrinterInvalidated.Invoke(_service, [printerId]);
@@ -188,7 +182,7 @@ public class PrusaLinkPollingServiceCacheTests
     public async Task PollPrinterAsync_InvalidationRacesCacheMissFetch_DoesNotPublishStaleData()
     {
         Guid printerId = Guid.NewGuid();
-        var stale = new Printer { Id = printerId, Name = "Stale", ServerUrl = "http://prusa.local", Backend = (int)PrinterBackend.PrusaLink };
+        var stale = new Printer { Id = printerId, Name = "Stale", ServerUrl = "192.168.1.50", Backend = (int)PrinterBackend.FlashForge };
 
         var fetchStarted = new TaskCompletionSource();
         var releaseFetch = new TaskCompletionSource();
@@ -203,8 +197,8 @@ public class PrusaLinkPollingServiceCacheTests
             });
 
         using CancellationTokenSource cts = new();
-        _prusaLinkClient
-            .Setup(c => c.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+        _flashForgeClient
+            .Setup(c => c.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
                 cts.Cancel();
@@ -229,32 +223,5 @@ public class PrusaLinkPollingServiceCacheTests
 
         GetCachedPrinter(printerId).Should().BeNull(
             "an invalidation racing the cache-miss fetch must prevent the stale row from being published");
-    }
-
-    [Fact]
-    public async Task Invalidate_AfterCacheHit_ForcesExactlyOneRefetchThenResumesCacheHitBehavior()
-    {
-        Guid printerId = Guid.NewGuid();
-        var original = new Printer { Id = printerId, Name = "Original", ServerUrl = "http://prusa.local", Backend = (int)PrinterBackend.PrusaLink };
-        var updated = new Printer { Id = printerId, Name = "Updated", ServerUrl = "http://prusa-new.local", Backend = (int)PrinterBackend.PrusaLink };
-        SeedCachedPrinter(printerId, original);
-
-        // Simulate PrintersController.UpdateAsync calling Invalidate after a successful save.
-        _onPrinterInvalidated.Invoke(_service, [printerId]);
-        _printersRepository
-            .Setup(r => r.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(updated);
-
-        await RunOneTickAsync(printerId, IdleStatus());
-
-        _printersRepository.Verify(r => r.FindByIdAsync(printerId, It.IsAny<CancellationToken>()), Times.Once,
-            "exactly one fresh read is expected immediately after invalidation");
-        GetCachedPrinter(printerId).Should().BeSameAs(updated);
-
-        // A subsequent tick must hit the now-repopulated cache again with no further DB reads.
-        await RunOneTickAsync(printerId, IdleStatus());
-
-        _printersRepository.Verify(r => r.FindByIdAsync(printerId, It.IsAny<CancellationToken>()), Times.Once,
-            "the cache must be repopulated after the single post-invalidation refetch");
     }
 }
