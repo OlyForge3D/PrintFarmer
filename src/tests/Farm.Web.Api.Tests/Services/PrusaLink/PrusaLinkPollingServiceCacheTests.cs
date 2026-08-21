@@ -35,7 +35,9 @@ public class PrusaLinkPollingServiceCacheTests
     private readonly PrusaLinkPollingService _service;
     private readonly MethodInfo _pollPrinterAsync;
     private readonly MethodInfo _onPrinterInvalidated;
+    private readonly MethodInfo _tryPublishCachedPrinter;
     private readonly FieldInfo _printerStatesField;
+    private readonly FieldInfo _invalidationGenerationsField;
     private readonly Type _pollingStateType;
 
     public PrusaLinkPollingServiceCacheTests()
@@ -72,7 +74,9 @@ public class PrusaLinkPollingServiceCacheTests
         Type serviceType = typeof(PrusaLinkPollingService);
         _pollPrinterAsync = serviceType.GetMethod("PollPrinterAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _onPrinterInvalidated = serviceType.GetMethod("OnPrinterInvalidated", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        _tryPublishCachedPrinter = serviceType.GetMethod("TryPublishCachedPrinter", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _printerStatesField = serviceType.GetField("_printerStates", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        _invalidationGenerationsField = serviceType.GetField("_invalidationGenerations", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _pollingStateType = serviceType.GetNestedType("PrinterPollingState", BindingFlags.NonPublic)!;
     }
 
@@ -105,6 +109,33 @@ public class PrusaLinkPollingServiceCacheTests
         var states = (System.Collections.IDictionary)_printerStatesField.GetValue(_service)!;
         object? state = states[printerId];
         return state is null ? null : (Printer?)_pollingStateType.GetProperty("CachedPrinter")!.GetValue(state);
+    }
+
+    /// <summary>
+    /// Reads the durable, per-printer invalidation generation counter directly (bypassing
+    /// <c>GetOrAdd</c>'s side effect of creating a missing entry), returning 0 for a printer id
+    /// with no entry yet -- matching the fallback the production code itself uses when snapshotting
+    /// a printer's generation for the very first time.
+    /// </summary>
+    private long GetInvalidationGeneration(Guid printerId)
+    {
+        var generations = (System.Collections.IDictionary)_invalidationGenerationsField.GetValue(_service)!;
+        return generations.Contains(printerId) ? (long)generations[printerId]! : 0L;
+    }
+
+    private object GetOrCreateEmptyState(Guid printerId)
+    {
+        var states = (System.Collections.IDictionary)_printerStatesField.GetValue(_service)!;
+        if (states[printerId] is { } existing)
+        {
+            return existing;
+        }
+
+        object state = Activator.CreateInstance(_pollingStateType)!;
+        _pollingStateType.GetProperty("PrinterId")!.SetValue(state, printerId);
+        _pollingStateType.GetProperty("LastKnownIsOnline")!.SetValue(state, false);
+        states[printerId] = state;
+        return state;
     }
 
     private async Task RunOneTickAsync(Guid printerId, PrusaCompositeStatus status)
@@ -256,5 +287,55 @@ public class PrusaLinkPollingServiceCacheTests
 
         _printersRepository.Verify(r => r.FindByIdAsync(printerId, It.IsAny<CancellationToken>()), Times.Once,
             "the cache must be repopulated after the single post-invalidation refetch");
+    }
+
+    /// <summary>
+    /// Regression test for Hicks's follow-up review finding: the test above only proves the
+    /// generation fence rejects a fetch that captured its generation *before* an invalidation ran
+    /// to completion (i.e. it never actually contends with <c>_cacheGates</c>'s lock, because the
+    /// TCS pauses well before the critical section is entered). It does not prove the
+    /// <c>_cacheGates</c> lock added afterward actually serializes <c>TryPublishCachedPrinter</c>'s
+    /// check-and-write against a concurrent <c>OnPrinterInvalidated</c> call. This test races the
+    /// two directly, many times, with no artificial pause, and asserts a deterministic invariant
+    /// that only holds if the two are genuinely mutually exclusive on the same per-printer lock:
+    /// since both operations start from the same generation captured up front, no matter which one
+    /// wins the race for the lock, <c>CachedPrinter</c> must end up null every round --
+    ///   * if the publish's critical section runs first, it writes the printer, but the
+    ///     invalidation's critical section then runs next (serialized behind the same lock) and
+    ///     clears it again -- final state: null.
+    ///   * if the invalidation's critical section runs first, it bumps the generation past what the
+    ///     publish captured, so the publish's generation check then fails and it declines to write
+    ///     -- final state: null (unchanged by the clear).
+    /// Without the lock serializing the two, the publish's check-then-write could observe a
+    /// matching generation, get preempted before its write, let the invalidation's clear run, and
+    /// then resume and publish the stale printer anyway -- leaving a non-null, stale
+    /// <c>CachedPrinter</c> after both complete. Many rounds under real thread-pool contention make
+    /// that narrow window likely to be hit at least once if the lock ever regresses.
+    /// </summary>
+    [Fact]
+    public async Task OnPrinterInvalidated_ConcurrentWithTryPublishCachedPrinter_NeverResurrectsStaleData()
+    {
+        Guid printerId = Guid.NewGuid();
+        object state = GetOrCreateEmptyState(printerId);
+
+        const int rounds = 200;
+        for (int i = 0; i < rounds; i++)
+        {
+            var printer = new Printer { Id = printerId, Name = $"Stale-{i}", ServerUrl = "http://prusa.local", Backend = (int)PrinterBackend.PrusaLink };
+            long capturedGeneration = GetInvalidationGeneration(printerId);
+
+            var tasks = new Task[2];
+            tasks[0] = Task.Run(() => _tryPublishCachedPrinter.Invoke(_service, [printerId, printer, capturedGeneration, state]));
+            tasks[1] = Task.Run(() => _onPrinterInvalidated.Invoke(_service, [printerId]));
+
+            await Task.WhenAll(tasks);
+
+            GetCachedPrinter(printerId).Should().BeNull(
+                "TryPublishCachedPrinter and OnPrinterInvalidated must serialize on the same " +
+                "per-printer lock: whichever runs first, the loser's outcome (a fresh " +
+                "bump-and-clear running after the write, or a generation check that now observes " +
+                "the bump) must leave the cache empty rather than resurrecting the stale printer " +
+                "snapshot captured before either ran");
+        }
     }
 }

@@ -150,6 +150,32 @@ public sealed class SdcpPollingService(
         }
     }
 
+    /// <summary>
+    /// Publishes <paramref name="printer"/> into <paramref name="state"/>.CachedPrinter only if no
+    /// invalidation has raced the fetch that produced it -- i.e. only if the current invalidation
+    /// generation for this printer still matches <paramref name="capturedGeneration"/>, the value
+    /// observed *before* the fetch began. Runs under the same per-printer <see cref="_cacheGates"/>
+    /// lock <see cref="OnPrinterInvalidated"/> uses, so the generation check and the publish are
+    /// atomic with respect to a concurrent invalidation: either this call's check-and-publish runs
+    /// fully before an invalidation's bump-and-clear (which then correctly observes the freshly
+    /// published row and clears it again), or fully after it (this call then observes the bumped
+    /// generation and declines to publish) -- there is no window in which a stale check can pass
+    /// and then have its write silently undo a subsequent invalidation. Shared by both write-back
+    /// sites (the 30s reconciliation loop and the per-tick cache-miss fallback) so a single test can
+    /// exercise this critical section for both callers at once.
+    /// </summary>
+    private void TryPublishCachedPrinter(Guid printerId, Printer printer, long capturedGeneration, PrinterPollingState state)
+    {
+        object gate = _cacheGates.GetOrAdd(printerId, static _ => new object());
+        lock (gate)
+        {
+            if (_invalidationGenerations.GetOrAdd(printerId, 0L) == capturedGeneration)
+            {
+                state.CachedPrinter = printer;
+            }
+        }
+    }
+
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("SdcpPollingService stopping");
@@ -215,18 +241,9 @@ public sealed class SdcpPollingService(
 
                         // Only publish if no invalidation raced the fetch above; otherwise this
                         // row may already be stale and the next tick's cache-miss re-read (or the
-                        // next reconciliation pass) will pick up the fresh value instead. Gate the
-                        // check-and-write under the same per-printer lock OnPrinterInvalidated
-                        // uses so the two are mutually exclusive.
+                        // next reconciliation pass) will pick up the fresh value instead.
                         long capturedGeneration = generationSnapshot.GetValueOrDefault(printer.Id, 0L);
-                        object gate = _cacheGates.GetOrAdd(printer.Id, static _ => new object());
-                        lock (gate)
-                        {
-                            if (_invalidationGenerations.GetOrAdd(printer.Id, 0L) == capturedGeneration)
-                            {
-                                refreshState.CachedPrinter = printer;
-                            }
-                        }
+                        TryPublishCachedPrinter(printer.Id, printer, capturedGeneration, refreshState);
                     }
 
                     // Ensure polling loops exist for all SDCP printers
@@ -292,18 +309,10 @@ public sealed class SdcpPollingService(
 
                     // Only cache the result if no invalidation raced this fetch; otherwise leave
                     // the cache empty so the very next tick re-reads instead of resurrecting a
-                    // row that may already be stale. Gate the check-and-write under the same
-                    // per-printer lock OnPrinterInvalidated uses, so this check is atomic with
-                    // any concurrent invalidation (an async continuation can resume long after
-                    // the underlying query completes, so a same-thread "before/after" read alone
-                    // is not enough).
-                    object gate = _cacheGates.GetOrAdd(printerId, static _ => new object());
-                    lock (gate)
+                    // row that may already be stale.
+                    if (printer is not null)
                     {
-                        if (_invalidationGenerations.GetOrAdd(printerId, 0L) == capturedGeneration)
-                        {
-                            state.CachedPrinter = printer;
-                        }
+                        TryPublishCachedPrinter(printerId, printer, capturedGeneration, state);
                     }
                 }
 
