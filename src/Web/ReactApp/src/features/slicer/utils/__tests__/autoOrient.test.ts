@@ -4,6 +4,7 @@ import {
   detectMajorFaces,
   computeBedPlacementZ,
   computeAutoOrientation,
+  assessOrientationStability,
 } from '../autoOrient';
 
 /** Height (max-min Z) of a geometry after applying a quaternion + scale. */
@@ -90,6 +91,51 @@ describe('autoOrient', () => {
       const z = computeBedPlacementZ(degenerate, new THREE.Quaternion());
       expect(Number.isFinite(z)).toBe(true);
       expect(z).toBe(0);
+    });
+  });
+
+  describe('assessOrientationStability', () => {
+    it('flags a tall triangular-prism part balanced on its knife-edge as likely unslicable', () => {
+      // CylinderGeometry with 3 radial segments = a triangular prism. Default
+      // axis is Y; rotate it so the prism's long axis (and its thin ridge/
+      // knife edge) points along Z, standing the part up on its edge — the
+      // "tall thin part on a likely-unslicable footprint" scenario from #1815.
+      const prism = new THREE.CylinderGeometry(15, 15, 60, 3).toNonIndexed();
+      prism.rotateX(Math.PI / 2);
+      prism.center();
+
+      const knifeEdgeUp = new THREE.Quaternion(); // current orientation: standing on the edge
+      const assessment = assessOrientationStability(prism, knifeEdgeUp);
+      expect(assessment).not.toBeNull();
+      expect(assessment!.isLikelyUnslicable).toBe(true);
+      expect(assessment!.currentScore).toBeGreaterThan(assessment!.bestScore);
+    });
+
+    it('does not flag a model already resting flat on its largest face', () => {
+      // A flat, wide box — already resting on its largest face, same as a
+      // well-designed print-in-place model. Auto-orient would pick this
+      // exact orientation, so the current/best scores should be equal.
+      const flatBox = new THREE.BoxGeometry(80, 60, 10).toNonIndexed();
+      const identity = new THREE.Quaternion();
+      const assessment = assessOrientationStability(flatBox, identity);
+      expect(assessment).not.toBeNull();
+      expect(assessment!.isLikelyUnslicable).toBe(false);
+      expect(assessment!.currentScore).toBeCloseTo(assessment!.bestScore, 5);
+    });
+
+    it('does not flag a short part even if not perfectly optimal', () => {
+      // Height is below the noise-floor threshold — should never warn
+      // regardless of ratio, to avoid flicker on tiny parts.
+      const tinyBox = new THREE.BoxGeometry(2, 2, 2).toNonIndexed();
+      const identity = new THREE.Quaternion();
+      const assessment = assessOrientationStability(tinyBox, identity);
+      expect(assessment).not.toBeNull();
+      expect(assessment!.isLikelyUnslicable).toBe(false);
+    });
+
+    it('returns null for empty geometry', () => {
+      const empty = new THREE.BufferGeometry();
+      expect(assessOrientationStability(empty, new THREE.Quaternion())).toBeNull();
     });
   });
 

@@ -16,7 +16,7 @@ import { TextTool, type TextToolConfig } from './TextTool';
 import { generateTextGeometry, geometryToStlBlobUrl } from '@/features/models3d/utils/textGeometry';
 import { Button, Checkbox, Input, Select } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
-import { RotateCcw, AlertTriangle } from 'lucide-react';
+import { RotateCcw, AlertTriangle, Compass, X } from 'lucide-react';
 import {
   type PrintheadClearance,
   type ModelFootprint,
@@ -43,7 +43,7 @@ import {
   computePlateLayout,
   togglePlateLock,
 } from '@/features/slicer/utils/plateManager';
-import { computeAutoOrientation, computeBedPlacementZ } from '@/features/slicer/utils/autoOrient';
+import { computeAutoOrientation, computeBedPlacementZ, assessOrientationStability } from '@/features/slicer/utils/autoOrient';
 
 export interface SlicerWorkspaceProps {
   /** Bed configuration including dimensions */
@@ -204,17 +204,26 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   const [redoStack, setRedoStack] = useState<TransformHistoryEntry[]>([]);
   const isApplyingHistoryRef = useRef(false);
   const blobUrlsRef = useRef<Set<string>>(new Set());
+  // Model ids for which the user dismissed the unslicable-orientation nudge
+  // (issue #1815). Cleared per-model when the model is removed, below.
+  const [dismissedOrientationWarningIds, setDismissedOrientationWarningIds] = useState<Set<string>>(new Set());
 
   // Registry of per-model processed geometry, published from the R3F scene via
   // onModelGeometryChange. Lets per-plate auto-orient reach the geometry of
   // EVERY model on a plate, not just the currently selected one.
   const geometryRegistryRef = useRef<Map<string, THREE.BufferGeometry>>(new Map());
+  // Bumped whenever the registry above changes. The registry itself is a plain
+  // ref (mutating it doesn't trigger a re-render), but the orientation-nudge
+  // heuristic (#1815) needs to react as soon as a model's mesh becomes
+  // available, so it depends on this counter instead of the ref directly.
+  const [geometryVersion, setGeometryVersion] = useState(0);
   const handleModelGeometryChange = useCallback((modelId: string, geometry: THREE.BufferGeometry | null) => {
     if (geometry) {
       geometryRegistryRef.current.set(modelId, geometry);
     } else {
       geometryRegistryRef.current.delete(modelId);
     }
+    setGeometryVersion((v) => v + 1);
   }, []);
 
   // Issue #1709: models whose source file failed to load (e.g. a 401/404 on
@@ -305,6 +314,13 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       }
       // A removed model can no longer block slicing (issue #1709).
       setFailedModelLoadIds(prev => {
+        if (!removedIds.some(id => prev.has(id))) return prev;
+        const next = new Set(prev);
+        for (const id of removedIds) next.delete(id);
+        return next;
+      });
+      // A removed model can't need an orientation nudge anymore (issue #1815).
+      setDismissedOrientationWarningIds(prev => {
         if (!removedIds.some(id => prev.has(id))) return prev;
         const next = new Set(prev);
         for (const id of removedIds) next.delete(id);
@@ -855,6 +871,50 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       pushHistoryEntry({ action: 'Auto-Orient Plate', deltas });
     }
   }, [computeArrangePositions, getModelsOnPlate, handleModelTransform, onModelTransform, plateState.plates, pushHistoryEntry, triplesEqual]);
+
+  /**
+   * Issue #1815: proactively flag models whose CURRENT orientation is likely
+   * to print poorly (e.g. a tall part balanced on a knife-edge footprint),
+   * despite auto-orient already existing to fix it. Purely client-side —
+   * uses the mesh geometry already loaded in the viewer (geometryRegistryRef,
+   * falling back to a model's pre-built geometry), so this doesn't depend on
+   * any backend geometry metadata. Advisory only: never blocks slicing.
+   */
+  const likelyUnslicableModelIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const model of visibleModels) {
+      const geo = geometryRegistryRef.current.get(model.id) ?? model.geometry;
+      if (!geo || typeof geo.getAttribute !== 'function') continue;
+      const q = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(model.rotation[0], model.rotation[1], model.rotation[2]),
+      );
+      const assessment = assessOrientationStability(geo, q, model.scale);
+      if (assessment?.isLikelyUnslicable) ids.add(model.id);
+    }
+    return ids;
+    // geometryVersion isn't read directly, but the ref it guards is — depend on
+    // it so this recomputes as soon as a model's geometry becomes available.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleModels, geometryVersion]);
+
+  // Ids currently shown in the nudge banner — flagged, minus dismissed.
+  const orientationWarningIds = useMemo(
+    () => new Set([...likelyUnslicableModelIds].filter((id) => !dismissedOrientationWarningIds.has(id))),
+    [likelyUnslicableModelIds, dismissedOrientationWarningIds],
+  );
+
+  const handleDismissOrientationWarning = useCallback(() => {
+    setDismissedOrientationWarningIds((prev) => {
+      const next = new Set(prev);
+      for (const id of likelyUnslicableModelIds) next.add(id);
+      return next;
+    });
+  }, [likelyUnslicableModelIds]);
+
+  // Offers the SAME auto-orient action as the plate toolbar/overlay button.
+  const handleFixOrientationWarning = useCallback(() => {
+    handleOrientPlate(plateState.activePlateId);
+  }, [handleOrientPlate, plateState.activePlateId]);
 
   /**
    * Delete a specific plate. A non-empty plate prompts for confirmation and its
@@ -1658,6 +1718,40 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
           <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-md bg-amber-900/90 border border-amber-600 px-3 py-1.5 text-amber-200 text-xs shadow-lg backdrop-blur-xs">
             <AlertTriangle size={14} className="shrink-0" />
             <span>Object outside build volume</span>
+          </div>
+        )}
+
+        {/* Unslicable-orientation nudge (issue #1815) — advisory only, never blocks slicing */}
+        {orientationWarningIds.size > 0 && (
+          <div
+            className={[
+              'absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-md',
+              'bg-amber-900/90 border border-amber-600 px-3 py-1.5 text-amber-200 text-xs shadow-lg backdrop-blur-xs',
+              outOfBoundsModelIds.size > 0 ? 'top-10' : 'top-2',
+            ].join(' ')}
+          >
+            <Compass size={14} className="shrink-0" />
+            <span>
+              {orientationWarningIds.size === 1
+                ? 'Model orientation may not print cleanly'
+                : `${orientationWarningIds.size} models may not print cleanly in this orientation`}
+            </span>
+            <Button
+              variant="unstyled"
+              onClick={handleFixOrientationWarning}
+              className="ml-1 rounded border border-amber-500/60 px-1.5 py-0.5 font-medium hover:bg-amber-500/20"
+            >
+              Auto-orient
+            </Button>
+            <Button
+              variant="unstyled"
+              aria-label="Dismiss orientation warning"
+              title="Dismiss"
+              onClick={handleDismissOrientationWarning}
+              className="ml-0.5 rounded p-0.5 hover:bg-amber-500/20"
+            >
+              <X size={12} />
+            </Button>
           </div>
         )}
 
