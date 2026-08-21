@@ -117,6 +117,104 @@ public class CalibrationProviderMigrationHarnessTests
         (await ctx.QueueOperationAudits.LongCountAsync()).Should().Be(0);
     }
 
+    // Covers issue #1824's data migration: the AddNozzleMaterialCatalog migration must seed
+    // exactly the 5 built-in NozzleMaterial rows backing the legacy NozzleType enum members
+    // (Brass, HardenedSteel, StainlessSteel, TungstenCarbide, Abrasive), each with the
+    // hardness/temperature defaults baked into the migration's raw SQL seed.
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task SQLite_NozzleMaterialCatalog_SeedsExactlyFiveBuiltInRows()
+    {
+        string dbName = $"pfarm_nozzlemat_{Guid.NewGuid():N}";
+        string connString = $"Data Source=file:{dbName}?mode=memory&cache=shared;Foreign Keys=False";
+
+        using var keepAlive = new SqliteConnection(connString);
+        keepAlive.Open();
+
+        await using var ctx = CreateSqliteContext(connString);
+        await ctx.Database.MigrateAsync();
+
+        List<NozzleMaterial> materials = await ctx.NozzleMaterials.OrderBy(m => m.Name).ToListAsync();
+
+        materials.Should().HaveCount(5, "the migration must seed exactly the 5 built-in materials backing the legacy NozzleType enum members");
+        materials.Should().OnlyContain(m => m.IsBuiltIn, "all migration-seeded rows must be marked IsBuiltIn");
+
+        Dictionary<string, bool> expectedHardness = new()
+        {
+            ["Abrasive"] = true,
+            ["Brass"] = false,
+            ["HardenedSteel"] = true,
+            ["StainlessSteel"] = false,
+            ["TungstenCarbide"] = true
+        };
+        materials.Select(m => m.Name).Should().BeEquivalentTo(expectedHardness.Keys, "seeded material names must match the legacy NozzleType enum members exactly");
+        foreach (NozzleMaterial material in materials)
+        {
+            material.IsHardened.Should().Be(expectedHardness[material.Name], $"'{material.Name}' hardness flag must match its known abrasive-filament compatibility");
+            material.DefaultMaxTemp.Should().BeGreaterThan(0, $"'{material.Name}' must have a positive default max temperature");
+        }
+    }
+
+    // Covers issue #1824's backfill logic: an existing NozzleModelDefinition row (as it would
+    // have looked pre-migration, with a legacy NozzleType enum value) must have its new
+    // NozzleMaterialId FK correctly backfilled to point at the matching built-in material.
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task SQLite_NozzleMaterialCatalog_BackfillsExistingNozzleModelToMatchingMaterial()
+    {
+        string dbName = $"pfarm_nozzlebackfill_{Guid.NewGuid():N}";
+        string connString = $"Data Source=file:{dbName}?mode=memory&cache=shared;Foreign Keys=False";
+
+        using var keepAlive = new SqliteConnection(connString);
+        keepAlive.Open();
+
+        // Apply migrations up to (but excluding) AddNozzleMaterialCatalog to seed a
+        // pre-migration NozzleModelDefinition row with the legacy NozzleType column populated,
+        // then apply the remaining migrations and verify the backfill.
+        await using (AppDbContext priorCtx = CreateSqliteContext(connString))
+        {
+            IMigrator migrator = priorCtx.GetInfrastructure().GetRequiredService<IMigrator>();
+            IReadOnlyList<string> allMigrations = priorCtx.Database.GetMigrations().ToList();
+            string? beforeTarget = allMigrations
+                .TakeWhile(m => !m.EndsWith("_AddNozzleMaterialCatalog", StringComparison.Ordinal))
+                .LastOrDefault();
+            beforeTarget.Should().NotBeNull("there must be at least one migration preceding AddNozzleMaterialCatalog");
+            await migrator.MigrateAsync(beforeTarget);
+        }
+
+        Guid manufacturerId = Guid.NewGuid();
+        Guid nozzleId = Guid.NewGuid();
+        await using (AppDbContext seedCtx = CreateSqliteContext(connString))
+        {
+            // Use the EF entity for Manufacturer (via reflection-free entry API) so we don't
+            // need to hand-maintain every NOT NULL column the Manufacturers table happens to
+            // have; only the pre-migration NozzleModelDefinitions row (whose legacy NozzleType
+            // column no longer exists on the current entity) needs raw SQL.
+            Manufacturer manufacturer = new() { Id = manufacturerId, Name = "TestMfg", IsActive = true };
+            seedCtx.Manufacturers.Add(manufacturer);
+            await seedCtx.SaveChangesAsync();
+
+            seedCtx.Database.ExecuteSqlRaw(
+                "INSERT INTO \"NozzleModelDefinitions\" (\"Id\", \"Name\", \"ManufacturerId\", \"Diameter\", \"NozzleType\", \"NozzleInterface\") " +
+                "VALUES ({0}, {1}, {2}, 0.4, 3, 0);",
+                nozzleId, "PreMigrationNozzle", manufacturerId);
+        }
+
+        await using (AppDbContext ctx = CreateSqliteContext(connString))
+        {
+            await ctx.Database.MigrateAsync();
+
+            NozzleModelDefinition? nozzle = await ctx.NozzleModelDefinitions
+                .Include(n => n.NozzleMaterial)
+                .SingleOrDefaultAsync(n => n.Id == nozzleId);
+
+            nozzle.Should().NotBeNull("the pre-migration nozzle row must survive the migration");
+            nozzle!.NozzleMaterial.Should().NotBeNull("the backfill must populate the NozzleMaterial navigation");
+            nozzle.NozzleMaterial!.Name.Should().Be("TungstenCarbide", "legacy NozzleType=3 (TungstenCarbide) must backfill to the matching built-in material");
+            nozzle.IsHardened.Should().BeTrue("TungstenCarbide is a hardened material");
+        }
+    }
+
     [Fact]
     [Trait("Category", "DbHeavy")]
     public async Task SQLite_PrintJobBackfill_LegacyJobsDefaultToStandard_NullCalibrationFields()
