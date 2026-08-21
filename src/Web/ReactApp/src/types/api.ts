@@ -855,6 +855,10 @@ export enum NozzleType {
   StainlessSteel = 'StainlessSteel',
   TungstenCarbide = 'TungstenCarbide',
   Abrasive = 'Abrasive',
+  Diamond = 'Diamond',
+  Ruby = 'Ruby',
+  PlatedCopper = 'PlatedCopper',
+  ToolSteel = 'ToolSteel',
   Unknown = 'Unknown'
 }
 
@@ -864,6 +868,10 @@ export const NozzleTypeLabels: Record<NozzleType, string> = {
   [NozzleType.StainlessSteel]: 'Stainless Steel',
   [NozzleType.TungstenCarbide]: 'Tungsten Carbide',
   [NozzleType.Abrasive]: 'Abrasive',
+  [NozzleType.Diamond]: 'Diamond',
+  [NozzleType.Ruby]: 'Ruby',
+  [NozzleType.PlatedCopper]: 'Plated Copper',
+  [NozzleType.ToolSteel]: 'Tool Steel',
   [NozzleType.Unknown]: 'Unknown'
 };
 
@@ -877,7 +885,27 @@ export const NozzleTypeStringLabels: Record<string, string> = {
   'StainlessSteel': 'Stainless Steel',
   'TungstenCarbide': 'Tungsten Carbide',
   'Abrasive': 'Abrasive',
+  'Diamond': 'Diamond',
+  'Ruby': 'Ruby',
+  'PlatedCopper': 'Plated Copper',
+  'ToolSteel': 'Tool Steel',
   'Unknown': 'Unknown'
+};
+
+/**
+ * Per-model override for whether a nozzle counts as hardened.
+ * `Auto` derives hardness from the nozzle material.
+ */
+export enum NozzleHardnessOverride {
+  Auto = 'Auto',
+  Hardened = 'Hardened',
+  NotHardened = 'NotHardened'
+}
+
+export const NozzleHardnessOverrideLabels: Record<string, string> = {
+  'Auto': 'Auto (from material)',
+  'Hardened': 'Hardened',
+  'NotHardened': 'Not hardened'
 };
 
 // ============== Toolhead Types ==============
@@ -1005,7 +1033,9 @@ export interface NozzleModelDefinition {
   maxTemp?: number;
   /** The material type of this nozzle */
   nozzleType: NozzleType | string;
-  /** Whether this nozzle is hardened for abrasive filaments (computed from nozzleType) */
+  /** Per-model hardness override; `Auto` derives hardness from nozzleType */
+  hardnessOverride: NozzleHardnessOverride | string;
+  /** Effective hardness after applying hardnessOverride */
   isHardened: boolean;
   /** Nozzle interface type - must match hotend's interface to be compatible */
   nozzleInterface: NozzleInterfaceType;
@@ -1103,6 +1133,8 @@ export interface CreateNozzleModelDto {
   maxTemp?: number;
   /** The material type of this nozzle - defaults to Brass if not specified */
   nozzleType?: NozzleType | string;
+  /** Hardness override - defaults to Auto (derived from nozzleType) */
+  hardnessOverride?: NozzleHardnessOverride | string;
   /** Nozzle interface type - defaults to V6 if not specified */
   nozzleInterface?: NozzleInterfaceType;
   description?: string;
@@ -1120,6 +1152,8 @@ export interface UpdateNozzleModelDto {
   maxTemp?: number;
   /** The material type of this nozzle */
   nozzleType?: NozzleType | string;
+  /** Hardness override - send `Auto` to clear a previously pinned value */
+  hardnessOverride?: NozzleHardnessOverride | string;
   nozzleInterface?: NozzleInterfaceType;
   description?: string;
   url?: string;

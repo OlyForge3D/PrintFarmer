@@ -50,6 +50,10 @@ enum NozzleType: String, Codable, Sendable {
     case stainlessSteel = "StainlessSteel"
     case tungstenCarbide = "TungstenCarbide"
     case abrasive = "Abrasive"
+    case diamond = "Diamond"
+    case ruby = "Ruby"
+    case platedCopper = "PlatedCopper"
+    case toolSteel = "ToolSteel"
     case unknown = "Unknown"
 
     init(from decoder: Decoder) throws {

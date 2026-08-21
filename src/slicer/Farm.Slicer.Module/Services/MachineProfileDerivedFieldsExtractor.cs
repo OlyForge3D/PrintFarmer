@@ -106,6 +106,10 @@ public static class MachineProfileDerivedFieldsExtractor
             "stainlesssteel" => NozzleType.StainlessSteel,
             "tungstencarbide" => NozzleType.TungstenCarbide,
             "abrasive" => NozzleType.Abrasive,
+            "diamond" => NozzleType.Diamond,
+            "ruby" => NozzleType.Ruby,
+            "platedcopper" => NozzleType.PlatedCopper,
+            "toolsteel" => NozzleType.ToolSteel,
             _ => null,
         };
     }

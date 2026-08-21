@@ -99,12 +99,16 @@ All YAML files use camelCase for property names and follow these conventions:
   defaultNozzle: Compatible Nozzle Name
 ```
 
-### components/nozzles.yaml (Future)
+### components/nozzles.yaml
 ```yaml
 - name: Nozzle Name
   manufacturer: Manufacturer Name
+  diameter: 0.4
   maxTemp: 300
-  nozzleType: Brass  # Brass, HardenedSteel, Ruby, etc.
+  nozzleType: Brass          # Brass, HardenedSteel, StainlessSteel, TungstenCarbide,
+                             # Abrasive, Diamond, Ruby, PlatedCopper, ToolSteel, Unknown
+  hardnessOverride: Auto     # Optional: Auto (derive from nozzleType), Hardened, NotHardened
+  nozzleInterface: V6        # V6, Volcano, Revo, Proprietary
   description: Description of nozzle
   url: https://example.com/product
 ```

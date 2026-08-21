@@ -229,6 +229,12 @@ public class NozzleModelSeedDto
 
     public string NozzleType { get; set; } = "Brass";
 
+    /// <summary>
+    /// Optional hardness override: "Auto" (default, derived from NozzleType),
+    /// "Hardened", or "NotHardened".
+    /// </summary>
+    public string? HardnessOverride { get; set; }
+
     public string? Description { get; set; }
 
     public string? Url { get; set; }

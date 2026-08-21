@@ -857,6 +857,13 @@ public class DataSeedService : IDataSeedService
                 nozzleType = parsedType;
             }
 
+            NozzleHardnessOverride hardnessOverride = NozzleHardnessOverride.Auto;
+            if (!string.IsNullOrEmpty(dto.HardnessOverride) &&
+                Enum.TryParse<NozzleHardnessOverride>(dto.HardnessOverride.Replace(" ", string.Empty), true, out NozzleHardnessOverride parsedHardness))
+            {
+                hardnessOverride = parsedHardness;
+            }
+
             NozzleModelDefinition? existing = await _context.NozzleModelDefinitions
                 .FirstOrDefaultAsync(n => n.Name == dto.Name && n.ManufacturerId == manufacturerId);
 
@@ -870,6 +877,7 @@ public class DataSeedService : IDataSeedService
                     Diameter = dto.Diameter,
                     MaxTemp = dto.MaxTemp,
                     NozzleType = nozzleType,
+                    HardnessOverride = hardnessOverride,
                     Description = dto.Description,
                     Url = dto.Url
                 });
@@ -879,6 +887,7 @@ public class DataSeedService : IDataSeedService
                 existing.Diameter = dto.Diameter;
                 existing.MaxTemp = dto.MaxTemp;
                 existing.NozzleType = nozzleType;
+                existing.HardnessOverride = hardnessOverride;
                 existing.Description = dto.Description;
                 existing.Url = dto.Url;
             }
