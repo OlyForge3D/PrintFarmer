@@ -151,8 +151,56 @@ public enum NozzleType
     /// </summary>
     Abrasive = 4,
 
+    /// <summary>
+    /// Diamond-tipped nozzle (e.g., Diamondback) - extreme abrasion resistance
+    /// combined with high thermal conductivity.
+    /// Best for: Continuous printing with highly abrasive filaments.
+    /// </summary>
+    Diamond = 5,
+
+    /// <summary>
+    /// Ruby-tipped nozzle (e.g., Olsson Ruby) - abrasion-resistant tip in a
+    /// brass body.
+    /// Best for: Abrasive filaments where thermal conductivity still matters.
+    /// </summary>
+    Ruby = 6,
+
+    /// <summary>
+    /// Plated copper nozzle - excellent thermal conductivity, plating is for
+    /// corrosion/adhesion rather than abrasion resistance.
+    /// Best for: High-flow printing with non-abrasive filaments.
+    /// </summary>
+    PlatedCopper = 7,
+
+    /// <summary>
+    /// Tool steel nozzle - abrasion-resistant with high temperature tolerance.
+    /// Best for: Filled filaments at high temperatures.
+    /// </summary>
+    ToolSteel = 8,
+
     /// <summary>Unknown or unspecified nozzle type.</summary>
     Unknown = 99
+}
+
+/// <summary>
+/// Per-model override for whether a nozzle counts as hardened.
+/// <para>
+/// Most materials imply their own hardness, but the material list cannot cover every
+/// product, so a model may pin the answer explicitly. <see cref="Auto"/> keeps the value
+/// following <see cref="NozzleType"/>, which means changing a model's material also
+/// updates its hardness.
+/// </para>
+/// </summary>
+public enum NozzleHardnessOverride
+{
+    /// <summary>Derive hardness from the nozzle material. This is the default.</summary>
+    Auto = 0,
+
+    /// <summary>Always treat this nozzle as hardened, regardless of material.</summary>
+    Hardened = 1,
+
+    /// <summary>Never treat this nozzle as hardened, regardless of material.</summary>
+    NotHardened = 2
 }
 
 #endregion

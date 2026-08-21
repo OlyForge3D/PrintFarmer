@@ -133,7 +133,7 @@ public interface ICatalogRepository
 
     /// <summary>Gets all nozzle model definitions.</summary>
     /// <param name="ct">Cancellation token.</param>
-    Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, NozzleType NozzleType, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, NozzleType NozzleType, NozzleHardnessOverride HardnessOverride, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Looks up a nozzle material by exact name (e.g. "Brass", "HardenedSteel"). Used to

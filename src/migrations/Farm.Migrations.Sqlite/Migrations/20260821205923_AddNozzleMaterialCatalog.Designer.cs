@@ -4589,6 +4589,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<double>("Diameter")
                         .HasColumnType("REAL");
 
+                    b.Property<int>("HardnessOverride")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid>("ManufacturerId")
                         .HasColumnType("TEXT");
 

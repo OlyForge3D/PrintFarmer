@@ -591,7 +591,7 @@ public class CatalogService(
     {
         try
         {
-            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, NozzleType NozzleType, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)> nozzles = await _repo.GetNozzleModelsAsync(ct);
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, NozzleType NozzleType, NozzleHardnessOverride HardnessOverride, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)> nozzles = await _repo.GetNozzleModelsAsync(ct);
             return nozzles.Select(n => new NozzleModelDto(
                 n.Id,
                 n.Name,
@@ -600,6 +600,7 @@ public class CatalogService(
                 n.Diameter,
                 n.MaxTemp,
                 n.NozzleType,
+                n.HardnessOverride,
                 n.IsHardened,
                 n.NozzleInterface,
                 n.Description,
@@ -931,6 +932,7 @@ public class CatalogService(
             Diameter = dto.Diameter,
             MaxTemp = dto.MaxTemp,
             NozzleMaterialId = nozzleMaterialId,
+            HardnessOverride = dto.HardnessOverride,
             NozzleInterface = dto.NozzleInterface,
             Description = dto.Description,
             Url = dto.Url
@@ -942,7 +944,8 @@ public class CatalogService(
         Domain.NozzleModelDefinition? created = await _repo.GetNozzleModelByIdAsync(model.Id, ct);
         return new NozzleModelDto(
             created!.Id, created.Name, created.ManufacturerId,
-            created.Manufacturer?.Name, created.Diameter, created.MaxTemp, created.NozzleType, created.IsHardened,
+            created.Manufacturer?.Name, created.Diameter, created.MaxTemp, created.NozzleType,
+            created.HardnessOverride, created.IsHardened,
             created.NozzleInterface, created.Description, created.Url);
     }
 
@@ -1002,6 +1005,11 @@ public class CatalogService(
             model.NozzleMaterialId = await ResolveNozzleMaterialIdAsync(dto.NozzleType.Value, ct);
         }
 
+        if (dto.HardnessOverride.HasValue)
+        {
+            model.HardnessOverride = dto.HardnessOverride.Value;
+        }
+
         if (dto.NozzleInterface.HasValue)
         {
             model.NozzleInterface = dto.NozzleInterface.Value;
@@ -1024,7 +1032,8 @@ public class CatalogService(
         model = await _repo.GetNozzleModelByIdAsync(id, ct);
         return new NozzleModelDto(
             model!.Id, model.Name, model.ManufacturerId,
-            model.Manufacturer?.Name, model.Diameter, model.MaxTemp, model.NozzleType, model.IsHardened,
+            model.Manufacturer?.Name, model.Diameter, model.MaxTemp, model.NozzleType,
+            model.HardnessOverride, model.IsHardened,
             model.NozzleInterface, model.Description, model.Url);
     }
 

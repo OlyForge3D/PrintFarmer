@@ -118,12 +118,13 @@ public class CalibrationProviderMigrationHarnessTests
     }
 
     // Covers issue #1824's data migration: the AddNozzleMaterialCatalog migration must seed
-    // exactly the 5 built-in NozzleMaterial rows backing the legacy NozzleType enum members
-    // (Brass, HardenedSteel, StainlessSteel, TungstenCarbide, Abrasive), each with the
-    // hardness/temperature defaults baked into the migration's raw SQL seed.
+    // exactly the 9 built-in NozzleMaterial rows backing the legacy NozzleType enum members
+    // (Brass, HardenedSteel, StainlessSteel, TungstenCarbide, Abrasive, Diamond, Ruby,
+    // PlatedCopper, ToolSteel — the latter four added by #1834's enum extension), each with
+    // the hardness/temperature defaults baked into the migration's raw SQL seed.
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task SQLite_NozzleMaterialCatalog_SeedsExactlyFiveBuiltInRows()
+    public async Task SQLite_NozzleMaterialCatalog_SeedsExactlyNineBuiltInRows()
     {
         string dbName = $"pfarm_nozzlemat_{Guid.NewGuid():N}";
         string connString = $"Data Source=file:{dbName}?mode=memory&cache=shared;Foreign Keys=False";
@@ -136,7 +137,7 @@ public class CalibrationProviderMigrationHarnessTests
 
         List<NozzleMaterial> materials = await ctx.NozzleMaterials.OrderBy(m => m.Name).ToListAsync();
 
-        materials.Should().HaveCount(5, "the migration must seed exactly the 5 built-in materials backing the legacy NozzleType enum members");
+        materials.Should().HaveCount(9, "the migration must seed exactly the 9 built-in materials backing the legacy NozzleType enum members");
         materials.Should().OnlyContain(m => m.IsBuiltIn, "all migration-seeded rows must be marked IsBuiltIn");
 
         Dictionary<string, bool> expectedHardness = new()
@@ -145,7 +146,11 @@ public class CalibrationProviderMigrationHarnessTests
             ["Brass"] = false,
             ["HardenedSteel"] = true,
             ["StainlessSteel"] = false,
-            ["TungstenCarbide"] = true
+            ["TungstenCarbide"] = true,
+            ["Diamond"] = true,
+            ["Ruby"] = true,
+            ["PlatedCopper"] = false,
+            ["ToolSteel"] = true
         };
         materials.Select(m => m.Name).Should().BeEquivalentTo(expectedHardness.Keys, "seeded material names must match the legacy NozzleType enum members exactly");
         foreach (NozzleMaterial material in materials)

@@ -229,6 +229,18 @@ public class NozzleModelSeedDto
 
     public string NozzleType { get; set; } = "Brass";
 
+    /// <summary>
+    /// Optional hardness override: "Auto" (default, derived from NozzleType),
+    /// "Hardened", or "NotHardened".
+    /// </summary>
+    public string? HardnessOverride { get; set; }
+
+    /// <summary>
+    /// Thread/mount type determining hotend compatibility: "V6" (default), "Volcano",
+    /// "Revo", or "Proprietary".
+    /// </summary>
+    public string? NozzleInterface { get; set; }
+
     public string? Description { get; set; }
 
     public string? Url { get; set; }

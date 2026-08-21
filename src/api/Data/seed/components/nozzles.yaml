@@ -10,7 +10,11 @@
 # - manufacturer: Manufacturer name (must match entry in manufacturers.yaml)
 # - diameter: Nozzle diameter in mm (default: 0.4)
 # - maxTemp: Maximum operating temperature in °C
-# - nozzleType: Material type (Brass, HardenedSteel, StainlessSteel, Abrasive, TungstenCarbide)
+# - nozzleType: Material type. One of: Brass, HardenedSteel, StainlessSteel,
+#     TungstenCarbide, Abrasive, Diamond, Ruby, PlatedCopper, ToolSteel, Unknown
+# - hardnessOverride: Optional. Auto (default) derives hardness from nozzleType;
+#     use Hardened or NotHardened to pin it for a product the material list doesn't
+#     describe well. Hardness gates dispatch of abrasive filaments.
 # - nozzleInterface: Thread/mount type (V6, Volcano, Revo, Proprietary)
 # - description: Brief description of the nozzle model and its characteristics
 # - url: Product or information URL (optional)
@@ -579,3 +583,23 @@
   nozzleInterface: V6
   description: V6-style brass nozzle for Phrozen Arco
   url: https://www.phrozen3d.com
+
+# Diamondback Nozzles - polycrystalline diamond tip in a brass or copper body.
+# Diamond is hardened by default, so no hardnessOverride is needed here.
+- name: Diamondback V6 Nozzle
+  manufacturer: Diamondback
+  diameter: 0.4
+  maxTemp: 550
+  nozzleType: Diamond
+  nozzleInterface: V6
+  description: Polycrystalline diamond-tipped V6 nozzle for continuous abrasive printing
+  url: https://www.diamondbacknozzles.com
+
+- name: Diamondback Volcano Nozzle
+  manufacturer: Diamondback
+  diameter: 0.6
+  maxTemp: 550
+  nozzleType: Diamond
+  nozzleInterface: Volcano
+  description: Polycrystalline diamond-tipped Volcano nozzle for high-flow abrasive printing
+  url: https://www.diamondbacknozzles.com

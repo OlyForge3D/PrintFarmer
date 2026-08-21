@@ -27,6 +27,7 @@ import {
   MotionType,
   NozzleInterfaceType,
   NozzleType,
+  NozzleHardnessOverride,
   PrinterBackend,
   PrintJobStatus,
   ToolheadType,
@@ -65,8 +66,19 @@ describe('enum wire contract: PascalCase member-name strings', () => {
     expect(NozzleType.StainlessSteel).toBe('StainlessSteel');
     expect(NozzleType.TungstenCarbide).toBe('TungstenCarbide');
     expect(NozzleType.Abrasive).toBe('Abrasive');
+    expect(NozzleType.Diamond).toBe('Diamond');
+    expect(NozzleType.Ruby).toBe('Ruby');
+    expect(NozzleType.PlatedCopper).toBe('PlatedCopper');
+    expect(NozzleType.ToolSteel).toBe('ToolSteel');
     expect(NozzleType.Unknown).toBe('Unknown');
     expectPascalCaseNameStrings(NozzleType);
+  });
+
+  it('NozzleHardnessOverride matches infra/Domain/PrinterEnums.cs', () => {
+    expect(NozzleHardnessOverride.Auto).toBe('Auto');
+    expect(NozzleHardnessOverride.Hardened).toBe('Hardened');
+    expect(NozzleHardnessOverride.NotHardened).toBe('NotHardened');
+    expectPascalCaseNameStrings(NozzleHardnessOverride);
   });
 
   it('ToolheadType matches infra/Domain/ToolheadType.cs:9', () => {

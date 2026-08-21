@@ -230,6 +230,7 @@ public class DataExportService : IDataExportService
     {
         List<NozzleModelDefinition> nozzles = await _context.NozzleModelDefinitions
             .Include(n => n.Manufacturer)
+            .Include(n => n.NozzleMaterial)
             .ToListAsync(ct);
 
         return nozzles.Select(n => new NozzleModelExportDto
@@ -239,6 +240,8 @@ public class DataExportService : IDataExportService
             ManufacturerName = n.Manufacturer?.Name ?? "Unknown",
             Diameter = n.Diameter,
             MaxTemp = n.MaxTemp,
+            NozzleType = n.NozzleType.ToString(),
+            HardnessOverride = n.HardnessOverride.ToString(),
             NozzleInterface = (int)n.NozzleInterface,
             Description = n.Description
         }).ToList();

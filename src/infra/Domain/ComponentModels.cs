@@ -185,11 +185,25 @@ public class NozzleModelDefinition : HardwareModel
         : NozzleType.Unknown;
 
     /// <summary>
-    /// Whether this nozzle is hardened for abrasive filaments.
-    /// Computed from <see cref="NozzleMaterial"/> - not persisted to database.
+    /// Per-model override for <see cref="IsHardened"/>. Defaults to
+    /// <see cref="NozzleHardnessOverride.Auto"/>, which derives hardness from
+    /// <see cref="NozzleMaterial"/>.
+    /// </summary>
+    public NozzleHardnessOverride HardnessOverride { get; set; } = NozzleHardnessOverride.Auto;
+
+    /// <summary>
+    /// Whether this nozzle is hardened for abrasive filaments. Resolved from
+    /// <see cref="HardnessOverride"/>, falling back to the hardness recorded on the resolved
+    /// <see cref="NozzleMaterial"/> catalog row (data-driven, so custom materials participate
+    /// correctly). Not persisted to the database.
     /// </summary>
     [System.ComponentModel.DataAnnotations.Schema.NotMapped]
-    public bool IsHardened => NozzleMaterial?.IsHardened ?? false;
+    public bool IsHardened => HardnessOverride switch
+    {
+        NozzleHardnessOverride.Hardened => true,
+        NozzleHardnessOverride.NotHardened => false,
+        _ => NozzleMaterial?.IsHardened ?? false
+    };
 
     /// <summary>
     /// The nozzle interface type (determines which hotends this nozzle fits).

@@ -4608,6 +4608,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<double>("Diameter")
                         .HasColumnType("float");
 
+                    b.Property<int>("HardnessOverride")
+                        .HasColumnType("int");
+
                     b.Property<Guid>("ManufacturerId")
                         .HasColumnType("uniqueidentifier");
 

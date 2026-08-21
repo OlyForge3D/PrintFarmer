@@ -1,7 +1,9 @@
-﻿using Farm.Infrastructure;
+﻿using System.Globalization;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services.DataManagement;
 using Microsoft.EntityFrameworkCore;
@@ -195,6 +197,10 @@ public class DataSeedService : IDataSeedService
                 (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000003"), nameof(NozzleType.StainlessSteel), false, 300, "Stainless steel nozzle - food safe, not abrasion resistant"),
                 (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000004"), nameof(NozzleType.TungstenCarbide), true, 500, "Tungsten carbide nozzle - highly abrasion resistant"),
                 (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000005"), nameof(NozzleType.Abrasive), true, 500, "Generic abrasion-resistant nozzle material"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000006"), nameof(NozzleType.Diamond), true, 500, "Diamond-tipped nozzle - extreme abrasion resistance combined with high thermal conductivity"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000007"), nameof(NozzleType.Ruby), true, 300, "Ruby-tipped nozzle in a brass body - abrasion resistant while retaining good thermal conductivity"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000008"), nameof(NozzleType.PlatedCopper), false, 300, "Plated copper nozzle - excellent thermal conductivity for high-flow printing, not abrasion resistant"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000009"), nameof(NozzleType.ToolSteel), true, 500, "Tool steel nozzle - abrasion resistant with high temperature tolerance"),
             };
 
             _logger.LogInformation("[SeedData] Seeding {Count} built-in nozzle materials", builtInMaterials.Length);
@@ -910,21 +916,21 @@ public class DataSeedService : IDataSeedService
                 continue;
             }
 
-            // Resolve the nozzle material by name, falling back to Brass for missing/unrecognized values
-            Guid nozzleMaterialId = defaultMaterialId;
-            if (!string.IsNullOrEmpty(dto.NozzleType))
+            NozzleType nozzleType = ParseSeedEnum(dto.NozzleType, NozzleType.Brass, nameof(dto.NozzleType), dto.Name);
+            NozzleHardnessOverride hardnessOverride = ParseSeedEnum(
+                dto.HardnessOverride, NozzleHardnessOverride.Auto, nameof(dto.HardnessOverride), dto.Name);
+            NozzleInterfaceType nozzleInterface = ParseSeedEnum(
+                dto.NozzleInterface, NozzleInterfaceType.V6, nameof(dto.NozzleInterface), dto.Name);
+
+            // Resolve the parsed material enum to its NozzleMaterial catalog row by name. Built-in
+            // materials are seeded with names matching the enum member names (see #1824's data
+            // migration), so this is a direct name lookup once the enum itself has been safely parsed.
+            if (!materialsByName.TryGetValue(nozzleType.ToString(), out Guid nozzleMaterialId))
             {
-                string normalizedName = dto.NozzleType.Replace(" ", string.Empty);
-                if (materialsByName.TryGetValue(normalizedName, out Guid parsedMaterialId))
-                {
-                    nozzleMaterialId = parsedMaterialId;
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "[SeedData] Nozzle material '{NozzleType}' not found for nozzle '{Name}', defaulting to Brass",
-                        dto.NozzleType, dto.Name);
-                }
+                nozzleMaterialId = defaultMaterialId;
+                _logger.LogWarning(
+                    "[SeedData] Nozzle material '{NozzleType}' not found for nozzle '{Name}', defaulting to Brass",
+                    nozzleType, dto.Name);
             }
 
             NozzleModelDefinition? existing = await _context.NozzleModelDefinitions
@@ -940,6 +946,8 @@ public class DataSeedService : IDataSeedService
                     Diameter = dto.Diameter,
                     MaxTemp = dto.MaxTemp,
                     NozzleMaterialId = nozzleMaterialId,
+                    HardnessOverride = hardnessOverride,
+                    NozzleInterface = nozzleInterface,
                     Description = dto.Description,
                     Url = dto.Url
                 });
@@ -949,12 +957,58 @@ public class DataSeedService : IDataSeedService
                 existing.Diameter = dto.Diameter;
                 existing.MaxTemp = dto.MaxTemp;
                 existing.NozzleMaterialId = nozzleMaterialId;
+                existing.HardnessOverride = hardnessOverride;
+                existing.NozzleInterface = nozzleInterface;
                 existing.Description = dto.Description;
                 existing.Url = dto.Url;
             }
         }
 
         await _context.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Parses an enum-valued seed field, warning rather than silently falling back when the
+    /// value is unrecognized. Silent fallback is unsafe here: nozzle hardness gates whether
+    /// abrasive filament may be dispatched, so a typo must not quietly re-enable a nozzle the
+    /// operator excluded.
+    /// </summary>
+    /// <typeparam name="TEnum">The enum type to parse into.</typeparam>
+    /// <param name="rawValue">Raw YAML value; null or empty yields <paramref name="fallback"/> without warning.</param>
+    /// <param name="fallback">Value to use when the field is absent or unparseable.</param>
+    /// <param name="fieldName">Field name, for the warning message.</param>
+    /// <param name="nozzleName">Owning nozzle name, for the warning message.</param>
+    /// <returns>The parsed value, or <paramref name="fallback"/>.</returns>
+    private TEnum ParseSeedEnum<TEnum>(string? rawValue, TEnum fallback, string fieldName, string nozzleName)
+        where TEnum : struct, Enum
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return fallback;
+        }
+
+        // Normalize once, then guard and parse the SAME string. Checking the raw value while
+        // parsing the space-stripped one leaves a hole: "+ 5" fails the numeric guard (the
+        // sign is detached from its digits) but then parses as ordinal 5.
+        string normalized = rawValue.Replace(" ", string.Empty);
+
+        // Reject numeric input outright. Enum.TryParse happily maps "5" onto a defined
+        // member, so seed YAML could otherwise pin a material by ordinal and silently
+        // change meaning if the enum is ever renumbered. Enum.IsDefined below only rejects
+        // *undefined* ordinals, which is not the same guarantee.
+        bool isNumeric = long.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
+
+        if (!isNumeric &&
+            Enum.TryParse(normalized, true, out TEnum parsed) &&
+            Enum.IsDefined(parsed))
+        {
+            return parsed;
+        }
+
+        _logger.LogWarning(
+            "[SeedData] Unrecognized {Field} '{Value}' for nozzle '{Name}', using {Fallback}",
+            fieldName, LogSanitizer.Sanitize(rawValue), LogSanitizer.Sanitize(nozzleName), fallback);
+        return fallback;
     }
 
     private async Task SeedPrinterModelAliasesAsync(List<PrinterModelSeedDto> modelsData)

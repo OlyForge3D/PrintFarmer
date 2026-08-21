@@ -34,10 +34,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                 column: "Name",
                 unique: true);
 
-            // 2. Seed one built-in NozzleMaterial row per existing NozzleType enum member
-            //    (Brass=0, HardenedSteel=1, StainlessSteel=2, TungstenCarbide=3, Abrasive=4).
-            //    Note: the enum currently defines only these 5 members (plus Unknown=99, which
-            //    is not seeded as it represents "no material assigned" rather than a real one).
+            // 2. Seed one built-in NozzleMaterial row per NozzleType enum member (Brass=0,
+            //    HardenedSteel=1, StainlessSteel=2, TungstenCarbide=3, Abrasive=4, Diamond=5,
+            //    Ruby=6, PlatedCopper=7, ToolSteel=8). Unknown=99 is not seeded, as it represents
+            //    "no material assigned" rather than a real one.
             migrationBuilder.Sql(@"
                 INSERT INTO [NozzleMaterials] ([Id], [Name], [IsHardened], [DefaultMaxTemp], [IsBuiltIn], [Description])
                 VALUES
@@ -45,7 +45,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                     ('9f5a1c1e-0001-4a1a-8c1a-000000000002', 'HardenedSteel', 1, 300, 1, 'Hardened steel nozzle - abrasion resistant'),
                     ('9f5a1c1e-0001-4a1a-8c1a-000000000003', 'StainlessSteel', 0, 300, 1, 'Stainless steel nozzle - food safe, not abrasion resistant'),
                     ('9f5a1c1e-0001-4a1a-8c1a-000000000004', 'TungstenCarbide', 1, 500, 1, 'Tungsten carbide nozzle - highly abrasion resistant'),
-                    ('9f5a1c1e-0001-4a1a-8c1a-000000000005', 'Abrasive', 1, 500, 1, 'Generic abrasion-resistant nozzle material');
+                    ('9f5a1c1e-0001-4a1a-8c1a-000000000005', 'Abrasive', 1, 500, 1, 'Generic abrasion-resistant nozzle material'),
+                    ('9f5a1c1e-0001-4a1a-8c1a-000000000006', 'Diamond', 1, 500, 1, 'Diamond-tipped nozzle - extreme abrasion resistance combined with high thermal conductivity'),
+                    ('9f5a1c1e-0001-4a1a-8c1a-000000000007', 'Ruby', 1, 300, 1, 'Ruby-tipped nozzle in a brass body - abrasion resistant while retaining good thermal conductivity'),
+                    ('9f5a1c1e-0001-4a1a-8c1a-000000000008', 'PlatedCopper', 0, 300, 1, 'Plated copper nozzle - excellent thermal conductivity for high-flow printing, not abrasion resistant'),
+                    ('9f5a1c1e-0001-4a1a-8c1a-000000000009', 'ToolSteel', 1, 500, 1, 'Tool steel nozzle - abrasion resistant with high temperature tolerance');
             ");
 
             // 3. Add the new FK column as nullable so we can backfill it from the legacy
@@ -68,6 +72,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     WHEN 2 THEN 'StainlessSteel'
                     WHEN 3 THEN 'TungstenCarbide'
                     WHEN 4 THEN 'Abrasive'
+                    WHEN 5 THEN 'Diamond'
+                    WHEN 6 THEN 'Ruby'
+                    WHEN 7 THEN 'PlatedCopper'
+                    WHEN 8 THEN 'ToolSteel'
                     ELSE 'Brass'
                 END;
             ");
@@ -123,6 +131,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     WHEN 'StainlessSteel' THEN 2
                     WHEN 'TungstenCarbide' THEN 3
                     WHEN 'Abrasive' THEN 4
+                    WHEN 'Diamond' THEN 5
+                    WHEN 'Ruby' THEN 6
+                    WHEN 'PlatedCopper' THEN 7
+                    WHEN 'ToolSteel' THEN 8
                     ELSE 99
                 END
                 FROM [NozzleModelDefinitions] nmd
