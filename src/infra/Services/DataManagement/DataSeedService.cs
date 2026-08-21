@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure;
+﻿using System.Globalization;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
@@ -910,9 +911,14 @@ public class DataSeedService : IDataSeedService
             return fallback;
         }
 
-        // Enum.TryParse also accepts raw numeric text and any undefined numeric value, so
-        // Enum.IsDefined is required to reject e.g. "42" landing as an invalid enum.
-        if (Enum.TryParse(rawValue.Replace(" ", string.Empty), true, out TEnum parsed) &&
+        // Reject numeric input outright. Enum.TryParse happily maps "5" onto a defined
+        // member, so seed YAML could otherwise pin a material by ordinal and silently
+        // change meaning if the enum is ever renumbered. Enum.IsDefined below only rejects
+        // *undefined* ordinals, which is not the same guarantee.
+        bool isNumeric = long.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
+
+        if (!isNumeric &&
+            Enum.TryParse(rawValue.Replace(" ", string.Empty), true, out TEnum parsed) &&
             Enum.IsDefined(parsed))
         {
             return parsed;

@@ -175,32 +175,113 @@ public sealed class NozzleModelExportRoundTripTests
     }
 
     [Fact]
-    public async Task Import_UnrecognizedEnumNames_FallBackRatherThanCorruptingData()
+    public async Task Import_UnrecognizedEnumNames_RejectsRowRatherThanGuessing()
     {
-        // A hand-edited or newer-schema backup must not land an undefined enum value.
-        CatalogExportDto hostile = new()
+        // A present-but-unparseable value is corruption, not a legacy backup. Falling back
+        // would be actively unsafe here: "NotHardend" on a Diamond nozzle would resolve
+        // through Auto back to hardened, re-admitting a nozzle the operator excluded.
+        CatalogExportDto corrupt = new()
         {
-            Manufacturers = [new ManufacturerExportDto { Name = "Hostile Mfg" }],
+            Manufacturers = [new ManufacturerExportDto { Name = "Corrupt Mfg" }],
             Nozzles =
             [
                 new NozzleModelExportDto
                 {
-                    Name = "Hostile Nozzle",
-                    ManufacturerName = "Hostile Mfg",
+                    Name = "Corrupt Nozzle",
+                    ManufacturerName = "Corrupt Mfg",
+                    Diameter = 0.4,
+                    NozzleType = "Diamond",
+                    HardnessOverride = "NotHardend",
+                }
+            ],
+        };
+
+        ImportResponseDto result = await _importService.ImportCatalogAsync(corrupt, ImportMode.Merge);
+
+        result.Success.Should().BeFalse("a corrupt safety field must surface, not be silently defaulted");
+        result.Errors.Should().Contain(e => e.Contains("hardnessOverride", StringComparison.OrdinalIgnoreCase));
+        (await _targetContext.NozzleModelDefinitions.AnyAsync(n => n.Name == "Corrupt Nozzle"))
+            .Should().BeFalse("the row is skipped rather than imported with a guessed value");
+    }
+
+    [Fact]
+    public async Task Import_UnrecognizedNozzleType_RejectsRow()
+    {
+        CatalogExportDto corrupt = new()
+        {
+            Manufacturers = [new ManufacturerExportDto { Name = "Corrupt Mfg" }],
+            Nozzles =
+            [
+                new NozzleModelExportDto
+                {
+                    Name = "Unobtanium Nozzle",
+                    ManufacturerName = "Corrupt Mfg",
                     Diameter = 0.4,
                     NozzleType = "Unobtanium",
+                }
+            ],
+        };
+
+        ImportResponseDto result = await _importService.ImportCatalogAsync(corrupt, ImportMode.Merge);
+
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("nozzleType", StringComparison.OrdinalIgnoreCase));
+        (await _targetContext.NozzleModelDefinitions.AnyAsync(n => n.Name == "Unobtanium Nozzle"))
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Import_UndefinedNumericEnumValue_RejectsRow()
+    {
+        // Enum.TryParse accepts raw numeric text and undefined ordinals; Enum.IsDefined
+        // is what stops "42" landing as an invalid enum in the database.
+        CatalogExportDto corrupt = new()
+        {
+            Manufacturers = [new ManufacturerExportDto { Name = "Corrupt Mfg" }],
+            Nozzles =
+            [
+                new NozzleModelExportDto
+                {
+                    Name = "Numeric Nozzle",
+                    ManufacturerName = "Corrupt Mfg",
+                    Diameter = 0.4,
                     HardnessOverride = "42",
                 }
             ],
         };
 
-        ImportResponseDto result = await _importService.ImportCatalogAsync(hostile, ImportMode.Merge);
-        result.Success.Should().BeTrue(because: string.Join("; ", result.Errors));
+        ImportResponseDto result = await _importService.ImportCatalogAsync(corrupt, ImportMode.Merge);
 
-        NozzleModelDefinition restored = (await _targetContext.NozzleModelDefinitions
-            .FirstOrDefaultAsync(n => n.Name == "Hostile Nozzle"))!;
-        restored.NozzleType.Should().Be(NozzleType.Brass);
-        restored.HardnessOverride.Should().Be(NozzleHardnessOverride.Auto);
-        Enum.IsDefined(restored.HardnessOverride).Should().BeTrue();
+        result.Success.Should().BeFalse();
+        (await _targetContext.NozzleModelDefinitions.AnyAsync(n => n.Name == "Numeric Nozzle"))
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Import_DefinedOrdinalAsString_IsRejectedBecauseContractIsNames()
+    {
+        // "1" maps onto a *defined* member, so Enum.IsDefined alone would accept it. The
+        // export contract is enum names precisely so a future renumbering cannot remap
+        // restored rows; accepting ordinals on input would silently undo that guarantee.
+        CatalogExportDto ordinal = new()
+        {
+            Manufacturers = [new ManufacturerExportDto { Name = "Corrupt Mfg" }],
+            Nozzles =
+            [
+                new NozzleModelExportDto
+                {
+                    Name = "Ordinal Nozzle",
+                    ManufacturerName = "Corrupt Mfg",
+                    Diameter = 0.4,
+                    HardnessOverride = "1",
+                }
+            ],
+        };
+
+        ImportResponseDto result = await _importService.ImportCatalogAsync(ordinal, ImportMode.Merge);
+
+        result.Success.Should().BeFalse();
+        (await _targetContext.NozzleModelDefinitions.AnyAsync(n => n.Name == "Ordinal Nozzle"))
+            .Should().BeFalse();
     }
 }
