@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.Globalization;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
@@ -69,6 +70,77 @@ public sealed class SliceJobErrorDetailVisibilityTests : IAsyncLifetime
 
         _ = status.ErrorMessage.Should().Be("Slicing failed.");
         _ = status.ErrorDetail.Should().Be(RealErrorDetail, "admins must be able to diagnose worker failures like issue #1768 without shelling into a worker");
+    }
+
+    [Fact(DisplayName = "The worker's real /fail error message is persisted and exposed to a farm admin via errorDetail")]
+    public async Task FailAsync_ThroughRealEndpoint_PersistsWorkerMessage_AdminSeesErrorDetail()
+    {
+        using HttpClient nonAdminClient = await _factory.CreateOperatorClientAsync("queue", "read", username: "error-detail-endpoint-owner");
+        Guid ownerId = await GetUserIdAsync("error-detail-endpoint-owner");
+        Guid jobId = await SubmitJobAsync(ownerId);
+
+        using HttpClient worker = await _factory.CreateWorkerClientAsync(
+            workerName: "Error Detail Endpoint Worker",
+            username: "error-detail-endpoint-worker",
+            email: "error-detail-endpoint-worker@example.com");
+        WorkerSliceJobResponse claimed = await ClaimSuccessfullyAsync(worker, jobId);
+
+        HttpResponseMessage failResponse = await SendFailAsync(worker, claimed, RealErrorDetail);
+        _ = failResponse.StatusCode.Should().Be(HttpStatusCode.OK, await failResponse.Content.ReadAsStringAsync());
+
+        // The real worker message must land in the domain row, not the hardcoded placeholder that
+        // FailAsync used to persist regardless of what the worker reported.
+        await using AsyncServiceScope verifyScope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        SliceJob persisted = await verifyDb.SliceJobs.AsNoTracking().SingleAsync(job => job.Id == jobId);
+        _ = persisted.ErrorMessage.Should().Be(RealErrorDetail);
+
+        using HttpClient adminClient = await _factory.CreateAdminClientAsync();
+        HttpResponseMessage adminResponse = await adminClient.GetAsync($"/api/slice/{jobId}");
+        _ = adminResponse.StatusCode.Should().Be(HttpStatusCode.OK, await adminResponse.Content.ReadAsStringAsync());
+        SliceJobStatusResponse adminStatus = await adminResponse.Content.ReadFromJsonAsync<SliceJobStatusResponse>()
+            ?? throw new InvalidOperationException("Missing status response.");
+        _ = adminStatus.ErrorDetail.Should().Be(RealErrorDetail, "a farm admin must see the real diagnostics reported by the worker");
+        _ = adminStatus.ErrorMessage.Should().Be("Slicing failed.");
+
+        HttpResponseMessage nonAdminResponse = await nonAdminClient.GetAsync($"/api/slice/{jobId}");
+        _ = nonAdminResponse.StatusCode.Should().Be(HttpStatusCode.OK, await nonAdminResponse.Content.ReadAsStringAsync());
+        SliceJobStatusResponse nonAdminStatus = await nonAdminResponse.Content.ReadFromJsonAsync<SliceJobStatusResponse>()
+            ?? throw new InvalidOperationException("Missing status response.");
+        _ = nonAdminStatus.ErrorMessage.Should().Be("Slicing failed.");
+        _ = nonAdminStatus.ErrorDetail.Should().BeNull("non-admins must never see worker-internal paths or filenames");
+    }
+
+    private async Task<WorkerSliceJobResponse> ClaimSuccessfullyAsync(HttpClient worker, Guid jobId)
+    {
+        HttpResponseMessage response = await worker.PostAsJsonAsync(
+            "/api/slice/claim",
+            new ClaimJobRequest
+            {
+                WorkerId = Guid.Parse(worker.DefaultRequestHeaders.GetValues(WorkerLeaseHeaders.WorkerId).Single()),
+                Capabilities = ["orcaslicer", "orcaslicer-upstream"],
+                LeaseDurationSeconds = 300,
+            });
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        WorkerSliceJobResponse claimed = await response.Content.ReadFromJsonAsync<WorkerSliceJobResponse>()
+            ?? throw new InvalidOperationException("Missing claim response.");
+        _ = claimed.Id.Should().Be(jobId, "the only queued job in this test must be the one claimed");
+        _ = worker.DefaultRequestHeaders.Remove(WorkerClaimHeaders.ClaimToken);
+        worker.DefaultRequestHeaders.Add(WorkerClaimHeaders.ClaimToken, claimed.ClaimToken.ToString());
+        return claimed;
+    }
+
+    private static async Task<HttpResponseMessage> SendFailAsync(HttpClient worker, WorkerSliceJobResponse claimed, string errorMessage)
+    {
+        using HttpRequestMessage message = new(HttpMethod.Post, $"/api/slice/{claimed.Id}/fail")
+        {
+            Content = JsonContent.Create(new FailSliceJobRequest(errorMessage)),
+        };
+        message.Headers.Add(WorkerLeaseHeaders.LeaseToken, claimed.LeaseToken.ToString());
+        message.Headers.Add(
+            WorkerLeaseHeaders.LeaseFence,
+            claimed.LeaseFence.ToString(CultureInfo.InvariantCulture));
+        return await worker.SendAsync(message);
     }
 
     private async Task<Guid> GetUserIdAsync(string username)

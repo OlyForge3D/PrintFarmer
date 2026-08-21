@@ -644,18 +644,21 @@ public partial class SliceJobController(
         [FromHeader(Name = WorkerClaimHeaders.ClaimToken)] Guid claimToken,
         CancellationToken ct)
     {
-        _ = request;
         (WorkerJobLease? lease, IActionResult? failure) = await AuthorizeWorkerMutationAsync(id, ct);
         if (failure is not null)
         {
             return failure;
         }
 
+        string errorMessage = string.IsNullOrWhiteSpace(request.ErrorMessage)
+            ? "Slicing worker reported a failure."
+            : request.ErrorMessage;
+
         bool failed = await _jobRepository.TryFailForActiveLeaseAsync(
             id,
             lease!.Worker.Id,
             claimToken,
-            "Slicing worker reported a failure.",
+            errorMessage,
             ct);
         if (!failed)
         {
