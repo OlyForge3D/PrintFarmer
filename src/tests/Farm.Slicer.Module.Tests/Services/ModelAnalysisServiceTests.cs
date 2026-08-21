@@ -139,17 +139,21 @@ public class ModelAnalysisServiceTests : IDisposable
         // doesn't need to allocate hundreds of megabytes of real bytes; if the ceiling weren't
         // enforced before parsing, the binary-STL path would try to read a phantom triangle count
         // and fail with a different, non-size-related error instead.
+        //
+        // The ceiling (600 MiB) intentionally sits above the /api/3d-models/upload endpoint's own
+        // 512,000,000-byte request cap (see ModelAnalysisService.MaxStlFileSizeBytes remarks), so
+        // this test uses a size just over that ceiling rather than the endpoint cap itself.
         string path = Path.Join(_tempDir, "oversized.stl");
         using (FileStream fs = new(path, FileMode.Create, FileAccess.Write))
         {
-            fs.SetLength(256L * 1024 * 1024 + 1);
+            fs.SetLength(600L * 1024 * 1024 + 1);
         }
 
         ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".stl", CancellationToken.None);
 
         Assert.NotNull(result);
         Assert.False(result!.IsValid);
-        Assert.Null(result.TriangleCount);
+        Assert.Equal(0, result.TriangleCount);
         Assert.NotNull(result.ValidationErrors);
         Assert.Contains(result.ValidationErrors!, e => e.Contains("size", StringComparison.OrdinalIgnoreCase));
     }

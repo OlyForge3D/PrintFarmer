@@ -23,14 +23,20 @@ public class ModelAnalysisService : IModelAnalysisService
     private const long MaxArchiveUncompressedBytes = 256L * 1024 * 1024;
 
     /// <summary>
-    /// Maximum accepted STL file size, in bytes. Mirrors <see cref="MaxArchiveUncompressedBytes"/>
-    /// for 3MF: the <c>/api/3d-models/upload</c> endpoint already caps request bodies well above
-    /// this (512,000,000 bytes, per #1838 review), but that cap lives outside this service and
-    /// isn't enforced for the metadata backfill path, which reads whatever files already exist on
-    /// disk regardless of size (#1837). This is defense-in-depth so the guarantee doesn't depend
-    /// solely on the upload endpoint's limit.
+    /// Maximum accepted STL file size, in bytes. This is a true backstop, not a validity gate:
+    /// a rejected file becomes <c>IsValid: false</c>, which the metadata backfill service persists
+    /// onto <c>Model3DFile.IsValid</c> — a column several repository queries use to filter model
+    /// *visibility* (e.g. <c>ListValidAsync</c>), not just printability. So this ceiling MUST sit
+    /// above every size the <c>/api/3d-models/upload</c> endpoint already accepts (500 MB model +
+    /// 10 MiB thumbnail + multipart overhead, capped at 512,000,000 bytes total per the #1838
+    /// review), or a large-but-legitimately-uploaded STL would silently disappear from listings
+    /// after the next backfill pass (caught in #1837 follow-up review by Bishop). The value below
+    /// (600 MiB) is comfortably above that endpoint cap, so it only trips for files that could
+    /// never have entered through the upload endpoint in the first place — i.e. it protects only
+    /// the metadata backfill path, which reads whatever already exists on disk regardless of size
+    /// and has no equivalent request-size gate of its own.
     /// </summary>
-    private const long MaxStlFileSizeBytes = 256L * 1024 * 1024;
+    private const long MaxStlFileSizeBytes = 600L * 1024 * 1024;
 
     /// <summary>Maximum accepted archive compression ratio before the input is treated as a bomb.</summary>
     private const long MaxArchiveCompressionRatio = 200;
@@ -82,7 +88,7 @@ public class ModelAnalysisService : IModelAnalysisService
             // mirrors the 3MF archive-size guard (MaxArchiveUncompressedBytes) so this ceiling
             // doesn't depend solely on the upload endpoint's request-size cap, and also protects
             // the backfill path, which reads arbitrary existing files from disk (#1837).
-            return new ModelAnalysisResult(null, null, null, null, IsValid: false, ValidationErrors: ["STL file exceeds the accepted size budget"]);
+            return new ModelAnalysisResult(null, null, null, 0, IsValid: false, ValidationErrors: ["STL file exceeds the accepted size budget"]);
         }
 
         byte[] header = new byte[80];
