@@ -305,6 +305,144 @@ public class SlicersControllerUnitTests
         _ = json.Should().Contain("\"latest\":\"2.4.2\"");
     }
 
+    [Fact(DisplayName = "GET /api/slicers/engines drops a version whose only worker row is stale beyond the configured-freshness window (issue #1812)")]
+    public async Task ListEngines_VersionWithOnlyOrphanedStaleWorker_IsExcludedEntirely()
+    {
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca242 =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
+        _ = orca242.SetupGet(l => l.SlicerName).Returns("OrcaSlicer");
+        _ = orca242.SetupGet(l => l.SlicerVersion).Returns("2.4.2");
+
+        // 2.3.1 HAD a worker registered at some point, but that worker was
+        // removed from the deployment (container deleted / feature flag
+        // turned off) long ago and never deregistered — the exact repro from
+        // issue #1812. Its row's LastSeen is far older than
+        // WorkerStatus.ConfiguredFreshnessSeconds (7 days), so it must no
+        // longer count as "configured" even though a row still exists.
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca231 =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
+        _ = orca231.SetupGet(l => l.SlicerName).Returns("OrcaSlicer");
+        _ = orca231.SetupGet(l => l.SlicerVersion).Returns("2.3.1");
+
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry> registry =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>();
+        _ = registry.Setup(r => r.ListAllLibraries())
+            .Returns(new[] { orca242.Object, orca231.Object });
+
+        Farm.Slicer.Module.Domain.SlicerService freshSvc = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "orca-2.4.2",
+            SlicerType = (int)Farm.Slicer.Module.Domain.SlicerType.OrcaSlicer,
+            Version = "2.4.2",
+            Status = "Online",
+            Host = "http://worker-2-4-2:5000",
+            LastSeen = DateTime.UtcNow,
+        };
+        Farm.Slicer.Module.Domain.SlicerService orphanedSvc = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "orca-2.3.1-removed",
+            SlicerType = (int)Farm.Slicer.Module.Domain.SlicerType.OrcaSlicer,
+            Version = "2.3.1",
+            Status = "Offline",
+            Host = "http://worker-2-3-1:5000",
+            LastSeen = DateTime.UtcNow.AddSeconds(-(Farm.Slicer.Module.Domain.WorkerStatus.ConfiguredFreshnessSeconds + 60)),
+        };
+        Mock<ISlicersService> service = new Mock<ISlicersService>();
+        _ = service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<Farm.Slicer.Module.Domain.SlicerService>)new[] { freshSvc, orphanedSvc });
+
+        SlicersController controller = new SlicersController(service.Object, registry.Object);
+        controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+
+        IActionResult result = await controller.ListEnginesAsync();
+        string json = System.Text.Json.JsonSerializer.Serialize((result as OkObjectResult)!.Value);
+
+        // 2.3.1's only row is stale beyond the configured-freshness window →
+        // treated as orphaned/reaped and absent from the payload entirely,
+        // even though a SlicerService row for it still physically exists.
+        _ = json.Should().NotContain("2.3.1");
+        // 2.4.2 is fresh and online → remains, available, and is latest.
+        _ = json.Should().Contain("\"version\":\"2.4.2\",\"available\":true");
+        _ = json.Should().Contain("\"latest\":\"2.4.2\"");
+    }
+
+    [Fact(DisplayName = "GET /api/slicers/engines counts a recently-seen Offline row as configured (freshness gate is independent of Online status, issue #1812)")]
+    public async Task ListEngines_RecentOfflineRow_StillCountsAsConfigured()
+    {
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca24 =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
+        _ = orca24.SetupGet(l => l.SlicerName).Returns("OrcaSlicer");
+        _ = orca24.SetupGet(l => l.SlicerVersion).Returns("2.4.2");
+
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry> registry =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>();
+        _ = registry.Setup(r => r.ListAllLibraries())
+            .Returns(new[] { orca24.Object });
+
+        // Offline, but LastSeen is recent (1 hour ago) — well within the 7-day
+        // configured-freshness window. Must still count as "configured" (and
+        // therefore stay listed as an unavailable option) — the freshness
+        // gate added for #1812 must not be conflated with the separate
+        // 60-second Online/available freshness gate.
+        Farm.Slicer.Module.Domain.SlicerService svc = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "orca-2.4.2-recently-offline",
+            SlicerType = (int)Farm.Slicer.Module.Domain.SlicerType.OrcaSlicer,
+            Version = "2.4.2",
+            Status = "Offline",
+            Host = "http://worker:5000",
+            LastSeen = DateTime.UtcNow.AddHours(-1),
+        };
+        Mock<ISlicersService> service = new Mock<ISlicersService>();
+        _ = service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<Farm.Slicer.Module.Domain.SlicerService>)new[] { svc });
+
+        SlicersController controller = new SlicersController(service.Object, registry.Object);
+        controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+
+        IActionResult result = await controller.ListEnginesAsync();
+        string json = System.Text.Json.JsonSerializer.Serialize((result as OkObjectResult)!.Value);
+
+        // Configured (recent row) but offline right now → stays listed, unavailable.
+        _ = json.Should().Contain("\"version\":\"2.4.2\",\"available\":false");
+        _ = json.Should().Contain("\"latest\":null");
+    }
+
+    [Fact(DisplayName = "GET /api/slicers/engines with zero SlicerService rows keeps every registry version available and latest null (legacy/fresh-install fallback, issue #1812)")]
+    public async Task ListEngines_NoServiceRowsAtAll_KeepsAllVersionsAvailableWithNullLatest()
+    {
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca242 =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
+        _ = orca242.SetupGet(l => l.SlicerName).Returns("OrcaSlicer");
+        _ = orca242.SetupGet(l => l.SlicerVersion).Returns("2.4.2");
+
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry> registry =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>();
+        _ = registry.Setup(r => r.ListAllLibraries())
+            .Returns(new[] { orca242.Object });
+
+        // No SlicerService rows registered at all (fresh install / legacy
+        // single-worker deployment). This must remain unaffected by the new
+        // #1812 freshness gate: there is nothing to filter against, so every
+        // registry version stays available and `latest` stays null so jobs
+        // remain unpinned for a generic-capability worker.
+        Mock<ISlicersService> service = new Mock<ISlicersService>();
+        _ = service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<Farm.Slicer.Module.Domain.SlicerService>)Array.Empty<Farm.Slicer.Module.Domain.SlicerService>());
+
+        SlicersController controller = new SlicersController(service.Object, registry.Object);
+        controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+
+        IActionResult result = await controller.ListEnginesAsync();
+        string json = System.Text.Json.JsonSerializer.Serialize((result as OkObjectResult)!.Value);
+
+        _ = json.Should().Contain("\"version\":\"2.4.2\",\"available\":true");
+        _ = json.Should().Contain("\"latest\":null");
+    }
+
     [Fact(DisplayName = "GET /api/slicers/engines keeps a configured-but-offline version listed and disabled (issue #1772)")]
     public async Task ListEngines_ConfiguredVersionThatIsOffline_StaysListedButUnavailable()
     {

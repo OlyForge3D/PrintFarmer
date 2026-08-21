@@ -138,6 +138,22 @@ public static class WorkerStatus
     /// </summary>
     public const int OnlineFreshnessSeconds = 60;
 
+    /// <summary>
+    /// Maximum age of a <c>SlicerService</c> row's <c>LastSeen</c> heartbeat before it
+    /// stops counting as "configured" for <c>GET /api/slicers/engines</c> (issue #1812).
+    /// A worker removed from a deployment (container deleted, feature flag disabled,
+    /// etc.) never explicitly deregisters, so its row is otherwise immortal and keeps a
+    /// dead version reported as "configured but offline" forever. Seven days is far
+    /// longer than <see cref="OnlineFreshnessSeconds"/> so a worker that is merely
+    /// restarting, mid-deploy, or down over a long weekend is never mistaken for
+    /// reaped — only a row that has not heartbeated in a week, which realistically
+    /// means the worker is gone, ages out of the "configured" set. This is a read-time
+    /// filter only: rows are never deleted, so the fresh-install/legacy fallback (zero
+    /// rows exist) and the "engine has zero configured versions" whole-group fallback
+    /// in <c>SlicersController.ListEnginesAsync</c> both stay intact untouched.
+    /// </summary>
+    public const int ConfiguredFreshnessSeconds = 7 * 24 * 60 * 60;
+
     public const string Offline = "Offline";
     public const string Online = "Online";
     public const string Busy = "Busy";

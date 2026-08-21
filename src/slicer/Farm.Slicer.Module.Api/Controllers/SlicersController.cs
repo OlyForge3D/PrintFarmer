@@ -56,6 +56,13 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
     /// is kept and reported as available so the version pin remains usable.
     /// Once at least one row exists, both the filter and the availability flag
     /// are gated by that row data — offline services are honoured.
+    /// "Configured" also requires the row to have heartbeated within
+    /// <see cref="WorkerStatus.ConfiguredFreshnessSeconds"/> (issue #1812): a
+    /// worker removed from a deployment never explicitly deregisters, so
+    /// without this gate its row would be immortal and keep a dead version
+    /// reported as "configured but offline" forever, permanently defeating
+    /// the drop filter above. Rows are never deleted — this only changes
+    /// which rows count as "seen" for this read.
     /// </summary>
     [HttpGet("engines")]
     public async Task<IActionResult> ListEnginesAsync()
@@ -80,12 +87,27 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
 
         // "Configured" is any service row for (engine, version), in ANY status
         // (Online or Offline) — this answers "has a worker for this version
-        // ever been registered", not "is it up right now". Unlike `online`
-        // above, this set is NOT freshness-gated: a worker that registered a
-        // version and later went stale/offline still proves that version was
-        // set up, which is exactly the distinction issue #1772 asks for.
+        // ever been registered", not "is it up right now". A worker that
+        // registered a version and later went stale/offline still proves that
+        // version was set up, which is exactly the distinction issue #1772
+        // asks for. Unlike `online` above (60s freshness), this set uses a
+        // much longer freshness gate (7 days, WorkerStatus.ConfiguredFreshnessSeconds)
+        // rather than none at all: a worker removed from a deployment (its
+        // container deleted, its feature flag disabled — see issue #1812)
+        // never explicitly deregisters, so its row would otherwise be
+        // immortal and keep a dead version reported as "configured but
+        // offline" forever, permanently defeating the #1792 drop filter
+        // below. The 7-day window is long enough that a worker merely
+        // restarting, mid-deploy, or down over a long weekend is never
+        // mistaken for reaped; only a row silent for a full week — which
+        // realistically means the worker is gone — ages out. Rows are never
+        // deleted by this gate; it only changes what counts as "seen" for
+        // this read, so the fresh-install/legacy fallback (`anyServiceRows`)
+        // and the whole-engine "zero configured versions" fallback below are
+        // unaffected.
+        DateTime configuredCutoff = DateTime.UtcNow.AddSeconds(-WorkerStatus.ConfiguredFreshnessSeconds);
         HashSet<(string Engine, string Version)> configured = services
-            .Where(s => !string.IsNullOrWhiteSpace(s.Version))
+            .Where(s => !string.IsNullOrWhiteSpace(s.Version) && s.LastSeen >= configuredCutoff)
             .Select(s => (Engine: SlicerTypeToEngineName(s.SlicerType), Version: s.Version!.Trim()))
             .Where(t => !string.IsNullOrEmpty(t.Engine))
             .ToHashSet();
