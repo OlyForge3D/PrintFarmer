@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   mentionsHighFlow,
+  resolveHighFlow,
   stripNozzleSuffix,
   buildMachineProfileLabels,
   isProcessProfileCoreOneVariantCompatible,
@@ -139,6 +140,25 @@ describe('isProcessProfileCoreOneVariantCompatible', () => {
     expect(() => isProcessProfileCoreOneVariantCompatible('0.20mm @CORE One HF', allMalformed, false)).not.toThrow();
     expect(isProcessProfileCoreOneVariantCompatible('0.20mm @CORE One HF', allMalformed, false)).toBe(false);
     expect(isProcessProfileCoreOneVariantCompatible('0.20mm @CORE One HF', allMalformed, true)).toBe(true);
+  });
+});
+
+describe('resolveHighFlow', () => {
+  // #1780: this is the field that exists specifically so the backend-derived
+  // signal can OVERRIDE the name heuristic. Every case here deliberately makes
+  // the flag and the name disagree — the only way to prove `resolveHighFlow`
+  // truly prefers the flag rather than happening to agree with the fallback.
+  it('prefers a true flag even when the name does not mention HF', () => {
+    expect(resolveHighFlow(true, 'Prusa CORE One 0.4 nozzle')).toBe(true);
+  });
+
+  it('prefers a false flag even when the name mentions HF', () => {
+    expect(resolveHighFlow(false, 'Prusa CORE One HF 0.4 nozzle')).toBe(false);
+  });
+
+  it('falls back to the name heuristic when the flag is undefined', () => {
+    expect(resolveHighFlow(undefined, 'Prusa CORE One HF 0.4 nozzle')).toBe(true);
+    expect(resolveHighFlow(undefined, 'Prusa CORE One 0.4 nozzle')).toBe(false);
   });
 });
 

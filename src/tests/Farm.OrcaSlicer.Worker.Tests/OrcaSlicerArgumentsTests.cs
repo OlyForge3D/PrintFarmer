@@ -373,6 +373,271 @@ public class OrcaSlicerArgumentsTests
 
     #endregion
 
+    #region Non-uniform scale (#1799)
+
+    /// <summary>The reproduction from issue #1799: X scaled 200%, Y and Z left at 100%, no
+    /// custom position (model sits at the plate origin).</summary>
+    private const string NonUniformScaleAtOrigin = """{"rotation":[0,0,0],"scale":[2,1,1],"position":[0,0,0]}""";
+
+    /// <summary>
+    /// A non-uniform scale needs embedding for the same reason a custom position does:
+    /// OrcaSlicer 2.4.2's CLI <c>--scale</c> is a single value, so per-axis scale can only be
+    /// expressed through the 3MF project matrix. This is the fix for the common case in #1799
+    /// — a model at the plate origin no longer silently flattens to uniform scale.
+    /// </summary>
+    [Fact]
+    public void NonUniformScale_SingleModelAtOrigin_UsesThreeMfProject()
+    {
+        PlacementPlan plan = PlanPlacement(
+            NonUniformScaleAtOrigin,
+            modelFileTransforms: null,
+            modelPaths: [ModelStl],
+            bedCenterKnown: true);
+
+        plan.Strategy.Should().Be(PlacementStrategy.ThreeMfProject);
+        plan.ArrangeFlag.Should().Be("--arrange 0");
+        plan.TransformFlags.Should().BeEmpty("scale is baked into the 3MF matrix, per-axis and all");
+        plan.PositionDropped.Should().BeFalse();
+        plan.NonUniformScaleDropped.Should().BeFalse("the 3MF matrix honours per-axis scale, so nothing is dropped");
+        plan.ModelTransforms.Should().ContainSingle().Which.Should().Be(NonUniformScaleAtOrigin);
+    }
+
+    /// <summary>
+    /// When the 3MF path is unavailable (no bed centre), the non-uniform scale genuinely
+    /// cannot be expressed on OrcaSlicer 2.4.2's CLI — <c>--scale</c> is a single value.
+    /// <see cref="PlacementPlan.NonUniformScaleDropped"/> must record the degradation so the
+    /// caller logs it rather than silently flattening the model (acceptance criteria in #1799).
+    /// </summary>
+    [Fact]
+    public void NonUniformScale_WithoutBedGeometry_FallsBackToAutoArrangeAndReportsDrop()
+    {
+        PlacementPlan plan = PlanPlacement(
+            NonUniformScaleAtOrigin,
+            modelFileTransforms: null,
+            modelPaths: [ModelStl],
+            bedCenterKnown: false);
+
+        plan.Strategy.Should().Be(PlacementStrategy.AutoArrange);
+        plan.ArrangeFlag.Should().Be("--arrange 1");
+        plan.NonUniformScaleDropped.Should().BeTrue();
+
+        // The model was never given a custom position, so this fallback did not lose any
+        // layout — only scale. PositionDropped must stay false here, or the caller logs a
+        // misleading "requested layout could not be embedded" warning for a job that never
+        // asked for one (issue #1799 review feedback).
+        plan.PositionDropped.Should().BeFalse(
+            "only scale, not position, triggered this fallback");
+
+        // Best-effort isotropic approximation (scale[0]) still ships rather than nothing.
+        string args = ComposeForPlan(plan, ProjectThreeMf, ModelStl);
+        args.Should().Contain("--scale 2.0000");
+        args.Should().NotContain("--center");
+    }
+
+    /// <summary>
+    /// OBJ/PLY/STEP/STP cannot be re-meshed into a 3MF project (only STL can), so a
+    /// non-uniform scale on one of these inputs must also be reported as dropped.
+    /// </summary>
+    [Fact]
+    public void NonUniformScale_NonStlInput_FallsBackToAutoArrangeAndReportsDrop()
+    {
+        PlacementPlan plan = PlanPlacement(
+            NonUniformScaleAtOrigin,
+            modelFileTransforms: null,
+            modelPaths: ["/work/model.obj"],
+            bedCenterKnown: true);
+
+        plan.Strategy.Should().Be(PlacementStrategy.AutoArrange);
+        plan.NonUniformScaleDropped.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// A 3MF input already carries its own placement (<see cref="PlacementStrategy.SourcePlacement"/>),
+    /// but there is no project being built here to bake a per-axis scale into, so the CLI
+    /// flags still flatten it — and that must be reported.
+    /// </summary>
+    [Fact]
+    public void NonUniformScale_ThreeMfInput_SourcePlacementReportsDrop()
+    {
+        PlacementPlan plan = PlanPlacement(
+            NonUniformScaleAtOrigin,
+            modelFileTransforms: null,
+            modelPaths: ["/work/model.3mf"],
+            bedCenterKnown: true);
+
+        plan.Strategy.Should().Be(PlacementStrategy.SourcePlacement);
+        plan.NonUniformScaleDropped.Should().BeTrue();
+    }
+
+    /// <summary>No regression for the uniform-scale case: it never needs embedding on its own
+    /// and is never reported as dropped.</summary>
+    [Fact]
+    public void UniformScale_AtOrigin_KeepsAutoArrangeAndNeverReportsDrop()
+    {
+        string uniform = """{"rotation":[0,0,0],"scale":[2,2,2],"position":[0,0,0]}""";
+
+        PlacementPlan plan = PlanPlacement(
+            uniform,
+            modelFileTransforms: null,
+            modelPaths: [ModelStl],
+            bedCenterKnown: true);
+
+        plan.Strategy.Should().Be(PlacementStrategy.AutoArrange);
+        plan.NonUniformScaleDropped.Should().BeFalse();
+
+        string args = ComposeForPlan(plan, ProjectThreeMf, ModelStl);
+        args.Should().Contain("--scale 2.0000");
+    }
+
+    /// <summary>
+    /// When a 3MF project cannot be built at runtime, downgrading to auto-arrange must also
+    /// recover — and report — a non-uniform scale as dropped, alongside the existing position
+    /// drop.
+    /// </summary>
+    [Fact]
+    public void DowngradeToAutoArrange_NonUniformScale_ReportsDrop()
+    {
+        string nonUniformAndPositioned = """{"rotation":[0,0,0],"scale":[2,1,1],"position":[30,0,0]}""";
+
+        PlacementPlan plan = PlanPlacement(
+            nonUniformAndPositioned,
+            modelFileTransforms: null,
+            modelPaths: [ModelStl],
+            bedCenterKnown: true);
+        plan.Strategy.Should().Be(PlacementStrategy.ThreeMfProject);
+
+        PlacementPlan downgraded = DowngradeToAutoArrange(plan);
+
+        downgraded.Strategy.Should().Be(PlacementStrategy.AutoArrange);
+        downgraded.PositionDropped.Should().BeTrue();
+        downgraded.NonUniformScaleDropped.Should().BeTrue();
+        downgraded.TransformFlags.Should().Contain("--scale 2.0000");
+    }
+
+    /// <summary>
+    /// A secondary model's non-uniform scale must still be reported as dropped on downgrade,
+    /// even though the CLI can only ever carry the *primary* model's flags — the drop
+    /// detection must not silently ignore anything but the first model in the job (issue
+    /// #1799 review feedback).
+    /// </summary>
+    [Fact]
+    public void DowngradeToAutoArrange_SecondaryModelNonUniformScale_StillReportsDrop()
+    {
+        string uniformPrimary = """{"rotation":[0,0,0],"scale":[1,1,1],"position":[0,0,0]}""";
+        string nonUniformSecondary = """{"rotation":[0,0,0],"scale":[2,1,1],"position":[0,0,0]}""";
+
+        PlacementPlan plan = PlanPlacement(
+            modelTransformJson: null,
+            modelFileTransforms: [uniformPrimary, nonUniformSecondary],
+            modelPaths: [ModelStl, "/work/model2.stl"],
+            bedCenterKnown: true);
+        plan.Strategy.Should().Be(PlacementStrategy.ThreeMfProject);
+
+        PlacementPlan downgraded = DowngradeToAutoArrange(plan);
+
+        downgraded.Strategy.Should().Be(PlacementStrategy.AutoArrange);
+        downgraded.NonUniformScaleDropped.Should().BeTrue(
+            "the secondary model's non-uniform scale is lost by this downgrade too, even though " +
+            "only the primary model's flags ever reach the CLI");
+
+        // Unchanged, pre-existing CLI limitation: only the primary (uniform) model's flags are
+        // recoverable, so no --scale flag beyond the default is expected here.
+        downgraded.TransformFlags.Should().NotContain("--scale 2.0000");
+    }
+
+    #endregion
+
+    #region Placement warning descriptions (#1799)
+
+    /// <summary>
+    /// A plan that embedded everything into a 3MF project dropped nothing, so no warning
+    /// should be produced.
+    /// </summary>
+    [Fact]
+    public void DescribePlacementWarnings_ThreeMfProject_ReturnsNoWarnings()
+    {
+        var plan = new PlacementPlan(PlacementStrategy.ThreeMfProject, "--arrange 0", string.Empty, [NonUniformScaleAtOrigin], false, false);
+
+        IReadOnlyList<PlacementWarningKind> warnings = DescribePlacementWarnings(plan);
+
+        warnings.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// SourcePlacement always warns that the layout could not be re-embedded, regardless of
+    /// scale — this is the only strategy where the warning fires unconditionally.
+    /// </summary>
+    [Fact]
+    public void DescribePlacementWarnings_SourcePlacement_WarnsAboutLayout()
+    {
+        var plan = new PlacementPlan(PlacementStrategy.SourcePlacement, "--arrange 0", string.Empty, ["/work/model.3mf"], true, false);
+
+        IReadOnlyList<PlacementWarningKind> warnings = DescribePlacementWarnings(plan);
+
+        warnings.Should().ContainSingle().Which.Should().Be(PlacementWarningKind.SourcePlacementFallback);
+    }
+
+    /// <summary>
+    /// SourcePlacement with a dropped non-uniform scale must warn about both the layout and
+    /// the scale degradation — proving the caller actually surfaces both, not just one
+    /// (acceptance criteria in #1799: degradation must be logged).
+    /// </summary>
+    [Fact]
+    public void DescribePlacementWarnings_SourcePlacementWithNonUniformScale_WarnsAboutBoth()
+    {
+        var plan = new PlacementPlan(PlacementStrategy.SourcePlacement, "--arrange 0", "--scale 2.0000", ["/work/model.3mf"], true, true);
+
+        IReadOnlyList<PlacementWarningKind> warnings = DescribePlacementWarnings(plan);
+
+        warnings.Should().BeEquivalentTo(
+            [PlacementWarningKind.SourcePlacementFallback, PlacementWarningKind.NonUniformScaleFlattened]);
+    }
+
+    /// <summary>
+    /// AutoArrange with a dropped position (but uniform scale) must warn only about the
+    /// layout, not scale — proving the two concerns are reported independently.
+    /// </summary>
+    [Fact]
+    public void DescribePlacementWarnings_AutoArrangePositionDroppedOnly_WarnsAboutLayoutOnly()
+    {
+        var plan = new PlacementPlan(PlacementStrategy.AutoArrange, "--arrange 1", string.Empty, [ModelStl], true, false);
+
+        IReadOnlyList<PlacementWarningKind> warnings = DescribePlacementWarnings(plan);
+
+        warnings.Should().ContainSingle().Which.Should().Be(PlacementWarningKind.LayoutNotEmbedded);
+    }
+
+    /// <summary>
+    /// AutoArrange with a dropped non-uniform scale but no position drop must warn only about
+    /// scale — this is the exact scenario Bishop flagged: a scale-only fallback must not also
+    /// claim the layout was lost.
+    /// </summary>
+    [Fact]
+    public void DescribePlacementWarnings_AutoArrangeNonUniformScaleOnly_WarnsAboutScaleOnly()
+    {
+        var plan = new PlacementPlan(PlacementStrategy.AutoArrange, "--arrange 1", "--scale 2.0000", [NonUniformScaleAtOrigin], false, true);
+
+        IReadOnlyList<PlacementWarningKind> warnings = DescribePlacementWarnings(plan);
+
+        warnings.Should().ContainSingle().Which.Should().Be(PlacementWarningKind.NonUniformScaleFlattened);
+    }
+
+    /// <summary>
+    /// AutoArrange with neither drop (e.g. no transform requested at all) must produce no
+    /// warnings.
+    /// </summary>
+    [Fact]
+    public void DescribePlacementWarnings_AutoArrangeNoDrops_ReturnsNoWarnings()
+    {
+        var plan = new PlacementPlan(PlacementStrategy.AutoArrange, "--arrange 1", string.Empty, [null], false, false);
+
+        IReadOnlyList<PlacementWarningKind> warnings = DescribePlacementWarnings(plan);
+
+        warnings.Should().BeEmpty();
+    }
+
+    #endregion
+
     #region Guards
 
     [Fact]

@@ -116,6 +116,21 @@ export function isProcessProfileCoreOneVariantCompatible(
 }
 
 /**
+ * Resolves whether a profile is a high-flow variant, preferring the backend-derived
+ * `isHighFlowNozzle` flag (#1780) whenever the profile shape carries it.
+ *
+ * The backend now derives this once from structural signals (`printer_notes`'s
+ * `HF_NOZZLE` marker or a `printer_model` " HF" suffix) instead of leaving every
+ * consumer to parse `name`. Falls back to {@link mentionsHighFlow} only for profile
+ * shapes that don't carry the flag — e.g. locally imported custom profiles, or the
+ * process-profile side of a machine/process pairing, which has no hotend concept of
+ * its own and must still key off compatible-printer names.
+ */
+export function resolveHighFlow(isHighFlowNozzle: boolean | undefined, fallbackText: string): boolean {
+  return isHighFlowNozzle ?? mentionsHighFlow(fallbackText);
+}
+
+/**
  * Removes a trailing nozzle token for display.
  *
  * Returns the original name when stripping would leave nothing, so a profile
