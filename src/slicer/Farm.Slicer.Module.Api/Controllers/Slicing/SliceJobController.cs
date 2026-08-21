@@ -527,6 +527,19 @@ public partial class SliceJobController(
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // JsonStringEnumConverter accepts raw numeric tokens on input (e.g. `"layoutDegradation": 123`),
+        // so a malformed or malicious worker payload can bind to an out-of-domain enum value that was
+        // never a named member. Refuse it outright rather than persisting/round-tripping it: it must
+        // never reach the database as a value that looks valid but Enum.TryParse would silently accept
+        // again when read back (see ParseLayoutDegradationReason below).
+        if (request.LayoutDegradation is { } requestedLayoutDegradation && !Enum.IsDefined(requestedLayoutDegradation))
+        {
+            return SlicerApiProblems.InvalidRequest(
+                this,
+                "invalid_layout_degradation",
+                "layoutDegradation must be one of the recognized LayoutDegradationReason values.");
+        }
+
         (WorkerJobLease? lease, IActionResult? failure) = await AuthorizeWorkerMutationAsync(id, ct);
         if (failure is not null)
         {
@@ -1182,8 +1195,17 @@ public partial class SliceJobController(
     /// into the typed contract value. Returns <see langword="null"/> for an unset or unrecognized
     /// value instead of throwing, since this is a redacted signal, not authoritative state.
     /// </summary>
+    /// <remarks>
+    /// <see cref="Enum.TryParse{TEnum}(string?, bool, out TEnum)"/> alone is not sufficient: it also
+    /// accepts a bare numeric string (e.g. <c>"123"</c>) and happily returns an out-of-domain enum
+    /// value for it, because C# enums can hold any underlying-type value regardless of whether it
+    /// names a member. <see cref="Enum.IsDefined{TEnum}(TEnum)"/> closes that gap so a value that was
+    /// never a real degradation reason - however it ended up in the column - is never surfaced as one.
+    /// </remarks>
     private static LayoutDegradationReason? ParseLayoutDegradationReason(string? value) =>
-        !string.IsNullOrWhiteSpace(value) && Enum.TryParse(value, ignoreCase: true, out LayoutDegradationReason reason)
+        !string.IsNullOrWhiteSpace(value) &&
+        Enum.TryParse(value, ignoreCase: true, out LayoutDegradationReason reason) &&
+        Enum.IsDefined(reason)
             ? reason
             : null;
 
