@@ -1202,6 +1202,9 @@ public class OrcaProfilesService : ISlicerProfilesService
         return profile;
     }
 
+    private static readonly Regex HighFlowNameFallbackPattern =
+        new(@"(?:^|[^a-zA-Z])HF(?![a-zA-Z])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     /// <summary>
     /// Derives the high-flow ("HF") hotend variant flag for #1780. OrcaSlicer's Prusa CORE
     /// One / CORE One L bundle never sets <c>nozzle_type</c> anywhere in the inheritance
@@ -1218,10 +1221,14 @@ public class OrcaProfilesService : ISlicerProfilesService
     /// that declares them inline; the 0.5/0.6/0.8 siblings inherit them (or, for the
     /// standard/non-HF sibling, an explicit override back to the non-HF values) — either
     /// way, the fully resolved profile always carries a consistent answer. Only if neither
-    /// structural signal is present does this fall back to a whole-word "HF" token in
+    /// structural signal is present does this fall back to an "HF" token in
     /// <paramref name="profileName"/>, so bundles that provide no structural marker at all
     /// still get a correct, backend-derived answer instead of forcing every consumer to
-    /// parse the display name itself.
+    /// parse the display name itself. The fallback regex is deliberately kept in lockstep
+    /// with the frontend's <c>HIGH_FLOW_PATTERN</c> (machineProfileLabels.ts) — case
+    /// insensitive, and matching both the spaced ("Prusa CORE One HF 0.4 nozzle") and
+    /// unspaced ("Prusa MK4S HF0.4 nozzle") forms vendor bundles actually ship — so the two
+    /// layers can never disagree on a name that reaches this last-resort tier.
     /// </summary>
     private static bool DetermineIsHighFlowNozzle(JsonElement root, string? printerModel, string profileName)
     {
@@ -1241,7 +1248,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
 
         return !string.IsNullOrEmpty(profileName) &&
-            Regex.IsMatch(profileName, @"\bHF\b", RegexOptions.None);
+            HighFlowNameFallbackPattern.IsMatch(profileName);
     }
 
     private static void ExtractBuildVolume(JsonElement root, MachineProfileDto profile)
