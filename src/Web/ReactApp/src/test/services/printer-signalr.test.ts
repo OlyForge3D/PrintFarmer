@@ -194,12 +194,21 @@ describe("PrinterSignalRService queue cursor recovery", () => {
     service.dispose();
   });
 
-  it("restores authorized printer, job, and project scopes after reconnect", async () => {
+  it("restores authorized printer, job, and project scopes after reconnect, with exactly one batched printer invocation", async () => {
     api.getQueueChanges.mockResolvedValue({
       afterSequence: 0,
       nextSequence: 0,
       hasMore: false,
       events: [],
+    });
+    signalr.connection.invoke.mockImplementation(async (
+      method: string,
+      arg?: unknown
+    ) => {
+      if (method === "SubscribeToPrintersAsync") {
+        return arg as string[];
+      }
+      return undefined;
     });
     const service = new PrinterSignalRService();
     await vi.waitFor(() =>
@@ -207,7 +216,7 @@ describe("PrinterSignalRService queue cursor recovery", () => {
     );
     await service.connect();
     await service.replaceQueueResourceSubscriptions({
-      printerIds: ["printer-1"],
+      printerIds: ["printer-1", "printer-2", "printer-3"],
       jobIds: ["job-1"],
       projectIds: ["project-1"],
     });
@@ -216,10 +225,18 @@ describe("PrinterSignalRService queue cursor recovery", () => {
     signalr.getReconnectHandler()?.();
 
     await vi.waitFor(() => {
-      expect(signalr.connection.invoke).toHaveBeenCalledWith(
-        "SubscribeToPrinterAsync",
-        "printer-1"
+      // Issue #1764: reconnect must issue exactly ONE batched printer
+      // subscribe invocation instead of one per printer, so assert the call
+      // count, not just that the args were seen at some point.
+      const printerInvocations = signalr.connection.invoke.mock.calls.filter(
+        ([method]: [string, unknown]) => method === "SubscribeToPrintersAsync"
       );
+      expect(printerInvocations).toHaveLength(1);
+      expect(printerInvocations[0][1]).toEqual([
+        "printer-1",
+        "printer-2",
+        "printer-3",
+      ]);
       expect(signalr.connection.invoke).toHaveBeenCalledWith(
         "SubscribeToQueueJobAsync",
         "job-1"
