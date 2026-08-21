@@ -152,6 +152,45 @@ public class BuildTransformFlagsTests
     }
 
     [Fact]
+    public void BuildTransformFlags_UniformScale_ReportsNoNonUniformScale()
+    {
+        string json = """{"scale":[2,2,2]}""";
+
+        TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
+
+        result.HasNonUniformScale.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Regression for #1799: a non-uniform scale must be reported via
+    /// <see cref="TransformResult.HasNonUniformScale"/> so <c>PlanPlacement</c> can route the
+    /// job through a 3MF project instead of silently flattening it to <c>scale[0]</c>. The CLI
+    /// flag itself still carries the isotropic approximation, for the degraded fallback case
+    /// where embedding is not possible.
+    /// </summary>
+    [Fact]
+    public void BuildTransformFlags_NonUniformScale_ReportsNonUniformScaleAndEmitsIsotropicApproximation()
+    {
+        string json = """{"scale":[2,1,1]}""";
+
+        TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
+
+        result.HasNonUniformScale.Should().BeTrue();
+        result.Flags.Should().Contain("--scale 2.0000");
+    }
+
+    [Theory]
+    [InlineData("""{"scale":[1,2,1]}""")]
+    [InlineData("""{"scale":[1,1,2]}""")]
+    [InlineData("""{"scale":[1,2,3]}""")]
+    public void BuildTransformFlags_AnyAxisDiffers_ReportsNonUniformScale(string json)
+    {
+        TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
+
+        result.HasNonUniformScale.Should().BeTrue();
+    }
+
+    [Fact]
     public void BuildTransformFlags_PositionOffset_ReportsPositionWithoutCenterFlag()
     {
         // position [10, 20, 0] → bed offset X=10, Y=20 (Z-up: XY is bed plane)

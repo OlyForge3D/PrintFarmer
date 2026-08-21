@@ -4,7 +4,7 @@ import { Button } from '@/common/components/ui';
 import { SearchIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
 import {
   buildMachineProfileLabels,
-  mentionsHighFlow,
+  resolveHighFlow,
 } from '@/features/slicer/utils/machineProfileLabels';
 
 /**
@@ -20,6 +20,8 @@ export interface MachineProfileChoice {
   nozzleDiameter?: number;
   /** False for user-created / imported profiles. */
   isSystem: boolean;
+  /** High-flow (HF) hotend variant flag, when the backend could derive it (#1780). */
+  isHighFlowNozzle?: boolean;
 }
 
 export interface MachineProfileSelectorModalProps {
@@ -168,7 +170,7 @@ export function MachineProfileSelectorModal({
 
   const renderRow = (profile: MachineProfileChoice, labels: Map<string, string>) => {
     const isSelected = profile.name === selectedProfileName;
-    const highFlow = mentionsHighFlow(profile.name);
+    const highFlow = resolveHighFlow(profile.isHighFlowNozzle, profile.name);
     const label = labels.get(profile.name) ?? profile.name;
 
     return (

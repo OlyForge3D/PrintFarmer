@@ -66,6 +66,29 @@ describe('MachineProfileSelectorModal', () => {
     expect(within(hfRow).getByText('Name indicates a high-flow variant')).toBeInTheDocument();
   });
 
+  it('follows the backend isHighFlowNozzle flag even when it disagrees with the name (#1780)', () => {
+    // This is the whole point of the flag: prove the badge is driven by the
+    // backend-derived signal, not merely by the name heuristic it happens to
+    // usually agree with. If resolveHighFlow silently ignored the flag,
+    // MK4S/CORE-One-shaped fixtures elsewhere in this suite would still pass.
+    renderModal({
+      profiles: [
+        { name: 'Prusa CORE One 0.4 nozzle', nozzleDiameter: 0.4, isSystem: true, isHighFlowNozzle: true },
+        { name: 'Prusa CORE One HF 0.4 nozzle', nozzleDiameter: 0.4, isSystem: true, isHighFlowNozzle: false },
+      ],
+      selectedProfileName: 'Prusa CORE One 0.4 nozzle',
+    });
+    const rows = rowsIn('0.4 mm machine profiles');
+    const labelOf = (r: HTMLElement) => r.querySelector('span.truncate')?.textContent?.trim();
+    const flaggedStandardRow = rows.find((r) => labelOf(r) === 'Prusa CORE One')!;
+    const flaggedHfRow = rows.find((r) => labelOf(r) === 'Prusa CORE One HF')!;
+
+    // Name says "standard", flag says HF -> badge follows the flag.
+    expect(within(flaggedStandardRow).getByText('HF')).toBeInTheDocument();
+    // Name says "HF", flag says standard -> no badge.
+    expect(within(flaggedHfRow).queryByText('HF')).not.toBeInTheDocument();
+  });
+
   it('reports the full profile name, never the trimmed label', () => {
     const { onSelect } = renderModal();
     const hfRow = rowsIn('0.4 mm machine profiles').find((r) => /HF/.test(r.textContent ?? ''))!;
