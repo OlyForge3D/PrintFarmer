@@ -61,14 +61,16 @@ public class ModelAnalysisService : IModelAnalysisService
         using FileStream fs = File.OpenRead(filePath);
         if (fs.Length < 84)
         {
-            return null; // too small to parse
+            // Too small to contain even a binary STL header + triangle count: this is a
+            // recognized STL upload that is structurally unreadable, not an unsupported format.
+            return new ModelAnalysisResult(null, null, null, 0, IsValid: false, ValidationErrors: ["File is too small to be a valid STL (must be at least 84 bytes)"]);
         }
 
         byte[] header = new byte[80];
         int bytesRead = await fs.ReadAsync(header.AsMemory(0, header.Length), cancellationToken);
         if (bytesRead < header.Length)
         {
-            return null;
+            return new ModelAnalysisResult(null, null, null, 0, IsValid: false, ValidationErrors: ["Failed to read STL header"]);
         }
 
         // Peek triangle count for binary (next 4 bytes)
@@ -76,7 +78,7 @@ public class ModelAnalysisService : IModelAnalysisService
         int countRead = await fs.ReadAsync(countBytes.AsMemory(0, 4), cancellationToken);
         if (countRead < 4)
         {
-            return null;
+            return new ModelAnalysisResult(null, null, null, 0, IsValid: false, ValidationErrors: ["Failed to read STL triangle count"]);
         }
 
         uint triangleCount = BitConverter.ToUInt32(countBytes, 0);
@@ -85,8 +87,19 @@ public class ModelAnalysisService : IModelAnalysisService
         string headerString = Encoding.ASCII.GetString(header).Trim();
         _ = fs.Seek(0, SeekOrigin.Begin);
 
+        // Binary STL files are sometimes authored with a "solid ..." text header for tooling
+        // compatibility even though the rest of the file is binary triangle data, so a header
+        // check alone is not reliable. A binary STL's file size is fully determined by its
+        // declared triangle count (84-byte header/count + 50 bytes per triangle); when the
+        // actual file size matches that formula exactly, treat it as binary regardless of the
+        // header text. Only fall back to the ASCII parser when the size doesn't match and the
+        // header looks like ASCII STL.
+        long expectedBinarySize = 84L + (triangleCount * 50L);
+        bool looksBinary = fs.Length == expectedBinarySize;
+        bool looksAscii = !looksBinary && headerString.StartsWith("solid", StringComparison.OrdinalIgnoreCase) && fs.Length < 10_000_000;
+
         // Small ASCII models (under 10MB) are often ASCII STL format
-        if (headerString.StartsWith("solid", StringComparison.OrdinalIgnoreCase) && fs.Length < 10_000_000)
+        if (looksAscii)
         {
             // ASCII parser: scan for vertex lines and compute bounding box
             using StreamReader sr = new(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
@@ -228,7 +241,7 @@ public class ModelAnalysisService : IModelAnalysisService
                     : null;
                 return new ModelAnalysisResult(dimX, dimY, dimZ, (int)actualTriangles, IsValid: !truncated, ValidationErrors: truncationErrors);
             }
-            catch
+            catch (Exception ex) when (ex is IOException or EndOfStreamException or ArgumentException or OverflowException)
             {
                 return new ModelAnalysisResult(null, null, null, (int)actualTriangles, IsValid: false, ValidationErrors: ["Failed to read binary STL triangle data"]);
             }
@@ -300,6 +313,13 @@ public class ModelAnalysisService : IModelAnalysisService
 
     private static async Task<ModelAnalysisResult?> ReadThreeMfModelPartAsync(ZipArchiveEntry entry, CancellationToken cancellationToken)
     {
+        // The archive-level entry-count/byte-budget/compression-ratio checks in
+        // AnalyzeThreeMfAsync rely on ZIP central-directory metadata (Length/CompressedLength),
+        // which is declared by the archive itself and not independently verified against what
+        // actually decompresses. MaxCharactersInDocument below is the authoritative guard against
+        // a malicious entry whose declared size doesn't match its real decompressed size: the
+        // reader aborts once it has read that many characters regardless of what the ZIP metadata
+        // claimed. Do not remove or relax it when touching this method.
         XmlReaderSettings settings = new()
         {
             DtdProcessing = DtdProcessing.Prohibit,

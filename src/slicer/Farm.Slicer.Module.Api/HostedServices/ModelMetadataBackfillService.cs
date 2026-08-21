@@ -168,7 +168,15 @@ public sealed class ModelMetadataBackfillService : BackgroundService
             ModelAnalysisResult? analysis = await analysisService.AnalyzeModelAsync(filePath, extension, ct);
             if (analysis is null)
             {
-                MarkUnanalyzable(model, "Model format is not supported by geometry analysis");
+                // Unsupported format reaching this path is defensive-only (ListNeedingAnalysisAsync
+                // already filters to STL/3MF), but if it ever happens this must match the upload
+                // path's contract: an unsupported/unanalyzed format is unknown, not invalid.
+                // TriangleCount still needs to become non-null so the row drops out of the
+                // "still needs analysis" query and isn't retried on every backfill run.
+                model.TriangleCount = 0;
+                model.DimensionX = null;
+                model.DimensionY = null;
+                model.DimensionZ = null;
                 return;
             }
 

@@ -122,7 +122,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
 
     private IFormFile CreateMockFormFile(
         string fileName = "test-model.stl",
-        string content = "mock stl content")
+        string content = "solid test\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid test\n")
     {
         var memoryStream = new MemoryStream();
         _streamsToDispose.Add(memoryStream);
@@ -564,7 +564,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         initialStream.Position = 0;
         FormFile initialThumbnail = new(initialStream, 0, initialStream.Length, "thumbnailFile", "initial.png");
         Model3DUploadResultDto uploaded = await service.UploadModelAsync(
-            CreateMockFormFile("replace-thumbnail.stl", "replacement-model"),
+            CreateMockFormFile("replace-thumbnail.stl"),
             initialThumbnail,
             userId,
             clientUploadId: null,

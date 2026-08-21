@@ -24,6 +24,7 @@ namespace Farm.Slicer.Module.Tests.HostedServices;
 public class ModelMetadataBackfillServiceTests : IDisposable
 {
     private readonly string _modelsDir = Path.Join(Path.GetTempPath(), "pfarm-backfill-tests", Guid.NewGuid().ToString());
+    private readonly List<ServiceProvider> _serviceProviders = [];
 
     public ModelMetadataBackfillServiceTests()
     {
@@ -32,6 +33,11 @@ public class ModelMetadataBackfillServiceTests : IDisposable
 
     public void Dispose()
     {
+        foreach (ServiceProvider provider in _serviceProviders)
+        {
+            provider.Dispose();
+        }
+
         try
         {
             if (Directory.Exists(_modelsDir))
@@ -171,6 +177,36 @@ public class ModelMetadataBackfillServiceTests : IDisposable
         repo.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    /// <summary>
+    /// Regression (#1814 review): a null analysis result (unsupported format) must keep the same
+    /// "unknown, not invalid" contract as the upload path — it should not flip a previously-valid
+    /// row to IsValid=false, only mark it as no-longer-needing-analysis via TriangleCount.
+    /// </summary>
+    [Fact]
+    public async Task BackfillAsync_AnalysisReturnsNull_KeepsIsValidTrueButStopsRetrying()
+    {
+        Model3D model = CreateModelOnDisk("unsupported.stl");
+        model.IsValid = true;
+
+        Mock<IModel3DFileRepository> repo = new(MockBehavior.Strict);
+        _ = repo.SetupSequence(r => r.ListNeedingAnalysisAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Model3D> { model })
+            .ReturnsAsync(new List<Model3D>());
+        _ = repo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        Mock<IModelAnalysisService> analysis = new(MockBehavior.Strict);
+        _ = analysis.Setup(a => a.AnalyzeModelAsync(It.IsAny<string>(), ".stl", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ModelAnalysisResult?)null);
+
+        ModelMetadataBackfillService svc = CreateService(repo, analysis, out _);
+
+        await svc.BackfillAsync(CancellationToken.None);
+
+        Assert.Equal(0, model.TriangleCount);
+        Assert.True(model.IsValid);
+        Assert.Null(model.DimensionX);
+    }
+
     [Fact]
     public async Task ExecuteAsync_DisabledByConfiguration_DoesNotRunOnStart()
     {
@@ -203,6 +239,7 @@ public class ModelMetadataBackfillServiceTests : IDisposable
         _ = services.AddSingleton(analysis.Object);
         _ = services.AddSingleton(storagePath.Object);
         provider = services.BuildServiceProvider();
+        _serviceProviders.Add(provider);
 
         IConfiguration configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(config ?? new Dictionary<string, string?>

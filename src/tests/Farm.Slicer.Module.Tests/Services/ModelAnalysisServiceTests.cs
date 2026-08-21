@@ -99,6 +99,38 @@ public class ModelAnalysisServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AnalyzeModelAsync_BinaryStlWithSolidTextHeader_IsStillDetectedAsBinary()
+    {
+        // Regression (#1814 review): some binary STL writers embed a "solid ..." text header for
+        // tooling compatibility even though the remainder of the file is binary triangle data. A
+        // header-text-only sniff misclassifies these as ASCII and fails to extract any geometry.
+        byte[] bytes = BuildBinaryStl(triangleCount: 3, headerText: "solid exported_by_some_tool");
+        string path = WriteFile("binary_with_solid_header.stl", bytes);
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".stl", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(3, result!.TriangleCount);
+        Assert.True(result.IsValid);
+        Assert.NotNull(result.DimensionX);
+    }
+
+    [Fact]
+    public async Task AnalyzeModelAsync_StlSmallerThanMinimumHeader_ReturnsIsValidFalse()
+    {
+        // Regression (#1814 review): files too small to even contain a binary header/count must
+        // be reported as a real, structurally-invalid STL, not silently treated as "unanalyzed".
+        byte[] bytes = new byte[40];
+        string path = WriteFile("too_small.stl", bytes);
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".stl", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.False(result!.IsValid);
+        Assert.NotNull(result.ValidationErrors);
+    }
+
+    [Fact]
     public async Task AnalyzeModelAsync_UppercaseStlExtension_IsStillAnalyzed()
     {
         // Regression: extension comparison used to be case-sensitive, so uploads that preserved
@@ -249,6 +281,112 @@ public class ModelAnalysisServiceTests : IDisposable
         Assert.False(result!.IsValid);
     }
 
+    // ---- 3MF security guards (zip bomb / XXE / depth) ----------------------
+
+    [Fact]
+    public async Task AnalyzeModelAsync_ThreeMfWithTooManyArchiveEntries_ReturnsIsValidFalse()
+    {
+        using MemoryStream ms = new();
+        using (ZipArchive archive = new(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            // One entry over the MaxArchiveEntries (1,000) budget.
+            for (int i = 0; i < 1_001; i++)
+            {
+                ZipArchiveEntry entry = archive.CreateEntry($"junk/{i}.txt");
+                using Stream stream = entry.Open();
+                using StreamWriter writer = new(stream, Encoding.UTF8);
+                writer.Write("x");
+            }
+        }
+
+        string path = WriteFile("too_many_entries.3mf", ms.ToArray());
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".3mf", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.False(result!.IsValid);
+        Assert.Contains(result.ValidationErrors!, e => e.Contains("entries", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task AnalyzeModelAsync_ThreeMfWithBombLikeCompressionRatio_ReturnsIsValidFalse()
+    {
+        // A small, highly-compressible payload (repeated bytes) trips the compression-ratio
+        // guard without needing to actually write hundreds of megabytes to disk for the test.
+        using MemoryStream ms = new();
+        using (ZipArchive archive = new(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            ZipArchiveEntry entry = archive.CreateEntry("3D/3dmodel.model", CompressionLevel.SmallestSize);
+            using Stream stream = entry.Open();
+            byte[] chunk = Encoding.ASCII.GetBytes(new string('a', 1024 * 1024));
+            for (int i = 0; i < 8; i++)
+            {
+                stream.Write(chunk);
+            }
+        }
+
+        string path = WriteFile("compression_bomb.3mf", ms.ToArray());
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".3mf", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.False(result!.IsValid);
+        Assert.Contains(result.ValidationErrors!, e => e.Contains("bomb", StringComparison.OrdinalIgnoreCase) || e.Contains("budget", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task AnalyzeModelAsync_ThreeMfWithXxePayload_DoesNotResolveExternalEntityAndReturnsIsValidFalse()
+    {
+        string maliciousXml =
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+            "<!DOCTYPE model [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]>" +
+            "<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">" +
+            "<resources><object id=\"1\" type=\"model\"><mesh>" +
+            "<vertices><vertex x=\"&xxe;\" y=\"0\" z=\"0\"/></vertices><triangles></triangles>" +
+            "</mesh></object></resources>" +
+            "<build><item objectid=\"1\"/></build>" +
+            "</model>";
+        byte[] bytes = BuildThreeMf(maliciousXml);
+        string path = WriteFile("xxe.3mf", bytes);
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".3mf", CancellationToken.None);
+
+        // DtdProcessing.Prohibit means the DOCTYPE itself throws inside XmlReader, which the
+        // analyzer converts into a structurally-invalid result rather than an unhandled crash
+        // or a resolved external entity.
+        Assert.NotNull(result);
+        Assert.False(result!.IsValid);
+    }
+
+    [Fact]
+    public async Task AnalyzeModelAsync_ThreeMfWithExcessiveXmlNesting_ReturnsIsValidFalse()
+    {
+        StringBuilder sb = new();
+        sb.Append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+        sb.Append("<model xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">");
+        const int depth = 100; // exceeds MaxXmlDepth (64)
+        for (int i = 0; i < depth; i++)
+        {
+            sb.Append("<resources>");
+        }
+
+        for (int i = 0; i < depth; i++)
+        {
+            sb.Append("</resources>");
+        }
+
+        sb.Append("</model>");
+
+        byte[] bytes = BuildThreeMf(sb.ToString());
+        string path = WriteFile("deep_nesting.3mf", bytes);
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".3mf", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.False(result!.IsValid);
+        Assert.Contains(result.ValidationErrors!, e => e.Contains("nested", StringComparison.OrdinalIgnoreCase) || e.Contains("depth", StringComparison.OrdinalIgnoreCase));
+    }
+
     // ---- Unsupported formats --------------------------------------------
 
     [Fact]
@@ -263,12 +401,19 @@ public class ModelAnalysisServiceTests : IDisposable
 
     // ---- Test fixture builders --------------------------------------------
 
-    private static byte[] BuildBinaryStl(int triangleCount, int? truncateAfterTriangles = null)
+    private static byte[] BuildBinaryStl(int triangleCount, int? truncateAfterTriangles = null, string? headerText = null)
     {
         using MemoryStream ms = new();
         using (BinaryWriter bw = new(ms, Encoding.ASCII, leaveOpen: true))
         {
-            bw.Write(new byte[80]); // header, not "solid"-prefixed so it is treated as binary
+            byte[] header = new byte[80];
+            if (headerText is not null)
+            {
+                byte[] headerBytes = Encoding.ASCII.GetBytes(headerText);
+                Array.Copy(headerBytes, header, Math.Min(headerBytes.Length, header.Length));
+            }
+
+            bw.Write(header); // header; "solid"-prefixed headers must still be detected as binary
             bw.Write((uint)triangleCount);
 
             int trianglesToWrite = truncateAfterTriangles ?? triangleCount;
