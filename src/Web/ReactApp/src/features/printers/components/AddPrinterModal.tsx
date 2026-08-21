@@ -285,37 +285,48 @@ function AddPrinterModalContent({
   if (!isOpen) return null;
 
   const modalFooter = (
-    <div className="space-y-3">
-      {/* Buttons */}
-      <div className="flex gap-3">
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={handleClose}
-          className="flex-1"
-        >
-          Cancel
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={handleTestConnection}
-          disabled={isTesting || !formData.serverUrl.trim()}
-          iconLeft={isTesting ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <WiFiIcon className="w-4 h-4" />}
-        >
-          {isTesting ? 'Testing...' : 'Test'}
-        </Button>
-        <Button
-          type="submit"
-          form="add-printer-form"
-          variant="success"
-          disabled={isLoading}
-          className="flex-1"
-          iconLeft={isLoading ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <CheckIcon className="w-4 h-4" />}
-        >
-          {isLoading ? 'Adding...' : 'Add Printer'}
-        </Button>
-      </div>
+    // Regression fix for #1820: at a 320px viewport, Cancel + Test + Add
+    // Printer never fit on one non-wrapping `flex` row, and because the two
+    // outer buttons were `flex-1` (grow-to-fill, not shrink-below-content),
+    // the row overflowed its container. Combined with Modal's fixed footer
+    // being `justify-end`, the overflow bled off the *left* edge instead of
+    // the right, pushing Cancel out of the viewport and out of reach.
+    //
+    // Mirrors the established fix for the same class of bug in
+    // PrinterDiscoveryModal (#1685): stack the actions in a full-width
+    // column (`flex-col`, not `flex-col-reverse` — a reversed column would
+    // swap visual order without touching DOM/tab order, its own WCAG 2.4.3
+    // regression) below the `sm` breakpoint, and only switch to a single
+    // right-aligned, wrapping row at `sm` and above.
+    <div
+      className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3"
+      data-testid="add-printer-modal-footer"
+    >
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={handleClose}
+      >
+        Cancel
+      </Button>
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={handleTestConnection}
+        disabled={isTesting || !formData.serverUrl.trim()}
+        iconLeft={isTesting ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <WiFiIcon className="w-4 h-4" />}
+      >
+        {isTesting ? 'Testing...' : 'Test'}
+      </Button>
+      <Button
+        type="submit"
+        form="add-printer-form"
+        variant="success"
+        disabled={isLoading}
+        iconLeft={isLoading ? <LoadingIcon className="w-4 h-4 animate-spin" /> : <CheckIcon className="w-4 h-4" />}
+      >
+        {isLoading ? 'Adding...' : 'Add Printer'}
+      </Button>
     </div>
   );
 
