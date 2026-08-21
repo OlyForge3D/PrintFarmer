@@ -410,6 +410,15 @@ public class ModelAnalysisService : IModelAnalysisService
                 }
             }
         }
+        catch (XmlException ex) when (ex.Message.Contains("DTD is prohibited", StringComparison.OrdinalIgnoreCase))
+        {
+            // .NET's XmlReader raises this specific, stable message only when DtdProcessing.Prohibit
+            // rejects a DOCTYPE declaration before any entity reference in it could be resolved. Keeping
+            // it as its own branch (rather than folding into the generic XmlException handler below)
+            // lets tests assert that a DOCTYPE/XXE payload was specifically rejected for that reason,
+            // not merely that some unrelated XML well-formedness error also happened to occur.
+            return new ModelAnalysisResult(null, null, null, null, IsValid: false, ValidationErrors: ["Model part XML declares a prohibited DOCTYPE"]);
+        }
         catch (XmlException)
         {
             return new ModelAnalysisResult(null, null, null, null, IsValid: false, ValidationErrors: ["Model part XML is malformed or unsafe"]);
