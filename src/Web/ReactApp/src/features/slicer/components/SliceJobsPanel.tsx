@@ -19,6 +19,7 @@ import {
   RefreshIcon,
   EyeIcon,
   ExternalLinkIcon,
+  AlertCircleIcon,
 } from '@/common/components/icons/MdiIcons';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
@@ -26,6 +27,7 @@ import {
   sliceJobService,
   SliceJobStatus,
   SliceJobStatusResponse,
+  getLayoutDegradationMessage,
 } from '@/services/sliceJobService';
 import { useSliceJobsRealtime } from '@/features/slicer/hooks/useSliceJobsRealtime';
 import { SendToPrinterModal } from '@/features/slicer/components/SendToPrinterModal';
@@ -544,6 +546,8 @@ function JobCard({
           </p>
         )}
 
+        <LayoutDegradationNotice job={job} />
+
         {job.sourceUrl && (
           <a
             href={job.sourceUrl}
@@ -617,6 +621,27 @@ function JobCard({
 
 /* ─── Shared Pieces ─── */
 
+/**
+ * Non-fatal notice for a completed job whose requested layout was dropped or
+ * altered by the worker (issue #1800). Renders nothing for jobs without a
+ * `layoutDegradation` signal or that never completed successfully — this is
+ * informational, not an error state, so it must not imply job failure.
+ */
+function LayoutDegradationNotice({ job }: { job: SliceJobStatusResponse }) {
+  if (job.status !== SliceJobStatus.Completed || !job.layoutDegradation) {
+    return null;
+  }
+  return (
+    <p
+      role="status"
+      className="flex items-start gap-1.5 text-xs text-pf-warning bg-pf-warning/10 rounded p-2 wrap-break-word"
+    >
+      <AlertCircleIcon className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+      <span>{getLayoutDegradationMessage(job.layoutDegradation)}</span>
+    </p>
+  );
+}
+
 function ProgressCell({ job }: { job: SliceJobStatusResponse }) {
   if (job.status === SliceJobStatus.Processing) {
     const timeRemaining = sliceJobService.getEstimatedTimeRemaining(job);
@@ -673,6 +698,11 @@ function JobDetailPanel({ job }: { job: SliceJobStatusResponse }) {
       {job.errorMessage && (
         <div className="col-span-full">
           <DetailField label="Error" value={job.errorMessage} error />
+        </div>
+      )}
+      {job.status === SliceJobStatus.Completed && job.layoutDegradation && (
+        <div className="col-span-full">
+          <LayoutDegradationNotice job={job} />
         </div>
       )}
       {job.sourceUrl && (

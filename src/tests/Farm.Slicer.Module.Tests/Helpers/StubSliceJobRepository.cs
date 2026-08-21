@@ -97,7 +97,7 @@ public class StubSliceJobRepository : ISliceJobRepository
         job.UpdatedAt = DateTime.UtcNow;
         return Task.FromResult(true);
     }
-    public Task<bool> TryCompleteForActiveLeaseAsync(Guid jobId, Guid workerId, Guid claimToken, string resultFileUrl, IEnumerable<Guid> artifactIds, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, string? machineProfileSha256 = null, string? processProfileSha256 = null, string? filamentProfileSha256 = null, CancellationToken ct = default)
+    public Task<bool> TryCompleteForActiveLeaseAsync(Guid jobId, Guid workerId, Guid claimToken, string resultFileUrl, IEnumerable<Guid> artifactIds, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, string? machineProfileSha256 = null, string? processProfileSha256 = null, string? filamentProfileSha256 = null, string? layoutDegradationReason = null, CancellationToken ct = default)
     {
         SliceJob? job = GetActiveLeaseJob(jobId, workerId, claimToken);
         if (job is null)
@@ -116,6 +116,7 @@ public class StubSliceJobRepository : ISliceJobRepository
         job.MachineProfileSha256 = machineProfileSha256;
         job.ProcessProfileSha256 = processProfileSha256;
         job.FilamentProfileSha256 = filamentProfileSha256;
+        job.LayoutDegradationReason = layoutDegradationReason;
         job.ArtifactIdsCsv = ids.Length > 0 ? string.Join(',', ids) : null;
         job.ArtifactsCount = ids.Length;
         job.UpdatedAt = DateTime.UtcNow;

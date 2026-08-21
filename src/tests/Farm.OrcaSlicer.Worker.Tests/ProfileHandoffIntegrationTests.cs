@@ -285,6 +285,85 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
             "an override naming an unrelated printer must not survive as an authorization");
     }
 
+    /// <summary>
+    /// End-to-end degradation path for issue #1800: a claimed job with a custom position but an
+    /// unknown bed centre (the stub machine profile declares no <c>printable_area</c>) drives
+    /// <c>PlanPlacement</c> into the <c>AutoArrange</c> fallback with <c>PositionDropped == true</c>
+    /// — the requested layout is silently dropped. This asserts the redacted, client-safe signal
+    /// actually reaches the real HTTP completion payload the worker sends to the API, not just the
+    /// in-process <see cref="Farm.Slicer.Module.Models.SlicingResult"/>.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_CustomPositionWithUnknownBedCenter_ReportsLayoutNotEmbedded()
+    {
+        _ = Directory.CreateDirectory(_testRoot);
+        string captureDirectory = Path.Join(_testRoot, "capture");
+        _ = Directory.CreateDirectory(captureDirectory);
+        string fakeOrcaPath = await CreateFakeOrcaAsync(captureDirectory, emitPipeProgress: false);
+
+        Guid workerId = Guid.NewGuid();
+
+        // A custom position with no known bed centre: inputs are STL (not 3MF, so
+        // SourcePlacement never applies), and the stub machine profile's Settings carry no
+        // printable_area, so TryReadBedCenterAsync resolves null and the ThreeMfProject branch
+        // is unavailable. PlanPlacement therefore falls through to AutoArrange with
+        // PositionDropped == true — exactly the degradation issue #1800 is about.
+        const string customPositionTransform = """{"rotation":[0,0,0],"scale":[1,1,1],"position":[10,20,0]}""";
+        var handler = new WorkerApiHandler(modelTransformJson: customPositionTransform);
+        var clientFactory = new StubHttpClientFactory(handler);
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["SlicerApi:BaseUrl"] = "http://localhost",
+                ["Worker:PollIntervalSeconds"] = "1",
+                ["Worker:LeaseDurationSeconds"] = "300",
+                ["Worker:WorkingDirectory"] = Path.Join(_testRoot, "work"),
+                ["Worker:OrcaSlicerPath"] = fakeOrcaPath,
+            })
+            .Build();
+        var workerState = new WorkerStateService();
+        workerState.SetRegisteredService(workerId, "worker-secret");
+
+        using HttpClient pipelineClient = new(handler, disposeHandler: false)
+        {
+            BaseAddress = new Uri("http://localhost"),
+        };
+        var pipeline = new OrcaSlicingPipelineService(
+            pipelineClient,
+            new NullProgressReporter(),
+            NullLogger<OrcaSlicingPipelineService>.Instance,
+            configuration,
+            workerState);
+        ServiceCollection services = new();
+        _ = services.AddSingleton<ISlicerProfilesService>(new StubProfilesService("system"));
+        _ = services.AddSingleton<ISlicingPipelineService>(pipeline);
+        await using ServiceProvider serviceProvider = services.BuildServiceProvider();
+        var poller = new TestPoller(clientFactory, serviceProvider, workerState, configuration);
+
+        await poller.StartAsync(CancellationToken.None);
+        TerminalRequest terminal;
+        try
+        {
+            terminal = await handler.TerminalRequest.WaitAsync(TimeSpan.FromSeconds(20));
+        }
+        finally
+        {
+            await poller.StopAsync(CancellationToken.None);
+            poller.Dispose();
+        }
+
+        _ = terminal.Path.Should().EndWith("/complete", terminal.Body);
+
+        CompleteSliceJobRequest? completed = JsonSerializer.Deserialize<CompleteSliceJobRequest>(
+            terminal.Body,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        _ = completed.Should().NotBeNull();
+        _ = completed!.LayoutDegradation.Should().Be(
+            LayoutDegradationReason.LayoutNotEmbedded,
+            "the worker could not embed the requested position and fell back to auto-arrange, " +
+            "so the redacted signal must reach the API, not just the worker's own log");
+    }
+
     public ValueTask DisposeAsync()
     {
         if (Directory.Exists(_testRoot))
@@ -495,7 +574,7 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
         public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
     }
 
-    private sealed class WorkerApiHandler(string profileSelectionJson = ProfileSelectionJson)
+    private sealed class WorkerApiHandler(string profileSelectionJson = ProfileSelectionJson, string? modelTransformJson = null)
         : HttpMessageHandler
     {
         private readonly Guid _artifactId = Guid.NewGuid();
@@ -533,6 +612,7 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
                         Status = "Processing",
                         ModelFileUrl = $"/api/slice/{_jobId}/model",
                         ModelFileName = "test-model.stl",
+                        ModelTransformJson = modelTransformJson,
                         SlicerEngine = SlicerEngineType.OrcaSlicer,
                         SlicerProfileJson = profileSelectionJson,
                         LeaseToken = _leaseToken,

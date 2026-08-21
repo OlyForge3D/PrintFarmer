@@ -99,6 +99,7 @@ public interface ISliceJobRepository
         string? machineProfileSha256 = null,
         string? processProfileSha256 = null,
         string? filamentProfileSha256 = null,
+        string? layoutDegradationReason = null,
         CancellationToken ct = default);
 
     /// <summary>Fails a job only while the worker still owns an unexpired processing lease.</summary>

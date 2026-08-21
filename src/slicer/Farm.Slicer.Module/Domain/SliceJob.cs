@@ -270,6 +270,16 @@ public class SliceJob
     [MaxLength(64)]
     public string? FilamentProfileSha256 { get; set; }
 
+    /// <summary>
+    /// Redacted, client-safe reason the requested layout was dropped or altered during slicing
+    /// (issue #1800), stored as the <see cref="Models.LayoutDegradationReason"/> enum name.
+    /// <see langword="null"/> means the requested layout was preserved. This deliberately mirrors
+    /// only worker-safe enum values — never raw worker diagnostics (see <see cref="ErrorMessage"/>
+    /// for the existing redaction pattern this follows).
+    /// </summary>
+    [MaxLength(64)]
+    public string? LayoutDegradationReason { get; set; }
+
     /// <summary>Resolved machine profile identity.</summary>
     public Guid? MachineProfileId { get; set; }
 

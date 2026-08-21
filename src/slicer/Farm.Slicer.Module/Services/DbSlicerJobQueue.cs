@@ -72,6 +72,7 @@ public class DbSlicerJobQueue(
             job.MachineProfileSha256 ?? job.NativeProfiles?.MachineSha256,
             job.ProcessProfileSha256 ?? job.NativeProfiles?.ProcessSha256,
             job.FilamentProfileSha256 ?? job.NativeProfiles?.FilamentSha256,
+            result.LayoutDegradation?.ToString(),
             cancellationToken);
         ThrowIfClaimLost(completed, job.Id);
     }

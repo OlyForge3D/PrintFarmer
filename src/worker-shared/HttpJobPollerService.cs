@@ -329,6 +329,7 @@ public abstract class HttpJobPollerService(
                 MachineProfileSha256 = job.MachineProfileSha256 ?? job.NativeProfiles?.MachineSha256,
                 ProcessProfileSha256 = job.ProcessProfileSha256 ?? job.NativeProfiles?.ProcessSha256,
                 FilamentProfileSha256 = job.FilamentProfileSha256 ?? job.NativeProfiles?.FilamentSha256,
+                LayoutDegradation = result.LayoutDegradation,
             };
 
             using HttpRequestMessage completeMessage = CreateJobMutationRequest(

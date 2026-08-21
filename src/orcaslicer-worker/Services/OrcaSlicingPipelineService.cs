@@ -165,7 +165,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
             await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 20, "Preparing slicer configuration", cancellationToken);
             await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 30, "Running OrcaSlicer", cancellationToken);
-            string gcodeFilePath = await RunOrcaSlicerAsync(modelFilePaths, jobWorkDir, job, cancellationToken);
+            (string gcodeFilePath, LayoutDegradationReason? layoutDegradation) =
+                await RunOrcaSlicerAsync(modelFilePaths, jobWorkDir, job, cancellationToken);
             await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 80, "Analyzing G-code", cancellationToken);
             GcodeMetadata metadata = await ExtractGcodeMetadataAsync(gcodeFilePath, cancellationToken);
 
@@ -184,7 +185,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 EstimatedFilamentUsageGrams = metadata.FilamentUsageGrams,
                 OutputFileSizeBytes = new FileInfo(gcodeFilePath).Length,
                 LayerCount = metadata.LayerCount,
-                Success = true
+                Success = true,
+                LayoutDegradation = layoutDegradation,
             };
             PopulateResultMetadata(result, job, modelFilePaths.Count);
 
@@ -1174,7 +1176,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
     }
 
-    private async Task<string> RunOrcaSlicerAsync(List<string> modelPaths, string workDir, DistributedSlicingJob job, CancellationToken cancellationToken)
+    private async Task<(string GcodeFilePath, LayoutDegradationReason? LayoutDegradation)> RunOrcaSlicerAsync(List<string> modelPaths, string workDir, DistributedSlicingJob job, CancellationToken cancellationToken)
     {
         string gcodeOutputDir = Path.Join(workDir, "output");
         _ = Directory.CreateDirectory(gcodeOutputDir);
@@ -1263,7 +1265,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // Extracted as a pure function (DescribePlacementWarnings) so the logging decision
         // itself is unit-testable, not just the PlacementPlan flags it reads — issue #1799 was
         // partly about a degradation that shipped with no way to prove it was ever surfaced.
-        foreach (PlacementWarningKind warningKind in DescribePlacementWarnings(placement))
+        IReadOnlyList<PlacementWarningKind> placementWarnings = DescribePlacementWarnings(placement);
+        foreach (PlacementWarningKind warningKind in placementWarnings)
         {
             switch (warningKind)
             {
@@ -1291,6 +1294,11 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                     break;
             }
         }
+
+        // The redacted, client-safe signal reported in the slice job result contract (issue
+        // #1800) — never the raw log message above. Only the position/layout half of the
+        // warnings maps to it; NonUniformScaleFlattened is a separate concern (issue #1799).
+        LayoutDegradationReason? layoutDegradation = ToLayoutDegradationReason(placementWarnings);
 
         // Create a named pipe for real-time progress from OrcaSlicer
         string pipePath = Path.Join(workDir, "progress.pipe");
@@ -1395,7 +1403,29 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             }
         }
 
-        return gcodeFilePath;
+        return (gcodeFilePath, layoutDegradation);
+    }
+
+    /// <summary>
+    /// Maps the position/layout half of <see cref="DescribePlacementWarnings"/> to the redacted,
+    /// client-safe signal reported in <see cref="SlicingResult.LayoutDegradation"/> (issue #1800).
+    /// Deliberately excludes <see cref="PlacementWarningKind.NonUniformScaleFlattened"/> — that is
+    /// a scale concern (issue #1799), not a layout one, and would misrepresent a scale-only
+    /// degradation as a dropped layout.
+    /// </summary>
+    internal static LayoutDegradationReason? ToLayoutDegradationReason(IReadOnlyList<PlacementWarningKind> warnings)
+    {
+        if (warnings.Contains(PlacementWarningKind.SourcePlacementFallback))
+        {
+            return LayoutDegradationReason.SourcePlacementFallback;
+        }
+
+        if (warnings.Contains(PlacementWarningKind.LayoutNotEmbedded))
+        {
+            return LayoutDegradationReason.LayoutNotEmbedded;
+        }
+
+        return null;
     }
 
     private static string ExtractOrcaErrorDetail(string stdout, string stderr)
