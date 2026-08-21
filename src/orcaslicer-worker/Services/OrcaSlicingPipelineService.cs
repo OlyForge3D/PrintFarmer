@@ -642,7 +642,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // OrcaSlicer expects flat key-value JSON (native settings), not our DTO wrapper.
         // The Settings dictionary stores raw JSON text per key (from GetRawText()),
         // so we reconstruct proper JSON by writing the raw values directly.
-        string machineJson = SettingsDictToNativeJson(profile.MachineProfile?.Settings);
+        // The guard above already proved MachineProfile non-null, so no null-conditional here.
+        string machineJson = SettingsDictToNativeJson(
+            WithSystemPresetInherits(profile.MachineProfile.Settings, profile.MachineProfile.Name));
         string processJson = SettingsDictToNativeJson(profile.ProcessProfile?.Settings);
 
         await File.WriteAllTextAsync(machineJsonPath, machineJson, cancellationToken);
@@ -692,6 +694,55 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     private static string ComputeProfileSetSha256(IEnumerable<string> profileJsonDocuments) =>
         NativeSlicerProfiles.ComputeSha256(string.Join("\0", profileJsonDocuments));
+
+    /// <summary>
+    /// Returns a copy of a machine profile's settings whose <c>inherits</c> key names the system
+    /// preset the document represents.
+    /// </summary>
+    /// <remarks>
+    /// OrcaSlicer decides whether a process preset may be used with a machine preset by comparing
+    /// each entry of the process document's <c>compatible_printers</c> against the machine
+    /// document's <b>system preset name</b>. When the machine document's <c>from</c> is not
+    /// <c>"system"</c>, OrcaSlicer derives that name from <c>inherits</c> rather than <c>name</c>.
+    /// See <c>CLI::run</c> in OrcaSlicer.cpp, the branch taken when <c>--load-settings</c> supplies
+    /// both a machine and a process document.
+    /// <para>
+    /// A flattened stock profile still carries the vendor bundle's internal base in that key (e.g.
+    /// <c>fdm_machine_common</c>), which process profiles do not list among their compatible
+    /// printers, so OrcaSlicer rejected those submissions with <c>CLI_PROCESS_NOT_COMPATIBLE</c>
+    /// (-17) roughly a second in, before slicing a single layer. Dropping the key entirely does not
+    /// help: the system name then resolves to the empty string, which matches nothing either.
+    /// </para>
+    /// <para>
+    /// The document written here is a fully flattened snapshot of the named system preset, so it
+    /// must declare that preset as its ancestor. Only the machine document needs this: the gate
+    /// reads the printer's system name alone, and the process/filament documents are untouched.
+    /// </para>
+    /// <para>
+    /// Scope: presets shipping <c>from</c>: <c>"system"</c> resolve by name and are unaffected by
+    /// this rewrite, and process profiles expressing compatibility only through
+    /// <c>compatible_printers_condition</c> fail for a separate reason tracked in issue #1795.
+    /// See issue #1768.
+    /// </para>
+    /// </remarks>
+    /// <param name="settings">The resolved machine settings bag.</param>
+    /// <param name="presetName">The machine profile's name, i.e. the system preset it snapshots.</param>
+    /// <returns>A copy carrying the corrected <c>inherits</c> value; key order is preserved.</returns>
+    internal static Dictionary<string, object> WithSystemPresetInherits(
+        Dictionary<string, object>? settings,
+        string? presetName)
+    {
+        Dictionary<string, object> copy = settings is null
+            ? new Dictionary<string, object>(StringComparer.Ordinal)
+            : new Dictionary<string, object>(settings, StringComparer.Ordinal);
+
+        if (!string.IsNullOrWhiteSpace(presetName))
+        {
+            copy["inherits"] = presetName;
+        }
+
+        return copy;
+    }
 
     private async Task<string> RunOrcaSlicerAsync(List<string> modelPaths, string workDir, DistributedSlicingJob job, CancellationToken cancellationToken)
     {

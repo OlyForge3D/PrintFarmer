@@ -286,4 +286,105 @@ public class SettingsSerializationTests
             File.Delete(tempFile);
         }
     }
+
+    // ── issue #1768: machine `inherits` must name the system preset ───────────
+    //
+    // OrcaSlicer gates process/machine compatibility on the machine document's *system preset
+    // name*, which it reads from `inherits` — never from `name`. A flattened stock profile carries
+    // the vendor bundle's internal base there (e.g. "fdm_machine_common"), which no process profile
+    // lists in `compatible_printers`, so OrcaSlicer rejected every stock submission with
+    // CLI_PROCESS_NOT_COMPATIBLE (-17) about a second in, before slicing any geometry.
+    //
+    // Proven against the live deployment: with `inherits` left as "fdm_machine_common" the CLI exits
+    // 239 (-17); changing only that one value to "Phrozen Arco 0.4 nozzle" exits 0 and produces a
+    // 12 MB plate_1.gcode. These tests pin that value on the document the worker writes.
+
+    [Fact(DisplayName = "A flattened stock machine profile declares the system preset it snapshots, not the vendor base it inherited from")]
+    public void WithSystemPresetInherits_StockProfile_ReplacesVendorBaseWithPresetName()
+    {
+        using JsonDocument doc = JsonDocument.Parse(SampleMachineProfile);
+        Dictionary<string, object> settings = OrcaProfilesService.SerializeElementToDict(doc.RootElement);
+        settings["inherits"] = "fdm_machine_common";
+
+        Dictionary<string, object> corrected =
+            OrcaSlicingPipelineService.WithSystemPresetInherits(settings, "Phrozen Arco 0.4 nozzle");
+
+        corrected["inherits"].Should().Be(
+            "Phrozen Arco 0.4 nozzle",
+            "OrcaSlicer matches compatible_printers against the machine's inherits value");
+    }
+
+    [Fact(DisplayName = "The corrected inherits value survives serialization and matches the process profile's compatible_printers entry")]
+    public void WithSystemPresetInherits_SerializedDocument_MatchesCompatiblePrintersEntry()
+    {
+        using JsonDocument machineDoc = JsonDocument.Parse(SampleMachineProfile);
+        Dictionary<string, object> machineSettings =
+            OrcaProfilesService.SerializeElementToDict(machineDoc.RootElement);
+        machineSettings["inherits"] = "fdm_machine_common";
+
+        string machineJson = OrcaSlicingPipelineService.SettingsDictToNativeJson(
+            OrcaSlicingPipelineService.WithSystemPresetInherits(machineSettings, "Phrozen Arco 0.4 nozzle"));
+
+        using JsonDocument writtenMachine = JsonDocument.Parse(machineJson);
+        string systemPresetName = writtenMachine.RootElement.GetProperty("inherits").GetString()!;
+
+        // The exact comparison OrcaSlicer performs: every compatible_printers entry vs the
+        // machine's system preset name. At least one must match or it exits -17.
+        using JsonDocument processDoc = JsonDocument.Parse(SampleProcessProfile);
+        string[] compatiblePrinters = processDoc.RootElement
+            .GetProperty("compatible_printers")
+            .EnumerateArray()
+            .Select(element => element.GetString()!)
+            .ToArray();
+
+        compatiblePrinters.Should().Contain(systemPresetName);
+        systemPresetName.Should().NotBe("fdm_machine_common", "the vendor base is never a compatible printer");
+    }
+
+    [Fact(DisplayName = "A machine profile with no inherits key gains one, since an absent system preset name matches nothing either")]
+    public void WithSystemPresetInherits_MissingInheritsKey_IsAdded()
+    {
+        using JsonDocument doc = JsonDocument.Parse(SampleMachineProfile);
+        Dictionary<string, object> settings = OrcaProfilesService.SerializeElementToDict(doc.RootElement);
+        settings.Remove("inherits");
+
+        Dictionary<string, object> corrected =
+            OrcaSlicingPipelineService.WithSystemPresetInherits(settings, "Phrozen Arco 0.4 nozzle");
+
+        corrected.Should().ContainKey("inherits");
+        corrected["inherits"].Should().Be("Phrozen Arco 0.4 nozzle");
+    }
+
+    [Fact(DisplayName = "An unknown preset name leaves the settings untouched rather than writing a meaningless inherits value")]
+    public void WithSystemPresetInherits_NoPresetName_LeavesSettingsUnchanged()
+    {
+        using JsonDocument doc = JsonDocument.Parse(SampleMachineProfile);
+        Dictionary<string, object> settings = OrcaProfilesService.SerializeElementToDict(doc.RootElement);
+        settings["inherits"] = "fdm_machine_common";
+
+        OrcaSlicingPipelineService.WithSystemPresetInherits(settings, null)["inherits"]
+            .Should().Be("fdm_machine_common");
+        OrcaSlicingPipelineService.WithSystemPresetInherits(settings, "   ")["inherits"]
+            .Should().Be("fdm_machine_common");
+    }
+
+    [Fact(DisplayName = "Correcting inherits does not mutate the caller's settings bag or disturb the other keys")]
+    public void WithSystemPresetInherits_DoesNotMutateSourceOrDropKeys()
+    {
+        using JsonDocument doc = JsonDocument.Parse(SampleMachineProfile);
+        Dictionary<string, object> settings = OrcaProfilesService.SerializeElementToDict(doc.RootElement);
+        settings["inherits"] = "fdm_machine_common";
+        int originalCount = settings.Count;
+
+        Dictionary<string, object> corrected =
+            OrcaSlicingPipelineService.WithSystemPresetInherits(settings, "Phrozen Arco 0.4 nozzle");
+
+        // The resolved profile is shared state; correcting the emitted document must not edit it.
+        settings["inherits"].Should().Be("fdm_machine_common");
+        corrected.Should().HaveCount(originalCount);
+        corrected["name"].Should().Be("Phrozen Arco 0.4 nozzle");
+        corrected["printer_model"].Should().Be("Phrozen Arco");
+        corrected["gcode_flavor"].Should().Be("klipper");
+        corrected["nozzle_diameter"].Should().BeOfType<List<string>>();
+    }
 }
