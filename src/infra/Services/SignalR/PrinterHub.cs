@@ -163,6 +163,7 @@ public class PrinterHub(
                 Context.ConnectionAborted);
 
         var authorized = new List<string>(authorizedIds.Count);
+        var cachedStatuses = new List<PrinterStatusDto>(authorizedIds.Count);
         foreach (Guid id in candidateIds)
         {
             if (!authorizedIds.Contains(id))
@@ -176,8 +177,16 @@ public class PrinterHub(
             PrinterStatusDto? status = statusCache.GetStatus(id);
             if (status is not null)
             {
-                await Clients.Caller.SendAsync("printerupdated", status, Context.ConnectionAborted);
+                cachedStatuses.Add(status);
             }
+        }
+
+        // Replay every authorized printer's cached status in a single message instead of
+        // one "printerupdated" frame per printer, so the client doesn't trade N subscribe
+        // invokes for N status frames (issue #1764).
+        if (cachedStatuses.Count > 0)
+        {
+            await Clients.Caller.SendAsync("printerstatusesreplayed", cachedStatuses, Context.ConnectionAborted);
         }
 
         return [.. authorized];

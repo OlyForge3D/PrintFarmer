@@ -137,62 +137,81 @@ export class PrinterSignalRService {
     this.setupEventHandlers(connection);
   }
 
-  private setupEventHandlers(connection: HubConnection): void {
-    // Handler for printerupdated event
-    const handlePrinterUpdated = (status: PrinterStatusUpdate) => {
-      try {
-        const win = window as unknown as {
-          PrintFarmerDebug?: Record<string, unknown>;
-        };
-        if (win.PrintFarmerDebug?.printerSignalR) {
-          try {
-            console.debug("[printerSignalR] Received printerupdated", {
-              id: status.id,
-              state: status.state,
-              isOnline: status.isOnline,
-            });
-          } catch {
-            /* ignore debug stringify errors */
-          }
+  /**
+   * Processes one printer status payload: debug logging, offline-flicker debounce,
+   * then cache + broadcast. Shared by the live single-status "printerupdated" event
+   * and the batched "printerstatusesreplayed" event (sent once, as an array, when a
+   * batch subscribe replays cached statuses for multiple printers at once — issue
+   * #1764) so both paths apply identical debounce/caching semantics.
+   */
+  private handlePrinterStatusPayload(status: PrinterStatusUpdate): void {
+    try {
+      const win = window as unknown as {
+        PrintFarmerDebug?: Record<string, unknown>;
+      };
+      if (win.PrintFarmerDebug?.printerSignalR) {
+        try {
+          console.debug("[printerSignalR] Received printerupdated", {
+            id: status.id,
+            state: status.state,
+            isOnline: status.isOnline,
+          });
+        } catch {
+          /* ignore debug stringify errors */
         }
-      } catch {
-        // ignore debug guard failures
       }
-      // --- Offline debounce logic ---
-      // Suppress brief online→offline flickers caused by transient WebSocket/network hiccups.
-      // If a printer goes offline, we wait OFFLINE_GRACE_MS before telling the UI.
-      // If it comes back online within that window, the offline event is silently discarded.
-      const previousStatus = this.lastStatuses.get(status.id);
-      const wasOnline = previousStatus?.isOnline !== false; // true or undefined → was online
+    } catch {
+      // ignore debug guard failures
+    }
+    // --- Offline debounce logic ---
+    // Suppress brief online→offline flickers caused by transient WebSocket/network hiccups.
+    // If a printer goes offline, we wait OFFLINE_GRACE_MS before telling the UI.
+    // If it comes back online within that window, the offline event is silently discarded.
+    const previousStatus = this.lastStatuses.get(status.id);
+    const wasOnline = previousStatus?.isOnline !== false; // true or undefined → was online
 
-      if (status.isOnline === false && wasOnline) {
-        // Online→Offline transition: start grace period instead of broadcasting immediately
-        if (!this.offlineGraceTimers.has(status.id)) {
-          const timer = setTimeout(() => {
-            this.offlineGraceTimers.delete(status.id);
-            // Grace period expired — printer is genuinely offline
-            this.applyStatusUpdate(status);
-          }, PrinterSignalRService.OFFLINE_GRACE_MS);
-          this.offlineGraceTimers.set(status.id, timer);
-        }
-        return; // Don't broadcast yet
-      }
-
-      if (status.isOnline) {
-        // Cancel any pending offline grace timer — printer recovered
-        const pendingTimer = this.offlineGraceTimers.get(status.id);
-        if (pendingTimer) {
-          clearTimeout(pendingTimer);
+    if (status.isOnline === false && wasOnline) {
+      // Online→Offline transition: start grace period instead of broadcasting immediately
+      if (!this.offlineGraceTimers.has(status.id)) {
+        const timer = setTimeout(() => {
           this.offlineGraceTimers.delete(status.id);
+          // Grace period expired — printer is genuinely offline
+          this.applyStatusUpdate(status);
+        }, PrinterSignalRService.OFFLINE_GRACE_MS);
+        this.offlineGraceTimers.set(status.id, timer);
+      }
+      return; // Don't broadcast yet
+    }
+
+    if (status.isOnline) {
+      // Cancel any pending offline grace timer — printer recovered
+      const pendingTimer = this.offlineGraceTimers.get(status.id);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        this.offlineGraceTimers.delete(status.id);
+      }
+    }
+
+    // Normal flow: cache + broadcast
+    this.applyStatusUpdate(status);
+  }
+
+  private setupEventHandlers(connection: HubConnection): void {
+    // Register single lowercase event name
+    connection.on("printerupdated", (status: PrinterStatusUpdate) => {
+      this.handlePrinterStatusPayload(status);
+    });
+
+    // Batched replay of cached statuses sent once by SubscribeToPrintersAsync
+    // (issue #1764), instead of one "printerupdated" frame per authorized printer.
+    connection.on(
+      "printerstatusesreplayed",
+      (statuses: PrinterStatusUpdate[]) => {
+        for (const status of statuses ?? []) {
+          this.handlePrinterStatusPayload(status);
         }
       }
-
-      // Normal flow: cache + broadcast
-      this.applyStatusUpdate(status);
-    };
-
-    // Register single lowercase event name
-    connection.on("printerupdated", handlePrinterUpdated);
+    );
 
     connection.on("jobqueueupdate", (update: JobQueueUpdateDto) => {
       this.jobQueueUpdateCallbacks.forEach((cb) => {
@@ -813,10 +832,22 @@ export class PrinterSignalRService {
       for (const id of printerIds) {
         if (authorizedSet.has(id)) {
           this.subscribedPrinters.add(id);
+        } else {
+          // Not authorized: don't keep retrying it as "desired" on future
+          // reconnects (mirrors the per-id rejection cleanup in
+          // restoreResourceSubscriptions).
+          this.desiredQueuePrinters.delete(id);
+          this.subscribedPrinters.delete(id);
         }
       }
     } catch (err) {
       console.warn("[printerSignalR] batch subscribeToPrinters failed", err);
+      if (this.isCurrentConnectionEpoch(connection, connectionEpoch)) {
+        for (const id of printerIds) {
+          this.desiredQueuePrinters.delete(id);
+          this.subscribedPrinters.delete(id);
+        }
+      }
     }
   }
 

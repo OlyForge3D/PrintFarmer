@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -416,10 +417,16 @@ public class PrinterHubTests
             AuthorizedHubGroups.Printer(unauthorizedId),
             It.IsAny<CancellationToken>()), Times.Never);
 
+        // A single batched status replay is sent instead of one "printerupdated"
+        // frame per authorized printer (issue #1764).
+        _callerMock.Verify(client => client.SendCoreAsync(
+            "printerstatusesreplayed",
+            It.Is<object?[]>(arguments => ContainsExactlyStatuses(arguments, authorizedStatus)),
+            It.IsAny<CancellationToken>()), Times.Once);
         _callerMock.Verify(client => client.SendCoreAsync(
             "printerupdated",
-            It.Is<object?[]>(arguments => ReferenceEquals(arguments[0], authorizedStatus)),
-            It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<object?[]>(),
+            It.IsAny<CancellationToken>()), Times.Never);
 
         // Batched authorization is used instead of a per-printer authorization check.
         _resourceAuthorizationMock.Verify(
@@ -492,6 +499,58 @@ public class PrinterHubTests
             "test-connection-id",
             AuthorizedHubGroups.Printer(printerId),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SubscribeToPrintersAsync_WithMultipleAuthorizedCachedStatuses_SendsSingleBatchedFrame()
+    {
+        Guid idA = Guid.NewGuid();
+        Guid idB = Guid.NewGuid();
+        Guid idC = Guid.NewGuid();
+        var statusA = new PrinterStatusDto(Id: idA, IsOnline: true, State: "Idle");
+        var statusB = new PrinterStatusDto(Id: idB, IsOnline: true, State: "Printing");
+        _statusCacheMock.Setup(cache => cache.GetStatus(idA)).Returns(statusA);
+        _statusCacheMock.Setup(cache => cache.GetStatus(idB)).Returns(statusB);
+        _statusCacheMock.Setup(cache => cache.GetStatus(idC)).Returns((PrinterStatusDto?)null);
+
+        _resourceAuthorizationMock
+            .Setup(service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Count == 3),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid> { idA, idB, idC });
+
+        string[] result = await _hub.SubscribeToPrintersAsync(
+            [idA.ToString(), idB.ToString(), idC.ToString()]);
+
+        Assert.Equal(3, result.Length);
+
+        // Exactly one outbound frame carrying every authorized printer's cached
+        // status, not N individual "printerupdated" frames.
+        _callerMock.Verify(client => client.SendCoreAsync(
+            It.IsAny<string>(),
+            It.IsAny<object?[]>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _callerMock.Verify(client => client.SendCoreAsync(
+            "printerstatusesreplayed",
+            It.Is<object?[]>(arguments => ContainsExactlyStatuses(arguments, statusA, statusB)),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
+    /// Matcher helper for "printerstatusesreplayed" payloads. Kept out of the Moq
+    /// <c>It.Is</c> lambda because Moq builds those lambdas into expression trees,
+    /// which cannot contain the <c>is</c> pattern-matching operator (CS8122).
+    /// </summary>
+    private static bool ContainsExactlyStatuses(object?[] arguments, params PrinterStatusDto[] expected)
+    {
+        if (arguments.Length == 0 || arguments[0] is not IReadOnlyCollection<PrinterStatusDto> statuses)
+        {
+            return false;
+        }
+
+        return statuses.Count == expected.Length && expected.All(statuses.Contains);
     }
 
     [Fact]
