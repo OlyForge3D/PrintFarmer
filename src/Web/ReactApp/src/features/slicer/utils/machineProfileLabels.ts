@@ -88,7 +88,17 @@ export function isProcessProfileCoreOneVariantCompatible(
   compatiblePrinters: readonly string[] | undefined,
   selectedIsHighFlow: boolean,
 ): boolean {
-  const relevantCompatiblePrinters = (compatiblePrinters ?? []).filter(isCoreOneFamilyName);
+  // `compatiblePrinters` is typed as `readonly string[]`, but this data comes
+  // off the wire from the slicer worker/OrcaSlicer bundle, so a malformed or
+  // hostile payload can carry non-string entries (null, a number, an object).
+  // Guard 1 tolerates that (`printerName === selectedMachineName` is just
+  // false for a non-string), and the old joined-string Guard 2 coerced junk
+  // via `join(' ')` without throwing — so this filter must reject non-string
+  // entries before anything here calls `.toLowerCase()` on them, or a single
+  // bad entry throws a TypeError and takes down the New Slice Job page.
+  const relevantCompatiblePrinters = (compatiblePrinters ?? [])
+    .filter((printerName): printerName is string => typeof printerName === 'string')
+    .filter(isCoreOneFamilyName);
 
   let candidateIsHighFlow: boolean;
   let candidateIsNonHighFlow: boolean;

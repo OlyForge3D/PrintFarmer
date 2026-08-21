@@ -120,6 +120,26 @@ describe('isProcessProfileCoreOneVariantCompatible', () => {
       true,
     )).toBe(false);
   });
+
+  it('never throws on malformed compatiblePrinters entries (non-string values)', () => {
+    // `compatiblePrinters` is typed as `readonly string[]`, but this is data
+    // off the wire from the slicer worker / an imported OrcaSlicer bundle, so
+    // a malformed or hostile payload can carry non-string entries. A single
+    // bad entry must be ignored, not throw a TypeError that would take down
+    // the New Slice Job page.
+    const malformed = [null, 42, {}, undefined, 'Prusa CORE One HF 0.4 nozzle'] as unknown as string[];
+
+    expect(() => isProcessProfileCoreOneVariantCompatible('profile', malformed, true)).not.toThrow();
+    expect(isProcessProfileCoreOneVariantCompatible('profile', malformed, true)).toBe(true);
+    expect(isProcessProfileCoreOneVariantCompatible('profile', malformed, false)).toBe(false);
+
+    // Every entry malformed and none naming CORE One at all -> falls back to
+    // the profile name, and still never throws.
+    const allMalformed = [null, 42, {}] as unknown as string[];
+    expect(() => isProcessProfileCoreOneVariantCompatible('0.20mm @CORE One HF', allMalformed, false)).not.toThrow();
+    expect(isProcessProfileCoreOneVariantCompatible('0.20mm @CORE One HF', allMalformed, false)).toBe(false);
+    expect(isProcessProfileCoreOneVariantCompatible('0.20mm @CORE One HF', allMalformed, true)).toBe(true);
+  });
 });
 
 describe('buildMachineProfileLabels', () => {
