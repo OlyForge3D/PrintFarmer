@@ -24,17 +24,38 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
     private readonly ISlicerRegistry _registry = registry ?? throw new ArgumentNullException(nameof(registry));
 
     /// <summary>
-    /// Lists all slicer engines available in the plugin registry, including all
-    /// installed versions per engine (issue #578). Used by the React version
-    /// selector. Each version carries an <c>available</c> flag that is true only
-    /// when at least one Online <see cref="SlicerService"/> currently advertises
-    /// that (engine, version) pair, so the UI can distinguish "installed" from
-    /// "actually claimable right now" and never pin a job to a version no worker
-    /// can serve. When there are no registered <see cref="SlicerService"/> rows
-    /// at all (fresh install / legacy single-worker deployments that never call
-    /// /api/slicers/register), every version is reported as available so the
-    /// version pin remains usable. Once at least one row exists, availability
-    /// is gated strictly by the Online set — offline services are honoured.
+    /// Lists all slicer engines available in the plugin registry, filtered to
+    /// versions that have at least one <em>configured</em> worker (issue #1772).
+    /// A registry version with zero <see cref="SlicerService"/> rows in any
+    /// status — the "never configured, nobody could ever run this" case
+    /// (e.g. a stale OrcaSlicer 2.3.1 plugin left installed after every
+    /// worker moved to 2.4.2) — is dropped entirely rather than surfaced as a
+    /// disabled "(offline)" option; it is noise, not a real choice. A version
+    /// backed by at least one service row that happens to be offline right
+    /// now IS still configured, so it remains listed with <c>available:false</c>
+    /// — the "(offline)" disabled option — since workers restart and this
+    /// distinguishes "was set up, temporarily down" from "was never set up".
+    /// This per-version filter only applies to an engine that has AT LEAST
+    /// ONE configured version somewhere in its group; an engine with ZERO
+    /// configured versions at all keeps its full, all-unavailable version
+    /// list instead of collapsing to an empty array. This matters because the
+    /// React client's submit guards (<c>NewSliceJobPage.tsx</c>,
+    /// <c>QuickSliceModal.tsx</c>) detect "no worker available for this
+    /// engine" by checking that <c>versions.length &gt; 0</c> with none
+    /// available — an empty array reads as "nothing to check" and would
+    /// silently let a job dispatch unpinned to an engine with no workers at
+    /// all, which is the exact failure this endpoint exists to prevent, just
+    /// promoted from per-version to whole-engine scope.
+    /// Each version carries an <c>available</c> flag that is true only when at
+    /// least one Online <see cref="SlicerService"/> currently advertises that
+    /// (engine, version) pair, so the UI never pins a job to a version no
+    /// worker can serve right now. When there are no registered
+    /// <see cref="SlicerService"/> rows at all (fresh install / legacy
+    /// single-worker deployments that never call /api/slicers/register), no
+    /// configuration data exists to filter against, so every registry version
+    /// is kept and reported as available so the version pin remains usable.
+    /// Once at least one row exists, both the filter and the availability flag
+    /// are gated by that row data — offline services are honoured.
     /// </summary>
     [HttpGet("engines")]
     public async Task<IActionResult> ListEnginesAsync()
@@ -57,8 +78,23 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
             .Where(t => !string.IsNullOrEmpty(t.Engine))
             .ToHashSet();
 
+        // "Configured" is any service row for (engine, version), in ANY status
+        // (Online or Offline) — this answers "has a worker for this version
+        // ever been registered", not "is it up right now". Unlike `online`
+        // above, this set is NOT freshness-gated: a worker that registered a
+        // version and later went stale/offline still proves that version was
+        // set up, which is exactly the distinction issue #1772 asks for.
+        HashSet<(string Engine, string Version)> configured = services
+            .Where(s => !string.IsNullOrWhiteSpace(s.Version))
+            .Select(s => (Engine: SlicerTypeToEngineName(s.SlicerType), Version: s.Version!.Trim()))
+            .Where(t => !string.IsNullOrEmpty(t.Engine))
+            .ToHashSet();
+
         // Fresh install / legacy deployment fallback: only when NO service rows
-        // exist at all do we mark every registry version available. When rows
+        // exist at all do we mark every registry version available and skip
+        // the "configured" filter — there is no configuration data yet to
+        // filter against, and dropping every version would leave a blank,
+        // unusable selector for legacy single-worker deployments. When rows
         // exist but none are Online we honour that state (marking versions
         // unavailable) — otherwise the UI would happily let the user pin a
         // job to a version that will hang in the queue forever.
@@ -68,7 +104,39 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
             .GroupBy(l => l.SlicerName, StringComparer.OrdinalIgnoreCase)
             .Select(g =>
             {
+                // Only drop unconfigured versions when THIS engine has at
+                // least one configured version elsewhere in the group. If an
+                // entire engine has zero configured workers (nobody has ever
+                // registered ANY version of it), we deliberately do NOT empty
+                // out its versionEntries: NewSliceJobPage.tsx's submit guard
+                // (`engineInfo.versions.length > 0 && !latest && !anyAvailable`)
+                // and QuickSliceModal's equivalent both rely on a non-empty
+                // `versions` array to detect "engine known but has no worker"
+                // and block submission with an error. An empty array reads as
+                // "nothing to check" and would silently let the job go out
+                // unpinned to an engine with zero workers — the exact failure
+                // these guards exist to prevent, just promoted from
+                // per-version to whole-engine scope (Bishop/Hicks finding on
+                // issue #1772's PR). Keeping the full, all-unavailable list
+                // preserves that guard while still fixing the reported bug:
+                // when an engine DOES have a configured version (e.g.
+                // OrcaSlicer 2.4.2), its never-configured siblings (2.3.1)
+                // are still dropped as noise.
+                bool engineHasAnyConfiguredVersion = g.Any(l => configured.Contains((g.Key, l.SlicerVersion)));
+
                 var versionEntries = g
+
+                    // Drop registry versions with no configured worker in any
+                    // status (issue #1772) — nobody could ever run these, so
+                    // they're noise rather than a real "offline" choice. Only
+                    // applies once service rows exist AND this engine has at
+                    // least one configured version; the legacy fallback (no
+                    // rows at all) and the all-unconfigured-engine case both
+                    // keep every version to stay usable / preserve the
+                    // frontend's no-worker submit guard (see above).
+                    .Where(l => !anyServiceRows
+                                || !engineHasAnyConfiguredVersion
+                                || configured.Contains((g.Key, l.SlicerVersion)))
                     .Select(l => new
                     {
                         version = l.SlicerVersion,

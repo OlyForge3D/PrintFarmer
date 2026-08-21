@@ -147,7 +147,7 @@ public class SlicersControllerUnitTests
         _ = json.Should().Contain("\"available\":true");
     }
 
-    [Fact(DisplayName = "GET /api/slicers/engines emits latest=<newest online> when workers registered (issue #578)")]
+    [Fact(DisplayName = "GET /api/slicers/engines drops a never-configured sibling version while keeping the configured/online one as latest (issue #1772)")]
     public async Task ListEngines_WithOnlineWorkers_ReturnsNewestOnlineAsLatest()
     {
         Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca24 =
@@ -164,7 +164,9 @@ public class SlicersControllerUnitTests
         _ = registry.Setup(r => r.ListAllLibraries())
             .Returns(new[] { orca24.Object, orca23.Object });
 
-        // Only the older version has an online worker.
+        // Only the older version has ANY worker (Online) — the newer 2.4.1 has
+        // never had a worker configured at all (issue #1772), so it must be
+        // dropped entirely rather than surfaced as a disabled option.
         Farm.Slicer.Module.Domain.SlicerService svc = new()
         {
             Id = Guid.NewGuid(),
@@ -186,11 +188,217 @@ public class SlicersControllerUnitTests
         _ = ok.Should().NotBeNull();
 
         string json = System.Text.Json.JsonSerializer.Serialize(ok!.Value);
-        // 2.4.1 has no online worker → available=false, 2.3.1 → available=true.
-        _ = json.Should().Contain("\"version\":\"2.4.1\",\"available\":false");
+        // 2.4.1 has never had a configured worker → dropped entirely (issue #1772).
+        _ = json.Should().NotContain("2.4.1");
+        // 2.3.1 is configured (has a service row) and online → available=true.
         _ = json.Should().Contain("\"version\":\"2.3.1\",\"available\":true");
-        // latest = newest AVAILABLE, so 2.3.1 (not 2.4.1).
+        // latest = the only remaining (configured, online) version.
         _ = json.Should().Contain("\"latest\":\"2.3.1\"");
+    }
+
+    [Fact(DisplayName = "GET /api/slicers/engines emits latest=<first online entry in registry order> when multiple configured versions are online (issue #578)")]
+    public async Task ListEngines_MultipleConfiguredOnlineVersions_ReturnsFirstOnlineInRegistryOrderAsLatest()
+    {
+        // Both versions are configured AND online; `latest` selection is
+        // `versionEntries.FirstOrDefault(v => v.available)`, i.e. registry
+        // group order — NOT a numeric "newest version" comparison. This test
+        // exercises that actual selection behavior directly, which the
+        // mixed configured/unconfigured test above no longer covers (Hicks
+        // finding on #1792: that test lost its ability to prove "latest"
+        // selection once one candidate stopped competing).
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca242 =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
+        _ = orca242.SetupGet(l => l.SlicerName).Returns("OrcaSlicer");
+        _ = orca242.SetupGet(l => l.SlicerVersion).Returns("2.4.2");
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca231b =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
+        _ = orca231b.SetupGet(l => l.SlicerName).Returns("OrcaSlicer");
+        _ = orca231b.SetupGet(l => l.SlicerVersion).Returns("2.3.1");
+
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry> registry2 =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>();
+        _ = registry2.Setup(r => r.ListAllLibraries())
+            .Returns(new[] { orca242.Object, orca231b.Object });
+
+        Farm.Slicer.Module.Domain.SlicerService svc242 = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "orca-2.4.2",
+            SlicerType = (int)Farm.Slicer.Module.Domain.SlicerType.OrcaSlicer,
+            Version = "2.4.2",
+            Status = "Online",
+            Host = "http://worker-2-4-2:5000",
+        };
+        Farm.Slicer.Module.Domain.SlicerService svc231 = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "orca-2.3.1",
+            SlicerType = (int)Farm.Slicer.Module.Domain.SlicerType.OrcaSlicer,
+            Version = "2.3.1",
+            Status = "Online",
+            Host = "http://worker-2-3-1b:5000",
+        };
+        Mock<ISlicersService> service2 = new Mock<ISlicersService>();
+        _ = service2.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<Farm.Slicer.Module.Domain.SlicerService>)new[] { svc242, svc231 });
+
+        SlicersController controller2 = new SlicersController(service2.Object, registry2.Object);
+        controller2.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+
+        IActionResult result2 = await controller2.ListEnginesAsync();
+        string json2 = System.Text.Json.JsonSerializer.Serialize((result2 as OkObjectResult)!.Value);
+
+        // Both versions are configured and online → both remain, both available.
+        _ = json2.Should().Contain("\"version\":\"2.4.2\",\"available\":true");
+        _ = json2.Should().Contain("\"version\":\"2.3.1\",\"available\":true");
+        // `latest` resolves to whichever entry comes first in registry/group
+        // order (2.4.2, per the registry mock order above) — the endpoint
+        // does not perform semantic version comparison.
+        _ = json2.Should().Contain("\"latest\":\"2.4.2\"");
+    }
+
+    [Fact(DisplayName = "GET /api/slicers/engines drops registry versions with no configured worker in any status (issue #1772)")]
+    public async Task ListEngines_VersionWithNoConfiguredWorker_IsExcludedEntirely()
+    {
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca242 =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
+        _ = orca242.SetupGet(l => l.SlicerName).Returns("OrcaSlicer");
+        _ = orca242.SetupGet(l => l.SlicerVersion).Returns("2.4.2");
+
+        // 2.3.1 is installed in the plugin registry but has never had ANY
+        // worker (Online or Offline) configured for it — the exact scenario
+        // from issue #1772 (stale plugin left installed after every worker
+        // moved to 2.4.2).
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca231 =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
+        _ = orca231.SetupGet(l => l.SlicerName).Returns("OrcaSlicer");
+        _ = orca231.SetupGet(l => l.SlicerVersion).Returns("2.3.1");
+
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry> registry =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>();
+        _ = registry.Setup(r => r.ListAllLibraries())
+            .Returns(new[] { orca242.Object, orca231.Object });
+
+        Farm.Slicer.Module.Domain.SlicerService svc = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "orca-2.4.2",
+            SlicerType = (int)Farm.Slicer.Module.Domain.SlicerType.OrcaSlicer,
+            Version = "2.4.2",
+            Status = "Online",
+            Host = "http://worker-2-4-2:5000",
+        };
+        Mock<ISlicersService> service = new Mock<ISlicersService>();
+        _ = service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<Farm.Slicer.Module.Domain.SlicerService>)new[] { svc });
+
+        SlicersController controller = new SlicersController(service.Object, registry.Object);
+        controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+
+        IActionResult result = await controller.ListEnginesAsync();
+        string json = System.Text.Json.JsonSerializer.Serialize((result as OkObjectResult)!.Value);
+
+        // 2.3.1 never had a worker configured → absent from the payload entirely.
+        _ = json.Should().NotContain("2.3.1");
+        // 2.4.2 is configured and online → remains, available, and is latest.
+        _ = json.Should().Contain("\"version\":\"2.4.2\",\"available\":true");
+        _ = json.Should().Contain("\"latest\":\"2.4.2\"");
+    }
+
+    [Fact(DisplayName = "GET /api/slicers/engines keeps a configured-but-offline version listed and disabled (issue #1772)")]
+    public async Task ListEngines_ConfiguredVersionThatIsOffline_StaysListedButUnavailable()
+    {
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca24 =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
+        _ = orca24.SetupGet(l => l.SlicerName).Returns("OrcaSlicer");
+        _ = orca24.SetupGet(l => l.SlicerVersion).Returns("2.4.2");
+
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry> registry =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>();
+        _ = registry.Setup(r => r.ListAllLibraries())
+            .Returns(new[] { orca24.Object });
+
+        // A worker WAS configured for 2.4.2 but is currently offline — distinct
+        // from "never configured", so this version must remain listed even
+        // though it is not available right now.
+        Farm.Slicer.Module.Domain.SlicerService svc = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "orca-2.4.2-offline",
+            SlicerType = (int)Farm.Slicer.Module.Domain.SlicerType.OrcaSlicer,
+            Version = "2.4.2",
+            Status = "Offline",
+            Host = "http://worker:5000",
+        };
+        Mock<ISlicersService> service = new Mock<ISlicersService>();
+        _ = service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<Farm.Slicer.Module.Domain.SlicerService>)new[] { svc });
+
+        SlicersController controller = new SlicersController(service.Object, registry.Object);
+        controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+
+        IActionResult result = await controller.ListEnginesAsync();
+        string json = System.Text.Json.JsonSerializer.Serialize((result as OkObjectResult)!.Value);
+
+        // Configured (has a row) but offline → stays listed, unavailable.
+        _ = json.Should().Contain("\"version\":\"2.4.2\",\"available\":false");
+        _ = json.Should().Contain("\"latest\":null");
+    }
+
+    [Fact(DisplayName = "GET /api/slicers/engines keeps the full version list for an engine with ZERO configured workers (Bishop/Hicks #1792 regression guard)")]
+    public async Task ListEngines_EngineWithNoConfiguredVersionsAtAll_KeepsFullListInsteadOfEmptyingIt()
+    {
+        // OrcaSlicer has two registry versions but NO service row of any
+        // status matches OrcaSlicer at all — nobody has ever configured a
+        // single OrcaSlicer worker. PrusaSlicer has a service row instead, so
+        // `anyServiceRows` is globally true, which is what would trigger the
+        // per-version drop filter. The React submit guards
+        // (NewSliceJobPage.tsx / QuickSliceModal.tsx) detect "no worker for
+        // this engine" via `versions.length > 0 && !latest && !anyAvailable`,
+        // so OrcaSlicer's versionEntries must NOT collapse to an empty array
+        // here — that would silently defeat the guard and let a job dispatch
+        // unpinned to an engine with zero workers (the regression Bishop and
+        // Hicks flagged on the initial version of this PR).
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca242 =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
+        _ = orca242.SetupGet(l => l.SlicerName).Returns("OrcaSlicer");
+        _ = orca242.SetupGet(l => l.SlicerVersion).Returns("2.4.2");
+
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary> orca231 =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerLibrary>();
+        _ = orca231.SetupGet(l => l.SlicerName).Returns("OrcaSlicer");
+        _ = orca231.SetupGet(l => l.SlicerVersion).Returns("2.3.1");
+
+        Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry> registry =
+            new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>();
+        _ = registry.Setup(r => r.ListAllLibraries())
+            .Returns(new[] { orca242.Object, orca231.Object });
+
+        Farm.Slicer.Module.Domain.SlicerService prusaSvc = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "prusa-worker",
+            SlicerType = (int)Farm.Slicer.Module.Domain.SlicerType.PrusaSlicer,
+            Version = "2.9.0",
+            Status = "Online",
+            Host = "http://prusa-worker:5000",
+        };
+        Mock<ISlicersService> service = new Mock<ISlicersService>();
+        _ = service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<Farm.Slicer.Module.Domain.SlicerService>)new[] { prusaSvc });
+
+        SlicersController controller = new SlicersController(service.Object, registry.Object);
+        controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+
+        IActionResult result = await controller.ListEnginesAsync();
+        string json = System.Text.Json.JsonSerializer.Serialize((result as OkObjectResult)!.Value);
+
+        // OrcaSlicer has zero configured workers of any kind → both versions
+        // remain listed (unavailable), NOT dropped to an empty array, so the
+        // frontend's "no worker available" submit guard can still fire.
+        _ = json.Should().Contain("\"engine\":\"OrcaSlicer\"");
+        _ = json.Should().Contain("\"version\":\"2.4.2\",\"available\":false");
+        _ = json.Should().Contain("\"version\":\"2.3.1\",\"available\":false");
     }
 
     [Fact(DisplayName = "GET /api/slicers/engines with all workers offline marks unavailable and returns null latest (issue #578, Hicks H#1)")]
