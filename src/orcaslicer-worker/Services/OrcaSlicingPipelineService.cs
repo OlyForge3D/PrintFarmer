@@ -1633,14 +1633,18 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // Every 'ZYX' triple has a second representative, (x-π, π-y, z+π). Take it when Z is
         // negative: that makes Z non-negative, and gives |y'| > 90°, which is exactly the case
         // where extract(Ry(y')) returns (π, y, π) — so the X, Y and Z contributions sum back to
-        // the intended triple modulo 2π. Normalising X and Y into (-π, π] does not change their
-        // matrices, and every component is 2π-periodic in the final composition.
+        // the intended triple modulo 2π.
         //
         // The extract(Ry(y')) → π step depends on the SIGN OF THE ZERO in the (1,0) entry:
         // atan2(+0, cos y') with cos y' < 0 gives +π and takes no correction, whereas atan2(-0, ·)
         // would trip Eigen's res[0] < 0 branch and yield 0, putting the Y contribution off by π.
-        // Rodrigues for AngleAxisd(θ, UnitY) gives m10 = +0, so it resolves correctly — but it is
-        // one sign-of-zero away from a silent π error, so do not "simplify" how that flag is built.
+        //
+        // NormalizeAngle is what guarantees that +0, so it is NOT cosmetic wrapping. For Ry(θ)
+        // the (1,0) entry is 2yx + 2wz with x = z = +0, so its sign follows sin(θ/2) and
+        // cos(θ/2); both are negative — giving -0 — only when θ < -180°. Confining the emitted
+        // angle to (-π, π] forces cos(θ/2) ≥ 0 and hence +0. Do NOT remove the normalisation on
+        // the grounds that rotation matrices are 2π-periodic: that is true of the matrices and
+        // false of the sign of zero.
         if (outZ < 0)
         {
             outX = NormalizeAngle(outX - Math.PI);
