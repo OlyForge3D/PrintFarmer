@@ -11,6 +11,14 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Farm.OrcaSlicer.Worker.Tests" />
+
+    <!--
+      The pinned-container real-OrcaSlicer-CLI rotation test (issue #1802) calls the production
+      rotation/placement pure functions (ToOrcaRotation, BuildTransformFlags, PlanPlacement,
+      TryReadBedCenter, BuildOrcaSlicerArguments) directly instead of reimplementing them, so the
+      test exercises the exact code under test rather than a parallel copy of it.
+    -->
+    <InternalsVisibleTo Include="Farm.Web.IntegrationTests" />
   </ItemGroup>
   <!-- Note: Health check and System.Text.Json packages removed - available via project references -->
   <ItemGroup>

@@ -226,6 +226,48 @@ internal sealed class PinnedOrcaWorkerContainer : IAsyncDisposable
         return "Worker log tail: " + Scrub(Truncate(combined, 6000), _redactedValues);
     }
 
+    /// <summary>
+    /// Copies a file from the runner into the running container, creating any missing parent
+    /// directories inside the container first.
+    /// </summary>
+    /// <param name="hostPath">Absolute path on the runner.</param>
+    /// <param name="containerPath">Absolute destination path inside the container.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The <c>docker cp</c> outcome.</returns>
+    public async Task<CommandResult> CopyToContainerAsync(
+        string hostPath,
+        string containerPath,
+        CancellationToken cancellationToken)
+    {
+        string parentDirectory = containerPath[..(containerPath.LastIndexOf('/') + 1)];
+        if (parentDirectory.Length > 0)
+        {
+            _ = await ExecAsync(["mkdir", "-p", parentDirectory], cancellationToken);
+        }
+
+        return await RunAsync(["cp", hostPath, $"{_containerName}:{containerPath}"], cancellationToken);
+    }
+
+    /// <summary>Copies a file out of the running container onto the runner.</summary>
+    /// <param name="containerPath">Absolute source path inside the container.</param>
+    /// <param name="hostPath">Absolute destination path on the runner.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The <c>docker cp</c> outcome.</returns>
+    public Task<CommandResult> CopyFromContainerAsync(
+        string containerPath,
+        string hostPath,
+        CancellationToken cancellationToken) =>
+        RunAsync(["cp", $"{_containerName}:{containerPath}", hostPath], cancellationToken);
+
+    /// <summary>Runs a command inside the already-running container via <c>docker exec</c>.</summary>
+    /// <param name="arguments">The command and its arguments, unescaped (no shell involved).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The command outcome.</returns>
+    public Task<CommandResult> ExecAsync(
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken) =>
+        RunAsync(["exec", _containerName, .. arguments], cancellationToken);
+
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
