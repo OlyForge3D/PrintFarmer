@@ -364,6 +364,93 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
             "so the redacted signal must reach the API, not just the worker's own log");
     }
 
+    /// <summary>
+    /// Drives the real poller and the real pipeline against a fake OrcaSlicer that fails exactly the
+    /// way the engine did in issue #1811, and asserts what actually lands on <c>/fail</c>.
+    /// </summary>
+    /// <remarks>
+    /// This is the junction the unit tests cannot reach. <c>OrcaSlicerFailureDiagnosticsTests</c>
+    /// proves the diagnostic is composed correctly and <c>SlicerFailureReportTransmissionTests</c>
+    /// proves the payload is built correctly, but only this exercises
+    /// <c>RunOrcaSlicerAsync</c> reading <c>result.json</c>, throwing a classified
+    /// <c>SlicerEngineFailureException</c>, and the poller's catch block turning that into the HTTP
+    /// request. Deleting the <c>result.json</c> read, or throwing an unclassified exception, fails
+    /// here and nowhere else.
+    /// </remarks>
+    [Fact(DisplayName =
+        "A model the engine rejects reaches /fail with the real diagnostic and a redacted reason")]
+    public async Task ExecuteAsync_EngineRejectsModel_ReportsIntactDetailAndReason()
+    {
+        _ = Directory.CreateDirectory(_testRoot);
+        string captureDirectory = Path.Join(_testRoot, "capture");
+        _ = Directory.CreateDirectory(captureDirectory);
+        string fakeOrcaPath = await CreateFailingFakeOrcaAsync();
+
+        Guid workerId = Guid.NewGuid();
+        var handler = new WorkerApiHandler();
+        var clientFactory = new StubHttpClientFactory(handler);
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["SlicerApi:BaseUrl"] = "http://localhost",
+                ["Worker:PollIntervalSeconds"] = "1",
+                ["Worker:LeaseDurationSeconds"] = "300",
+                ["Worker:WorkingDirectory"] = Path.Join(_testRoot, "work"),
+                ["Worker:OrcaSlicerPath"] = fakeOrcaPath,
+            })
+            .Build();
+        var workerState = new WorkerStateService();
+        workerState.SetRegisteredService(workerId, "worker-secret");
+
+        using HttpClient pipelineClient = new(handler, disposeHandler: false)
+        {
+            BaseAddress = new Uri("http://localhost"),
+        };
+        var pipeline = new OrcaSlicingPipelineService(
+            pipelineClient,
+            new NullProgressReporter(),
+            NullLogger<OrcaSlicingPipelineService>.Instance,
+            configuration,
+            workerState);
+        ServiceCollection services = new();
+        _ = services.AddSingleton<ISlicerProfilesService>(new StubProfilesService("system"));
+        _ = services.AddSingleton<ISlicingPipelineService>(pipeline);
+        await using ServiceProvider serviceProvider = services.BuildServiceProvider();
+        var poller = new TestPoller(clientFactory, serviceProvider, workerState, configuration);
+
+        await poller.StartAsync(CancellationToken.None);
+        TerminalRequest terminal;
+        try
+        {
+            terminal = await handler.TerminalRequest.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        finally
+        {
+            await poller.StopAsync(CancellationToken.None);
+            poller.Dispose();
+        }
+
+        _ = terminal.Path.Should().EndWith("/fail", terminal.Body);
+
+        FailSliceJobRequest? failed = JsonSerializer.Deserialize<FailSliceJobRequest>(
+            terminal.Body,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        _ = failed.Should().NotBeNull();
+
+        // The regression: before issue #1811 this arrived as the single word "Errors".
+        _ = failed!.ErrorMessage.Should().NotBe("OrcaSlicer failed with exit code 156: Errors");
+        _ = failed.ErrorMessage.Should().Contain(
+            "Failed slicing the model.",
+            "the engine's own error_string from result.json must survive to the API");
+        _ = failed.ErrorMessage.Should().Contain("CLI_SLICING_ERROR");
+        _ = failed.ErrorMessage.Should().Contain(
+            "run found error, return -100",
+            "the informative console line used to be dropped in favour of the first match");
+        _ = failed.FailureReason.Should().Be(
+            SliceFailureReason.SlicingEngineRejectedModel,
+            "the redacted classification must travel with the failure, not be inferred from prose");
+    }
+
     public ValueTask DisposeAsync()
     {
         if (Directory.Exists(_testRoot))
@@ -412,6 +499,60 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
             {progressCommand}
             printf 'invoked\n' > "{Path.Join(captureDirectory, "orca-invoked.txt")}"
             printf '; estimated printing time = 120s\n; filament used = 1g\n; layer_count = 2\nG28\n' > "$PWD/output/plate_1.gcode"
+            """;
+        await File.WriteAllTextAsync(
+            unixScriptPath,
+            unixScript.ReplaceLineEndings("\n"),
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        File.SetUnixFileMode(
+            unixScriptPath,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return unixScriptPath;
+    }
+
+    /// <summary>
+    /// A fake OrcaSlicer that fails exactly the way the real engine did in issue #1811: the bare
+    /// word <c>Errors</c> on stderr, <c>run found error, return -100, exit...</c> on stdout, a
+    /// <c>result.json</c> written into the output directory, no G-code, and exit status 156.
+    /// </summary>
+    /// <remarks>
+    /// The console strings and the <c>result.json</c> body are byte-exact captures from the pinned
+    /// OrcaSlicer 2.4.2 AppImage slicing <c>top.stl</c>. Both streams are written because production
+    /// runs the binary through <c>xvfb-run</c>, which merges them; the pipeline reads them combined,
+    /// so this fake exercises that path without needing the wrapper.
+    /// </remarks>
+    /// <returns>Path to the executable fake.</returns>
+    private async Task<string> CreateFailingFakeOrcaAsync()
+    {
+        // A single-quoted JSON literal keeps the shell/cmd quoting trivial; the pipeline only reads
+        // return_code, error_string and sliced_plates from it.
+        const string ResultJson =
+            "{\"error_string\": \"Failed slicing the model. Please verify the slicing of all " +
+            "plates on Orca Slicer before uploading.\", \"return_code\": -100, \"plate_index\": 1}";
+
+        if (OperatingSystem.IsWindows())
+        {
+            string scriptPath = Path.Join(_testRoot, "fake-orca-fail.cmd");
+            string script = $"""
+                @echo off
+                echo Errors 1>&2
+                echo run found error, return -100, exit...
+                > "%CD%\output\result.json" echo {ResultJson.Replace("%", "%%", StringComparison.Ordinal)}
+                exit /b 156
+                """;
+            await File.WriteAllTextAsync(scriptPath, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            return scriptPath;
+        }
+
+        string unixScriptPath = Path.Join(_testRoot, "fake-orca-fail");
+        string unixScript = $"""
+            #!/bin/sh
+            printf 'Errors\n' 1>&2
+            printf 'run found error, return -100, exit...\n'
+            cat > "$PWD/output/result.json" <<'ORCA_RESULT_JSON'
+            {ResultJson}
+            ORCA_RESULT_JSON
+            exit 156
             """;
         await File.WriteAllTextAsync(
             unixScriptPath,

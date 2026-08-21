@@ -548,6 +548,8 @@ function JobCard({
 
         <LayoutDegradationNotice job={job} />
 
+        <SliceFailureNotice job={job} />
+
         {job.sourceUrl && (
           <a
             href={job.sourceUrl}
@@ -642,6 +644,28 @@ function LayoutDegradationNotice({ job }: { job: SliceJobStatusResponse }) {
   );
 }
 
+/**
+ * Actionable, client-safe explanation for a failed job (issue #1811). The text
+ * comes from the backend's fixed `failureHint` lookup, never from raw worker
+ * diagnostics, so it is safe for a normal operator who can never see
+ * `errorDetail`. Before this existed a failed job showed only "Slicing failed."
+ * and the operator had no way to learn why or what to do next.
+ */
+function SliceFailureNotice({ job }: { job: SliceJobStatusResponse }) {
+  if (job.status !== SliceJobStatus.Failed || !job.failureHint) {
+    return null;
+  }
+  return (
+    <p
+      role="status"
+      className="flex items-start gap-1.5 text-xs text-pf-warning bg-pf-warning/10 rounded p-2 wrap-break-word"
+    >
+      <AlertCircleIcon className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+      <span>{job.failureHint}</span>
+    </p>
+  );
+}
+
 function ProgressCell({ job }: { job: SliceJobStatusResponse }) {
   if (job.status === SliceJobStatus.Processing) {
     const timeRemaining = sliceJobService.getEstimatedTimeRemaining(job);
@@ -698,6 +722,11 @@ function JobDetailPanel({ job }: { job: SliceJobStatusResponse }) {
       {job.errorMessage && (
         <div className="col-span-full">
           <DetailField label="Error" value={job.errorMessage} error />
+        </div>
+      )}
+      {job.status === SliceJobStatus.Failed && job.failureHint && (
+        <div className="col-span-full">
+          <SliceFailureNotice job={job} />
         </div>
       )}
       {job.status === SliceJobStatus.Completed && job.layoutDegradation && (

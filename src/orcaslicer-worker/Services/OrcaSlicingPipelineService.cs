@@ -1355,26 +1355,47 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string output = await outputTask;
         string error = await errorTask;
 
+        // xvfb-run execs the wrapped command as `"$@" 2>&1`, so when the wrapper is in use (which is
+        // every containerized deployment) the child's stderr is folded into stdout before this
+        // process ever sees it and StandardError is always empty. Treating the two as one combined
+        // stream is therefore the only reading that is correct both under the wrapper and when
+        // OrcaSlicer is executed directly — the previous stderr-only fallback could never run on the
+        // deployed path. See issue #1811.
+        string consoleOutput = string.IsNullOrWhiteSpace(error)
+            ? output
+            : string.Concat(output, "\n", error);
+
         _logger.LogInformation(
-            "OrcaSlicer exited with code {ExitCode}. Stdout length={StdoutLen}, Stderr length={StderrLen}",
+            "OrcaSlicer exited with code {ExitCode}. Stdout length={StdoutLen}, Stderr length={StderrLen} " +
+            "(stderr is expected to be empty when xvfb-run is used: it merges stderr into stdout)",
             process.ExitCode,
             output.Length,
             error.Length);
 
-        if (!string.IsNullOrWhiteSpace(output))
+        if (!string.IsNullOrWhiteSpace(consoleOutput))
         {
-            _logger.LogInformation("OrcaSlicer stdout: {Output}", output.Length > 2000 ? output[..2000] : output);
+            _logger.LogInformation(
+                "OrcaSlicer console output: {Output}",
+                consoleOutput.Length > 2000 ? consoleOutput[..2000] : consoleOutput);
         }
 
         if (process.ExitCode != 0)
         {
-            _logger.LogError("OrcaSlicer stderr: {Error}", error);
+            // OrcaSlicer's own result.json is the authoritative diagnostic: the console carries only
+            // the bare word "Errors" plus its exit line on the slicing-failure path.
+            OrcaSlicerFailureDiagnostics.OrcaResult? orcaResult =
+                OrcaSlicerFailureDiagnostics.TryReadResult(gcodeOutputDir);
 
-            // Parse stdout for [error] lines — OrcaSlicer writes diagnostics to stdout, not stderr
-            string detail = ExtractOrcaErrorDetail(output, error);
+            OrcaSlicerFailureDiagnostics.Diagnosis diagnosis =
+                OrcaSlicerFailureDiagnostics.Describe(process.ExitCode, consoleOutput, orcaResult);
 
-            throw new InvalidOperationException(
-                $"OrcaSlicer failed with exit code {process.ExitCode}: {detail}");
+            _logger.LogError(
+                "Job {JobId}: OrcaSlicer failed. Reason={Reason}. Detail={Detail}",
+                job.Id,
+                diagnosis.Reason,
+                diagnosis.Detail);
+
+            throw new SlicerEngineFailureException(diagnosis.Reason, diagnosis.Detail);
         }
 
         // OrcaSlicer CLI always outputs plate_X.gcode (not {modelname}.gcode)
@@ -1426,44 +1447,6 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
 
         return null;
-    }
-
-    private static string ExtractOrcaErrorDetail(string stdout, string stderr)
-    {
-        // OrcaSlicer writes errors to stdout as "[error] <message>" lines
-        var errorLines = stdout
-            .Split('\n')
-            .Select(l => l.Trim())
-            .Where(l => l.Contains("[error]", StringComparison.OrdinalIgnoreCase))
-            .Select(l =>
-            {
-                // Strip timestamp prefix: "[2026-04-13 ...] [0x...] [error]   message"
-                int idx = l.IndexOf("[error]", StringComparison.OrdinalIgnoreCase);
-                return idx >= 0 ? l[(idx + 7)..].TrimStart(':', ' ') : l;
-            })
-            .Where(l => l.Length > 0)
-            .ToList();
-
-        if (errorLines.Count > 0)
-        {
-            return string.Join("; ", errorLines);
-        }
-
-        // Fall back to stderr if no [error] lines in stdout
-        if (!string.IsNullOrWhiteSpace(stderr))
-        {
-            return stderr.Length > 500 ? stderr[..500] : stderr;
-        }
-
-        // Last resort: grab lines containing "error" or "fail" from stdout
-        string fallback = stdout
-            .Split('\n')
-            .Select(l => l.Trim())
-            .FirstOrDefault(l => l.Contains("error", StringComparison.OrdinalIgnoreCase)
-                              || l.Contains("fail", StringComparison.OrdinalIgnoreCase))
-            ?? string.Empty;
-
-        return fallback.Length > 500 ? fallback[..500] : fallback;
     }
 
     private static string RenameGcodeFile(string gcodeFilePath, DistributedSlicingJob job, GcodeMetadata metadata)

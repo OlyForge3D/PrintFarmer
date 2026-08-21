@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { slicerHubService, type SliceJobEvent } from '@/services/slicerHubService';
 import type { SliceJobStatusResponse } from '@/services/sliceJobService';
+import { SliceJobStatus } from '@/services/sliceJobService';
 
 const SLICE_JOBS_KEY = ['slice-jobs'] as const;
 
@@ -14,6 +15,13 @@ function applyEventToJob(
   existing: SliceJobStatusResponse,
   event: SliceJobEvent,
 ): SliceJobStatusResponse {
+  // The event contract carries no failure classification, so it cannot be filled in from here.
+  // What it must not do is leave a *stale* one in place: a job that has been requeued or has since
+  // completed would otherwise keep rendering the previous attempt's reason until the next poll.
+  // Clearing on any non-failed status matches the server, which only ever reports these for a
+  // failed job (issue #1811).
+  const stillFailed = event.status === SliceJobStatus.Failed;
+
   return {
     ...existing,
     status: event.status,
@@ -26,6 +34,8 @@ function applyEventToJob(
     filamentUsedGrams: event.filamentUsedGrams ?? existing.filamentUsedGrams,
     errorMessage: event.errorMessage ?? existing.errorMessage,
     workerId: event.workerId ?? existing.workerId,
+    failureReason: stillFailed ? existing.failureReason : null,
+    failureHint: stillFailed ? existing.failureHint : null,
   };
 }
 
@@ -52,6 +62,11 @@ export function useSliceJobsRealtime(
 
   const handleEvent = useCallback(
     (event: SliceJobEvent) => {
+      // The event payload has no failure classification of its own, so a job that has just failed
+      // needs one refetch to pick up the server-computed reason and hint. Without this a connected
+      // client shows a bare "Slicing failed." until the next poll (issue #1811).
+      let needsRefetch = false;
+
       queryClient.setQueryData<SliceJobStatusResponse[]>(
         [...SLICE_JOBS_KEY],
         (old) => {
@@ -62,11 +77,18 @@ export function useSliceJobsRealtime(
             queryClient.invalidateQueries({ queryKey: [...SLICE_JOBS_KEY] });
             return old;
           }
+          const previous = old[idx];
+          needsRefetch =
+            event.status === SliceJobStatus.Failed && previous.status !== SliceJobStatus.Failed;
           const updated = [...old];
-          updated[idx] = applyEventToJob(updated[idx], event);
+          updated[idx] = applyEventToJob(previous, event);
           return updated;
         },
       );
+
+      if (needsRefetch) {
+        queryClient.invalidateQueries({ queryKey: [...SLICE_JOBS_KEY] });
+      }
     },
     [queryClient],
   );

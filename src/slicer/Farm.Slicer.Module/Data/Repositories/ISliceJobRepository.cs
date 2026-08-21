@@ -103,11 +103,20 @@ public interface ISliceJobRepository
         CancellationToken ct = default);
 
     /// <summary>Fails a job only while the worker still owns an unexpired processing lease.</summary>
+    /// <param name="jobId">The job being failed.</param>
+    /// <param name="workerId">The worker holding the lease.</param>
+    /// <param name="claimToken">The claim incarnation the worker holds.</param>
+    /// <param name="errorMessage">Verbatim worker diagnostic, exposed to farm admins only.</param>
+    /// <param name="failureReason">
+    /// Redacted <see cref="Models.SliceFailureReason"/> name shown to every caller (issue #1811).
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
     Task<bool> TryFailForActiveLeaseAsync(
         Guid jobId,
         Guid workerId,
         Guid claimToken,
         string errorMessage,
+        string? failureReason = null,
         CancellationToken ct = default);
 
     /// <summary>

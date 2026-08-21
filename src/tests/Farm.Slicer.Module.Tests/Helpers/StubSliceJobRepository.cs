@@ -122,7 +122,7 @@ public class StubSliceJobRepository : ISliceJobRepository
         job.UpdatedAt = DateTime.UtcNow;
         return Task.FromResult(true);
     }
-    public Task<bool> TryFailForActiveLeaseAsync(Guid jobId, Guid workerId, Guid claimToken, string errorMessage, CancellationToken ct = default)
+    public Task<bool> TryFailForActiveLeaseAsync(Guid jobId, Guid workerId, Guid claimToken, string errorMessage, string? failureReason = null, CancellationToken ct = default)
     {
         SliceJob? job = GetActiveLeaseJob(jobId, workerId, claimToken);
         if (job is null)
@@ -133,6 +133,7 @@ public class StubSliceJobRepository : ISliceJobRepository
         job.Status = SliceJobStatus.Failed;
         job.CompletedAt = DateTime.UtcNow;
         job.ErrorMessage = errorMessage;
+        job.FailureReason = failureReason;
         job.UpdatedAt = DateTime.UtcNow;
         return Task.FromResult(true);
     }
