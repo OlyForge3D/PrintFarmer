@@ -24,6 +24,21 @@ namespace Farm.OrcaSlicer.Worker.Services;
 public static class PrinterExpressionParser
 {
     /// <summary>
+    /// Upper bound on a single <c>=~</c> / <c>!~</c> regex evaluation.
+    /// </summary>
+    /// <remarks>
+    /// The pattern text comes from a profile document, and a slice submission can put arbitrary
+    /// text into a process setting through its <c>overrides</c> object (see
+    /// <c>HttpJobPollerService.ResolveProfileFromJsonAsync</c>), so the pattern is reachable from
+    /// untrusted input. Without a bound, a pattern chosen for catastrophic backtracking would pin
+    /// a worker thread indefinitely. A timeout surfaces as
+    /// <see cref="RegexMatchTimeoutException"/>, which is treated as "does not match" — the
+    /// conservative answer, since an expression that cannot be evaluated must not be read as
+    /// proof of compatibility.
+    /// </remarks>
+    private static readonly TimeSpan RegexEvaluationTimeout = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
     /// Evaluates a compatible_printers_condition expression against available machines.
     /// Returns list of matching machine names, or null if expression cannot be evaluated.
     /// </summary>
@@ -341,10 +356,19 @@ public static class PrinterExpressionParser
 
             try
             {
-                return Regex.IsMatch(value, pattern, RegexOptions.IgnoreCase);
+                return Regex.IsMatch(value, pattern, RegexOptions.IgnoreCase, RegexEvaluationTimeout);
             }
             catch (ArgumentException)
             {
+                return false;
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                // A pattern that cannot be evaluated within the bound is never treated as a match:
+                // failing closed here keeps an expensive expression from being read as proof that a
+                // process profile is compatible with a printer.
+                System.Diagnostics.Trace.TraceWarning(
+                    "Regex evaluation timed out for compatible_printers_condition pattern.");
                 return false;
             }
         }

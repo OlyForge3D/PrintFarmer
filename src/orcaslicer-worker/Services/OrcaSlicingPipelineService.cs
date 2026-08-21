@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Farm.Infrastructure.Logging;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
@@ -616,7 +617,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// <param name="workDir">The per-job working directory.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Absolute paths of the written machine, process and filament files.</returns>
-    private static async Task<Dictionary<string, string>> GenerateProfileJsonFilesAsync(
+    private async Task<Dictionary<string, string>> GenerateProfileJsonFilesAsync(
         DistributedSlicingJob job,
         string workDir,
         CancellationToken cancellationToken)
@@ -644,9 +645,25 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // The Settings dictionary stores raw JSON text per key (from GetRawText()),
         // so we reconstruct proper JSON by writing the raw values directly.
         // The guard above already proved MachineProfile non-null, so no null-conditional here.
-        string machineJson = SettingsDictToNativeJson(
-            WithSystemPresetInherits(profile.MachineProfile.Settings, profile.MachineProfile.Name));
-        string processJson = SettingsDictToNativeJson(profile.ProcessProfile?.Settings);
+        // The machine document is materialized FIRST, because the value OrcaSlicer will match
+        // `compatible_printers` against is read out of this exact document — including the
+        // `inherits` rewrite below (issue #1768). Deriving it from the cached settings instead
+        // would name the vendor base for a `from`: "User" preset while OrcaSlicer compared
+        // against the rewritten name, and the pairing would still be rejected.
+        Dictionary<string, object> emittedMachineSettings =
+            WithSystemPresetInherits(profile.MachineProfile.Settings, profile.MachineProfile.Name);
+        string machineJson = SettingsDictToNativeJson(emittedMachineSettings);
+
+        // OrcaSlicer gates machine/process compatibility on the process document's
+        // `compatible_printers` array alone; `compatible_printers_condition` is never evaluated
+        // on the --load-settings path. Reconcile the two before emitting. See issue #1795.
+        ProcessCompatibilityResolution compatibility = ResolveProcessCompatiblePrinters(
+            profile.ProcessProfile!,
+            profile.MachineProfile,
+            emittedMachineSettings);
+        LogProcessCompatibilityResolution(job, profile, compatibility);
+
+        string processJson = SettingsDictToNativeJson(compatibility.Settings);
 
         await File.WriteAllTextAsync(machineJsonPath, machineJson, cancellationToken);
         await File.WriteAllTextAsync(processJsonPath, processJson, cancellationToken);
@@ -745,6 +762,418 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return copy;
     }
 
+    /// <summary>
+    /// How the emitted process document was reconciled with OrcaSlicer's compatibility gate.
+    /// </summary>
+    internal enum ProcessCompatibilityOutcome
+    {
+        /// <summary>The document already declared at least one compatible printer; left untouched.</summary>
+        AlreadyDeclared,
+
+        /// <summary>The profile constrains no printer at all, so the pairing was materialized.</summary>
+        InjectedUnconditional,
+
+        /// <summary>The profile's condition holds for this machine, so the pairing was materialized.</summary>
+        InjectedFromCondition,
+
+        /// <summary>The profile's condition does not hold for this machine; left untouched so OrcaSlicer rejects it.</summary>
+        ConditionNotSatisfied,
+
+        /// <summary>The machine's system preset name could not be derived; left untouched.</summary>
+        MachineSystemNameUnknown,
+    }
+
+    /// <summary>
+    /// The reconciled process settings plus the evidence behind the decision.
+    /// </summary>
+    /// <param name="Settings">The settings bag to emit as <c>process.json</c>.</param>
+    /// <param name="Outcome">Which branch of the reconciliation was taken.</param>
+    /// <param name="MachineSystemPresetName">The name OrcaSlicer will match against, when derivable.</param>
+    /// <param name="Condition">The profile's <c>compatible_printers_condition</c>, when it carries one.</param>
+    internal sealed record ProcessCompatibilityResolution(
+        Dictionary<string, object> Settings,
+        ProcessCompatibilityOutcome Outcome,
+        string? MachineSystemPresetName,
+        string? Condition);
+
+    /// <summary>
+    /// Derives the system preset name OrcaSlicer will match <c>compatible_printers</c> entries
+    /// against for a given machine document.
+    /// </summary>
+    /// <remarks>
+    /// This mirrors <c>CLI::run</c> in <c>OrcaSlicer.cpp</c>, which sets
+    /// <c>new_printer_system_name</c> from the machine document's <c>name</c> when its
+    /// <c>from</c> is exactly <c>"system"</c>, and from its <c>inherits</c> otherwise. Reading
+    /// the emitted document rather than assuming one of the two keys keeps this correct for both
+    /// stock (<c>from</c>: <c>"system"</c>) and user (<c>from</c>: <c>"User"</c>) presets, and
+    /// therefore independent of the sibling <c>inherits</c> fix for issue #1768.
+    /// </remarks>
+    /// <param name="machineSettings">The resolved machine settings bag.</param>
+    /// <param name="fallbackName">The machine profile's name, used when the document is malformed.</param>
+    /// <returns>The system preset name, or <see langword="null"/> when none can be derived.</returns>
+    internal static string? ResolveMachineSystemPresetName(
+        Dictionary<string, object>? machineSettings,
+        string? fallbackName)
+    {
+        string? from = ReadSettingString(machineSettings, "from");
+        string? derived = string.Equals(from, "system", StringComparison.Ordinal)
+            ? ReadSettingString(machineSettings, "name")
+            : ReadSettingString(machineSettings, "inherits");
+
+        // A document that derives nothing here is one OrcaSlicer rejects outright before reaching
+        // the gate, so the fallback cannot mask a compatibility decision — it only keeps the
+        // emitted pair self-consistent.
+        if (string.IsNullOrWhiteSpace(derived))
+        {
+            derived = fallbackName;
+        }
+
+        return string.IsNullOrWhiteSpace(derived) ? null : derived;
+    }
+
+    /// <summary>
+    /// Returns a copy of a process profile's settings whose <c>compatible_printers</c> array
+    /// satisfies OrcaSlicer's compatibility gate for the machine it is being paired with.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On the <c>--load-settings</c> path where both a machine and a process document are
+    /// supplied, <c>CLI::run</c> decides compatibility by iterating the process document's
+    /// <c>compatible_printers</c> array and comparing each entry against the machine's system
+    /// preset name. It never evaluates <c>compatible_printers_condition</c> there, and the
+    /// empty-array auto-pass sits in a different branch, so a profile that expresses
+    /// compatibility only through the condition can never satisfy the gate: every such job exits
+    /// <c>CLI_PROCESS_NOT_COMPATIBLE</c> (-17, surfacing as 239) about a second in, before
+    /// slicing any geometry. That is the whole Prusa MK4S and CORE One family. See issue #1795.
+    /// </para>
+    /// <para>
+    /// Materializing the condition's result closes that gap, but blindly injecting the machine
+    /// name whenever the array is empty would force <em>any</em> pairing through. The injection
+    /// is therefore gated on the machine actually satisfying the profile's condition, evaluated
+    /// with the same <see cref="PrinterExpressionParser"/> that
+    /// <c>OrcaProfilesService.ListAvailableProcessProfilesAsync</c> uses to resolve the condition
+    /// into <c>CompatiblePrinters</c>, and that <c>SlicerProfilesController</c>'s
+    /// <c>process/for-machines</c> endpoint uses to decide which presets the wizard may offer for
+    /// a machine. The worker's emit-time decision is thus exactly the one the UI already made
+    /// when it offered the pairing. A machine that fails the condition gets no injection and is
+    /// still rejected downstream.
+    /// </para>
+    /// <para>
+    /// A profile carrying neither an array nor a condition constrains no printer at all; the
+    /// hierarchy endpoint likewise treats those as universally available, so the pairing is
+    /// materialized. A profile that already declares compatible printers is left untouched, so
+    /// this cannot regress the profiles that work today.
+    /// </para>
+    /// </remarks>
+    /// <param name="processProfile">The resolved process profile.</param>
+    /// <param name="machineProfile">The resolved machine profile it is paired with.</param>
+    /// <param name="emittedMachineSettings">
+    /// The machine settings exactly as they will be written to <c>machine.json</c>. The system
+    /// preset name is derived from these rather than from the cached profile, so the value injected
+    /// here is always the value OrcaSlicer will actually read back — including after the
+    /// <c>inherits</c> rewrite for issue #1768, which changes that derivation for a
+    /// <c>from</c>: <c>"User"</c> preset.
+    /// </param>
+    /// <returns>The reconciled settings plus the evidence behind the decision.</returns>
+    internal static ProcessCompatibilityResolution ResolveProcessCompatiblePrinters(
+        ProcessProfileDto processProfile,
+        MachineProfileDto? machineProfile,
+        Dictionary<string, object>? emittedMachineSettings = null)
+    {
+        ArgumentNullException.ThrowIfNull(processProfile);
+
+        Dictionary<string, object> copy = processProfile.Settings is null
+            ? new Dictionary<string, object>(StringComparer.Ordinal)
+            : new Dictionary<string, object>(processProfile.Settings, StringComparer.Ordinal);
+
+        // The profile's OWN declared condition wins over the settings bag. A submission's
+        // `overrides` object writes arbitrary keys into that bag
+        // (HttpJobPollerService.ResolveProfileFromJsonAsync), so reading the bag first would let a
+        // submission relax — or delete — the very constraint being enforced. The DTO property is
+        // populated from the resolved profile document and is never written by overrides. The bag
+        // is still consulted as a fallback, which can only ever add a constraint that was not
+        // declared, never remove one.
+        string? condition = processProfile.CompatiblePrintersCondition
+            ?? ReadSettingString(copy, "compatible_printers_condition");
+
+        if (HasDeclaredCompatiblePrinters(copy))
+        {
+            return new ProcessCompatibilityResolution(
+                copy, ProcessCompatibilityOutcome.AlreadyDeclared, null, condition);
+        }
+
+        string? systemPresetName = ResolveMachineSystemPresetName(
+            emittedMachineSettings ?? machineProfile?.Settings, machineProfile?.Name);
+        if (systemPresetName is null)
+        {
+            return new ProcessCompatibilityResolution(
+                copy, ProcessCompatibilityOutcome.MachineSystemNameUnknown, null, condition);
+        }
+
+        if (string.IsNullOrWhiteSpace(condition))
+        {
+            copy["compatible_printers"] = new List<string> { systemPresetName };
+            return new ProcessCompatibilityResolution(
+                copy, ProcessCompatibilityOutcome.InjectedUnconditional, systemPresetName, condition);
+        }
+
+        // EvaluateCondition returns the subset of the supplied machines the expression holds for,
+        // or null when it holds for none (including when the expression cannot be parsed). With a
+        // single candidate, a non-empty result means "this machine satisfies the condition".
+        List<string>? matches = machineProfile is null
+            ? null
+            : PrinterExpressionParser.EvaluateCondition(condition, [machineProfile]);
+
+        if (matches is not { Count: > 0 })
+        {
+            return new ProcessCompatibilityResolution(
+                copy, ProcessCompatibilityOutcome.ConditionNotSatisfied, systemPresetName, condition);
+        }
+
+        copy["compatible_printers"] = new List<string> { systemPresetName };
+        return new ProcessCompatibilityResolution(
+            copy, ProcessCompatibilityOutcome.InjectedFromCondition, systemPresetName, condition);
+    }
+
+    /// <summary>
+    /// Reports whether a process settings bag already names at least one compatible printer.
+    /// </summary>
+    /// <remarks>
+    /// Array values normally arrive as <see cref="List{T}"/> of <see cref="string"/> from
+    /// <c>OrcaProfilesService.SerializeElementToDict</c>, but the same bag also accepts the legacy
+    /// raw-JSON-array text form that <see cref="SettingsDictToNativeJson"/> still understands, so
+    /// both are recognised here.
+    /// </remarks>
+    /// <param name="settings">The process settings bag.</param>
+    /// <returns><see langword="true"/> when the gate already has something to match against.</returns>
+    private static bool HasDeclaredCompatiblePrinters(Dictionary<string, object> settings)
+    {
+        if (!settings.TryGetValue("compatible_printers", out object? value) || value is null)
+        {
+            return false;
+        }
+
+        if (value is IList<string> list)
+        {
+            return list.Any(entry => !string.IsNullOrWhiteSpace(entry));
+        }
+
+        string text = value.ToString() ?? string.Empty;
+        if (text.StartsWith('['))
+        {
+            try
+            {
+                using JsonDocument parsed = JsonDocument.Parse(text);
+                return parsed.RootElement.ValueKind == JsonValueKind.Array
+                    && parsed.RootElement.EnumerateArray().Any(
+                        element => !string.IsNullOrWhiteSpace(element.ToString()));
+            }
+            catch (JsonException)
+            {
+                // Not a JSON array after all — fall through to the scalar reading below.
+            }
+        }
+
+        return !string.IsNullOrWhiteSpace(text);
+    }
+
+    /// <summary>
+    /// Reads a scalar settings value as a string, ignoring array-valued keys.
+    /// </summary>
+    /// <param name="settings">The settings bag, which may be <see langword="null"/>.</param>
+    /// <param name="key">The settings key to read.</param>
+    /// <returns>The trimmed value, or <see langword="null"/> when absent, empty or not scalar.</returns>
+    private static string? ReadSettingString(Dictionary<string, object>? settings, string key)
+    {
+        if (settings is null || !settings.TryGetValue(key, out object? value) || value is null)
+        {
+            return null;
+        }
+
+        if (value is IList<string>)
+        {
+            return null;
+        }
+
+        string text = value.ToString() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    /// <summary>
+    /// Records why the emitted process document will or will not satisfy OrcaSlicer's gate.
+    /// </summary>
+    /// <remarks>
+    /// The failing cases are logged at error level on purpose: without this the job's only symptom
+    /// is an opaque exit 239 with no indication of which of the two documents was at fault.
+    /// The run is still handed to OrcaSlicer rather than pre-empted, because a job whose input is
+    /// a 3MF carrying its own printer configuration can legitimately pass the gate through
+    /// <c>CLI::run</c>'s machine-switch branch, which this worker cannot evaluate.
+    /// </remarks>
+    /// <param name="job">The job being prepared, for correlation.</param>
+    /// <param name="profile">The resolved profile selection.</param>
+    /// <param name="resolution">The reconciliation result to report.</param>
+    private void LogProcessCompatibilityResolution(
+        DistributedSlicingJob job,
+        SlicerProfileDto profile,
+        ProcessCompatibilityResolution resolution)
+    {
+        switch (resolution.Outcome)
+        {
+            case ProcessCompatibilityOutcome.AlreadyDeclared:
+                break;
+
+            case ProcessCompatibilityOutcome.InjectedUnconditional:
+            case ProcessCompatibilityOutcome.InjectedFromCondition:
+                _logger.LogInformation(
+                    "Job {JobId}: process profile '{ProcessName}' declares no compatible printers; " +
+                    "materialized '{SystemPresetName}' for machine '{MachineName}' ({Outcome})",
+                    job.Id,
+                    LogSanitizer.Sanitize(profile.ProcessProfile?.Name),
+                    LogSanitizer.Sanitize(resolution.MachineSystemPresetName),
+                    LogSanitizer.Sanitize(profile.MachineProfile?.Name),
+                    resolution.Outcome);
+                break;
+
+            case ProcessCompatibilityOutcome.ConditionNotSatisfied:
+                _logger.LogError(
+                    "Job {JobId}: process profile '{ProcessName}' is not compatible with machine " +
+                    "'{MachineName}' (system preset '{SystemPresetName}') — its " +
+                    "compatible_printers_condition '{Condition}' does not hold. OrcaSlicer will " +
+                    "reject this pairing with CLI_PROCESS_NOT_COMPATIBLE (-17).",
+                    job.Id,
+                    LogSanitizer.Sanitize(profile.ProcessProfile?.Name),
+                    LogSanitizer.Sanitize(profile.MachineProfile?.Name),
+                    LogSanitizer.Sanitize(resolution.MachineSystemPresetName),
+                    LogSanitizer.Sanitize(resolution.Condition));
+                break;
+
+            default:
+                _logger.LogError(
+                    "Job {JobId}: could not derive a system preset name for machine '{MachineName}', " +
+                    "so process profile '{ProcessName}' cannot be shown to satisfy OrcaSlicer's " +
+                    "compatibility gate.",
+                    job.Id,
+                    LogSanitizer.Sanitize(profile.MachineProfile?.Name),
+                    LogSanitizer.Sanitize(profile.ProcessProfile?.Name));
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Describes why the pair of emitted profile documents cannot satisfy OrcaSlicer's
+    /// process/machine compatibility gate, or <see langword="null"/> when they can.
+    /// </summary>
+    /// <remarks>
+    /// The gate compares each entry of the process document's <c>compatible_printers</c> against
+    /// the machine document's system preset name. Checking that invariant on the documents that
+    /// are about to be handed to the CLI turns an otherwise opaque exit 239 into a statement of
+    /// which document was at fault, and covers both the generated and the verbatim native path.
+    /// Anything unreadable yields <see langword="null"/>: this is a diagnostic, so a parsing
+    /// problem here must never become the reported cause of a job failure.
+    /// </remarks>
+    /// <param name="machineDocument">The emitted machine document's JSON text.</param>
+    /// <param name="processDocument">The emitted process document's JSON text.</param>
+    /// <returns>A human-readable explanation, or <see langword="null"/> when the gate is satisfiable.</returns>
+    internal static string? DescribeUnsatisfiableCompatibilityGate(
+        string machineDocument,
+        string processDocument)
+    {
+        try
+        {
+            using JsonDocument machine = JsonDocument.Parse(machineDocument);
+            using JsonDocument process = JsonDocument.Parse(processDocument);
+
+            // A profile document is an object. Anything else is a shape OrcaSlicer rejects before
+            // the gate, and would make the JsonElement accessors below throw, so bail out rather
+            // than let a diagnostic become the reported cause of a job failure.
+            if (machine.RootElement.ValueKind != JsonValueKind.Object
+                || process.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            string? systemPresetName = ResolveMachineSystemPresetName(
+                OrcaProfilesService.SerializeElementToDict(machine.RootElement), fallbackName: null);
+            if (systemPresetName is null)
+            {
+                return "the machine document declares neither a system preset name via `name` " +
+                    "(when `from` is \"system\") nor one via `inherits`";
+            }
+
+            if (!process.RootElement.TryGetProperty("compatible_printers", out JsonElement compatible)
+                || compatible.ValueKind != JsonValueKind.Array
+                || compatible.GetArrayLength() == 0)
+            {
+                return $"the process document declares no compatible printers, so the machine's " +
+                    $"system preset '{systemPresetName}' cannot match any of them";
+            }
+
+            bool matched = compatible
+                .EnumerateArray()
+                .Any(entry => entry.ValueKind == JsonValueKind.String
+                    && string.Equals(entry.GetString(), systemPresetName, StringComparison.Ordinal));
+
+            return matched
+                ? null
+                : $"the process document's compatible printers do not include the machine's " +
+                    $"system preset '{systemPresetName}'";
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Logs, immediately before invoking OrcaSlicer, when the emitted documents cannot satisfy its
+    /// compatibility gate.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately a warning rather than a pre-emptive failure: a job whose input is a 3MF
+    /// carrying its own printer configuration can still pass through <c>CLI::run</c>'s
+    /// machine-switch branch, which this worker cannot evaluate, so refusing to run would reject
+    /// pairings OrcaSlicer would have accepted.
+    /// </remarks>
+    /// <param name="job">The job being prepared, for correlation.</param>
+    /// <param name="machineJsonPath">Path of the emitted machine document.</param>
+    /// <param name="processJsonPath">Path of the emitted process document.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task WarnIfProcessCannotSatisfyGateAsync(
+        DistributedSlicingJob job,
+        string machineJsonPath,
+        string processJsonPath,
+        CancellationToken cancellationToken)
+    {
+        string? reason;
+        try
+        {
+            reason = DescribeUnsatisfiableCompatibilityGate(
+                await File.ReadAllTextAsync(machineJsonPath, cancellationToken),
+                await File.ReadAllTextAsync(processJsonPath, cancellationToken));
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+#pragma warning disable CA1031 // A diagnostic must never be the reported cause of a job failure.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            _logger.LogDebug(
+                ex, "Job {JobId}: could not pre-check profile compatibility", job.Id);
+            return;
+        }
+
+        if (reason is not null)
+        {
+            _logger.LogWarning(
+                "Job {JobId}: OrcaSlicer is expected to reject this profile pairing with " +
+                "CLI_PROCESS_NOT_COMPATIBLE (-17, reported as exit 239) because {Reason}.",
+                job.Id,
+                LogSanitizer.Sanitize(reason));
+        }
+    }
+
     private async Task<string> RunOrcaSlicerAsync(List<string> modelPaths, string workDir, DistributedSlicingJob job, CancellationToken cancellationToken)
     {
         string gcodeOutputDir = Path.Join(workDir, "output");
@@ -775,6 +1204,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string machineJson = profilePaths["machine"];
         string processJson = profilePaths["process"];
         string filamentJson = profilePaths["filament"];
+
+        await WarnIfProcessCannotSatisfyGateAsync(job, machineJson, processJson, cancellationToken);
 
         // Build command line: --slice 0 --arrange 1 --ensure-on-bed --load-settings ...
         // --arrange 1: auto-center model on build plate (CLI loads STL at origin)
@@ -1847,6 +2278,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// (start with '[') are written as native arrays.
     /// Keys with values that would fail OrcaSlicer's CLI validator are sanitized.
     /// </summary>
+    /// <remarks>
+    /// The caller's dictionary is never modified. Resolved profiles come from a shared cache and
+    /// several jobs can be prepared concurrently, so sanitizing in place would both leak one job's
+    /// CLI fix-ups into every later job and write to a <see cref="Dictionary{TKey, TValue}"/> that
+    /// another thread may be reading — which is undefined behaviour, not merely stale data.
+    /// </remarks>
+    /// <param name="settings">The settings bag to serialize.</param>
+    /// <returns>The native OrcaSlicer JSON document text.</returns>
     internal static string SettingsDictToNativeJson(Dictionary<string, object>? settings)
     {
         if (settings == null || settings.Count == 0)
@@ -1856,13 +2295,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         // OrcaSlicer --load-settings has stricter range checks than the profile format.
         // Clamp known speed/rate fields that use 0="auto" in profiles but require ≥1 in CLI.
-        SanitizeForCli(settings);
+        Dictionary<string, object> sanitized = new(settings, StringComparer.Ordinal);
+        SanitizeForCli(sanitized);
 
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
         {
             writer.WriteStartObject();
-            foreach (KeyValuePair<string, object> kvp in settings)
+            foreach (KeyValuePair<string, object> kvp in sanitized)
             {
                 writer.WritePropertyName(kvp.Key);
 
