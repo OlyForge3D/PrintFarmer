@@ -2,10 +2,15 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import { GCodeViewer } from '../GCodeViewer3D';
 import { SELECTABLE_THEMES } from '@/design-system/themes/registry';
-import type { IGcodePreviewService, DetailedParsedGCode } from '@/features/slicer/services';
+import type { IGcodePreviewService, DetailedParsedGCode, DetailedLayer } from '@/features/slicer/services';
+
+// Captures the `points` prop passed to every rendered <Line>, so tests can
+// verify the typed-array-driven rendering path (GCodePath) actually builds
+// segments from layer.x/y/pz/feedRate/type rather than a no-op on stale mocks.
+const renderedLinePointCounts: number[] = [];
 
 // Mock react-three/fiber and drei — they require WebGL
 vi.mock('@react-three/fiber', () => ({
@@ -13,7 +18,10 @@ vi.mock('@react-three/fiber', () => ({
 }));
 
 vi.mock('@react-three/drei', () => ({
-  Line: () => <div data-testid="r3f-line" />,
+  Line: ({ points }: { points: unknown[] }) => {
+    renderedLinePointCounts.push(points.length);
+    return <div data-testid="r3f-line" />;
+  },
   OrbitControls: () => null,
   Grid: () => null,
 }));
@@ -29,28 +37,42 @@ vi.mock('three', () => ({
   },
 }));
 
-const THREE_LAYER_GCODE = `; test fixture
-G28
-G1 Z0.2 F3000
-G1 X10 Y10 E1 F1500
-G1 X20 Y10 E2
-G1 Z0.4
-G1 X10 Y10 E3
-G1 X20 Y20 E4
-G1 Z0.6
-G1 X5 Y5 E5
-`;
-
 const THEME_ROOT = resolve(process.cwd(), 'src/design-system/themes');
 const GRAPHIC_CONTRAST_MINIMUM = 3;
+
+/**
+ * Builds a `DetailedLayer` from plain per-point descriptors using real typed
+ * arrays — matching the zero-copy Structure-of-Arrays shape `GCodePath`
+ * actually consumes (#1788), instead of the retired `points: GCodePoint[]`
+ * shape.
+ */
+function makeDetailedLayer(
+  index: number,
+  z: number,
+  points: Array<{ x: number; y: number; z: number; e: number; feedRate: number; type: 'move' | 'extrude'; tool: number }>,
+): DetailedLayer {
+  const count = points.length;
+  return {
+    index,
+    z,
+    count,
+    x: Float32Array.from(points.map(p => p.x)),
+    y: Float32Array.from(points.map(p => p.y)),
+    pz: Float32Array.from(points.map(p => p.z)),
+    e: Float32Array.from(points.map(p => p.e)),
+    feedRate: Float32Array.from(points.map(p => p.feedRate)),
+    type: Uint8Array.from(points.map(p => (p.type === 'extrude' ? 1 : 0))),
+    tool: Int32Array.from(points.map(p => p.tool)),
+  };
+}
 
 function createMockService(result?: DetailedParsedGCode): IGcodePreviewService {
   const defaultResult: DetailedParsedGCode = {
     layerCount: 3,
     layers: [
-      { index: 0, z: 0.2, points: [{ x: 10, y: 10, z: 0.2, e: 1, feedRate: 1500, type: 'extrude', tool: 0 }] },
-      { index: 1, z: 0.4, points: [{ x: 20, y: 20, z: 0.4, e: 3, feedRate: 1500, type: 'extrude', tool: 0 }] },
-      { index: 2, z: 0.6, points: [{ x: 5, y: 5, z: 0.6, e: 5, feedRate: 1500, type: 'extrude', tool: 0 }] },
+      makeDetailedLayer(0, 0.2, [{ x: 10, y: 10, z: 0.2, e: 1, feedRate: 1500, type: 'extrude', tool: 0 }]),
+      makeDetailedLayer(1, 0.4, [{ x: 20, y: 20, z: 0.4, e: 3, feedRate: 1500, type: 'extrude', tool: 0 }]),
+      makeDetailedLayer(2, 0.6, [{ x: 5, y: 5, z: 0.6, e: 5, feedRate: 1500, type: 'extrude', tool: 0 }]),
     ],
     tools: [0],
   };
@@ -95,10 +117,7 @@ function contrastRatio(first: string, second: string): number {
 describe('GCodeViewer3D', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      text: () => Promise.resolve(THREE_LAYER_GCODE),
-    });
+    renderedLinePointCounts.length = 0;
   });
 
   it('shows loading spinner while parsing', () => {
@@ -161,12 +180,10 @@ describe('GCodeViewer3D', () => {
   );
 
   it('shows error state on fetch failure', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 404,
-      text: () => Promise.resolve(''),
-    });
     const service = createMockService();
+    (service.parseGCodeDetailed as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('404 Not Found'),
+    );
 
     render(<GCodeViewer gcodeUrl="/missing.gcode" service={service} />);
 
@@ -188,26 +205,56 @@ describe('GCodeViewer3D', () => {
     });
   });
 
-  it('calls parseGCodeDetailed on the service (not direct parser)', async () => {
+  it('calls parseGCodeDetailed on the service with the gcode URL (fetch happens inside the service/worker, not the component)', async () => {
     const service = createMockService();
 
     render(<GCodeViewer gcodeUrl="/test.gcode" service={service} />);
 
     await waitFor(() => {
-      expect(service.parseGCodeDetailed).toHaveBeenCalledWith(THREE_LAYER_GCODE);
+      expect(service.parseGCodeDetailed).toHaveBeenCalledWith('/test.gcode', expect.any(AbortSignal));
     });
+  });
+
+  it('cancels the superseded parse via AbortSignal when gcodeUrl changes before it resolves (#1808 concurrency finding)', async () => {
+    const service = createMockService();
+    let resolveFirst: ((value: DetailedParsedGCode) => void) | undefined;
+    (service.parseGCodeDetailed as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => new Promise<DetailedParsedGCode>((resolve) => { resolveFirst = resolve; }),
+    );
+
+    const { rerender } = render(<GCodeViewer gcodeUrl="/stale.gcode" service={service} />);
+
+    await waitFor(() => {
+      expect(service.parseGCodeDetailed).toHaveBeenCalledWith('/stale.gcode', expect.any(AbortSignal));
+    });
+    const staleSignal = (service.parseGCodeDetailed as ReturnType<typeof vi.fn>).mock.calls[0][1] as AbortSignal;
+    expect(staleSignal.aborted).toBe(false);
+
+    // Switching gcodeUrl before the stale parse resolves must abort the
+    // signal passed for it — this is what lets the service terminate the
+    // worker running it, rather than merely ignoring its eventual result.
+    rerender(<GCodeViewer gcodeUrl="/new.gcode" service={service} />);
+
+    expect(staleSignal.aborted).toBe(true);
+    await waitFor(() => {
+      expect(service.parseGCodeDetailed).toHaveBeenCalledWith('/new.gcode', expect.any(AbortSignal));
+    });
+
+    // Resolving the superseded (now-aborted) request afterwards must not
+    // clobber state derived from the newer request.
+    await act(async () => {
+      resolveFirst?.({ layers: [], layerCount: 0, tools: [] });
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('renders tool filter when multiple tools present', async () => {
     const multiToolResult: DetailedParsedGCode = {
       layerCount: 2,
       layers: [
-        { index: 0, z: 0.2, points: [
-          { x: 10, y: 10, z: 0.2, e: 1, feedRate: 3000, type: 'extrude', tool: 0 },
-        ] },
-        { index: 1, z: 0.4, points: [
-          { x: 20, y: 20, z: 0.4, e: 2, feedRate: 3000, type: 'extrude', tool: 1 },
-        ] },
+        makeDetailedLayer(0, 0.2, [{ x: 10, y: 10, z: 0.2, e: 1, feedRate: 3000, type: 'extrude', tool: 0 }]),
+        makeDetailedLayer(1, 0.4, [{ x: 20, y: 20, z: 0.4, e: 2, feedRate: 3000, type: 'extrude', tool: 1 }]),
       ],
       tools: [0, 1],
     };
@@ -220,6 +267,36 @@ describe('GCodeViewer3D', () => {
       expect(screen.getByLabelText('Toggle tool 0')).toBeInTheDocument();
       expect(screen.getByLabelText('Toggle tool 1')).toBeInTheDocument();
     });
+  });
+
+  it('renders Line segments built from the typed-array layer data (#1788)', async () => {
+    // Layer 0: a Z-lift move (type 0) followed by three extrude points
+    // (type 1) at distinct coordinates — enough points per segment (>1) for
+    // GCodePath to actually emit <Line> elements, proving the typed-array
+    // read path (layer.x/y/pz/feedRate/type) drives real rendering rather
+    // than a no-op against stale `points` mocks.
+    const layerWithSegments = makeDetailedLayer(0, 0.2, [
+      { x: 0, y: 0, z: 0.2, e: 0, feedRate: 3000, type: 'move', tool: 0 },
+      { x: 1, y: 0, z: 0.2, e: 0, feedRate: 3000, type: 'move', tool: 0 },
+      { x: 10, y: 10, z: 0.2, e: 1, feedRate: 1500, type: 'extrude', tool: 0 },
+      { x: 20, y: 10, z: 0.2, e: 2, feedRate: 1500, type: 'extrude', tool: 0 },
+      { x: 20, y: 20, z: 0.2, e: 3, feedRate: 1500, type: 'extrude', tool: 0 },
+    ]);
+    const service = createMockService({
+      layerCount: 1,
+      layers: [layerWithSegments],
+      tools: [0],
+    });
+
+    render(<GCodeViewer gcodeUrl="/test.gcode" service={service} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Layer 1 \/ 1/)).toBeInTheDocument();
+    });
+
+    // Two segments: a 2-point move segment (indices 0-1) and a 3-point
+    // extrude segment (indices 2-4), split exactly at the type transition.
+    expect(renderedLinePointCounts.sort()).toEqual([2, 3]);
   });
 
   it('does not show tool filter for single-tool gcode', async () => {
