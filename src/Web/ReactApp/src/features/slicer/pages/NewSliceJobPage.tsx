@@ -1799,12 +1799,22 @@ export const NewSliceJobPage: React.FC = () => {
     // query has a 300s staleTime — and a job pinned to a version no worker
     // advertises sits in the queue unclaimable forever. UI warnings are not
     // enough while the dispatch path stays open, so hard-block here.
-    // Deliberately skipped when the engine reports no entries at all, which is
-    // the legacy/fresh-install shape that must stay submittable.
+    //
+    // NOTE: there is deliberately NO `versionEntriesForEngine.length > 0`
+    // exemption. An earlier revision had one, on the theory that it protected
+    // the legacy/fresh-install shape — it does not. In that shape the backend
+    // marks EVERY entry available (`available = !anyServiceRows || ...`, see
+    // SlicersController.ListEnginesAsync), so the list is non-empty and a
+    // legitimate pin passes on the `.some(...)` availability clause below, not
+    // on any length check. The exemption only ever applied to an empty list,
+    // where it let a pinned job — which carries a version-specific capability
+    // tag no generic worker can claim — dispatch straight into a permanent
+    // queue hang. Blocking instead is safe: the picker always renders a Latest
+    // control while a pin is held, and clearing the pin routes the user to the
+    // Latest-mode guard above.
     if (
       selectedEngineVersion !== undefined
       && engineInfo
-      && versionEntriesForEngine.length > 0
       && !versionEntriesForEngine.some(v => v.version === selectedEngineVersion && v.available)
     ) {
       setError(`${engineName} ${selectedEngineVersion} has no online worker to accept this job. Switch to Latest or start that worker.`);

@@ -1338,5 +1338,100 @@ describe('NewSliceJobPage', () => {
       const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)?.[0] as { slicerEngineVersion?: string };
       expect(request.slicerEngineVersion).toBeUndefined();
     });
+
+    it('allows a PINNED submission on the legacy fresh-install shape', async () => {
+      // The pinned guard has no length exemption, so legacy is protected purely
+      // by the availability clause: with zero service rows the backend marks
+      // every entry available, so a pin is legitimately claimable. This test
+      // exists so a future edit that reorders or tightens those clauses cannot
+      // silently start blocking legacy deployments (Bishop nit 4).
+      mockEngines([
+        { version: '2.4.2', available: true },
+        { version: '2.3.1', available: true },
+      ], null);
+
+      await reachSubmittableState();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('pin-engine-version')).toBeInTheDocument();
+      });
+      act(() => {
+        fireEvent.click(screen.getByTestId('pin-engine-version'));
+      });
+
+      await waitForProcessProfile();
+      await submit();
+
+      await waitFor(() => {
+        expect(sliceJobService.submitJob).toHaveBeenCalled();
+      }, { timeout: 3000 });
+
+      const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)?.[0] as { slicerEngineVersion?: string };
+      expect(request.slicerEngineVersion).toBe('2.3.1');
+    });
+
+    it('blocks a pinned submission when the engine reports no version entries', async () => {
+      // A pin carries a version-specific capability tag that no generic worker
+      // can claim, so dispatching one against an empty registry guarantees a
+      // permanent queue hang. Verifying nothing is NOT the same as verifying
+      // it is fine — fail closed (Vasquez R2).
+      mockEngines([], null);
+
+      await reachSubmittableState();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('pin-engine-version')).toBeInTheDocument();
+      });
+      act(() => {
+        fireEvent.click(screen.getByTestId('pin-engine-version'));
+      });
+
+      await waitForProcessProfile();
+      await submit();
+
+      expect(await screen.findByText(/OrcaSlicer 2\.3\.1 has no online worker/i)).toBeInTheDocument();
+      expect(sliceJobService.submitJob).not.toHaveBeenCalled();
+    });
+
+    it('clears a pin when the engine changes, in the same commit as the switch', async () => {
+      // Relying on the [selectedSlicerId] effect alone would render one frame
+      // pairing the new engine's entries with the old engine's pin (Bishop).
+      mockEngines([
+        { version: '2.4.2', available: true },
+        { version: '2.3.1', available: false },
+      ], '2.4.2');
+
+      await reachSubmittableState();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('pin-engine-version')).toBeInTheDocument();
+      });
+      act(() => {
+        fireEvent.click(screen.getByTestId('pin-engine-version'));
+      });
+
+      // Switching engines must drop the pin, so PrusaSlicer is never asked to
+      // honour an OrcaSlicer version.
+      act(() => {
+        fireEvent.change(screen.getByTestId('slicer-select'), { target: { value: '2' } });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('slicer-selector')).toHaveAttribute('data-engine-name', 'PrusaSlicer');
+      });
+
+      await waitForProcessProfile();
+      await submit();
+
+      // No PrusaSlicer entry exists in the mocked registry, so engineInfo is
+      // undefined and both version guards skip — the job goes out unpinned
+      // rather than carrying the stale OrcaSlicer pin.
+      await waitFor(() => {
+        expect(sliceJobService.submitJob).toHaveBeenCalled();
+      }, { timeout: 3000 });
+
+      const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)?.[0] as { slicerEngineVersion?: string };
+      expect(request.slicerEngineVersion).toBeUndefined();
+    });
   });
 });
