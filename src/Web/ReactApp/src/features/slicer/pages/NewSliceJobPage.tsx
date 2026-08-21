@@ -1816,11 +1816,18 @@ export const NewSliceJobPage: React.FC = () => {
     //
     // Both cases dispatch a job carrying a version-specific capability tag that
     // no worker advertises, so it sits in the queue unclaimable forever. Since
-    // `versionEntriesForEngine` is `engineInfo?.versionEntries ?? []`, the single
-    // `.some(...)` test below covers every case: unknown engine and empty list
-    // both yield `false`, which blocks. Unverifiable is treated as unusable.
-    // Failing closed is recoverable — the picker always renders a Latest control
-    // while a pin is held, and clearing the pin routes to the guard above.
+    // `versionEntriesForEngine` is `engineInfo?.versionEntries ?? []` (keep that
+    // `?? []` — it is what makes the single test below cover the unknown-engine
+    // case, and dropping it is a compile error here and at the Latest-mode guard
+    // rather than a silent behaviour change), the single `.some(...)` test covers
+    // every case: unknown engine and empty list both yield `false`, which blocks.
+    // Unverifiable is treated as unusable.
+    //
+    // Failing closed is recoverable. The picker always renders a Latest control
+    // while a pin is held (SlicerSelector's `|| selectedVersion !== undefined`),
+    // and clearing the pin either routes to the Latest-mode guard above (engine
+    // known) or submits unpinned (engine unknown, where that guard short-circuits
+    // on `engineInfo`) — no trap either way.
     if (
       selectedEngineVersion !== undefined
       && !versionEntriesForEngine.some(v => v.version === selectedEngineVersion && v.available)
