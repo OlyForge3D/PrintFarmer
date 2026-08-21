@@ -60,6 +60,24 @@ describe('AddPrinterModal', () => {
     expect(createPrinter).not.toHaveBeenCalled();
   });
 
+  it('rejects a name whose raw (untrimmed) length exceeds 100, matching the backend\'s Length(1,100) check', async () => {
+    const user = userEvent.setup();
+    render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+
+    // 3 leading + 98 + 3 trailing = 104 raw characters, but only 98 once trimmed.
+    // The backend's FluentValidation rule measures the raw string, so the client
+    // must reject this too rather than trim-then-measure and let it through.
+    const paddedName = `   ${'a'.repeat(98)}   `;
+    const nameInput = screen.getByLabelText('Printer name');
+    fireEvent.change(nameInput, { target: { value: paddedName } });
+    await user.type(screen.getByLabelText('Server URL'), 'http://printer.local');
+
+    await user.click(screen.getByRole('button', { name: /add printer/i }));
+
+    expect(await screen.findByText('Printer name must be between 1 and 100 characters')).toBeInTheDocument();
+    expect(createPrinter).not.toHaveBeenCalled();
+  });
+
   it('submits successfully with a 100-character printer name (boundary)', async () => {
     const user = userEvent.setup();
     const onSuccess = vi.fn();
@@ -79,11 +97,13 @@ describe('AddPrinterModal', () => {
 
   it('surfaces the backend field validation message instead of a generic failure', async () => {
     const user = userEvent.setup();
+    // apiClient rejects with the shared ApiError shape (statusCode/data), not a raw
+    // AxiosError — see src/services/api.ts's response interceptor.
     createPrinter.mockRejectedValue({
-      response: {
-        status: 400,
-        data: { Name: ['Printer name must be between 1 and 100 characters'] },
-      },
+      message: 'Bad Request',
+      statusCode: 400,
+      data: { Name: ['Printer name must be between 1 and 100 characters'] },
+      isAxiosError: true,
     });
 
     render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
@@ -95,13 +115,29 @@ describe('AddPrinterModal', () => {
     expect(screen.queryByText('Failed to add printer')).not.toBeInTheDocument();
   });
 
-  it('falls back to a generic message when the 400 response has no field errors', async () => {
+  it('falls back to the ApiError message when the 400 response has no field errors', async () => {
     const user = userEvent.setup();
     createPrinter.mockRejectedValue({
-      response: {
-        status: 400,
-        data: {},
-      },
+      message: 'Something went wrong creating the printer',
+      statusCode: 400,
+      data: {},
+      isAxiosError: true,
+    });
+
+    render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+
+    await fillRequiredFields(user, 'Valid Name');
+    await user.click(screen.getByRole('button', { name: /add printer/i }));
+
+    expect(await screen.findByText('Something went wrong creating the printer')).toBeInTheDocument();
+  });
+
+  it('falls back to a generic message when the rejection carries no usable message', async () => {
+    const user = userEvent.setup();
+    createPrinter.mockRejectedValue({
+      message: '',
+      statusCode: 500,
+      isAxiosError: true,
     });
 
     render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);

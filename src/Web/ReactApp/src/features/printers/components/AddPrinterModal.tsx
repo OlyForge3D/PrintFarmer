@@ -9,6 +9,7 @@ import { BackendSelector } from '@/common/components/BackendSelector';
 import { Button, Input, Select, Textarea, FormField, Alert } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { useManufacturers, useModels } from '@/common/hooks/useApi';
+import { isApiError, getErrorMessage } from '@/common/utils/apiErrors';
 
 interface AddPrinterModalProps {
   isOpen: boolean;
@@ -186,7 +187,9 @@ function AddPrinterModalContent({
     
     if (!formData.name.trim()) {
       errors.name = ['Printer name is required'];
-    } else if (formData.name.trim().length > PRINTER_NAME_MAX_LENGTH) {
+    } else if (formData.name.length > PRINTER_NAME_MAX_LENGTH) {
+      // Match the backend's FluentValidation `.Length(1, 100)`, which measures the raw
+      // string (not trimmed), so client and server agree on whitespace-padded names.
       errors.name = [PRINTER_NAME_LENGTH_ERROR];
     }
     
@@ -228,18 +231,17 @@ function AddPrinterModalContent({
       onSuccess();
       handleClose();
     } catch (err: unknown) {
-      const error = err as { response?: { status?: number; data?: unknown } };
-      const data = error?.response?.data;
-      if (error?.response?.status === 400 && data && typeof data === 'object') {
+      const data = isApiError(err) && err.statusCode === 400 ? err.data : undefined;
+      if (data && typeof data === 'object') {
         const fieldErrors = extractFieldErrors(data as Record<string, unknown>);
         if (Object.keys(fieldErrors).length > 0) {
           // Handle validation errors from the server
           setValidationErrors(prev => ({ ...prev, ...fieldErrors }));
         } else {
-          setError((data as Record<string, unknown>).message as string || 'Failed to add printer');
+          setError(getErrorMessage(err, 'Failed to add printer'));
         }
       } else {
-        setError('Failed to add printer');
+        setError(getErrorMessage(err, 'Failed to add printer'));
       }
       console.error('Add printer error:', err);
     } finally {
