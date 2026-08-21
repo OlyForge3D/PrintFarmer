@@ -396,9 +396,16 @@ public abstract class HttpJobPollerService(
             }
             else
             {
-                // Report failure to the API so the job doesn't sit in Processing until lease expires
-                terminalAcknowledgement =
-                    await TryReportFailureAsync(httpClient, job.Id, job.ClaimToken, ex.Message, ct);
+                // Report failure to the API so the job doesn't sit in Processing until lease expires.
+                // A pipeline that classified the failure carries the redacted reason structurally, so
+                // the API never has to infer it from the diagnostic prose (issue #1811).
+                terminalAcknowledgement = await TryReportFailureAsync(
+                    httpClient,
+                    job.Id,
+                    job.ClaimToken,
+                    ex.Message,
+                    ct,
+                    (ex as SlicerEngineFailureException)?.Reason);
             }
 
             if (!terminalAcknowledgement)
@@ -640,7 +647,8 @@ public abstract class HttpJobPollerService(
         Guid jobId,
         Guid claimToken,
         string errorMessage,
-        CancellationToken ct)
+        CancellationToken ct,
+        SliceFailureReason? failureReason = null)
     {
         try
         {
@@ -652,7 +660,7 @@ public abstract class HttpJobPollerService(
                 HttpMethod.Post,
                 jobId,
                 $"/api/slice/{jobId}/fail",
-                JsonContent.Create(new FailSliceJobRequest(truncated)));
+                JsonContent.Create(new FailSliceJobRequest(truncated, failureReason)));
             using HttpResponseMessage resp = await client.SendAsync(request, ct);
             if (!resp.IsSuccessStatusCode)
             {

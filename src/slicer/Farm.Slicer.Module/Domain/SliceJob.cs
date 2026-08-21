@@ -280,6 +280,16 @@ public class SliceJob
     [MaxLength(64)]
     public string? LayoutDegradationReason { get; set; }
 
+    /// <summary>
+    /// Redacted, client-safe classification of why the job failed (issue #1811), stored as the
+    /// <see cref="Models.SliceFailureReason"/> enum name. <see langword="null"/> when the job did
+    /// not fail, or when it failed before a worker could classify it. Deliberately mirrors only
+    /// worker-safe enum values — the verbatim diagnostic stays in <see cref="ErrorMessage"/>, which
+    /// is exposed to farm admins alone.
+    /// </summary>
+    [MaxLength(64)]
+    public string? FailureReason { get; set; }
+
     /// <summary>Resolved machine profile identity.</summary>
     public Guid? MachineProfileId { get; set; }
 

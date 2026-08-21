@@ -669,11 +669,18 @@ public partial class SliceJobController(
             ? "Slicing worker reported a failure."
             : request.ErrorMessage;
 
+        // Only a currently-defined enum member is persisted, so a worker running a different build
+        // cannot store a value this API would later hand back to a client (issue #1811).
+        string? failureReason = request.FailureReason is SliceFailureReason reported && Enum.IsDefined(reported)
+            ? reported.ToString()
+            : null;
+
         bool failed = await _jobRepository.TryFailForActiveLeaseAsync(
             id,
             lease!.Worker.Id,
             claimToken,
             errorMessage,
+            failureReason,
             ct);
         if (!failed)
         {
@@ -1181,6 +1188,14 @@ public partial class SliceJobController(
             // profile-resolution error in issue #1768 without shelling into a worker.
             ErrorDetail = isAdmin && !string.IsNullOrWhiteSpace(job.ErrorMessage) ? job.ErrorMessage : null,
             LayoutDegradation = ParseLayoutDegradationReason(job.LayoutDegradationReason),
+
+            // Safe for every caller by construction: FailureReason is a closed enum and FailureHint
+            // is a constant string looked up from it, so neither can carry worker paths, filenames
+            // or CLI arguments the way ErrorDetail can (issue #1811).
+            FailureReason = ParseFailureReason(job.FailureReason),
+            FailureHint = ParseFailureReason(job.FailureReason) is SliceFailureReason reason
+                ? SliceFailureHints.For(reason)
+                : null,
             EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
             FilamentUsedGrams = job.FilamentUsedGrams,
             WorkerId = null,
@@ -1205,6 +1220,20 @@ public partial class SliceJobController(
     private static LayoutDegradationReason? ParseLayoutDegradationReason(string? value) =>
         !string.IsNullOrWhiteSpace(value) &&
         Enum.TryParse(value, ignoreCase: true, out LayoutDegradationReason reason) &&
+        Enum.IsDefined(reason)
+            ? reason
+            : null;
+
+    /// <summary>
+    /// Parses the persisted <see cref="SliceFailureReason"/> name, rejecting anything that is not a
+    /// currently-defined member so a value written by a differently-versioned worker can never be
+    /// echoed back to a caller.
+    /// </summary>
+    /// <param name="value">The persisted enum name.</param>
+    /// <returns>The parsed reason, or <see langword="null"/>.</returns>
+    private static SliceFailureReason? ParseFailureReason(string? value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        Enum.TryParse(value, ignoreCase: true, out SliceFailureReason reason) &&
         Enum.IsDefined(reason)
             ? reason
             : null;

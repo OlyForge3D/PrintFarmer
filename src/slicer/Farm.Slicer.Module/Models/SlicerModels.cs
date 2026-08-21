@@ -386,6 +386,157 @@ public enum LayoutDegradationReason
 }
 
 /// <summary>
+/// Redacted, client-safe classification of why a slice job failed (issue #1811), derived by the
+/// worker from the slicer's own exit code. Like <see cref="LayoutDegradationReason"/> this is a
+/// small, explicitly-modelled signal and never the raw worker diagnostic text — compare
+/// <see cref="Contracts.SliceJobStatusResponse.ErrorDetail"/>, which stays admin-only and verbatim
+/// because it can contain worker container paths, model filenames and CLI arguments.
+/// </summary>
+/// <remarks>
+/// Redaction here is guaranteed structurally, not by remembering to sanitize: the only values that
+/// can ever reach a caller are these enum members and the fixed English strings
+/// <see cref="SliceFailureHints"/> maps them to. No job-derived text is carried on this channel, so
+/// there is no path by which a filename or container path could leak through it.
+/// </remarks>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum SliceFailureReason
+{
+    /// <summary>
+    /// The slicing engine rejected the model itself (OrcaSlicer <c>CLI_SLICING_ERROR</c>, -100).
+    /// A generic catch-all on the engine's side: the model's geometry is usually valid, and one
+    /// common trigger is an orientation the engine cannot slice.
+    /// </summary>
+    SlicingEngineRejectedModel,
+
+    /// <summary>
+    /// Nothing printable was found on the plate (<c>CLI_NO_SUITABLE_OBJECTS</c>, -50, or
+    /// <c>CLI_NO_SUITABLE_OBJECTS_AFTER_SKIP</c>, -60).
+    /// </summary>
+    NoPrintableObjects,
+
+    /// <summary>Part of the model lies outside the build volume (<c>CLI_OBJECTS_PARTLY_INSIDE</c>, -52).</summary>
+    ModelOutsideBuildVolume,
+
+    /// <summary>
+    /// The selected process or filament is not compatible with the selected printer
+    /// (<c>CLI_PROCESS_NOT_COMPATIBLE</c> -17, <c>CLI_FILAMENT_NOT_MATCH_BED_TYPE</c> -61,
+    /// <c>CLI_FILAMENTS_DIFFERENT_TEMP</c> -62).
+    /// </summary>
+    ProfileNotCompatible,
+
+    /// <summary>A slicing profile could not be read or contained invalid values.</summary>
+    ProfileInvalid,
+
+    /// <summary>The model file could not be found or parsed by the slicing engine.</summary>
+    ModelFileUnreadable,
+
+    /// <summary>The model exceeds the engine's complexity or memory limits.</summary>
+    ModelTooComplex,
+
+    /// <summary>Slicing exceeded the engine's time limit.</summary>
+    SlicingTimedOut,
+
+    /// <summary>Objects or toolpaths collide (sequential/by-layer printing or G-code conflicts).</summary>
+    ToolpathConflict,
+
+    /// <summary>
+    /// The slicing engine failed for a reason this system does not classify. Farm admins can read
+    /// <see cref="Contracts.SliceJobStatusResponse.ErrorDetail"/> for the verbatim diagnostic.
+    /// </summary>
+    SlicerFailed,
+}
+
+/// <summary>
+/// Fixed, client-safe guidance for each <see cref="SliceFailureReason"/> (issue #1811). Every value
+/// is a compile-time constant string: nothing job-derived is interpolated, which is what makes the
+/// hint channel safe to show to a non-admin caller.
+/// </summary>
+public static class SliceFailureHints
+{
+    /// <summary>
+    /// Names the existing "Auto-orient plate" control (the compass button on the slicer
+    /// workspace's plate controls — <c>PlateBedOverlay</c>, where the string is both the button's
+    /// <c>aria-label</c> and its tooltip). That button is what resolves the most common cause of
+    /// <see cref="SliceFailureReason.SlicingEngineRejectedModel"/> (a model authored on its side,
+    /// which the engine then cannot slice standing up) — verified in issue #1811 against the real
+    /// OrcaSlicer 2.4.2 CLI, where every affected model sliced cleanly after auto-orienting.
+    /// Deliberately phrased as a likely cause, not a diagnosis: -100 is a generic engine catch-all,
+    /// so a confident "reorient your model" would misdirect callers whose job failed for an
+    /// unrelated reason.
+    /// </summary>
+    public const string SlicingEngineRejectedModel =
+        "The slicing engine could not slice this model. This most often happens when a model sits " +
+        "in an orientation the engine cannot handle — try the \"Auto-orient plate\" button on the " +
+        "plate controls in the slicer workspace, then slice again. If it still fails, ask a farm " +
+        "admin to check the job's error detail.";
+
+    /// <summary>Guidance for <see cref="SliceFailureReason.NoPrintableObjects"/>.</summary>
+    public const string NoPrintableObjects =
+        "The plate had nothing printable on it. Check that the model is on the plate and fully " +
+        "inside the build area, then slice again.";
+
+    /// <summary>Guidance for <see cref="SliceFailureReason.ModelOutsideBuildVolume"/>.</summary>
+    public const string ModelOutsideBuildVolume =
+        "Part of the model is outside the printer's build volume. Move, rotate or scale it to fit " +
+        "the plate, then slice again.";
+
+    /// <summary>Guidance for <see cref="SliceFailureReason.ProfileNotCompatible"/>.</summary>
+    public const string ProfileNotCompatible =
+        "The selected process or filament profile is not compatible with the selected printer. " +
+        "Pick a profile intended for this printer and slice again.";
+
+    /// <summary>Guidance for <see cref="SliceFailureReason.ProfileInvalid"/>.</summary>
+    public const string ProfileInvalid =
+        "A slicing profile could not be read or contained invalid values. Pick a different profile, " +
+        "or ask a farm admin to check the printer's profiles.";
+
+    /// <summary>Guidance for <see cref="SliceFailureReason.ModelFileUnreadable"/>.</summary>
+    public const string ModelFileUnreadable =
+        "The slicing engine could not read this model file. Re-upload the model and try again.";
+
+    /// <summary>Guidance for <see cref="SliceFailureReason.ModelTooComplex"/>.</summary>
+    public const string ModelTooComplex =
+        "The model is too large or too detailed for the slicing engine. Simplify or reduce its " +
+        "geometry resolution, or use a larger layer height, then slice again.";
+
+    /// <summary>Guidance for <see cref="SliceFailureReason.SlicingTimedOut"/>.</summary>
+    public const string SlicingTimedOut =
+        "Slicing took longer than the engine allows. Simplify the model or use a larger layer " +
+        "height, then slice again.";
+
+    /// <summary>Guidance for <see cref="SliceFailureReason.ToolpathConflict"/>.</summary>
+    public const string ToolpathConflict =
+        "The slicing engine found colliding objects or toolpaths. Move the models further apart on " +
+        "the plate and slice again.";
+
+    /// <summary>Guidance for <see cref="SliceFailureReason.SlicerFailed"/>.</summary>
+    public const string SlicerFailed =
+        "Slicing failed inside the slicing engine. Ask a farm admin to check the job's error detail.";
+
+    /// <summary>
+    /// Returns the fixed hint for <paramref name="reason"/>, or <see langword="null"/> when the
+    /// value is not a defined member (so an unknown value persisted by an older or newer worker can
+    /// never be echoed back to a caller as if it were guidance).
+    /// </summary>
+    /// <param name="reason">The classified failure reason.</param>
+    /// <returns>A constant hint string, or <see langword="null"/>.</returns>
+    public static string? For(SliceFailureReason reason) => reason switch
+    {
+        SliceFailureReason.SlicingEngineRejectedModel => SlicingEngineRejectedModel,
+        SliceFailureReason.NoPrintableObjects => NoPrintableObjects,
+        SliceFailureReason.ModelOutsideBuildVolume => ModelOutsideBuildVolume,
+        SliceFailureReason.ProfileNotCompatible => ProfileNotCompatible,
+        SliceFailureReason.ProfileInvalid => ProfileInvalid,
+        SliceFailureReason.ModelFileUnreadable => ModelFileUnreadable,
+        SliceFailureReason.ModelTooComplex => ModelTooComplex,
+        SliceFailureReason.SlicingTimedOut => SlicingTimedOut,
+        SliceFailureReason.ToolpathConflict => ToolpathConflict,
+        SliceFailureReason.SlicerFailed => SlicerFailed,
+        _ => null,
+    };
+}
+
+/// <summary>
 /// Result of a slicing operation.
 /// </summary>
 public class SlicingResult

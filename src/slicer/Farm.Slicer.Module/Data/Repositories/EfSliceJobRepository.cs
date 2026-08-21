@@ -661,6 +661,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         Guid workerId,
         Guid claimToken,
         string errorMessage,
+        string? failureReason = null,
         CancellationToken ct = default)
     {
         DateTime now = DateTime.UtcNow;
@@ -677,6 +678,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                     .SetProperty(job => job.Status, SliceJobStatus.Failed)
                     .SetProperty(job => job.CompletedAt, now)
                     .SetProperty(job => job.ErrorMessage, errorMessage)
+                    .SetProperty(job => job.FailureReason, failureReason)
                     .SetProperty(job => job.UpdatedAt, now),
                 ct);
         if (updated == 1)
