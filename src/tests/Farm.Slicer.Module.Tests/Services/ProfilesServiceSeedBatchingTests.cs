@@ -50,6 +50,15 @@ public class ProfilesServiceSeedBatchingTests
         Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Loose);
         Mock<IProcessProfileRepository> processRepo = new(MockBehavior.Loose);
 
+        // #1779: the seed now reads existing system profile names as its idempotency key, so these
+        // repository reads must be stubbed; a real EF repository returns an empty list, never null.
+        _ = machineRepo.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MachineProfile>());
+        _ = filamentRepo.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<FilamentProfile>());
+        _ = processRepo.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ProcessProfile>());
+
         // First seed run: nothing exists yet.
         HashSet<string> alreadySeededHashes = new(StringComparer.Ordinal);
         _ = machineRepo
@@ -117,6 +126,15 @@ public class ProfilesServiceSeedBatchingTests
         Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Loose);
         Mock<IProcessProfileRepository> processRepo = new(MockBehavior.Loose);
 
+        // #1779: the seed now reads existing system profile names as its idempotency key, so these
+        // repository reads must be stubbed; a real EF repository returns an empty list, never null.
+        _ = machineRepo.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MachineProfile>());
+        _ = filamentRepo.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<FilamentProfile>());
+        _ = processRepo.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ProcessProfile>());
+
         _ = filamentRepo
             .Setup(r => r.GetExistingSystemHashesAsync(It.IsAny<IEnumerable<string>>(), SlicerType.OrcaSlicer, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HashSet<string>());
@@ -140,7 +158,12 @@ public class ProfilesServiceSeedBatchingTests
 
         // Assert: the two good profiles are still imported despite the malformed one in the same batch.
         Assert.Equal(2, (int)result.imported);
-        Assert.Equal(1, (int)result.skipped);
+
+        // #1779: a malformed profile is a failure, not a duplicate. It is reported as an error so a
+        // caller can tell "nothing left to import" apart from "something did not import"; `skipped`
+        // now means duplicates only.
+        Assert.Equal(0, (int)result.skipped);
+        Assert.Equal(1, (int)result.errors);
         Assert.Equal(2, persisted.Count);
         Assert.Contains(persisted, p => p.Name == "Good1");
         Assert.Contains(persisted, p => p.Name == "Good2");
@@ -166,6 +189,15 @@ public class ProfilesServiceSeedBatchingTests
         Mock<IMachineProfileRepository> machineRepo = new(MockBehavior.Loose);
         Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Loose);
         Mock<IProcessProfileRepository> processRepo = new(MockBehavior.Loose);
+
+        // #1779: the seed now reads existing system profile names as its idempotency key, so these
+        // repository reads must be stubbed; a real EF repository returns an empty list, never null.
+        _ = machineRepo.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MachineProfile>());
+        _ = filamentRepo.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<FilamentProfile>());
+        _ = processRepo.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ProcessProfile>());
 
         _ = processRepo
             .Setup(r => r.GetExistingSystemHashesAsync(It.IsAny<IEnumerable<string>>(), SlicerType.OrcaSlicer, It.IsAny<CancellationToken>()))
@@ -222,6 +254,15 @@ public class ProfilesServiceSeedBatchingTests
         Mock<IMachineProfileRepository> machineRepo = new(MockBehavior.Loose);
         Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Loose);
         Mock<IProcessProfileRepository> processRepo = new(MockBehavior.Loose);
+
+        // #1779: the seed now reads existing system profile names as its idempotency key, so these
+        // repository reads must be stubbed; a real EF repository returns an empty list, never null.
+        _ = machineRepo.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MachineProfile>());
+        _ = filamentRepo.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<FilamentProfile>());
+        _ = processRepo.Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ProcessProfile>());
 
         _ = machineRepo
             .Setup(r => r.GetExistingSystemHashesAsync(It.IsAny<IEnumerable<string>>(), SlicerType.OrcaSlicer, It.IsAny<CancellationToken>()))

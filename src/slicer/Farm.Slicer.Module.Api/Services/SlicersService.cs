@@ -957,9 +957,10 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
     /// <summary>
     /// Seed OrcaSlicer profiles from the worker into the database on registration.
-    /// This happens automatically when an OrcaSlicer worker registers, so profiles are available immediately.
-    /// Only seeds if no system OrcaSlicer profiles exist yet (idempotent - won't reseed on subsequent registrations).
-    /// Uses a distributed lock to ensure seeding happens only once, even with multiple concurrent worker registrations.
+    /// Only runs when a worker opts in via <c>SeedProfilesOnRegistration</c> (push seeding); the
+    /// default is pull-based, where profiles are imported on demand as printers are added.
+    /// Only seeds if no system OrcaSlicer profiles exist yet, and uses a distributed lock so seeding
+    /// happens once even with multiple concurrent worker registrations.
     /// Profiles are filtered to only include those for manufacturers and models in the catalog.
     /// </summary>
     private async Task SeedProfilesFromWorkerAsync(
@@ -989,6 +990,32 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                 await _settingsService.CompleteLockAsync(SEED_LOCK_KEY, ct);
                 return;
             }
+
+            // #1779: guard inserts on a stable IDENTITY, not on the content hash the per-profile checks
+            // in this method use. The hash is SHA256 over the serialized worker DTO, so any change to a
+            // DTO's shape between releases changes every hash — MachineProfileDto gained
+            // IsHighFlowNozzle in #1806, for example — leaving a hash check unable to recognise profiles
+            // it already imported. These tables carry UNIQUE indexes, so re-inserting does not merely
+            // duplicate a row: it throws and leaves the failed entity tracked, which can then block the
+            // very HF inserts this fix is about. Each identity below mirrors its table's declared index
+            // (machine/machine-model on Name, filament on Name+Material, process on Name+PrinterModelId)
+            // and covers ALL rows, not just system ones, because those indexes are global. Loading them
+            // once also replaces one database roundtrip per profile with one query per type.
+            HashSet<string> existingMachineModelNames = await LoadExistingProfileIdentitiesAsync(
+                async token => (await _machineModelProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, token)).Select(p => (p.Name ?? string.Empty).Trim()), ct);
+            HashSet<string> existingMachineNames = await LoadExistingProfileIdentitiesAsync(
+                async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => (p.Name ?? string.Empty).Trim()), ct);
+            HashSet<string> existingFilamentNames = await LoadExistingProfileIdentitiesAsync(
+                async token => (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => FilamentIdentity(p.Name, p.Material)), ct);
+            HashSet<string> existingProcessNames = await LoadExistingProfileIdentitiesAsync(
+                async token => (await _profileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => ProcessIdentity(p.Name, p.PrinterModelId)), ct);
+
+            _logger.LogInformation(
+                "[SeedProfilesFromWorker] Existing system profiles: {MachineModelCount} machine model, {MachineCount} machine, {FilamentCount} filament, {ProcessCount} process",
+                existingMachineModelNames.Count,
+                existingMachineNames.Count,
+                existingFilamentNames.Count,
+                existingProcessNames.Count);
 
             // Call the worker's /api/profiles endpoint which now returns AllProfilesResponseDto with all three profile types
             string workerUrl = workerHost.TrimEnd('/');
@@ -1027,7 +1054,14 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
             (IReadOnlyList<PrinterModelDto> catalogModels, _) = await _catalogService.GetModelsAsync(null, ct);
 
             HashSet<string> catalogManufacturerNames = new HashSet<string>(catalogManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
-            HashSet<string> catalogModelNames = new HashSet<string>(catalogModels.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
+
+            // #1779: the worker keys its ByHierarchy groups by each machine profile's `printer_model`.
+            // High-flow variants declare their own distinct printer_model ("Prusa CORE One HF"), which is
+            // never a catalog model Name — only a configured OrcaSlicer alias of one. Matching on base
+            // catalog names alone skipped those groups entirely, dropping all 8 CORE One / CORE One L HF
+            // machine profiles (plus their filament/process profiles) before they ever reached the
+            // database that /api/slicer/profiles/extended reads from.
+            HashSet<string> catalogModelNames = await OrcaSlicerCatalogModelNames.BuildAsync(_catalogService, catalogModels, ct);
 
             _logger.LogInformation("[SeedProfilesFromWorker] Filtering profiles for {CatalogManufacturerNamesCount} manufacturers and {CatalogModelsCount} models in catalog (using alias service for PrinterModel linking)", catalogManufacturerNames.Count, catalogModels.Count);
 
@@ -1061,6 +1095,13 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                     {
                         try
                         {
+                            if (existingMachineModelNames.Contains((modelProfile.Name ?? string.Empty).Trim()))
+                            {
+                                continue;
+                            }
+
+                            _ = existingMachineModelNames.Add((modelProfile.Name ?? string.Empty).Trim());
+
                             string profileJson = JsonSerializer.Serialize(modelProfile);
                             string profileHash = ComputeProfileHash(profileJson);
 
@@ -1162,6 +1203,13 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                             {
                                 try
                                 {
+                                    if (existingMachineNames.Contains((machineProfile.Name ?? string.Empty).Trim()))
+                                    {
+                                        continue;
+                                    }
+
+                                    _ = existingMachineNames.Add((machineProfile.Name ?? string.Empty).Trim());
+
                                     string profileJson = JsonSerializer.Serialize(machineProfile);
                                     string profileHash = ComputeProfileHash(profileJson);
 
@@ -1229,6 +1277,15 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                             {
                                 try
                                 {
+                                    string filamentName = string.IsNullOrEmpty(filamentProfile.Name) ? filamentProfile.Material : filamentProfile.Name;
+                                    string filamentIdentity = FilamentIdentity(filamentName, filamentProfile.Material);
+                                    if (existingFilamentNames.Contains(filamentIdentity))
+                                    {
+                                        continue;
+                                    }
+
+                                    _ = existingFilamentNames.Add(filamentIdentity);
+
                                     string profileJson = JsonSerializer.Serialize(filamentProfile);
                                     string profileHash = ComputeProfileHash(profileJson);
 
@@ -1294,6 +1351,23 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                             {
                                 try
                                 {
+                                    string processName = string.IsNullOrEmpty(processProfile.Name)
+                                        ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)"
+                                        : processProfile.Name;
+
+                                    // Resolve PrinterModelId before the identity guard: process profiles are
+                                    // unique on (Name, SlicerType, PrinterModelId), so the same process name
+                                    // legitimately exists under two printer models and a name-only guard
+                                    // would silently drop one of them (#1779).
+                                    Guid? printerModelId = await _aliasService.ResolveModelAliasAsync(displayName, "OrcaSlicer");
+                                    string processIdentity = ProcessIdentity(processName, printerModelId);
+                                    if (existingProcessNames.Contains(processIdentity))
+                                    {
+                                        continue;
+                                    }
+
+                                    _ = existingProcessNames.Add(processIdentity);
+
                                     string profileJson = JsonSerializer.Serialize(processProfile);
                                     string profileHash = ComputeProfileHash(profileJson);
 
@@ -1310,10 +1384,6 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                                     {
                                         continue;
                                     }
-
-                                    // Look up the catalog PrinterModelId via alias service using the model's display name
-                                    // Process profiles are grouped under models in the hierarchy, so displayName is the model name (e.g., "Prusa CORE One")
-                                    Guid? printerModelId = await _aliasService.ResolveModelAliasAsync(displayName, "OrcaSlicer");
 
                                     ProcessProfile systemProfile = new ProcessProfile
                                     {
@@ -1394,4 +1464,29 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         byte[] hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(profileJson));
         return Convert.ToHexString(hashedBytes);
     }
+
+    /// <summary>
+    /// Loads the identities of already-persisted OrcaSlicer profiles of one type into a
+    /// case-insensitive set, used as the seed's stable idempotency key (#1779). Each identity must
+    /// mirror its table's declared UNIQUE index, and all rows are loaded (not just system ones)
+    /// because those indexes are global. Failures propagate rather than degrading to an empty set,
+    /// which would be indistinguishable from "nothing imported yet" and drive into a collision.
+    /// </summary>
+    private static async Task<HashSet<string>> LoadExistingProfileIdentitiesAsync(
+        Func<CancellationToken, Task<IEnumerable<string>>> load,
+        CancellationToken ct)
+    {
+        IEnumerable<string> identities = await load(ct);
+        return new HashSet<string>(
+            identities.Where(id => !string.IsNullOrWhiteSpace(id)),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Builds the filament identity matching its UNIQUE (Name, Material, SlicerType) index.</summary>
+    private static string FilamentIdentity(string? name, string? material) =>
+        $"{(name ?? string.Empty).Trim()}\u001F{(material ?? string.Empty).Trim()}";
+
+    /// <summary>Builds the process identity matching its UNIQUE (Name, SlicerType, PrinterModelId) index.</summary>
+    private static string ProcessIdentity(string? name, Guid? printerModelId) =>
+        $"{(name ?? string.Empty).Trim()}\u001F{printerModelId?.ToString() ?? string.Empty}";
 }

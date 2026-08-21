@@ -96,6 +96,10 @@ public static class SlicerApiExtensions
         // Background services
         _ = services.AddHostedService<ProfileTaskCheckService>();
 
+        // #1779: converge the system profile catalog on start so a corrected seed actually reaches
+        // an existing deployment, instead of relying on an administrator invoking the admin POST.
+        _ = services.AddHostedService<SystemProfileReconciliationService>();
+
         // Printables import (preview, #349)
         _ = services.Configure<PrintablesGraphQlOptions>(configuration.GetSection(PrintablesGraphQlOptions.SectionName));
         _ = services.Configure<PrintablesOAuthOptions>(configuration.GetSection(PrintablesOAuthOptions.SectionName));
