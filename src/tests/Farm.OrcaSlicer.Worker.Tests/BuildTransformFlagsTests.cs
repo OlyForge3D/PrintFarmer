@@ -78,17 +78,30 @@ public class BuildTransformFlagsTests
     [Fact]
     public void BuildTransformFlags_ZRotation_MapsToRotate()
     {
-        // Z-axis rotation (around up axis) → OrcaSlicer --rotate (yaw).
-        // +180° and -180° are the same rotation; this input is a hair over π, so the 'ZYX'
-        // re-parameterisation lands on -180. Assert the orientation, not the sign.
+        // A positive Z-only rotation is already a valid 'ZYX' triple and passes straight through.
+        string json = """{"rotation":[0,0,1.5707963267948966],"scale":[1,1,1]}""";
+
+        TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
+
+        result.Flags.Trim().Should().Be("--rotate 90.00");
+    }
+
+    /// <summary>
+    /// A 180° Z rotation is re-expressed as X+Y rather than a negative <c>--rotate</c>, because
+    /// this input is a hair over π so the extraction lands just below zero and the negative-Z
+    /// correction fires. <c>Rz(π) == Ry(π)·Rx(π)</c>, so the orientation is identical — which is
+    /// what is asserted, rather than the particular flags.
+    /// </summary>
+    [Fact]
+    public void BuildTransformFlags_ZRotation180_ReExpressedButOrientationPreserved()
+    {
         string json = """{"rotation":[0,0,3.1415927],"scale":[1,1,1]}""";
 
         TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
 
-        (double rx, double ry, double rz) = ParseRotationDegrees(result.Flags);
-        rx.Should().BeApproximately(0, 1e-2);
-        ry.Should().BeApproximately(0, 1e-2);
-        Math.Abs(rz).Should().BeApproximately(180, 1e-2);
+        result.Flags.Should().NotContain("--rotate -", "a negative Z cannot survive accumulation");
+        MaxAbsDifference(ViewerRotation(0, 0, 3.1415927), SimulateOrcaCli(result.Flags))
+            .Should().BeLessThan(1e-3);
     }
 
     [Fact]
@@ -248,78 +261,179 @@ public class BuildTransformFlagsTests
     }
 
     /// <summary>
-    /// The emitted angles must reconstruct the orientation the user approved in the viewer.
-    /// <para>
-    /// OrcaSlicer sums <c>--rotate*</c> into an Euler triple (<c>ModelVolume::rotate</c> does
-    /// <c>get_rotation() + extract_euler_angles(...)</c>) and rebuilds it as <c>Rz·Ry·Rx</c>
-    /// (<c>Geometry::rotation_transform</c>), so flag order is irrelevant and the workspace's
-    /// three.js <c>'XYZ'</c> angles cannot be passed through verbatim. This applies
-    /// <c>Rz·Ry·Rx</c> to whatever we emitted and compares against hard literals derived
-    /// independently from three.js, so it fails if the re-parameterisation is dropped.
-    /// </para>
+    /// The emitted angles must reconstruct the orientation the user approved in the viewer,
+    /// after OrcaSlicer's real processing — which is extract-an-Euler-triple-per-flag, SUM the
+    /// triples (<c>ModelVolume::rotate</c>), then compose as <c>Rz·Ry·Rx</c>
+    /// (<c>Geometry::rotation_transform</c>). <see cref="SimulateOrcaCli"/> models that whole
+    /// chain rather than applying <c>Rz·Ry·Rx</c> to the emitted triple directly, because the
+    /// extract-and-accumulate step is where a negative Z goes wrong.
     /// </summary>
-    [Fact]
-    public void BuildTransformFlags_MultiAxisRotation_AnglesReconstructViewerOrientation()
+    /// <remarks>
+    /// The negative-Z rows are the ones that matter: before the second 'ZYX' representative was
+    /// used they were off by up to 129°, and no assertion in this suite could see it. The
+    /// tolerance is 1e-3 because the flags are F2-formatted; the divergence being guarded
+    /// against is O(1) in matrix terms.
+    /// </remarks>
+    [Theory]
+    [InlineData(45.0, 45.0, 45.0)]
+    [InlineData(90.0, 0.0, 90.0)]
+    [InlineData(22.92, 51.57, -74.48)]
+    [InlineData(34.38, -11.46, -63.03)]
+    [InlineData(28.65, 0.0, -28.65)]
+    [InlineData(-22.92, 17.19, -34.38)]
+    [InlineData(0.0, 0.0, -30.0)]
+    [InlineData(-120.0, 70.0, -160.0)]
+    [InlineData(10.0, -80.0, -5.0)]
+    public void BuildTransformFlags_Rotation_SurvivesOrcaSlicerAccumulation(
+        double rxDeg, double ryDeg, double rzDeg)
     {
-        // three.js Euler(π/4, π/4, π/4), order 'XYZ' → e1 maps to (0.5, 0.85355339, 0.14644661).
-        string json = """{"rotation":[0.7853981633974483,0.7853981633974483,0.7853981633974483],"scale":[1,1,1],"position":[0,0,0]}""";
+        double rx = rxDeg * Math.PI / 180.0;
+        double ry = ryDeg * Math.PI / 180.0;
+        double rz = rzDeg * Math.PI / 180.0;
+        string json = $$"""{"rotation":[{{Inv(rx)}},{{Inv(ry)}},{{Inv(rz)}}],"scale":[1,1,1],"position":[0,0,0]}""";
 
         TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
 
-        (double rxDeg, double ryDeg, double rzDeg) = ParseRotationDegrees(result.Flags);
+        double[,] expected = ViewerRotation(rx, ry, rz);
+        double[,] actual = SimulateOrcaCli(result.Flags);
 
-        // Passing the workspace angles through unchanged would emit 45/45/45 and be wrong.
-        ryDeg.Should().NotBeApproximately(45, 0.5, "the triple must be re-parameterised to 'ZYX'");
+        MaxAbsDifference(expected, actual).Should().BeLessThan(1e-3);
+    }
 
-        // Tolerance is 1e-3, not 1e-6: the flags are formatted to 2 decimal places, so a
-        // reconstruction from them carries up to ~1e-4 of rounding. The 'XYZ' vs 'ZYX'
-        // divergence this guards against is O(0.1) — three orders of magnitude larger.
-        (double x, double y, double z) = ApplyOrcaZyx(rxDeg, ryDeg, rzDeg, 1, 0, 0);
-        x.Should().BeApproximately(0.5, 1e-3);
-        y.Should().BeApproximately(0.85355339, 1e-3);
-        z.Should().BeApproximately(0.14644661, 1e-3);
+    /// <summary>
+    /// Self-check on <see cref="ExtractEulerAnglesLikeOrca"/>: OrcaSlicer documents that
+    /// <c>rotation_transform(extract_euler_angles(M)) == M</c>. If this transcription of Eigen's
+    /// <c>eulerAngles(2,1,0)</c> is wrong, the test above would be measuring the wrong thing, so
+    /// the helper is validated against OrcaSlicer's own contract before being trusted.
+    /// </summary>
+    [Fact]
+    public void ExtractEulerAnglesLikeOrca_SatisfiesOrcaSlicersRoundTripContract()
+    {
+        ulong seed = 20260820UL;
+        double worst = 0;
 
-        (double x2, double y2, double z2) = ApplyOrcaZyx(rxDeg, ryDeg, rzDeg, 0, 0, 1);
-        x2.Should().BeApproximately(0.70710678, 1e-3);
-        y2.Should().BeApproximately(-0.5, 1e-3);
-        z2.Should().BeApproximately(0.5, 1e-3);
+        for (int i = 0; i < 2000; i++)
+        {
+            double[,] m = ViewerRotation(
+                NextAngle(ref seed),
+                NextAngle(ref seed),
+                NextAngle(ref seed));
+
+            (double x, double y, double z) = ExtractEulerAnglesLikeOrca(m);
+            worst = Math.Max(worst, MaxAbsDifference(m, RotationTransform(x, y, z)));
+        }
+
+        worst.Should().BeLessThan(1e-9);
+    }
+
+    /// <summary>
+    /// Sweep of realistic auto-orient output. <c>autoOrient.ts</c> builds its rotation from
+    /// <c>setFromUnitVectors</c> and converts with a default-order <c>THREE.Euler</c>, so
+    /// multi-axis rotations with a negative Z are routine, not exotic — roughly half of this
+    /// sweep was mis-oriented before the negative-Z correction.
+    /// </summary>
+    [Fact]
+    public void BuildTransformFlags_RandomRotations_AllSurviveAccumulation()
+    {
+        ulong seed = 1794UL;
+        double worst = 0;
+        double worstRx = 0, worstRy = 0, worstRz = 0;
+
+        for (int i = 0; i < 1500; i++)
+        {
+            double rx = NextAngle(ref seed);
+            double ry = NextAngle(ref seed);
+            double rz = NextAngle(ref seed);
+            string json = $$"""{"rotation":[{{Inv(rx)}},{{Inv(ry)}},{{Inv(rz)}}],"scale":[1,1,1],"position":[0,0,0]}""";
+
+            TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
+            double diff = MaxAbsDifference(ViewerRotation(rx, ry, rz), SimulateOrcaCli(result.Flags));
+
+            if (diff > worst)
+            {
+                (worst, worstRx, worstRy, worstRz) = (diff, rx, ry, rz);
+            }
+        }
+
+        worst.Should().BeLessThan(
+            1e-3,
+            "worst case was rotation [{0}, {1}, {2}]",
+            worstRx,
+            worstRy,
+            worstRz);
+    }
+
+    /// <summary>
+    /// Deterministic angle sequence in (-π, π]. A hand-rolled 64-bit LCG rather than
+    /// <see cref="Random"/> because the repository enforces CA5394 as an error; a fixed seed also
+    /// makes any failure exactly reproducible.
+    /// </summary>
+    private static double NextAngle(ref ulong state)
+    {
+        state = unchecked((state * 6364136223846793005UL) + 1442695040888963407UL);
+        double unit = ((state >> 11) & ((1UL << 53) - 1)) / (double)(1UL << 53);
+        return ((unit * 2) - 1) * Math.PI;
+    }
+
+    /// <summary>
+    /// A negative Z must never be emitted alongside an X or Y rotation.
+    /// <c>Geometry::extract_euler_angles</c> normalises its Z component into [0, π] (Eigen
+    /// <c>eulerAngles(2,1,0)</c>), so <c>extract(Rz(γ))</c> for <c>γ &lt; 0</c> is
+    /// <c>(π, -π, γ+π)</c>, not <c>(0, 0, γ)</c> — and those spurious X/Y terms get SUMMED into
+    /// the real ones. This pins the structural property directly, independently of the
+    /// orientation assertions above.
+    /// </summary>
+    [Theory]
+    [InlineData(22.92, 51.57, -74.48)]
+    [InlineData(34.38, -11.46, -63.03)]
+    [InlineData(28.65, 0.0, -28.65)]
+    [InlineData(-120.0, 70.0, -160.0)]
+    public void BuildTransformFlags_NegativeZ_IsNeverEmittedWithAnXOrYRotation(
+        double rxDeg, double ryDeg, double rzDeg)
+    {
+        string json = $$"""{"rotation":[{{Inv(rxDeg * Math.PI / 180.0)}},{{Inv(ryDeg * Math.PI / 180.0)}},{{Inv(rzDeg * Math.PI / 180.0)}}],"scale":[1,1,1],"position":[0,0,0]}""";
+
+        TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
+
+        (double x, double y, double z) = ParseRotationDegrees(result.Flags);
+
+        if (Math.Abs(x) > 1e-9 || Math.Abs(y) > 1e-9)
+        {
+            z.Should().BeGreaterThanOrEqualTo(0, "a negative --rotate cannot survive accumulation");
+        }
     }
 
     /// <summary>
     /// Gimbal-lock branch: three.js Euler(π/2, 0, π/2) re-parameterises to a 'ZYX' triple with
-    /// |ry'| = 90°, where only the X/Z sum is observable. Viewer oracle: e1 → (0,0,1).
+    /// |ry'| = 90°, where only the X/Z sum is observable.
     /// <para>
-    /// The canonical triple is also pinned. At lock, <c>r00/r10/r21/r22</c> all collapse to the
-    /// residue of a catastrophic cancellation (~6e-17), so deriving X and Z from
-    /// <c>atan2</c> of those is numerically meaningless — it happens to yield an equivalent
-    /// rotation, (45,-90,45) instead of (90,-90,0), but only by luck. The dedicated branch reads
-    /// <c>r01</c>/<c>r02</c>, which are O(1). Asserting Z == 0 is what makes that branch
-    /// detectable; without it, deleting the branch passes every other test.
+    /// The canonical triple is pinned as well as the orientation. At lock,
+    /// <c>r00/r10/r21/r22</c> all collapse to the residue of a catastrophic cancellation
+    /// (~6e-17), so deriving X and Z from <c>atan2</c> of those is numerically meaningless — it
+    /// happens to yield an equivalent rotation, (45,-90,45) instead of (90,-90,0), but only by
+    /// luck. Asserting Z == 0 is what makes the branch detectable; without it, deleting the
+    /// branch passes every other test.
     /// </para>
     /// </summary>
     [Fact]
     public void BuildTransformFlags_GimbalLockedRotation_StillReconstructsViewerOrientation()
     {
+        double halfPi = Math.PI / 2;
         string json = """{"rotation":[1.5707963267948966,0,1.5707963267948966],"scale":[1,1,1],"position":[0,0,0]}""";
 
         TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
 
         (double rxDeg, double ryDeg, double rzDeg) = ParseRotationDegrees(result.Flags);
-
         rxDeg.Should().BeApproximately(90, 1e-2);
         ryDeg.Should().BeApproximately(-90, 1e-2);
         rzDeg.Should().BeApproximately(0, 1e-2, "the locked branch pins Z and solves for X");
 
-        (double x, double y, double z) = ApplyOrcaZyx(rxDeg, ryDeg, rzDeg, 1, 0, 0);
-        x.Should().BeApproximately(0, 1e-3);
-        y.Should().BeApproximately(0, 1e-3);
-        z.Should().BeApproximately(1, 1e-3);
-
-        (double x2, double y2, double z2) = ApplyOrcaZyx(rxDeg, ryDeg, rzDeg, 0, 1, 0);
-        x2.Should().BeApproximately(-1, 1e-3);
-        y2.Should().BeApproximately(0, 1e-3);
-        z2.Should().BeApproximately(0, 1e-3);
+        MaxAbsDifference(ViewerRotation(halfPi, 0, halfPi), SimulateOrcaCli(result.Flags))
+            .Should().BeLessThan(1e-3);
     }
+
+    private static string Inv(double value) =>
+        value.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Single-axis rotations are already a valid 'ZYX' triple, so they must pass through
@@ -361,31 +475,123 @@ public class BuildTransformFlagsTests
     }
 
     /// <summary>
-    /// Independent reimplementation of how OrcaSlicer turns its Euler triple into an orientation:
-    /// column-vector <c>Rz·Ry·Rx</c> (<c>Geometry::rotation_transform</c>).
+    /// Faithful model of <c>Geometry::extract_euler_angles</c>: Eigen's
+    /// <c>eulerAngles(2,1,0)</c> (Eigen 3.4 <c>EulerAngles.h</c>, transcribed for a0=2, a1=1,
+    /// a2=0 ⇒ odd=1, i=2, j=1, k=0) followed by <c>std::swap(angles(0), angles(2))</c>.
+    /// <para>
+    /// The <c>res0 += π</c> normalisation is the whole point: it forces the Z component into
+    /// [0, π], so a negative Z cannot survive as a pure single-axis triple.
+    /// </para>
     /// </summary>
-    private static (double X, double Y, double Z) ApplyOrcaZyx(
-        double rxDeg, double ryDeg, double rzDeg, double x, double y, double z)
+    private static (double X, double Y, double Z) ExtractEulerAnglesLikeOrca(double[,] m)
     {
-        double rx = rxDeg * Math.PI / 180.0;
-        double ry = ryDeg * Math.PI / 180.0;
-        double rz = rzDeg * Math.PI / 180.0;
+        double res0 = Math.Atan2(m[1, 0], m[0, 0]);
+        double c2 = Math.Sqrt((m[2, 2] * m[2, 2]) + (m[2, 1] * m[2, 1]));
 
-        // Rx
-        double y1 = (y * Math.Cos(rx)) - (z * Math.Sin(rx));
-        double z1 = (y * Math.Sin(rx)) + (z * Math.Cos(rx));
-        double x1 = x;
+        double res1;
+        if (res0 < 0)
+        {
+            res0 += Math.PI;
+            res1 = Math.Atan2(-m[2, 0], -c2);
+        }
+        else
+        {
+            res1 = Math.Atan2(-m[2, 0], c2);
+        }
 
-        // Ry
-        double x2 = (x1 * Math.Cos(ry)) + (z1 * Math.Sin(ry));
-        double z2 = (-x1 * Math.Sin(ry)) + (z1 * Math.Cos(ry));
-        double y2 = y1;
+        double s1 = Math.Sin(res0);
+        double c1 = Math.Cos(res0);
+        double res2 = Math.Atan2((s1 * m[0, 2]) - (c1 * m[1, 2]), (c1 * m[1, 1]) - (s1 * m[0, 1]));
 
-        // Rz
-        double x3 = (x2 * Math.Cos(rz)) - (y2 * Math.Sin(rz));
-        double y3 = (x2 * Math.Sin(rz)) + (y2 * Math.Cos(rz));
+        return (res2, res1, res0);
+    }
 
-        return (x3, y3, z2);
+    /// <summary>Column-vector rotation about a single world axis (0=X, 1=Y, 2=Z).</summary>
+    private static double[,] AxisRotation(int axis, double radians)
+    {
+        double c = Math.Cos(radians), s = Math.Sin(radians);
+        return axis switch
+        {
+            0 => new[,] { { 1, 0, 0 }, { 0, c, -s }, { 0, s, c } },
+            1 => new[,] { { c, 0, s }, { 0, 1, 0 }, { -s, 0, c } },
+            _ => new[,] { { c, -s, 0 }, { s, c, 0 }, { 0, 0, 1 } },
+        };
+    }
+
+    private static double[,] Multiply(double[,] a, double[,] b)
+    {
+        var r = new double[3, 3];
+        for (int i = 0; i < 3; i++)
+        {
+            for (int j = 0; j < 3; j++)
+            {
+                for (int k = 0; k < 3; k++)
+                {
+                    r[i, j] += a[i, k] * b[k, j];
+                }
+            }
+        }
+
+        return r;
+    }
+
+    /// <summary>
+    /// <c>Geometry::rotation_transform</c>: column-vector <c>Rz·Ry·Rx</c> from an Euler triple.
+    /// </summary>
+    private static double[,] RotationTransform(double x, double y, double z) =>
+        Multiply(Multiply(AxisRotation(2, z), AxisRotation(1, y)), AxisRotation(0, x));
+
+    /// <summary>
+    /// The viewer's orientation: three.js Euler order 'XYZ', column-vector <c>Rx·Ry·Rz</c>.
+    /// </summary>
+    private static double[,] ViewerRotation(double rx, double ry, double rz) =>
+        Multiply(Multiply(AxisRotation(0, rx), AxisRotation(1, ry)), AxisRotation(2, rz));
+
+    /// <summary>
+    /// Simulate what OrcaSlicer actually does with the emitted flags, end to end: each
+    /// <c>--rotate*</c> becomes a pure axis rotation, <c>ModelVolume::rotate</c> extracts an
+    /// Euler triple from it and ADDS it to the accumulator, and <c>rotation_transform</c> finally
+    /// composes the sum as <c>Rz·Ry·Rx</c>.
+    /// <para>
+    /// This is deliberately NOT "apply Rz·Ry·Rx to the emitted triple" — that models OrcaSlicer
+    /// as consuming the triple verbatim and skips the extract-and-accumulate step, which is
+    /// exactly where the negative-Z defect lives.
+    /// </para>
+    /// </summary>
+    private static double[,] SimulateOrcaCli(string flags)
+    {
+        (double xDeg, double yDeg, double zDeg) = ParseRotationDegrees(flags);
+        double sumX = 0, sumY = 0, sumZ = 0;
+
+        foreach ((int axis, double deg) in new[] { (0, xDeg), (1, yDeg), (2, zDeg) })
+        {
+            if (Math.Abs(deg) < 1e-9)
+            {
+                continue;
+            }
+
+            (double ex, double ey, double ez) =
+                ExtractEulerAnglesLikeOrca(AxisRotation(axis, deg * Math.PI / 180.0));
+            sumX += ex;
+            sumY += ey;
+            sumZ += ez;
+        }
+
+        return RotationTransform(sumX, sumY, sumZ);
+    }
+
+    private static double MaxAbsDifference(double[,] a, double[,] b)
+    {
+        double worst = 0;
+        for (int i = 0; i < 3; i++)
+        {
+            for (int j = 0; j < 3; j++)
+            {
+                worst = Math.Max(worst, Math.Abs(a[i, j] - b[i, j]));
+            }
+        }
+
+        return worst;
     }
 
     /// <summary>

@@ -1574,10 +1574,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// triple that reproduces it.
     /// </para>
     /// <para>
-    /// This round-trips exactly through OrcaSlicer's additive accumulation: each emitted flag is
-    /// a pure single-axis rotation whose <c>extract_euler_angles</c> is that component alone, and
-    /// <c>|ry'| ≤ 90°</c> by construction (it comes from <c>asin</c>), so no component is folded
-    /// into an equivalent-but-different triple before being summed.
+    /// This round-trips through OrcaSlicer's additive accumulation, but only because of the
+    /// negative-Z correction below. <c>Geometry::extract_euler_angles</c> is Eigen's
+    /// <c>eulerAngles(2,1,0)</c> with the first and last components swapped, and Eigen normalises
+    /// that first angle — the Z one — into <c>[0, π]</c>. So <c>extract(Rz(γ))</c> for
+    /// <c>γ &lt; 0</c> is NOT <c>(0,0,γ)</c>; it is <c>(π, -π, γ+π)</c>. Since
+    /// <c>ModelVolume::rotate</c> SUMS these triples and <c>Ry(-π)</c> does not commute with a
+    /// non-trivial X/Y contribution, a negative Z combined with any X or Y rotation would
+    /// accumulate into the wrong orientation.
     /// </para>
     /// </summary>
     /// <returns>Rotation about X, Y and Z in radians, to be summed by OrcaSlicer as 'ZYX'.</returns>
@@ -1597,20 +1601,55 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         double r21 = (sinX * cosZ) + (cosX * sinZ * sinY);
         double r22 = cosX * cosY;
 
-        double outY = Math.Asin(Math.Clamp(-r20, -1.0, 1.0));
+        double outX;
 
-        // Gimbal lock: cos(outY) == 0 collapses r00/r10/r21/r22, leaving only the sum or
-        // difference of the X and Z rotations observable. Pin Z at zero and solve for X.
+        // Math.Clamp is a defensive guard, not dead weight: if -r20 ever rounded outside [-1,1],
+        // Math.Asin would return NaN, and NaN fails SILENTLY here — Math.Abs(NaN) > epsilon is
+        // false, so --rotate-y would be dropped rather than throwing, i.e. a silent
+        // mis-orientation, the exact failure class this code exists to prevent.
+        //
+        // It is deliberately not covered by a test: r20 is a rotation-matrix entry, and a
+        // targeted 20M-sample scan along the gimbal-lock boundary (where |r20| → 1) found no
+        // input for which this expression rounds past 1. Do not delete it as "untested" — a
+        // future change to how r20 is computed could easily make it reachable.
+        double outY = Math.Asin(Math.Clamp(-r20, -1.0, 1.0));
+        double outZ;
+
+        // Gimbal lock: cos(outY) == 0 collapses r00/r10/r21/r22 to the residue of a catastrophic
+        // cancellation, so deriving X and Z from them is meaningless. Read the O(1) terms
+        // instead, pinning Z at zero and solving for X.
         const double lockEpsilon = 1e-9;
         if (Math.Abs(r20) >= 1.0 - lockEpsilon)
         {
-            double lockedX = r20 <= 0
-                ? Math.Atan2(r01, r02)
-                : Math.Atan2(-r01, -r02);
-            return (lockedX, outY, 0.0);
+            outX = r20 <= 0 ? Math.Atan2(r01, r02) : Math.Atan2(-r01, -r02);
+            outZ = 0.0;
+        }
+        else
+        {
+            outX = Math.Atan2(r21, r22);
+            outZ = Math.Atan2(r10, r00);
         }
 
-        return (Math.Atan2(r21, r22), outY, Math.Atan2(r10, r00));
+        // Every 'ZYX' triple has a second representative, (x-π, π-y, z+π). Take it when Z is
+        // negative: that makes Z non-negative, and gives |y'| > 90°, which is exactly the case
+        // where extract(Ry(y')) returns (π, y, π) — so the X, Y and Z contributions sum back to
+        // the intended triple modulo 2π. Normalising X and Y into (-π, π] does not change their
+        // matrices, and every component is 2π-periodic in the final composition.
+        if (outZ < 0)
+        {
+            outX = NormalizeAngle(outX - Math.PI);
+            outY = NormalizeAngle(Math.PI - outY);
+            outZ += Math.PI;
+        }
+
+        return (outX, outY, outZ);
+    }
+
+    /// <summary>Wrap an angle into (-π, π].</summary>
+    private static double NormalizeAngle(double radians)
+    {
+        double wrapped = Math.IEEERemainder(radians, 2 * Math.PI);
+        return wrapped <= -Math.PI ? wrapped + (2 * Math.PI) : wrapped;
     }
 
     /// <summary>
