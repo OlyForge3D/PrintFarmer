@@ -158,7 +158,12 @@ public class ProfilesServiceSeedBatchingTests
 
         // Assert: the two good profiles are still imported despite the malformed one in the same batch.
         Assert.Equal(2, (int)result.imported);
-        Assert.Equal(1, (int)result.skipped);
+
+        // #1779: a malformed profile is a failure, not a duplicate. It is reported as an error so a
+        // caller can tell "nothing left to import" apart from "something did not import"; `skipped`
+        // now means duplicates only.
+        Assert.Equal(0, (int)result.skipped);
+        Assert.Equal(1, (int)result.errors);
         Assert.Equal(2, persisted.Count);
         Assert.Contains(persisted, p => p.Name == "Good1");
         Assert.Contains(persisted, p => p.Name == "Good2");

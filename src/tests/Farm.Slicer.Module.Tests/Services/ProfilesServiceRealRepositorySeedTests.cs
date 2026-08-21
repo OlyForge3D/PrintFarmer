@@ -265,6 +265,97 @@ public class ProfilesServiceRealRepositorySeedTests
         Assert.Contains(persisted, p => p.Name == "Prusa CORE One L HF 0.4 nozzle");
     }
 
+    /// <summary>
+    /// Proves the identity guard survives the exact churn that broke the hash guard. The seed runs
+    /// twice, but the second run computes completely different content hashes — simulating a DTO
+    /// shape change between releases, as when <c>MachineProfileDto</c> gained <c>IsHighFlowNozzle</c>
+    /// in #1806. Row counts must be identical: the index-keyed identity, unlike the hash, is stable.
+    /// </summary>
+    [Fact]
+    public async Task SeedSystemProfiles_SecondRunComputesDifferentHashes_StillIdempotent()
+    {
+        using SlicerDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        Harness harness = new(db);
+
+        _ = await harness.CreateService().SeedSystemProfilesFromWorkerAsync(harness.CreateWorkerHttpClient(), CancellationToken.None);
+        List<MachineProfile> afterFirst = (await harness.MachineRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, CancellationToken.None)).ToList();
+
+        // Every hash the second run produces differs from the first run's, as a DTO shape change would.
+        harness.HashSalt = "post-dto-change";
+        _ = await harness.CreateService().SeedSystemProfilesFromWorkerAsync(harness.CreateWorkerHttpClient(), CancellationToken.None);
+        List<MachineProfile> afterSecond = (await harness.MachineRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, CancellationToken.None)).ToList();
+
+        Assert.Equal(4, afterFirst.Count);
+        Assert.Equal(afterFirst.Count, afterSecond.Count);
+        Assert.Equal(afterSecond.Count, afterSecond.Select(p => p.Name).Distinct(StringComparer.Ordinal).Count());
+    }
+
+    /// <summary>
+    /// The state a losing instance sees in a multi-replica rolling deploy: another reconciler has
+    /// already written every row, under hashes this instance cannot reproduce. Reconciliation must
+    /// then be a clean no-op — no duplicate rows, and no exception escaping to the caller. Combined
+    /// with the repositories detaching failed inserts, this is what keeps a concurrent start from
+    /// recreating the batch-poisoning failure mode.
+    /// </summary>
+    [Fact]
+    public async Task SeedSystemProfiles_AnotherInstanceAlreadyWroteEveryRow_IsNoOpAndDoesNotThrow()
+    {
+        using SlicerDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        Harness harness = new(db);
+
+        // Simulate the winner's writes, with hashes this instance will never compute.
+        foreach (string name in new[]
+        {
+            "Prusa CORE One 0.4 nozzle",
+            "Prusa CORE One HF 0.4 nozzle",
+            "Prusa CORE One L 0.4 nozzle",
+            "Prusa CORE One L HF 0.4 nozzle"
+        })
+        {
+            await harness.MachineRepo.AddAsync(new MachineProfile
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+                Manufacturer = ManufacturerName,
+                SlicerType = SlicerType.OrcaSlicer,
+                IsSystem = true,
+                Hash = "winner-instance-hash-" + name,
+                RawJson = "{}",
+                SettingsJson = "{\"NozzleDiameter\": 0.4, \"PrinterVariant\": \"0.4\"}"
+            });
+        }
+
+        ProfilesService svc = harness.CreateService();
+        _ = await svc.SeedSystemProfilesFromWorkerAsync(harness.CreateWorkerHttpClient(), CancellationToken.None);
+
+        List<MachineProfile> persisted = (await harness.MachineRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, CancellationToken.None)).ToList();
+        Assert.Equal(4, persisted.Count);
+        Assert.Equal(4, persisted.Select(p => p.Name).Distinct(StringComparer.Ordinal).Count());
+    }
+
+    /// <summary>
+    /// The identity guard is load-bearing for process profiles, not merely an optimisation. This
+    /// seed writes them with a null <c>PrinterModelId</c>, and because the unique index includes
+    /// that column and SQL treats NULLs as distinct, the database will happily accept the same
+    /// process profile once per hierarchy group it appears under. Only the guard prevents that, so
+    /// removing it silently multiplies process profiles across the catalog.
+    /// </summary>
+    [Fact]
+    public async Task SeedSystemProfiles_ProcessProfileSharedAcrossHierarchyGroups_IsPersistedOnce()
+    {
+        using SlicerDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+
+        // The same process profile is offered under all four model groups, as the worker does for a
+        // profile whose compatible_printers spans them.
+        Harness harness = new(db, processProfileName: "0.20mm Standard");
+        ProfilesService svc = harness.CreateService();
+
+        _ = await svc.SeedSystemProfilesFromWorkerAsync(harness.CreateWorkerHttpClient(), CancellationToken.None);
+
+        List<ProcessProfile> processes = (await harness.ProcessRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, CancellationToken.None)).ToList();
+        Assert.Single(processes, p => p.Name == "0.20mm Standard");
+    }
+
     private sealed class Harness
     {
         private readonly Dictionary<string, List<MachineProfileDto>> _hierarchy = new(StringComparer.Ordinal);
@@ -307,6 +398,12 @@ public class ProfilesServiceRealRepositorySeedTests
         public Guid BaseModelId { get; }
 
         public Guid BaseLModelId { get; }
+
+        /// <summary>
+        /// Changes every content hash the parsing mock produces, simulating a worker-DTO shape
+        /// change between releases (the churn that invalidated the old hash-based guard).
+        /// </summary>
+        public string HashSalt { get; set; } = string.Empty;
 
         public ProfilesService CreateService()
         {
@@ -356,7 +453,7 @@ public class ProfilesServiceRealRepositorySeedTests
             Mock<IProfileParsingService> parsing = new(MockBehavior.Loose);
             _ = parsing.Setup(p => p.ParseAndPrepare(It.IsAny<string>()))
                 .Returns((string json) => (json, json, Convert.ToHexString(
-                    System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(json)))));
+                    System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(HashSalt + json)))));
 
             return new ProfilesService(
                 new Mock<IProfilesRepository>(MockBehavior.Loose).Object,

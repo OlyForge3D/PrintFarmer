@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
@@ -31,6 +32,28 @@ namespace Farm.Slicer.Module.Api.HostedServices;
 /// no-op and an incomplete one gains exactly the rows it is missing. It never deletes, and it never
 /// touches user-created profiles.
 /// </para>
+/// <para>
+/// <b>Concurrency.</b> A rolling deploy can start several instances at once, and they reconcile
+/// against the same tables. That is deliberately handled by convergence rather than by a lock,
+/// because a lock here could only be advisory: the settings-backed lock is a non-atomic
+/// read-then-write and would add a stranding failure mode without actually guaranteeing exclusion.
+/// Instead the losing instance is harmless by construction — identity matching means it stages only
+/// rows it believes are missing, and if the winner committed them in between, the database's UNIQUE
+/// indexes reject the insert, the repositories detach the failed entity (so one rejection cannot
+/// poison the rows behind it), and the batch falls back to per-row inserts. The outcome is no
+/// duplicates and no escaping exception, which is exactly what the reconciler needs. Two dedicated
+/// tests pin this: one drives the seed against a database where another instance already wrote
+/// every row under hashes this instance cannot reproduce, and one proves idempotency holds even
+/// when every content hash changes.
+/// </para>
+/// <para>
+/// <b>Startup cost and failure semantics.</b> This is a <see cref="BackgroundService"/> whose first
+/// action is an <c>await</c>, so it never blocks host startup or readiness — reconciliation happens
+/// alongside a serving application. Every failure is caught and logged rather than rethrown, which
+/// matters because .NET's default <c>BackgroundServiceExceptionBehavior</c> is <c>StopHost</c>:
+/// letting a seeding error escape would turn an incomplete profile catalog, a cosmetic gap, into an
+/// outage. On failure the admin endpoint remains available and the next start retries.
+/// </para>
 /// </remarks>
 public sealed class SystemProfileReconciliationService : BackgroundService
 {
@@ -40,6 +63,7 @@ public sealed class SystemProfileReconciliationService : BackgroundService
     private readonly TimeSpan _startupDelay;
     private readonly TimeSpan _workerWaitTimeout;
     private readonly TimeSpan _workerPollInterval;
+    private readonly TimeSpan _workerFreshness;
 
     public SystemProfileReconciliationService(
         IServiceScopeFactory scopeFactory,
@@ -54,6 +78,7 @@ public sealed class SystemProfileReconciliationService : BackgroundService
         _startupDelay = TimeSpan.FromSeconds(configuration.GetValue("SystemProfileReconciliation:StartupDelaySeconds", 20));
         _workerWaitTimeout = TimeSpan.FromMinutes(configuration.GetValue("SystemProfileReconciliation:WorkerWaitMinutes", 10));
         _workerPollInterval = TimeSpan.FromSeconds(configuration.GetValue("SystemProfileReconciliation:WorkerPollSeconds", 30));
+        _workerFreshness = TimeSpan.FromMinutes(configuration.GetValue("SystemProfileReconciliation:WorkerFreshnessMinutes", 15));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -85,27 +110,92 @@ public sealed class SystemProfileReconciliationService : BackgroundService
 
     internal async Task ReconcileAsync(CancellationToken ct)
     {
-        if (!await WaitForOrcaSlicerWorkerAsync(ct))
-        {
-            _logger.LogInformation("[SystemProfileReconciliation] No OrcaSlicer worker became available; nothing to reconcile against");
-            return;
-        }
+        DateTime deadline = DateTime.UtcNow.Add(_workerWaitTimeout);
+        Exception? lastFailure = null;
 
+        // Retry the whole attempt — worker discovery AND seeding — until the deadline. A worker that
+        // is up but still preloading its profile catalog will reject or fail the first fetch, and a
+        // single attempt would then leave the deployment unreconciled until the next restart, which
+        // is the failure mode this service exists to eliminate (#1779).
+        while (!ct.IsCancellationRequested)
+        {
+            if (await TryFindEligibleWorkerAsync(ct))
+            {
+                try
+                {
+                    if (await TrySeedAsync(ct))
+                    {
+                        return;
+                    }
+
+                    lastFailure = null;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    lastFailure = ex;
+                    _logger.LogWarning(
+                        "[SystemProfileReconciliation] Seed attempt failed ({Message}); will retry until {Deadline:o}",
+                        ex.Message,
+                        deadline);
+                }
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                if (lastFailure is not null)
+                {
+                    _logger.LogError(
+                        lastFailure,
+                        "[SystemProfileReconciliation] Gave up reconciling the system profile catalog; it may be incomplete until the next start or a manual seed");
+                }
+                else
+                {
+                    _logger.LogInformation("[SystemProfileReconciliation] No eligible OrcaSlicer worker became available; nothing to reconcile against");
+                }
+
+                return;
+            }
+
+            await Task.Delay(_workerPollInterval, ct);
+        }
+    }
+
+    /// <summary>
+    /// Runs one seed pass. Returns false when the seed reported failures, so the caller retries
+    /// within its window instead of mistaking an incomplete catalog for a complete one.
+    /// </summary>
+    private async Task<bool> TrySeedAsync(CancellationToken ct)
+    {
         using IServiceScope scope = _scopeFactory.CreateScope();
         IProfilesService? profilesService = scope.ServiceProvider.GetService<IProfilesService>();
         if (profilesService is null)
         {
             _logger.LogInformation("[SystemProfileReconciliation] Profiles service not registered; skipping");
-            return;
+            return true;
         }
 
         IMachineProfileRepository machineRepo = scope.ServiceProvider.GetRequiredService<IMachineProfileRepository>();
         int before = (await machineRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, ct)).Count;
 
         using HttpClient httpClient = new() { Timeout = TimeSpan.FromMinutes(5) };
-        _ = await profilesService.SeedSystemProfilesFromWorkerAsync(httpClient, ct);
+        object result = await profilesService.SeedSystemProfilesFromWorkerAsync(httpClient, ct);
 
         int after = (await machineRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, ct)).Count;
+        int errors = ReadErrorCount(result);
+
+        if (errors > 0)
+        {
+            _logger.LogWarning(
+                "[SystemProfileReconciliation] Seed reported {Errors} failed profile(s); machine profiles {Before} -> {After}. Not treating the catalog as complete",
+                errors,
+                before,
+                after);
+            return false;
+        }
 
         if (after != before)
         {
@@ -118,41 +208,48 @@ public sealed class SystemProfileReconciliationService : BackgroundService
         {
             _logger.LogInformation("[SystemProfileReconciliation] System profile catalog already complete ({Count} machine profiles)", after);
         }
+
+        return true;
     }
 
     /// <summary>
-    /// Polls until a usable OrcaSlicer worker is registered, since a co-deployed worker container
-    /// commonly registers after the API is up. Returns false if none appears within the timeout.
+    /// Reads the seed's <c>errors</c> count from its anonymous result. A shape without that member
+    /// is treated as zero rather than failing reconciliation over a reporting detail.
     /// </summary>
-    private async Task<bool> WaitForOrcaSlicerWorkerAsync(CancellationToken ct)
+    private static int ReadErrorCount(object? result)
     {
-        DateTime deadline = DateTime.UtcNow.Add(_workerWaitTimeout);
+        object? value = result?.GetType().GetProperty("errors")?.GetValue(result);
+        return value is int count ? count : 0;
+    }
 
-        while (!ct.IsCancellationRequested)
+    /// <summary>
+    /// Reports whether a worker is registered that is actually usable for profile import.
+    /// </summary>
+    /// <remarks>
+    /// The eligibility rules deliberately mirror the ones the import paths themselves apply — a
+    /// supported OrcaSlicer version, an attested upstream-slicer capability, and a host — plus a
+    /// freshness check. Accepting any row with a host would let a stale registration left behind by
+    /// a removed worker satisfy the wait immediately, so the bounded retry window would be spent
+    /// against a worker that is not there.
+    /// </remarks>
+    private async Task<bool> TryFindEligibleWorkerAsync(CancellationToken ct)
+    {
+        using IServiceScope scope = _scopeFactory.CreateScope();
+        ISlicersService? slicersService = scope.ServiceProvider.GetService<ISlicersService>();
+        if (slicersService is null)
         {
-            using (IServiceScope scope = _scopeFactory.CreateScope())
-            {
-                ISlicersService? slicersService = scope.ServiceProvider.GetService<ISlicersService>();
-                if (slicersService is null)
-                {
-                    return false;
-                }
-
-                IReadOnlyList<SlicerService> workers = await slicersService.ListAsync(ct);
-                if (workers.Any(s => s.SlicerType == 1 && !string.IsNullOrWhiteSpace(s.Host)))
-                {
-                    return true;
-                }
-            }
-
-            if (DateTime.UtcNow >= deadline)
-            {
-                return false;
-            }
-
-            await Task.Delay(_workerPollInterval, ct);
+            return false;
         }
 
-        return false;
+        IReadOnlyList<SlicerService> workers = await slicersService.ListAsync(ct);
+        DateTime staleBefore = DateTime.UtcNow.Subtract(_workerFreshness);
+
+        return workers.Any(s =>
+            s.SlicerType == 1 &&
+            !string.IsNullOrWhiteSpace(s.Host) &&
+            OrcaSlicerProfileCompatibility.IsSupportedVersion(s.Version) &&
+            CalibrationContractConstants.AttestsUpstreamSlicer(s.CapabilitiesJson) &&
+            !string.Equals(s.Status, "Offline", StringComparison.OrdinalIgnoreCase) &&
+            s.LastSeen >= staleBefore);
     }
 }

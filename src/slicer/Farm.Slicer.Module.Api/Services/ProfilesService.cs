@@ -1107,7 +1107,7 @@ public class ProfilesService(
     /// duplicating. <paramref name="existingNames"/> is mutated as rows are staged so that a name
     /// appearing in several hierarchy groups — routine for filament profiles — is staged only once.
     /// </remarks>
-    private static async Task<(List<TEntity> Added, int Skipped)> StageAndCommitBatchAsync<TDto, TEntity>(
+    private static async Task<(List<TEntity> Added, int Skipped, int Errors)> StageAndCommitBatchAsync<TDto, TEntity>(
         IEnumerable<TDto> dtos,
         Func<TDto, (string Hash, TEntity Entity)> buildEntity,
         bool checkDuplicates,
@@ -1120,6 +1120,7 @@ public class ProfilesService(
     {
         List<(string Hash, TEntity Entity)> candidates = new();
         int skipped = 0;
+        int errors = 0;
 
         foreach (TDto dto in dtos)
         {
@@ -1127,15 +1128,17 @@ public class ProfilesService(
             {
                 candidates.Add(buildEntity(dto));
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                skipped++;
+                // A malformed profile is a real failure, not a duplicate: count it separately so a
+                // caller can tell "nothing to do" apart from "something did not import" (#1779).
+                errors++;
             }
         }
 
         if (candidates.Count == 0)
         {
-            return (new List<TEntity>(), skipped);
+            return (new List<TEntity>(), skipped, errors);
         }
 
         HashSet<string> existingHashes = checkDuplicates
@@ -1143,7 +1146,12 @@ public class ProfilesService(
             : new HashSet<string>();
 
         HashSet<string> stagedHashes = new(StringComparer.Ordinal);
-        List<TEntity> staged = new();
+
+        // Staged identities are tracked separately and merged into existingNames only once the row
+        // is actually persisted. Merging at staging time would mark a row as present even when its
+        // insert later failed, hiding it from every subsequent batch and from any retry.
+        HashSet<string> stagedNames = new(StringComparer.OrdinalIgnoreCase);
+        List<(TEntity Entity, string Name)> staged = new();
         foreach ((string hash, TEntity entity) in candidates)
         {
             if (existingHashes.Contains(hash) || !stagedHashes.Add(hash))
@@ -1153,44 +1161,58 @@ public class ProfilesService(
             }
 
             string name = (nameSelector(entity) ?? string.Empty).Trim();
-            if (name.Length > 0 && !existingNames.Add(name))
+            if (name.Length > 0 && (existingNames.Contains(name) || !stagedNames.Add(name)))
             {
                 skipped++;
                 continue;
             }
 
-            staged.Add(entity);
+            staged.Add((entity, name));
         }
 
         if (staged.Count == 0)
         {
-            return (staged, skipped);
+            return (new List<TEntity>(), skipped, errors);
         }
+
+        List<TEntity> stagedEntities = staged.Select(s => s.Entity).ToList();
 
         try
         {
-            _ = await addRangeAsync(staged, ct);
-            return (staged, skipped);
+            _ = await addRangeAsync(stagedEntities, ct);
+            foreach ((TEntity _, string name) in staged)
+            {
+                if (name.Length > 0)
+                {
+                    _ = existingNames.Add(name);
+                }
+            }
+
+            return (stagedEntities, skipped, errors);
         }
         catch (DbUpdateException)
         {
             // A batch-level commit failure (e.g. a same-hash collision the pre-check missed)
             // must not drop the other valid profiles in this batch: retry per-row.
             List<TEntity> actuallyAdded = new();
-            foreach (TEntity entity in staged)
+            foreach ((TEntity entity, string name) in staged)
             {
                 try
                 {
                     await addSingleAsync(entity, ct);
                     actuallyAdded.Add(entity);
+                    if (name.Length > 0)
+                    {
+                        _ = existingNames.Add(name);
+                    }
                 }
-                catch
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    skipped++;
+                    errors++;
                 }
             }
 
-            return (actuallyAdded, skipped);
+            return (actuallyAdded, skipped, errors);
         }
     }
 
@@ -1507,6 +1529,7 @@ public class ProfilesService(
 
         int imported = 0;
         int skipped = 0;
+        int errors = 0;
 
         (IReadOnlyList<ManufacturerDto> catalogManufacturers, _) = await _catalogService.GetManufacturersAsync(ct);
         (IReadOnlyList<PrinterModelDto> catalogModels, _) = await _catalogService.GetModelsAsync(null, ct);
@@ -1551,7 +1574,7 @@ public class ProfilesService(
 
                 if (modelProfiles.MachineProfiles != null)
                 {
-                    (List<MachineProfile> added, int batchSkipped) = await StageAndCommitBatchAsync(
+                    (List<MachineProfile> added, int batchSkipped, int batchErrors) = await StageAndCommitBatchAsync(
                         modelProfiles.MachineProfiles,
                         machineProfile =>
                         {
@@ -1589,11 +1612,12 @@ public class ProfilesService(
 
                     imported += added.Count;
                     skipped += batchSkipped;
+                    errors += batchErrors;
                 }
 
                 if (modelProfiles.FilamentProfiles != null)
                 {
-                    (List<FilamentProfile> added, int batchSkipped) = await StageAndCommitBatchAsync(
+                    (List<FilamentProfile> added, int batchSkipped, int batchErrors) = await StageAndCommitBatchAsync(
                         modelProfiles.FilamentProfiles,
                         filamentProfile =>
                         {
@@ -1634,11 +1658,12 @@ public class ProfilesService(
 
                     imported += added.Count;
                     skipped += batchSkipped;
+                    errors += batchErrors;
                 }
 
                 if (modelProfiles.ProcessProfiles != null)
                 {
-                    (List<ProcessProfile> added, int batchSkipped) = await StageAndCommitBatchAsync(
+                    (List<ProcessProfile> added, int batchSkipped, int batchErrors) = await StageAndCommitBatchAsync(
                         modelProfiles.ProcessProfiles,
                         processProfile =>
                         {
@@ -1679,6 +1704,7 @@ public class ProfilesService(
 
                     imported += added.Count;
                     skipped += batchSkipped;
+                    errors += batchErrors;
                 }
             }
         }
@@ -1687,10 +1713,15 @@ public class ProfilesService(
         {
             imported,
             skipped,
+
+            // #1779: surfaced so a caller can distinguish "nothing left to import" from "something
+            // failed to import". Reconciliation retries while this is non-zero rather than
+            // reporting the catalog complete just because the row count did not move.
+            errors,
             manufacturersProcessed = catalogManufacturerNames.Count,
             modelsProcessed = catalogModelNames.Count,
             orcaslicerVersion = orcaVersion,
-            message = $"Seeded {imported} OrcaSlicer profiles for catalog manufacturers/models (OrcaSlicer v{orcaVersion ?? "unknown"})"
+            message = $"Seeded {imported} OrcaSlicer profiles for catalog manufacturers/models (OrcaSlicer v{orcaVersion ?? "unknown"}), {errors} failed"
         };
     }
 
@@ -1755,6 +1786,7 @@ public class ProfilesService(
 
         int imported = 0;
         int skipped = 0;
+        int errors = 0;
 
         (IReadOnlyList<ManufacturerDto> catalogManufacturers, _) = await _catalogService.GetManufacturersAsync(ct);
         (IReadOnlyList<PrinterModelDto> catalogModels, _) = await _catalogService.GetModelsAsync(null, ct);
@@ -1800,7 +1832,7 @@ public class ProfilesService(
 
                 if (modelProfiles.MachineProfiles != null)
                 {
-                    (List<MachineProfile> added, int batchSkipped) = await StageAndCommitBatchAsync(
+                    (List<MachineProfile> added, int batchSkipped, int batchErrors) = await StageAndCommitBatchAsync(
                         modelProfiles.MachineProfiles,
                         machineProfile =>
                         {
@@ -1852,7 +1884,7 @@ public class ProfilesService(
 
                 if (modelProfiles.FilamentProfiles != null)
                 {
-                    (List<FilamentProfile> added, int batchSkipped) = await StageAndCommitBatchAsync(
+                    (List<FilamentProfile> added, int batchSkipped, int batchErrors) = await StageAndCommitBatchAsync(
                         modelProfiles.FilamentProfiles,
                         filamentProfile =>
                         {
@@ -1908,7 +1940,7 @@ public class ProfilesService(
 
                 if (modelProfiles.ProcessProfiles != null)
                 {
-                    (List<ProcessProfile> added, int batchSkipped) = await StageAndCommitBatchAsync(
+                    (List<ProcessProfile> added, int batchSkipped, int batchErrors) = await StageAndCommitBatchAsync(
                         modelProfiles.ProcessProfiles,
                         processProfile =>
                         {
@@ -1979,10 +2011,11 @@ public class ProfilesService(
             imported,
             deleted = deletedCount,
             skipped,
+            errors,
             manufacturersProcessed = catalogManufacturerNames.Count,
             modelsProcessed = catalogModelNames.Count,
             orcaslicerVersion = orcaVersion,
-            message = $"Force-reseeded {imported} system OrcaSlicer profiles from {catalogManufacturerNames.Count} catalog manufacturers and {catalogModelNames.Count} printer models (deleted {deletedCount} old, skipped {skipped} duplicates)"
+            message = $"Force-reseeded {imported} system OrcaSlicer profiles from {catalogManufacturerNames.Count} catalog manufacturers and {catalogModelNames.Count} printer models (deleted {deletedCount} old, skipped {skipped} duplicates, {errors} failed)"
         };
     }
 
