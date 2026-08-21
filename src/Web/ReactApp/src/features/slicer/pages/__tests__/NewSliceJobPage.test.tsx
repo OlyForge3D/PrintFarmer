@@ -11,6 +11,7 @@ import type { OrcaMachineProfile, OrcaFilamentProfile, OrcaProcessProfile } from
 import { apiClient } from '../../../../services/api';
 import { slicerProfilesService } from '../../../../services/slicerProfilesService';
 import { slicerRegistry } from '../../../../services/slicerRegistry';
+import { slicerService } from '@/services/slicerService';
 import { sliceJobService } from '@/services/sliceJobService';
 
 // Mutable slicer-mode ref so individual describes can opt into Advanced mode.
@@ -1002,6 +1003,67 @@ describe('NewSliceJobPage', () => {
       await waitFor(() => {
         expect(screen.queryByLabelText(/bed type/i)).not.toBeInTheDocument();
       });
+    });
+  });
+
+  describe('Engine Version (issue #1773)', () => {
+    beforeEach(() => {
+      // Only rendered when 2+ versions are registered for the engine.
+      vi.mocked(slicerService.listEngines).mockResolvedValue([
+        {
+          engine: 'OrcaSlicer',
+          versions: ['2.4.2', '2.3.1'],
+          versionEntries: [
+            { version: '2.4.2', available: true },
+            { version: '2.3.1', available: false },
+          ],
+          latest: '2.4.2',
+        },
+      ]);
+    });
+
+    it('shows the Engine version label without the helper text rendered permanently inline', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Engine version')).toBeInTheDocument();
+      });
+
+      // The old permanent helper paragraph must no longer be visible by
+      // default. The tooltip keeps its content in the DOM for
+      // aria-describedby wiring, but it must carry the `hidden` class
+      // (not be an always-visible <p>) until the trigger is hovered/focused.
+      const helperText = screen.getByText(/Pins the slice job to a specific/i);
+      expect(helperText.closest('[role="tooltip"]')).not.toBeNull();
+      expect(helperText.closest('[role="tooltip"]')?.className).toContain('hidden');
+    });
+
+    it('exposes the guidance text via an aria-describedby-wired info tooltip on the label', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      let engineVersionLabel: HTMLElement;
+      await waitFor(() => {
+        engineVersionLabel = screen.getByText('Engine version');
+        expect(engineVersionLabel).toBeInTheDocument();
+      });
+
+      const infoButton = screen.getByRole('button', { name: 'More information about engine version' });
+      expect(infoButton).toBeInTheDocument();
+
+      const describedBy = infoButton.getAttribute('aria-describedby');
+      expect(describedBy).toBeTruthy();
+
+      // The guidance text is present in the DOM (available on demand) even
+      // though it isn't visible until the tooltip opens.
+      const tooltip = document.getElementById(describedBy!);
+      expect(tooltip).toHaveTextContent(/Pins the slice job to a specific OrcaSlicer engine/i);
+      expect(tooltip).toHaveTextContent(/Versions marked "offline" have no worker currently registered/i);
+
+      // Keyboard-operable: focusing the trigger reveals the tooltip content.
+      act(() => {
+        infoButton.focus();
+      });
+      expect(tooltip?.className).not.toContain('hidden');
     });
   });
 });

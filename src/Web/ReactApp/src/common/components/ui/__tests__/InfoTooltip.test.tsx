@@ -1,8 +1,14 @@
 import { act, render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { InfoTooltip } from '../InfoTooltip';
 
+let outerHandlerCalls = 0;
+
 describe('InfoTooltip', () => {
+  beforeEach(() => {
+    outerHandlerCalls = 0;
+  });
+
   it('renders a trigger button and keeps the tooltip content in the document but hidden', () => {
     render(<InfoTooltip content="Helpful guidance text" />);
 
@@ -54,7 +60,7 @@ describe('InfoTooltip', () => {
     expect(screen.getByRole('tooltip', { hidden: true }).className).toContain('hidden');
   });
 
-  it('dismisses on Escape and returns focus to the trigger button', () => {
+  it('dismisses on Escape while focused and keeps focus on the trigger button', () => {
     render(<InfoTooltip content="Helpful guidance text" />);
 
     const button = screen.getByRole('button', { name: 'More information' });
@@ -63,10 +69,35 @@ describe('InfoTooltip', () => {
     });
     expect(screen.getByRole('tooltip').className).not.toContain('hidden');
 
-    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.keyDown(button, { key: 'Escape' });
 
     expect(screen.getByRole('tooltip', { hidden: true }).className).toContain('hidden');
     expect(document.activeElement).toBe(button);
+  });
+
+  it('does not attach a global document-level Escape listener that could steal Escape from an enclosing surface', () => {
+    render(
+      <div
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') outerHandlerCalls++;
+        }}
+      >
+        <InfoTooltip content="Helpful guidance text" />
+      </div>
+    );
+
+    const button = screen.getByRole('button', { name: 'More information' });
+    act(() => {
+      button.focus();
+    });
+    expect(screen.getByRole('tooltip').className).not.toContain('hidden');
+
+    fireEvent.keyDown(button, { key: 'Escape' });
+
+    // The tooltip's own Escape handling calls stopPropagation, so the
+    // enclosing surface's own Escape handler must not fire.
+    expect(outerHandlerCalls).toBe(0);
+    expect(screen.getByRole('tooltip', { hidden: true }).className).toContain('hidden');
   });
 
   it('shows the tooltip on mouse hover and hides on mouse leave', () => {
@@ -86,5 +117,24 @@ describe('InfoTooltip', () => {
     render(<InfoTooltip content="Helpful guidance text" label="More information about engine version" />);
 
     expect(screen.getByRole('button', { name: 'More information about engine version' })).toBeInTheDocument();
+  });
+
+  it('ignores Escape when the tooltip is already closed', () => {
+    render(<InfoTooltip content="Helpful guidance text" />);
+
+    const button = screen.getByRole('button', { name: 'More information' });
+    expect(screen.getByRole('tooltip', { hidden: true }).className).toContain('hidden');
+
+    expect(() => fireEvent.keyDown(button, { key: 'Escape' })).not.toThrow();
+    expect(screen.getByRole('tooltip', { hidden: true }).className).toContain('hidden');
+  });
+
+  it('hides the decorative info icon from assistive technologies', () => {
+    render(<InfoTooltip content="Helpful guidance text" />);
+
+    const button = screen.getByRole('button', { name: 'More information' });
+    const decorativeWrapper = button.querySelector('[aria-hidden="true"]');
+    expect(decorativeWrapper).not.toBeNull();
+    expect(decorativeWrapper?.querySelector('svg')).not.toBeNull();
   });
 });

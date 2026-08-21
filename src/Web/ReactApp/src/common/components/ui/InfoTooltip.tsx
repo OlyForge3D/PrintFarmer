@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { Button } from '@/common/components/ui/Button';
 import { InfoIcon } from '@/common/components/icons/MdiIcons';
@@ -17,8 +17,12 @@ export interface InfoTooltipProps {
 /**
  * A small, focusable "i" affordance that reveals supplemental help text on
  * demand instead of rendering it permanently inline. Opens on hover or
- * keyboard focus, is dismissible with `Escape`, and wires the trigger to the
- * tooltip content via `aria-describedby` so screen readers announce it.
+ * keyboard focus, is dismissible with `Escape` while the trigger has focus
+ * (per the WAI-ARIA APG tooltip pattern — Escape only affects a
+ * currently-focused disclosure, never a global/document-level listener that
+ * could steal Escape from an enclosing modal or other surface), and wires
+ * the trigger to the tooltip content via `aria-describedby` so screen
+ * readers announce it.
  */
 export const InfoTooltip: React.FC<InfoTooltipProps> = ({
   content,
@@ -34,20 +38,16 @@ export const InfoTooltip: React.FC<InfoTooltipProps> = ({
   const show = () => setIsVisible(true);
   const hide = () => setIsVisible(false);
 
-  useEffect(() => {
-    if (!isVisible) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        hide();
-        buttonRef.current?.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isVisible]);
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'Escape' && isVisible) {
+      // Scoped to this trigger only: stop the key from reaching an
+      // enclosing surface (e.g. a Modal's own Escape handler) so dismissing
+      // this tooltip doesn't also close its container. The trigger already
+      // has focus at this point, so no explicit re-focus is needed.
+      event.stopPropagation();
+      hide();
+    }
+  };
 
   return (
     <span className="relative inline-flex" onMouseEnter={show} onMouseLeave={hide}>
@@ -59,9 +59,12 @@ export const InfoTooltip: React.FC<InfoTooltipProps> = ({
         aria-expanded={isVisible}
         onFocus={show}
         onBlur={hide}
+        onKeyDown={handleKeyDown}
         className="aspect-square w-5 h-5 rounded-full p-0 text-pf-text-muted hover:text-pf-text-primary"
       >
-        <InfoIcon className="w-3.5 h-3.5" ariaLabel="" />
+        <span aria-hidden="true">
+          <InfoIcon className="w-3.5 h-3.5" ariaLabel="" />
+        </span>
         <span className="sr-only">{label}</span>
       </Button>
       <div
