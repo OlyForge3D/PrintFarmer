@@ -1635,6 +1635,12 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // where extract(Ry(y')) returns (π, y, π) — so the X, Y and Z contributions sum back to
         // the intended triple modulo 2π. Normalising X and Y into (-π, π] does not change their
         // matrices, and every component is 2π-periodic in the final composition.
+        //
+        // The extract(Ry(y')) → π step depends on the SIGN OF THE ZERO in the (1,0) entry:
+        // atan2(+0, cos y') with cos y' < 0 gives +π and takes no correction, whereas atan2(-0, ·)
+        // would trip Eigen's res[0] < 0 branch and yield 0, putting the Y contribution off by π.
+        // Rodrigues for AngleAxisd(θ, UnitY) gives m10 = +0, so it resolves correctly — but it is
+        // one sign-of-zero away from a silent π error, so do not "simplify" how that flag is built.
         if (outZ < 0)
         {
             outX = NormalizeAngle(outX - Math.PI);

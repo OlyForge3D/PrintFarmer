@@ -303,8 +303,15 @@ public class BuildTransformFlagsTests
     /// <summary>
     /// Self-check on <see cref="ExtractEulerAnglesLikeOrca"/>: OrcaSlicer documents that
     /// <c>rotation_transform(extract_euler_angles(M)) == M</c>. If this transcription of Eigen's
-    /// <c>eulerAngles(2,1,0)</c> is wrong, the test above would be measuring the wrong thing, so
+    /// <c>eulerAngles(2,1,0)</c> is wrong, the tests above would be measuring the wrong thing, so
     /// the helper is validated against OrcaSlicer's own contract before being trusted.
+    /// <para>
+    /// The round-trip alone is NOT sufficient, and that matters: the naive extraction (leaving
+    /// <c>res0</c> negative) is an equally valid representative and round-trips exactly, so a
+    /// transcription that silently dropped Eigen's <c>res0 += π</c> normalisation would still
+    /// pass — and would then stop reproducing the negative-Z defect this suite exists to catch.
+    /// The Z-range assertion is what pins that normalisation, and hence the whole premise.
+    /// </para>
     /// </summary>
     [Fact]
     public void ExtractEulerAnglesLikeOrca_SatisfiesOrcaSlicersRoundTripContract()
@@ -321,6 +328,11 @@ public class BuildTransformFlagsTests
 
             (double x, double y, double z) = ExtractEulerAnglesLikeOrca(m);
             worst = Math.Max(worst, MaxAbsDifference(m, RotationTransform(x, y, z)));
+
+            z.Should().BeInRange(
+                0,
+                Math.PI,
+                "Eigen normalises the first returned angle of eulerAngles(2,1,0) into [0, pi]");
         }
 
         worst.Should().BeLessThan(1e-9);
