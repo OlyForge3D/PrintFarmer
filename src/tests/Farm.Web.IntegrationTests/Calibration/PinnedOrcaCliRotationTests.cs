@@ -2,6 +2,7 @@
 using System.Text.Json.Nodes;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.OrcaSlicer.Worker.Tests.Support;
+using Farm.Web.Api.Services.Calibration.Generation;
 using Farm.Web.Api.Tests.Calibration.Generation;
 using FluentAssertions;
 using Xunit;
@@ -39,6 +40,20 @@ namespace Farm.Web.IntegrationTests.Calibration;
 /// is deliberately asymmetric (<see cref="OrientationMarkerGeometry"/>), either regression
 /// produces a real, measurable bounding-box divergence from the independently-computed expected
 /// size, not a divergence hidden by code shared between "expected" and "actual".
+/// </para>
+/// <para>
+/// The worker's raw upstream profiles (<see cref="PinnedOrcaProfileCatalog"/>) legitimately carry
+/// vendor command fields — <c>machine_start_gcode</c>, <c>before_layer_change_gcode</c>,
+/// <c>change_filament_gcode</c> and similar hooks routinely emit purge lines, wipe towers and
+/// other extruding moves at fixed physical positions unrelated to the marker's own orientation.
+/// Left untouched, those moves would leak into <see cref="OrcaGcodeOrientationReader"/>'s measured
+/// bounding box and make this test's pass/fail depend on vendor profile scripting instead of the
+/// model's rotation. Before slicing, this class derives each profile through
+/// <see cref="OrcaEffectiveProfileFactory.Derive(string)"/> — the exact same
+/// <see cref="OrcaProfileCommandKeys"/> neutralization rule production's own calibration plan
+/// compiler applies before a real job ever reaches a worker — so the real binary here only ever
+/// sees profiles with every <c>*_gcode</c> hook (plus <c>post_process</c>/<c>printer_notes</c>)
+/// emptied out, and the measured extents can only reflect the marker itself.
 /// </para>
 /// <para>
 /// Gated identically to <see cref="CalibrationPinnedWorkerSmokeTests"/>: it shares the
@@ -151,8 +166,22 @@ public sealed class PinnedOrcaCliRotationTests(ITestOutputHelper output) : IAsyn
 
         PinnedOrcaProfileSelection profiles =
             await PinnedOrcaProfileCatalog.SelectAsync(worker.BaseAddress, cancellationToken);
-        string processJson = DisableSkirtAndBrim(profiles.ProcessJson);
-        (double X, double Y)? bedCenter = OrcaSlicingPipelineService.TryReadBedCenter(profiles.MachineJson);
+
+        // PinnedOrcaProfileCatalog deliberately hands back the worker's raw upstream documents
+        // unchanged (including vendor command fields such as machine_start_gcode,
+        // before_layer_change_gcode and change_filament_gcode). Those hooks routinely contain
+        // purge lines, wipe towers and other extruding moves at fixed physical positions that
+        // have nothing to do with the marker's own rotation — left in place, they would
+        // contaminate OrcaGcodeOrientationReader's measured bounding box and make this test's
+        // pass/fail depend on vendor profile scripting instead of the model orientation. This
+        // reuses the exact same neutralization rule production's own calibration plan compiler
+        // applies before a real job ever reaches a worker (OrcaEffectiveProfileFactory /
+        // OrcaProfileCommandKeys: any key ending in "_gcode", plus post_process/printer_notes),
+        // so the sliced output here reflects only the marker being rotated.
+        string machineJson = OrcaEffectiveProfileFactory.Derive(profiles.MachineJson).Json;
+        string processJson = DisableSkirtAndBrim(OrcaEffectiveProfileFactory.Derive(profiles.ProcessJson).Json);
+        string filamentJson = OrcaEffectiveProfileFactory.Derive(profiles.FilamentJson).Json;
+        (double X, double Y)? bedCenter = OrcaSlicingPipelineService.TryReadBedCenter(machineJson);
         _ = bedCenter.Should().NotBeNull("the pinned worker's own machine profile must declare a printable_area");
 
         string localWorkDir = Path.Combine(_workspace, placementCase.ToString());
@@ -163,9 +192,9 @@ public sealed class PinnedOrcaCliRotationTests(ITestOutputHelper output) : IAsyn
         string localMachineJson = Path.Combine(localWorkDir, "machine.json");
         string localProcessJson = Path.Combine(localWorkDir, "process.json");
         string localFilamentJson = Path.Combine(localWorkDir, "filament.json");
-        await File.WriteAllTextAsync(localMachineJson, profiles.MachineJson, cancellationToken);
+        await File.WriteAllTextAsync(localMachineJson, machineJson, cancellationToken);
         await File.WriteAllTextAsync(localProcessJson, processJson, cancellationToken);
-        await File.WriteAllTextAsync(localFilamentJson, profiles.FilamentJson, cancellationToken);
+        await File.WriteAllTextAsync(localFilamentJson, filamentJson, cancellationToken);
 
         string containerWorkDir = FormattableString.Invariant(
             $"/work/pinned-orca-cli-rotation-{Guid.NewGuid():N}");

@@ -23,7 +23,10 @@ internal readonly record struct GcodeExtent(double SizeX, double SizeY, double S
 /// G-code) — <c>PinnedOrcaProfileCatalog</c> only ever selects a machine profile that declares
 /// absolute extrusion, and OrcaSlicer's default is absolute XY positioning, so this holds for every
 /// profile this suite can select. A stray <c>G91</c> is treated as an unsupported input rather than
-/// silently mis-measured.
+/// silently mis-measured. <c>M82</c>/<c>M83</c> extrusion-mode switches are not handled here at
+/// all: they only ever appear inside vendor start/layer/filament-change G-code hooks, and the
+/// caller (<c>PinnedOrcaCliRotationTests</c>) neutralizes every such hook out of the profile before
+/// the real binary ever runs, so no G-code this reader sees can legally contain one.
 /// </remarks>
 internal static class OrcaGcodeOrientationReader
 {
@@ -64,6 +67,37 @@ internal static class OrcaGcodeOrientationReader
                 throw new InvalidOperationException(
                     "The G-code switched to relative positioning (G91), which this reader does not " +
                     "support; every profile this suite selects must emit absolute XY positioning.");
+            }
+
+            if (command is "G92")
+            {
+                // G92 re-defines the machine's current position without moving it — most commonly
+                // "G92 E0" between objects/layers to reset the extruder axis and avoid floating-point
+                // drift. It must rebase lastE to the declared value rather than being ignored,
+                // otherwise the next real printing move's E value looks smaller than the pre-reset
+                // lastE and is wrongly classified as non-extruding, under-measuring the bounding box.
+                (double? resetX, double? resetY, double? resetZ, double? resetE) = ParseAxes(tokens);
+                if (resetX.HasValue)
+                {
+                    x = resetX.Value;
+                }
+
+                if (resetY.HasValue)
+                {
+                    y = resetY.Value;
+                }
+
+                if (resetZ.HasValue)
+                {
+                    z = resetZ.Value;
+                }
+
+                if (resetE.HasValue)
+                {
+                    lastE = resetE.Value;
+                }
+
+                continue;
             }
 
             if (command is not ("G0" or "G1"))
