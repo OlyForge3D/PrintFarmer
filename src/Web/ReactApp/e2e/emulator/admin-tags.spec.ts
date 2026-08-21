@@ -122,8 +122,18 @@ test.describe('Admin Tags — Emulator', () => {
     const tagCell = page.getByRole('cell', { name: TEST_TAG_NAME, exact: true });
     const tagRow = page.getByRole('row').filter({ has: tagCell });
     await expect(tagRow).toBeVisible();
+
+    const deleteResponsePromise = page.waitForResponse((response) =>
+      response.request().method() === 'DELETE'
+      && /\/api\/tags\/[^/]+$/.test(new URL(response.url()).pathname)
+    );
     await tagRow.getByRole('button', { name: 'Delete tag', exact: true }).click();
-    await expect(tagCell).toBeHidden();
+    const deleteResponse = await deleteResponsePromise;
+    expect(deleteResponse.ok()).toBe(true);
+
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('cell', { name: TEST_TAG_NAME, exact: true })).toHaveCount(0);
 
     expect(criticalErrors()).toHaveLength(0);
   });
