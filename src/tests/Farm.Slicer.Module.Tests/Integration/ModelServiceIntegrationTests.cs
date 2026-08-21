@@ -668,8 +668,11 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         result.Should().NotBeNull();
         result.Id.Should().NotBe(Guid.Empty);
 
-        // Assert - Check that thumbnail was attempted to be generated
-        Model3D? uploadedModel = await repository.GetByIdAsync(result.Id, CancellationToken.None);
+        // Assert - Check that thumbnail was attempted to be generated.
+        // Use the unfiltered lookup: this fixture is just the 4-byte ZIP magic ("PK\x03\x04"),
+        // not a real archive, so real geometry analysis (#1814) correctly marks it IsValid=false
+        // (structurally unreadable) and GetByIdAsync's `IsValid` filter would otherwise hide it.
+        Model3D? uploadedModel = await repository.GetByIdUnfilteredAsync(result.Id, CancellationToken.None);
         uploadedModel.Should().NotBeNull();
 
         // Note: ThumbnailPath may be null if:

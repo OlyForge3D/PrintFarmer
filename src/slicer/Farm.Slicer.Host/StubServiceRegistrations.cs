@@ -35,6 +35,11 @@ public static class StubServiceRegistrations
         // Real implementation — self-contained in Farm.Infrastructure, only needs ILogger<StubServiceRegistrations>.
         services.AddScoped<I3MfToStlConversionService, ThreeMfToStlConversionService>();
 
+        // Model geometry analysis (dimensions, triangle count) — was missing from this standalone
+        // deployment path, so every model uploaded through slicer-host reported null metadata
+        // regardless of format (#1814).
+        services.AddSingleton<IModelAnalysisService, ModelAnalysisService>();
+
         // Thumbnail generation for 3D model uploads (STL, 3MF, OBJ, etc.)
         services.AddSingleton<IThumbnailGenerationService, ThumbnailGenerationService>();
 
