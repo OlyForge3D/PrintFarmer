@@ -1,5 +1,7 @@
 import { test, expect } from '../fixtures/emulator-setup';
 
+const TEST_GROUP_NAME = `E2E Test Group ${Date.now()}`;
+
 /**
  * Printer Groups CRUD E2E Tests — Emulator-backed
  *
@@ -75,22 +77,15 @@ test.describe('Printer Groups — Emulator', () => {
     await expect(modal).toBeVisible({ timeout: 5_000 });
 
     const nameInput = modal.getByRole('textbox', { name: 'Name', exact: true });
-    if (await nameInput.isVisible().catch(() => false)) {
-      await nameInput.fill('E2E Test Group');
+    await expect(nameInput).toBeVisible();
+    await nameInput.fill(TEST_GROUP_NAME);
 
-      const saveButton = modal.getByRole('button', { name: 'Create Group', exact: true });
-      if (await saveButton.isVisible().catch(() => false)) {
-        await saveButton.click();
-        await page.waitForTimeout(2_000);
+    const saveButton = modal.getByRole('button', { name: 'Create Group', exact: true });
+    await expect(saveButton).toBeVisible();
+    await saveButton.click();
 
-        // Group should appear in the list OR modal closed successfully
-        const modalGone = await modal.isHidden().catch(() => true);
-        if (modalGone) {
-          const bodyText = await page.locator('body').textContent() ?? '';
-          expect(bodyText).toContain('E2E Test Group');
-        }
-      }
-    }
+    await expect(modal).toBeHidden();
+    await expect(page.getByText(TEST_GROUP_NAME, { exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });

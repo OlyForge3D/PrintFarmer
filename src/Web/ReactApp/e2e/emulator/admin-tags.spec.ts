@@ -1,5 +1,7 @@
 import { test, expect } from '../fixtures/emulator-setup';
 
+const TEST_TAG_NAME = `E2E Test Tag ${Date.now()}`;
+
 /**
  * Admin Tags CRUD E2E Tests — Emulator-backed
  *
@@ -54,20 +56,12 @@ test.describe('Admin Tags — Emulator', () => {
     await page.waitForTimeout(500);
 
     const createButton = page.getByTestId('add-tag-action');
-    const hasCreate = await createButton.isVisible({ timeout: 5_000 }).catch(() => false);
+    await expect(createButton).toBeVisible({ timeout: 5_000 });
+    await createButton.click();
 
-    if (hasCreate) {
-      await createButton.click();
-      await page.waitForTimeout(500);
-
-      const dialog = page.getByRole('dialog', { name: 'Create New Tag', exact: true });
-      await expect(dialog).toBeVisible();
-      await expect(dialog.getByRole('textbox', { name: 'Tag Name', exact: true })).toBeVisible();
-    } else {
-      // Inline creation — look for input field directly on the page
-      const inlineInput = page.locator('input').first();
-      expect(await inlineInput.isVisible().catch(() => false)).toBeTruthy();
-    }
+    const dialog = page.getByRole('dialog', { name: 'Create New Tag', exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('textbox', { name: 'Tag Name', exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
@@ -76,29 +70,21 @@ test.describe('Admin Tags — Emulator', () => {
     await page.waitForTimeout(1_000);
 
     const createButton = page.getByTestId('add-tag-action');
-    const hasCreate = await createButton.isVisible().catch(() => false);
-
-    if (hasCreate) {
-      await createButton.click();
-      await page.waitForTimeout(500);
-    }
+    await expect(createButton).toBeVisible({ timeout: 5_000 });
+    await createButton.click();
 
     const dialog = page.getByRole('dialog', { name: 'Create New Tag', exact: true });
     await expect(dialog).toBeVisible();
     const nameInput = dialog.getByRole('textbox', { name: 'Tag Name', exact: true });
-    if (await nameInput.isVisible().catch(() => false)) {
-      await nameInput.fill('E2E Test Tag');
+    await expect(nameInput).toBeVisible();
+    await nameInput.fill(TEST_TAG_NAME);
 
-      const saveButton = dialog.getByRole('button', { name: 'Create tag', exact: true });
-      if (await saveButton.isVisible().catch(() => false)) {
-        await saveButton.click();
-        await page.waitForTimeout(1_000);
+    const saveButton = dialog.getByRole('button', { name: 'Create tag', exact: true });
+    await expect(saveButton).toBeVisible();
+    await saveButton.click();
 
-        // Tag should appear in the list
-        const bodyText = await page.locator('body').textContent() ?? '';
-        expect(bodyText).toContain('E2E Test Tag');
-      }
-    }
+    await expect(dialog).toBeHidden();
+    await expect(page.getByRole('cell', { name: TEST_TAG_NAME, exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });

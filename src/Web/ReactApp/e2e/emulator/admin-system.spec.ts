@@ -107,9 +107,14 @@ test.describe('Admin System Dashboard — Emulator', () => {
     await page.waitForTimeout(1_500);
 
     await expect(page.getByRole('button', { name: 'Workers', exact: true })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: 'Worker', exact: true })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: 'Status', exact: true })).toBeVisible();
-    expect(await page.getByText('Online', { exact: true }).count()).toBeGreaterThan(0);
+    const workersTable = page.getByRole('table').filter({
+      has: page.getByRole('columnheader', { name: 'Worker', exact: true }),
+    });
+    await expect(workersTable.getByRole('columnheader', { name: 'Status', exact: true })).toBeVisible();
+    const onlineWorkerRows = workersTable.getByRole('row').filter({
+      has: page.getByText('Online', { exact: true }),
+    });
+    expect(await onlineWorkerRows.count()).toBeGreaterThan(0);
 
     expect(criticalErrors()).toHaveLength(0);
   });

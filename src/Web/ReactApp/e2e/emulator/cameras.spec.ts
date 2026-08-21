@@ -47,21 +47,14 @@ test.describe('Cameras — Emulator', () => {
   }
 
   test('cameras page loads with heading', async ({ page }) => {
-    await page.waitForTimeout(1_000);
-
-    const bodyText = await page.locator('body').textContent() ?? '';
-    const hasCameraContent = /camera/i.test(bodyText);
-    expect(hasCameraContent).toBeTruthy();
+    await expect(page.getByRole('heading', { name: 'Cameras', exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
 
-  test('cameras page has view tab', async ({ page }) => {
-    await page.waitForTimeout(1_000);
-
-    // At minimum, the page should render content
-    const content = page.locator('main, [role="main"], #root');
-    await expect(content.first()).toBeVisible();
+  test('cameras page starts in view mode', async ({ page }) => {
+    await expect(page.getByRole('button', { name: 'Manage', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
@@ -82,19 +75,13 @@ test.describe('Cameras — Emulator', () => {
   });
 
   test('admin can see manage tab', async ({ page }) => {
-    await page.waitForTimeout(1_000);
-
     const manageTab = page.getByRole('button', { name: 'Manage', exact: true });
-    const hasManage = await manageTab.isVisible().catch(() => false);
+    await expect(manageTab).toBeVisible();
+    await manageTab.click();
 
-    if (hasManage) {
-      await manageTab.click();
-      await page.waitForTimeout(1_000);
-
-      // Management panel should show camera configuration options
-      const content = page.locator('main, [role="main"], #root');
-      await expect(content.first()).toBeVisible();
-    }
+    await expect(page.getByRole('button', { name: 'View Cameras', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Standalone Cameras', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Add Camera', exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
@@ -121,7 +108,10 @@ test.describe('Cameras — Emulator', () => {
 
     const streamCount = await streamFrames.count();
     for (let index = 0; index < streamCount; index++) {
-      const image = streamFrames.nth(index).contentFrame().locator('img');
+      const streamFrame = streamFrames.nth(index);
+      await streamFrame.scrollIntoViewIfNeeded();
+      await expect(streamFrame).toBeVisible();
+      const image = streamFrame.contentFrame().locator('img');
       await expect.poll(
         () => image.evaluate((element: HTMLImageElement) =>
           element.complete && element.naturalWidth > 0

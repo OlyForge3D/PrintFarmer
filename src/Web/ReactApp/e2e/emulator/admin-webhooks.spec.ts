@@ -1,5 +1,7 @@
 import { test, expect } from '../fixtures/emulator-setup';
 
+const TEST_WEBHOOK_NAME = `E2E Test Webhook ${Date.now()}`;
+
 /**
  * Admin Webhooks CRUD E2E Tests — Emulator-backed
  *
@@ -62,10 +64,8 @@ test.describe('Admin Webhooks — Emulator', () => {
     const nameInput = modal.getByRole('textbox', { name: 'Name', exact: true });
     const urlInput = modal.getByRole('textbox', { name: 'URL', exact: true });
 
-    const hasName = await nameInput.isVisible().catch(() => false);
-    const hasUrl = await urlInput.isVisible().catch(() => false);
-
-    expect(hasName || hasUrl).toBeTruthy();
+    await expect(nameInput).toBeVisible();
+    await expect(urlInput).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
@@ -105,35 +105,23 @@ test.describe('Admin Webhooks — Emulator', () => {
     await expect(modal).toBeVisible({ timeout: 5_000 });
 
     const nameInput = modal.getByRole('textbox', { name: 'Name', exact: true });
-    if (await nameInput.isVisible().catch(() => false)) {
-      await nameInput.fill('E2E Test Webhook');
-    }
+    await expect(nameInput).toBeVisible();
+    await nameInput.fill(TEST_WEBHOOK_NAME);
 
     const urlInput = modal.getByRole('textbox', { name: 'URL', exact: true });
-    if (await urlInput.isVisible().catch(() => false)) {
-      await urlInput.fill('https://example.com/webhook');
-    }
+    await expect(urlInput).toBeVisible();
+    await urlInput.fill('https://example.com/webhook');
 
-    // Check at least one event type if checkboxes present
     const firstCheckbox = modal.getByRole('checkbox', { name: 'All events', exact: true });
-    if (await firstCheckbox.isVisible().catch(() => false)) {
-      await firstCheckbox.check();
-    }
+    await expect(firstCheckbox).toBeVisible();
+    await firstCheckbox.check();
 
-    // Click the Create/Save button inside the modal
     const saveButton = modal.getByRole('button', { name: 'Create', exact: true });
-    if (await saveButton.isVisible().catch(() => false)) {
-      await saveButton.click();
-      await page.waitForTimeout(2_000);
+    await expect(saveButton).toBeVisible();
+    await saveButton.click();
 
-      // Webhook should appear in the list OR at minimum the form was submitted
-      const modalGone = await modal.isHidden().catch(() => true);
-      if (modalGone) {
-        const bodyText = await page.locator('body').textContent() ?? '';
-        expect(bodyText).toContain('E2E Test Webhook');
-      }
-      // If modal is still open, it may be a validation error — that's acceptable for E2E
-    }
+    await expect(modal).toBeHidden();
+    await expect(page.getByRole('heading', { name: TEST_WEBHOOK_NAME, exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
