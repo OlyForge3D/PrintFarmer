@@ -163,7 +163,7 @@ export function PrinterGroupsPage({ embedded = false }: PrinterGroupsPageProps) 
       icon={PrinterIcon}
       embedded={embedded}
       actions={
-        <Button variant="primary" onClick={handleCreate} iconLeft={<PlusIcon />}>
+        <Button data-testid="create-printer-group-action" variant="primary" onClick={handleCreate} iconLeft={<PlusIcon />}>
           Create Group
         </Button>
       }

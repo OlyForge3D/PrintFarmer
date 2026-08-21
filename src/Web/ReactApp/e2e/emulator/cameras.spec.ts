@@ -1,5 +1,11 @@
 import { test, expect } from '../fixtures/emulator-setup';
 
+const CAMERA_STREAM_ROUTE = '**/api/cameras/*/stream';
+const CAMERA_STREAM_FRAME = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64',
+);
+
 /**
  * Cameras Page E2E Tests — Emulator-backed
  *
@@ -18,6 +24,13 @@ test.describe('Cameras — Emulator', () => {
   test.beforeEach(async ({ page }) => {
     consoleErrors = [];
     page.on('pageerror', (error) => consoleErrors.push(error.message));
+    await page.route(CAMERA_STREAM_ROUTE, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: CAMERA_STREAM_FRAME,
+      });
+    });
     await page.goto('/admin/settings?tab=hardware&sub=cameras');
     await page.waitForLoadState('networkidle');
   });
@@ -34,21 +47,14 @@ test.describe('Cameras — Emulator', () => {
   }
 
   test('cameras page loads with heading', async ({ page }) => {
-    await page.waitForTimeout(1_000);
-
-    const bodyText = await page.locator('body').textContent() ?? '';
-    const hasCameraContent = /camera/i.test(bodyText);
-    expect(hasCameraContent).toBeTruthy();
+    await expect(page.getByRole('heading', { name: 'Cameras', exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
 
-  test('cameras page has view tab', async ({ page }) => {
-    await page.waitForTimeout(1_000);
-
-    // At minimum, the page should render content
-    const content = page.locator('main, [role="main"], #root');
-    await expect(content.first()).toBeVisible();
+  test('cameras page starts in view mode', async ({ page }) => {
+    await expect(page.getByRole('button', { name: 'Manage', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
@@ -56,9 +62,8 @@ test.describe('Cameras — Emulator', () => {
   test('cameras display grid or empty state', async ({ page }) => {
     await page.waitForTimeout(1_500);
 
-    // Camera grid or empty state
-    const cameraCards = page.locator('[class*="camera"], [class*="Camera"], img, video');
-    const emptyState = page.locator('div, p').filter({ hasText: /no camera|empty|add camera/i }).first();
+    const cameraCards = page.getByRole('article', { name: / camera$/ });
+    const emptyState = page.getByRole('heading', { name: 'No Cameras Configured', exact: true });
 
     const hasCards = (await cameraCards.count()) > 0;
     const hasEmpty = await emptyState.isVisible().catch(() => false);
@@ -70,20 +75,13 @@ test.describe('Cameras — Emulator', () => {
   });
 
   test('admin can see manage tab', async ({ page }) => {
-    await page.waitForTimeout(1_000);
+    const manageTab = page.getByRole('button', { name: 'Manage', exact: true });
+    await expect(manageTab).toBeVisible();
+    await manageTab.click();
 
-    // Manage tab should be visible for admin users
-    const manageTab = page.locator('[role="tab"], button').filter({ hasText: /manage/i }).first();
-    const hasManage = await manageTab.isVisible().catch(() => false);
-
-    if (hasManage) {
-      await manageTab.click();
-      await page.waitForTimeout(1_000);
-
-      // Management panel should show camera configuration options
-      const content = page.locator('main, [role="main"], #root');
-      await expect(content.first()).toBeVisible();
-    }
+    await expect(page.getByRole('button', { name: 'View Cameras', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Standalone Cameras', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Add Camera', exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
@@ -91,9 +89,36 @@ test.describe('Cameras — Emulator', () => {
   test('camera cards show health indicators', async ({ page }) => {
     await page.waitForTimeout(1_500);
 
-    // This is a soft check — cameras may not be registered in the DB
-    const content = page.locator('main, [role="main"], #root');
-    await expect(content.first()).toBeVisible();
+    const cameraCards = page.getByRole('article', { name: / camera$/ });
+    const cameraCount = await cameraCards.count();
+    expect(cameraCount).toBeGreaterThan(0);
+
+    for (let index = 0; index < cameraCount; index++) {
+      await expect(
+        cameraCards.nth(index).getByText(/^(Healthy|Degraded|Unhealthy|Unknown)$/),
+      ).toBeVisible();
+    }
+
+    expect(criticalErrors()).toHaveLength(0);
+  });
+
+  test('camera stream frames decode a deterministic media fixture', async ({ page }) => {
+    const streamFrames = page.locator('iframe[title$=" live camera feed"]');
+    await expect.poll(() => streamFrames.count()).toBeGreaterThan(0);
+
+    const streamCount = await streamFrames.count();
+    for (let index = 0; index < streamCount; index++) {
+      const streamFrame = streamFrames.nth(index);
+      await streamFrame.scrollIntoViewIfNeeded();
+      await expect(streamFrame).toBeVisible();
+      const image = streamFrame.contentFrame().locator('img');
+      await expect.poll(
+        () => image.evaluate((element: HTMLImageElement) =>
+          element.complete && element.naturalWidth > 0
+        ),
+        { message: `Camera stream fixture ${index + 1} should decode in its frame` },
+      ).toBe(true);
+    }
 
     expect(criticalErrors()).toHaveLength(0);
   });

@@ -495,6 +495,7 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                                 </p>
                                 <Button
                                     variant="primary"
+                                    data-testid="add-tag-action"
                                     iconLeft={<PlusIcon className="w-4 h-4" />}
                                     onClick={() => {
                                         createForm.markPristine({ name: '', color: nextTagColor, description: '' });
@@ -622,6 +623,7 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                                                         size="sm"
                                                         className="!p-2 !h-auto"
                                                         title="Delete tag"
+                                                        aria-label="Delete tag"
                                                         disabled={isPending}
                                                     >
                                                         {isPending ? (
@@ -753,10 +755,12 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                     {/* Tag Name */}
                     <FormField
                         label="Tag Name"
+                        htmlFor="new-tag-name"
                         error={createTagMutation.isError ? undefined : (createForm.values.name.trim() === '' ? undefined : undefined)}
                         helper="Choose a short, descriptive name"
                     >
                         <Input
+                            id="new-tag-name"
                             type="text"
                             value={createForm.values.name}
                             onChange={(e) => createForm.setValue('name', e.target.value)}
