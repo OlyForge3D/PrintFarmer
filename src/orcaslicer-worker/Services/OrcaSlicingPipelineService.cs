@@ -1252,6 +1252,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                         "Job {JobId}: could not build the 3MF project; falling back to auto-arrange, so the requested layout is lost.",
                         job.Id);
                     placement = DowngradeToAutoArrange(placement);
+
+                    if (placement.NonUniformScaleDropped)
+                    {
+                        _logger.LogWarning(
+                            "Job {JobId}: model has non-uniform scale but the 3MF project could not be built; " +
+                            "OrcaSlicer will apply an isotropic scale on the CLI instead of the requested per-axis scale.",
+                            job.Id);
+                    }
                 }
 
                 break;
@@ -1261,6 +1269,15 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                     "Job {JobId}: inputs are 3MF, so the workspace layout cannot be re-embedded. " +
                     "Falling back to the placement stored in the source file.",
                     job.Id);
+
+                if (placement.NonUniformScaleDropped)
+                {
+                    _logger.LogWarning(
+                        "Job {JobId}: model has non-uniform scale but 3MF inputs cannot be re-embedded; " +
+                        "OrcaSlicer will apply an isotropic scale on the CLI instead of the requested per-axis scale.",
+                        job.Id);
+                }
+
                 break;
 
             default:
@@ -1269,6 +1286,15 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                     _logger.LogWarning(
                         "Job {JobId}: the requested layout could not be embedded (inputs are not all STL, or the " +
                         "bed centre could not be determined); letting OrcaSlicer auto-arrange instead.",
+                        job.Id);
+                }
+
+                if (placement.NonUniformScaleDropped)
+                {
+                    _logger.LogWarning(
+                        "Job {JobId}: model has non-uniform scale but it could not be embedded in a 3MF project " +
+                        "(inputs are not all STL, or the bed centre could not be determined); OrcaSlicer will apply " +
+                        "an isotropic scale instead of the requested per-axis scale.",
                         job.Id);
                 }
 
@@ -1808,13 +1834,19 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private static partial Regex MyRegex();
 
     /// <summary>
-    /// Parsed transform result: CLI flags and whether a custom position was specified.
+    /// Parsed transform result: CLI flags and whether a custom position or a non-uniform scale
+    /// was specified.
     /// <see cref="Flags"/> must never contain a positional flag — OrcaSlicer 2.4.2 has none,
     /// and passing one aborts the run before slicing (issue #1794). When
     /// <see cref="HasCustomPosition"/> is true the caller embeds the placement in a 3MF project
-    /// instead; see <see cref="PlanPlacement"/>.
+    /// instead; see <see cref="PlanPlacement"/>. Likewise, OrcaSlicer's CLI <c>--scale</c> is a
+    /// single value (<c>coFloat</c>) — <c>scale_to_fit</c> (<c>coPoint3</c>) is commented out of
+    /// <c>CLITransformConfigDef</c> in 2.4.2 — so <see cref="HasNonUniformScale"/> being true
+    /// means <see cref="Flags"/> can only carry an isotropic approximation
+    /// (<c>scale[0]</c>) and <see cref="PlanPlacement"/> should prefer embedding the real
+    /// per-axis scale in a 3MF project matrix instead (issue #1799).
     /// </summary>
-    internal readonly record struct TransformResult(string Flags, bool HasCustomPosition);
+    internal readonly record struct TransformResult(string Flags, bool HasCustomPosition, bool HasNonUniformScale);
 
     /// <summary>How a job's model placement is delivered to OrcaSlicer.</summary>
     internal enum PlacementStrategy
@@ -1841,12 +1873,18 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// True when a custom position existed but could not be honoured, so the model is
     /// auto-arranged instead. Callers should log this.
     /// </param>
+    /// <param name="NonUniformScaleDropped">
+    /// True when a non-uniform per-axis scale existed but could not be embedded in a 3MF
+    /// project, so <see cref="TransformFlags"/> carries only an isotropic approximation
+    /// (<c>scale[0]</c>) via the CLI <c>--scale</c> flag. Callers should log this (issue #1799).
+    /// </param>
     internal readonly record struct PlacementPlan(
         PlacementStrategy Strategy,
         string ArrangeFlag,
         string TransformFlags,
         IReadOnlyList<string?> ModelTransforms,
-        bool PositionDropped);
+        bool PositionDropped,
+        bool NonUniformScaleDropped);
 
     /// <summary>
     /// Decide how to place the job's models.
@@ -1883,12 +1921,25 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 : (i == 0 ? modelTransformJson : null));
         }
 
-        bool anyCustomPosition = transforms.Any(t => BuildTransformFlags(t).HasCustomPosition);
-        bool secondaryTransforms = transforms.Skip(1).Any(t => !string.IsNullOrWhiteSpace(t));
-        bool needsEmbedding = anyCustomPosition || secondaryTransforms;
+        var transformResults = new TransformResult[transforms.Count];
+        bool anyCustomPosition = false;
+        bool anyNonUniformScale = false;
+        for (int i = 0; i < transforms.Count; i++)
+        {
+            transformResults[i] = BuildTransformFlags(transforms[i]);
+            anyCustomPosition |= transformResults[i].HasCustomPosition;
+            anyNonUniformScale |= transformResults[i].HasNonUniformScale;
+        }
 
-        string primaryFlags = transforms.Count > 0
-            ? BuildTransformFlags(transforms[0]).Flags
+        bool secondaryTransforms = transforms.Skip(1).Any(t => !string.IsNullOrWhiteSpace(t));
+
+        // Non-uniform scale needs embedding for the same reason a custom position does:
+        // OrcaSlicer 2.4.2's CLI --scale is a single value, so per-axis scale can only survive
+        // via the 3MF project matrix (issue #1799).
+        bool needsEmbedding = anyCustomPosition || secondaryTransforms || anyNonUniformScale;
+
+        string primaryFlags = transformResults.Length > 0
+            ? transformResults[0].Flags
             : string.Empty;
 
         // Only STL can be re-meshed into a project we control.
@@ -1902,40 +1953,50 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         if (needsEmbedding && inputsAreStl && bedCenterKnown)
         {
-            // Rotation and scale are baked into the 3MF matrix, so no CLI transform flags.
-            return new PlacementPlan(PlacementStrategy.ThreeMfProject, "--arrange 0", string.Empty, transforms, false);
+            // Rotation and scale (including non-uniform scale) are baked into the 3MF matrix,
+            // so no CLI transform flags — and nothing is dropped.
+            return new PlacementPlan(PlacementStrategy.ThreeMfProject, "--arrange 0", string.Empty, transforms, false, false);
         }
 
         if (needsEmbedding && inputsCarryOwnPlacement)
         {
             // A 3MF input already carries its own placement; keep it rather than re-arranging.
-            return new PlacementPlan(PlacementStrategy.SourcePlacement, "--arrange 0", primaryFlags, transforms, true);
+            // Non-uniform scale still can't be embedded here (there's no project to embed it
+            // in), so it is flattened to isotropic via the CLI flags in primaryFlags.
+            return new PlacementPlan(PlacementStrategy.SourcePlacement, "--arrange 0", primaryFlags, transforms, true, anyNonUniformScale);
         }
 
         // Nothing to place (or nowhere to place it): auto-arrange. Never "--arrange 0" without
         // an embedded placement — that would leave the model at raw mesh coordinates, which
         // lands it off the bed and trips OrcaSlicer's CLI_OBJECTS_PARTLY_INSIDE check. This is
         // also the path for mixed STL+3MF jobs and for OBJ/PLY/STEP, none of which can be
-        // placed faithfully.
-        return new PlacementPlan(PlacementStrategy.AutoArrange, "--arrange 1", primaryFlags, transforms, needsEmbedding);
+        // placed faithfully. Any non-uniform scale here is likewise flattened to isotropic.
+        return new PlacementPlan(PlacementStrategy.AutoArrange, "--arrange 1", primaryFlags, transforms, needsEmbedding, anyNonUniformScale);
     }
 
     /// <summary>
     /// Rewrite a plan to plain auto-arrange, used when the chosen mechanism turned out to be
     /// unavailable at runtime (for example the 3MF project could not be built). The requested
     /// layout is lost, which <see cref="PlacementPlan.PositionDropped"/> records so the caller
-    /// can say so in the log; rotation and scale are recovered as CLI flags.
+    /// can say so in the log; rotation and scale are recovered as CLI flags, though a
+    /// non-uniform scale is flattened to isotropic in the process
+    /// (<see cref="PlacementPlan.NonUniformScaleDropped"/>).
     /// </summary>
-    internal static PlacementPlan DowngradeToAutoArrange(PlacementPlan plan) =>
-        plan with
+    internal static PlacementPlan DowngradeToAutoArrange(PlacementPlan plan)
+    {
+        TransformResult primary = plan.ModelTransforms.Count > 0
+            ? BuildTransformFlags(plan.ModelTransforms[0])
+            : default;
+
+        return plan with
         {
             Strategy = PlacementStrategy.AutoArrange,
             ArrangeFlag = "--arrange 1",
-            TransformFlags = plan.ModelTransforms.Count > 0
-                ? BuildTransformFlags(plan.ModelTransforms[0]).Flags
-                : string.Empty,
+            TransformFlags = primary.Flags,
             PositionDropped = true,
+            NonUniformScaleDropped = primary.HasNonUniformScale,
         };
+    }
 
     /// <summary>
     /// Compose the OrcaSlicer CLI argument string. The first model is positional; any
@@ -2162,7 +2223,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     {
         if (string.IsNullOrWhiteSpace(modelTransformJson))
         {
-            return new TransformResult(string.Empty, false);
+            return new TransformResult(string.Empty, false, false);
         }
 
         try
@@ -2171,6 +2232,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             JsonElement root = doc.RootElement;
             StringBuilder flags = new();
             bool hasCustomPosition = false;
+            bool hasNonUniformScale = false;
 
             if (root.TryGetProperty("rotation", out JsonElement rotEl) && rotEl.ValueKind == JsonValueKind.Array)
             {
@@ -2222,8 +2284,19 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                     scale[i++] = double.IsFinite(v) ? v : 1;
                 }
 
-                // Use uniform scale (first component). 1.0 = no change.
                 const double epsilon = 0.001;
+
+                // OrcaSlicer 2.4.2's CLI --scale takes a single value (coFloat); per-axis scale
+                // ("scale_to_fit", coPoint3) is commented out of CLITransformConfigDef. Report a
+                // non-uniform scale so PlanPlacement can route the job through a 3MF project,
+                // where ThreeMfProjectBuilder.ComputeLinear bakes sx/sy/sz independently instead
+                // of flattening to a single axis (issue #1799).
+                hasNonUniformScale = Math.Abs(scale[1] - scale[0]) > epsilon || Math.Abs(scale[2] - scale[0]) > epsilon;
+
+                // Isotropic approximation (first component). Used verbatim when uniform, and as
+                // the degraded fallback when PlanPlacement cannot embed a non-uniform scale in a
+                // 3MF project (e.g. non-STL inputs or unknown bed centre) — that degradation is
+                // logged by the caller via PlacementPlan.NonUniformScaleDropped. 1.0 = no change.
                 if (Math.Abs(scale[0] - 1.0) > epsilon)
                 {
                     flags.Append(CultureInfo.InvariantCulture, $" --scale {scale[0]:F4}");
@@ -2264,11 +2337,11 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 }
             }
 
-            return new TransformResult(flags.ToString(), hasCustomPosition);
+            return new TransformResult(flags.ToString(), hasCustomPosition, hasNonUniformScale);
         }
         catch (JsonException)
         {
-            return new TransformResult(string.Empty, false);
+            return new TransformResult(string.Empty, false, false);
         }
     }
 

@@ -373,6 +373,142 @@ public class OrcaSlicerArgumentsTests
 
     #endregion
 
+    #region Non-uniform scale (#1799)
+
+    /// <summary>The reproduction from issue #1799: X scaled 200%, Y and Z left at 100%, no
+    /// custom position (model sits at the plate origin).</summary>
+    private const string NonUniformScaleAtOrigin = """{"rotation":[0,0,0],"scale":[2,1,1],"position":[0,0,0]}""";
+
+    /// <summary>
+    /// A non-uniform scale needs embedding for the same reason a custom position does:
+    /// OrcaSlicer 2.4.2's CLI <c>--scale</c> is a single value, so per-axis scale can only be
+    /// expressed through the 3MF project matrix. This is the fix for the common case in #1799
+    /// — a model at the plate origin no longer silently flattens to uniform scale.
+    /// </summary>
+    [Fact]
+    public void NonUniformScale_SingleModelAtOrigin_UsesThreeMfProject()
+    {
+        PlacementPlan plan = PlanPlacement(
+            NonUniformScaleAtOrigin,
+            modelFileTransforms: null,
+            modelPaths: [ModelStl],
+            bedCenterKnown: true);
+
+        plan.Strategy.Should().Be(PlacementStrategy.ThreeMfProject);
+        plan.ArrangeFlag.Should().Be("--arrange 0");
+        plan.TransformFlags.Should().BeEmpty("scale is baked into the 3MF matrix, per-axis and all");
+        plan.PositionDropped.Should().BeFalse();
+        plan.NonUniformScaleDropped.Should().BeFalse("the 3MF matrix honours per-axis scale, so nothing is dropped");
+        plan.ModelTransforms.Should().ContainSingle().Which.Should().Be(NonUniformScaleAtOrigin);
+    }
+
+    /// <summary>
+    /// When the 3MF path is unavailable (no bed centre), the non-uniform scale genuinely
+    /// cannot be expressed on OrcaSlicer 2.4.2's CLI — <c>--scale</c> is a single value.
+    /// <see cref="PlacementPlan.NonUniformScaleDropped"/> must record the degradation so the
+    /// caller logs it rather than silently flattening the model (acceptance criteria in #1799).
+    /// </summary>
+    [Fact]
+    public void NonUniformScale_WithoutBedGeometry_FallsBackToAutoArrangeAndReportsDrop()
+    {
+        PlacementPlan plan = PlanPlacement(
+            NonUniformScaleAtOrigin,
+            modelFileTransforms: null,
+            modelPaths: [ModelStl],
+            bedCenterKnown: false);
+
+        plan.Strategy.Should().Be(PlacementStrategy.AutoArrange);
+        plan.ArrangeFlag.Should().Be("--arrange 1");
+        plan.NonUniformScaleDropped.Should().BeTrue();
+
+        // Best-effort isotropic approximation (scale[0]) still ships rather than nothing.
+        string args = ComposeForPlan(plan, ProjectThreeMf, ModelStl);
+        args.Should().Contain("--scale 2.0000");
+        args.Should().NotContain("--center");
+    }
+
+    /// <summary>
+    /// OBJ/PLY/STEP/STP cannot be re-meshed into a 3MF project (only STL can), so a
+    /// non-uniform scale on one of these inputs must also be reported as dropped.
+    /// </summary>
+    [Fact]
+    public void NonUniformScale_NonStlInput_FallsBackToAutoArrangeAndReportsDrop()
+    {
+        PlacementPlan plan = PlanPlacement(
+            NonUniformScaleAtOrigin,
+            modelFileTransforms: null,
+            modelPaths: ["/work/model.obj"],
+            bedCenterKnown: true);
+
+        plan.Strategy.Should().Be(PlacementStrategy.AutoArrange);
+        plan.NonUniformScaleDropped.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// A 3MF input already carries its own placement (<see cref="PlacementStrategy.SourcePlacement"/>),
+    /// but there is no project being built here to bake a per-axis scale into, so the CLI
+    /// flags still flatten it — and that must be reported.
+    /// </summary>
+    [Fact]
+    public void NonUniformScale_ThreeMfInput_SourcePlacementReportsDrop()
+    {
+        PlacementPlan plan = PlanPlacement(
+            NonUniformScaleAtOrigin,
+            modelFileTransforms: null,
+            modelPaths: ["/work/model.3mf"],
+            bedCenterKnown: true);
+
+        plan.Strategy.Should().Be(PlacementStrategy.SourcePlacement);
+        plan.NonUniformScaleDropped.Should().BeTrue();
+    }
+
+    /// <summary>No regression for the uniform-scale case: it never needs embedding on its own
+    /// and is never reported as dropped.</summary>
+    [Fact]
+    public void UniformScale_AtOrigin_KeepsAutoArrangeAndNeverReportsDrop()
+    {
+        string uniform = """{"rotation":[0,0,0],"scale":[2,2,2],"position":[0,0,0]}""";
+
+        PlacementPlan plan = PlanPlacement(
+            uniform,
+            modelFileTransforms: null,
+            modelPaths: [ModelStl],
+            bedCenterKnown: true);
+
+        plan.Strategy.Should().Be(PlacementStrategy.AutoArrange);
+        plan.NonUniformScaleDropped.Should().BeFalse();
+
+        string args = ComposeForPlan(plan, ProjectThreeMf, ModelStl);
+        args.Should().Contain("--scale 2.0000");
+    }
+
+    /// <summary>
+    /// When a 3MF project cannot be built at runtime, downgrading to auto-arrange must also
+    /// recover — and report — a non-uniform scale as dropped, alongside the existing position
+    /// drop.
+    /// </summary>
+    [Fact]
+    public void DowngradeToAutoArrange_NonUniformScale_ReportsDrop()
+    {
+        string nonUniformAndPositioned = """{"rotation":[0,0,0],"scale":[2,1,1],"position":[30,0,0]}""";
+
+        PlacementPlan plan = PlanPlacement(
+            nonUniformAndPositioned,
+            modelFileTransforms: null,
+            modelPaths: [ModelStl],
+            bedCenterKnown: true);
+        plan.Strategy.Should().Be(PlacementStrategy.ThreeMfProject);
+
+        PlacementPlan downgraded = DowngradeToAutoArrange(plan);
+
+        downgraded.Strategy.Should().Be(PlacementStrategy.AutoArrange);
+        downgraded.PositionDropped.Should().BeTrue();
+        downgraded.NonUniformScaleDropped.Should().BeTrue();
+        downgraded.TransformFlags.Should().Contain("--scale 2.0000");
+    }
+
+    #endregion
+
     #region Guards
 
     [Fact]
