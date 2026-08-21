@@ -175,10 +175,11 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
 
     const loadGCode = async () => {
       try {
-        const res = await fetch(gcodeUrl);
-        if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
-        const code = await res.text();
-        const result = await service.parseGCodeDetailed(code);
+        // parseGCodeDetailed fetches gcodeUrl itself (in a Web Worker when
+        // available) so the raw G-code text never round-trips through this
+        // component or across the worker boundary as a structured-clone
+        // payload — see #1788.
+        const result = await service.parseGCodeDetailed(gcodeUrl);
         if (cancelled) return;
         setParseResult(result);
         setCurrentLayer(result.layerCount - 1);

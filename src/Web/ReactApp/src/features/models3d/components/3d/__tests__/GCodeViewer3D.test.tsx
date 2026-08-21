@@ -29,18 +29,6 @@ vi.mock('three', () => ({
   },
 }));
 
-const THREE_LAYER_GCODE = `; test fixture
-G28
-G1 Z0.2 F3000
-G1 X10 Y10 E1 F1500
-G1 X20 Y10 E2
-G1 Z0.4
-G1 X10 Y10 E3
-G1 X20 Y20 E4
-G1 Z0.6
-G1 X5 Y5 E5
-`;
-
 const THEME_ROOT = resolve(process.cwd(), 'src/design-system/themes');
 const GRAPHIC_CONTRAST_MINIMUM = 3;
 
@@ -95,10 +83,6 @@ function contrastRatio(first: string, second: string): number {
 describe('GCodeViewer3D', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      text: () => Promise.resolve(THREE_LAYER_GCODE),
-    });
   });
 
   it('shows loading spinner while parsing', () => {
@@ -161,12 +145,10 @@ describe('GCodeViewer3D', () => {
   );
 
   it('shows error state on fetch failure', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 404,
-      text: () => Promise.resolve(''),
-    });
     const service = createMockService();
+    (service.parseGCodeDetailed as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('404 Not Found'),
+    );
 
     render(<GCodeViewer gcodeUrl="/missing.gcode" service={service} />);
 
@@ -188,13 +170,13 @@ describe('GCodeViewer3D', () => {
     });
   });
 
-  it('calls parseGCodeDetailed on the service (not direct parser)', async () => {
+  it('calls parseGCodeDetailed on the service with the gcode URL (fetch happens inside the service/worker, not the component)', async () => {
     const service = createMockService();
 
     render(<GCodeViewer gcodeUrl="/test.gcode" service={service} />);
 
     await waitFor(() => {
-      expect(service.parseGCodeDetailed).toHaveBeenCalledWith(THREE_LAYER_GCODE);
+      expect(service.parseGCodeDetailed).toHaveBeenCalledWith('/test.gcode');
     });
   });
 
