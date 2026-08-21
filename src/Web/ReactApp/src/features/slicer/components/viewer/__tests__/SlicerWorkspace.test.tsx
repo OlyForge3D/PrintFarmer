@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import * as THREE from 'three';
 
 const { mockToast } = vi.hoisted(() => ({
   mockToast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -212,6 +213,94 @@ describe('SlicerWorkspace multi-plate', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /slice/i }));
       expect(onSlice).toHaveBeenCalledWith(['A']);
+    });
+  });
+
+  // Issue #1815: the client-side proactive orientation nudge. Verifies the
+  // banner wiring itself (not the pure heuristic, which is unit tested in
+  // autoOrient.test.ts): it appears for a flagged model, offers the SAME
+  // auto-orient action as the plate toolbar, and its dismiss control hides
+  // it — clearing again once the flagged model is removed.
+  describe('unslicable-orientation nudge', () => {
+    // A triangular prism standing on its knife edge (identity rotation) —
+    // the exact scenario from autoOrient.test.ts's "flags a tall
+    // triangular-prism part" case, built as a real THREE.BufferGeometry so
+    // it exercises the actual heuristic through the component, not a stub.
+    function knifeEdgePrismGeometry(): THREE.BufferGeometry {
+      const prism = new THREE.CylinderGeometry(15, 15, 60, 3).toNonIndexed();
+      prism.rotateX(Math.PI / 2);
+      prism.center();
+      return prism;
+    }
+
+    it('shows a dismissible nudge for a model in a likely-unslicable orientation, and Auto-orient reuses the existing plate action', async () => {
+      const onModelTransform = vi.fn();
+      const a = model('A', [0, 0, 30]);
+
+      const { rerender } = render(
+        <SlicerWorkspace bedConfig={bedConfig} models={[]} onModelTransform={onModelTransform} canSlice />,
+      );
+      rerender(
+        <SlicerWorkspace bedConfig={bedConfig} models={[a]} onModelTransform={onModelTransform} canSlice />,
+      );
+
+      const onModelGeometryChange = lastBedProps.onModelGeometryChange as (
+        modelId: string,
+        geometry: THREE.BufferGeometry,
+      ) => void;
+      act(() => onModelGeometryChange('A', knifeEdgePrismGeometry()));
+
+      await waitFor(() => {
+        expect(screen.getByText(/orientation may not print cleanly/i)).toBeInTheDocument();
+      });
+
+      // Slicing is never blocked by the nudge (advisory only).
+      expect(screen.getByRole('button', { name: /slice/i })).not.toBeDisabled();
+
+      fireEvent.click(screen.getByRole('button', { name: /auto-orient/i }));
+
+      // The banner's action is the SAME plate-level auto-orient path
+      // (handleOrientPlate), so it reports a changed rotation for the model.
+      await waitFor(() => {
+        expect(onModelTransform).toHaveBeenCalled();
+      });
+      const [, , rotation] = onModelTransform.mock.calls[0] as [string, [number, number, number], [number, number, number]];
+      expect(rotation).not.toEqual([0, 0, 0]);
+    });
+
+    it('dismissing the nudge hides it, and removing the model clears the dismissal', async () => {
+      const a = model('A', [0, 0, 30]);
+
+      const { rerender } = render(
+        <SlicerWorkspace bedConfig={bedConfig} models={[]} canSlice />,
+      );
+      rerender(<SlicerWorkspace bedConfig={bedConfig} models={[a]} canSlice />);
+
+      const onModelGeometryChange = lastBedProps.onModelGeometryChange as (
+        modelId: string,
+        geometry: THREE.BufferGeometry,
+      ) => void;
+      act(() => onModelGeometryChange('A', knifeEdgePrismGeometry()));
+
+      await waitFor(() => {
+        expect(screen.getByText(/orientation may not print cleanly/i)).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /dismiss orientation warning/i }));
+      await waitFor(() => {
+        expect(screen.queryByText(/orientation may not print cleanly/i)).not.toBeInTheDocument();
+      });
+
+      // Remove model A, then re-add a fresh model with the same id — the
+      // dismissal was keyed to the removed instance, so the nudge should be
+      // able to fire again for the new one.
+      rerender(<SlicerWorkspace bedConfig={bedConfig} models={[]} canSlice />);
+      rerender(<SlicerWorkspace bedConfig={bedConfig} models={[a]} canSlice />);
+      act(() => onModelGeometryChange('A', knifeEdgePrismGeometry()));
+
+      await waitFor(() => {
+        expect(screen.getByText(/orientation may not print cleanly/i)).toBeInTheDocument();
+      });
     });
   });
 
