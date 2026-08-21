@@ -28,7 +28,7 @@ export interface SubmitSliceJobRequest {
   userId: string;
   printerId?: string;
   modelFileUrl: string;
-  /** Stored model identity used by the server for ownership-checked worker downloads. */
+  /** Stored model identity used by the server to resolve the shared model library's bytes for the worker. */
   model3DId?: string;
   modelFileName: string;
   slicerEngine: number;

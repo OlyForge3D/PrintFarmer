@@ -179,6 +179,15 @@ public partial class SliceJobController(
                     return BadRequest($"Invalid model file URL: must be an absolute HTTP(S) URL. Got: '{url}'");
                 }
 
+                // Same Desktop-scope gap as the single modelFileUrl/model3DId paths below: a
+                // multi-model URL can also reference a stored library model
+                // ("/api/3d-models/file/{id}") rather than an external location, and the worker
+                // later dereferences it with no per-caller scope check (issue #1770 follow-up).
+                if (TryGetStoredModelId(resolved, out _) && IsDesktopTokenMissingModelScope())
+                {
+                    return SlicerApiProblems.ResourceForbidden(this);
+                }
+
                 resolvedModelUrls.Add(resolved);
             }
         }
@@ -890,6 +899,15 @@ public partial class SliceJobController(
             && Guid.TryParse(candidate, out model3DId);
     }
 
+    /// <summary>
+    /// True when the caller is a Desktop-exchange token that must be refused stored-model access.
+    /// See <see cref="Farm.Infrastructure.Authorization.DesktopScopeClaims.IsMissingModelScope"/>
+    /// for the full rationale (issue #1770 follow-up); this thin wrapper only binds it to the
+    /// controller's <see cref="ControllerBase.User"/> so every call site here stays terse.
+    /// </summary>
+    private bool IsDesktopTokenMissingModelScope() =>
+        Farm.Infrastructure.Authorization.DesktopScopeClaims.IsMissingModelScope(User);
+
     /// <summary>Uploads a verified artifact for a job owned by the authenticated worker.</summary>
     /// <param name="id">The claimed job ID.</param>
     /// <param name="file">The artifact bytes.</param>
@@ -1412,17 +1430,43 @@ public partial class SliceJobController(
     {
         if (request.Model3DId is not { } model3DId)
         {
-            return string.IsNullOrWhiteSpace(request.ModelFileUrl)
-                ? SlicerApiProblems.InvalidRequest(
+            if (string.IsNullOrWhiteSpace(request.ModelFileUrl))
+            {
+                return SlicerApiProblems.InvalidRequest(
                     this,
                     "model_reference_required",
-                    "Supply model3DId for stored models, or modelFileUrl for a previously stored key.")
-                : null;
+                    "Supply model3DId for stored models, or modelFileUrl for a previously stored key.");
+            }
+
+            // The legacy modelFileUrl form can also reference a stored library model
+            // ("/api/3d-models/file/{id}") rather than an external location. The worker later
+            // dereferences that URL via TryGetStoredModelId with no per-caller scope check, so this
+            // path needs the identical Desktop-scope guard as the model3DId path below or a
+            // submit-only-scoped Desktop token could route around it (issue #1770 follow-up).
+            if (TryGetStoredModelId(request.ModelFileUrl, out _) && IsDesktopTokenMissingModelScope())
+            {
+                return SlicerApiProblems.ResourceForbidden(this);
+            }
+
+            return null;
         }
 
         if (_modelStorage is null)
         {
             return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
+
+        // The class-level slicing:submit permission is intentionally broad enough that a
+        // Desktop-exchange token issued only for calibration generation (issue #838) legitimately
+        // holds it. Since #1770 made model3DId lookups succeed for any existing library model
+        // rather than just the caller's own uploads, a submit-only-scoped Desktop token could
+        // otherwise reference (and thereby read the contents of) an arbitrary model it was never
+        // granted ModelRead/LibrarySync access to. Normal login/session tokens - which carry no
+        // DesktopScopeClaims.TokenUse claim - are unaffected, exactly as DesktopScopeAuthorizationHandler
+        // behaves for attribute-gated endpoints.
+        if (IsDesktopTokenMissingModelScope())
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
         }
 
         Model3D? model = await _modelStorage.FindOwnedAsync(model3DId, userId, ct);

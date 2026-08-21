@@ -19,6 +19,7 @@ import {
 } from '@/services/slicerProfilesService';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
+import { getErrorMessage } from '@/common/utils/apiErrors';
 import { BED_TYPE_OPTIONS } from '@/features/slicer/components/settings';
 import type { Model } from '@/types/models';
 
@@ -171,7 +172,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
       navigate('/admin/manage?tab=operations&sub=workers&workerTab=jobs');
     },
     onError: (err: unknown) => {
-      setError(err instanceof Error ? err.message : 'Failed to submit slice job');
+      setError(getErrorMessage(err, 'Failed to submit slice job'));
     },
   });
 
