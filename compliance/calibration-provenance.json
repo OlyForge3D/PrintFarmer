@@ -263,6 +263,19 @@
       }
     },
     {
+      "id": "calibration-generation-desktop-scope-authorization-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationGenerationDesktopScopeAuthorizationTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1790"
+      ],
+      "statement": "Independent PrintFarmer regression test implementation proving the issue #1790 Desktop-exchange-token model-scope guard on calibration generation submission; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-21",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-generation-fixture",
       "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationGenerationFixture.cs",
       "referenceUrls": [
