@@ -295,4 +295,99 @@ public class OctoPrintPollingServiceCacheTests
         results[0].Should().NotBeSameAs(staleAdapter, "the stale, old-credential adapter must be replaced, not reused");
         ((OctoPrintWebSocketAdapter)WebSocketAdapters[printerId]!).Should().BeSameAs(results[0]);
     }
+
+    [Fact]
+    public void EnsureWebSocketAdapter_CredentialsChanged_PreservesExistingPrinterPollingStateObject()
+    {
+        // Regression test for the round-3 review finding (Vasquez, Critical): the credential-changed
+        // branch used to TryRemove the printer's entries from _pollingLoops and _printerStates, which
+        // only dropped tracking references -- it never cancelled the already-running PollPrinterAsync
+        // HTTP-fallback loop, which keeps looping forever on its own captured PrinterPollingState
+        // object. The next reconciliation pass would then see "no polling loop" and spawn a *second*,
+        // independent PollPrinterAsync task for the same printer -- a permanent per-edit leak of
+        // background loops, with the orphaned original loop never observing future invalidations.
+        // The fix must update the existing state object in place instead, so the one already-running
+        // loop's captured reference sees the new adapter/credentials on its very next tick.
+        Guid printerId = Guid.NewGuid();
+        var staleCredentialPrinter = new Printer
+        {
+            Id = printerId,
+            Name = "OctoPrint",
+            ServerUrl = "http://octo.local",
+            Backend = (int)PrinterBackend.OctoPrint,
+            Credential = PrinterCredential.FromApiKey("old-key"),
+        };
+        var updatedPrinter = new Printer
+        {
+            Id = printerId,
+            Name = "OctoPrint",
+            ServerUrl = "http://octo.local",
+            Backend = (int)PrinterBackend.OctoPrint,
+            Credential = PrinterCredential.FromApiKey("new-key"),
+        };
+
+        OctoPrintWebSocketAdapter staleAdapter = CreateFakeAdapter(printerId, staleCredentialPrinter);
+        SeedState(printerId, staleCredentialPrinter, staleAdapter);
+        object originalStateObject = PrinterStates[printerId]!;
+
+        _ensureWebSocketAdapter.Invoke(_service, [printerId, updatedPrinter, CancellationToken.None]);
+
+        PrinterStates.Contains(printerId).Should().BeTrue(
+            "a credential change must never remove the printer's tracking entry -- doing so orphans " +
+            "the already-running PollPrinterAsync loop, which keeps polling on its own stale state " +
+            "object forever while a second loop gets spawned for the same printer on the next " +
+            "reconciliation pass");
+        PrinterStates[printerId].Should().BeSameAs(
+            originalStateObject,
+            "the already-running polling loop's captured PrinterPollingState reference must be updated " +
+            "in place (new adapter, new credentials) rather than replaced, so a single loop instance " +
+            "continues to serve this printer across a credential change");
+    }
+
+    [Fact]
+    public async Task OnPrinterInvalidated_ConcurrentWithEnsureWebSocketAdapter_NeverLeavesDisposedAdapterPublished()
+    {
+        // Regression test for the round-3 review finding (Hicks + Vasquez, Warning): OnPrinterInvalidated
+        // used to mutate _printerStates/_webSocketAdapters without acquiring the same per-printer gate
+        // that EnsureWebSocketAdapter uses, so the two could interleave -- e.g. invalidation could tear
+        // down an adapter that EnsureWebSocketAdapter had just published (or was mid-construction) with
+        // fresh credentials, or a concurrent PollPrinterAsync tick could observe/use an adapter the
+        // instant after it was disposed by invalidation. Both now serialize on the same lock object per
+        // printer id, so after any interleaving of concurrent calls, whatever adapter (if any) ends up
+        // published in _webSocketAdapters must never be the disposed one.
+        Guid printerId = Guid.NewGuid();
+        var printer = new Printer
+        {
+            Id = printerId,
+            Name = "OctoPrint",
+            ServerUrl = "http://octo.local",
+            Backend = (int)PrinterBackend.OctoPrint,
+            Credential = PrinterCredential.FromApiKey("key"),
+        };
+
+        const int rounds = 200;
+        for (int i = 0; i < rounds; i++)
+        {
+            var tasks = new Task[4];
+            tasks[0] = Task.Run(() => _ensureWebSocketAdapter.Invoke(_service, [printerId, printer, CancellationToken.None]));
+            tasks[1] = Task.Run(() => _onPrinterInvalidated.Invoke(_service, [printerId]));
+            tasks[2] = Task.Run(() => _ensureWebSocketAdapter.Invoke(_service, [printerId, printer, CancellationToken.None]));
+            tasks[3] = Task.Run(() => _onPrinterInvalidated.Invoke(_service, [printerId]));
+
+            await Task.WhenAll(tasks);
+
+            if (WebSocketAdapters[printerId] is OctoPrintWebSocketAdapter published)
+            {
+                bool isDisposed = (bool)typeof(OctoPrintWebSocketAdapter)
+                    .GetField("_disposed", BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .GetValue(published)!;
+
+                isDisposed.Should().BeFalse(
+                    "whatever adapter ends up published in _webSocketAdapters after any interleaving of " +
+                    "concurrent invalidation and (re)creation must be a live one -- a disposed adapter " +
+                    "reaching the dictionary would mean the two operations raced instead of serializing " +
+                    "on the shared per-printer gate");
+            }
+        }
+    }
 }

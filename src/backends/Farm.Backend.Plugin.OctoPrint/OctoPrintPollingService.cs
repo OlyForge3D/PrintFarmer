@@ -143,25 +143,34 @@ public sealed class OctoPrintPollingService(
     /// </remarks>
     private void OnPrinterInvalidated(Guid printerId)
     {
-        if (_printerStates.TryGetValue(printerId, out PrinterPollingState? state))
+        // Take the same per-printer gate EnsureWebSocketAdapter uses, so an invalidation can never
+        // interleave with an in-flight adapter construction: either it runs fully before the
+        // construction begins (the fresh adapter picks up the cleared state and is built with
+        // current credentials since CreateWebSocketAdapter re-reads the printer passed to it), or
+        // fully after (the just-published adapter is torn down immediately, exactly as intended).
+        object gate = _adapterCreationLocks.GetOrAdd(printerId, static _ => new object());
+        lock (gate)
         {
-            state.CachedPrinter = null;
-
-            // Force the next reconciliation pass (or on-demand recreation in PollPrinterAsync)
-            // to treat this printer as needing a fresh adapter, even if it hasn't run yet.
-            state.CreatedWithServerUrl = null;
-            state.CreatedWithApiKey = null;
-        }
-
-        if (_webSocketAdapters.TryRemove(printerId, out OctoPrintWebSocketAdapter? adapter))
-        {
-            try
+            if (_printerStates.TryGetValue(printerId, out PrinterPollingState? state))
             {
-                adapter.Dispose();
+                state.CachedPrinter = null;
+
+                // Force the next reconciliation pass (or on-demand recreation in PollPrinterAsync)
+                // to treat this printer as needing a fresh adapter, even if it hasn't run yet.
+                state.CreatedWithServerUrl = null;
+                state.CreatedWithApiKey = null;
             }
-            catch (Exception ex)
+
+            if (_webSocketAdapters.TryRemove(printerId, out OctoPrintWebSocketAdapter? adapter))
             {
-                _logger.LogDebug(ex, "OctoPrint {PrinterId}: error disposing WebSocket adapter during invalidation", printerId);
+                try
+                {
+                    adapter.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "OctoPrint {PrinterId}: error disposing WebSocket adapter during invalidation", printerId);
+                }
             }
         }
     }
@@ -317,9 +326,16 @@ public sealed class OctoPrintPollingService(
                 }
 
                 _logger.LogInformation("OctoPrint {Id}: Credentials changed, recreating adapter", id);
+
+                // Only drop the stale adapter itself. Do NOT remove this printer's entry from
+                // _pollingLoops/_printerStates: PollPrinterAsync's HTTP fallback loop is already
+                // running with a captured reference to the existing PrinterPollingState object, and
+                // CreateWebSocketAdapter below (via _printerStates.GetOrAdd) will find and update
+                // that same shared object in place. Removing them here would let the reconciliation
+                // loop see "no polling loop" on its next pass and spawn a second, independent
+                // PollPrinterAsync task for this printer while the original keeps running forever on
+                // its own now-orphaned state object — a permanent per-edit leak of background loops.
                 _webSocketAdapters.TryRemove(id, out _);
-                _pollingLoops.TryRemove(id, out _);
-                _printerStates.TryRemove(id, out _);
 
                 try
                 {
@@ -399,7 +415,17 @@ public sealed class OctoPrintPollingService(
                         adapter?.Dispose();
                         _pollingLoops.TryRemove(printerId, out _);
                         _printerStates.TryRemove(printerId, out _);
-                        _adapterCreationLocks.TryRemove(printerId, out _);
+
+                        // Deliberately do NOT remove this printer's entry from _adapterCreationLocks.
+                        // Doing so is not itself synchronized against the gate it removes: a caller
+                        // could be holding or waiting on this exact lock object at the moment it's
+                        // dropped from the dictionary, after which a subsequent EnsureWebSocketAdapter
+                        // call would GetOrAdd a brand-new lock object for the same printer id, and the
+                        // old holder/waiter plus the new caller could then run their "serialized"
+                        // critical sections concurrently -- reintroducing the double-construction race
+                        // this locking scheme exists to prevent. Leaving the entry in place costs one
+                        // small object per distinct printer id ever seen by this service instance,
+                        // which is bounded and negligible.
                         _logger.LogDebug("Stopped WebSocket and polling for OctoPrint printer {PrinterId}", printerId);
                     }
 
@@ -455,10 +481,12 @@ public sealed class OctoPrintPollingService(
 
                 if (printer?.Backend != (int)PrinterBackend.OctoPrint)
                 {
-                    // Printer is no longer OctoPrint, remove from polling
+                    // Printer is no longer OctoPrint, remove from polling. Leave this printer's
+                    // _adapterCreationLocks entry in place (see the matching cleanup in RunAsync
+                    // for why removing it is unsafe) -- it's a single small object, bounded by the
+                    // number of distinct printer ids this service instance has ever seen.
                     _pollingLoops.TryRemove(printerId, out _);
                     _printerStates.TryRemove(printerId, out _);
-                    _adapterCreationLocks.TryRemove(printerId, out _);
                     if (_webSocketAdapters.TryRemove(printerId, out OctoPrintWebSocketAdapter? adapter))
                     {
                         adapter?.Dispose();
