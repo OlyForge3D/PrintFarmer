@@ -182,6 +182,10 @@ export interface OrcaMachineProfile {
   instantiation?: boolean;
   inherits?: string;
   settings?: Record<string, unknown>;
+  /** High-flow (HF) hotend variant flag, derived backend-side (#1780). Some vendor
+   * bundles (e.g. Prusa CORE One / CORE One L) never set nozzle_type, so this is the
+   * structural signal to prefer over name parsing when it is present. */
+  isHighFlowNozzle?: boolean;
 }
 
 /**

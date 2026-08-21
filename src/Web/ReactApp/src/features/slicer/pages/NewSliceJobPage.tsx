@@ -21,7 +21,7 @@ import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesMo
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import { ProcessProfileEditorModal } from '@/features/slicer/components/ProcessProfileEditorModal';
 import { MachineProfileSelectorModal, type MachineProfileChoice } from '@/features/slicer/components/job/MachineProfileSelectorModal';
-import { buildMachineProfileLabels, mentionsHighFlow } from '@/features/slicer/utils/machineProfileLabels';
+import { buildMachineProfileLabels, mentionsHighFlow, resolveHighFlow } from '@/features/slicer/utils/machineProfileLabels';
 import { buildSlicerProfileJson } from '@/features/slicer/utils/slicerProfilePayload';
 import {
   SlicerSettingsPanel,
@@ -160,7 +160,10 @@ function machineProfileMatchesNozzle(profile: OrcaMachineProfile | CustomProfile
  * Variant detection for machine/process profile pairing.
  *
  * Delegates to the shared helper so profile labelling and HF/non-HF process
- * filtering can never disagree about what counts as a high-flow profile.
+ * filtering can never disagree about what counts as a high-flow profile. This
+ * text-only overload is for candidates with no backend-derived flag available
+ * (e.g. process profiles, which have no hotend concept of their own) — prefer
+ * {@link resolveHighFlow} directly wherever a profile's `isHighFlowNozzle` is on hand.
  */
 function profileMentionsHighFlow(text: string): boolean {
   return mentionsHighFlow(text);
@@ -1113,6 +1116,7 @@ export const NewSliceJobPage: React.FC = () => {
       name: profile.name,
       nozzleDiameter: getMachineProfileNozzleDiameter(profile),
       isSystem: true,
+      isHighFlowNozzle: profile.isHighFlowNozzle,
     }));
     const custom = customMachineProfiles.map((profile) => ({
       name: profile.name,
@@ -1170,7 +1174,7 @@ export const NewSliceJobPage: React.FC = () => {
     const profiles = processProfilesData ?? [];
     const selectedMachineName = selectedMachineProfile?.name ?? '';
     const selectedMachineLower = selectedMachineName.toLowerCase();
-    const selectedIsHighFlow = profileMentionsHighFlow(selectedMachineName);
+    const selectedIsHighFlow = resolveHighFlow(selectedMachineProfile?.isHighFlowNozzle, selectedMachineName);
 
     const filtered = profiles.filter((profile) => {
       // Guard 1: Compatible printer names must include the selected machine when provided.
@@ -2293,7 +2297,7 @@ export const NewSliceJobPage: React.FC = () => {
                             ? 'Loading...'
                             : selectedMachineProfileLabel || 'Select machine...'}
                         </span>
-                        {selectedMachineProfileId && profileMentionsHighFlow(selectedMachineProfileId) && (
+                        {selectedMachineProfileId && resolveHighFlow(selectedMachineProfile?.isHighFlowNozzle, selectedMachineProfileId) && (
                           <span
                             data-pf-radius="full"
                             className="shrink-0 rounded-full bg-pf-info/15 px-1.5 py-0.5 text-[10px] font-semibold text-pf-info"
