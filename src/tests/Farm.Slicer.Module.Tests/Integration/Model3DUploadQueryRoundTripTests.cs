@@ -55,7 +55,7 @@ public class Model3DUploadQueryRoundTripTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    private static MultipartFormDataContent CreateStlUpload(string fileName, string content = "solid test\nendsolid test")
+    private static MultipartFormDataContent CreateStlUpload(string fileName, string content = "solid test\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid test\n")
     {
         var form = new MultipartFormDataContent();
         var fileContent = new ByteArrayContent(Encoding.UTF8.GetBytes(content));

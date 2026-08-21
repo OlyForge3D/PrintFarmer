@@ -106,4 +106,14 @@ public interface IModel3DFileRepository
     /// <summary>Persists all pending changes to the database.</summary>
     /// <param name="ct">Cancellation token.</param>
     Task SaveChangesAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Retrieves a batch of STL/3MF models that are missing analyzed geometry metadata
+    /// (<see cref="Model3D.TriangleCount"/> is null), oldest first. Used to backfill rows created
+    /// before real geometry analysis existed (#1814). Not filtered by <see cref="Model3D.IsValid"/>
+    /// so previously-uploaded rows are always reconsidered.
+    /// </summary>
+    /// <param name="batchSize">Maximum number of rows to return.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<List<Model3D>> ListNeedingAnalysisAsync(int batchSize, CancellationToken ct);
 }
