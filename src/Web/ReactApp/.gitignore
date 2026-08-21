@@ -30,3 +30,6 @@ e2e/.auth/
 
 # Playwright auth storage state
 .auth/
+
+# Generated E2E fixtures (written and removed at test time, not committed)
+public/gcode-fixtures/

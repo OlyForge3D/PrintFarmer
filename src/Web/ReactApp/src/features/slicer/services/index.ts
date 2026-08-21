@@ -1,5 +1,6 @@
 export {
   createGcodePreviewService,
+  pointAt,
   type IGcodePreviewService,
   type ParsedGCode,
   type ParsedLayer,
@@ -7,3 +8,10 @@ export {
   type DetailedLayer,
   type GCodePoint,
 } from './gcodePreviewService';
+
+export {
+  parseLayersCore,
+  parseDetailedLayersCore,
+  detailedParseBuffersTransferList,
+  type DetailedParseBuffers,
+} from './gcodeParserCore';

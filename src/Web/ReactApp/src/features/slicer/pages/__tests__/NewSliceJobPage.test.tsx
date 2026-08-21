@@ -794,6 +794,127 @@ describe('NewSliceJobPage', () => {
         expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenCalled();
       }, { timeout: 2000 });
     });
+
+    describe('CORE One HF variant guard (issue #1782)', () => {
+      // The bug: Guard 2 detected a candidate's HF variant by joining the
+      // profile name WITH its entire `compatiblePrinters` list into one
+      // string before testing for "HF". A process profile that legitimately
+      // supports both CORE One variants lists both machine names in
+      // `compatiblePrinters`, so the joined text always mentions "HF" — which
+      // made the guard drop the profile for the STANDARD machine while
+      // wrongly keeping it for the HF one. Guard 1 (a few lines above) had
+      // already proven the profile lists the selected machine as compatible.
+      beforeEach(() => {
+        vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
+          { name: 'Prusa CORE One 0.4 nozzle', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'CORE One' },
+          { name: 'Prusa CORE One HF 0.4 nozzle', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'CORE One' },
+        ] as OrcaMachineProfile[]);
+      });
+
+      it('offers a dual-compatible process profile for BOTH the standard and HF machine', async () => {
+        vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue([
+          {
+            name: '0.20mm Standard @CORE One',
+            quality: 'Standard',
+            layerHeight: 0.2,
+            infillPercentage: 15,
+            printSpeed: 60,
+            supports: false,
+            compatiblePrinters: ['Prusa CORE One 0.4 nozzle', 'Prusa CORE One HF 0.4 nozzle'],
+          },
+        ] as OrcaProcessProfile[]);
+
+        renderWithProviders(<NewSliceJobPage />);
+
+        await waitFor(() => {
+          expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
+        });
+
+        fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+        const machineProfileTrigger = await screen.findByRole('button', { name: /^Machine profile:/ });
+        await waitFor(() => {
+          expect(machineProfileTrigger).toBeEnabled();
+        });
+
+        // Select the STANDARD (non-HF) machine profile.
+        fireEvent.click(machineProfileTrigger);
+        const group04 = await screen.findByRole('region', { name: '0.4 mm machine profiles' });
+        const standardRow = within(group04).getAllByRole('button').find((r) => !/HF/.test(r.textContent ?? ''))!;
+        fireEvent.click(standardRow);
+
+        await waitFor(() => {
+          expect(slicerProfilesService.getProcessProfilesForMachines)
+            .toHaveBeenLastCalledWith(['Prusa CORE One 0.4 nozzle'], expect.anything());
+        });
+
+        // The dual-compatible profile must still be offered here — this is
+        // exactly the case the old guard dropped.
+        await waitFor(() => {
+          expect(screen.getByRole('option', { name: /0\.20mm Standard @CORE One/ })).toBeInTheDocument();
+        });
+
+        // Switch to the HF variant; the same profile must remain offered.
+        fireEvent.click(machineProfileTrigger);
+        const group04Again = await screen.findByRole('region', { name: '0.4 mm machine profiles' });
+        const hfRow = within(group04Again).getAllByRole('button').find((r) => /HF/.test(r.textContent ?? ''))!;
+        fireEvent.click(hfRow);
+
+        await waitFor(() => {
+          expect(slicerProfilesService.getProcessProfilesForMachines)
+            .toHaveBeenLastCalledWith(['Prusa CORE One HF 0.4 nozzle'], expect.anything());
+        });
+
+        await waitFor(() => {
+          expect(screen.getByRole('option', { name: /0\.20mm Standard @CORE One/ })).toBeInTheDocument();
+        });
+      });
+
+      it('still hides an HF-only process profile from the standard machine, and explains the empty state', async () => {
+        vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue([
+          {
+            name: '0.20mm Standard @CORE One HF',
+            quality: 'Standard',
+            layerHeight: 0.2,
+            infillPercentage: 15,
+            printSpeed: 60,
+            supports: false,
+            compatiblePrinters: ['Prusa CORE One HF 0.4 nozzle'],
+          },
+        ] as OrcaProcessProfile[]);
+
+        renderWithProviders(<NewSliceJobPage />);
+
+        await waitFor(() => {
+          expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
+        });
+
+        fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+        const machineProfileTrigger = await screen.findByRole('button', { name: /^Machine profile:/ });
+        await waitFor(() => {
+          expect(machineProfileTrigger).toBeEnabled();
+        });
+
+        fireEvent.click(machineProfileTrigger);
+        const group04 = await screen.findByRole('region', { name: '0.4 mm machine profiles' });
+        const standardRow = within(group04).getAllByRole('button').find((r) => !/HF/.test(r.textContent ?? ''))!;
+        fireEvent.click(standardRow);
+
+        await waitFor(() => {
+          expect(slicerProfilesService.getProcessProfilesForMachines)
+            .toHaveBeenLastCalledWith(['Prusa CORE One 0.4 nozzle'], expect.anything());
+        });
+
+        // Genuinely HF-only profile must stay hidden from the standard machine,
+        // and the resulting empty state must explain itself instead of leaving
+        // a dead "no options" select with no route forward.
+        await waitFor(() => {
+          expect(screen.queryByRole('option', { name: /0\.20mm Standard @CORE One HF/ })).not.toBeInTheDocument();
+          expect(screen.getByText(/No process profiles are compatible with this machine variant/i)).toBeInTheDocument();
+        });
+      });
+    });
   });
 
   describe('Cascading Selection Logic', () => {
