@@ -31,6 +31,25 @@ namespace Farm.Slicer.Module.Api.HostedServices;
 /// error here must never turn into an outage over cosmetic metadata.
 /// </para>
 /// <para>
+/// <b>Concurrency.</b> Unlike <see cref="SystemProfileReconciliationService"/>'s reconciliation,
+/// which relies on database unique indexes to reject a losing replica's duplicate insert, this
+/// service has no equivalent structural guard, and none is added here (#1837). If the host runs
+/// more than one replica, each pulls its own batch from
+/// <see cref="IModel3DFileRepository.ListNeedingAnalysisAsync"/> independently, so overlapping
+/// batches are possible between replicas that start their pass around the same time (a row can be
+/// selected by more than one replica before either has written its result). This is deliberately
+/// accepted rather than mitigated with a distributed lock or leader election, because the outcome
+/// is benign: analysis is a pure, deterministic function of file bytes, so redoing it produces the
+/// same result, and this method updates a row's own columns by primary key rather than inserting
+/// against a unique constraint, so there is nothing for concurrent writers to collide on — the
+/// worst case is last-write-wins with identical values, plus wasted CPU re-analyzing a file more
+/// than once. That waste is bounded by <c>BatchSize</c> per pass and disappears once the library is
+/// fully backfilled (the loop then finds nothing left to do), so it was judged not worth the added
+/// complexity of a distributed lock for what is a one-time reconciliation pass, not a steady-state
+/// workload. A future change that makes this ongoing (e.g. re-analyzing on every file change) should
+/// revisit this assumption.
+/// </para>
+/// <para>
 /// <b>Per-row resilience.</b> A single unreadable file (missing from disk, corrupt archive, unknown
 /// format) must not abort the whole batch, and must not be retried forever on every future start
 /// either. So a row that cannot be analyzed is still updated — with <c>TriangleCount = 0</c>,

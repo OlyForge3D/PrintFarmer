@@ -22,6 +22,16 @@ public class ModelAnalysisService : IModelAnalysisService
     /// <summary>Maximum accepted total uncompressed 3MF archive size, in bytes.</summary>
     private const long MaxArchiveUncompressedBytes = 256L * 1024 * 1024;
 
+    /// <summary>
+    /// Maximum accepted STL file size, in bytes. Mirrors <see cref="MaxArchiveUncompressedBytes"/>
+    /// for 3MF: the <c>/api/3d-models/upload</c> endpoint already caps request bodies well above
+    /// this (512,000,000 bytes, per #1838 review), but that cap lives outside this service and
+    /// isn't enforced for the metadata backfill path, which reads whatever files already exist on
+    /// disk regardless of size (#1837). This is defense-in-depth so the guarantee doesn't depend
+    /// solely on the upload endpoint's limit.
+    /// </summary>
+    private const long MaxStlFileSizeBytes = 256L * 1024 * 1024;
+
     /// <summary>Maximum accepted archive compression ratio before the input is treated as a bomb.</summary>
     private const long MaxArchiveCompressionRatio = 200;
 
@@ -64,6 +74,15 @@ public class ModelAnalysisService : IModelAnalysisService
             // Too small to contain even a binary STL header + triangle count: this is a
             // recognized STL upload that is structurally unreadable, not an unsupported format.
             return new ModelAnalysisResult(null, null, null, 0, IsValid: false, ValidationErrors: ["File is too small to be a valid STL (must be at least 84 bytes)"]);
+        }
+
+        if (fs.Length > MaxStlFileSizeBytes)
+        {
+            // Checked before any ASCII/binary parsing so an oversized file is never scanned:
+            // mirrors the 3MF archive-size guard (MaxArchiveUncompressedBytes) so this ceiling
+            // doesn't depend solely on the upload endpoint's request-size cap, and also protects
+            // the backfill path, which reads arbitrary existing files from disk (#1837).
+            return new ModelAnalysisResult(null, null, null, null, IsValid: false, ValidationErrors: ["STL file exceeds the accepted size budget"]);
         }
 
         byte[] header = new byte[80];
