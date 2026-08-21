@@ -595,6 +595,7 @@ public partial class SliceJobController(
             request.MachineProfileSha256,
             request.ProcessProfileSha256,
             request.FilamentProfileSha256,
+            request.LayoutDegradation?.ToString(),
             ct);
         if (!completionApplied)
         {
@@ -1166,6 +1167,7 @@ public partial class SliceJobController(
             // internal file names); admins get it verbatim so they can diagnose failures like the
             // profile-resolution error in issue #1768 without shelling into a worker.
             ErrorDetail = isAdmin && !string.IsNullOrWhiteSpace(job.ErrorMessage) ? job.ErrorMessage : null,
+            LayoutDegradation = ParseLayoutDegradationReason(job.LayoutDegradationReason),
             EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
             FilamentUsedGrams = job.FilamentUsedGrams,
             WorkerId = null,
@@ -1174,6 +1176,16 @@ public partial class SliceJobController(
             ArtifactsRoute = $"/api/artifacts/job/{job.Id}",
         };
     }
+
+    /// <summary>
+    /// Parses the persisted <see cref="SliceJob.LayoutDegradationReason"/> enum-name column back
+    /// into the typed contract value. Returns <see langword="null"/> for an unset or unrecognized
+    /// value instead of throwing, since this is a redacted signal, not authoritative state.
+    /// </summary>
+    private static LayoutDegradationReason? ParseLayoutDegradationReason(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && Enum.TryParse(value, ignoreCase: true, out LayoutDegradationReason reason)
+            ? reason
+            : null;
 
     private static WorkerSliceJobResponse MapToWorkerResponse(SliceJob job)
     {

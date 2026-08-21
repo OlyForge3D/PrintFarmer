@@ -361,6 +361,31 @@ public class SlicingJobStatusResponse
 }
 
 /// <summary>
+/// Redacted, client-safe reason the requested model layout was dropped or altered during
+/// slicing (issue #1800). This is a small, explicitly-modelled signal — never the raw worker
+/// diagnostic text (compare <see cref="Contracts.SliceJobStatusResponse.ErrorDetail"/>, which is
+/// intentionally admin-only and verbatim). <see langword="null"/> means the requested layout (if
+/// any) was fully honoured.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum LayoutDegradationReason
+{
+    /// <summary>
+    /// The requested position/layout could not be embedded in a 3MF project (inputs were not
+    /// all STL, the bed centre could not be determined, or the project failed to build), so
+    /// OrcaSlicer auto-arranged the model(s) instead.
+    /// </summary>
+    LayoutNotEmbedded,
+
+    /// <summary>
+    /// The inputs were 3MF, which already carries its own placement and cannot be re-embedded,
+    /// so the workspace's requested layout was dropped in favor of the placement already stored
+    /// in the source file.
+    /// </summary>
+    SourcePlacementFallback,
+}
+
+/// <summary>
 /// Result of a slicing operation.
 /// </summary>
 public class SlicingResult
@@ -382,6 +407,12 @@ public class SlicingResult
     public double EstimatedFilamentUsageGrams { get; set; }
 
     public int LayerCount { get; set; }
+
+    /// <summary>
+    /// Set when the requested model layout was dropped or altered because it could not be
+    /// honoured (issue #1800). <see langword="null"/> when nothing was dropped.
+    /// </summary>
+    public LayoutDegradationReason? LayoutDegradation { get; set; }
 
     public Dictionary<string, string> Metadata { get; } = [];
 }

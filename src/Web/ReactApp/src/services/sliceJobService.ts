@@ -88,6 +88,14 @@ export interface SliceJobStatusResponse {
    * callers only ever see the generic `errorMessage`.
    */
   errorDetail?: string;
+  /**
+   * Set when the worker could not honor the requested model placement and
+   * silently fell back to a different layout (issue #1800). This is a
+   * small, explicitly-modelled, client-safe signal — never raw worker
+   * diagnostics — so it is surfaced to every caller, unlike `errorDetail`.
+   * `undefined`/`null` means the layout was applied as requested.
+   */
+  layoutDegradation?: LayoutDegradationReason | null;
   estimatedPrintTimeSeconds?: number;
   filamentUsedGrams?: number;
   workerId?: string;
@@ -95,6 +103,38 @@ export interface SliceJobStatusResponse {
   artifactsTotalBytes?: number;
   sourceUrl?: string;
   sourceCreator?: string;
+}
+
+/**
+ * Reasons a completed slice job's requested layout was dropped or altered
+ * (issue #1800). Mirrors the backend `LayoutDegradationReason` enum
+ * (`Farm.Slicer.Module.Models`), serialized as a string via
+ * `JsonStringEnumConverter`.
+ */
+export enum LayoutDegradationReason {
+  /**
+   * The requested position/rotation/scale could not be embedded into the
+   * sliced input (e.g. an STL with an unknown bed center), so the worker
+   * auto-arranged the model instead and the custom placement was dropped.
+   */
+  LayoutNotEmbedded = 'LayoutNotEmbedded',
+  /**
+   * The worker fell back to using the source file's own embedded placement
+   * instead of the requested transform.
+   */
+  SourcePlacementFallback = 'SourcePlacementFallback',
+}
+
+/** Human-readable, non-fatal notice text for a `LayoutDegradationReason`. */
+export function getLayoutDegradationMessage(reason: LayoutDegradationReason): string {
+  switch (reason) {
+    case LayoutDegradationReason.LayoutNotEmbedded:
+      return 'The requested model position could not be applied, so the print was auto-arranged instead.';
+    case LayoutDegradationReason.SourcePlacementFallback:
+      return 'The requested model position was ignored in favor of the placement embedded in the source file.';
+    default:
+      return 'The requested layout was altered during slicing.';
+  }
 }
 
 // Job statuses

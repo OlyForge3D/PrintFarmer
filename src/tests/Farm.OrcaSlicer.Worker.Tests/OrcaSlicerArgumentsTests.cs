@@ -1,4 +1,5 @@
 ﻿using Farm.OrcaSlicer.Worker.Services;
+using Farm.Slicer.Module.Models;
 using FluentAssertions;
 using Xunit;
 using static Farm.OrcaSlicer.Worker.Services.OrcaSlicingPipelineService;
@@ -634,6 +635,74 @@ public class OrcaSlicerArgumentsTests
         IReadOnlyList<PlacementWarningKind> warnings = DescribePlacementWarnings(plan);
 
         warnings.Should().BeEmpty();
+    }
+
+    #endregion
+
+    #region Layout degradation reason mapping (#1800)
+
+    /// <summary>
+    /// A clean 3MF-project embed drops nothing, so the redacted result-contract signal must stay
+    /// unset — this is the "no degradation" baseline the other mapping tests are contrasted against.
+    /// </summary>
+    [Fact]
+    public void ToLayoutDegradationReason_NoWarnings_ReturnsNull()
+    {
+        LayoutDegradationReason? reason = ToLayoutDegradationReason([]);
+
+        reason.Should().BeNull();
+    }
+
+    /// <summary>
+    /// SourcePlacement always maps to <see cref="LayoutDegradationReason.SourcePlacementFallback"/>,
+    /// mirroring <see cref="DescribePlacementWarnings"/>'s own priority (SourcePlacement wins even
+    /// though the plan's PositionDropped flag is also true for that strategy).
+    /// </summary>
+    [Fact]
+    public void ToLayoutDegradationReason_SourcePlacementFallback_MapsToSourcePlacementFallback()
+    {
+        LayoutDegradationReason? reason = ToLayoutDegradationReason([PlacementWarningKind.SourcePlacementFallback]);
+
+        reason.Should().Be(LayoutDegradationReason.SourcePlacementFallback);
+    }
+
+    /// <summary>
+    /// AutoArrange with a dropped position maps to <see cref="LayoutDegradationReason.LayoutNotEmbedded"/>
+    /// — this is the DowngradeToAutoArrange / AutoArrange degradation path from the issue.
+    /// </summary>
+    [Fact]
+    public void ToLayoutDegradationReason_LayoutNotEmbedded_MapsToLayoutNotEmbedded()
+    {
+        LayoutDegradationReason? reason = ToLayoutDegradationReason([PlacementWarningKind.LayoutNotEmbedded]);
+
+        reason.Should().Be(LayoutDegradationReason.LayoutNotEmbedded);
+    }
+
+    /// <summary>
+    /// A scale-only warning (issue #1799's concern) must NOT be reported as a layout degradation
+    /// — conflating the two would misrepresent a preserved layout as dropped.
+    /// </summary>
+    [Fact]
+    public void ToLayoutDegradationReason_NonUniformScaleFlattenedOnly_ReturnsNull()
+    {
+        LayoutDegradationReason? reason = ToLayoutDegradationReason([PlacementWarningKind.NonUniformScaleFlattened]);
+
+        reason.Should().BeNull();
+    }
+
+    /// <summary>
+    /// When both a source-placement fallback and (redundantly) a layout warning are present, the
+    /// mapping must prefer SourcePlacementFallback — matching the mutual-exclusivity guaranteed by
+    /// <see cref="DescribePlacementWarnings"/> in practice, but pinned here in case that invariant
+    /// ever slips.
+    /// </summary>
+    [Fact]
+    public void ToLayoutDegradationReason_BothLayoutWarnings_PrefersSourcePlacementFallback()
+    {
+        LayoutDegradationReason? reason = ToLayoutDegradationReason(
+            [PlacementWarningKind.LayoutNotEmbedded, PlacementWarningKind.SourcePlacementFallback]);
+
+        reason.Should().Be(LayoutDegradationReason.SourcePlacementFallback);
     }
 
     #endregion

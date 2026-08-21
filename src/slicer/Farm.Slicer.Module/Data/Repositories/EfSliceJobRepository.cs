@@ -592,6 +592,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         string? machineProfileSha256 = null,
         string? processProfileSha256 = null,
         string? filamentProfileSha256 = null,
+        string? layoutDegradationReason = null,
         CancellationToken ct = default)
     {
         Guid[] ids = artifactIds?.Distinct().ToArray() ?? [];
@@ -636,6 +637,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                     .SetProperty(job => job.MachineProfileSha256, NormalizeSha256(machineProfileSha256))
                     .SetProperty(job => job.ProcessProfileSha256, NormalizeSha256(processProfileSha256))
                     .SetProperty(job => job.FilamentProfileSha256, NormalizeSha256(filamentProfileSha256))
+                    .SetProperty(job => job.LayoutDegradationReason, layoutDegradationReason)
                     .SetProperty(job => job.ArtifactIdsCsv, artifactIdsCsv)
                     .SetProperty(job => job.ArtifactsTotalBytes, totalBytes)
                     .SetProperty(job => job.ArtifactsCount, ids.Length)

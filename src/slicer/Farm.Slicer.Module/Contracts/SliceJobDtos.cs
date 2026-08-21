@@ -151,6 +151,14 @@ public class SliceJobStatusResponse
     /// </summary>
     public string? ErrorDetail { get; set; }
 
+    /// <summary>
+    /// Redacted, client-safe reason the requested layout was dropped or altered during slicing
+    /// (issue #1800). <see langword="null"/> means the layout was preserved as requested. Unlike
+    /// <see cref="ErrorDetail"/>, this field is a small explicitly-modelled enum, not raw worker
+    /// diagnostics, so it is safe to surface to every caller.
+    /// </summary>
+    public LayoutDegradationReason? LayoutDegradation { get; set; }
+
     public int? EstimatedPrintTimeSeconds { get; set; }
 
     public decimal? FilamentUsedGrams { get; set; }
@@ -297,6 +305,13 @@ public class CompleteSliceJobRequest
     /// </summary>
     [MaxLength(64)]
     public string? FilamentProfileSha256 { get; set; }
+
+    /// <summary>
+    /// Redacted, client-safe reason the requested layout was dropped or altered during slicing
+    /// (issue #1800), computed by the worker from the <c>PlacementPlan</c> it resolved. Never the
+    /// raw log message.
+    /// </summary>
+    public LayoutDegradationReason? LayoutDegradation { get; set; }
 }
 
 /// <summary>
