@@ -1800,21 +1800,29 @@ export const NewSliceJobPage: React.FC = () => {
     // advertises sits in the queue unclaimable forever. UI warnings are not
     // enough while the dispatch path stays open, so hard-block here.
     //
-    // NOTE: there is deliberately NO `versionEntriesForEngine.length > 0`
-    // exemption. An earlier revision had one, on the theory that it protected
-    // the legacy/fresh-install shape — it does not. In that shape the backend
-    // marks EVERY entry available (`available = !anyServiceRows || ...`, see
-    // SlicersController.ListEnginesAsync), so the list is non-empty and a
-    // legitimate pin passes on the `.some(...)` availability clause below, not
-    // on any length check. The exemption only ever applied to an empty list,
-    // where it let a pinned job — which carries a version-specific capability
-    // tag no generic worker can claim — dispatch straight into a permanent
-    // queue hang. Blocking instead is safe: the picker always renders a Latest
-    // control while a pin is held, and clearing the pin routes the user to the
-    // Latest-mode guard above.
+    // NOTE: there is deliberately NO `engineInfo` guard and NO
+    // `versionEntriesForEngine.length > 0` exemption here. Both were present in
+    // earlier revisions and both let a pinned job escape:
+    //
+    //   * The length exemption was added on the theory that it protected the
+    //     legacy/fresh-install shape. It does not. In that shape the backend
+    //     marks EVERY entry available (`available = !anyServiceRows || ...`, see
+    //     SlicersController.ListEnginesAsync), so the list is non-empty and a
+    //     legitimate pin passes on the `.some(...)` clause below, not on any
+    //     length check. The exemption only ever applied to an empty list.
+    //   * Requiring `engineInfo` meant a registry refresh that drops the pinned
+    //     engine entirely (engineInfo → undefined) skipped the guard and
+    //     dispatched the stale pin (Hicks R3).
+    //
+    // Both cases dispatch a job carrying a version-specific capability tag that
+    // no worker advertises, so it sits in the queue unclaimable forever. Since
+    // `versionEntriesForEngine` is `engineInfo?.versionEntries ?? []`, the single
+    // `.some(...)` test below covers every case: unknown engine and empty list
+    // both yield `false`, which blocks. Unverifiable is treated as unusable.
+    // Failing closed is recoverable — the picker always renders a Latest control
+    // while a pin is held, and clearing the pin routes to the guard above.
     if (
       selectedEngineVersion !== undefined
-      && engineInfo
       && !versionEntriesForEngine.some(v => v.version === selectedEngineVersion && v.available)
     ) {
       setError(`${engineName} ${selectedEngineVersion} has no online worker to accept this job. Switch to Latest or start that worker.`);

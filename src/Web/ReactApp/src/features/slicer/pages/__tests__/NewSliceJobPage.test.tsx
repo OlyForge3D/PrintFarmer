@@ -271,48 +271,59 @@ vi.mock('../../components/job', () => ({
   // version), so its behaviour is covered by SlicerSelector's own unit tests.
   // Here we only surface the forwarded props so the page's wiring contract —
   // especially passing RAW, unfiltered versionEntries — stays under test.
-  SlicerSelector: ({
-    onSlicerChange,
-    versionEntries,
-    latestVersion,
-    engineName,
-    onVersionChange,
-  }: {
+  SlicerSelector: (props: {
     selectedSlicerId: number;
     onSlicerChange: (id: number) => void;
     versionEntries?: Array<{ version: string; available: boolean }>;
     latestVersion?: string;
+    selectedVersion?: string;
     engineName?: string;
     onVersionChange?: (v: string | undefined) => void;
-  }) => (
-    // Flat, primitive attributes only — the version entries are surfaced as
-    // two comma-joined lists rather than embedded JSON so the assertions stay
-    // readable and no raw object is interpolated into JSX.
-    <div
-      data-testid="slicer-selector"
-      data-all-versions={(versionEntries ?? []).map(v => v.version).join(',')}
-      data-available-versions={(versionEntries ?? []).filter(v => v.available).map(v => v.version).join(',')}
-      data-latest-version={latestVersion ?? ''}
-      data-engine-name={engineName ?? ''}
-    >
-      <select
-        data-testid="slicer-select"
-        aria-label="Select slicer"
-        onChange={(e) => onSlicerChange(Number(e.target.value))}
+  }) => {
+    const { onSlicerChange, versionEntries, latestVersion, engineName, onVersionChange } = props;
+    // Records EVERY render so tests can assert on intermediate frames, not just
+    // the settled state — e.g. that no frame ever pairs a new engine with the
+    // previous engine's pin.
+    slicerSelectorRenderSpy({ engineName, selectedVersion: props.selectedVersion });
+    return (
+      // Flat, primitive attributes only — the version entries are surfaced as
+      // two comma-joined lists rather than embedded JSON so the assertions stay
+      // readable and no raw object is interpolated into JSX.
+      <div
+        data-testid="slicer-selector"
+        data-all-versions={(versionEntries ?? []).map(v => v.version).join(',')}
+        data-available-versions={(versionEntries ?? []).filter(v => v.available).map(v => v.version).join(',')}
+        data-latest-version={latestVersion ?? ''}
+        data-selected-version={props.selectedVersion ?? ''}
+        data-engine-name={engineName ?? ''}
       >
-        <option value="1">OrcaSlicer</option>
-        <option value="2">PrusaSlicer</option>
-      </select>
-      {/* Lets submit-guard tests drive a pin without the real component. */}
-      <button type="button" data-testid="pin-engine-version" onClick={() => onVersionChange?.('2.3.1')}>
-        pin 2.3.1
-      </button>
-    </div>
-  ),
+        <select
+          data-testid="slicer-select"
+          aria-label="Select slicer"
+          onChange={(e) => onSlicerChange(Number(e.target.value))}
+        >
+          <option value="1">OrcaSlicer</option>
+          <option value="2">PrusaSlicer</option>
+        </select>
+        {/* Lets submit-guard tests drive a pin without the real component. */}
+        <button type="button" data-testid="pin-engine-version" onClick={() => onVersionChange?.('2.3.1')}>
+          pin 2.3.1
+        </button>
+      </div>
+    );
+  },
   SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
 }));
 
 const slicerWorkspaceSpy = vi.fn();
+
+/**
+ * Captures the SlicerSelector mock's props on EVERY render, so tests can assert
+ * on intermediate frames rather than only the settled state. Referenced from
+ * the `../../components/job` mock factory above; the reference resolves at
+ * render time, not at factory time, so declaration order is irrelevant.
+ */
+const slicerSelectorRenderSpy = vi.fn();
 
 vi.mock('@/features/slicer/components/viewer/SlicerWorkspace', () => ({
   SlicerWorkspace: (props: {
@@ -407,6 +418,7 @@ describe('NewSliceJobPage', () => {
     // gave it, so every test starts from the same state whatever the order.
     vi.resetAllMocks();
     slicerWorkspaceSpy.mockClear();
+    slicerSelectorRenderSpy.mockClear();
     vi.mocked(apiClient.get).mockResolvedValue({ data: mockModelList } as never);
   });
 
@@ -1232,7 +1244,11 @@ describe('NewSliceJobPage', () => {
       ]);
     }
 
-    /** Drives the page to a state where onSlice will actually attempt a submit. */
+    /**
+     * Drives the page to a state where onSlice will actually attempt a submit.
+     * Returns the QueryClient so a test can force a registry refetch mid-flow
+     * (the test client uses staleTime: Infinity).
+     */
     async function reachSubmittableState() {
       vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
         { name: 'Prusa MK4S 0.4 nozzle', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'MK4S' },
@@ -1249,14 +1265,14 @@ describe('NewSliceJobPage', () => {
         },
       ] as OrcaProcessProfile[]);
 
-      renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
+      const { queryClient } = renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
 
       await waitFor(() => {
         expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
       });
       fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+      return queryClient;
     }
-
     async function waitForProcessProfile() {
       await waitFor(() => {
         const processSelect = Array.from(document.querySelectorAll('select'))
@@ -1393,9 +1409,10 @@ describe('NewSliceJobPage', () => {
       expect(sliceJobService.submitJob).not.toHaveBeenCalled();
     });
 
-    it('clears a pin when the engine changes, in the same commit as the switch', async () => {
-      // Relying on the [selectedSlicerId] effect alone would render one frame
-      // pairing the new engine's entries with the old engine's pin (Bishop).
+    it('never renders a frame pairing a new engine with the previous engine pin', async () => {
+      // Asserting only the settled state would pass even without the inline
+      // reset, because the [selectedSlicerId] effect eventually clears the pin.
+      // The defect is the intermediate frame, so assert on every render (Hicks).
       mockEngines([
         { version: '2.4.2', available: true },
         { version: '2.3.1', available: false },
@@ -1409,9 +1426,11 @@ describe('NewSliceJobPage', () => {
       act(() => {
         fireEvent.click(screen.getByTestId('pin-engine-version'));
       });
+      await waitFor(() => {
+        expect(screen.getByTestId('slicer-selector')).toHaveAttribute('data-selected-version', '2.3.1');
+      });
 
-      // Switching engines must drop the pin, so PrusaSlicer is never asked to
-      // honour an OrcaSlicer version.
+      slicerSelectorRenderSpy.mockClear();
       act(() => {
         fireEvent.change(screen.getByTestId('slicer-select'), { target: { value: '2' } });
       });
@@ -1420,18 +1439,49 @@ describe('NewSliceJobPage', () => {
         expect(screen.getByTestId('slicer-selector')).toHaveAttribute('data-engine-name', 'PrusaSlicer');
       });
 
+      const frames = slicerSelectorRenderSpy.mock.calls.map(
+        (c) => c[0] as { engineName?: string; selectedVersion?: string },
+      );
+      // Guard against a vacuous pass: the switch must actually have rendered.
+      expect(frames.some((f) => f.engineName === 'PrusaSlicer')).toBe(true);
+      expect(
+        frames.filter((f) => f.engineName === 'PrusaSlicer' && f.selectedVersion !== undefined),
+      ).toEqual([]);
+    });
+
+    it('blocks a pinned submission when the pinned engine vanishes from the registry', async () => {
+      // A registry refresh can drop the engine entirely, leaving engineInfo
+      // undefined while the pin survives. Requiring engineInfo in the guard let
+      // that stale pin dispatch unvalidated (Hicks R3).
+      mockEngines([
+        { version: '2.4.2', available: true },
+        { version: '2.3.1', available: false },
+      ], '2.4.2');
+
+      const queryClient = await reachSubmittableState();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('pin-engine-version')).toBeInTheDocument();
+      });
+      act(() => {
+        fireEvent.click(screen.getByTestId('pin-engine-version'));
+      });
       await waitForProcessProfile();
+
+      // OrcaSlicer disappears from the registry while the pin is still held.
+      vi.mocked(slicerService.listEngines).mockResolvedValue([
+        { engine: 'PrusaSlicer', versions: ['2.9.0'], versionEntries: [{ version: '2.9.0', available: true }], latest: '2.9.0' },
+      ]);
+      await act(async () => { await queryClient.invalidateQueries({ queryKey: ['slicer-engines-registry'] }); });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('slicer-selector')).toHaveAttribute('data-all-versions', '');
+      });
+
       await submit();
 
-      // No PrusaSlicer entry exists in the mocked registry, so engineInfo is
-      // undefined and both version guards skip — the job goes out unpinned
-      // rather than carrying the stale OrcaSlicer pin.
-      await waitFor(() => {
-        expect(sliceJobService.submitJob).toHaveBeenCalled();
-      }, { timeout: 3000 });
-
-      const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)?.[0] as { slicerEngineVersion?: string };
-      expect(request.slicerEngineVersion).toBeUndefined();
+      expect(await screen.findByText(/OrcaSlicer 2\.3\.1 has no online worker/i)).toBeInTheDocument();
+      expect(sliceJobService.submitJob).not.toHaveBeenCalled();
     });
   });
 });
