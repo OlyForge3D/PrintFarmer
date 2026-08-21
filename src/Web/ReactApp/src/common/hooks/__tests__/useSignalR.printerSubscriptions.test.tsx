@@ -9,7 +9,7 @@ describe('usePrinterStatusUpdates printer subscriptions', () => {
     vi.spyOn(printerSignalRService, 'getLastStatuses').mockReturnValue(new Map());
     vi.spyOn(printerSignalRService, 'onPrinterStatusUpdate').mockReturnValue(() => undefined);
     vi.spyOn(printerSignalRService, 'onConnectionStateChange').mockReturnValue(() => undefined);
-    vi.spyOn(printerSignalRService, 'subscribeToPrinter').mockResolvedValue();
+    vi.spyOn(printerSignalRService, 'subscribeToPrinters').mockResolvedValue(new Set());
     vi.spyOn(printerSignalRService, 'isConnected', 'get').mockReturnValue(true);
   });
 
@@ -17,7 +17,7 @@ describe('usePrinterStatusUpdates printer subscriptions', () => {
     vi.restoreAllMocks();
   });
 
-  it('joins each requested printer group so cached and live status updates are delivered', async () => {
+  it('batches all requested printers into a single subscribeToPrinters call', async () => {
     const printerIds = ['printer-a', 'printer-b'];
 
     const { rerender } = renderHook(() =>
@@ -25,12 +25,14 @@ describe('usePrinterStatusUpdates printer subscriptions', () => {
     );
 
     await waitFor(() => {
-      expect(printerSignalRService.subscribeToPrinter).toHaveBeenCalledTimes(2);
+      expect(printerSignalRService.subscribeToPrinters).toHaveBeenCalledTimes(1);
     });
-    expect(printerSignalRService.subscribeToPrinter).toHaveBeenCalledWith('printer-a');
-    expect(printerSignalRService.subscribeToPrinter).toHaveBeenCalledWith('printer-b');
+    expect(printerSignalRService.subscribeToPrinters).toHaveBeenCalledWith([
+      'printer-a',
+      'printer-b',
+    ]);
 
     rerender();
-    expect(printerSignalRService.subscribeToPrinter).toHaveBeenCalledTimes(2);
+    expect(printerSignalRService.subscribeToPrinters).toHaveBeenCalledTimes(1);
   });
 });

@@ -86,9 +86,9 @@ export function usePrinterStatusUpdates(
     const subscribeToPrinters = () => {
       if (cancelled || subscribed) return;
       subscribed = true;
-      void Promise.allSettled(
-        printerIds.map((printerId) => printerSignalRService.subscribeToPrinter(printerId))
-      );
+      // Batches the whole set into a single hub invocation instead of one
+      // SubscribeToPrinterAsync call per printer (#1764).
+      void printerSignalRService.subscribeToPrinters(printerIds);
     };
     const unsubscribeConnectionState = printerSignalRService.onConnectionStateChange((connected) => {
       if (connected) subscribeToPrinters();

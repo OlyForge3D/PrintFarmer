@@ -385,6 +385,156 @@ public class PrinterHubTests
     }
 
     [Fact]
+    public async Task SubscribeToPrintersAsync_WithFullAccess_AuthorizesOnceAndSendsSingleBatch()
+    {
+        Guid printerA = Guid.NewGuid();
+        Guid printerB = Guid.NewGuid();
+        var statusA = new PrinterStatusDto(Id: printerA, IsOnline: true, State: "Idle");
+        var statusB = new PrinterStatusDto(Id: printerB, IsOnline: false, State: "Offline");
+        _statusCacheMock.Setup(cache => cache.GetStatus(printerA)).Returns(statusA);
+        _statusCacheMock.Setup(cache => cache.GetStatus(printerB)).Returns(statusB);
+
+        _resourceAuthorizationMock
+            .Setup(service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Count == 2 && ids.Contains(printerA) && ids.Contains(printerB)),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid> { printerA, printerB });
+
+        string[] result = await _hub.SubscribeToPrintersAsync([printerA.ToString(), printerB.ToString()]);
+
+        Assert.Equal(2, result.Length);
+        Assert.Contains(printerA.ToString(), result);
+        Assert.Contains(printerB.ToString(), result);
+
+        // Exactly one authorization call for the whole batch, not one per printer id.
+        _resourceAuthorizationMock.Verify(
+            service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        _groupsMock.Verify(groups => groups.AddToGroupAsync(
+            "test-connection-id",
+            AuthorizedHubGroups.Printer(printerA),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _groupsMock.Verify(groups => groups.AddToGroupAsync(
+            "test-connection-id",
+            AuthorizedHubGroups.Printer(printerB),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        // Exactly one batched send, not one "printerupdated" frame per printer.
+        _callerMock.Verify(client => client.SendCoreAsync(
+            "printerstatusesbatch",
+            It.Is<object?[]>(arguments => BatchContainsExactly(arguments, statusA, statusB)),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _callerMock.Verify(client => client.SendCoreAsync(
+            "printerupdated",
+            It.IsAny<object?[]>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SubscribeToPrintersAsync_WithPartialAccess_JoinsOnlyAuthorizedAndReturnsSubset()
+    {
+        Guid authorizedPrinter = Guid.NewGuid();
+        Guid rejectedPrinter = Guid.NewGuid();
+        var status = new PrinterStatusDto(Id: authorizedPrinter, IsOnline: true, State: "Idle");
+        _statusCacheMock.Setup(cache => cache.GetStatus(authorizedPrinter)).Returns(status);
+
+        _resourceAuthorizationMock
+            .Setup(service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid> { authorizedPrinter });
+
+        string[] result = await _hub.SubscribeToPrintersAsync(
+            [authorizedPrinter.ToString(), rejectedPrinter.ToString()]);
+
+        // Explicit partial-failure semantics: caller ends up with exactly the authorized subset,
+        // with no exception thrown for the rejected id.
+        Assert.Single(result);
+        Assert.Equal(authorizedPrinter.ToString(), result[0]);
+
+        _groupsMock.Verify(groups => groups.AddToGroupAsync(
+            "test-connection-id",
+            AuthorizedHubGroups.Printer(authorizedPrinter),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _groupsMock.Verify(groups => groups.AddToGroupAsync(
+            "test-connection-id",
+            AuthorizedHubGroups.Printer(rejectedPrinter),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SubscribeToPrintersAsync_WithNoCachedStatuses_JoinsGroupsButSendsNoBatch()
+    {
+        Guid printerId = Guid.NewGuid();
+        _statusCacheMock.Setup(cache => cache.GetStatus(printerId)).Returns((PrinterStatusDto?)null);
+
+        _resourceAuthorizationMock
+            .Setup(service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid> { printerId });
+
+        string[] result = await _hub.SubscribeToPrintersAsync([printerId.ToString()]);
+
+        Assert.Single(result);
+        _groupsMock.Verify(groups => groups.AddToGroupAsync(
+            "test-connection-id",
+            AuthorizedHubGroups.Printer(printerId),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _callerMock.Verify(client => client.SendCoreAsync(
+            It.IsAny<string>(),
+            It.IsAny<object?[]>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SubscribeToPrintersAsync_WithInvalidGuidInBatch_ExcludesItWithoutFailingBatch()
+    {
+        Guid validPrinter = Guid.NewGuid();
+        var status = new PrinterStatusDto(Id: validPrinter, IsOnline: true, State: "Idle");
+        _statusCacheMock.Setup(cache => cache.GetStatus(validPrinter)).Returns(status);
+
+        _resourceAuthorizationMock
+            .Setup(service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Count == 1 && ids.Contains(validPrinter)),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid> { validPrinter });
+
+        string[] result = await _hub.SubscribeToPrintersAsync([validPrinter.ToString(), "not-a-guid"]);
+
+        Assert.Single(result);
+        Assert.Equal(validPrinter.ToString(), result[0]);
+    }
+
+    [Fact]
+    public async Task SubscribeToPrintersAsync_WithEmptyArray_ReturnsEmptyWithoutAuthorizationCall()
+    {
+        string[] result = await _hub.SubscribeToPrintersAsync([]);
+
+        Assert.Empty(result);
+        _resourceAuthorizationMock.Verify(
+            service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<PrinterGroupAccessLevel>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task RequestPrinterStatus_WithInvalidId_SendsNothing()
     {
         // Act
@@ -415,5 +565,23 @@ public class PrinterHubTests
                 It.IsAny<object?[]>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    private static bool BatchContainsExactly(object?[] arguments, params PrinterStatusDto[] expected)
+    {
+            if (arguments[0] is not List<PrinterStatusDto> statuses || statuses.Count != expected.Length)
+            {
+                return false;
+            }
+
+            foreach (PrinterStatusDto status in expected)
+            {
+                if (!statuses.Contains(status))
+                {
+                    return false;
+                }
+            }
+
+            return true;
     }
 }

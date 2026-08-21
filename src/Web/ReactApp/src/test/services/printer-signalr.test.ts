@@ -217,8 +217,8 @@ describe("PrinterSignalRService queue cursor recovery", () => {
 
     await vi.waitFor(() => {
       expect(signalr.connection.invoke).toHaveBeenCalledWith(
-        "SubscribeToPrinterAsync",
-        "printer-1"
+        "SubscribeToPrintersAsync",
+        ["printer-1"]
       );
       expect(signalr.connection.invoke).toHaveBeenCalledWith(
         "SubscribeToQueueJobAsync",
@@ -228,6 +228,51 @@ describe("PrinterSignalRService queue cursor recovery", () => {
         "SubscribeToProjectAsync",
         "project-1"
       );
+    });
+    service.dispose();
+  });
+
+  it("restores only the authorized printer subset when reconnect batch is partially rejected", async () => {
+    api.getQueueChanges.mockResolvedValue({
+      afterSequence: 0,
+      nextSequence: 0,
+      hasMore: false,
+      events: [],
+    });
+    const service = new PrinterSignalRService();
+    await vi.waitFor(() =>
+      expect(signalr.eventHandlers.has("queueevent")).toBe(true)
+    );
+    await service.connect();
+    await service.replaceQueueResourceSubscriptions({
+      printerIds: ["printer-authorized", "printer-rejected"],
+      jobIds: [],
+      projectIds: [],
+    });
+    signalr.connection.invoke.mockClear();
+    signalr.connection.invoke.mockImplementation(async (
+      method: string,
+      arg: string | string[]
+    ) => {
+      if (method === "SubscribeToPrintersAsync") {
+        return (arg as string[]).filter((id) => id === "printer-authorized");
+      }
+      return undefined;
+    });
+
+    signalr.getReconnectHandler()?.();
+
+    await vi.waitFor(() => {
+      expect(signalr.connection.invoke).toHaveBeenCalledWith(
+        "SubscribeToPrintersAsync",
+        ["printer-authorized", "printer-rejected"]
+      );
+    });
+
+    // The rejected id is reconciled out of desired state and is never retried.
+    await vi.waitFor(() => {
+      const snapshot = service.getQueueSubscriptionSnapshot();
+      expect(snapshot.printerIds).toEqual(["printer-authorized"]);
     });
     service.dispose();
   });

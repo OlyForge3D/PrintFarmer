@@ -549,8 +549,11 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       });
       signalRTestState.connection.invoke.mockClear();
       signalRTestState.connection.invoke.mockImplementation(
-        async (method: string, id: string) => {
-          if (method === 'SubscribeToQueueJobAsync' && id === 'job-1') {
+        async (method: string, arg: string | string[]) => {
+          if (method === 'SubscribeToPrintersAsync') {
+            return arg as string[];
+          }
+          if (method === 'SubscribeToQueueJobAsync' && arg === 'job-1') {
             throw new Error('Forbidden');
           }
         }
@@ -560,8 +563,8 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       await flushMicrotasks();
 
       expect(signalRTestState.connection.invoke).toHaveBeenCalledWith(
-        'SubscribeToPrinterAsync',
-        'printer-1'
+        'SubscribeToPrintersAsync',
+        ['printer-1']
       );
       expect(signalRTestState.connection.invoke).toHaveBeenCalledWith(
         'SubscribeToProjectAsync',
@@ -572,6 +575,45 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
           printerIds: ['printer-1'],
           jobIds: [],
           projectIds: ['project-1'],
+        })
+      );
+      printerSignalRService.dispose();
+    });
+
+    it('restores only the authorized subset when reconnect partially rejects the printer batch', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      await printerSignalRService.connect();
+      await printerSignalRService.replaceQueueResourceSubscriptions({
+        printerIds: ['printer-authorized', 'printer-rejected'],
+        jobIds: [],
+        projectIds: [],
+      });
+      signalRTestState.connection.invoke.mockClear();
+      signalRTestState.connection.invoke.mockImplementation(
+        async (method: string, arg: string | string[]) => {
+          if (method === 'SubscribeToPrintersAsync') {
+            // Server authorizes only the subset it can access.
+            return (arg as string[]).filter((id) => id === 'printer-authorized');
+          }
+        }
+      );
+
+      signalRTestState.triggerReconnected();
+      await flushMicrotasks();
+
+      expect(signalRTestState.connection.invoke).toHaveBeenCalledWith(
+        'SubscribeToPrintersAsync',
+        ['printer-authorized', 'printer-rejected']
+      );
+      // Client bookkeeping is reconciled to exactly the authorized subset: the
+      // rejected id is dropped from desired state and is not retried on the
+      // next reconnect.
+      expect(printerSignalRService.getQueueSubscriptionSnapshot()).toEqual(
+        expect.objectContaining({
+          printerIds: ['printer-authorized'],
+          jobIds: [],
+          projectIds: [],
         })
       );
       printerSignalRService.dispose();

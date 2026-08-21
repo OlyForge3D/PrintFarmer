@@ -194,6 +194,13 @@ export class PrinterSignalRService {
     // Register single lowercase event name
     connection.on("printerupdated", handlePrinterUpdated);
 
+    // Batched counterpart used by SubscribeToPrintersAsync: one frame containing
+    // an array of statuses instead of N individual "printerupdated" frames.
+    // Reuses the same per-status debounce/cache logic as the singular handler.
+    connection.on("printerstatusesbatch", (statuses: PrinterStatusUpdate[]) => {
+      statuses.forEach(handlePrinterUpdated);
+    });
+
     connection.on("jobqueueupdate", (update: JobQueueUpdateDto) => {
       this.jobQueueUpdateCallbacks.forEach((cb) => {
         try {
@@ -778,6 +785,77 @@ export class PrinterSignalRService {
     }
   }
 
+  /**
+   * Batches an entire set of printer subscriptions into a single hub invocation
+   * (`SubscribeToPrintersAsync`) instead of one `SubscribeToPrinterAsync` call per
+   * printer. Used for the connect/reconnect fan-out and bulk mount-time subscribe;
+   * `subscribeToPrinter` remains the path for incremental single-id subscribes.
+   *
+   * Partial-failure semantics: the server returns only the authorized subset of
+   * `printerIds`. This method reconciles both `desiredQueuePrinters` and
+   * `subscribedPrinters` down to exactly that authorized subset, so a rejected id
+   * is dropped from desired state and is never retried on a later reconnect. If the
+   * invocation itself throws, the entire requested batch is dropped from desired
+   * state (mirrors the failure handling already used for per-id job/project
+   * subscriptions in `restoreResourceSubscriptions`).
+   */
+  private async applySubscribeToPrinters(
+    printerIds: string[]
+  ): Promise<Set<string>> {
+    if (printerIds.length === 0) {
+      return new Set();
+    }
+
+    const connection = this.connection;
+    const connectionEpoch = this.connectionEpoch;
+    if (connection?.state !== HubConnectionState.Connected) {
+      return new Set();
+    }
+
+    try {
+      const authorized: string[] = await connection.invoke(
+        "SubscribeToPrintersAsync",
+        printerIds
+      );
+      if (!this.isCurrentConnectionEpoch(connection, connectionEpoch)) {
+        return new Set(authorized);
+      }
+
+      const authorizedSet = new Set(authorized);
+      for (const printerId of printerIds) {
+        if (authorizedSet.has(printerId)) {
+          this.subscribedPrinters.add(printerId);
+        } else {
+          // Rejected id: remove from both desired and applied state so a later
+          // reconnect never retries it in a loop.
+          this.desiredQueuePrinters.delete(printerId);
+          this.subscribedPrinters.delete(printerId);
+        }
+      }
+      return authorizedSet;
+    } catch (err) {
+      if (this.isCurrentConnectionEpoch(connection, connectionEpoch)) {
+        for (const printerId of printerIds) {
+          this.desiredQueuePrinters.delete(printerId);
+          this.subscribedPrinters.delete(printerId);
+        }
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Public batch subscribe entry point. Adds all requested ids to desired state,
+   * then authorizes and joins the whole set in one hub invocation. Returns the
+   * authorized subset actually subscribed.
+   */
+  public async subscribeToPrinters(printerIds: string[]): Promise<Set<string>> {
+    for (const printerId of printerIds) {
+      this.desiredQueuePrinters.add(printerId);
+    }
+    return this.applySubscribeToPrinters(printerIds);
+  }
+
   public async unsubscribeFromPrinter(printerId: string): Promise<void> {
     this.desiredQueuePrinters.delete(printerId);
     await this.applyUnsubscribeFromPrinter(printerId);
@@ -1130,13 +1208,23 @@ export class PrinterSignalRService {
       ) {
         return;
       }
+
+      // Printers: one batched SubscribeToPrintersAsync call for the whole desired
+      // set instead of one SubscribeToPrinterAsync invocation per printer (#1764).
+      const desiredPrinterIds = Array.from(this.desiredQueuePrinters);
+      if (desiredPrinterIds.length > 0) {
+        try {
+          await this.applySubscribeToPrinters(desiredPrinterIds);
+        } catch (err) {
+          console.warn(
+            "[printerSignalR] batched printer subscription restore failed",
+            err
+          );
+        }
+      }
+
+      // Jobs and projects stay on the existing per-id incremental path.
       const subscriptions = [
-        ...Array.from(this.desiredQueuePrinters, (id) => ({
-          id,
-          method: "SubscribeToPrinterAsync",
-          desiredValues: this.desiredQueuePrinters,
-          appliedValues: this.subscribedPrinters,
-        })),
         ...Array.from(this.desiredQueueJobs, (id) => ({
           id,
           method: "SubscribeToQueueJobAsync",
@@ -1171,6 +1259,7 @@ export class PrinterSignalRService {
       });
     });
   }
+
 
   private async restoreSubscriptionsAndDrain(
     connection: HubConnection,
