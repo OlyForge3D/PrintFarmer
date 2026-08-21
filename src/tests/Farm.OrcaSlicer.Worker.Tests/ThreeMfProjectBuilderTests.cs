@@ -393,7 +393,9 @@ public class ThreeMfProjectBuilderTests : IDisposable
 
     /// <summary>
     /// Rotation must be applied about the mesh's own bounding-box centre even for multi-axis
-    /// rotations, and the result still translated onto the bed centre.
+    /// rotations, and the result still translated onto the bed centre. The non-centre point is
+    /// the load-bearing assertion: the centre maps to the target for ANY linear part, so
+    /// checking only the centre would carry no rotation signal at all.
     /// </summary>
     [Fact]
     public void BuildItemTransform_MultiAxisRotationOffOriginMesh_StillCentersOnBed()
@@ -404,9 +406,17 @@ public class ThreeMfProjectBuilderTests : IDisposable
 
         double[] m = ParseTransformValues(BuildItemTransform(json, bounds, (110, 110)));
 
-        (double X, double Y, double _) = MapPoint(m, 40, -25, 5);
+        (double X, double Y, double Z) = MapPoint(m, 40, -25, 5);
         X.Should().BeApproximately(120, 1e-6);
         Y.Should().BeApproximately(130, 1e-6);
+        Z.Should().BeApproximately(5, 1e-6);
+
+        // A raw vertex 1 mm along +X from the mesh centre. Under three.js Euler(π/2,0,π/2)
+        // the offset (1,0,0) rotates to (0,0,1), so it must land 1 mm ABOVE the centre.
+        (double vx, double vy, double vz) = MapPoint(m, 41, -25, 5);
+        vx.Should().BeApproximately(120, 1e-6);
+        vy.Should().BeApproximately(130, 1e-6);
+        vz.Should().BeApproximately(6, 1e-6);
     }
 
     #endregion

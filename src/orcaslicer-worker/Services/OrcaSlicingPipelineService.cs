@@ -1555,11 +1555,70 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     }
 
     /// <summary>
+    /// Convert the workspace's rotation into the triple OrcaSlicer's CLI can actually express.
+    /// <para>
+    /// The viewer is three.js Euler order <c>'XYZ'</c> — column-vector <c>R = Rx·Ry·Rz</c>.
+    /// OrcaSlicer does NOT compose CLI rotations. <c>ModelVolume::rotate</c> (Model.cpp) does
+    /// <c>set_rotation(get_rotation() + extract_euler_angles(...))</c>, i.e. it ADDS each
+    /// single-axis angle into an Euler triple — so flag order is irrelevant, addition being
+    /// commutative — and <c>Geometry::rotation_transform</c> then rebuilds the matrix as
+    /// <c>AngleAxisd(z,Z) * AngleAxisd(y,Y) * AngleAxisd(x,X)</c>, i.e. <c>Rz·Ry·Rx</c>, order
+    /// <c>'ZYX'</c>. OrcaSlicer's own comment notes the triple "is not equivalent to Euler angles
+    /// in the usual sense".
+    /// </para>
+    /// <para>
+    /// Emitting the workspace angles verbatim therefore orients the part differently from what
+    /// the user approved on screen whenever more than one component is non-zero — which is the
+    /// normal output of auto-orient, since it derives its Euler from a quaternion. The rotation
+    /// is instead re-parameterised: build the viewer's matrix, then extract the <c>'ZYX'</c>
+    /// triple that reproduces it.
+    /// </para>
+    /// <para>
+    /// This round-trips exactly through OrcaSlicer's additive accumulation: each emitted flag is
+    /// a pure single-axis rotation whose <c>extract_euler_angles</c> is that component alone, and
+    /// <c>|ry'| ≤ 90°</c> by construction (it comes from <c>asin</c>), so no component is folded
+    /// into an equivalent-but-different triple before being summed.
+    /// </para>
+    /// </summary>
+    /// <returns>Rotation about X, Y and Z in radians, to be summed by OrcaSlicer as 'ZYX'.</returns>
+    internal static (double X, double Y, double Z) ToOrcaRotation(double rx, double ry, double rz)
+    {
+        double cosX = Math.Cos(rx), sinX = Math.Sin(rx);
+        double cosY = Math.Cos(ry), sinY = Math.Sin(ry);
+        double cosZ = Math.Cos(rz), sinZ = Math.Sin(rz);
+
+        // Viewer orientation, column-vector R = Rx·Ry·Rz (three.js Matrix4.makeRotationFromEuler,
+        // case 'XYZ'). Only the entries the extraction needs are computed.
+        double r00 = cosY * cosZ;
+        double r01 = -cosY * sinZ;
+        double r02 = sinY;
+        double r10 = (cosX * sinZ) + (sinX * cosZ * sinY);
+        double r20 = (sinX * sinZ) - (cosX * cosZ * sinY);
+        double r21 = (sinX * cosZ) + (cosX * sinZ * sinY);
+        double r22 = cosX * cosY;
+
+        double outY = Math.Asin(Math.Clamp(-r20, -1.0, 1.0));
+
+        // Gimbal lock: cos(outY) == 0 collapses r00/r10/r21/r22, leaving only the sum or
+        // difference of the X and Z rotations observable. Pin Z at zero and solve for X.
+        const double lockEpsilon = 1e-9;
+        if (Math.Abs(r20) >= 1.0 - lockEpsilon)
+        {
+            double lockedX = r20 <= 0
+                ? Math.Atan2(r01, r02)
+                : Math.Atan2(-r01, -r02);
+            return (lockedX, outY, 0.0);
+        }
+
+        return (Math.Atan2(r21, r22), outY, Math.Atan2(r10, r00));
+    }
+
+    /// <summary>
     /// Parse model transform JSON from the UI and build OrcaSlicer CLI transform flags.
     /// Input: {"rotation":[rx,ry,rz],"scale":[sx,sy,sz],"position":[px,py,pz]}
-    ///   — radians for rotation, Y-up coordinate system (Three.js/R3F).
-    /// Output: OrcaSlicer flags in degrees, Z-up.
-    /// Axis mapping (rotation): R3F X → --rotate-x, R3F Y (up) → --rotate (Z), R3F Z → --rotate-y.
+    ///   — radians, three.js Euler order 'XYZ', Z-up with the XY bed plane (camera.up = [0,0,1]).
+    /// Output: OrcaSlicer flags in degrees. rotation[0]=X, rotation[1]=Y, rotation[2]=Z map to
+    /// the same axes, but the angles are re-parameterised — see <see cref="ToOrcaRotation"/>.
     /// Position is deliberately not mapped to a flag; see <see cref="TransformResult"/>.
     /// </summary>
     internal static TransformResult BuildTransformFlags(string? modelTransformJson)
@@ -1589,32 +1648,30 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 const double radToDeg = 180.0 / Math.PI;
                 const double epsilon = 0.001;
 
-                // Workspace is Z-up with XY bed plane (camera.up = [0,0,1]).
-                // rotation[0]=X, rotation[1]=Y, rotation[2]=Z — same axes as OrcaSlicer.
+                // The workspace angles cannot be emitted verbatim: OrcaSlicer sums --rotate*
+                // into an Euler triple and rebuilds it as Rz·Ry·Rx ('ZYX'), while the viewer is
+                // three.js 'XYZ'. Re-parameterise first. See ToOrcaRotation.
                 //
-                // ORDER MATTERS. OrcaSlicer applies --rotate* options in command-line order
-                // (CLI::setup records opt_order, and the transform loop walks m_transforms in
-                // that order), each as a rotation about a world axis. The workspace viewer uses
-                // three.js' default Euler order 'XYZ', i.e. column-vector Rx·Ry·Rz, which is
-                // produced by applying Z first, then Y, then X. Emitting X→Y→Z instead yields
-                // 'ZYX' and silently mis-orients any model with more than one non-zero rotation
-                // component — which is the normal output of auto-orient. Keep Z, Y, X.
-                double rotZDeg = rot[2] * radToDeg;
-                if (Math.Abs(rotZDeg) > epsilon)
+                // Flag ORDER is irrelevant — ModelVolume::rotate adds into separate components
+                // and addition commutes — so these are emitted X, Y, Z purely for readability.
+                (double orcaX, double orcaY, double orcaZ) = ToOrcaRotation(rot[0], rot[1], rot[2]);
+
+                double rotXDeg = orcaX * radToDeg;
+                if (Math.Abs(rotXDeg) > epsilon)
                 {
-                    flags.Append(CultureInfo.InvariantCulture, $" --rotate {rotZDeg:F2}");
+                    flags.Append(CultureInfo.InvariantCulture, $" --rotate-x {rotXDeg:F2}");
                 }
 
-                double rotYDeg = rot[1] * radToDeg;
+                double rotYDeg = orcaY * radToDeg;
                 if (Math.Abs(rotYDeg) > epsilon)
                 {
                     flags.Append(CultureInfo.InvariantCulture, $" --rotate-y {rotYDeg:F2}");
                 }
 
-                double rotXDeg = rot[0] * radToDeg;
-                if (Math.Abs(rotXDeg) > epsilon)
+                double rotZDeg = orcaZ * radToDeg;
+                if (Math.Abs(rotZDeg) > epsilon)
                 {
-                    flags.Append(CultureInfo.InvariantCulture, $" --rotate-x {rotXDeg:F2}");
+                    flags.Append(CultureInfo.InvariantCulture, $" --rotate {rotZDeg:F2}");
                 }
             }
 
