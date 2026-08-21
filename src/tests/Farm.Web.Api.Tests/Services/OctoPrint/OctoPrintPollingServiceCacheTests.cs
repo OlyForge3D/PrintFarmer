@@ -203,6 +203,77 @@ public class OctoPrintPollingServiceCacheTests
     }
 
     [Fact]
+    public async Task PollPrinterAsync_InvalidationRacesInFlightCacheMissFetch_DoesNotPublishStaleData()
+    {
+        // Regression test for PR #1786 round 5 review (Hicks): PollPrinterAsync used to read
+        // CachedPrinter, then separately re-read CacheGeneration *after* an async cache-miss fetch
+        // completed, and unconditionally wrote the fetch result into CachedPrinter. An invalidation
+        // that landed while the fetch's continuation was still pending (a real possibility -- an
+        // awaited Task completing does not mean its continuation runs immediately) could therefore
+        // have its cleared state silently overwritten by a fetch that started before the edit
+        // committed, republishing the old row/adapter and undoing the invalidation until the next
+        // 30s reconciliation pass.
+        Guid printerId = Guid.NewGuid();
+        var oldPrinter = new Printer
+        {
+            Id = printerId,
+            Name = "OctoPrint",
+            ServerUrl = "http://octo.local",
+            Backend = (int)PrinterBackend.OctoPrint,
+            Credential = PrinterCredential.FromApiKey("old-key"),
+        };
+
+        // Cache miss: no cached printer, no adapter yet (generation starts at 0).
+        SeedState(printerId, cachedPrinter: null, adapter: null);
+
+        TaskCompletionSource fetchStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<Printer?> fetchResult = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _printersRepository
+            .Setup(r => r.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                fetchStarted.TrySetResult();
+                return fetchResult.Task;
+            });
+
+        using CancellationTokenSource cts = new();
+        Task pollTask = (Task)_pollPrinterAsync.Invoke(_service, [printerId, cts.Token])!;
+
+        // Deterministically wait until PollPrinterAsync has started (and is awaiting) the
+        // cache-miss fetch before simulating a concurrent edit + invalidation.
+        await fetchStarted.Task;
+        _onPrinterInvalidated.Invoke(_service, [printerId]);
+
+        // Now let the in-flight fetch resolve with the row it captured *before* the invalidation
+        // ran -- this is the stale data that must not be republished.
+        fetchResult.SetResult(oldPrinter);
+
+        // The tick must decline (generation fence mismatch) and skip via its Task.Delay; cancel to
+        // break out of that delay immediately instead of waiting for the real polling interval.
+        cts.Cancel();
+        try
+        {
+            await pollTask;
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected: the skipped-tick delay observes the cancellation.
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is OperationCanceledException)
+        {
+            // Expected: reflection wraps the OperationCanceledException thrown from the delay.
+        }
+
+        GetCachedPrinter(printerId).Should().BeNull(
+            "a cache-miss fetch that raced an invalidation must not publish its stale result into " +
+            "CachedPrinter -- otherwise a later tick could treat that stale row as current once the " +
+            "generation stops moving");
+        WebSocketAdapters.Contains(printerId).Should().BeFalse(
+            "no WebSocket adapter should be constructed from a printer snapshot that predates the " +
+            "invalidation that raced its fetch");
+    }
+
+    [Fact]
     public async Task EnsureWebSocketAdapter_ConcurrentCallers_OnlyOneAdapterIsConstructed()
     {
         // Regression test for PR #1786 review round 2 (Bishop/Hicks/Vasquez): the 30-second
