@@ -141,11 +141,19 @@ public class PrinterHub(
         }
 
         var candidateIds = new List<Guid>();
+        // Preserve the caller's original string for each id (first occurrence wins on
+        // duplicates) so the response echoes back exactly what the client sent, not the
+        // server's own re-serialization. Otherwise a valid but non-canonical GUID string
+        // (uppercase, braced, etc.) would round-trip authorized on the server but appear
+        // "unauthorized" to the client's string comparison, causing it to be wrongly
+        // dropped from desiredQueuePrinters/subscribedPrinters (see PR #1801 review).
+        var originalStringsById = new Dictionary<Guid, string>();
         foreach (string printerId in printerIds)
         {
-            if (Guid.TryParse(printerId, out Guid id) && !candidateIds.Contains(id))
+            if (Guid.TryParse(printerId, out Guid id) && !originalStringsById.ContainsKey(id))
             {
                 candidateIds.Add(id);
+                originalStringsById[id] = printerId;
             }
         }
 
@@ -172,7 +180,7 @@ public class PrinterHub(
             }
 
             await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Printer(id));
-            authorized.Add(id.ToString());
+            authorized.Add(originalStringsById[id]);
 
             PrinterStatusDto? status = statusCache.GetStatus(id);
             if (status is not null)

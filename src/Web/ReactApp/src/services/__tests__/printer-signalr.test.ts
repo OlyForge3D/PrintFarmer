@@ -553,12 +553,12 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       printerSignalRService.dispose();
     });
 
-    it('restores authorized groups and removes a rejected group on reconnect', async () => {
+    it('restores authorized groups and removes a rejected group on reconnect, with exactly one batched printer invocation', async () => {
       const { printerSignalRService } = await import('../printer-signalr');
       await flushMicrotasks();
       await printerSignalRService.connect();
       await printerSignalRService.replaceQueueResourceSubscriptions({
-        printerIds: ['printer-1'],
+        printerIds: ['printer-1', 'printer-2', 'printer-3'],
         jobIds: ['job-1'],
         projectIds: ['project-1'],
       });
@@ -577,17 +577,21 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       signalRTestState.triggerReconnected();
       await flushMicrotasks();
 
-      expect(signalRTestState.connection.invoke).toHaveBeenCalledWith(
-        'SubscribeToPrintersAsync',
-        ['printer-1']
+      // The whole point of issue #1764 is one batched invocation instead of N
+      // serialized ones — assert the exact call count, not just call args, so
+      // a regression back to N per-printer invokes would fail this test.
+      const printerInvocations = signalRTestState.connection.invoke.mock.calls.filter(
+        ([method]) => method === 'SubscribeToPrintersAsync'
       );
+      expect(printerInvocations).toHaveLength(1);
+      expect(printerInvocations[0][1]).toEqual(['printer-1', 'printer-2', 'printer-3']);
       expect(signalRTestState.connection.invoke).toHaveBeenCalledWith(
         'SubscribeToProjectAsync',
         'project-1'
       );
       expect(printerSignalRService.getQueueSubscriptionSnapshot()).toEqual(
         expect.objectContaining({
-          printerIds: ['printer-1'],
+          printerIds: ['printer-1', 'printer-2', 'printer-3'],
           jobIds: [],
           projectIds: ['project-1'],
         })

@@ -502,6 +502,34 @@ public class PrinterHubTests
     }
 
     [Fact]
+    public async Task SubscribeToPrintersAsync_WithNonCanonicalGuidString_EchoesBackOriginalRequestedString()
+    {
+        // A GUID string in an uppercase, hyphen-braced format is a valid GUID
+        // (Guid.TryParse accepts it), but is not what Guid.ToString() would
+        // produce. The response must echo back exactly what the client sent so
+        // the client's own string-equality comparison recognizes it as
+        // authorized (see PR #1801 review — Bishop).
+        Guid printerId = Guid.NewGuid();
+        string nonCanonicalRequestedId = "{" + printerId.ToString().ToUpperInvariant() + "}";
+
+        _resourceAuthorizationMock
+            .Setup(service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Count == 1 && ids.Contains(printerId)),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid> { printerId });
+
+        string[] result = await _hub.SubscribeToPrintersAsync([nonCanonicalRequestedId]);
+
+        Assert.Equal([nonCanonicalRequestedId], result);
+        _groupsMock.Verify(groups => groups.AddToGroupAsync(
+            "test-connection-id",
+            AuthorizedHubGroups.Printer(printerId),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task SubscribeToPrintersAsync_WithMultipleAuthorizedCachedStatuses_SendsSingleBatchedFrame()
     {
         Guid idA = Guid.NewGuid();
