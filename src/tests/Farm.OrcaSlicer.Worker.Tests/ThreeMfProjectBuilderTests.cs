@@ -173,59 +173,135 @@ public class ThreeMfProjectBuilderTests : IDisposable
 
     #endregion
 
-    #region BuildTransformAttribute Tests
+    #region BuildItemTransform Tests
+
+    private static readonly MeshBounds OriginBounds = new(0, 0, 0, 0);
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("  ")]
-    public void BuildTransformAttribute_NullOrEmpty_ReturnsEmpty(string? json)
+    public void BuildItemTransform_NullOrEmpty_PlacesModelAtBedCenter(string? json)
     {
-        ThreeMfProjectBuilder.BuildTransformAttribute(json).Should().BeEmpty();
-    }
+        double[] m = ParseTransformValues(BuildItemTransform(json, OriginBounds, (110, 110)));
 
-    [Fact]
-    public void BuildTransformAttribute_IdentityTransform_ReturnsEmpty()
-    {
-        string json = """{"rotation":[0,0,0],"scale":[1,1,1],"position":[0,0,0]}""";
-
-        ThreeMfProjectBuilder.BuildTransformAttribute(json).Should().BeEmpty();
-    }
-
-    [Fact]
-    public void BuildTransformAttribute_InvalidJson_ReturnsEmpty()
-    {
-        ThreeMfProjectBuilder.BuildTransformAttribute("not json{").Should().BeEmpty();
-    }
-
-    [Fact]
-    public void BuildTransformAttribute_TranslationOnly_CorrectMatrix()
-    {
-        string json = """{"rotation":[0,0,0],"scale":[1,1,1],"position":[10,20,30]}""";
-
-        string attr = ThreeMfProjectBuilder.BuildTransformAttribute(json);
-        double[] m = ParseTransformValues(attr);
-
-        // Identity upper-left, translation in last row
+        // Identity orientation, translated to the bed centre — a model with no transform still
+        // has to be moved onto the bed, because 3MF build items are in bed coordinates.
         m[0].Should().BeApproximately(1, 1e-6);
         m[4].Should().BeApproximately(1, 1e-6);
         m[8].Should().BeApproximately(1, 1e-6);
-        m[9].Should().BeApproximately(10, 1e-6);
-        m[10].Should().BeApproximately(20, 1e-6);
-        m[11].Should().BeApproximately(30, 1e-6);
+        m[9].Should().BeApproximately(110, 1e-6);
+        m[10].Should().BeApproximately(110, 1e-6);
     }
 
     [Fact]
-    public void BuildTransformAttribute_UniformScale_CorrectDiagonal()
+    public void BuildItemTransform_IdentityTransform_PlacesModelAtBedCenter()
     {
-        string json = """{"rotation":[0,0,0],"scale":[2,2,2],"position":[0,0,0]}""";
+        string json = """{"rotation":[0,0,0],"scale":[1,1,1],"position":[0,0,0]}""";
 
-        string attr = ThreeMfProjectBuilder.BuildTransformAttribute(json);
-        double[] m = ParseTransformValues(attr);
+        double[] m = ParseTransformValues(BuildItemTransform(json, OriginBounds, (125, 105)));
 
-        m[0].Should().BeApproximately(2, 1e-6);
-        m[4].Should().BeApproximately(2, 1e-6);
-        m[8].Should().BeApproximately(2, 1e-6);
+        m[9].Should().BeApproximately(125, 1e-6);
+        m[10].Should().BeApproximately(105, 1e-6);
+    }
+
+    [Fact]
+    public void BuildItemTransform_InvalidJson_PlacesModelAtBedCenter()
+    {
+        double[] m = ParseTransformValues(BuildItemTransform("not json{", OriginBounds, (110, 110)));
+
+        m[0].Should().BeApproximately(1, 1e-6);
+        m[9].Should().BeApproximately(110, 1e-6);
+        m[10].Should().BeApproximately(110, 1e-6);
+    }
+
+    [Fact]
+    public void BuildItemTransform_WorkspacePosition_IsRelativeToBedCenter()
+    {
+        // The React workspace draws the bed centred on the world origin, so a model at
+        // position [30, 0] is 30 mm right of the bed centre — not 30 mm from the bed corner.
+        string json = """{"rotation":[0,0,0],"scale":[1,1,1],"position":[30,0,0]}""";
+
+        double[] m = ParseTransformValues(BuildItemTransform(json, OriginBounds, (110, 110)));
+
+        m[9].Should().BeApproximately(140, 1e-6);
+        m[10].Should().BeApproximately(110, 1e-6);
+    }
+
+    [Fact]
+    public void BuildItemTransform_OffOriginMesh_IsRecenteredOnItsOwnBoundingBox()
+    {
+        // The viewer recentres every mesh on its bounding box before positioning it, so an STL
+        // authored far from its own origin must still land on the requested point.
+        var bounds = new MeshBounds(CenterX: 500, CenterY: -200, CenterZ: 10, HalfHeight: 10);
+        string json = """{"rotation":[0,0,0],"scale":[1,1,1],"position":[0,0,0]}""";
+
+        double[] m = ParseTransformValues(BuildItemTransform(json, bounds, (110, 110)));
+
+        m[9].Should().BeApproximately(110 - 500, 1e-6);
+        m[10].Should().BeApproximately(110 + 200, 1e-6);
+    }
+
+    [Fact]
+    public void BuildItemTransform_ZeroZPosition_SitsOnTheBed()
+    {
+        // position.z == 0 means "sitting on the bed": the mesh centre is lifted by half the
+        // model height so its lowest point is at Z=0.
+        var bounds = new MeshBounds(CenterX: 0, CenterY: 0, CenterZ: 12, HalfHeight: 12);
+        string json = """{"rotation":[0,0,0],"scale":[1,1,1],"position":[0,0,0]}""";
+
+        double[] m = ParseTransformValues(BuildItemTransform(json, bounds, (110, 110)));
+
+        // Raw mesh spans Z 0..24; after the transform its bottom must be at Z=0.
+        m[11].Should().BeApproximately(0, 1e-6);
+    }
+
+    [Fact]
+    public void BuildItemTransform_ScaleAndRotation_AppliedAboutTheMeshCenter()
+    {
+        // 90° about Z with 2x scale, mesh centred at (10, 0, 0) in its own coordinates.
+        var bounds = new MeshBounds(CenterX: 10, CenterY: 0, CenterZ: 0, HalfHeight: 0);
+        string json = """{"rotation":[0,0,1.5707963267948966],"scale":[2,2,2],"position":[0,0,0]}""";
+
+        double[] m = ParseTransformValues(BuildItemTransform(json, bounds, (110, 110)));
+
+        // The mesh centre must map exactly onto the bed centre regardless of rotation/scale.
+        (double X, double Y, double _) = MapPoint(m, 10, 0, 0);
+        X.Should().BeApproximately(110, 1e-6);
+        Y.Should().BeApproximately(110, 1e-6);
+
+        // Linear part is still Scale × Rotate(90° about Z).
+        m[0].Should().BeApproximately(0, 1e-6);
+        m[1].Should().BeApproximately(2, 1e-6);
+        m[3].Should().BeApproximately(-2, 1e-6);
+        m[4].Should().BeApproximately(0, 1e-6);
+    }
+
+    #endregion
+
+    #region ComputeBounds Tests
+
+    [Fact]
+    public void ComputeBounds_EmptyMesh_ReturnsZeroBounds()
+    {
+        MeshBounds bounds = ThreeMfProjectBuilder.ComputeBounds(
+            new MeshData(Array.Empty<(float, float, float)>(), Array.Empty<(int, int, int)>()));
+
+        bounds.Should().Be(new MeshBounds(0, 0, 0, 0));
+    }
+
+    [Fact]
+    public void ComputeBounds_SingleTriangle_ReturnsBoundingBoxCenter()
+    {
+        // Triangle (0,0,0), (1,0,0), (0,1,0) → bbox 0..1 on X and Y, flat in Z.
+        MeshData mesh = ThreeMfProjectBuilder.ParseBinaryStl(CreateSingleTriangleStl());
+
+        MeshBounds bounds = ThreeMfProjectBuilder.ComputeBounds(mesh);
+
+        bounds.CenterX.Should().BeApproximately(0.5, 1e-6);
+        bounds.CenterY.Should().BeApproximately(0.5, 1e-6);
+        bounds.CenterZ.Should().BeApproximately(0, 1e-6);
+        bounds.HalfHeight.Should().BeApproximately(0, 1e-6);
     }
 
     #endregion
@@ -321,13 +397,15 @@ public class ThreeMfProjectBuilderTests : IDisposable
 
     #region Build (end-to-end) Tests
 
+    private static readonly (double X, double Y) TestBedCenter = (110, 110);
+
     [Fact]
     public void Build_SingleModel_NoTransform_ProducesValid3Mf()
     {
         string stl = CreateSingleTriangleStl();
         var models = new[] { new ModelEntry(stl, null) };
 
-        string path = ThreeMfProjectBuilder.Build(models, _tempDir);
+        string path = ThreeMfProjectBuilder.Build(models, _tempDir, TestBedCenter);
 
         File.Exists(path).Should().BeTrue();
         Path.GetExtension(path).Should().Be(".3mf");
@@ -338,7 +416,32 @@ public class ThreeMfProjectBuilderTests : IDisposable
 
         var items = modelDoc.Descendants(Ns3Mf + "item").ToList();
         items.Should().HaveCount(1);
-        items[0].Attribute("transform").Should().BeNull("no transform for null input");
+        items[0].Attribute("transform").Should().NotBeNull(
+            "even an untransformed model must be translated onto the bed");
+    }
+
+    /// <summary>
+    /// Regression for #1794: a SINGLE model with a custom position must go through the 3MF
+    /// project so its placement survives — there is no CLI flag that can express it.
+    /// </summary>
+    [Fact]
+    public void Build_SingleModel_WithPosition_EmbedsBedRelativePlacement()
+    {
+        string stl = CreateSingleTriangleStl();
+        string tf = """{"rotation":[0,0,0],"scale":[1,1,1],"position":[30,0,0]}""";
+
+        string path = ThreeMfProjectBuilder.Build([new ModelEntry(stl, tf)], _tempDir, TestBedCenter);
+
+        XDocument modelDoc = Extract3DModelXml(path);
+        var items = modelDoc.Descendants(Ns3Mf + "item").ToList();
+        items.Should().HaveCount(1);
+
+        double[] m = ParseTransformValues(items[0].Attribute("transform")!.Value);
+
+        // Mesh bbox centre is (0.5, 0.5, 0); it must land at bed centre + workspace position.
+        (double X, double Y, double _) = MapPoint(m, 0.5, 0.5, 0);
+        X.Should().BeApproximately(140, 1e-6);
+        Y.Should().BeApproximately(110, 1e-6);
     }
 
     [Fact]
@@ -356,7 +459,7 @@ public class ThreeMfProjectBuilderTests : IDisposable
             new ModelEntry(stl2, tf2)
         };
 
-        string path = ThreeMfProjectBuilder.Build(models, _tempDir);
+        string path = ThreeMfProjectBuilder.Build(models, _tempDir, TestBedCenter);
 
         XDocument modelDoc = Extract3DModelXml(path);
         var objects = modelDoc.Descendants(Ns3Mf + "object").ToList();
@@ -367,12 +470,25 @@ public class ThreeMfProjectBuilderTests : IDisposable
 
         items[0].Attribute("transform").Should().NotBeNull("model 1 has translation");
         items[1].Attribute("transform").Should().NotBeNull("model 2 has rotation + scale");
+
+        // The two models keep their relative layout: 10 mm right vs 20 mm back of bed centre.
+        // model1 mesh bbox centre is (0.5, 0.5, 0); model2's is (2.5, 0.5, 0).
+        double[] m1 = ParseTransformValues(items[0].Attribute("transform")!.Value);
+        double[] m2 = ParseTransformValues(items[1].Attribute("transform")!.Value);
+
+        (double X1, double Y1, double _) = MapPoint(m1, 0.5, 0.5, 0);
+        X1.Should().BeApproximately(120, 1e-6);
+        Y1.Should().BeApproximately(110, 1e-6);
+
+        (double X2, double Y2, double _) = MapPoint(m2, 2.5, 0.5, 0);
+        X2.Should().BeApproximately(110, 1e-6);
+        Y2.Should().BeApproximately(130, 1e-6);
     }
 
     [Fact]
     public void Build_EmptyModels_ThrowsArgumentException()
     {
-        Action act = () => ThreeMfProjectBuilder.Build(Array.Empty<ModelEntry>(), _tempDir);
+        Action act = () => ThreeMfProjectBuilder.Build(Array.Empty<ModelEntry>(), _tempDir, TestBedCenter);
 
         act.Should().Throw<ArgumentException>();
     }
@@ -381,7 +497,7 @@ public class ThreeMfProjectBuilderTests : IDisposable
     public void Build_3MfZipContainsRequiredEntries()
     {
         string stl = CreateSingleTriangleStl();
-        string path = ThreeMfProjectBuilder.Build([new ModelEntry(stl, null)], _tempDir);
+        string path = ThreeMfProjectBuilder.Build([new ModelEntry(stl, null)], _tempDir, TestBedCenter);
 
         using ZipArchive zip = ZipFile.OpenRead(path);
         var entryNames = zip.Entries.Select(e => e.FullName).ToList();
@@ -395,7 +511,7 @@ public class ThreeMfProjectBuilderTests : IDisposable
     public void Build_MeshDataPreservedInXml()
     {
         string stl = CreateTwoTriangleStl();
-        string path = ThreeMfProjectBuilder.Build([new ModelEntry(stl, null)], _tempDir);
+        string path = ThreeMfProjectBuilder.Build([new ModelEntry(stl, null)], _tempDir, TestBedCenter);
 
         XDocument doc = Extract3DModelXml(path);
         var vertices = doc.Descendants(Ns3Mf + "vertex").ToList();
@@ -413,6 +529,14 @@ public class ThreeMfProjectBuilderTests : IDisposable
     {
         return attr.Split(' ').Select(s => double.Parse(s, Inv)).ToArray();
     }
+
+    /// <summary>
+    /// Apply a parsed 3MF transform (row-vector convention) to a point.
+    /// </summary>
+    private static (double X, double Y, double Z) MapPoint(double[] m, double x, double y, double z) =>
+        ((x * m[0]) + (y * m[3]) + (z * m[6]) + m[9],
+         (x * m[1]) + (y * m[4]) + (z * m[7]) + m[10],
+         (x * m[2]) + (y * m[5]) + (z * m[8]) + m[11]);
 
     private static XDocument Extract3DModelXml(string threeMfPath)
     {

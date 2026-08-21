@@ -28,11 +28,34 @@ internal static class ThreeMfProjectBuilder
         IReadOnlyList<(int V1, int V2, int V3)> Triangles);
 
     /// <summary>
+    /// Axis-aligned bounds of a raw mesh, used as the pivot for placement.
+    /// The workspace viewer recentres every loaded mesh on this box before applying
+    /// rotation/scale, so the 3MF transform has to use the same pivot to land the model
+    /// where the user put it.
+    /// </summary>
+    internal readonly record struct MeshBounds(
+        double CenterX,
+        double CenterY,
+        double CenterZ,
+        double HalfHeight);
+
+    /// <summary>
     /// Creates a 3MF file in <paramref name="outputDirectory"/> embedding the given models
     /// with their transforms baked into the 3MF build section.
     /// </summary>
+    /// <param name="models">Model files plus their workspace transform JSON.</param>
+    /// <param name="outputDirectory">Directory to write <c>project.3mf</c> into.</param>
+    /// <param name="bedCenter">
+    /// Bed centre in OrcaSlicer bed coordinates (the centre of the machine profile's
+    /// <c>printable_area</c>). Workspace positions are expressed relative to the bed centre,
+    /// while OrcaSlicer places 3MF build items in bed coordinates whose origin is usually the
+    /// front-left corner, so every model is translated by this offset.
+    /// </param>
     /// <returns>Absolute path to the generated .3mf file.</returns>
-    internal static string Build(IReadOnlyList<ModelEntry> models, string outputDirectory)
+    internal static string Build(
+        IReadOnlyList<ModelEntry> models,
+        string outputDirectory,
+        (double X, double Y) bedCenter)
     {
         ArgumentNullException.ThrowIfNull(models);
         if (models.Count == 0)
@@ -48,7 +71,7 @@ internal static class ThreeMfProjectBuilder
             meshes.Add(ParseBinaryStl(model.FilePath));
         }
 
-        XDocument modelDoc = BuildModelXml(models, meshes);
+        XDocument modelDoc = BuildModelXml(models, meshes, bedCenter);
 
         using FileStream fs = File.Create(outputPath);
         using ZipArchive zip = new(fs, ZipArchiveMode.Create);
@@ -102,57 +125,105 @@ internal static class ThreeMfProjectBuilder
         return new MeshData(vertices, triangles);
     }
 
-    /// <summary>
-    /// Parse transform JSON and return a 3MF transform attribute string (12 space-separated floats).
-    /// Returns empty string for null/identity transforms.
-    /// </summary>
-    internal static string BuildTransformAttribute(string? transformJson)
+    /// <summary>Computes the axis-aligned bounds of a parsed mesh.</summary>
+    internal static MeshBounds ComputeBounds(MeshData mesh)
     {
-        if (string.IsNullOrWhiteSpace(transformJson))
+        if (mesh.Vertices is null || mesh.Vertices.Count == 0)
         {
-            return string.Empty;
+            return new MeshBounds(0, 0, 0, 0);
         }
 
-        try
+        double minX = double.MaxValue, minY = double.MaxValue, minZ = double.MaxValue;
+        double maxX = double.MinValue, maxY = double.MinValue, maxZ = double.MinValue;
+
+        foreach ((float x, float y, float z) in mesh.Vertices)
         {
-            using JsonDocument doc = JsonDocument.Parse(transformJson);
-            JsonElement root = doc.RootElement;
-
-            double[] rot = [0, 0, 0];
-            double[] scale = [1, 1, 1];
-            double[] pos = [0, 0, 0];
-
-            if (root.TryGetProperty("rotation", out JsonElement rotEl) && rotEl.ValueKind == JsonValueKind.Array)
-            {
-                ParseArrayInto(rotEl, rot);
-            }
-
-            if (root.TryGetProperty("scale", out JsonElement scaleEl) && scaleEl.ValueKind == JsonValueKind.Array)
-            {
-                ParseArrayInto(scaleEl, scale);
-            }
-
-            if (root.TryGetProperty("position", out JsonElement posEl) && posEl.ValueKind == JsonValueKind.Array)
-            {
-                ParseArrayInto(posEl, pos);
-            }
-
-            const double eps = 0.0001;
-            bool isIdentity = Math.Abs(rot[0]) < eps && Math.Abs(rot[1]) < eps && Math.Abs(rot[2]) < eps
-                           && Math.Abs(scale[0] - 1) < eps && Math.Abs(scale[1] - 1) < eps && Math.Abs(scale[2] - 1) < eps
-                           && Math.Abs(pos[0]) < eps && Math.Abs(pos[1]) < eps && Math.Abs(pos[2]) < eps;
-
-            if (isIdentity)
-            {
-                return string.Empty;
-            }
-
-            return ComputeTransformMatrix(rot[0], rot[1], rot[2], scale[0], scale[1], scale[2], pos[0], pos[1], pos[2]);
+            minX = Math.Min(minX, x);
+            minY = Math.Min(minY, y);
+            minZ = Math.Min(minZ, z);
+            maxX = Math.Max(maxX, x);
+            maxY = Math.Max(maxY, y);
+            maxZ = Math.Max(maxZ, z);
         }
-        catch (JsonException)
+
+        return new MeshBounds(
+            (minX + maxX) / 2,
+            (minY + maxY) / 2,
+            (minZ + maxZ) / 2,
+            (maxZ - minZ) / 2);
+    }
+
+    /// <summary>
+    /// Build the 3MF <c>transform</c> attribute that places one model exactly where the
+    /// workspace shows it.
+    /// <para>
+    /// The workspace recentres each mesh on its bounding box, rotates and scales it about that
+    /// centre, then positions that centre relative to the <em>bed centre</em>, with
+    /// <c>position.z == 0</c> meaning "sitting on the bed". OrcaSlicer instead places 3MF build
+    /// items in bed coordinates, so the emitted matrix is
+    /// <c>Translate(-meshCentre) · Scale · Rotate · Translate(bedCentre + position)</c>.
+    /// </para>
+    /// <para>
+    /// This is the only mechanism available: OrcaSlicer 2.4.2 compiles its <c>--center</c> and
+    /// <c>--align-xy</c> CLI options out of <c>CLITransformConfigDef</c>, so there is no
+    /// command-line flag that can place a model at an absolute bed coordinate (issue #1794).
+    /// </para>
+    /// </summary>
+    internal static string BuildItemTransform(
+        string? transformJson,
+        MeshBounds bounds,
+        (double X, double Y) bedCenter)
+    {
+        double[] rot = [0, 0, 0];
+        double[] scale = [1, 1, 1];
+        double[] pos = [0, 0, 0];
+
+        if (!string.IsNullOrWhiteSpace(transformJson))
         {
-            return string.Empty;
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(transformJson);
+                JsonElement root = doc.RootElement;
+
+                if (root.TryGetProperty("rotation", out JsonElement rotEl) && rotEl.ValueKind == JsonValueKind.Array)
+                {
+                    ParseArrayInto(rotEl, rot);
+                }
+
+                if (root.TryGetProperty("scale", out JsonElement scaleEl) && scaleEl.ValueKind == JsonValueKind.Array)
+                {
+                    ParseArrayInto(scaleEl, scale);
+                }
+
+                if (root.TryGetProperty("position", out JsonElement posEl) && posEl.ValueKind == JsonValueKind.Array)
+                {
+                    ParseArrayInto(posEl, pos);
+                }
+            }
+            catch (JsonException)
+            {
+                // Malformed transform: fall back to an untransformed model centred on the bed.
+            }
         }
+
+        double[] linear = ComputeLinear(rot[0], rot[1], rot[2], scale[0], scale[1], scale[2]);
+
+        // Target for the mesh's own bounding-box centre, in OrcaSlicer bed coordinates.
+        double targetX = bedCenter.X + pos[0];
+        double targetY = bedCenter.Y + pos[1];
+
+        // The viewer keeps `position.z == 0` on the bed by lifting the centred mesh by half its
+        // (untransformed) height; OrcaSlicer re-normalises Z via ensure_on_bed regardless.
+        double targetZ = pos[2] + bounds.HalfHeight;
+
+        // Row-vector composition: Translate(-c) · L · Translate(target)
+        // ⇒ translation row = target − (c · L).
+        double cx = bounds.CenterX, cy = bounds.CenterY, cz = bounds.CenterZ;
+        double tx = targetX - ((cx * linear[0]) + (cy * linear[3]) + (cz * linear[6]));
+        double ty = targetY - ((cx * linear[1]) + (cy * linear[4]) + (cz * linear[7]));
+        double tz = targetZ - ((cx * linear[2]) + (cy * linear[5]) + (cz * linear[8]));
+
+        return FormatMatrix(linear, tx, ty, tz);
     }
 
     /// <summary>
@@ -166,28 +237,38 @@ internal static class ThreeMfProjectBuilder
     internal static string ComputeTransformMatrix(
         double rx, double ry, double rz,
         double sx, double sy, double sz,
-        double tx, double ty, double tz)
+        double tx, double ty, double tz) =>
+        FormatMatrix(ComputeLinear(rx, ry, rz, sx, sy, sz), tx, ty, tz);
+
+    /// <summary>
+    /// Upper-left 3×3 of the row-vector transform: Scale × (Rx × Ry × Rz), row-major.
+    /// </summary>
+    private static double[] ComputeLinear(double rx, double ry, double rz, double sx, double sy, double sz)
     {
         double cosRx = Math.Cos(rx), sinRx = Math.Sin(rx);
         double cosRy = Math.Cos(ry), sinRy = Math.Sin(ry);
         double cosRz = Math.Cos(rz), sinRz = Math.Sin(rz);
 
-        // Combined rotation R = Rx × Ry × Rz (row-vector: apply X first, then Y, then Z).
-        // Upper-left 3×3 = Scale × R.
-        double m00 = sx * cosRy * cosRz;
-        double m01 = sx * cosRy * sinRz;
-        double m02 = sx * (-sinRy);
+        return
+        [
+            sx * cosRy * cosRz,
+            sx * cosRy * sinRz,
+            sx * -sinRy,
 
-        double m10 = sy * ((sinRx * sinRy * cosRz) - (cosRx * sinRz));
-        double m11 = sy * ((sinRx * sinRy * sinRz) + (cosRx * cosRz));
-        double m12 = sy * sinRx * cosRy;
+            sy * ((sinRx * sinRy * cosRz) - (cosRx * sinRz)),
+            sy * ((sinRx * sinRy * sinRz) + (cosRx * cosRz)),
+            sy * sinRx * cosRy,
 
-        double m20 = sz * ((cosRx * sinRy * cosRz) + (sinRx * sinRz));
-        double m21 = sz * ((cosRx * sinRy * sinRz) - (sinRx * cosRz));
-        double m22 = sz * cosRx * cosRy;
-
-        return string.Create(Inv, $"{C(m00):G9} {C(m01):G9} {C(m02):G9} {C(m10):G9} {C(m11):G9} {C(m12):G9} {C(m20):G9} {C(m21):G9} {C(m22):G9} {C(tx):G9} {C(ty):G9} {C(tz):G9}");
+            sz * ((cosRx * sinRy * cosRz) + (sinRx * sinRz)),
+            sz * ((cosRx * sinRy * sinRz) - (sinRx * cosRz)),
+            sz * cosRx * cosRy,
+        ];
     }
+
+    private static string FormatMatrix(double[] m, double tx, double ty, double tz) =>
+        string.Create(
+            Inv,
+            $"{C(m[0]):G9} {C(m[1]):G9} {C(m[2]):G9} {C(m[3]):G9} {C(m[4]):G9} {C(m[5]):G9} {C(m[6]):G9} {C(m[7]):G9} {C(m[8]):G9} {C(tx):G9} {C(ty):G9} {C(tz):G9}");
 
     /// <summary>Snap near-zero values to exactly zero to avoid scientific notation noise.</summary>
     private static double C(double v) => Math.Abs(v) < CleanEpsilon ? 0.0 : v;
@@ -240,7 +321,8 @@ internal static class ThreeMfProjectBuilder
 
     private static XDocument BuildModelXml(
         IReadOnlyList<ModelEntry> models,
-        List<MeshData> meshes)
+        List<MeshData> meshes,
+        (double X, double Y) bedCenter)
     {
         var resources = new XElement(Ns3Mf + "resources");
         var buildSection = new XElement(Ns3Mf + "build");
@@ -278,13 +360,8 @@ internal static class ThreeMfProjectBuilder
 
             var item = new XElement(
                 Ns3Mf + "item",
-                new XAttribute("objectid", objectId));
-
-            string transformAttr = BuildTransformAttribute(models[i].TransformJson);
-            if (!string.IsNullOrEmpty(transformAttr))
-            {
-                item.Add(new XAttribute("transform", transformAttr));
-            }
+                new XAttribute("objectid", objectId),
+                new XAttribute("transform", BuildItemTransform(models[i].TransformJson, ComputeBounds(mesh), bedCenter)));
 
             buildSection.Add(item);
         }

@@ -130,14 +130,17 @@ public class BuildTransformFlagsTests
     }
 
     [Fact]
-    public void BuildTransformFlags_PositionOffset_EmitsCenterFlag()
+    public void BuildTransformFlags_PositionOffset_ReportsPositionWithoutCenterFlag()
     {
         // position [10, 20, 0] → bed offset X=10, Y=20 (Z-up: XY is bed plane)
         string json = """{"rotation":[0,0,0],"scale":[1,1,1],"position":[10,20,0]}""";
 
         TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
 
-        result.Flags.Should().Contain("--center 10.00,20.00");
+        // OrcaSlicer 2.4.2 has no --center option: emitting one aborts the run with
+        // CLI_INVALID_PARAMS before slicing (#1794). Placement is embedded in a 3MF instead.
+        result.Flags.Should().NotContain("--center");
+        result.Flags.Should().BeEmpty();
         result.HasCustomPosition.Should().BeTrue();
     }
 
@@ -153,18 +156,18 @@ public class BuildTransformFlagsTests
     }
 
     [Fact]
-    public void BuildTransformFlags_NegativePosition_EmitsNegativeCenter()
+    public void BuildTransformFlags_NegativePosition_ReportsPositionWithoutCenterFlag()
     {
         string json = """{"position":[-15.5,-30.2,0]}""";
 
         TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
 
-        result.Flags.Should().Contain("--center -15.50,-30.20");
+        result.Flags.Should().NotContain("--center");
         result.HasCustomPosition.Should().BeTrue();
     }
 
     [Fact]
-    public void BuildTransformFlags_FullTransform_AllFlagsPresent()
+    public void BuildTransformFlags_FullTransform_RotationAndScaleOnly()
     {
         // 90° X rotation, 2x scale, position offset on XY bed plane
         string json = """{"rotation":[1.5707963,0,0],"scale":[2,2,2],"position":[50,75,0]}""";
@@ -173,7 +176,7 @@ public class BuildTransformFlagsTests
 
         result.Flags.Should().Contain("--rotate-x 90.00");
         result.Flags.Should().Contain("--scale 2.0000");
-        result.Flags.Should().Contain("--center 50.00,75.00");
+        result.Flags.Should().NotContain("--center");
         result.HasCustomPosition.Should().BeTrue();
     }
 
@@ -190,13 +193,13 @@ public class BuildTransformFlagsTests
     }
 
     [Fact]
-    public void BuildTransformFlags_OnlyXPosition_EmitsCenterWithZeroY()
+    public void BuildTransformFlags_OnlyXPosition_ReportsPositionWithoutCenterFlag()
     {
         string json = """{"position":[25,0,0]}""";
 
         TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
 
-        result.Flags.Should().Contain("--center 25.00,0.00");
+        result.Flags.Should().NotContain("--center");
         result.HasCustomPosition.Should().BeTrue();
     }
 
@@ -225,13 +228,33 @@ public class BuildTransformFlagsTests
     }
 
     [Fact]
-    public void BuildTransformFlags_OnlyYPosition_EmitsCenterWithZeroX()
+    public void BuildTransformFlags_OnlyYPosition_ReportsPositionWithoutCenterFlag()
     {
         string json = """{"position":[0,30,0]}""";
 
         TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
 
-        result.Flags.Should().Contain("--center 0.00,30.00");
+        result.Flags.Should().NotContain("--center");
         result.HasCustomPosition.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Regression guard for #1794: <c>--center</c> is not a valid OrcaSlicer 2.4.2 option
+    /// (it is commented out of <c>CLITransformConfigDef</c>), so it must never appear in the
+    /// flags for ANY transform shape. Passing it aborts the run with exit 254.
+    /// </summary>
+    [Theory]
+    [InlineData("""{"rotation":[0,0,0],"scale":[1,1,1],"position":[30,0,0]}""")]
+    [InlineData("""{"rotation":[0,0,0],"scale":[1,1,1],"position":[0,45,0]}""")]
+    [InlineData("""{"rotation":[0,0,0],"scale":[1,1,1],"position":[-12.5,88.25,3]}""")]
+    [InlineData("""{"rotation":[1.5707963,0.7853981,3.1415926],"scale":[2,2,2],"position":[110,110,0]}""")]
+    [InlineData("""{"position":[0.0011,0.0011,0]}""")]
+    public void BuildTransformFlags_NeverEmitsUnsupportedPositionalFlags(string json)
+    {
+        TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
+
+        result.Flags.Should().NotContain("--center");
+        result.Flags.Should().NotContain("--align-xy");
+        result.Flags.Should().NotContain("--align_xy");
     }
 }
