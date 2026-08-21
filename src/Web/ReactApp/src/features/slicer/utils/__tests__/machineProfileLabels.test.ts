@@ -4,6 +4,7 @@ import {
   resolveHighFlow,
   stripNozzleSuffix,
   buildMachineProfileLabels,
+  isProcessProfileCoreOneVariantCompatible,
 } from '../machineProfileLabels';
 
 describe('stripNozzleSuffix', () => {
@@ -68,6 +69,77 @@ describe('mentionsHighFlow', () => {
   it('matches hyphen- and underscore-delimited forms', () => {
     expect(mentionsHighFlow('MK4-HF-test')).toBe(true);
     expect(mentionsHighFlow('MK4_HF_test')).toBe(true);
+  });
+});
+
+describe('isProcessProfileCoreOneVariantCompatible', () => {
+  // Regression coverage for the issue: a process profile that lists BOTH the
+  // standard and HF machine in `compatiblePrinters` was dropped for the
+  // standard machine because the old guard joined the whole compatiblePrinters
+  // list into one string before testing for "HF" — the joined text mentions
+  // HF even though the profile is genuinely dual-compatible.
+  it('keeps a dual-compatible profile for BOTH the standard and HF selection', () => {
+    const compatiblePrinters = ['Prusa CORE One 0.4 nozzle', 'Prusa CORE One HF 0.4 nozzle'];
+
+    expect(isProcessProfileCoreOneVariantCompatible('0.20mm Standard @CORE One', compatiblePrinters, false))
+      .toBe(true);
+    expect(isProcessProfileCoreOneVariantCompatible('0.20mm Standard @CORE One', compatiblePrinters, true))
+      .toBe(true);
+  });
+
+  it('still hides an HF-only profile from the standard machine, and vice versa', () => {
+    expect(isProcessProfileCoreOneVariantCompatible(
+      '0.20mm Standard @CORE One HF',
+      ['Prusa CORE One HF 0.4 nozzle'],
+      false,
+    )).toBe(false);
+
+    expect(isProcessProfileCoreOneVariantCompatible(
+      '0.20mm Standard @CORE One',
+      ['Prusa CORE One 0.4 nozzle'],
+      true,
+    )).toBe(false);
+  });
+
+  it('falls back to the profile NAME when compatiblePrinters has no CORE One entries', () => {
+    expect(isProcessProfileCoreOneVariantCompatible('0.20mm Standard @CORE One HF', undefined, false)).toBe(false);
+    expect(isProcessProfileCoreOneVariantCompatible('0.20mm Standard @CORE One HF', [], true)).toBe(true);
+    expect(isProcessProfileCoreOneVariantCompatible('0.20mm Standard @CORE One', undefined, false)).toBe(true);
+  });
+
+  it('ignores unrelated compatiblePrinters entries when scoping the variant check', () => {
+    // A profile shared across families should not have its CORE One variant
+    // decided by an entry belonging to a different printer.
+    expect(isProcessProfileCoreOneVariantCompatible(
+      'Generic 0.20mm',
+      ['Prusa MK4S HF0.4 nozzle', 'Prusa CORE One 0.4 nozzle'],
+      false,
+    )).toBe(true);
+    expect(isProcessProfileCoreOneVariantCompatible(
+      'Generic 0.20mm',
+      ['Prusa MK4S HF0.4 nozzle', 'Prusa CORE One 0.4 nozzle'],
+      true,
+    )).toBe(false);
+  });
+
+  it('never throws on malformed compatiblePrinters entries (non-string values)', () => {
+    // `compatiblePrinters` is typed as `readonly string[]`, but this is data
+    // off the wire from the slicer worker / an imported OrcaSlicer bundle, so
+    // a malformed or hostile payload can carry non-string entries. A single
+    // bad entry must be ignored, not throw a TypeError that would take down
+    // the New Slice Job page.
+    const malformed = [null, 42, {}, undefined, 'Prusa CORE One HF 0.4 nozzle'] as unknown as string[];
+
+    expect(() => isProcessProfileCoreOneVariantCompatible('profile', malformed, true)).not.toThrow();
+    expect(isProcessProfileCoreOneVariantCompatible('profile', malformed, true)).toBe(true);
+    expect(isProcessProfileCoreOneVariantCompatible('profile', malformed, false)).toBe(false);
+
+    // Every entry malformed and none naming CORE One at all -> falls back to
+    // the profile name, and still never throws.
+    const allMalformed = [null, 42, {}] as unknown as string[];
+    expect(() => isProcessProfileCoreOneVariantCompatible('0.20mm @CORE One HF', allMalformed, false)).not.toThrow();
+    expect(isProcessProfileCoreOneVariantCompatible('0.20mm @CORE One HF', allMalformed, false)).toBe(false);
+    expect(isProcessProfileCoreOneVariantCompatible('0.20mm @CORE One HF', allMalformed, true)).toBe(true);
   });
 });
 

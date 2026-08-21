@@ -21,7 +21,7 @@ import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesMo
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import { ProcessProfileEditorModal } from '@/features/slicer/components/ProcessProfileEditorModal';
 import { MachineProfileSelectorModal, type MachineProfileChoice } from '@/features/slicer/components/job/MachineProfileSelectorModal';
-import { buildMachineProfileLabels, mentionsHighFlow, resolveHighFlow } from '@/features/slicer/utils/machineProfileLabels';
+import { buildMachineProfileLabels, isProcessProfileCoreOneVariantCompatible, resolveHighFlow } from '@/features/slicer/utils/machineProfileLabels';
 import { buildSlicerProfileJson } from '@/features/slicer/utils/slicerProfilePayload';
 import {
   SlicerSettingsPanel,
@@ -154,19 +154,6 @@ function machineProfileMatchesNozzle(profile: OrcaMachineProfile | CustomProfile
   }
 
   return Math.abs(profileNozzleDiameter - selectedDiameter) < NOZZLE_MATCH_TOLERANCE;
-}
-
-/**
- * Variant detection for machine/process profile pairing.
- *
- * Delegates to the shared helper so profile labelling and HF/non-HF process
- * filtering can never disagree about what counts as a high-flow profile. This
- * text-only overload is for candidates with no backend-derived flag available
- * (e.g. process profiles, which have no hotend concept of their own) — prefer
- * {@link resolveHighFlow} directly wherever a profile's `isHighFlowNozzle` is on hand.
- */
-function profileMentionsHighFlow(text: string): boolean {
-  return mentionsHighFlow(text);
 }
 
 const DEFAULT_FILAMENT_COLOUR = '888888';
@@ -1186,18 +1173,14 @@ export const NewSliceJobPage: React.FC = () => {
       }
 
       // Guard 2: Avoid mixing HF and non-HF variants for the same machine family.
-      // Use both profile name and compatible-printer text for variant detection.
-      const candidateText = `${profile.name} ${(profile.compatiblePrinters ?? []).join(' ')}`.toLowerCase();
-      const candidateIsHighFlow = profileMentionsHighFlow(candidateText);
-
       // Apply this guard only when this is the same machine family (CORE One) and
       // the machine selection explicitly indicates HF/non-HF variant intent.
+      // A profile whose `compatiblePrinters` explicitly lists BOTH variants is
+      // dual-compatible and must pass regardless of selection — see
+      // isProcessProfileCoreOneVariantCompatible for why this can't be decided
+      // by joining the whole compatiblePrinters list into one string.
       if (selectedMachineLower.includes('core one')) {
-        if (selectedIsHighFlow && !candidateIsHighFlow) {
-          return false;
-        }
-
-        if (!selectedIsHighFlow && candidateIsHighFlow) {
+        if (!isProcessProfileCoreOneVariantCompatible(profile.name, profile.compatiblePrinters, selectedIsHighFlow)) {
           return false;
         }
       }
@@ -2743,7 +2726,7 @@ export const NewSliceJobPage: React.FC = () => {
             />
 
             {/* Select + Reset + Save row */}
-            {(availableProcessProfiles.length > 0 || customProcessProfiles.length > 0) ? (
+            {(processProfilesBySource.user.length > 0 || processProfilesBySource.system.length > 0 || customProcessProfiles.length > 0) ? (
               <>
                 <div className="flex gap-1">
                   <Select
@@ -2836,6 +2819,11 @@ export const NewSliceJobPage: React.FC = () => {
                 {isMachineProfilesLoading ? <span className="italic">Loading...</span> :
                  selectedMachineProfileId && isProcessProfilesLoading ? <span className="italic">Loading...</span> :
                  !selectedMachineProfileId ? 'Select a machine profile to see process options' :
+                 availableProcessProfiles.length > 0 ? (
+                   <span className="italic">
+                     No process profiles are compatible with this machine variant. Try the other CORE One / CORE One HF profile, or import a compatible process profile.
+                   </span>
+                 ) :
                  <span className="italic">No process profiles available</span>}
               </div>
             )}
