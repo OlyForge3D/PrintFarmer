@@ -778,6 +778,48 @@ export class PrinterSignalRService {
     }
   }
 
+  /**
+   * Subscribes to multiple printers in a single hub invocation instead of one
+   * `SubscribeToPrinterAsync` call per printer (issue #1764). Used on initial
+   * connect and reconnect, where a dashboard would otherwise fan out N calls
+   * that the server serializes one-at-a-time (`MaximumParallelInvocationsPerClient`
+   * is 1), turning apparent client-side concurrency into N sequential
+   * authorization round-trips on every reconnect.
+   */
+  public async subscribeToPrinters(printerIds: Iterable<string>): Promise<void> {
+    const ids = [...new Set(printerIds)];
+    for (const id of ids) {
+      this.desiredQueuePrinters.add(id);
+    }
+    await this.applyBatchSubscribeToPrinters(ids);
+  }
+
+  private async applyBatchSubscribeToPrinters(printerIds: string[]): Promise<void> {
+    if (printerIds.length === 0) return;
+    const connection = this.connection;
+    const connectionEpoch = this.connectionEpoch;
+    if (connection?.state !== HubConnectionState.Connected) {
+      return;
+    }
+    try {
+      const authorizedIds = (await connection.invoke(
+        "SubscribeToPrintersAsync",
+        printerIds
+      )) as string[];
+      if (!this.isCurrentConnectionEpoch(connection, connectionEpoch)) {
+        return;
+      }
+      const authorizedSet = new Set(authorizedIds);
+      for (const id of printerIds) {
+        if (authorizedSet.has(id)) {
+          this.subscribedPrinters.add(id);
+        }
+      }
+    } catch (err) {
+      console.warn("[printerSignalR] batch subscribeToPrinters failed", err);
+    }
+  }
+
   public async unsubscribeFromPrinter(printerId: string): Promise<void> {
     this.desiredQueuePrinters.delete(printerId);
     await this.applyUnsubscribeFromPrinter(printerId);
@@ -1130,13 +1172,55 @@ export class PrinterSignalRService {
       ) {
         return;
       }
+      // Printers are subscribed in a single batched hub invocation (issue #1764)
+      // instead of one SubscribeToPrinterAsync call per printer: the server
+      // serializes concurrent client invokes one-at-a-time
+      // (MaximumParallelInvocationsPerClient = 1), so N apparently-concurrent
+      // per-printer calls were actually N sequential authorization round-trips
+      // on every connect/reconnect.
+      const printerIds = Array.from(this.desiredQueuePrinters);
+      if (printerIds.length > 0) {
+        try {
+          const authorizedIds = (await connection.invoke(
+            "SubscribeToPrintersAsync",
+            printerIds
+          )) as string[];
+          if (this.isCurrentConnectionEpoch(connection, connectionEpoch)) {
+            const authorizedSet = new Set(authorizedIds);
+            for (const id of printerIds) {
+              if (authorizedSet.has(id)) {
+                this.subscribedPrinters.add(id);
+              } else if (generation === this.queueSubscriptionGeneration) {
+                this.desiredQueuePrinters.delete(id);
+                this.subscribedPrinters.delete(id);
+              }
+            }
+          }
+        } catch (error) {
+          console.warn(
+            "[printerSignalR] batch printer restore-subscribe failed",
+            error
+          );
+          if (
+            this.isCurrentConnectionEpoch(connection, connectionEpoch) &&
+            generation === this.queueSubscriptionGeneration
+          ) {
+            for (const id of printerIds) {
+              this.desiredQueuePrinters.delete(id);
+              this.subscribedPrinters.delete(id);
+            }
+          }
+        }
+      }
+
+      if (
+        !this.isCurrentConnectionEpoch(connection, connectionEpoch) ||
+        generation !== this.queueSubscriptionGeneration
+      ) {
+        return;
+      }
+
       const subscriptions = [
-        ...Array.from(this.desiredQueuePrinters, (id) => ({
-          id,
-          method: "SubscribeToPrinterAsync",
-          desiredValues: this.desiredQueuePrinters,
-          appliedValues: this.subscribedPrinters,
-        })),
         ...Array.from(this.desiredQueueJobs, (id) => ({
           id,
           method: "SubscribeToQueueJobAsync",

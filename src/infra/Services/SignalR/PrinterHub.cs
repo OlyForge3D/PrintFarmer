@@ -121,6 +121,68 @@ public class PrinterHub(
         }
     }
 
+    /// <summary>
+    /// Subscribes to multiple authorized printers' status and queue events in a single hub
+    /// invocation, instead of the client issuing N serialized <see cref="SubscribeToPrinterAsync"/>
+    /// calls (issue #1764: with <c>MaximumParallelInvocationsPerClient = 1</c>, N apparently
+    /// concurrent client invokes are actually serialized server-side into N sequential
+    /// authorization queries on every connect/reconnect). Authorization is still enforced per
+    /// printer via <see cref="IQueueResourceAuthorizationService.FilterAccessiblePrinterIdsAsync"/>
+    /// in a single batched query; invalid or unauthorized ids are silently excluded rather than
+    /// failing the whole batch.
+    /// </summary>
+    /// <param name="printerIds">Candidate printer IDs (as strings) to subscribe to.</param>
+    /// <returns>The authorized printer IDs (as strings) that were joined.</returns>
+    public async Task<string[]> SubscribeToPrintersAsync(string[] printerIds)
+    {
+        if (printerIds is null || printerIds.Length == 0)
+        {
+            return [];
+        }
+
+        var candidateIds = new List<Guid>();
+        foreach (string printerId in printerIds)
+        {
+            if (Guid.TryParse(printerId, out Guid id) && !candidateIds.Contains(id))
+            {
+                candidateIds.Add(id);
+            }
+        }
+
+        if (candidateIds.Count == 0)
+        {
+            return [];
+        }
+
+        IReadOnlySet<Guid> authorizedIds = resourceAuthorization is null
+            ? new HashSet<Guid>()
+            : await resourceAuthorization.FilterAccessiblePrinterIdsAsync(
+                Context.User!,
+                candidateIds,
+                PrinterGroupAccessLevel.View,
+                Context.ConnectionAborted);
+
+        var authorized = new List<string>(authorizedIds.Count);
+        foreach (Guid id in candidateIds)
+        {
+            if (!authorizedIds.Contains(id))
+            {
+                continue;
+            }
+
+            await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Printer(id));
+            authorized.Add(id.ToString());
+
+            PrinterStatusDto? status = statusCache.GetStatus(id);
+            if (status is not null)
+            {
+                await Clients.Caller.SendAsync("printerupdated", status, Context.ConnectionAborted);
+            }
+        }
+
+        return [.. authorized];
+    }
+
     /// <summary>Subscribes to one authorized queue job.</summary>
     public async Task SubscribeToQueueJobAsync(string jobId)
     {

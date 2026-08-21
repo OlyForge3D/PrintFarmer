@@ -385,6 +385,116 @@ public class PrinterHubTests
     }
 
     [Fact]
+    public async Task SubscribeToPrintersAsync_WithMixedAccess_JoinsAndReturnsOnlyAuthorizedIds()
+    {
+        Guid authorizedId = Guid.NewGuid();
+        Guid unauthorizedId = Guid.NewGuid();
+        var authorizedStatus = new PrinterStatusDto(Id: authorizedId, IsOnline: true, State: "Idle");
+        _statusCacheMock.Setup(cache => cache.GetStatus(authorizedId)).Returns(authorizedStatus);
+        _statusCacheMock.Setup(cache => cache.GetStatus(unauthorizedId)).Returns((PrinterStatusDto?)null);
+
+        _resourceAuthorizationMock
+            .Setup(service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.Is<IReadOnlyCollection<Guid>>(ids =>
+                    ids.Contains(authorizedId) && ids.Contains(unauthorizedId) && ids.Count == 2),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid> { authorizedId });
+
+        string[] result = await _hub.SubscribeToPrintersAsync(
+            [authorizedId.ToString(), unauthorizedId.ToString()]);
+
+        Assert.Equal([authorizedId.ToString()], result);
+
+        _groupsMock.Verify(groups => groups.AddToGroupAsync(
+            "test-connection-id",
+            AuthorizedHubGroups.Printer(authorizedId),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _groupsMock.Verify(groups => groups.AddToGroupAsync(
+            "test-connection-id",
+            AuthorizedHubGroups.Printer(unauthorizedId),
+            It.IsAny<CancellationToken>()), Times.Never);
+
+        _callerMock.Verify(client => client.SendCoreAsync(
+            "printerupdated",
+            It.Is<object?[]>(arguments => ReferenceEquals(arguments[0], authorizedStatus)),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        // Batched authorization is used instead of a per-printer authorization check.
+        _resourceAuthorizationMock.Verify(
+            service => service.CanAccessPrinterAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<Guid>(),
+                It.IsAny<PrinterGroupAccessLevel>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        _resourceAuthorizationMock.Verify(
+            service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<PrinterGroupAccessLevel>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SubscribeToPrintersAsync_WithEmptyInput_ReturnsEmptyAndDoesNotJoin()
+    {
+        string[] result = await _hub.SubscribeToPrintersAsync([]);
+
+        Assert.Empty(result);
+        _groupsMock.Verify(groups => groups.AddToGroupAsync(
+            It.IsAny<string>(),
+            It.Is<string>(group => group.StartsWith("Printer-", StringComparison.Ordinal)),
+            It.IsAny<CancellationToken>()), Times.Never);
+        _resourceAuthorizationMock.Verify(
+            service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<PrinterGroupAccessLevel>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SubscribeToPrintersAsync_WithOnlyInvalidIds_ReturnsEmptyAndDoesNotAuthorize()
+    {
+        string[] result = await _hub.SubscribeToPrintersAsync(["not-a-guid", "also-not-a-guid"]);
+
+        Assert.Empty(result);
+        _resourceAuthorizationMock.Verify(
+            service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<PrinterGroupAccessLevel>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SubscribeToPrintersAsync_WithDuplicateIds_DeduplicatesBeforeAuthorizationAndJoinsOnce()
+    {
+        Guid printerId = Guid.NewGuid();
+        _resourceAuthorizationMock
+            .Setup(service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Count == 1 && ids.Contains(printerId)),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid> { printerId });
+
+        string[] result = await _hub.SubscribeToPrintersAsync(
+            [printerId.ToString(), printerId.ToString()]);
+
+        Assert.Equal([printerId.ToString()], result);
+        _groupsMock.Verify(groups => groups.AddToGroupAsync(
+            "test-connection-id",
+            AuthorizedHubGroups.Printer(printerId),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task RequestPrinterStatus_WithInvalidId_SendsNothing()
     {
         // Act

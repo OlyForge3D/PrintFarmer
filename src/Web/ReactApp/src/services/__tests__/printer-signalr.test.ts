@@ -549,9 +549,12 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       });
       signalRTestState.connection.invoke.mockClear();
       signalRTestState.connection.invoke.mockImplementation(
-        async (method: string, id: string) => {
-          if (method === 'SubscribeToQueueJobAsync' && id === 'job-1') {
+        async (method: string, arg: string | string[]) => {
+          if (method === 'SubscribeToQueueJobAsync' && arg === 'job-1') {
             throw new Error('Forbidden');
+          }
+          if (method === 'SubscribeToPrintersAsync') {
+            return arg as string[];
           }
         }
       );
@@ -560,8 +563,8 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       await flushMicrotasks();
 
       expect(signalRTestState.connection.invoke).toHaveBeenCalledWith(
-        'SubscribeToPrinterAsync',
-        'printer-1'
+        'SubscribeToPrintersAsync',
+        ['printer-1']
       );
       expect(signalRTestState.connection.invoke).toHaveBeenCalledWith(
         'SubscribeToProjectAsync',
@@ -618,6 +621,76 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
         'UnsubscribeFromPrinterAsync',
         'printer-a'
       );
+      printerSignalRService.dispose();
+    });
+
+    it('subscribeToPrinters issues a single batched invocation for multiple printers', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      await printerSignalRService.connect();
+      signalRTestState.connection.invoke.mockClear();
+      signalRTestState.connection.invoke.mockImplementation(
+        async (method: string, ids: string[]) => {
+          if (method === 'SubscribeToPrintersAsync') {
+            return ids;
+          }
+        }
+      );
+
+      await printerSignalRService.subscribeToPrinters([
+        'printer-a',
+        'printer-b',
+        'printer-c',
+      ]);
+
+      const printerInvocations = signalRTestState.connection.invoke.mock.calls.filter(
+        ([method]) => method === 'SubscribeToPrintersAsync'
+      );
+      expect(printerInvocations).toHaveLength(1);
+      expect(printerInvocations[0][1]).toEqual(
+        expect.arrayContaining(['printer-a', 'printer-b', 'printer-c'])
+      );
+      printerSignalRService.dispose();
+    });
+
+    it('subscribeToPrinters drops printers the server did not authorize', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      await printerSignalRService.connect();
+      signalRTestState.connection.invoke.mockImplementation(
+        async (method: string, ids: string[]) => {
+          if (method === 'SubscribeToPrintersAsync') {
+            return ids.filter((id) => id !== 'printer-forbidden');
+          }
+        }
+      );
+
+      await printerSignalRService.subscribeToPrinters([
+        'printer-allowed',
+        'printer-forbidden',
+      ]);
+
+      const snapshot = printerSignalRService.getQueueSubscriptionSnapshot();
+      expect(snapshot.printerIds).toEqual(['printer-allowed']);
+      printerSignalRService.dispose();
+    });
+
+    it('subscribeToPrinters drops all requested printers when the batched invocation fails', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      await printerSignalRService.connect();
+      signalRTestState.connection.invoke.mockImplementation(
+        async (method: string) => {
+          if (method === 'SubscribeToPrintersAsync') {
+            throw new Error('network error');
+          }
+        }
+      );
+
+      await printerSignalRService.subscribeToPrinters(['printer-a', 'printer-b']);
+
+      const snapshot = printerSignalRService.getQueueSubscriptionSnapshot();
+      expect(snapshot.printerIds).toEqual([]);
       printerSignalRService.dispose();
     });
 

@@ -201,6 +201,15 @@ describe("PrinterSignalRService queue cursor recovery", () => {
       hasMore: false,
       events: [],
     });
+    signalr.connection.invoke.mockImplementation(async (
+      method: string,
+      arg?: unknown
+    ) => {
+      if (method === "SubscribeToPrintersAsync") {
+        return arg as string[];
+      }
+      return undefined;
+    });
     const service = new PrinterSignalRService();
     await vi.waitFor(() =>
       expect(signalr.eventHandlers.has("queueevent")).toBe(true)
@@ -217,8 +226,8 @@ describe("PrinterSignalRService queue cursor recovery", () => {
 
     await vi.waitFor(() => {
       expect(signalr.connection.invoke).toHaveBeenCalledWith(
-        "SubscribeToPrinterAsync",
-        "printer-1"
+        "SubscribeToPrintersAsync",
+        ["printer-1"]
       );
       expect(signalr.connection.invoke).toHaveBeenCalledWith(
         "SubscribeToQueueJobAsync",
