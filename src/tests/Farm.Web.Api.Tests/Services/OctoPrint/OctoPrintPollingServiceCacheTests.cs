@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
@@ -38,8 +39,10 @@ public class OctoPrintPollingServiceCacheTests
     private readonly MethodInfo _pollPrinterAsync;
     private readonly MethodInfo _onPrinterInvalidated;
     private readonly MethodInfo _ensureWebSocketAdapter;
+    private readonly MethodInfo _reconcilePrintersOnceAsync;
     private readonly FieldInfo _printerStatesField;
     private readonly FieldInfo _webSocketAdaptersField;
+    private readonly FieldInfo _pollingLoopsField;
     private readonly Type _pollingStateType;
 
     public OctoPrintPollingServiceCacheTests()
@@ -70,14 +73,18 @@ public class OctoPrintPollingServiceCacheTests
         _pollPrinterAsync = serviceType.GetMethod("PollPrinterAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _onPrinterInvalidated = serviceType.GetMethod("OnPrinterInvalidated", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _ensureWebSocketAdapter = serviceType.GetMethod("EnsureWebSocketAdapter", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        _reconcilePrintersOnceAsync = serviceType.GetMethod("ReconcilePrintersOnceAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _printerStatesField = serviceType.GetField("_printerStates", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _webSocketAdaptersField = serviceType.GetField("_webSocketAdapters", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        _pollingLoopsField = serviceType.GetField("_pollingLoops", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _pollingStateType = serviceType.GetNestedType("PrinterPollingState", BindingFlags.NonPublic)!;
     }
 
     private IDictionary PrinterStates => (IDictionary)_printerStatesField.GetValue(_service)!;
 
     private IDictionary WebSocketAdapters => (IDictionary)_webSocketAdaptersField.GetValue(_service)!;
+
+    private IDictionary PollingLoops => (IDictionary)_pollingLoopsField.GetValue(_service)!;
 
     private OctoPrintWebSocketAdapter CreateFakeAdapter(Guid printerId, Printer printer) => new(
         printerId,
@@ -271,6 +278,71 @@ public class OctoPrintPollingServiceCacheTests
         WebSocketAdapters.Contains(printerId).Should().BeFalse(
             "no WebSocket adapter should be constructed from a printer snapshot that predates the " +
             "invalidation that raced its fetch");
+    }
+
+    [Fact]
+    public async Task ReconcilePrintersOnceAsync_InvalidationRacesInFlightBatchFetch_DoesNotRepublishStaleData()
+    {
+        // Regression test for PR #1786 round 6 review (Hicks): the 30-second reconciliation pass
+        // (RunAsync -> ReconcilePrintersOnceAsync) reads every OctoPrint printer's row in one batch
+        // call, then republished each row into CachedPrinter (and, via EnsureWebSocketAdapter,
+        // possibly into a freshly (re)constructed WebSocket adapter) with no fence at all -- unlike
+        // PollPrinterAsync's cache-miss path, which round 6 already gated. If an edit invalidated a
+        // printer while this batch fetch was in flight, the fetch could still return the pre-edit
+        // row and this pass would republish it, silently undoing the invalidation for up to another
+        // 30 seconds.
+        Guid printerId = Guid.NewGuid();
+        var oldPrinter = new Printer
+        {
+            Id = printerId,
+            Name = "OctoPrint",
+            ServerUrl = "http://octo.local",
+            Backend = (int)PrinterBackend.OctoPrint,
+            Credential = PrinterCredential.FromApiKey("old-key"),
+        };
+
+        // Seed the state this pass will observe when it starts: cached printer + adapter already
+        // established from a previous tick, exactly as they'd look right before an edit arrives.
+        OctoPrintWebSocketAdapter oldAdapter = CreateFakeAdapter(printerId, oldPrinter);
+        SeedState(printerId, cachedPrinter: oldPrinter, adapter: oldAdapter);
+
+        // Pre-seed a completed "polling loop" so ReconcilePrintersOnceAsync doesn't spawn a real,
+        // unmocked PollPrinterAsync background task for this printer -- that's a separate code path
+        // already covered by the PollPrinterAsync tests above and would otherwise run uncontrolled.
+        PollingLoops[printerId] = Task.CompletedTask;
+
+        TaskCompletionSource fetchStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<List<Printer>> fetchResult = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _printersRepository
+            .Setup(r => r.GetByBackendAsync(PrinterBackend.OctoPrint, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                fetchStarted.TrySetResult();
+                return fetchResult.Task;
+            });
+
+        Task reconcileTask = (Task)_reconcilePrintersOnceAsync.Invoke(_service, [CancellationToken.None])!;
+
+        // Deterministically wait until the reconciliation pass has started (and is awaiting) the
+        // batch fetch before simulating a concurrent edit + invalidation.
+        await fetchStarted.Task;
+        WebSocketAdapters.Contains(printerId).Should().BeTrue("the adapter must exist before invalidation for this race to be meaningful");
+        _onPrinterInvalidated.Invoke(_service, [printerId]);
+        WebSocketAdapters.Contains(printerId).Should().BeFalse("invalidation must have torn down the adapter");
+
+        // Now let the in-flight batch fetch resolve with the row it captured *before* the
+        // invalidation ran -- this is the stale data that must not be republished.
+        fetchResult.SetResult([oldPrinter]);
+
+        await reconcileTask;
+
+        GetCachedPrinter(printerId).Should().BeNull(
+            "a batch fetch that raced an invalidation must not republish its stale row into " +
+            "CachedPrinter -- doing so would silently undo the invalidation until the next " +
+            "reconciliation pass");
+        WebSocketAdapters.Contains(printerId).Should().BeFalse(
+            "no WebSocket adapter should be (re)constructed from a batch-fetched printer snapshot " +
+            "that predates the invalidation racing that fetch");
     }
 
     [Fact]
