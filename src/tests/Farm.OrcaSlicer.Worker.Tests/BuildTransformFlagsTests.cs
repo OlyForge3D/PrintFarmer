@@ -533,6 +533,16 @@ public class BuildTransformFlagsTests
     /// The <c>res0 += π</c> normalisation is the whole point: it forces the Z component into
     /// [0, π], so a negative Z cannot survive as a pure single-axis triple.
     /// </para>
+    /// <para>
+    /// This is a hand-transcription of OrcaSlicer's C++ source, not the real binary — its fidelity
+    /// is validated against the real OrcaSlicer CLI (pinned container, OrcaSlicer 2.4.2) by
+    /// <c>PinnedOrcaCliRotationTests</c> in <c>Farm.Web.IntegrationTests</c> (issue #1802), which
+    /// slices a multi-axis, negative-Z rotation with the real binary and compares the resulting
+    /// object orientation against an independent, non-production computation of the expected
+    /// orientation. If this transcription ever silently diverges from the real slicer, that test —
+    /// not this one — is the one that would catch it, because it is the only test in the suite
+    /// that does not share code with the model being transcribed here.
+    /// </para>
     /// </summary>
     private static (double X, double Y, double Z) ExtractEulerAnglesLikeOrca(double[,] m)
     {
@@ -607,6 +617,16 @@ public class BuildTransformFlagsTests
     /// This is deliberately NOT "apply Rz·Ry·Rx to the emitted triple" — that models OrcaSlicer
     /// as consuming the triple verbatim and skips the extract-and-accumulate step, which is
     /// exactly where the negative-Z defect lives.
+    /// </para>
+    /// <para>
+    /// This whole simulation, and <see cref="ExtractEulerAnglesLikeOrca"/> beneath it, is a
+    /// hand-transcription of OrcaSlicer's C++ source — it has never itself executed against the
+    /// real binary. <c>PinnedOrcaCliRotationTests</c> in <c>Farm.Web.IntegrationTests</c> (issue
+    /// #1802) is this transcription's external oracle: it runs the real, pinned OrcaSlicer 2.4.2
+    /// CLI against a multi-axis, negative-Z rotation and checks the real sliced output's
+    /// orientation, independently of both this simulation and the production code it verifies. If
+    /// this hand-transcribed model and the real CLI were ever to diverge, only that test would
+    /// notice.
     /// </para>
     /// </summary>
     private static double[,] SimulateOrcaCli(string flags)

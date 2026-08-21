@@ -55,6 +55,14 @@
     -->
     <ProjectReference Include="..\..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
     <ProjectReference Include="..\..\slicer\Farm.Slicer.Module.Api\Farm.Slicer.Module.Api.csproj" />
+
+    <!--
+      Referenced so the real-OrcaSlicer-CLI rotation test (issue #1802) can call the production
+      ToOrcaRotation/BuildTransformFlags/PlanPlacement/TryReadBedCenter/BuildOrcaSlicerArguments
+      and ThreeMfProjectBuilder internals directly (see InternalsVisibleTo on
+      Farm.OrcaSlicer.Worker.csproj) instead of reimplementing the rotation/placement math.
+    -->
+    <ProjectReference Include="..\..\orcaslicer-worker\Farm.OrcaSlicer.Worker.csproj" />
   </ItemGroup>
 
   <!--
@@ -73,6 +81,19 @@
              Link="Calibration\Shared\TestAuthHandler.cs" />
     <Compile Include="..\Farm.Web.Api.Tests\TestInfrastructure\SlicerModulePreloader.cs"
              Link="Calibration\Shared\SlicerModulePreloader.cs" />
+  </ItemGroup>
+
+  <!--
+    Pure geometry/gcode-parsing helpers for the real-OrcaSlicer-CLI rotation test (issue #1802) are
+    physically authored in Farm.OrcaSlicer.Worker.Tests, alongside their own fast, docker-free unit
+    tests, and linked in here so the docker-gated test reuses the exact same math instead of a
+    drifting copy.
+  -->
+  <ItemGroup>
+    <Compile Include="..\Farm.OrcaSlicer.Worker.Tests\Support\OrientationMarkerGeometry.cs"
+             Link="Calibration\Shared\OrientationMarkerGeometry.cs" />
+    <Compile Include="..\Farm.OrcaSlicer.Worker.Tests\Support\OrcaGcodeOrientationReader.cs"
+             Link="Calibration\Shared\OrcaGcodeOrientationReader.cs" />
   </ItemGroup>
 
 </Project>

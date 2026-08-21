@@ -1129,6 +1129,24 @@ Digest validation and gating rules are unit-tested in the default suite
 (`Farm.Web.Api.Tests.Calibration.Generation.PinnedOrcaPublicationTests`); the gate compiles the same
 source file, so there is one implementation rather than two.
 
+**Real-CLI rotation oracle (`PinnedOrcaCliRotationTests`, issue #1802)**
+
+`src/tests/Farm.Web.IntegrationTests/Calibration/PinnedOrcaCliRotationTests.cs` reuses the same pinned
+container (`PinnedOrcaWorkerContainer`) and the same `PinnedOrcaSmoke` category/gate, but exercises a
+different question: whether the *real* OrcaSlicer binary honors the negative-Z rotation correction added
+in #1794, not whether the end-to-end job pipeline works. It builds a small asymmetric marker mesh, calls
+the production `BuildTransformFlags` / `PlanPlacement` / `BuildOrcaSlicerArguments` /
+`ThreeMfProjectBuilder.Build` functions to construct the exact CLI invocation for a multi-axis rotation
+(X=22.92°, Y=51.57°, Z=-74.48° — the values that were mis-oriented by 129° before #1794), runs the real
+`orca-slicer` binary inside the container via `docker exec ... sh -c`, and reads the resulting G-code's
+bounding box back with `OrcaGcodeOrientationReader`. That measured size is compared against an expected
+size computed independently (never through production code) from the viewer's `Rx·Ry·Rz` matrix via
+`OrientationMarkerGeometry`. Two placement strategies are covered — CLI `--rotate` flags (`AutoArrange`)
+and the embedded 3MF-project path — so both code paths `PlanPlacement` can choose are validated against
+the real binary. This test is the external oracle referenced by the hand-transcribed
+`SimulateOrcaCli` / `ExtractEulerAnglesLikeOrca` helpers in
+`src/tests/Farm.OrcaSlicer.Worker.Tests/BuildTransformFlagsTests.cs`.
+
 ### Verify Worker Container
 
 ```bash
