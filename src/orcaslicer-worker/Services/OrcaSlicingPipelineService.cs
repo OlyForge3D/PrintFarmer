@@ -5,9 +5,11 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Farm.Infrastructure.Logging;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
+using Farm.Slicer.ProfileParsing;
 using Farm.Slicer.Worker.Core;
 using Microsoft.Extensions.Logging; // shared interfaces
 
@@ -615,7 +617,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// <param name="workDir">The per-job working directory.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Absolute paths of the written machine, process and filament files.</returns>
-    private static async Task<Dictionary<string, string>> GenerateProfileJsonFilesAsync(
+    private async Task<Dictionary<string, string>> GenerateProfileJsonFilesAsync(
         DistributedSlicingJob job,
         string workDir,
         CancellationToken cancellationToken)
@@ -643,9 +645,25 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // The Settings dictionary stores raw JSON text per key (from GetRawText()),
         // so we reconstruct proper JSON by writing the raw values directly.
         // The guard above already proved MachineProfile non-null, so no null-conditional here.
-        string machineJson = SettingsDictToNativeJson(
-            WithSystemPresetInherits(profile.MachineProfile.Settings, profile.MachineProfile.Name));
-        string processJson = SettingsDictToNativeJson(profile.ProcessProfile?.Settings);
+        // The machine document is materialized FIRST, because the value OrcaSlicer will match
+        // `compatible_printers` against is read out of this exact document — including the
+        // `inherits` rewrite below (issue #1768). Deriving it from the cached settings instead
+        // would name the vendor base for a `from`: "User" preset while OrcaSlicer compared
+        // against the rewritten name, and the pairing would still be rejected.
+        Dictionary<string, object> emittedMachineSettings =
+            WithSystemPresetInherits(profile.MachineProfile.Settings, profile.MachineProfile.Name);
+        string machineJson = SettingsDictToNativeJson(emittedMachineSettings);
+
+        // OrcaSlicer gates machine/process compatibility on the process document's
+        // `compatible_printers` array alone; `compatible_printers_condition` is never evaluated
+        // on the --load-settings path. Reconcile the two before emitting. See issue #1795.
+        ProcessCompatibilityResolution compatibility = ResolveProcessCompatiblePrinters(
+            profile.ProcessProfile!,
+            profile.MachineProfile,
+            emittedMachineSettings);
+        LogProcessCompatibilityResolution(job, profile, compatibility);
+
+        string processJson = SettingsDictToNativeJson(compatibility.Settings);
 
         await File.WriteAllTextAsync(machineJsonPath, machineJson, cancellationToken);
         await File.WriteAllTextAsync(processJsonPath, processJson, cancellationToken);
@@ -744,6 +762,418 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return copy;
     }
 
+    /// <summary>
+    /// How the emitted process document was reconciled with OrcaSlicer's compatibility gate.
+    /// </summary>
+    internal enum ProcessCompatibilityOutcome
+    {
+        /// <summary>The document already declared at least one compatible printer; left untouched.</summary>
+        AlreadyDeclared,
+
+        /// <summary>The profile constrains no printer at all, so the pairing was materialized.</summary>
+        InjectedUnconditional,
+
+        /// <summary>The profile's condition holds for this machine, so the pairing was materialized.</summary>
+        InjectedFromCondition,
+
+        /// <summary>The profile's condition does not hold for this machine; left untouched so OrcaSlicer rejects it.</summary>
+        ConditionNotSatisfied,
+
+        /// <summary>The machine's system preset name could not be derived; left untouched.</summary>
+        MachineSystemNameUnknown,
+    }
+
+    /// <summary>
+    /// The reconciled process settings plus the evidence behind the decision.
+    /// </summary>
+    /// <param name="Settings">The settings bag to emit as <c>process.json</c>.</param>
+    /// <param name="Outcome">Which branch of the reconciliation was taken.</param>
+    /// <param name="MachineSystemPresetName">The name OrcaSlicer will match against, when derivable.</param>
+    /// <param name="Condition">The profile's <c>compatible_printers_condition</c>, when it carries one.</param>
+    internal sealed record ProcessCompatibilityResolution(
+        Dictionary<string, object> Settings,
+        ProcessCompatibilityOutcome Outcome,
+        string? MachineSystemPresetName,
+        string? Condition);
+
+    /// <summary>
+    /// Derives the system preset name OrcaSlicer will match <c>compatible_printers</c> entries
+    /// against for a given machine document.
+    /// </summary>
+    /// <remarks>
+    /// This mirrors <c>CLI::run</c> in <c>OrcaSlicer.cpp</c>, which sets
+    /// <c>new_printer_system_name</c> from the machine document's <c>name</c> when its
+    /// <c>from</c> is exactly <c>"system"</c>, and from its <c>inherits</c> otherwise. Reading
+    /// the emitted document rather than assuming one of the two keys keeps this correct for both
+    /// stock (<c>from</c>: <c>"system"</c>) and user (<c>from</c>: <c>"User"</c>) presets, and
+    /// therefore independent of the sibling <c>inherits</c> fix for issue #1768.
+    /// </remarks>
+    /// <param name="machineSettings">The resolved machine settings bag.</param>
+    /// <param name="fallbackName">The machine profile's name, used when the document is malformed.</param>
+    /// <returns>The system preset name, or <see langword="null"/> when none can be derived.</returns>
+    internal static string? ResolveMachineSystemPresetName(
+        Dictionary<string, object>? machineSettings,
+        string? fallbackName)
+    {
+        string? from = ReadSettingString(machineSettings, "from");
+        string? derived = string.Equals(from, "system", StringComparison.Ordinal)
+            ? ReadSettingString(machineSettings, "name")
+            : ReadSettingString(machineSettings, "inherits");
+
+        // A document that derives nothing here is one OrcaSlicer rejects outright before reaching
+        // the gate, so the fallback cannot mask a compatibility decision — it only keeps the
+        // emitted pair self-consistent.
+        if (string.IsNullOrWhiteSpace(derived))
+        {
+            derived = fallbackName;
+        }
+
+        return string.IsNullOrWhiteSpace(derived) ? null : derived;
+    }
+
+    /// <summary>
+    /// Returns a copy of a process profile's settings whose <c>compatible_printers</c> array
+    /// satisfies OrcaSlicer's compatibility gate for the machine it is being paired with.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On the <c>--load-settings</c> path where both a machine and a process document are
+    /// supplied, <c>CLI::run</c> decides compatibility by iterating the process document's
+    /// <c>compatible_printers</c> array and comparing each entry against the machine's system
+    /// preset name. It never evaluates <c>compatible_printers_condition</c> there, and the
+    /// empty-array auto-pass sits in a different branch, so a profile that expresses
+    /// compatibility only through the condition can never satisfy the gate: every such job exits
+    /// <c>CLI_PROCESS_NOT_COMPATIBLE</c> (-17, surfacing as 239) about a second in, before
+    /// slicing any geometry. That is the whole Prusa MK4S and CORE One family. See issue #1795.
+    /// </para>
+    /// <para>
+    /// Materializing the condition's result closes that gap, but blindly injecting the machine
+    /// name whenever the array is empty would force <em>any</em> pairing through. The injection
+    /// is therefore gated on the machine actually satisfying the profile's condition, evaluated
+    /// with the same <see cref="PrinterExpressionParser"/> that
+    /// <c>OrcaProfilesService.ListAvailableProcessProfilesAsync</c> uses to resolve the condition
+    /// into <c>CompatiblePrinters</c>, and that <c>SlicerProfilesController</c>'s
+    /// <c>process/for-machines</c> endpoint uses to decide which presets the wizard may offer for
+    /// a machine. The worker's emit-time decision is thus exactly the one the UI already made
+    /// when it offered the pairing. A machine that fails the condition gets no injection and is
+    /// still rejected downstream.
+    /// </para>
+    /// <para>
+    /// A profile carrying neither an array nor a condition constrains no printer at all; the
+    /// hierarchy endpoint likewise treats those as universally available, so the pairing is
+    /// materialized. A profile that already declares compatible printers is left untouched, so
+    /// this cannot regress the profiles that work today.
+    /// </para>
+    /// </remarks>
+    /// <param name="processProfile">The resolved process profile.</param>
+    /// <param name="machineProfile">The resolved machine profile it is paired with.</param>
+    /// <param name="emittedMachineSettings">
+    /// The machine settings exactly as they will be written to <c>machine.json</c>. The system
+    /// preset name is derived from these rather than from the cached profile, so the value injected
+    /// here is always the value OrcaSlicer will actually read back — including after the
+    /// <c>inherits</c> rewrite for issue #1768, which changes that derivation for a
+    /// <c>from</c>: <c>"User"</c> preset.
+    /// </param>
+    /// <returns>The reconciled settings plus the evidence behind the decision.</returns>
+    internal static ProcessCompatibilityResolution ResolveProcessCompatiblePrinters(
+        ProcessProfileDto processProfile,
+        MachineProfileDto? machineProfile,
+        Dictionary<string, object>? emittedMachineSettings = null)
+    {
+        ArgumentNullException.ThrowIfNull(processProfile);
+
+        Dictionary<string, object> copy = processProfile.Settings is null
+            ? new Dictionary<string, object>(StringComparer.Ordinal)
+            : new Dictionary<string, object>(processProfile.Settings, StringComparer.Ordinal);
+
+        // The profile's OWN declared condition wins over the settings bag. A submission's
+        // `overrides` object writes arbitrary keys into that bag
+        // (HttpJobPollerService.ResolveProfileFromJsonAsync), so reading the bag first would let a
+        // submission relax — or delete — the very constraint being enforced. The DTO property is
+        // populated from the resolved profile document and is never written by overrides. The bag
+        // is still consulted as a fallback, which can only ever add a constraint that was not
+        // declared, never remove one.
+        string? condition = processProfile.CompatiblePrintersCondition
+            ?? ReadSettingString(copy, "compatible_printers_condition");
+
+        if (HasDeclaredCompatiblePrinters(copy))
+        {
+            return new ProcessCompatibilityResolution(
+                copy, ProcessCompatibilityOutcome.AlreadyDeclared, null, condition);
+        }
+
+        string? systemPresetName = ResolveMachineSystemPresetName(
+            emittedMachineSettings ?? machineProfile?.Settings, machineProfile?.Name);
+        if (systemPresetName is null)
+        {
+            return new ProcessCompatibilityResolution(
+                copy, ProcessCompatibilityOutcome.MachineSystemNameUnknown, null, condition);
+        }
+
+        if (string.IsNullOrWhiteSpace(condition))
+        {
+            copy["compatible_printers"] = new List<string> { systemPresetName };
+            return new ProcessCompatibilityResolution(
+                copy, ProcessCompatibilityOutcome.InjectedUnconditional, systemPresetName, condition);
+        }
+
+        // EvaluateCondition returns the subset of the supplied machines the expression holds for,
+        // or null when it holds for none (including when the expression cannot be parsed). With a
+        // single candidate, a non-empty result means "this machine satisfies the condition".
+        List<string>? matches = machineProfile is null
+            ? null
+            : PrinterExpressionParser.EvaluateCondition(condition, [machineProfile]);
+
+        if (matches is not { Count: > 0 })
+        {
+            return new ProcessCompatibilityResolution(
+                copy, ProcessCompatibilityOutcome.ConditionNotSatisfied, systemPresetName, condition);
+        }
+
+        copy["compatible_printers"] = new List<string> { systemPresetName };
+        return new ProcessCompatibilityResolution(
+            copy, ProcessCompatibilityOutcome.InjectedFromCondition, systemPresetName, condition);
+    }
+
+    /// <summary>
+    /// Reports whether a process settings bag already names at least one compatible printer.
+    /// </summary>
+    /// <remarks>
+    /// Array values normally arrive as <see cref="List{T}"/> of <see cref="string"/> from
+    /// <c>OrcaProfilesService.SerializeElementToDict</c>, but the same bag also accepts the legacy
+    /// raw-JSON-array text form that <see cref="SettingsDictToNativeJson"/> still understands, so
+    /// both are recognised here.
+    /// </remarks>
+    /// <param name="settings">The process settings bag.</param>
+    /// <returns><see langword="true"/> when the gate already has something to match against.</returns>
+    private static bool HasDeclaredCompatiblePrinters(Dictionary<string, object> settings)
+    {
+        if (!settings.TryGetValue("compatible_printers", out object? value) || value is null)
+        {
+            return false;
+        }
+
+        if (value is IList<string> list)
+        {
+            return list.Any(entry => !string.IsNullOrWhiteSpace(entry));
+        }
+
+        string text = value.ToString() ?? string.Empty;
+        if (text.StartsWith('['))
+        {
+            try
+            {
+                using JsonDocument parsed = JsonDocument.Parse(text);
+                return parsed.RootElement.ValueKind == JsonValueKind.Array
+                    && parsed.RootElement.EnumerateArray().Any(
+                        element => !string.IsNullOrWhiteSpace(element.ToString()));
+            }
+            catch (JsonException)
+            {
+                // Not a JSON array after all — fall through to the scalar reading below.
+            }
+        }
+
+        return !string.IsNullOrWhiteSpace(text);
+    }
+
+    /// <summary>
+    /// Reads a scalar settings value as a string, ignoring array-valued keys.
+    /// </summary>
+    /// <param name="settings">The settings bag, which may be <see langword="null"/>.</param>
+    /// <param name="key">The settings key to read.</param>
+    /// <returns>The trimmed value, or <see langword="null"/> when absent, empty or not scalar.</returns>
+    private static string? ReadSettingString(Dictionary<string, object>? settings, string key)
+    {
+        if (settings is null || !settings.TryGetValue(key, out object? value) || value is null)
+        {
+            return null;
+        }
+
+        if (value is IList<string>)
+        {
+            return null;
+        }
+
+        string text = value.ToString() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    /// <summary>
+    /// Records why the emitted process document will or will not satisfy OrcaSlicer's gate.
+    /// </summary>
+    /// <remarks>
+    /// The failing cases are logged at error level on purpose: without this the job's only symptom
+    /// is an opaque exit 239 with no indication of which of the two documents was at fault.
+    /// The run is still handed to OrcaSlicer rather than pre-empted, because a job whose input is
+    /// a 3MF carrying its own printer configuration can legitimately pass the gate through
+    /// <c>CLI::run</c>'s machine-switch branch, which this worker cannot evaluate.
+    /// </remarks>
+    /// <param name="job">The job being prepared, for correlation.</param>
+    /// <param name="profile">The resolved profile selection.</param>
+    /// <param name="resolution">The reconciliation result to report.</param>
+    private void LogProcessCompatibilityResolution(
+        DistributedSlicingJob job,
+        SlicerProfileDto profile,
+        ProcessCompatibilityResolution resolution)
+    {
+        switch (resolution.Outcome)
+        {
+            case ProcessCompatibilityOutcome.AlreadyDeclared:
+                break;
+
+            case ProcessCompatibilityOutcome.InjectedUnconditional:
+            case ProcessCompatibilityOutcome.InjectedFromCondition:
+                _logger.LogInformation(
+                    "Job {JobId}: process profile '{ProcessName}' declares no compatible printers; " +
+                    "materialized '{SystemPresetName}' for machine '{MachineName}' ({Outcome})",
+                    job.Id,
+                    LogSanitizer.Sanitize(profile.ProcessProfile?.Name),
+                    LogSanitizer.Sanitize(resolution.MachineSystemPresetName),
+                    LogSanitizer.Sanitize(profile.MachineProfile?.Name),
+                    resolution.Outcome);
+                break;
+
+            case ProcessCompatibilityOutcome.ConditionNotSatisfied:
+                _logger.LogError(
+                    "Job {JobId}: process profile '{ProcessName}' is not compatible with machine " +
+                    "'{MachineName}' (system preset '{SystemPresetName}') — its " +
+                    "compatible_printers_condition '{Condition}' does not hold. OrcaSlicer will " +
+                    "reject this pairing with CLI_PROCESS_NOT_COMPATIBLE (-17).",
+                    job.Id,
+                    LogSanitizer.Sanitize(profile.ProcessProfile?.Name),
+                    LogSanitizer.Sanitize(profile.MachineProfile?.Name),
+                    LogSanitizer.Sanitize(resolution.MachineSystemPresetName),
+                    LogSanitizer.Sanitize(resolution.Condition));
+                break;
+
+            default:
+                _logger.LogError(
+                    "Job {JobId}: could not derive a system preset name for machine '{MachineName}', " +
+                    "so process profile '{ProcessName}' cannot be shown to satisfy OrcaSlicer's " +
+                    "compatibility gate.",
+                    job.Id,
+                    LogSanitizer.Sanitize(profile.MachineProfile?.Name),
+                    LogSanitizer.Sanitize(profile.ProcessProfile?.Name));
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Describes why the pair of emitted profile documents cannot satisfy OrcaSlicer's
+    /// process/machine compatibility gate, or <see langword="null"/> when they can.
+    /// </summary>
+    /// <remarks>
+    /// The gate compares each entry of the process document's <c>compatible_printers</c> against
+    /// the machine document's system preset name. Checking that invariant on the documents that
+    /// are about to be handed to the CLI turns an otherwise opaque exit 239 into a statement of
+    /// which document was at fault, and covers both the generated and the verbatim native path.
+    /// Anything unreadable yields <see langword="null"/>: this is a diagnostic, so a parsing
+    /// problem here must never become the reported cause of a job failure.
+    /// </remarks>
+    /// <param name="machineDocument">The emitted machine document's JSON text.</param>
+    /// <param name="processDocument">The emitted process document's JSON text.</param>
+    /// <returns>A human-readable explanation, or <see langword="null"/> when the gate is satisfiable.</returns>
+    internal static string? DescribeUnsatisfiableCompatibilityGate(
+        string machineDocument,
+        string processDocument)
+    {
+        try
+        {
+            using JsonDocument machine = JsonDocument.Parse(machineDocument);
+            using JsonDocument process = JsonDocument.Parse(processDocument);
+
+            // A profile document is an object. Anything else is a shape OrcaSlicer rejects before
+            // the gate, and would make the JsonElement accessors below throw, so bail out rather
+            // than let a diagnostic become the reported cause of a job failure.
+            if (machine.RootElement.ValueKind != JsonValueKind.Object
+                || process.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            string? systemPresetName = ResolveMachineSystemPresetName(
+                OrcaProfilesService.SerializeElementToDict(machine.RootElement), fallbackName: null);
+            if (systemPresetName is null)
+            {
+                return "the machine document declares neither a system preset name via `name` " +
+                    "(when `from` is \"system\") nor one via `inherits`";
+            }
+
+            if (!process.RootElement.TryGetProperty("compatible_printers", out JsonElement compatible)
+                || compatible.ValueKind != JsonValueKind.Array
+                || compatible.GetArrayLength() == 0)
+            {
+                return $"the process document declares no compatible printers, so the machine's " +
+                    $"system preset '{systemPresetName}' cannot match any of them";
+            }
+
+            bool matched = compatible
+                .EnumerateArray()
+                .Any(entry => entry.ValueKind == JsonValueKind.String
+                    && string.Equals(entry.GetString(), systemPresetName, StringComparison.Ordinal));
+
+            return matched
+                ? null
+                : $"the process document's compatible printers do not include the machine's " +
+                    $"system preset '{systemPresetName}'";
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Logs, immediately before invoking OrcaSlicer, when the emitted documents cannot satisfy its
+    /// compatibility gate.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately a warning rather than a pre-emptive failure: a job whose input is a 3MF
+    /// carrying its own printer configuration can still pass through <c>CLI::run</c>'s
+    /// machine-switch branch, which this worker cannot evaluate, so refusing to run would reject
+    /// pairings OrcaSlicer would have accepted.
+    /// </remarks>
+    /// <param name="job">The job being prepared, for correlation.</param>
+    /// <param name="machineJsonPath">Path of the emitted machine document.</param>
+    /// <param name="processJsonPath">Path of the emitted process document.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task WarnIfProcessCannotSatisfyGateAsync(
+        DistributedSlicingJob job,
+        string machineJsonPath,
+        string processJsonPath,
+        CancellationToken cancellationToken)
+    {
+        string? reason;
+        try
+        {
+            reason = DescribeUnsatisfiableCompatibilityGate(
+                await File.ReadAllTextAsync(machineJsonPath, cancellationToken),
+                await File.ReadAllTextAsync(processJsonPath, cancellationToken));
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+#pragma warning disable CA1031 // A diagnostic must never be the reported cause of a job failure.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            _logger.LogDebug(
+                ex, "Job {JobId}: could not pre-check profile compatibility", job.Id);
+            return;
+        }
+
+        if (reason is not null)
+        {
+            _logger.LogWarning(
+                "Job {JobId}: OrcaSlicer is expected to reject this profile pairing with " +
+                "CLI_PROCESS_NOT_COMPATIBLE (-17, reported as exit 239) because {Reason}.",
+                job.Id,
+                LogSanitizer.Sanitize(reason));
+        }
+    }
+
     private async Task<string> RunOrcaSlicerAsync(List<string> modelPaths, string workDir, DistributedSlicingJob job, CancellationToken cancellationToken)
     {
         string gcodeOutputDir = Path.Join(workDir, "output");
@@ -775,77 +1205,74 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string processJson = profilePaths["process"];
         string filamentJson = profilePaths["filament"];
 
+        await WarnIfProcessCannotSatisfyGateAsync(job, machineJson, processJson, cancellationToken);
+
         // Build command line: --slice 0 --arrange 1 --ensure-on-bed --load-settings ...
         // --arrange 1: auto-center model on build plate (CLI loads STL at origin)
         // --ensure-on-bed: lift objects partially below Z=0
         //
-        // Per-model transforms: for multi-model jobs with ModelFileTransforms, use the first
-        // entry as the primary model transform. If any model has a custom position, disable
-        // auto-arrange to preserve the user's layout.
-        //
-        // When additional models (2..N) also carry transforms, embed all models in a 3MF
-        // project file so OrcaSlicer applies every transform instead of auto-arranging.
-        string? primaryTransformJson = job.ModelTransformJson;
-        bool anyModelHasPosition = false;
-        bool useThreeMfProject = false;
+        // Placement: OrcaSlicer 2.4.2 has NO CLI flag that can put a model at an absolute bed
+        // coordinate (both --center and --align-xy are commented out of CLITransformConfigDef),
+        // so any model carrying a custom position has its placement embedded in a 3MF project
+        // instead. See PlanPlacement.
+        (double X, double Y)? bedCenter = await TryReadBedCenterAsync(machineJson, job.Id, cancellationToken);
 
-        if (job.ModelFileTransforms is { Count: > 0 } && modelPaths.Count > 1)
+        PlacementPlan placement = PlanPlacement(
+            job.ModelTransformJson,
+            job.ModelFileTransforms,
+            modelPaths,
+            bedCenter.HasValue);
+
+        List<string> effectiveModelPaths = modelPaths;
+
+        switch (placement.Strategy)
         {
-            primaryTransformJson = job.ModelFileTransforms[0];
-            foreach (string? t in job.ModelFileTransforms)
-            {
-                TransformResult check = BuildTransformFlags(t);
-                if (check.HasCustomPosition)
+            case PlacementStrategy.ThreeMfProject:
+                _logger.LogInformation(
+                    "Job {JobId}: embedding transforms for {Count} model(s) in a 3MF project (bed centre {BedX},{BedY})",
+                    job.Id, modelPaths.Count, bedCenter!.Value.X, bedCenter.Value.Y);
+
+                var entries = new List<ThreeMfProjectBuilder.ModelEntry>(modelPaths.Count);
+                for (int i = 0; i < modelPaths.Count; i++)
                 {
-                    anyModelHasPosition = true;
-                    break;
+                    entries.Add(new ThreeMfProjectBuilder.ModelEntry(modelPaths[i], placement.ModelTransforms[i]));
                 }
-            }
 
-            if (job.ModelFileTransforms.Count > 1
-                && job.ModelFileTransforms.Skip(1).Any(t => !string.IsNullOrWhiteSpace(t)))
-            {
-                useThreeMfProject = true;
-            }
-        }
+                try
+                {
+                    effectiveModelPaths = [ThreeMfProjectBuilder.Build(entries, workDir, bedCenter.Value)];
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+                {
+                    // Only a binary STL within the triangle budget can be re-meshed into a
+                    // project. Rather than failing the whole job, let OrcaSlicer auto-arrange —
+                    // the layout is lost but the slice succeeds, and the reason is recorded here.
+                    _logger.LogError(
+                        ex,
+                        "Job {JobId}: could not build the 3MF project; falling back to auto-arrange, so the requested layout is lost.",
+                        job.Id);
+                    placement = DowngradeToAutoArrange(placement);
+                }
 
-        string arrangeFlag;
-        string transformFlags;
-        List<string> effectiveModelPaths;
+                break;
 
-        bool allStl = modelPaths.All(p => p.EndsWith(".stl", StringComparison.OrdinalIgnoreCase));
-
-        if (useThreeMfProject && allStl)
-        {
-            _logger.LogInformation(
-                "Job {JobId}: using 3MF project workflow to embed transforms for {Count} models",
-                job.Id, modelPaths.Count);
-
-            var entries = new List<ThreeMfProjectBuilder.ModelEntry>(modelPaths.Count);
-            for (int i = 0; i < modelPaths.Count; i++)
-            {
-                string? tfJson = i < job.ModelFileTransforms!.Count ? job.ModelFileTransforms[i] : null;
-                entries.Add(new ThreeMfProjectBuilder.ModelEntry(modelPaths[i], tfJson));
-            }
-
-            string threeMfPath = ThreeMfProjectBuilder.Build(entries, workDir);
-            effectiveModelPaths = [threeMfPath];
-            arrangeFlag = "--arrange 0";
-            transformFlags = string.Empty;
-        }
-        else
-        {
-            if (useThreeMfProject)
-            {
+            case PlacementStrategy.SourcePlacement:
                 _logger.LogWarning(
-                    "Job {JobId}: 3MF project workflow skipped — not all inputs are STL files. Falling back to CLI flags.",
+                    "Job {JobId}: inputs are 3MF, so the workspace layout cannot be re-embedded. " +
+                    "Falling back to the placement stored in the source file.",
                     job.Id);
-            }
+                break;
 
-            effectiveModelPaths = modelPaths;
-            TransformResult transform = BuildTransformFlags(primaryTransformJson);
-            arrangeFlag = (transform.HasCustomPosition || anyModelHasPosition) ? "--arrange 0" : "--arrange 1";
-            transformFlags = transform.Flags;
+            default:
+                if (placement.PositionDropped)
+                {
+                    _logger.LogWarning(
+                        "Job {JobId}: the requested layout could not be embedded (inputs are not all STL, or the " +
+                        "bed centre could not be determined); letting OrcaSlicer auto-arrange instead.",
+                        job.Id);
+                }
+
+                break;
         }
 
         // Create a named pipe for real-time progress from OrcaSlicer
@@ -853,17 +1280,18 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         bool pipeCreated = TryCreateNamedPipe(pipePath);
         string pipeFlag = pipeCreated ? $" --pipe \"{pipePath}\"" : string.Empty;
 
-        // Build model arguments: first model is positional, additional models use --load
-        string primaryModel = $"\"{effectiveModelPaths[0]}\"";
-        string additionalModels = string.Empty;
-        if (effectiveModelPaths.Count > 1)
-        {
-            additionalModels = " " + string.Join(" ", effectiveModelPaths.Skip(1).Select(p => $"--load \"{p}\""));
-        }
-
         string plateFlag = job.PlateIndex.HasValue ? $" --plate {job.PlateIndex.Value + 1}" : string.Empty;
 
-        string arguments = $"--slice 0 {arrangeFlag} --ensure-on-bed{transformFlags}{pipeFlag}{plateFlag} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\"{additionalModels} {primaryModel}";
+        string arguments = BuildOrcaSlicerArguments(
+            placement.ArrangeFlag,
+            placement.TransformFlags,
+            pipeFlag,
+            plateFlag,
+            machineJson,
+            processJson,
+            filamentJson,
+            gcodeOutputDir,
+            effectiveModelPaths);
 
         // OrcaSlicer requires a display even for headless CLI slicing; use xvfb-run if available
         string binaryPath = _orcaSlicerBinaryPath;
@@ -1381,18 +1809,354 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     /// <summary>
     /// Parsed transform result: CLI flags and whether a custom position was specified.
-    /// When <see cref="HasCustomPosition"/> is true, callers should use --arrange 0
-    /// instead of --arrange 1 so OrcaSlicer respects the explicit placement.
+    /// <see cref="Flags"/> must never contain a positional flag — OrcaSlicer 2.4.2 has none,
+    /// and passing one aborts the run before slicing (issue #1794). When
+    /// <see cref="HasCustomPosition"/> is true the caller embeds the placement in a 3MF project
+    /// instead; see <see cref="PlanPlacement"/>.
     /// </summary>
     internal readonly record struct TransformResult(string Flags, bool HasCustomPosition);
+
+    /// <summary>How a job's model placement is delivered to OrcaSlicer.</summary>
+    internal enum PlacementStrategy
+    {
+        /// <summary>No custom placement needed — let OrcaSlicer auto-arrange (<c>--arrange 1</c>).</summary>
+        AutoArrange,
+
+        /// <summary>Placement embedded in a generated 3MF project (<c>--arrange 0</c>).</summary>
+        ThreeMfProject,
+
+        /// <summary>Non-STL input: honour the placement already stored in the source file (<c>--arrange 0</c>).</summary>
+        SourcePlacement,
+    }
+
+    /// <summary>
+    /// Resolved placement for a slice job: the arrange flag, the (position-free) CLI transform
+    /// flags, and the per-model transform JSON to embed when a 3MF project is built.
+    /// </summary>
+    /// <param name="Strategy">Chosen placement mechanism.</param>
+    /// <param name="ArrangeFlag">Either <c>--arrange 0</c> or <c>--arrange 1</c>.</param>
+    /// <param name="TransformFlags">Rotation/scale CLI flags; empty when a 3MF project is used.</param>
+    /// <param name="ModelTransforms">Transform JSON per model, aligned with the model paths.</param>
+    /// <param name="PositionDropped">
+    /// True when a custom position existed but could not be honoured, so the model is
+    /// auto-arranged instead. Callers should log this.
+    /// </param>
+    internal readonly record struct PlacementPlan(
+        PlacementStrategy Strategy,
+        string ArrangeFlag,
+        string TransformFlags,
+        IReadOnlyList<string?> ModelTransforms,
+        bool PositionDropped);
+
+    /// <summary>
+    /// Decide how to place the job's models.
+    /// <para>
+    /// OrcaSlicer 2.4.2 exposes no CLI option for absolute placement — <c>center</c> and
+    /// <c>align_xy</c> are both commented out of <c>CLITransformConfigDef</c>, so passing
+    /// <c>--center</c> aborts the run with <c>CLI_INVALID_PARAMS</c> before anything is sliced
+    /// (issue #1794). Placement must therefore be embedded in a 3MF project, which is only
+    /// possible when every input is an STL we can re-mesh and when the machine profile tells us
+    /// where the bed centre is.
+    /// </para>
+    /// </summary>
+    /// <param name="modelTransformJson">Primary model transform for single-model jobs.</param>
+    /// <param name="modelFileTransforms">Per-model transforms for multi-model jobs.</param>
+    /// <param name="modelPaths">Downloaded model files, in order.</param>
+    /// <param name="bedCenterKnown">True when the machine profile yielded a bed centre.</param>
+    /// <returns>The placement plan.</returns>
+    internal static PlacementPlan PlanPlacement(
+        string? modelTransformJson,
+        IReadOnlyList<string?>? modelFileTransforms,
+        IReadOnlyList<string> modelPaths,
+        bool bedCenterKnown)
+    {
+        ArgumentNullException.ThrowIfNull(modelPaths);
+
+        // Multi-model jobs carry a per-file transform list; single-model jobs carry one blob.
+        bool perModel = modelFileTransforms is { Count: > 0 } && modelPaths.Count > 1;
+
+        var transforms = new List<string?>(modelPaths.Count);
+        for (int i = 0; i < modelPaths.Count; i++)
+        {
+            transforms.Add(perModel
+                ? (i < modelFileTransforms!.Count ? modelFileTransforms[i] : null)
+                : (i == 0 ? modelTransformJson : null));
+        }
+
+        bool anyCustomPosition = transforms.Any(t => BuildTransformFlags(t).HasCustomPosition);
+        bool secondaryTransforms = transforms.Skip(1).Any(t => !string.IsNullOrWhiteSpace(t));
+        bool needsEmbedding = anyCustomPosition || secondaryTransforms;
+
+        string primaryFlags = transforms.Count > 0
+            ? BuildTransformFlags(transforms[0]).Flags
+            : string.Empty;
+
+        // Only STL can be re-meshed into a project we control.
+        bool inputsAreStl = modelPaths.Count > 0
+            && modelPaths.All(p => p.EndsWith(".stl", StringComparison.OrdinalIgnoreCase));
+
+        // Only 3MF carries its own bed placement. OBJ/PLY/STEP/STP load at raw mesh or CAD
+        // coordinates, so "--arrange 0" would strand them wherever the file happens to sit.
+        bool inputsCarryOwnPlacement = modelPaths.Count > 0
+            && modelPaths.All(p => p.EndsWith(".3mf", StringComparison.OrdinalIgnoreCase));
+
+        if (needsEmbedding && inputsAreStl && bedCenterKnown)
+        {
+            // Rotation and scale are baked into the 3MF matrix, so no CLI transform flags.
+            return new PlacementPlan(PlacementStrategy.ThreeMfProject, "--arrange 0", string.Empty, transforms, false);
+        }
+
+        if (needsEmbedding && inputsCarryOwnPlacement)
+        {
+            // A 3MF input already carries its own placement; keep it rather than re-arranging.
+            return new PlacementPlan(PlacementStrategy.SourcePlacement, "--arrange 0", primaryFlags, transforms, true);
+        }
+
+        // Nothing to place (or nowhere to place it): auto-arrange. Never "--arrange 0" without
+        // an embedded placement — that would leave the model at raw mesh coordinates, which
+        // lands it off the bed and trips OrcaSlicer's CLI_OBJECTS_PARTLY_INSIDE check. This is
+        // also the path for mixed STL+3MF jobs and for OBJ/PLY/STEP, none of which can be
+        // placed faithfully.
+        return new PlacementPlan(PlacementStrategy.AutoArrange, "--arrange 1", primaryFlags, transforms, needsEmbedding);
+    }
+
+    /// <summary>
+    /// Rewrite a plan to plain auto-arrange, used when the chosen mechanism turned out to be
+    /// unavailable at runtime (for example the 3MF project could not be built). The requested
+    /// layout is lost, which <see cref="PlacementPlan.PositionDropped"/> records so the caller
+    /// can say so in the log; rotation and scale are recovered as CLI flags.
+    /// </summary>
+    internal static PlacementPlan DowngradeToAutoArrange(PlacementPlan plan) =>
+        plan with
+        {
+            Strategy = PlacementStrategy.AutoArrange,
+            ArrangeFlag = "--arrange 1",
+            TransformFlags = plan.ModelTransforms.Count > 0
+                ? BuildTransformFlags(plan.ModelTransforms[0]).Flags
+                : string.Empty,
+            PositionDropped = true,
+        };
+
+    /// <summary>
+    /// Compose the OrcaSlicer CLI argument string. The first model is positional; any
+    /// additional models are passed with <c>--load</c>.
+    /// </summary>
+    internal static string BuildOrcaSlicerArguments(
+        string arrangeFlag,
+        string transformFlags,
+        string pipeFlag,
+        string plateFlag,
+        string machineJson,
+        string processJson,
+        string filamentJson,
+        string gcodeOutputDir,
+        IReadOnlyList<string> effectiveModelPaths)
+    {
+        ArgumentNullException.ThrowIfNull(effectiveModelPaths);
+        if (effectiveModelPaths.Count == 0)
+        {
+            throw new ArgumentException("At least one model path is required.", nameof(effectiveModelPaths));
+        }
+
+        string primaryModel = $"\"{effectiveModelPaths[0]}\"";
+        string additionalModels = effectiveModelPaths.Count > 1
+            ? " " + string.Join(" ", effectiveModelPaths.Skip(1).Select(p => $"--load \"{p}\""))
+            : string.Empty;
+
+        return $"--slice 0 {arrangeFlag} --ensure-on-bed{transformFlags}{pipeFlag}{plateFlag} --load-settings \"{machineJson};{processJson}\" --load-filaments \"{filamentJson}\" --allow-newer-file --outputdir \"{gcodeOutputDir}\"{additionalModels} {primaryModel}";
+    }
+
+    /// <summary>
+    /// Read the bed centre, in OrcaSlicer bed coordinates, from a machine profile file.
+    /// Workspace model positions are relative to the bed centre, so this offset is what maps
+    /// them into the coordinate space OrcaSlicer places 3MF build items in.
+    /// </summary>
+    /// <returns>The bed centre, or <see langword="null"/> when the profile cannot be read or has
+    /// no usable <c>printable_area</c>.</returns>
+    private async Task<(double X, double Y)?> TryReadBedCenterAsync(
+        string machineProfilePath,
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        string json;
+        try
+        {
+            json = await File.ReadAllTextAsync(machineProfilePath, cancellationToken);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Distinguished from "profile parsed but has no printable_area" so the placement
+            // warning downstream is not blamed on profile content that was never read.
+            _logger.LogWarning(ex, "Job {JobId}: could not read the machine profile to determine the bed centre.", jobId);
+            return null;
+        }
+
+        (double X, double Y)? center = TryReadBedCenter(json);
+        if (center is null)
+        {
+            _logger.LogWarning(
+                "Job {JobId}: machine profile has no usable printable_area, so the bed centre is unknown.",
+                jobId);
+        }
+
+        return center;
+    }
+
+    /// <summary>
+    /// Bed centre derived from a machine profile's <c>printable_area</c> polygon: the centre of
+    /// its bounding box. This is origin-convention agnostic — a corner-origin rectangular bed
+    /// yields (width/2, depth/2) while a delta bed centred on (0,0) yields (0,0).
+    /// </summary>
+    internal static (double X, double Y)? TryReadBedCenter(string? machineProfileJson)
+    {
+        if (string.IsNullOrWhiteSpace(machineProfileJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(machineProfileJson);
+            List<(double X, double Y)>? points = OrcaMachineProfileFields.ParsePrintableAreaPoints(doc.RootElement);
+            if (points is null || points.Count == 0)
+            {
+                return null;
+            }
+
+            double minX = points.Min(p => p.X);
+            double maxX = points.Max(p => p.X);
+            double minY = points.Min(p => p.Y);
+            double maxY = points.Max(p => p.Y);
+
+            return ((minX + maxX) / 2, (minY + maxY) / 2);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Convert the workspace's rotation into the triple OrcaSlicer's CLI can actually express.
+    /// <para>
+    /// The viewer is three.js Euler order <c>'XYZ'</c> — column-vector <c>R = Rx·Ry·Rz</c>.
+    /// OrcaSlicer does NOT compose CLI rotations. <c>ModelVolume::rotate</c> (Model.cpp) does
+    /// <c>set_rotation(get_rotation() + extract_euler_angles(...))</c>, i.e. it ADDS each
+    /// single-axis angle into an Euler triple — so flag order is irrelevant, addition being
+    /// commutative — and <c>Geometry::rotation_transform</c> then rebuilds the matrix as
+    /// <c>AngleAxisd(z,Z) * AngleAxisd(y,Y) * AngleAxisd(x,X)</c>, i.e. <c>Rz·Ry·Rx</c>, order
+    /// <c>'ZYX'</c>. OrcaSlicer's own comment notes the triple "is not equivalent to Euler angles
+    /// in the usual sense".
+    /// </para>
+    /// <para>
+    /// Emitting the workspace angles verbatim therefore orients the part differently from what
+    /// the user approved on screen whenever more than one component is non-zero — which is the
+    /// normal output of auto-orient, since it derives its Euler from a quaternion. The rotation
+    /// is instead re-parameterised: build the viewer's matrix, then extract the <c>'ZYX'</c>
+    /// triple that reproduces it.
+    /// </para>
+    /// <para>
+    /// This round-trips through OrcaSlicer's additive accumulation, but only because of the
+    /// negative-Z correction below. <c>Geometry::extract_euler_angles</c> is Eigen's
+    /// <c>eulerAngles(2,1,0)</c> with the first and last components swapped, and Eigen normalises
+    /// that first angle — the Z one — into <c>[0, π]</c>. So <c>extract(Rz(γ))</c> for
+    /// <c>γ &lt; 0</c> is NOT <c>(0,0,γ)</c>; it is <c>(π, -π, γ+π)</c>. Since
+    /// <c>ModelVolume::rotate</c> SUMS these triples and <c>Ry(-π)</c> does not commute with a
+    /// non-trivial X/Y contribution, a negative Z combined with any X or Y rotation would
+    /// accumulate into the wrong orientation.
+    /// </para>
+    /// </summary>
+    /// <returns>Rotation about X, Y and Z in radians, to be summed by OrcaSlicer as 'ZYX'.</returns>
+    internal static (double X, double Y, double Z) ToOrcaRotation(double rx, double ry, double rz)
+    {
+        double cosX = Math.Cos(rx), sinX = Math.Sin(rx);
+        double cosY = Math.Cos(ry), sinY = Math.Sin(ry);
+        double cosZ = Math.Cos(rz), sinZ = Math.Sin(rz);
+
+        // Viewer orientation, column-vector R = Rx·Ry·Rz (three.js Matrix4.makeRotationFromEuler,
+        // case 'XYZ'). Only the entries the extraction needs are computed.
+        double r00 = cosY * cosZ;
+        double r01 = -cosY * sinZ;
+        double r02 = sinY;
+        double r10 = (cosX * sinZ) + (sinX * cosZ * sinY);
+        double r20 = (sinX * sinZ) - (cosX * cosZ * sinY);
+        double r21 = (sinX * cosZ) + (cosX * sinZ * sinY);
+        double r22 = cosX * cosY;
+
+        double outX;
+
+        // Math.Clamp is a defensive guard, not dead weight: if -r20 ever rounded outside [-1,1],
+        // Math.Asin would return NaN, and NaN fails SILENTLY here — Math.Abs(NaN) > epsilon is
+        // false, so --rotate-y would be dropped rather than throwing, i.e. a silent
+        // mis-orientation, the exact failure class this code exists to prevent.
+        //
+        // It is deliberately not covered by a test: r20 is a rotation-matrix entry, and a
+        // targeted 20M-sample scan along the gimbal-lock boundary (where |r20| → 1) found no
+        // input for which this expression rounds past 1. Do not delete it as "untested" — a
+        // future change to how r20 is computed could easily make it reachable.
+        double outY = Math.Asin(Math.Clamp(-r20, -1.0, 1.0));
+        double outZ;
+
+        // Gimbal lock: cos(outY) == 0 collapses r00/r10/r21/r22 to the residue of a catastrophic
+        // cancellation, so deriving X and Z from them is meaningless. Read the O(1) terms
+        // instead, pinning Z at zero and solving for X.
+        const double lockEpsilon = 1e-9;
+        if (Math.Abs(r20) >= 1.0 - lockEpsilon)
+        {
+            outX = r20 <= 0 ? Math.Atan2(r01, r02) : Math.Atan2(-r01, -r02);
+            outZ = 0.0;
+        }
+        else
+        {
+            outX = Math.Atan2(r21, r22);
+            outZ = Math.Atan2(r10, r00);
+        }
+
+        // Every 'ZYX' triple has a second representative, (x-π, π-y, z+π). Take it when Z is
+        // negative: that makes Z non-negative, and gives |y'| > 90°, which is exactly the case
+        // where extract(Ry(y')) returns (π, y, π) — so the X, Y and Z contributions sum back to
+        // the intended triple modulo 2π.
+        //
+        // That extract(Ry(y')) → π step reads atan2(m10, cos y') with cos y' < 0, so it depends
+        // on m10 being +0 rather than -0: atan2(-0, negative) would return -π, trip Eigen's
+        // res[0] < 0 branch, and yield 0 instead of π — rotating the result by Rz(π).
+        //
+        // It holds unconditionally, and by IEEE rule rather than by luck. Eigen builds the
+        // quaternion as vec() = sin(θ/2)·axis, so for UnitY the x and z components are ±0
+        // carrying sin(θ/2)'s sign. m10 is then 2·x·y + 2·z·w: the first term's factors BOTH
+        // carry sign(sin(θ/2)), so it is +0 for every θ, while the second may be -0 — and
+        // round-to-nearest gives (+0) + (-0) = +0. Eigen's direct AngleAxis::toRotationMatrix
+        // path reaches +0 the same way, though Model.cpp takes the quaternion path. Verified by
+        // execution over both paths and both signs of θ.
+        //
+        // NormalizeAngle is therefore NOT required for correctness, and nothing here depends on
+        // the emitted angle's range: q(θ±2π) = -q(θ) and the matrix is quadratic in the
+        // quaternion, so Ry(θ) and Ry(θ±2π) are bit-identical including zero signs. It is kept
+        // only so the emitted flags stay legible rather than values like "--rotate-y 270.00".
+        if (outZ < 0)
+        {
+            outX = NormalizeAngle(outX - Math.PI);
+            outY = NormalizeAngle(Math.PI - outY);
+            outZ += Math.PI;
+        }
+
+        return (outX, outY, outZ);
+    }
+
+    /// <summary>Wrap an angle into (-π, π].</summary>
+    private static double NormalizeAngle(double radians)
+    {
+        double wrapped = Math.IEEERemainder(radians, 2 * Math.PI);
+        return wrapped <= -Math.PI ? wrapped + (2 * Math.PI) : wrapped;
+    }
 
     /// <summary>
     /// Parse model transform JSON from the UI and build OrcaSlicer CLI transform flags.
     /// Input: {"rotation":[rx,ry,rz],"scale":[sx,sy,sz],"position":[px,py,pz]}
-    ///   — radians for rotation, Y-up coordinate system (Three.js/R3F).
-    /// Output: OrcaSlicer flags in degrees, Z-up.
-    /// Axis mapping (rotation): R3F X → --rotate-x, R3F Y (up) → --rotate (Z), R3F Z → --rotate-y.
-    /// Axis mapping (position):  R3F X → OrcaSlicer X, R3F Z → OrcaSlicer Y (bed plane).
+    ///   — radians, three.js Euler order 'XYZ', Z-up with the XY bed plane (camera.up = [0,0,1]).
+    /// Output: OrcaSlicer flags in degrees. rotation[0]=X, rotation[1]=Y, rotation[2]=Z map to
+    /// the same axes, but the angles are re-parameterised — see <see cref="ToOrcaRotation"/>.
+    /// Position is deliberately not mapped to a flag; see <see cref="TransformResult"/>.
     /// </summary>
     internal static TransformResult BuildTransformFlags(string? modelTransformJson)
     {
@@ -1421,22 +2185,27 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 const double radToDeg = 180.0 / Math.PI;
                 const double epsilon = 0.001;
 
-                // Workspace is Z-up with XY bed plane (camera.up = [0,0,1]).
-                // rotation[0]=X, rotation[1]=Y, rotation[2]=Z — same axes as OrcaSlicer.
-                double rotXDeg = rot[0] * radToDeg;
+                // The workspace angles cannot be emitted verbatim: OrcaSlicer sums --rotate*
+                // into an Euler triple and rebuilds it as Rz·Ry·Rx ('ZYX'), while the viewer is
+                // three.js 'XYZ'. Re-parameterise first. See ToOrcaRotation.
+                //
+                // Flag ORDER is irrelevant — ModelVolume::rotate adds into separate components
+                // and addition commutes — so these are emitted X, Y, Z purely for readability.
+                (double orcaX, double orcaY, double orcaZ) = ToOrcaRotation(rot[0], rot[1], rot[2]);
+
+                double rotXDeg = orcaX * radToDeg;
                 if (Math.Abs(rotXDeg) > epsilon)
                 {
                     flags.Append(CultureInfo.InvariantCulture, $" --rotate-x {rotXDeg:F2}");
                 }
 
-                double rotYDeg = rot[1] * radToDeg;
+                double rotYDeg = orcaY * radToDeg;
                 if (Math.Abs(rotYDeg) > epsilon)
                 {
                     flags.Append(CultureInfo.InvariantCulture, $" --rotate-y {rotYDeg:F2}");
                 }
 
-                // Z-rotation (around up axis) = OrcaSlicer --rotate (yaw)
-                double rotZDeg = rot[2] * radToDeg;
+                double rotZDeg = orcaZ * radToDeg;
                 if (Math.Abs(rotZDeg) > epsilon)
                 {
                     flags.Append(CultureInfo.InvariantCulture, $" --rotate {rotZDeg:F2}");
@@ -1462,7 +2231,22 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             }
 
             // Workspace is Z-up with XY bed plane — same as OrcaSlicer.
-            // position[0]=X (bed), position[1]=Y (bed), position[2]=Z (height, ignored for --center).
+            // position[0]=X (bed), position[1]=Y (bed), position[2]=Z (height).
+            //
+            // DO NOT add a positional flag here. OrcaSlicer 2.4.2 compiles both `center` and
+            // `align_xy` out of CLITransformConfigDef, so passing either is fatal: the CLI
+            // answers "Invalid option --center", dumps its usage, and exits 254
+            // (CLI_INVALID_PARAMS) without slicing anything (issue #1794).
+            //
+            // A custom position is reported through HasCustomPosition instead, and embedded in
+            // a 3MF project by PlanPlacement — the only placement mechanism this CLI supports.
+            // If a future OrcaSlicer restores a positional option, adding it back here is NOT
+            // sufficient on its own: placement is coupled to the arrange flag, so PlanPlacement
+            // must change in the same commit.
+            //
+            // Guarded by BuildTransformFlagsTests.BuildTransformFlags_NeverEmitsUnsupportedPositionalFlags
+            // and OrcaSlicerArgumentsTests. Those tests failing means the defect is back — they
+            // are not stale, so do not "fix" them by relaxing the assertion.
             if (root.TryGetProperty("position", out JsonElement posEl) && posEl.ValueKind == JsonValueKind.Array)
             {
                 double[] pos = new double[3];
@@ -1474,13 +2258,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 }
 
                 const double epsilon = 0.001;
-                double bedX = pos[0]; // X bed axis → OrcaSlicer X
-                double bedY = pos[1]; // Y bed axis → OrcaSlicer Y
-
-                if (Math.Abs(bedX) > epsilon || Math.Abs(bedY) > epsilon)
+                if (Math.Abs(pos[0]) > epsilon || Math.Abs(pos[1]) > epsilon)
                 {
                     hasCustomPosition = true;
-                    flags.Append(CultureInfo.InvariantCulture, $" --center {bedX:F2},{bedY:F2}");
                 }
             }
 
@@ -1498,6 +2278,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// (start with '[') are written as native arrays.
     /// Keys with values that would fail OrcaSlicer's CLI validator are sanitized.
     /// </summary>
+    /// <remarks>
+    /// The caller's dictionary is never modified. Resolved profiles come from a shared cache and
+    /// several jobs can be prepared concurrently, so sanitizing in place would both leak one job's
+    /// CLI fix-ups into every later job and write to a <see cref="Dictionary{TKey, TValue}"/> that
+    /// another thread may be reading — which is undefined behaviour, not merely stale data.
+    /// </remarks>
+    /// <param name="settings">The settings bag to serialize.</param>
+    /// <returns>The native OrcaSlicer JSON document text.</returns>
     internal static string SettingsDictToNativeJson(Dictionary<string, object>? settings)
     {
         if (settings == null || settings.Count == 0)
@@ -1507,13 +2295,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         // OrcaSlicer --load-settings has stricter range checks than the profile format.
         // Clamp known speed/rate fields that use 0="auto" in profiles but require ≥1 in CLI.
-        SanitizeForCli(settings);
+        Dictionary<string, object> sanitized = new(settings, StringComparer.Ordinal);
+        SanitizeForCli(sanitized);
 
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
         {
             writer.WriteStartObject();
-            foreach (KeyValuePair<string, object> kvp in settings)
+            foreach (KeyValuePair<string, object> kvp in sanitized)
             {
                 writer.WritePropertyName(kvp.Key);
 

@@ -108,4 +108,19 @@ public class ProcessProfileDto
 
     // ── Full settings bag (forward compatibility) ─────────────────────────
     public Dictionary<string, object> Settings { get; set; } = new();
+
+    /// <summary>
+    /// Shallow clone with independent <see cref="Settings"/> and
+    /// <see cref="CompatiblePrinters"/> collections. Use before mutating a profile resolved from
+    /// a shared cache (e.g. applying a submission's per-slice setting overrides) so the cached
+    /// instance — which later jobs, including other users' jobs, will reuse — is never polluted.
+    /// </summary>
+    /// <returns>An independently mutable copy.</returns>
+    public ProcessProfileDto Clone()
+    {
+        ProcessProfileDto clone = (ProcessProfileDto)MemberwiseClone();
+        clone.Settings = new Dictionary<string, object>(Settings);
+        clone.CompatiblePrinters = new List<string>(CompatiblePrinters);
+        return clone;
+    }
 }

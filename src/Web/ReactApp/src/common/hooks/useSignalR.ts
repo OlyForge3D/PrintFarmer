@@ -86,9 +86,7 @@ export function usePrinterStatusUpdates(
     const subscribeToPrinters = () => {
       if (cancelled || subscribed) return;
       subscribed = true;
-      void Promise.allSettled(
-        printerIds.map((printerId) => printerSignalRService.subscribeToPrinter(printerId))
-      );
+      void printerSignalRService.subscribeToPrinters(printerIds);
     };
     const unsubscribeConnectionState = printerSignalRService.onConnectionStateChange((connected) => {
       if (connected) subscribeToPrinters();

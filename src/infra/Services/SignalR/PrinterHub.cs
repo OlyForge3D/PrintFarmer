@@ -121,6 +121,85 @@ public class PrinterHub(
         }
     }
 
+    /// <summary>
+    /// Subscribes to multiple authorized printers' status and queue events in a single hub
+    /// invocation, instead of the client issuing N serialized <see cref="SubscribeToPrinterAsync"/>
+    /// calls (issue #1764: with <c>MaximumParallelInvocationsPerClient = 1</c>, N apparently
+    /// concurrent client invokes are actually serialized server-side into N sequential
+    /// authorization queries on every connect/reconnect). Authorization is still enforced per
+    /// printer via <see cref="IQueueResourceAuthorizationService.FilterAccessiblePrinterIdsAsync"/>
+    /// in a single batched query; invalid or unauthorized ids are silently excluded rather than
+    /// failing the whole batch.
+    /// </summary>
+    /// <param name="printerIds">Candidate printer IDs (as strings) to subscribe to.</param>
+    /// <returns>The authorized printer IDs (as strings) that were joined.</returns>
+    public async Task<string[]> SubscribeToPrintersAsync(string[] printerIds)
+    {
+        if (printerIds is null || printerIds.Length == 0)
+        {
+            return [];
+        }
+
+        var candidateIds = new List<Guid>();
+        // Preserve the caller's original string for each id (first occurrence wins on
+        // duplicates) so the response echoes back exactly what the client sent, not the
+        // server's own re-serialization. Otherwise a valid but non-canonical GUID string
+        // (uppercase, braced, etc.) would round-trip authorized on the server but appear
+        // "unauthorized" to the client's string comparison, causing it to be wrongly
+        // dropped from desiredQueuePrinters/subscribedPrinters (see PR #1801 review).
+        var originalStringsById = new Dictionary<Guid, string>();
+        foreach (string printerId in printerIds)
+        {
+            if (Guid.TryParse(printerId, out Guid id) && !originalStringsById.ContainsKey(id))
+            {
+                candidateIds.Add(id);
+                originalStringsById[id] = printerId;
+            }
+        }
+
+        if (candidateIds.Count == 0)
+        {
+            return [];
+        }
+
+        IReadOnlySet<Guid> authorizedIds = resourceAuthorization is null
+            ? new HashSet<Guid>()
+            : await resourceAuthorization.FilterAccessiblePrinterIdsAsync(
+                Context.User!,
+                candidateIds,
+                PrinterGroupAccessLevel.View,
+                Context.ConnectionAborted);
+
+        var authorized = new List<string>(authorizedIds.Count);
+        var cachedStatuses = new List<PrinterStatusDto>(authorizedIds.Count);
+        foreach (Guid id in candidateIds)
+        {
+            if (!authorizedIds.Contains(id))
+            {
+                continue;
+            }
+
+            await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Printer(id));
+            authorized.Add(originalStringsById[id]);
+
+            PrinterStatusDto? status = statusCache.GetStatus(id);
+            if (status is not null)
+            {
+                cachedStatuses.Add(status);
+            }
+        }
+
+        // Replay every authorized printer's cached status in a single message instead of
+        // one "printerupdated" frame per printer, so the client doesn't trade N subscribe
+        // invokes for N status frames (issue #1764).
+        if (cachedStatuses.Count > 0)
+        {
+            await Clients.Caller.SendAsync("printerstatusesreplayed", cachedStatuses, Context.ConnectionAborted);
+        }
+
+        return [.. authorized];
+    }
+
     /// <summary>Subscribes to one authorized queue job.</summary>
     public async Task SubscribeToQueueJobAsync(string jobId)
     {

@@ -222,6 +222,21 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       printerSignalRService.dispose();
     });
 
+    it('handles the batched "printerstatusesreplayed" event by applying each status', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+
+      signalRTestState.connectionHandlers.get('printerstatusesreplayed')?.([
+        { id: 'printer-1', state: 'Printing', isOnline: true },
+        { id: 'printer-2', state: 'Idle', isOnline: true },
+      ]);
+      await flushMicrotasks();
+
+      expect(printerSignalRService.getLastStatus('printer-1')?.state).toBe('Printing');
+      expect(printerSignalRService.getLastStatus('printer-2')?.state).toBe('Idle');
+      printerSignalRService.dispose();
+    });
+
     it('still caches statuses (offline debounce logic) when the debug flag is off', async () => {
       const { printerSignalRService } = await import('../printer-signalr');
       await flushMicrotasks();
@@ -538,20 +553,23 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       printerSignalRService.dispose();
     });
 
-    it('restores authorized groups and removes a rejected group on reconnect', async () => {
+    it('restores authorized groups and removes a rejected group on reconnect, with exactly one batched printer invocation', async () => {
       const { printerSignalRService } = await import('../printer-signalr');
       await flushMicrotasks();
       await printerSignalRService.connect();
       await printerSignalRService.replaceQueueResourceSubscriptions({
-        printerIds: ['printer-1'],
+        printerIds: ['printer-1', 'printer-2', 'printer-3'],
         jobIds: ['job-1'],
         projectIds: ['project-1'],
       });
       signalRTestState.connection.invoke.mockClear();
       signalRTestState.connection.invoke.mockImplementation(
-        async (method: string, id: string) => {
-          if (method === 'SubscribeToQueueJobAsync' && id === 'job-1') {
+        async (method: string, arg: string | string[]) => {
+          if (method === 'SubscribeToQueueJobAsync' && arg === 'job-1') {
             throw new Error('Forbidden');
+          }
+          if (method === 'SubscribeToPrintersAsync') {
+            return arg as string[];
           }
         }
       );
@@ -559,17 +577,21 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       signalRTestState.triggerReconnected();
       await flushMicrotasks();
 
-      expect(signalRTestState.connection.invoke).toHaveBeenCalledWith(
-        'SubscribeToPrinterAsync',
-        'printer-1'
+      // The whole point of issue #1764 is one batched invocation instead of N
+      // serialized ones — assert the exact call count, not just call args, so
+      // a regression back to N per-printer invokes would fail this test.
+      const printerInvocations = signalRTestState.connection.invoke.mock.calls.filter(
+        ([method]) => method === 'SubscribeToPrintersAsync'
       );
+      expect(printerInvocations).toHaveLength(1);
+      expect(printerInvocations[0][1]).toEqual(['printer-1', 'printer-2', 'printer-3']);
       expect(signalRTestState.connection.invoke).toHaveBeenCalledWith(
         'SubscribeToProjectAsync',
         'project-1'
       );
       expect(printerSignalRService.getQueueSubscriptionSnapshot()).toEqual(
         expect.objectContaining({
-          printerIds: ['printer-1'],
+          printerIds: ['printer-1', 'printer-2', 'printer-3'],
           jobIds: [],
           projectIds: ['project-1'],
         })
@@ -618,6 +640,108 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
         'UnsubscribeFromPrinterAsync',
         'printer-a'
       );
+      printerSignalRService.dispose();
+    });
+
+    it('subscribeToPrinters issues a single batched invocation for multiple printers', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      await printerSignalRService.connect();
+      signalRTestState.connection.invoke.mockClear();
+      signalRTestState.connection.invoke.mockImplementation(
+        async (method: string, ids: string[]) => {
+          if (method === 'SubscribeToPrintersAsync') {
+            return ids;
+          }
+        }
+      );
+
+      await printerSignalRService.subscribeToPrinters([
+        'printer-a',
+        'printer-b',
+        'printer-c',
+      ]);
+
+      const printerInvocations = signalRTestState.connection.invoke.mock.calls.filter(
+        ([method]) => method === 'SubscribeToPrintersAsync'
+      );
+      expect(printerInvocations).toHaveLength(1);
+      expect(printerInvocations[0][1]).toEqual(
+        expect.arrayContaining(['printer-a', 'printer-b', 'printer-c'])
+      );
+      printerSignalRService.dispose();
+    });
+
+    it('subscribeToPrinters drops printers the server did not authorize, and does not retry them on reconnect', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      await printerSignalRService.connect();
+      signalRTestState.connection.invoke.mockImplementation(
+        async (method: string, ids: string[]) => {
+          if (method === 'SubscribeToPrintersAsync') {
+            return ids.filter((id) => id !== 'printer-forbidden');
+          }
+        }
+      );
+
+      await printerSignalRService.subscribeToPrinters([
+        'printer-allowed',
+        'printer-forbidden',
+      ]);
+
+      const snapshot = printerSignalRService.getQueueSubscriptionSnapshot();
+      expect(snapshot.printerIds).toEqual(['printer-allowed']);
+
+      // The unauthorized id must be dropped from the desired set too, not just
+      // from `subscribedPrinters` — otherwise a later reconnect would keep
+      // re-requesting it forever.
+      signalRTestState.connection.invoke.mockClear();
+      signalRTestState.connection.invoke.mockImplementation(
+        async (method: string, ids: string[]) => {
+          if (method === 'SubscribeToPrintersAsync') {
+            return ids;
+          }
+        }
+      );
+      signalRTestState.triggerReconnected();
+      await flushMicrotasks();
+
+      const printerInvocations = signalRTestState.connection.invoke.mock.calls.filter(
+        ([method]) => method === 'SubscribeToPrintersAsync'
+      );
+      expect(printerInvocations).toHaveLength(1);
+      expect(printerInvocations[0][1]).toEqual(['printer-allowed']);
+      printerSignalRService.dispose();
+    });
+
+    it('subscribeToPrinters drops all requested printers when the batched invocation fails, and does not retry them on reconnect', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      await printerSignalRService.connect();
+      signalRTestState.connection.invoke.mockImplementation(
+        async (method: string) => {
+          if (method === 'SubscribeToPrintersAsync') {
+            throw new Error('network error');
+          }
+        }
+      );
+
+      await printerSignalRService.subscribeToPrinters(['printer-a', 'printer-b']);
+
+      const snapshot = printerSignalRService.getQueueSubscriptionSnapshot();
+      expect(snapshot.printerIds).toEqual([]);
+
+      // A subsequent reconnect must not re-request the ids the failed batch
+      // invocation dropped from the desired set.
+      signalRTestState.connection.invoke.mockClear();
+      signalRTestState.connection.invoke.mockResolvedValue(undefined);
+      signalRTestState.triggerReconnected();
+      await flushMicrotasks();
+
+      const printerInvocations = signalRTestState.connection.invoke.mock.calls.filter(
+        ([method]) => method === 'SubscribeToPrintersAsync'
+      );
+      expect(printerInvocations).toHaveLength(0);
       printerSignalRService.dispose();
     });
 

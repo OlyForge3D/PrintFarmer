@@ -118,6 +118,58 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime
         _ = process.RootElement.GetProperty("layer_height").GetString().Should().Be("0.28");
     }
 
+    [Fact(DisplayName = "A compatibility override is rejected rather than snapshotted onto the native process profile")]
+    public async Task Submit_WithCompatibilityOverride_DoesNotSnapshotItOntoTheProcessProfile()
+    {
+        // Issue #1795. OrcaSlicer gates the slice by comparing each entry of the process
+        // document's `compatible_printers` against the machine's system preset name, and the
+        // worker materializes `compatible_printers_condition` into that array for profiles that
+        // declare only a condition. Both therefore decide whether a pairing is permitted at all —
+        // they are not print settings a submission may tune. Accepting either here would let a
+        // submission authorize its own machine/process pairing, and this path snapshots a document
+        // the worker writes VERBATIM after digest verification, so it would bypass the worker's
+        // own filter entirely.
+        Guid userId = await GetAuthenticatedUserIdAsync();
+        await AddProfilesAsync(userId, filamentName: CustomFilamentName);
+
+        string slicerProfileJson = JsonSerializer.Serialize(new
+        {
+            machineProfileName = "Test Machine",
+            processProfileName = "Test Process",
+            filamentProfileName = CustomFilamentName,
+            overrides = new Dictionary<string, object>
+            {
+                ["layer_height"] = "0.28",
+                ["compatible_printers"] = new[] { "Some Other Printer" },
+                ["compatible_printers_condition"] = "name=~/.*/",
+            },
+        });
+
+        HttpResponseMessage submit = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = userId,
+            ModelFileUrl = "models/test.stl",
+            ModelFileName = "test.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            SlicerProfileJson = slicerProfileJson,
+        });
+        _ = submit.StatusCode.Should().Be(HttpStatusCode.Created, await submit.Content.ReadAsStringAsync());
+
+        WorkerSliceJobResponse claimed = await ClaimAsync();
+        using JsonDocument process = JsonDocument.Parse(claimed.ProcessProfileJson!);
+
+        // The benign override is still applied — overrides remain a supported feature.
+        _ = process.RootElement.GetProperty("layer_height").GetString().Should().Be("0.28");
+
+        _ = process.RootElement.TryGetProperty("compatible_printers", out _).Should().BeFalse(
+            "a submission must not be able to declare which printers a process profile works with");
+        _ = process.RootElement.TryGetProperty("compatible_printers_condition", out _).Should().BeFalse(
+            "nor the condition the worker materializes into that declaration");
+
+        // The digest must cover the document actually snapshotted, overrides and all.
+        _ = claimed.ProcessProfileSha256.Should().Be(Sha256(claimed.ProcessProfileJson!));
+    }
+
     [Fact(DisplayName = "A numeric process override is stringified to match the native OrcaSlicer JSON schema")]
     public async Task Submit_WithNumericProcessOverride_StringifiesOverrideValue()
     {
