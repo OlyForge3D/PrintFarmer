@@ -17,6 +17,9 @@
   <ItemGroup>
     <ProjectReference Include="../discovery/Farm.Shared.Discovery.csproj" />
     <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
+    <!-- Validation-only fixture provider (issue #1835), isolated into its own assembly;
+         see docs/MOONRAKER_EMULATOR_VALIDATION.md for what it supports. -->
+    <ProjectReference Include="../Farm.PrinterDiscovery.ValidationFixtures/Farm.PrinterDiscovery.ValidationFixtures.csproj" />
     <ProjectReference Include="../backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj" />
     <ProjectReference Include="../backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj" />
     <ProjectReference Include="../backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj" />
