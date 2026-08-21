@@ -240,7 +240,7 @@ public sealed class SliceJobLeaseFencingTests : IAsyncLifetime
         SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         SliceJob persisted = await db.SliceJobs.AsNoTracking().SingleAsync(job => job.Id == claimed.Id);
         _ = persisted.Status.Should().Be(SliceJobStatus.Failed);
-        _ = persisted.ErrorMessage.Should().NotBeNullOrWhiteSpace();
+        _ = persisted.ErrorMessage.Should().Be("worker detail", "the worker-reported message must be persisted verbatim, not a hardcoded placeholder");
         _ = persisted.CompletedAt.Should().NotBeNull();
     }
 
