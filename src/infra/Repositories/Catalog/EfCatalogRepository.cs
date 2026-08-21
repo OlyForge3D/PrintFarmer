@@ -376,7 +376,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             t.DefaultNozzleId)).ToList();
     }
 
-    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, NozzleType NozzleType, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, NozzleType NozzleType, NozzleHardnessOverride HardnessOverride, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default)
     {
         List<NozzleModelDefinition> nozzles = await _db.NozzleModelDefinitions
             .Include(n => n.Manufacturer)
@@ -393,6 +393,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             n.Diameter,
             n.MaxTemp,
             n.NozzleType,
+            n.HardnessOverride,
             n.IsHardened,
             n.NozzleInterface,
             n.Description,

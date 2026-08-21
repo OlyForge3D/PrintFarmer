@@ -15,9 +15,10 @@ import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type NozzleModelCardData } from '@/common/components/ComponentModelCard';
 import { useNozzleModels, useCreateNozzleModel, useUpdateNozzleModel, useDeleteNozzleModel } from '@/common/hooks/useApi';
-import { CatalogContext, type NozzleModelDefinition, type CreateNozzleModelDto, type UpdateNozzleModelDto, NozzleTypeStringLabels } from '@/types/api';
+import { CatalogContext, type NozzleModelDefinition, type CreateNozzleModelDto, type UpdateNozzleModelDto, NozzleTypeStringLabels, NozzleHardnessOverrideLabels } from '@/types/api';
 import { PlusIcon, EditIcon, DeleteIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
+import { isHardenedByMaterial } from '../nozzleHardness';
 
 /**
  * Converts a NozzleModelDefinition to the card display format
@@ -46,6 +47,7 @@ interface NozzleFormState {
   diameter: string;
   maxTemp: string;
   nozzleType: string;
+  hardnessOverride: string;
   description: string;
   url: string;
 }
@@ -53,16 +55,17 @@ interface NozzleFormState {
 // Common nozzle diameters in mm
 const COMMON_NOZZLE_DIAMETERS = ['0.2', '0.25', '0.3', '0.4', '0.5', '0.6', '0.8', '1.0', '1.2'];
 
-// Default max temperatures by nozzle type (°C)
+// Default max temperatures by nozzle type (°C). Keys must match the backend NozzleType names.
 const DEFAULT_TEMPS_BY_TYPE: Record<string, number> = {
   'Brass': 300,
   'HardenedSteel': 500,
-  'Steel': 450,
-  'Copper': 350,
+  'StainlessSteel': 300,
+  'TungstenCarbide': 500,
+  'Abrasive': 500,
+  'Diamond': 550,
   'Ruby': 500,
-  'Tungsten': 550,
   'PlatedCopper': 400,
-  'Other': 300,
+  'ToolSteel': 500,
 };
 
 const emptyForm: NozzleFormState = {
@@ -71,6 +74,7 @@ const emptyForm: NozzleFormState = {
   diameter: '0.4',
   maxTemp: '300',
   nozzleType: 'Brass',
+  hardnessOverride: 'Auto',
   description: '',
   url: '',
 };
@@ -131,7 +135,7 @@ export function NozzlesCatalog() {
       header: 'Material',
       sortable: true,
       sort: (a, b) => (a.isHardened ? 1 : 0) - (b.isHardened ? 1 : 0),
-      render: (item) => item.isHardened 
+      render: (item) => item.isHardened
         ? <Badge variant="warning" size="sm">Hardened</Badge>
         : <span className="text-sm text-pf-text-muted">Standard</span>,
     },
@@ -156,6 +160,7 @@ export function NozzlesCatalog() {
       diameter: model.diameter?.toString() ?? '0.4',
       maxTemp: model.maxTemp?.toString() ?? '',
       nozzleType: typeof model.nozzleType === 'string' ? model.nozzleType : 'Brass',
+      hardnessOverride: typeof model.hardnessOverride === 'string' ? model.hardnessOverride : 'Auto',
       description: model.description ?? '',
       url: model.url ?? '',
     });
@@ -175,6 +180,7 @@ export function NozzlesCatalog() {
       diameter: model.diameter?.toString() ?? '0.4',
       maxTemp: model.maxTemp?.toString() ?? '',
       nozzleType: typeof model.nozzleType === 'string' ? model.nozzleType : 'Brass',
+      hardnessOverride: typeof model.hardnessOverride === 'string' ? model.hardnessOverride : 'Auto',
       description: model.description ?? '',
       url: model.url ?? '',
     });
@@ -247,6 +253,7 @@ export function NozzlesCatalog() {
       diameter: formState.diameter ? Number(formState.diameter) : 0.4,
       maxTemp: formState.maxTemp ? Number(formState.maxTemp) : undefined,
       nozzleType: formState.nozzleType,
+      hardnessOverride: formState.hardnessOverride,
       description: formState.description.trim() || undefined,
       url: formState.url.trim() || undefined,
     };
@@ -269,6 +276,7 @@ export function NozzlesCatalog() {
       diameter: formState.diameter ? Number(formState.diameter) : undefined,
       maxTemp: formState.maxTemp ? Number(formState.maxTemp) : undefined,
       nozzleType: formState.nozzleType,
+      hardnessOverride: formState.hardnessOverride,
       description: formState.description.trim() || undefined,
       url: formState.url.trim() || undefined,
     };
@@ -631,6 +639,26 @@ function NozzleForm({
           />
         </FormField>
       </div>
+
+      <FormField
+        label="Hardness"
+        helper={
+          formState.hardnessOverride === 'Auto'
+            ? `Derived from material — ${NozzleTypeStringLabels[formState.nozzleType] ?? formState.nozzleType} counts as ${isHardenedByMaterial(formState.nozzleType) ? 'hardened' : 'not hardened'}.`
+            : 'Pinned for this model, ignoring the material. Job dispatch uses this to decide whether abrasive filaments are safe.'
+        }
+      >
+        <Select
+          value={formState.hardnessOverride}
+          onChange={(e) => onFieldChange('hardnessOverride', e.target.value)}
+        >
+          {Object.entries(NozzleHardnessOverrideLabels).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </Select>
+      </FormField>
 
       <FormField
         label="Description"
