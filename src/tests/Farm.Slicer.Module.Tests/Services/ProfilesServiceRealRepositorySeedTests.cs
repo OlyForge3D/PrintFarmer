@@ -176,14 +176,112 @@ public class ProfilesServiceRealRepositorySeedTests
         Assert.Single(filaments, f => f.Name == "Prusa Generic PLA @COREOne");
     }
 
+    /// <summary>
+    /// Process profiles are unique on <c>(Name, SlicerType, PrinterModelId)</c>, so a row already
+    /// bound to a printer model does not block a bundle profile of the same name that carries no
+    /// model binding. A name-only identity guard would wrongly treat the existing row as occupying
+    /// the name and silently skip the bundle profile.
+    /// </summary>
+    [Fact]
+    public async Task SeedSystemProfiles_ProcessNameAlreadyUsedUnderAnotherModelBinding_StillImportsBundleProfile()
+    {
+        using SlicerDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        Harness harness = new(db, processProfileName: "0.20mm Standard");
+
+        // Same name, but bound to a printer model — a distinct row under the real unique index.
+        await harness.ProcessRepo.AddAsync(new ProcessProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "0.20mm Standard",
+            SlicerType = SlicerType.OrcaSlicer,
+            PrinterModelId = harness.BaseModelId,
+            IsSystem = true,
+            Hash = "pre-existing-bound-process",
+            RawJson = "{}"
+        });
+
+        ProfilesService svc = harness.CreateService();
+        _ = await svc.SeedSystemProfilesFromWorkerAsync(harness.CreateWorkerHttpClient(), CancellationToken.None);
+
+        List<ProcessProfile> processes = (await harness.ProcessRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, CancellationToken.None)).ToList();
+
+        Assert.Equal(2, processes.Count(p => p.Name == "0.20mm Standard"));
+        Assert.Single(processes, p => p.Name == "0.20mm Standard" && p.PrinterModelId == harness.BaseModelId);
+        Assert.Single(processes, p => p.Name == "0.20mm Standard" && p.PrinterModelId == null);
+    }
+
+    /// <summary>
+    /// Filament profiles are unique on <c>(Name, Material, SlicerType)</c>. When the bundle offers
+    /// two filaments sharing a name but differing in material, both are legal rows and both must be
+    /// imported; a name-only identity guard would discard one.
+    /// </summary>
+    [Fact]
+    public async Task SeedSystemProfiles_BundleHasSameFilamentNameInTwoMaterials_ImportsBoth()
+    {
+        using SlicerDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        Harness harness = new(db, filamentMaterials: new[] { "PLA", "PETG" }, sharedFilamentName: "Prusa Generic");
+        ProfilesService svc = harness.CreateService();
+
+        _ = await svc.SeedSystemProfilesFromWorkerAsync(harness.CreateWorkerHttpClient(), CancellationToken.None);
+
+        List<FilamentProfile> filaments = (await harness.FilamentRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, CancellationToken.None)).ToList();
+
+        Assert.Equal(2, filaments.Count(f => f.Name == "Prusa Generic"));
+        Assert.Single(filaments, f => f.Name == "Prusa Generic" && f.Material == "PLA");
+        Assert.Single(filaments, f => f.Name == "Prusa Generic" && f.Material == "PETG");
+    }
+
+    /// <summary>
+    /// The UNIQUE indexes are global, not scoped to system rows. A user-created profile occupying a
+    /// name the bundle also uses must therefore be treated as occupied: the seed must skip it rather
+    /// than collide, and must still import every other profile — notably the HF rows.
+    /// </summary>
+    [Fact]
+    public async Task SeedSystemProfiles_UserProfileOccupiesABundleName_SkipsItAndStillImportsHf()
+    {
+        using SlicerDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        Harness harness = new(db);
+
+        await harness.MachineRepo.AddAsync(new MachineProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Prusa CORE One 0.4 nozzle",
+            Manufacturer = ManufacturerName,
+            SlicerType = SlicerType.OrcaSlicer,
+            IsSystem = false,
+            CreatedByUserId = Guid.NewGuid(),
+            Hash = "user-created-hash",
+            RawJson = "{}"
+        });
+
+        ProfilesService svc = harness.CreateService();
+        _ = await svc.SeedSystemProfilesFromWorkerAsync(harness.CreateWorkerHttpClient(), CancellationToken.None);
+
+        List<MachineProfile> persisted = (await harness.MachineRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, CancellationToken.None)).ToList();
+
+        Assert.Single(persisted, p => p.Name == "Prusa CORE One 0.4 nozzle");
+        Assert.False(Assert.Single(persisted, p => p.Name == "Prusa CORE One 0.4 nozzle").IsSystem);
+        Assert.Contains(persisted, p => p.Name == "Prusa CORE One HF 0.4 nozzle");
+        Assert.Contains(persisted, p => p.Name == "Prusa CORE One L HF 0.4 nozzle");
+    }
+
     private sealed class Harness
     {
         private readonly Dictionary<string, List<MachineProfileDto>> _hierarchy = new(StringComparer.Ordinal);
         private readonly string? _sharedFilamentName;
+        private readonly string[] _filamentMaterials;
+        private readonly string? _processProfileName;
 
-        public Harness(SlicerDbContext db, bool allNozzleSizes = false, string? sharedFilamentName = null)
+        public Harness(
+            SlicerDbContext db,
+            bool allNozzleSizes = false,
+            string? sharedFilamentName = null,
+            string[]? filamentMaterials = null,
+            string? processProfileName = null)
         {
             _sharedFilamentName = sharedFilamentName;
+            _filamentMaterials = filamentMaterials ?? new[] { "PLA" };
+            _processProfileName = processProfileName;
             MachineRepo = new EfMachineProfileRepository(db);
             FilamentRepo = new EfFilamentProfileRepository(db);
             ProcessRepo = new EfProcessProfileRepository(db);
@@ -337,8 +435,15 @@ public class ProfilesServiceRealRepositorySeedTests
                     MachineProfiles = [.. group.Value],
                     FilamentProfiles = _sharedFilamentName is null
                         ? []
-                        : [new FilamentProfileDto { Name = _sharedFilamentName, Material = "PLA", Instantiation = true }],
-                    ProcessProfiles = []
+                        : [.. _filamentMaterials.Select(m => new FilamentProfileDto
+                        {
+                            Name = _sharedFilamentName,
+                            Material = m,
+                            Instantiation = true
+                        })],
+                    ProcessProfiles = _processProfileName is null
+                        ? []
+                        : [new ProcessProfileDto { Name = _processProfileName, Quality = "standard", LayerHeight = 0.2, Instantiation = true }]
                 };
             }
 

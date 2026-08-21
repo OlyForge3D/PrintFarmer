@@ -29,26 +29,28 @@ using Xunit;
 namespace Farm.Slicer.Module.Tests.SlicerServices;
 
 /// <summary>
-/// Regression tests for #1779 targeting the seeding path that actually populates a deployment:
-/// <c>SlicersService.SeedProfilesFromWorkerAsync</c>, invoked from
-/// <see cref="SlicersService.RegisterAsync"/> when an OrcaSlicer worker registers.
+/// Regression tests for #1779 covering <c>SlicersService.SeedProfilesFromWorkerAsync</c>, the
+/// registration-triggered seed invoked from <see cref="SlicersService.RegisterAsync"/>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The OrcaSlicer worker keys its <c>ByHierarchy</c> groups by each machine profile's
-/// <c>printer_model</c>. High-flow variants declare their own distinct <c>printer_model</c>
-/// ("Prusa CORE One HF"), which is never a catalog model <c>Name</c> — only a configured
-/// OrcaSlicer alias of one. Matching hierarchy groups against base catalog names alone skipped
-/// those groups outright, so the 8 CORE One / CORE One L HF machine profiles never reached the
-/// database that <c>/api/slicer/profiles/extended</c> reads from, while
-/// <c>/api/slicer/profiles/machine/for-model/{id}</c> — which queries the worker live and unions
-/// all configured aliases — kept returning them. That is the endpoint disagreement in #1779.
+/// Note this path is <em>opt-in and off by default</em>: it runs only when a worker registers with
+/// <c>SeedProfilesOnRegistration</c> set, which no shipped worker does. It is therefore NOT what
+/// populates a deployment — the catalog-wide admin seed
+/// <c>ProfilesService.SeedSystemProfilesFromWorkerAsync</c> is, and
+/// <c>ProfilesServiceRealRepositorySeedTests</c> covers that against real repositories. These tests
+/// exist because this path carried the same alias defect and would resurrect the bug the moment
+/// push seeding is enabled.
 /// </para>
 /// <para>
-/// PR #1785 fixed this in <c>ProfilesService</c>'s admin-triggered seeds only; the existing
-/// <c>ProfilesServiceListExtendedTests</c> / <c>ProfilesServiceSeedBatchingTests</c> coverage
-/// therefore passed while production still reproduced. These tests exercise the registration
-/// seed instead, so the gap cannot reopen unnoticed.
+/// The OrcaSlicer worker keys its <c>ByHierarchy</c> groups by each machine profile's
+/// <c>printer_model</c>. High-flow variants declare their own distinct <c>printer_model</c>
+/// ("Prusa CORE One HF"), which is never a catalog model <c>Name</c> — only a configured OrcaSlicer
+/// alias of one. Matching hierarchy groups against base catalog names alone skipped those groups
+/// outright, so the CORE One / CORE One L HF machine profiles never reached the database that
+/// <c>/api/slicer/profiles/extended</c> reads from, while
+/// <c>/api/slicer/profiles/machine/for-model/{id}</c> — which queries the worker live and unions all
+/// configured aliases — kept returning them. That is the endpoint disagreement in #1779.
 /// </para>
 /// </remarks>
 public class SlicersServiceHfProfileSeedingTests

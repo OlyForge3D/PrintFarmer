@@ -1069,20 +1069,35 @@ public class ProfilesService(
     /// batch never drops the other already-valid rows in that same batch.
     /// </remarks>
     /// <summary>
-    /// Loads the names of already-persisted system OrcaSlicer profiles of one type into a
-    /// case-insensitive set, used as the seed's stable idempotency key (#1779). Failures propagate
-    /// rather than degrading to an empty set, because an empty set is indistinguishable from
-    /// "nothing imported yet" and would let a re-seed collide with the UNIQUE (Name, SlicerType) index.
+    /// Loads the identities of already-persisted OrcaSlicer profiles of one type into a
+    /// case-insensitive set, used as the seed's stable idempotency key (#1779).
     /// </summary>
-    private static async Task<HashSet<string>> LoadExistingSystemProfileNamesAsync(
+    /// <remarks>
+    /// The identity must mirror the table's declared UNIQUE index, not merely the name: filament is
+    /// unique on <c>(Name, Material, SlicerType)</c> and process on <c>(Name, SlicerType,
+    /// PrinterModelId)</c>, so a name-only key would silently discard legitimate rows such as the
+    /// same process name under two printer models. All rows are loaded, not just system ones,
+    /// because those indexes are global — a user-created profile sharing an identity collides just
+    /// as hard. Failures propagate rather than degrading to an empty set, since an empty set is
+    /// indistinguishable from "nothing imported yet" and would drive straight into a collision.
+    /// </remarks>
+    private static async Task<HashSet<string>> LoadExistingProfileIdentitiesAsync(
         Func<CancellationToken, Task<IEnumerable<string>>> load,
         CancellationToken ct)
     {
-        IEnumerable<string> names = await load(ct);
+        IEnumerable<string> identities = await load(ct);
         return new HashSet<string>(
-            names.Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name.Trim()),
+            identities.Where(id => !string.IsNullOrWhiteSpace(id)),
             StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>Builds the filament identity matching its UNIQUE (Name, Material, SlicerType) index.</summary>
+    private static string FilamentIdentity(string? name, string? material) =>
+        $"{(name ?? string.Empty).Trim()}\u001F{(material ?? string.Empty).Trim()}";
+
+    /// <summary>Builds the process identity matching its UNIQUE (Name, SlicerType, PrinterModelId) index.</summary>
+    private static string ProcessIdentity(string? name, Guid? printerModelId) =>
+        $"{(name ?? string.Empty).Trim()}\u001F{printerModelId?.ToString() ?? string.Empty}";
 
     /// <remarks>
     /// De-duplicates on BOTH the content hash and the profile name (#1779). Hash alone is not
@@ -1499,14 +1514,16 @@ public class ProfilesService(
         HashSet<string> catalogManufacturerNames = new HashSet<string>(catalogManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
         HashSet<string> catalogModelNames = await GetOrcaSlicerCatalogModelNamesAsync(catalogModels, ct);
 
-        // #1779: name-keyed idempotency so a re-run of this non-destructive seed backfills only the
-        // genuinely missing profiles instead of colliding with the UNIQUE (Name, SlicerType) index.
-        HashSet<string> existingMachineNames = await LoadExistingSystemProfileNamesAsync(
-            async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.IsSystem).Select(p => p.Name), ct);
-        HashSet<string> existingFilamentNames = await LoadExistingSystemProfileNamesAsync(
-            async token => (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.IsSystem).Select(p => p.Name), ct);
-        HashSet<string> existingProcessNames = await LoadExistingSystemProfileNamesAsync(
-            async token => (await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.IsSystem).Select(p => p.Name), ct);
+        // #1779: identity-keyed idempotency so a re-run of this non-destructive seed backfills only
+        // the genuinely missing profiles instead of colliding with the tables' UNIQUE indexes. Each
+        // identity mirrors its table's declared index, and ALL rows are loaded (not just system
+        // ones) because those indexes are global.
+        HashSet<string> existingMachineNames = await LoadExistingProfileIdentitiesAsync(
+            async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => (p.Name ?? string.Empty).Trim()), ct);
+        HashSet<string> existingFilamentNames = await LoadExistingProfileIdentitiesAsync(
+            async token => (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => FilamentIdentity(p.Name, p.Material)), ct);
+        HashSet<string> existingProcessNames = await LoadExistingProfileIdentitiesAsync(
+            async token => (await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => ProcessIdentity(p.Name, p.PrinterModelId)), ct);
 
         foreach ((string? manufacturerKey, ManufacturerProfilesDto? manufacturerProfiles) in allProfiles.ByHierarchy)
         {
@@ -1612,7 +1629,7 @@ public class ProfilesService(
                         (hashes, hCt) => _filamentProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
                         _filamentProfileRepo.AddRangeAsync,
                         _filamentProfileRepo.AddAsync,
-                        p => p.Name, existingFilamentNames,
+                        p => FilamentIdentity(p.Name, p.Material), existingFilamentNames,
                         ct);
 
                     imported += added.Count;
@@ -1657,7 +1674,7 @@ public class ProfilesService(
                         (hashes, hCt) => _processProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
                         _processProfileRepo.AddRangeAsync,
                         _processProfileRepo.AddAsync,
-                        p => p.Name, existingProcessNames,
+                        p => ProcessIdentity(p.Name, p.PrinterModelId), existingProcessNames,
                         ct);
 
                     imported += added.Count;
@@ -1745,12 +1762,17 @@ public class ProfilesService(
         HashSet<string> catalogManufacturerNames = new HashSet<string>(catalogManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
         HashSet<string> catalogModelNames = await GetOrcaSlicerCatalogModelNamesAsync(catalogModels, ct);
 
-        // Force-reseed deletes all system profiles first, so these start empty; they still prevent a
-        // profile name that appears under several hierarchy groups — routine for filament profiles
-        // shared across models — from being staged twice into the UNIQUE (Name, SlicerType) index.
-        HashSet<string> reseedMachineNames = new(StringComparer.OrdinalIgnoreCase);
-        HashSet<string> reseedFilamentNames = new(StringComparer.OrdinalIgnoreCase);
-        HashSet<string> reseedProcessNames = new(StringComparer.OrdinalIgnoreCase);
+        // Force-reseed deletes SYSTEM profiles only, so user-created rows survive — and the UNIQUE
+        // indexes are global, so a user profile sharing an identity would still collide. Load what
+        // actually remains rather than starting empty. These sets also prevent an identity that
+        // appears under several hierarchy groups — routine for filament profiles shared across
+        // models — from being staged twice.
+        HashSet<string> reseedMachineNames = await LoadExistingProfileIdentitiesAsync(
+            async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => (p.Name ?? string.Empty).Trim()), ct);
+        HashSet<string> reseedFilamentNames = await LoadExistingProfileIdentitiesAsync(
+            async token => (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => FilamentIdentity(p.Name, p.Material)), ct);
+        HashSet<string> reseedProcessNames = await LoadExistingProfileIdentitiesAsync(
+            async token => (await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => ProcessIdentity(p.Name, p.PrinterModelId)), ct);
 
         foreach ((string? manufacturerKey, ManufacturerProfilesDto? manufacturerProfiles) in allProfiles.ByHierarchy)
         {
@@ -1865,7 +1887,7 @@ public class ProfilesService(
                         (hashes, hCt) => _filamentProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
                         _filamentProfileRepo.AddRangeAsync,
                         _filamentProfileRepo.AddAsync,
-                        p => p.Name, reseedFilamentNames,
+                        p => FilamentIdentity(p.Name, p.Material), reseedFilamentNames,
                         ct);
 
                     foreach (FilamentProfile addedProfile in added)
@@ -1922,7 +1944,7 @@ public class ProfilesService(
                         (hashes, hCt) => _processProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
                         _processProfileRepo.AddRangeAsync,
                         _processProfileRepo.AddAsync,
-                        p => p.Name, reseedProcessNames,
+                        p => ProcessIdentity(p.Name, p.PrinterModelId), reseedProcessNames,
                         ct);
 
                     foreach (ProcessProfile addedProfile in added)

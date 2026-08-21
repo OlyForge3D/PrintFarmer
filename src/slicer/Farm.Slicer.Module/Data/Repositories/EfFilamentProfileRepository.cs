@@ -40,7 +40,18 @@ public class EfFilamentProfileRepository(SlicerDbContext db) : IFilamentProfileR
     public async Task AddAsync(FilamentProfile profile, CancellationToken ct = default)
     {
         _ = _db.FilamentProfiles.Add(profile);
-        _ = await _db.SaveChangesAsync(ct);
+        try
+        {
+            _ = await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Same rationale as AddRangeAsync: a failed save leaves the entity tracked as Added, so
+            // every later save on this context resubmits and fails on it again. Detaching keeps one
+            // rejected row from blocking the rows that follow it in a per-row retry loop (#1779).
+            _db.Entry(profile).State = EntityState.Detached;
+            throw;
+        }
     }
 
     /// <inheritdoc/>
