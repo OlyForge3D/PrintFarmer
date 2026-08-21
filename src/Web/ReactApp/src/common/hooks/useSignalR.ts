@@ -87,8 +87,12 @@ export function usePrinterStatusUpdates(
       if (cancelled || subscribed) return;
       subscribed = true;
       // Batches the whole set into a single hub invocation instead of one
-      // SubscribeToPrinterAsync call per printer (#1764).
-      void printerSignalRService.subscribeToPrinters(printerIds);
+      // SubscribeToPrinterAsync call per printer (#1764). A transient invoke
+      // failure is dropped here (matching restoreResourceSubscriptions'
+      // own handling) rather than surfacing as an unhandled rejection.
+      printerSignalRService.subscribeToPrinters(printerIds).catch((err) => {
+        console.warn("[useSignalR] batched printer subscribe failed", err);
+      });
     };
     const unsubscribeConnectionState = printerSignalRService.onConnectionStateChange((connected) => {
       if (connected) subscribeToPrinters();

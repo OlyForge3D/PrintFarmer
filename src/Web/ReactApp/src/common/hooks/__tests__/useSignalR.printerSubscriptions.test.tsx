@@ -35,4 +35,32 @@ describe('usePrinterStatusUpdates printer subscriptions', () => {
     rerender();
     expect(printerSignalRService.subscribeToPrinters).toHaveBeenCalledTimes(1);
   });
+
+  it('does not surface a batched invoke failure as an unhandled rejection', async () => {
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      unhandledRejections.push(event.reason);
+    };
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
+
+    vi.spyOn(printerSignalRService, 'subscribeToPrinters').mockRejectedValue(
+      new Error('transient invoke failure')
+    );
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const printerIds = ['printer-a'];
+    renderHook(() => usePrinterStatusUpdates(undefined, printerIds));
+
+    await waitFor(() => {
+      expect(printerSignalRService.subscribeToPrinters).toHaveBeenCalledTimes(1);
+    });
+    // Flush the rejected promise's microtask queue.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(warnSpy).toHaveBeenCalled();
+    expect(unhandledRejections).toHaveLength(0);
+
+    window.removeEventListener('unhandledrejection', onUnhandledRejection);
+  });
 });
