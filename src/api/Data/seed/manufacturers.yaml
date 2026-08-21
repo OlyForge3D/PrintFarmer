@@ -41,4 +41,5 @@
 - name: DropEffect         # NextG hotends
 - name: Mellow             # NF-Zone, CNC parts
 - name: Fysetc             # Budget boards and parts
+- name: Diamondback        # Diamond-tipped nozzles
 - name: Community          # OpenSource community contributors

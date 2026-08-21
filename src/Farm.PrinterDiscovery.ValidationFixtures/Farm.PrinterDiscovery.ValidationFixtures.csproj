@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Validation-only fixture provider (issue #1835): supplies deterministic discovery
+       candidates for the digest-pinned Moonraker-emulator daily validation stack
+       (docs/MOONRAKER_EMULATOR_VALIDATION.md). Isolated into its own assembly so
+       PrinterDiscoveryService's production code no longer directly implements
+       validation-harness-only logic; it remains a normal ProjectReference (still built
+       into the Release publish output) so the daily-validation compose stack, which
+       reuses the same production image, is unaffected. -->
+
+  <ItemGroup>
+    <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

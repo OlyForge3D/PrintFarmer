@@ -69,6 +69,12 @@
          Aliased because PrinterDiscoveryService also emits a top-level Program type that
          would otherwise collide with Farm.Web.Api's public Program (CS0433). -->
     <ProjectReference Include="..\..\printer-discovery\PrinterDiscoveryService.csproj" Aliases="PrinterDiscoveryRef" />
+    <!-- Deterministic discovery fixture types (issue #1835) now live in their own
+         assembly, referenced transitively by PrinterDiscoveryService.csproj under the
+         same "PrinterDiscoveryRef" alias above. Alias this direct reference to match, so
+         the compiler resolves IDeterministicDiscoveryFixtureProvider et al. as one type
+         identity instead of two conflicting ones (CS1503). -->
+    <ProjectReference Include="..\..\Farm.PrinterDiscovery.ValidationFixtures\Farm.PrinterDiscovery.ValidationFixtures.csproj" Aliases="PrinterDiscoveryRef" />
   </ItemGroup>
 
   <!-- Exclude Docker integration tests moved to Farm.Web.IntegrationTests -->

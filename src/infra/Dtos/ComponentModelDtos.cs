@@ -89,8 +89,9 @@ public record ToolheadModelDto(
 /// <param name="ManufacturerName">Name of the manufacturer (resolved from navigation).</param>
 /// <param name="Diameter">Nozzle diameter in millimeters (e.g., 0.4, 0.6, 0.8).</param>
 /// <param name="MaxTemp">Maximum temperature rating in °C.</param>
-/// <param name="NozzleType">The material type of this nozzle (Brass, HardenedSteel, etc.).</param>
-/// <param name="IsHardened">Whether this nozzle is hardened for abrasive filaments (computed from NozzleType).</param>
+/// <param name="NozzleType">The material type of this nozzle (Brass, HardenedSteel, Diamond, etc.).</param>
+/// <param name="HardnessOverride">Per-model override for hardness; <c>Auto</c> derives it from <paramref name="NozzleType"/>.</param>
+/// <param name="IsHardened">Effective hardness after applying <paramref name="HardnessOverride"/>.</param>
 /// <param name="NozzleInterface">Nozzle interface type that determines compatible hotends.</param>
 /// <param name="Description">Optional description or notes.</param>
 /// <param name="Url">Optional product page URL.</param>
@@ -102,6 +103,7 @@ public record NozzleModelDto(
     double Diameter = 0.4,
     int? MaxTemp = null,
     NozzleType NozzleType = NozzleType.Brass,
+    NozzleHardnessOverride HardnessOverride = NozzleHardnessOverride.Auto,
     bool IsHardened = false,
     NozzleInterfaceType NozzleInterface = NozzleInterfaceType.V6,
     string? Description = null,
@@ -223,7 +225,8 @@ public record UpdateToolheadModelDefDto(
 /// <param name="ManufacturerId">ID of the manufacturer</param>
 /// <param name="Diameter">Nozzle diameter in millimeters (e.g., 0.4, 0.6, 0.8)</param>
 /// <param name="MaxTemp">Maximum temperature rating in °C</param>
-/// <param name="NozzleType">The material type of this nozzle (Brass, HardenedSteel, etc.)</param>
+/// <param name="NozzleType">The material type of this nozzle (Brass, HardenedSteel, Diamond, etc.)</param>
+/// <param name="HardnessOverride">Per-model hardness override; <c>Auto</c> derives it from the material</param>
 /// <param name="NozzleInterface">Nozzle interface type for compatibility matching</param>
 /// <param name="Description">Optional description</param>
 /// <param name="Url">Optional product URL</param>
@@ -233,13 +236,15 @@ public record CreateNozzleModelDto(
     double Diameter = 0.4,
     int? MaxTemp = null,
     NozzleType NozzleType = NozzleType.Brass,
+    NozzleHardnessOverride HardnessOverride = NozzleHardnessOverride.Auto,
     NozzleInterfaceType NozzleInterface = NozzleInterfaceType.V6,
     string? Description = null,
     string? Url = null);
 
 /// <summary>
 /// DTO for updating an existing nozzle model definition.
-/// All fields are optional - only provided fields are updated.
+/// All fields are optional - only provided fields are updated. Send
+/// <c>HardnessOverride: "Auto"</c> to clear a previously pinned hardness.
 /// </summary>
 public record UpdateNozzleModelDto(
     string? Name = null,
@@ -247,6 +252,7 @@ public record UpdateNozzleModelDto(
     double? Diameter = null,
     int? MaxTemp = null,
     NozzleType? NozzleType = null,
+    NozzleHardnessOverride? HardnessOverride = null,
     NozzleInterfaceType? NozzleInterface = null,
     string? Description = null,
     string? Url = null);
