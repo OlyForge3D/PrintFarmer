@@ -911,14 +911,19 @@ public class DataSeedService : IDataSeedService
             return fallback;
         }
 
+        // Normalize once, then guard and parse the SAME string. Checking the raw value while
+        // parsing the space-stripped one leaves a hole: "+ 5" fails the numeric guard (the
+        // sign is detached from its digits) but then parses as ordinal 5.
+        string normalized = rawValue.Replace(" ", string.Empty);
+
         // Reject numeric input outright. Enum.TryParse happily maps "5" onto a defined
         // member, so seed YAML could otherwise pin a material by ordinal and silently
         // change meaning if the enum is ever renumbered. Enum.IsDefined below only rejects
         // *undefined* ordinals, which is not the same guarantee.
-        bool isNumeric = long.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
+        bool isNumeric = long.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
 
         if (!isNumeric &&
-            Enum.TryParse(rawValue.Replace(" ", string.Empty), true, out TEnum parsed) &&
+            Enum.TryParse(normalized, true, out TEnum parsed) &&
             Enum.IsDefined(parsed))
         {
             return parsed;
