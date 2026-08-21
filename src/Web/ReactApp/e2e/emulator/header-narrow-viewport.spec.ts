@@ -41,9 +41,13 @@ test.describe('Header narrow viewport clipping — Emulator', () => {
       // All three controls named in the issue's acceptance criteria must be
       // visible and fully within the viewport — none of these are optional,
       // so no assertion here is skipped based on a runtime visibility check.
-      const systemStatusButton = page.getByRole('button', { name: /system/i });
-      const notificationButton = page.getByRole('button', { name: /notifications/i });
-      const accountMenuButton = page.getByRole('button', { name: /account menu/i });
+      const systemStatusButton = header.getByRole('button', {
+        name: /^System(?:, (?:Healthy|Degraded|Critical) health| status degraded, view system status)$/i,
+      });
+      const notificationButton = header.getByRole('button', {
+        name: /^Notifications(?: \(\d+ unread\))?$/,
+      });
+      const accountMenuButton = header.getByRole('button', { name: / account menu$/i });
 
       for (const [label, control] of [
         ['System status', systemStatusButton],
@@ -98,8 +102,11 @@ test.describe('Header narrow viewport clipping — Emulator', () => {
     );
     expect(hasHorizontalScroll, 'Unexpected horizontal scroll at 768px').toBeFalsy();
 
-    const systemStatusButton = page.getByRole('button', { name: /system/i });
-    const accountMenuButton = page.getByRole('button', { name: /account menu/i });
+    const header = page.locator('header:visible');
+    const systemStatusButton = header.getByRole('button', {
+      name: /^System(?:, (?:Healthy|Degraded|Critical) health| status degraded, view system status)$/i,
+    });
+    const accountMenuButton = header.getByRole('button', { name: / account menu$/i });
     await expect(accountMenuButton, 'Account menu button not visible at 768px').toBeVisible();
 
     const box = await accountMenuButton.boundingBox();

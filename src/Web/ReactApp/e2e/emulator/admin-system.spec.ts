@@ -101,18 +101,15 @@ test.describe('Admin System Dashboard — Emulator', () => {
     expect(criticalErrors()).toHaveLength(0);
   });
 
-  test('background services tab shows service status', async ({ page }) => {
+  test('workers tab shows current worker status', async ({ page }) => {
     await page.goto('/admin/manage?tab=operations&sub=workers');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_500);
 
-    const content = page.locator('main, [role="main"], #root');
-    await expect(content.first()).toBeVisible();
-
-    // Should show service names or status indicators
-    const bodyText = await page.locator('body').textContent() ?? '';
-    const hasServiceContent = /service|running|stopped|background/i.test(bodyText);
-    expect(hasServiceContent).toBeTruthy();
+    await expect(page.getByRole('button', { name: 'Workers', exact: true })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Worker', exact: true })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Status', exact: true })).toBeVisible();
+    expect(await page.getByText('Online', { exact: true }).count()).toBeGreaterThan(0);
 
     expect(criticalErrors()).toHaveLength(0);
   });

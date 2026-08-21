@@ -53,18 +53,16 @@ test.describe('Admin Tags — Emulator', () => {
       .waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => {});
     await page.waitForTimeout(500);
 
-    // Look for a create/add tag button
-    const createButton = page.getByRole('button', { name: /create|add|new/i }).first();
+    const createButton = page.getByTestId('add-tag-action');
     const hasCreate = await createButton.isVisible({ timeout: 5_000 }).catch(() => false);
 
     if (hasCreate) {
       await createButton.click();
       await page.waitForTimeout(500);
 
-      // A form or modal should appear with name input
-      const nameInput = page.locator('input[name="name"], input[placeholder*="name" i], input[placeholder*="tag" i]').first();
-      const hasNameInput = await nameInput.isVisible().catch(() => false);
-      expect(hasNameInput).toBeTruthy();
+      const dialog = page.getByRole('dialog', { name: 'Create New Tag', exact: true });
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByRole('textbox', { name: 'Tag Name', exact: true })).toBeVisible();
     } else {
       // Inline creation — look for input field directly on the page
       const inlineInput = page.locator('input').first();
@@ -77,7 +75,7 @@ test.describe('Admin Tags — Emulator', () => {
   test('can create a new tag', async ({ page }) => {
     await page.waitForTimeout(1_000);
 
-    const createButton = page.getByRole('button', { name: /create|add|new/i }).first();
+    const createButton = page.getByTestId('add-tag-action');
     const hasCreate = await createButton.isVisible().catch(() => false);
 
     if (hasCreate) {
@@ -85,13 +83,13 @@ test.describe('Admin Tags — Emulator', () => {
       await page.waitForTimeout(500);
     }
 
-    // Fill in tag name
-    const nameInput = page.locator('input[name="name"], input[placeholder*="name" i], input[placeholder*="tag" i]').first();
+    const dialog = page.getByRole('dialog', { name: 'Create New Tag', exact: true });
+    await expect(dialog).toBeVisible();
+    const nameInput = dialog.getByRole('textbox', { name: 'Tag Name', exact: true });
     if (await nameInput.isVisible().catch(() => false)) {
       await nameInput.fill('E2E Test Tag');
 
-      // Submit the form
-      const saveButton = page.getByRole('button', { name: /save|create|add|submit/i }).first();
+      const saveButton = dialog.getByRole('button', { name: 'Create tag', exact: true });
       if (await saveButton.isVisible().catch(() => false)) {
         await saveButton.click();
         await page.waitForTimeout(1_000);

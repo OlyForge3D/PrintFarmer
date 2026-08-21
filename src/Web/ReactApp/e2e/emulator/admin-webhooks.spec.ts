@@ -43,7 +43,7 @@ test.describe('Admin Webhooks — Emulator', () => {
     expect(hasWebhookContent).toBeTruthy();
 
     // Add webhook button should be present
-    const addButton = page.getByRole('button', { name: /add|create|new/i }).first();
+    const addButton = page.getByTestId('add-webhook-action');
     await expect(addButton).toBeVisible({ timeout: 5_000 });
 
     expect(criticalErrors()).toHaveLength(0);
@@ -52,14 +52,15 @@ test.describe('Admin Webhooks — Emulator', () => {
   test('can open create webhook modal', async ({ page }) => {
     await page.waitForTimeout(1_000);
 
-    const addButton = page.getByRole('button', { name: /add|create|new/i }).first();
+    const addButton = page.getByTestId('add-webhook-action');
     await expect(addButton).toBeVisible({ timeout: 5_000 });
     await addButton.click();
     await page.waitForTimeout(500);
 
-    // Modal should open with form fields
-    const nameInput = page.locator('input[name="name"], input[placeholder*="name" i]').first();
-    const urlInput = page.locator('input[name="url"], input[placeholder*="url" i], input[type="url"]').first();
+    const modal = page.getByRole('dialog', { name: 'Create Webhook', exact: true });
+    await expect(modal).toBeVisible();
+    const nameInput = modal.getByRole('textbox', { name: 'Name', exact: true });
+    const urlInput = modal.getByRole('textbox', { name: 'URL', exact: true });
 
     const hasName = await nameInput.isVisible().catch(() => false);
     const hasUrl = await urlInput.isVisible().catch(() => false);
@@ -72,14 +73,16 @@ test.describe('Admin Webhooks — Emulator', () => {
   test('create webhook form has event type selection', async ({ page }) => {
     await page.waitForTimeout(1_000);
 
-    const addButton = page.getByRole('button', { name: /add|create|new/i }).first();
+    const addButton = page.getByTestId('add-webhook-action');
     await expect(addButton).toBeVisible({ timeout: 5_000 });
     await addButton.click();
     await page.waitForTimeout(500);
 
     // Should have event type checkboxes or multi-select
-    const eventCheckboxes = page.locator('input[type="checkbox"]');
-    const eventSelect = page.locator('select, [role="listbox"]');
+    const modal = page.getByRole('dialog', { name: 'Create Webhook', exact: true });
+    await expect(modal).toBeVisible();
+    const eventCheckboxes = modal.getByRole('checkbox');
+    const eventSelect = modal.getByRole('listbox');
 
     const checkboxCount = await eventCheckboxes.count();
     const selectCount = await eventSelect.count();
@@ -93,33 +96,32 @@ test.describe('Admin Webhooks — Emulator', () => {
   test('can create a webhook', async ({ page }) => {
     await page.waitForTimeout(1_000);
 
-    const addButton = page.getByRole('button', { name: /add|create|new/i }).first();
+    const addButton = page.getByTestId('add-webhook-action');
     await expect(addButton).toBeVisible({ timeout: 5_000 });
     await addButton.click();
     await page.waitForTimeout(500);
 
-    // Scope all form interactions to the modal dialog
-    const modal = page.locator('[role="dialog"]');
+    const modal = page.getByRole('dialog', { name: 'Create Webhook', exact: true });
     await expect(modal).toBeVisible({ timeout: 5_000 });
 
-    const nameInput = modal.locator('input[name="name"], input[placeholder*="name" i]').first();
+    const nameInput = modal.getByRole('textbox', { name: 'Name', exact: true });
     if (await nameInput.isVisible().catch(() => false)) {
       await nameInput.fill('E2E Test Webhook');
     }
 
-    const urlInput = modal.locator('input[name="url"], input[placeholder*="url" i], input[type="url"]').first();
+    const urlInput = modal.getByRole('textbox', { name: 'URL', exact: true });
     if (await urlInput.isVisible().catch(() => false)) {
       await urlInput.fill('https://example.com/webhook');
     }
 
     // Check at least one event type if checkboxes present
-    const firstCheckbox = modal.locator('input[type="checkbox"]').first();
+    const firstCheckbox = modal.getByRole('checkbox', { name: 'All events', exact: true });
     if (await firstCheckbox.isVisible().catch(() => false)) {
       await firstCheckbox.check();
     }
 
     // Click the Create/Save button inside the modal
-    const saveButton = modal.getByRole('button', { name: /^create$|^save$|^submit$/i }).first();
+    const saveButton = modal.getByRole('button', { name: 'Create', exact: true });
     if (await saveButton.isVisible().catch(() => false)) {
       await saveButton.click();
       await page.waitForTimeout(2_000);

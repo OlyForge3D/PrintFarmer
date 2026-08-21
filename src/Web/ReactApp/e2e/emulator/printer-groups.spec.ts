@@ -42,7 +42,7 @@ test.describe('Printer Groups — Emulator', () => {
     expect(hasGroupContent).toBeTruthy();
 
     // Create group button
-    const createButton = page.getByRole('button', { name: /create|add|new/i }).first();
+    const createButton = page.getByTestId('create-printer-group-action');
     await expect(createButton).toBeVisible({ timeout: 5_000 });
 
     expect(criticalErrors()).toHaveLength(0);
@@ -51,21 +51,14 @@ test.describe('Printer Groups — Emulator', () => {
   test('can open create group modal', async ({ page }) => {
     await page.waitForTimeout(1_000);
 
-    const createButton = page.getByRole('button', { name: /create|add|new/i }).first();
+    const createButton = page.getByTestId('create-printer-group-action');
     await expect(createButton).toBeVisible({ timeout: 5_000 });
     await createButton.click();
     await page.waitForTimeout(500);
 
-    // Modal should open with name input
-    const nameInput = page.locator(
-      'input[name="name"], ' +
-      'input[placeholder*="name" i], ' +
-      'input[placeholder*="group" i], ' +
-      'input[placeholder*="fleet" i], ' +
-      '[role="dialog"] input[type="text"]'
-    ).first();
-    const hasNameInput = await nameInput.isVisible().catch(() => false);
-    expect(hasNameInput).toBeTruthy();
+    const modal = page.getByRole('dialog', { name: 'Create Printer Group', exact: true });
+    await expect(modal).toBeVisible({ timeout: 5_000 });
+    await expect(modal.getByRole('textbox', { name: 'Name', exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
@@ -73,20 +66,19 @@ test.describe('Printer Groups — Emulator', () => {
   test('can create a new printer group', async ({ page }) => {
     await page.waitForTimeout(1_000);
 
-    const createButton = page.getByRole('button', { name: /create|add|new/i }).first();
+    const createButton = page.getByTestId('create-printer-group-action');
     await expect(createButton).toBeVisible({ timeout: 5_000 });
     await createButton.click();
     await page.waitForTimeout(500);
 
-    // Scope all form interactions to the modal dialog
-    const modal = page.locator('[role="dialog"]');
+    const modal = page.getByRole('dialog', { name: 'Create Printer Group', exact: true });
     await expect(modal).toBeVisible({ timeout: 5_000 });
 
-    const nameInput = modal.locator('input[type="text"], input[name="name"]').first();
+    const nameInput = modal.getByRole('textbox', { name: 'Name', exact: true });
     if (await nameInput.isVisible().catch(() => false)) {
       await nameInput.fill('E2E Test Group');
 
-      const saveButton = modal.getByRole('button', { name: /^create$|^save$|^submit$/i }).first();
+      const saveButton = modal.getByRole('button', { name: 'Create Group', exact: true });
       if (await saveButton.isVisible().catch(() => false)) {
         await saveButton.click();
         await page.waitForTimeout(2_000);

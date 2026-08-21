@@ -125,7 +125,7 @@ export function PrinterGroupsPage({ embedded = false }: PrinterGroupsPageProps) 
           <p className="text-sm text-pf-text-secondary mb-4">
             Create groups to organize your printers and simplify management
           </p>
-          <Button variant="primary" onClick={handleCreate} iconLeft={<PlusIcon />}>
+          <Button data-testid="create-printer-group-action" variant="primary" onClick={handleCreate} iconLeft={<PlusIcon />}>
             Create First Group
           </Button>
         </div>
