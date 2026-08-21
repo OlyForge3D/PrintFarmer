@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Dtos;
@@ -1106,6 +1107,16 @@ public class OrcaProfilesService : ISlicerProfilesService
             profile.NozzleType = ParseStringValue(nozzleTypeElem);
         }
 
+        // ── Hotend variant (#1780) ──────────────────────────────────────────
+        // Some vendor bundles (e.g. Prusa CORE One / CORE One L) never set nozzle_type
+        // at any level of their inheritance chain, so it cannot be populated for those
+        // printers — that is a genuine gap in the vendor bundle, not a parsing bug (see
+        // DetermineIsHighFlowNozzle for the confirmed structural signals that survive
+        // full inheritance resolution). Deriving IsHighFlowNozzle here, once, lets every
+        // consumer distinguish an HF profile from its standard sibling without parsing
+        // `name` itself.
+        profile.IsHighFlowNozzle = DetermineIsHighFlowNozzle(root, profile.PrinterModel, profile.Name);
+
         // ── Build volume ───────────────────────────────────────────────────
         ExtractBuildVolume(root, profile);
 
@@ -1189,6 +1200,55 @@ public class OrcaProfilesService : ISlicerProfilesService
         profile.Settings = SerializeElementToDict(root);
 
         return profile;
+    }
+
+    private static readonly Regex HighFlowNameFallbackPattern =
+        new(@"(?:^|[^a-zA-Z])HF(?![a-zA-Z])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Derives the high-flow ("HF") hotend variant flag for #1780. OrcaSlicer's Prusa CORE
+    /// One / CORE One L bundle never sets <c>nozzle_type</c> anywhere in the inheritance
+    /// chain, so a standard profile and its HF sibling can be identical in every other
+    /// structural field (<c>nozzle_diameter</c>, <c>printer_variant</c>). Two signals do
+    /// reliably survive full inheritance resolution (<paramref name="root"/> here is the
+    /// already-merged profile from <see cref="BuildResolvedProfileJson"/>):
+    /// <list type="number">
+    /// <item><c>printer_notes</c> contains the <c>HF_NOZZLE</c> token — Prusa's own marker,
+    /// consumed by the printer's firmware nozzle check in <c>machine_start_gcode</c>.</item>
+    /// <item><c>printer_model</c> ends with " HF" (e.g. "Prusa CORE One HF").</item>
+    /// </list>
+    /// Both are checked because the base 0.4-nozzle profile in each family is the only one
+    /// that declares them inline; the 0.5/0.6/0.8 siblings inherit them (or, for the
+    /// standard/non-HF sibling, an explicit override back to the non-HF values) — either
+    /// way, the fully resolved profile always carries a consistent answer. Only if neither
+    /// structural signal is present does this fall back to an "HF" token in
+    /// <paramref name="profileName"/>, so bundles that provide no structural marker at all
+    /// still get a correct, backend-derived answer instead of forcing every consumer to
+    /// parse the display name itself. The fallback regex is deliberately kept in lockstep
+    /// with the frontend's <c>HIGH_FLOW_PATTERN</c> (machineProfileLabels.ts) — case
+    /// insensitive, and matching both the spaced ("Prusa CORE One HF 0.4 nozzle") and
+    /// unspaced ("Prusa MK4S HF0.4 nozzle") forms vendor bundles actually ship — so the two
+    /// layers can never disagree on a name that reaches this last-resort tier.
+    /// </summary>
+    private static bool DetermineIsHighFlowNozzle(JsonElement root, string? printerModel, string profileName)
+    {
+        if (root.TryGetProperty("printer_notes", out JsonElement notesElem))
+        {
+            string? notes = ParseStringValue(notesElem);
+            if (!string.IsNullOrEmpty(notes) && notes.Contains("HF_NOZZLE", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        if (!string.IsNullOrEmpty(printerModel) &&
+            printerModel.EndsWith(" HF", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrEmpty(profileName) &&
+            HighFlowNameFallbackPattern.IsMatch(profileName);
     }
 
     private static void ExtractBuildVolume(JsonElement root, MachineProfileDto profile)

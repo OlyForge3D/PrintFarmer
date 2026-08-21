@@ -4737,6 +4737,9 @@ export interface MachineProfileDto {
   inherits?: string;
   nozzleDiameter?: number;
   nozzleType?: string;
+  /** High-flow (HF) hotend variant flag, derived once backend-side (#1780) since some
+   * vendor bundles (e.g. Prusa CORE One / CORE One L) never populate nozzleType. */
+  isHighFlowNozzle: boolean;
   buildVolumeX?: number;
   buildVolumeY?: number;
   buildVolumeZ?: number;

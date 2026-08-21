@@ -34,6 +34,19 @@ public class MachineProfileDto
 
     public string? NozzleType { get; set; }
 
+    /// <summary>
+    /// Whether this profile is the high-flow ("HF") hotend variant of its printer model
+    /// (#1780). Some vendor bundles (e.g. Prusa CORE One / CORE One L) never set
+    /// <c>nozzle_type</c> at any level of the profile's inheritance chain, so a standard
+    /// profile and its HF sibling can otherwise be structurally identical — same
+    /// <see cref="NozzleDiameter"/>, same <see cref="PrinterVariant"/> — leaving <c>name</c>
+    /// as the only signal. This field is derived once by the producer (from
+    /// <c>printer_notes</c>'s <c>HF_NOZZLE</c> marker or a <c>printer_model</c> " HF" suffix,
+    /// falling back to <c>name</c> only if neither structural signal is present) so every
+    /// consumer can tell the variants apart without re-parsing <c>name</c> itself.
+    /// </summary>
+    public bool IsHighFlowNozzle { get; set; }
+
     // ── Build volume ──────────────────────────────────────────────────────
     public double? BuildVolumeX { get; set; }
 
