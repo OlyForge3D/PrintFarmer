@@ -96,9 +96,13 @@ public class ModelAnalysisService : IModelAnalysisService
         // header looks like ASCII STL.
         long expectedBinarySize = 84L + (triangleCount * 50L);
         bool looksBinary = fs.Length == expectedBinarySize;
-        bool looksAscii = !looksBinary && headerString.StartsWith("solid", StringComparison.OrdinalIgnoreCase) && fs.Length < 10_000_000;
 
-        // Small ASCII models (under 10MB) are often ASCII STL format
+        // No file-size ceiling here: a legitimate ASCII STL can exceed any arbitrary size cutoff
+        // (large, detailed prints routinely produce multi-hundred-MB ASCII files), and gating the
+        // ASCII fallback by size would force such files down the binary parser, which would then
+        // misinterpret plain text bytes as a binary triangle count/vertex stream.
+        bool looksAscii = !looksBinary && headerString.StartsWith("solid", StringComparison.OrdinalIgnoreCase);
+
         if (looksAscii)
         {
             // ASCII parser: scan for vertex lines and compute bounding box

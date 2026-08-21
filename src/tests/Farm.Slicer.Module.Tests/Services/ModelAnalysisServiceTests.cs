@@ -194,6 +194,51 @@ public class ModelAnalysisServiceTests : IDisposable
         Assert.False(result.IsValid);
     }
 
+    /// <summary>
+    /// Regression (#1838 review, Bishop): the ASCII-detection fallback previously required
+    /// fs.Length &lt; 10MB. A legitimate ASCII STL larger than that (a real, common size for
+    /// detailed prints) would fail both the binary-size-formula check and the (now-removed)
+    /// ASCII size gate, forcing it down the binary parser, which then misreads plain text bytes
+    /// as a binary triangle count/vertex stream instead of parsing the real geometry.
+    /// </summary>
+    [Fact]
+    public async Task AnalyzeModelAsync_AsciiStlLargerThanTenMegabytes_IsStillParsedAsAscii()
+    {
+        StringBuilder sb = new();
+        _ = sb.Append("solid large\n");
+
+        // Pad well past 10MB with comment-like lines that are not "vertex" lines, so the
+        // resulting file is unambiguously ASCII-sized but still has real triangle geometry.
+        string paddingLine = "REM padding line to exceed the previous 10MB ASCII size gate\n";
+        int paddingLinesNeeded = (11 * 1024 * 1024 / paddingLine.Length) + 1;
+        for (int i = 0; i < paddingLinesNeeded; i++)
+        {
+            _ = sb.Append(paddingLine);
+        }
+
+        _ = sb.Append("facet normal 0 0 1\n");
+        _ = sb.Append("outer loop\n");
+        _ = sb.Append("vertex 0 0 0\n");
+        _ = sb.Append("vertex 10 0 0\n");
+        _ = sb.Append("vertex 0 10 0\n");
+        _ = sb.Append("endloop\n");
+        _ = sb.Append("endfacet\n");
+        _ = sb.Append("endsolid large\n");
+
+        byte[] bytes = Encoding.ASCII.GetBytes(sb.ToString());
+        Assert.True(bytes.Length > 10 * 1024 * 1024, "Test fixture must exceed the previous 10MB ASCII size gate");
+        string path = WriteFile("large_ascii.stl", bytes);
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".stl", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.True(result!.IsValid);
+        Assert.Equal(1, result.TriangleCount);
+        Assert.Equal(10, result.DimensionX);
+        Assert.Equal(10, result.DimensionY);
+        Assert.Equal(0, result.DimensionZ);
+    }
+
     [Fact]
     public async Task AnalyzeModelAsync_UppercaseThreeMfExtension_IsStillAnalyzed()
     {
@@ -351,11 +396,17 @@ public class ModelAnalysisServiceTests : IDisposable
 
         ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".3mf", CancellationToken.None);
 
-        // DtdProcessing.Prohibit means the DOCTYPE itself throws inside XmlReader, which the
-        // analyzer converts into a structurally-invalid result rather than an unhandled crash
-        // or a resolved external entity.
+        // DtdProcessing.Prohibit means the DOCTYPE itself throws an XmlException inside
+        // XmlReader before any entity reference is ever resolved. Pin the specific
+        // ValidationErrors marker the XmlException catch clause produces
+        // ("Model part XML is malformed or unsafe"), not just IsValid=false: a bare IsValid
+        // check would also pass if the entity were resolved and parsing later failed for an
+        // unrelated reason (e.g. "declares no printable mesh"), which would not actually prove
+        // the DOCTYPE/entity was rejected.
         Assert.NotNull(result);
         Assert.False(result!.IsValid);
+        Assert.NotNull(result.ValidationErrors);
+        Assert.Contains("Model part XML is malformed or unsafe", result.ValidationErrors!);
     }
 
     [Fact]
