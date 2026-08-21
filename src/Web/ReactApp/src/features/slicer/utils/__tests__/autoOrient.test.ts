@@ -22,6 +22,41 @@ function rotatedHeight(geometry: THREE.BufferGeometry, q: THREE.Quaternion, scal
   return maxZ - minZ;
 }
 
+/**
+ * Build a triangular-prism knife-edge shape whose long axis is Z from the
+ * start (top/bottom caps placed at literal +/-height/2), so its height under
+ * an IDENTITY quaternion is an exact value with no rotation-induced floating
+ * point noise — unlike `CylinderGeometry(...).rotateX(...)`, whose trig-based
+ * rotation matrix can perturb the last bit or two of each coordinate. This
+ * lets boundary tests assert an exact height (e.g. exactly the height-floor
+ * threshold) instead of "close to" it.
+ */
+function knifeEdgePrism(radius: number, height: number): THREE.BufferGeometry {
+  const halfH = height / 2;
+  const angles = [Math.PI / 2, (7 * Math.PI) / 6, (11 * Math.PI) / 6]; // 90°, 210°, 330°
+  const top = angles.map((a) => new THREE.Vector3(radius * Math.cos(a), radius * Math.sin(a), halfH));
+  const bottom = angles.map((a) => new THREE.Vector3(radius * Math.cos(a), radius * Math.sin(a), -halfH));
+  const [t0, t1, t2] = top;
+  const [b0, b1, b2] = bottom;
+
+  const positions: number[] = [];
+  const pushTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) => {
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+  };
+  pushTri(t0, t1, t2); // top cap
+  pushTri(b0, b2, b1); // bottom cap
+  pushTri(b0, b1, t1);
+  pushTri(b0, t1, t0);
+  pushTri(b1, b2, t2);
+  pushTri(b1, t2, t1);
+  pushTri(b2, b0, t0);
+  pushTri(b2, t0, t2);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  return geo;
+}
+
 describe('autoOrient', () => {
   describe('detectMajorFaces', () => {
     it('finds the six axis-aligned faces of a box', () => {
@@ -141,6 +176,26 @@ describe('autoOrient', () => {
       // proving the height gate — not the ratio check — is what suppresses it.
       expect(assessment!.currentScore / assessment!.bestScore).toBeGreaterThan(1.6);
       expect(assessment!.isLikelyUnslicable).toBe(false);
+    });
+
+    it('flags a knife-edge part exactly at the height noise floor (boundary is inclusive)', () => {
+      // The height gate is documented/intended as "at least" MIN_HEIGHT_FOR_
+      // WARNING_MM (3mm), i.e. inclusive of the boundary, not a strict
+      // exclusive `>`. Build a knife-edge prism whose current-orientation
+      // height is an EXACT 3.0 (not "close to 3") to pin down the boundary
+      // itself rather than a value near it.
+      const boundaryPrism = knifeEdgePrism(0.75, 3);
+      const knifeEdgeUp = new THREE.Quaternion(); // identity: no rotation, no floating-point noise
+
+      const height = rotatedHeight(boundaryPrism, knifeEdgeUp, new THREE.Vector3(1, 1, 1));
+      expect(height).toBe(3);
+
+      const assessment = assessOrientationStability(boundaryPrism, knifeEdgeUp);
+      expect(assessment).not.toBeNull();
+      // Confirms the ratio alone would flag it, isolating the height gate.
+      expect(assessment!.currentScore / assessment!.bestScore).toBeGreaterThan(1.6);
+      // A model exactly at the floor must still be flagged ("at least 3mm").
+      expect(assessment!.isLikelyUnslicable).toBe(true);
     });
 
     it('returns null for empty geometry', () => {

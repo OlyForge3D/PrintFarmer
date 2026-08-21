@@ -366,7 +366,7 @@ export function assessOrientationStability(
 
   const isLikelyUnslicable =
     bestScore > 0 &&
-    current.height > MIN_HEIGHT_FOR_WARNING_MM &&
+    current.height >= MIN_HEIGHT_FOR_WARNING_MM &&
     currentScore / bestScore > UNSLICABLE_SCORE_RATIO;
 
   return { isLikelyUnslicable, currentScore, bestScore, suggested };
