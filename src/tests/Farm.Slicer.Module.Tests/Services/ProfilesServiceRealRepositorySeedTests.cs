@@ -356,6 +356,43 @@ public class ProfilesServiceRealRepositorySeedTests
         Assert.Single(processes, p => p.Name == "0.20mm Standard");
     }
 
+    /// <summary>
+    /// A worker that answers 200 with an empty or unparseable hierarchy has told us nothing about
+    /// the catalog. Treating that as a clean no-op would let reconciliation stop while the profiles
+    /// are still missing, so the seed reports it as an error and reconciliation retries.
+    /// </summary>
+    [Fact]
+    public async Task SeedSystemProfiles_WorkerReturnsEmptyHierarchy_ReportsAnErrorRatherThanSuccess()
+    {
+        using SlicerDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        Harness harness = new(db);
+        ProfilesService svc = harness.CreateService();
+
+        object result = await svc.SeedSystemProfilesFromWorkerAsync(harness.CreateEmptyHierarchyHttpClient(), CancellationToken.None);
+
+        int errors = (int)(result.GetType().GetProperty("errors")!.GetValue(result) ?? 0);
+        Assert.True(errors > 0, "an empty worker hierarchy must not be reported as a successful, complete seed");
+        Assert.Empty(await harness.MachineRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// Force-reseed deletes first, so silently reporting zero failures after a partial import is
+    /// worse than for the non-destructive seed: the operator is told everything succeeded while
+    /// rows are missing.
+    /// </summary>
+    [Fact]
+    public async Task ForceReseed_WorkerReturnsEmptyHierarchy_ReportsAnError()
+    {
+        using SlicerDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        Harness harness = new(db);
+        ProfilesService svc = harness.CreateService();
+
+        object result = await svc.ForceReseedSystemProfilesFromWorkerAsync(harness.CreateEmptyHierarchyHttpClient(), CancellationToken.None);
+
+        int errors = (int)(result.GetType().GetProperty("errors")!.GetValue(result) ?? 0);
+        Assert.True(errors > 0, "a destructive reseed that imported nothing must not report success");
+    }
+
     private sealed class Harness
     {
         private readonly Dictionary<string, List<MachineProfileDto>> _hierarchy = new(StringComparer.Ordinal);
@@ -404,6 +441,26 @@ public class ProfilesServiceRealRepositorySeedTests
         /// change between releases (the churn that invalidated the old hash-based guard).
         /// </summary>
         public string HashSalt { get; set; } = string.Empty;
+
+        /// <summary>
+        /// A worker that answers 200 but offers no hierarchy — e.g. it is up but has not finished
+        /// loading its profile bundles.
+        /// </summary>
+        public HttpClient CreateEmptyHierarchyHttpClient()
+        {
+            return new HttpClient(new StubHttpMessageHandler(request =>
+            {
+                if (request.RequestUri!.AbsolutePath.EndsWith("/version", StringComparison.Ordinal))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"byHierarchy\":{}}", Encoding.UTF8, "application/json")
+                };
+            }));
+        }
 
         public ProfilesService CreateService()
         {

@@ -1524,7 +1524,10 @@ public class ProfilesService(
         AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, CaseInsensitiveJsonOptions);
         if (allProfiles?.ByHierarchy == null || allProfiles.ByHierarchy.Count == 0)
         {
-            return new { imported = 0, skipped = 0, message = "No profiles available from worker or invalid hierarchy structure" };
+            // #1779: report this as a failure, not a clean no-op. A worker that answers 200 with an
+            // empty or unparseable hierarchy has told us nothing about the catalog, and treating it
+            // as "complete" would let reconciliation stop with the profiles still missing.
+            return new { imported = 0, skipped = 0, errors = 1, message = "No profiles available from worker or invalid hierarchy structure" };
         }
 
         int imported = 0;
@@ -1775,7 +1778,7 @@ public class ProfilesService(
         AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, CaseInsensitiveJsonOptions);
         if (allProfiles?.ByHierarchy == null || allProfiles.ByHierarchy.Count == 0)
         {
-            return new { imported = 0, deleted = deletedCount, message = "No profiles available from worker or invalid hierarchy structure", orcaslicerVersion = orcaVersion };
+            return new { imported = 0, deleted = deletedCount, errors = 1, message = "No profiles available from worker or invalid hierarchy structure", orcaslicerVersion = orcaVersion };
         }
 
         // Emit start event
@@ -1880,6 +1883,7 @@ public class ProfilesService(
                     }
 
                     skipped += batchSkipped;
+                    errors += batchErrors;
                 }
 
                 if (modelProfiles.FilamentProfiles != null)
@@ -1936,6 +1940,7 @@ public class ProfilesService(
                     }
 
                     skipped += batchSkipped;
+                    errors += batchErrors;
                 }
 
                 if (modelProfiles.ProcessProfiles != null)
@@ -1993,6 +1998,7 @@ public class ProfilesService(
                     }
 
                     skipped += batchSkipped;
+                    errors += batchErrors;
                 }
             }
         }
@@ -2002,8 +2008,9 @@ public class ProfilesService(
         {
             imported,
             skipped,
+            errors,
             deleted = deletedCount,
-            message = $"Successfully imported {imported} OrcaSlicer profiles (deleted {deletedCount} old, skipped {skipped} duplicates)"
+            message = $"Successfully imported {imported} OrcaSlicer profiles (deleted {deletedCount} old, skipped {skipped} duplicates, {errors} failed)"
         }, cancellationToken: ct);
 
         return new

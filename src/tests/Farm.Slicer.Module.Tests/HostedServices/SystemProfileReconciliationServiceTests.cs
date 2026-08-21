@@ -225,6 +225,77 @@ public class SystemProfileReconciliationServiceTests
         Assert.Equal(2, attempts);
     }
 
+    /// <summary>
+    /// A transient registry/database failure during worker discovery must be retried like any other
+    /// failure. If it escaped the retry loop, reconciliation would be deferred to the next restart —
+    /// the exact failure mode this service exists to remove.
+    /// </summary>
+    [Fact]
+    public async Task ReconcileAsync_WorkerDiscoveryThrowsTransiently_IsRetriedNotAbandoned()
+    {
+        Mock<Farm.Slicer.Module.Services.IProfilesService> profiles = new(MockBehavior.Loose);
+        _ = profiles.Setup(p => p.SeedSystemProfilesFromWorkerAsync(It.IsAny<HttpClient>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new { imported = 8, errors = 0 });
+
+        Mock<Farm.Slicer.Module.Services.ISlicersService> slicers = new(MockBehavior.Loose);
+        int call = 0;
+        _ = slicers.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .Returns(() => ++call == 1
+                ? throw new InvalidOperationException("registry temporarily unavailable")
+                : Task.FromResult<IReadOnlyList<SlicerService>>(WorkerOnline()));
+
+        SystemProfileReconciliationService svc = CreateService(profiles, slicers, out _, LongWindow());
+
+        await svc.ReconcileAsync(CancellationToken.None);
+
+        profiles.Verify(
+            p => p.SeedSystemProfilesFromWorkerAsync(It.IsAny<HttpClient>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// A worker that answers 200 with an empty hierarchy (up, but not finished loading its bundles)
+    /// must be retried, not accepted as a complete catalog — this is Hicks's and Vasquez's
+    /// empty-then-populated case end to end.
+    /// </summary>
+    [Fact]
+    public async Task ReconcileAsync_WorkerReturnsEmptyCatalogThenPopulated_RetriesUntilPopulated()
+    {
+        Mock<Farm.Slicer.Module.Services.IProfilesService> profiles = new(MockBehavior.Loose);
+        int attempts = 0;
+        _ = profiles.Setup(p => p.SeedSystemProfilesFromWorkerAsync(It.IsAny<HttpClient>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => ++attempts == 1
+                ? new { imported = 0, skipped = 0, errors = 1, message = "No profiles available from worker or invalid hierarchy structure" }
+                : new { imported = 8, skipped = 0, errors = 0, message = "ok" });
+
+        SystemProfileReconciliationService svc = CreateService(profiles, WorkerOnline(), out _, LongWindow());
+
+        await svc.ReconcileAsync(CancellationToken.None);
+
+        Assert.Equal(2, attempts);
+    }
+
+    /// <summary>
+    /// An unrecognised result shape is not evidence of success. Reconciliation must fail closed and
+    /// keep retrying rather than infer "zero errors" from a missing member.
+    /// </summary>
+    [Fact]
+    public async Task ReconcileAsync_SeedResultHasNoErrorCount_FailsClosedAndRetries()
+    {
+        Mock<Farm.Slicer.Module.Services.IProfilesService> profiles = new(MockBehavior.Loose);
+        int attempts = 0;
+        _ = profiles.Setup(p => p.SeedSystemProfilesFromWorkerAsync(It.IsAny<HttpClient>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => ++attempts == 1
+                ? new { imported = 0 }
+                : (object)new { imported = 8, errors = 0 });
+
+        SystemProfileReconciliationService svc = CreateService(profiles, WorkerOnline(), out _, LongWindow());
+
+        await svc.ReconcileAsync(CancellationToken.None);
+
+        Assert.Equal(2, attempts);
+    }
+
     private static Dictionary<string, string?> LongWindow() => new()
     {
         ["SystemProfileReconciliation:StartupDelaySeconds"] = "0",

@@ -119,9 +119,12 @@ public sealed class SystemProfileReconciliationService : BackgroundService
         // is the failure mode this service exists to eliminate (#1779).
         while (!ct.IsCancellationRequested)
         {
-            if (await TryFindEligibleWorkerAsync(ct))
+            try
             {
-                try
+                // Discovery is inside the retry: a transient registry/database failure here must be
+                // retried like any other, not allowed to escape and defer reconciliation until the
+                // next restart — that is the very failure mode this service exists to remove.
+                if (await TryFindEligibleWorkerAsync(ct))
                 {
                     if (await TrySeedAsync(ct))
                     {
@@ -130,18 +133,18 @@ public sealed class SystemProfileReconciliationService : BackgroundService
 
                     lastFailure = null;
                 }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    lastFailure = ex;
-                    _logger.LogWarning(
-                        "[SystemProfileReconciliation] Seed attempt failed ({Message}); will retry until {Deadline:o}",
-                        ex.Message,
-                        deadline);
-                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                lastFailure = ex;
+                _logger.LogWarning(
+                    "[SystemProfileReconciliation] Reconciliation attempt failed ({Message}); will retry until {Deadline:o}",
+                    ex.Message,
+                    deadline);
             }
 
             if (DateTime.UtcNow >= deadline)
@@ -185,7 +188,14 @@ public sealed class SystemProfileReconciliationService : BackgroundService
         object result = await profilesService.SeedSystemProfilesFromWorkerAsync(httpClient, ct);
 
         int after = (await machineRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, ct)).Count;
-        int errors = ReadErrorCount(result);
+
+        if (!TryReadErrorCount(result, out int errors))
+        {
+            // Fail closed: an unrecognised result shape is not evidence of success, and treating it
+            // as zero errors is exactly how an incomplete catalog would look complete.
+            _logger.LogWarning("[SystemProfileReconciliation] Seed returned an unrecognised result shape; not treating the catalog as complete");
+            return false;
+        }
 
         if (errors > 0)
         {
@@ -213,13 +223,21 @@ public sealed class SystemProfileReconciliationService : BackgroundService
     }
 
     /// <summary>
-    /// Reads the seed's <c>errors</c> count from its anonymous result. A shape without that member
-    /// is treated as zero rather than failing reconciliation over a reporting detail.
+    /// Reads the seed's <c>errors</c> count from its result. Returns false when the member is
+    /// absent or not an <see cref="int"/>, so the caller can fail closed rather than infer success
+    /// from a shape it does not recognise.
     /// </summary>
-    private static int ReadErrorCount(object? result)
+    private static bool TryReadErrorCount(object? result, out int errors)
     {
+        errors = 0;
         object? value = result?.GetType().GetProperty("errors")?.GetValue(result);
-        return value is int count ? count : 0;
+        if (value is not int count)
+        {
+            return false;
+        }
+
+        errors = count;
+        return true;
     }
 
     /// <summary>

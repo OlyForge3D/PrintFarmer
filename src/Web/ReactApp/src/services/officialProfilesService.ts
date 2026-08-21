@@ -108,9 +108,13 @@ export const officialProfilesService = {
   /**
    * Force reseed system OrcaSlicer profiles from the worker.
    * Clears existing system profiles and fetches fresh ones from OrcaSlicer worker.
+   *
+   * `errors` counts profiles that failed to import (#1779). Because this operation deletes before
+   * it re-imports, a non-zero value means the catalog is now incomplete and must not be presented
+   * as a clean success.
    */
-  async forceReseedSystemProfilesFromWorker(): Promise<{ imported: number; deleted?: number; message?: string; orcaslicerVersion?: string }> {
-    const response = await apiClient.post<{ imported: number; deleted?: number; message?: string; orcaslicerVersion?: string }>('/slicer/profiles/system/orca/force-reseed-from-worker');
+  async forceReseedSystemProfilesFromWorker(): Promise<{ imported: number; deleted?: number; skipped?: number; errors?: number; message?: string; orcaslicerVersion?: string }> {
+    const response = await apiClient.post<{ imported: number; deleted?: number; skipped?: number; errors?: number; message?: string; orcaslicerVersion?: string }>('/slicer/profiles/system/orca/force-reseed-from-worker');
     return response.data;
   },
 
