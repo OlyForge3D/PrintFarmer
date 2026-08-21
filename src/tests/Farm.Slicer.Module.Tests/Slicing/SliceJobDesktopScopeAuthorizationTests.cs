@@ -212,6 +212,15 @@ public sealed class SliceJobDesktopScopeAuthorizationTests : IAsyncLifetime
         return (model.Id, hash);
     }
 
+    /// <summary>
+    /// A minimal, validly-formed multipart form for the legacy slice-model route: an empty
+    /// <see cref="MultipartFormDataContent"/> with no parts fails ASP.NET Core's form-reader with a
+    /// "Form section has invalid Content-Disposition" 400 before the action (and its Desktop-scope
+    /// guard) ever runs, so at least one well-formed field is required to reach that guard at all.
+    /// </summary>
+    private static MultipartFormDataContent BuildSliceModelForm() =>
+        new() { { new StringContent("OrcaSlicer"), "slicerEngine" } };
+
     private static async Task<string?> ReadCodeAsync(HttpResponseMessage response)
     {
         string body = await response.Content.ReadAsStringAsync();
@@ -329,10 +338,14 @@ public sealed class SliceJobDesktopScopeAuthorizationTests : IAsyncLifetime
         string storedUrl = $"/api/3d-models/file/{modelId}";
         using HttpClient client = await ExchangeClientAsync(ApiKeyScope.SlicingSubmit);
 
+        // Deliberately leave ModelFileUrl unset (default string.Empty) so this test can only pass
+        // via the ModelFileUrls array-loop guard, not by short-circuiting on the single-URL guard
+        // (Bishop/Hicks review round 3: the prior version set both fields to the same URL, so the
+        // single-URL guard rejected first and the test would still pass even if the per-entry
+        // array guard were broken or removed).
         HttpResponseMessage response = await client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
         {
             UserId = _ownerId,
-            ModelFileUrl = storedUrl,
             ModelFileUrls = [storedUrl],
             ModelFileName = "calibration.stl",
             SlicerEngine = SlicerEngineType.OrcaSlicer,
@@ -362,5 +375,49 @@ public sealed class SliceJobDesktopScopeAuthorizationTests : IAsyncLifetime
         string body = await response.Content.ReadAsStringAsync();
 
         _ = response.StatusCode.Should().Be(HttpStatusCode.Created, body);
+    }
+
+    /// <summary>
+    /// Bishop's review round-3 finding: the deprecated <c>POST /api/slicer/slice-model/{modelId}</c>
+    /// route (<see cref="Farm.Slicer.Module.Api.Controllers.Slicing.SlicingSubmissionController"/>)
+    /// is a structurally separate legacy code path from <c>SliceJobController</c> - it resolves any
+    /// model by ID with no ownership/scope check of its own, and predates issue #1770 entirely - so
+    /// every guard added above for <c>/api/slice</c> left this route fully exploitable by a
+    /// submit-only-scoped Desktop token. Proves the guard now added to
+    /// <c>SlicingSubmissionController.SubmitModelAsync</c> actually rejects the request before the
+    /// legacy service ever touches the model or the orchestrator.
+    /// </summary>
+    [Fact(DisplayName =
+        "A Desktop token holding only slicing:submit cannot reference a library model via the legacy slice-model route")]
+    public async Task SlicingSubmitOnlyToken_CannotReferenceLibraryModelViaLegacySliceModelRoute()
+    {
+        (Guid modelId, _) = await AddStoredModelAsync(Guid.NewGuid());
+        using HttpClient client = await ExchangeClientAsync(ApiKeyScope.SlicingSubmit);
+
+        HttpResponseMessage response = await client.PostAsync(
+            $"/api/slicer/slice-model/{modelId}", BuildSliceModelForm());
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            $"the deprecated slice-model route must be guarded identically to /api/slice (issue #1770 follow-up): {body}");
+        _ = (await ReadCodeAsync(response)).Should().Be("resource_forbidden");
+    }
+
+    [Fact(DisplayName =
+        "A Desktop token holding slicing:submit + ModelRead can reference a library model via the legacy slice-model route")]
+    public async Task SlicingSubmitTokenWithModelRead_CanReferenceLibraryModelViaLegacySliceModelRoute()
+    {
+        (Guid modelId, _) = await AddStoredModelAsync(Guid.NewGuid());
+        using HttpClient client = await ExchangeClientAsync(
+            ApiKeyScope.SlicingSubmit | ApiKeyScope.ModelRead);
+
+        HttpResponseMessage response = await client.PostAsync(
+            $"/api/slicer/slice-model/{modelId}", BuildSliceModelForm());
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().NotBe(
+            HttpStatusCode.Forbidden,
+            $"ModelRead scope must clear the guard so the request reaches the legacy submission service: {body}");
     }
 }

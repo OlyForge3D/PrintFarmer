@@ -111,6 +111,17 @@ public class SlicingSubmissionController(
             return SlicerApiProblems.ResourceForbidden(this);
         }
 
+        // This legacy route resolves any existing model by ID (Farm.Infrastructure.Authorization.
+        // DesktopScopeClaims.IsMissingModelScope) with no ownership check of its own, and is
+        // gated only by the broad slicing:submit permission - so without this guard a
+        // Desktop-exchange token issued only for slicing (issue #838) could use it to slice/read
+        // an arbitrary library model it was never granted ModelRead/LibrarySync access to, exactly
+        // the bypass closed for POST /api/slice in issue #1770's follow-up.
+        if (Farm.Infrastructure.Authorization.DesktopScopeClaims.IsMissingModelScope(User))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
+        }
+
         SlicerProfileDto profile = DeserializeProfile(profileJson);
 
         SlicingSubmissionResult result = await _submissionService.SubmitSlicingJobFromModelAsync(

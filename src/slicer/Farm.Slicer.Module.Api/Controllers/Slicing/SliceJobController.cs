@@ -900,19 +900,13 @@ public partial class SliceJobController(
     }
 
     /// <summary>
-    /// True when the caller is a Desktop-exchange token (issue #838) that was never granted
-    /// ModelRead or LibrarySync scope. Since #1770 made stored-model lookups succeed for any
-    /// existing library model rather than just the caller's own uploads, every submission path
-    /// that can resolve to a stored model3DId - model3DId itself, or a modelFileUrl/modelFileUrls
-    /// entry pointing at "/api/3d-models/file/{id}" - must apply this guard identically, or a
-    /// submit-only-scoped Desktop token could route around it via whichever form skips the check.
-    /// Normal login/session tokens carry no DesktopScopeClaims.TokenUse claim and are unaffected,
-    /// exactly as DesktopScopeAuthorizationHandler behaves for attribute-gated endpoints.
+    /// True when the caller is a Desktop-exchange token that must be refused stored-model access.
+    /// See <see cref="Farm.Infrastructure.Authorization.DesktopScopeClaims.IsMissingModelScope"/>
+    /// for the full rationale (issue #1770 follow-up); this thin wrapper only binds it to the
+    /// controller's <see cref="ControllerBase.User"/> so every call site here stays terse.
     /// </summary>
     private bool IsDesktopTokenMissingModelScope() =>
-        User.HasClaim(Farm.Infrastructure.Authorization.DesktopScopeClaims.TokenUse, Farm.Infrastructure.Authorization.DesktopScopeClaims.DesktopExchangeTokenUse)
-        && !User.HasClaim(Farm.Infrastructure.Authorization.DesktopScopeClaims.Scope, "ModelRead")
-        && !User.HasClaim(Farm.Infrastructure.Authorization.DesktopScopeClaims.Scope, "LibrarySync");
+        Farm.Infrastructure.Authorization.DesktopScopeClaims.IsMissingModelScope(User);
 
     /// <summary>Uploads a verified artifact for a job owned by the authenticated worker.</summary>
     /// <param name="id">The claimed job ID.</param>
