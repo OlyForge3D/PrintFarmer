@@ -396,9 +396,16 @@ public abstract class HttpJobPollerService(
             }
             else
             {
-                // Report failure to the API so the job doesn't sit in Processing until lease expires
-                terminalAcknowledgement =
-                    await TryReportFailureAsync(httpClient, job.Id, job.ClaimToken, ex.Message, ct);
+                // Report failure to the API so the job doesn't sit in Processing until lease expires.
+                // A pipeline that classified the failure carries the redacted reason structurally, so
+                // the API never has to infer it from the diagnostic prose (issue #1811).
+                terminalAcknowledgement = await TryReportFailureAsync(
+                    httpClient,
+                    job.Id,
+                    job.ClaimToken,
+                    ex.Message,
+                    ct,
+                    ClassifyFailure(ex));
             }
 
             if (!terminalAcknowledgement)
@@ -635,24 +642,60 @@ public abstract class HttpJobPollerService(
         }
     }
 
+    /// <summary>
+    /// Classifies an exception raised while processing a job into the redacted, client-safe reason
+    /// reported to the API (issue #1811).
+    /// </summary>
+    /// <remarks>
+    /// A pipeline that understands its engine's failure modes throws
+    /// <see cref="SlicerEngineFailureException"/> carrying the classification structurally. Anything
+    /// else — a timeout, an IO error, a bug — stays unclassified rather than being guessed at from
+    /// the message text, so the client-safe channel never asserts a cause nobody established.
+    /// </remarks>
+    /// <param name="exception">The exception that ended the job.</param>
+    /// <returns>The reason, or <see langword="null"/> when the failure was not classified.</returns>
+    internal static SliceFailureReason? ClassifyFailure(Exception? exception) =>
+        (exception as SlicerEngineFailureException)?.Reason;
+
+    /// <summary>
+    /// Builds the exact payload sent to <c>POST /api/slice/{id}/fail</c>.
+    /// </summary>
+    /// <remarks>
+    /// Extracted so the worker→API junction is directly testable: the diagnostic must arrive intact
+    /// (not re-truncated to something useless like the single word "Errors") and the classification
+    /// must travel alongside it rather than be inferred from prose.
+    /// </remarks>
+    /// <param name="errorMessage">The verbatim, admin-only diagnostic.</param>
+    /// <param name="failureReason">The redacted classification, when the pipeline supplied one.</param>
+    /// <returns>The request body.</returns>
+    internal static FailSliceJobRequest CreateFailureReport(
+        string errorMessage,
+        SliceFailureReason? failureReason)
+    {
+        // Kept under the contract's [MaxLength(1024)]; the diagnostics composer already targets a
+        // smaller budget, so this is a backstop for messages that did not come from it.
+        string truncated = errorMessage.Length > 1000 ? errorMessage[..1000] : errorMessage;
+        return new FailSliceJobRequest(truncated, failureReason);
+    }
+
     private async Task<bool> TryReportFailureAsync(
         HttpClient client,
         Guid jobId,
         Guid claimToken,
         string errorMessage,
-        CancellationToken ct)
+        CancellationToken ct,
+        SliceFailureReason? failureReason = null)
     {
         try
         {
             EnsureCurrentClaim(jobId, claimToken);
-            string truncated = errorMessage.Length > 1000 ? errorMessage[..1000] : errorMessage;
 
             using HttpRequestMessage request = CreateJobMutationRequest(
                 client,
                 HttpMethod.Post,
                 jobId,
                 $"/api/slice/{jobId}/fail",
-                JsonContent.Create(new FailSliceJobRequest(truncated)));
+                JsonContent.Create(CreateFailureReport(errorMessage, failureReason)));
             using HttpResponseMessage resp = await client.SendAsync(request, ct);
             if (!resp.IsSuccessStatusCode)
             {

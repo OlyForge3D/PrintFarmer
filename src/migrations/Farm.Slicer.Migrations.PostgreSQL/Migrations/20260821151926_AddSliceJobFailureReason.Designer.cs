@@ -3,98 +3,107 @@ using System;
 using Farm.Slicer.Module.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace Farm.Slicer.Migrations.Sqlite.Migrations
+namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
 {
     [DbContext(typeof(SlicerDbContext))]
-    partial class SlicerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260821151926_AddSliceJobFailureReason")]
+    partial class AddSliceJobFailureReason
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.11");
+            modelBuilder
+                .HasDefaultSchema("slicer")
+                .HasAnnotation("ProductVersion", "10.0.11")
+                .HasAnnotation("Relational:MaxIdentifierLength", 63);
+
+            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.Artifact", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<Guid?>("ClaimToken")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime?>("CleanupDeletionStartedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("CleanupReservationToken")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime?>("CleanupReservedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("ContentType")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(128)");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("DeclaredSha256")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(256)");
 
                     b.Property<Guid>("JobId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTime?>("PromotedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("PromotedGcodeFileId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<Guid?>("PromotionCheckpointId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("PromotionOperationId")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(128)");
 
                     b.Property<string>("PromotionOperationKey")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTime?>("PromotionStartedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("RelativePath")
                         .IsRequired()
                         .HasMaxLength(1024)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(1024)");
 
                     b.Property<string>("Sha256")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<long>("SizeBytes")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bigint");
 
                     b.Property<Guid?>("WorkerId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.HasKey("Id");
 
@@ -113,68 +122,68 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
 
                     b.HasIndex("JobId", "Kind");
 
-                    b.ToTable("Artifacts");
+                    b.ToTable("Artifacts", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.FilamentProfile", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<int>("BedTemperature")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<string>("CompatiblePrinters")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("CreatedByUserId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<string>("Hash")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<bool>("IsDefault")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsPublic")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsSystem")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasDefaultValue(false);
 
                     b.Property<string>("Manufacturer")
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(255)");
 
                     b.Property<string>("Material")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(255)");
 
                     b.Property<int>("NozzleTemperature")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<int>("PrintSpeed")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<string>("ProfileFormat")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
@@ -183,16 +192,16 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SlicerDistribution")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<int>("SlicerType")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<string>("SlicerVersion")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
@@ -210,59 +219,59 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.HasIndex("Name", "Material", "SlicerType")
                         .IsUnique();
 
-                    b.ToTable("FilamentProfiles");
+                    b.ToTable("FilamentProfiles", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.MachineModelProfile", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Description")
                         .HasMaxLength(1024)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(1024)");
 
                     b.Property<string>("Hash")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<bool>("IsPublic")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsSystem")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasDefaultValue(false);
 
                     b.Property<string>("Manufacturer")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(128)");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(256)");
 
                     b.Property<Guid?>("PrinterModelId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("SlicerType")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<string>("SlicerVersion")
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(32)");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
@@ -278,58 +287,58 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.HasIndex("Name", "SlicerType")
                         .IsUnique();
 
-                    b.ToTable("MachineModelProfiles");
+                    b.ToTable("MachineModelProfiles", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.MachineProfile", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("CreatedByUserId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<string>("Hash")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<bool>("IsDefault")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsPublic")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsSystem")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasDefaultValue(false);
 
                     b.Property<Guid?>("MachineModelProfileId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Manufacturer")
                         .IsRequired()
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(255)");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(255)");
 
                     b.Property<Guid?>("PrinterModelId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("ProfileFormat")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
@@ -338,16 +347,16 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SlicerDistribution")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<int>("SlicerType")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<string>("SlicerVersion")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
@@ -369,117 +378,117 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.HasIndex("Name", "SlicerType")
                         .IsUnique();
 
-                    b.ToTable("MachineProfiles");
+                    b.ToTable("MachineProfiles", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.Model3D", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("ClientUploadHash")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<Guid?>("ClientUploadId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Description")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<double?>("DimensionX")
-                        .HasColumnType("REAL");
+                        .HasColumnType("double precision");
 
                     b.Property<double?>("DimensionY")
-                        .HasColumnType("REAL");
+                        .HasColumnType("double precision");
 
                     b.Property<double?>("DimensionZ")
-                        .HasColumnType("REAL");
+                        .HasColumnType("double precision");
 
                     b.Property<string>("ExtractedMetadataJson")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<int>("FileFormat")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<string>("FileHash")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(255)");
 
                     b.Property<string>("FilePath")
                         .IsRequired()
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(512)");
 
                     b.Property<long>("FileSizeBytes")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bigint");
 
                     b.Property<Guid>("FolderId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<int>("HealthStatus")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasDefaultValue(0);
 
                     b.Property<DateTime?>("ImportedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("IsValid")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("boolean");
 
                     b.Property<DateTime?>("LastHealthCheckDate")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("LastVerificationResult")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("bigint")
                         .HasDefaultValue(1L);
 
                     b.Property<string>("SourceCreator")
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(256)");
 
                     b.Property<string>("SourceLicense")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(128)");
 
                     b.Property<string>("SourceUrl")
                         .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(2048)");
 
                     b.Property<string>("ThumbnailFileName")
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(255)");
 
                     b.Property<int?>("TriangleCount")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime>("UploadedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("UploadedByUserId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("ValidationErrors")
                         .HasColumnType("TEXT");
@@ -506,71 +515,71 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.HasIndex("UploadedByUserId", "ClientUploadId")
                         .IsUnique();
 
-                    b.ToTable("Models3D");
+                    b.ToTable("Models3D", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.ProcessProfile", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("AdvancedSettings")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("CompatiblePrinters")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("CreatedByUserId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<bool>("EnableSupports")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Hash")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<int>("InfillPercentage")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<bool>("IsDefault")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsPublic")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsSystem")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasDefaultValue(false);
 
                     b.Property<double>("LayerHeight")
-                        .HasColumnType("REAL");
+                        .HasColumnType("double precision");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(255)");
 
                     b.Property<double>("PrintSpeed")
-                        .HasColumnType("REAL");
+                        .HasColumnType("double precision");
 
                     b.Property<Guid?>("PrinterModelId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("ProfileFormat")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<int>("Quality")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
@@ -579,19 +588,19 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SlicerDistribution")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<int>("SlicerType")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<string>("SlicerVersion")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<Guid?>("SpecificPrinterId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
@@ -613,230 +622,230 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.HasIndex("Name", "SlicerType", "PrinterModelId")
                         .IsUnique();
 
-                    b.ToTable("ProcessProfiles");
+                    b.ToTable("ProcessProfiles", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.SliceJob", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("ArtifactIdsCsv")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<int?>("ArtifactsCount")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<long?>("ArtifactsTotalBytes")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bigint");
 
                     b.Property<Guid?>("CalibrationAttemptId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<Guid?>("CalibrationOrchestrationId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<Guid?>("CalibrationProjectId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Checksum")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(128)");
 
                     b.Property<Guid?>("ClaimToken")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime?>("ClaimedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("CorrelationId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("ErrorMessage")
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("EstimatedPrintTimeSeconds")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<string>("ExtruderFilamentProfileNamesJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("FailureReason")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<Guid?>("FilamentProfileId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("FilamentProfileJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("FilamentProfileSha256")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<decimal?>("FilamentUsedGrams")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("numeric");
 
                     b.Property<Guid>("IdempotencyScopeId")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasDefaultValue(new Guid("00000000-0000-0000-0000-000000000000"));
 
                     b.Property<string>("LayoutDegradationReason")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTime?>("LeaseExpiresAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<long>("LeaseFence")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("bigint")
                         .HasDefaultValue(0L);
 
                     b.Property<Guid?>("LeaseToken")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<Guid?>("MachineProfileId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("MachineProfileJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("MachineProfileSha256")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<Guid?>("Model3DId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("ModelFileName")
                         .IsRequired()
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(512)");
 
                     b.Property<string>("ModelFileTransformsJson")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<string>("ModelFileUrl")
                         .IsRequired()
                         .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(2048)");
 
                     b.Property<string>("ModelFileUrlsJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ModelSha256")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("ModelTransformJson")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<int>("NormalizedEngine")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasDefaultValue(0);
 
                     b.Property<Guid?>("OperationId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<Guid?>("PinnedWorkerId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<Guid?>("PrinterId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<int>("Priority")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<Guid?>("ProcessProfileId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("ProcessProfileJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ProcessProfileSha256")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("ProgressMessage")
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(512)");
 
                     b.Property<int>("ProgressPercent")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("QueuedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("RequiredCapabilitiesJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ResultFileUrl")
                         .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(2048)");
 
                     b.Property<int>("RetryCount")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<string>("SlicerBinarySha256")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("SlicerContainerDigest")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(128)");
 
                     b.Property<string>("SlicerDistribution")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<int>("SlicerEngine")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<string>("SlicerEngineName")
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(32)");
 
                     b.Property<string>("SlicerEngineVersion")
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(32)");
 
                     b.Property<Guid?>("SlicerProfileId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("SlicerProfileJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SlicerVersion")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTime?>("StartedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(50)");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("UserId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<Guid?>("WorkerId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.HasKey("Id");
 
@@ -871,67 +880,67 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasDatabaseName("IX_SliceJobs_Owner_Project_Correlation")
                         .HasFilter("\"CorrelationId\" IS NOT NULL AND \"IdempotencyScopeId\" <> '00000000-0000-0000-0000-000000000000'");
 
-                    b.ToTable("SliceJobs");
+                    b.ToTable("SliceJobs", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.SlicerService", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("ApiKey")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(128)");
 
                     b.Property<DateTime?>("ApiKeyRotatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("CapabilitiesJson")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Host")
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(512)");
 
                     b.Property<string>("InstanceId")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(200)");
 
                     b.Property<DateTime>("LastSeen")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("MaxConcurrentJobs")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(200)");
 
                     b.Property<int>("SlicerType")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<string>("Status")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("Tags")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("text");
 
                     b.Property<string>("UiManifestUrl")
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(512)");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Version")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(64)");
 
                     b.HasKey("Id");
 
@@ -944,83 +953,85 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("SlicerServices");
+                    b.ToTable("SlicerServices", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.SlicerSettings", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<bool>("Enabled")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("boolean");
 
                     b.Property<double>("JitterPercent")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("REAL")
+                        .HasColumnType("double precision")
                         .HasDefaultValue(15.0);
 
                     b.Property<string>("PerEngineJson")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
-                    b.ToTable("SlicerSettings");
+                    b.ToTable("SlicerSettings", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.Worker", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uuid");
 
                     b.Property<int>("ActiveJobs")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<string>("ApiKey")
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(512)");
 
                     b.Property<long>("ArtifactBytesProduced")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bigint");
 
                     b.Property<int>("ArtifactsProduced")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<double?>("AverageProcessingTimeSeconds")
-                        .HasColumnType("REAL");
+                        .HasColumnType("double precision");
 
                     b.Property<string>("CapabilitiesJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<int>("CompletedJobs")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("DisabledReason")
                         .HasMaxLength(1024)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(1024)");
 
                     b.Property<string>("EndpointUrl")
                         .IsRequired()
                         .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(2048)");
 
                     b.Property<int>("FailedJobs")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<bool>("IsDisabled")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("boolean");
 
                     b.Property<DateTime?>("LastHeartbeat")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("MetadataJson")
                         .HasColumnType("TEXT");
@@ -1028,36 +1039,36 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(256)");
 
                     b.Property<DateTime?>("OfflineAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("OnlineAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime>("RegisteredAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("ServiceId")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(256)");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(50)");
 
                     b.Property<int>("TotalSlots")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Version")
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("character varying(50)");
 
                     b.HasKey("Id");
 
@@ -1068,7 +1079,7 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("Workers");
+                    b.ToTable("Workers", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.MachineProfile", b =>

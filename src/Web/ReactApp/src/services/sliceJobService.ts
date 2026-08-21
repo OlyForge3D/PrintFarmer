@@ -96,6 +96,21 @@ export interface SliceJobStatusResponse {
    * `undefined`/`null` means the layout was applied as requested.
    */
   layoutDegradation?: LayoutDegradationReason | null;
+  /**
+   * Redacted, client-safe classification of why a job failed (issue #1811).
+   * Like `layoutDegradation` — and unlike `errorDetail` — this is a closed
+   * enum rather than raw worker diagnostics, so it is surfaced to every
+   * caller. `undefined`/`null` when the job did not fail, or when it failed
+   * before a worker could classify it.
+   */
+  failureReason?: SliceFailureReason | null;
+  /**
+   * Fixed guidance for `failureReason`, supplied by the backend from a
+   * constant lookup table. Never contains job-derived text such as worker
+   * paths or model filenames, which is what makes it safe to show to a
+   * non-admin operator who can never see `errorDetail`.
+   */
+  failureHint?: string | null;
   estimatedPrintTimeSeconds?: number;
   filamentUsedGrams?: number;
   workerId?: string;
@@ -123,6 +138,38 @@ export enum LayoutDegradationReason {
    * instead of the requested transform.
    */
   SourcePlacementFallback = 'SourcePlacementFallback',
+}
+
+/**
+ * Redacted, client-safe reasons a slice job failed (issue #1811). Mirrors the
+ * backend `SliceFailureReason` enum (`Farm.Slicer.Module.Models`), serialized
+ * as a string via `JsonStringEnumConverter`.
+ */
+export enum SliceFailureReason {
+  /**
+   * The slicing engine rejected the model itself. A generic catch-all on the
+   * engine's side; a common trigger is an orientation it cannot slice, which
+   * the workspace's "Auto-orient plate" control resolves.
+   */
+  SlicingEngineRejectedModel = 'SlicingEngineRejectedModel',
+  /** Nothing printable was found on the plate. */
+  NoPrintableObjects = 'NoPrintableObjects',
+  /** Part of the model lies outside the printer's build volume. */
+  ModelOutsideBuildVolume = 'ModelOutsideBuildVolume',
+  /** The selected process/filament is not compatible with the printer. */
+  ProfileNotCompatible = 'ProfileNotCompatible',
+  /** A profile could not be read or contained invalid values. */
+  ProfileInvalid = 'ProfileInvalid',
+  /** The engine could not read the model file. */
+  ModelFileUnreadable = 'ModelFileUnreadable',
+  /** The model exceeds the engine's complexity or memory limits. */
+  ModelTooComplex = 'ModelTooComplex',
+  /** Slicing exceeded the engine's time limit. */
+  SlicingTimedOut = 'SlicingTimedOut',
+  /** Objects or toolpaths collide. */
+  ToolpathConflict = 'ToolpathConflict',
+  /** The engine failed for a reason the system does not classify. */
+  SlicerFailed = 'SlicerFailed',
 }
 
 /** Human-readable, non-fatal notice text for a `LayoutDegradationReason`. */

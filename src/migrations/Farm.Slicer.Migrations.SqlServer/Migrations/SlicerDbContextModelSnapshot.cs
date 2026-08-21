@@ -681,6 +681,10 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<string>("ExtruderFilamentProfileNamesJson")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<Guid?>("FilamentProfileId")
                         .HasColumnType("uniqueidentifier");
 

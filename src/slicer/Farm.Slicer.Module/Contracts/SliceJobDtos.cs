@@ -159,6 +159,23 @@ public class SliceJobStatusResponse
     /// </summary>
     public LayoutDegradationReason? LayoutDegradation { get; set; }
 
+    /// <summary>
+    /// Redacted, client-safe classification of why the job failed (issue #1811). Like
+    /// <see cref="LayoutDegradation"/> — and unlike <see cref="ErrorDetail"/> — this is a small
+    /// explicitly-modelled enum rather than raw worker diagnostics, so it is safe to surface to
+    /// every caller. <see langword="null"/> when the job did not fail, or when it failed before a
+    /// worker could classify it.
+    /// </summary>
+    public SliceFailureReason? FailureReason { get; set; }
+
+    /// <summary>
+    /// Fixed, client-safe guidance for <see cref="FailureReason"/>, from
+    /// <see cref="SliceFailureHints"/>. Always a compile-time constant string with nothing
+    /// job-derived interpolated into it, which is what lets a non-admin caller be told why their
+    /// slice failed without exposing worker paths or filenames.
+    /// </summary>
+    public string? FailureHint { get; set; }
+
     public int? EstimatedPrintTimeSeconds { get; set; }
 
     public decimal? FilamentUsedGrams { get; set; }
@@ -331,12 +348,20 @@ public class SliceJobProgressUpdateRequest
 /// The API deliberately replaces the supplied detail with a generic public error.
 /// </summary>
 /// <param name="ErrorMessage">Worker-local failure detail; never returned to API clients.</param>
+/// <param name="FailureReason">
+/// Redacted, client-safe classification of the failure (issue #1811). Optional so a worker that
+/// could not classify the failure — or one built before this field existed — still reports the
+/// failure itself. Unlike <paramref name="ErrorMessage"/> this value <em>is</em> returned to every
+/// API client, which is safe because it is a closed enum carrying no job-derived text.
+/// </param>
 /// <remarks>
 /// The length constraint is declared on the primary-constructor parameter. Declaring it with a
 /// <c>property:</c> target makes MVC model validation throw, which previously turned every worker
 /// failure report into a <c>500</c> and lost the failure entirely.
 /// </remarks>
-public sealed record FailSliceJobRequest([MaxLength(1024)] string ErrorMessage);
+public sealed record FailSliceJobRequest(
+    [MaxLength(1024)] string ErrorMessage,
+    SliceFailureReason? FailureReason = null);
 
 /// <summary>
 /// Response after successful job completion.
