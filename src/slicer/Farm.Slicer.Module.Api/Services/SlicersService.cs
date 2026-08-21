@@ -958,8 +958,9 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
     /// <summary>
     /// Seed OrcaSlicer profiles from the worker into the database on registration.
     /// This happens automatically when an OrcaSlicer worker registers, so profiles are available immediately.
-    /// Only seeds if no system OrcaSlicer profiles exist yet (idempotent - won't reseed on subsequent registrations).
-    /// Uses a distributed lock to ensure seeding happens only once, even with multiple concurrent worker registrations.
+    /// Uses a versioned distributed lock so seeding runs at most once per seed-logic version, even with
+    /// multiple concurrent worker registrations. The seed body is idempotent: every profile is looked up
+    /// by content hash before insert, so a re-run only backfills rows that are genuinely missing.
     /// Profiles are filtered to only include those for manufacturers and models in the catalog.
     /// </summary>
     private async Task SeedProfilesFromWorkerAsync(
@@ -967,7 +968,14 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         CancellationToken ct)
     {
         string workerHost = worker.Host ?? string.Empty;
-        const string SEED_LOCK_KEY = "SystemOrcaSlicerProfilesSeedLock";
+
+        // #1779: the lock is a run-once latch — TryAcquireLockAsync returns false forever once the key is
+        // "completed". A deployment seeded before the alias fix below therefore kept its incomplete profile
+        // set indefinitely, and shipping the fix changed nothing in production (the bug was reported as
+        // still reproducing twice after it was "fixed"). Bumping the key lets already-seeded deployments
+        // run the corrected seed exactly once to backfill the alias-keyed hierarchy groups that were
+        // previously skipped. Bump this suffix again whenever a seed-logic change must reach existing installs.
+        const string SEED_LOCK_KEY = "SystemOrcaSlicerProfilesSeedLock:v2";
 
         try
         {
@@ -981,14 +989,10 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
             _logger.LogInformation("[SeedProfilesFromWorker] Acquired distributed lock for profile seeding");
 
-            // Early exit: Verify no system profiles exist (double-check after acquiring lock)
-            IReadOnlyList<ProcessProfile> existingSystemProfiles = await _profileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
-            if (existingSystemProfiles.Any(p => p.IsSystem))
-            {
-                _logger.LogInformation("[SeedProfilesFromWorker] System OrcaSlicer profiles already exist, skipping seed (detected after acquiring lock)");
-                await _settingsService.CompleteLockAsync(SEED_LOCK_KEY, ct);
-                return;
-            }
+            // NOTE: deliberately no "system profiles already exist" early exit here. On a deployment that
+            // was seeded by an earlier version, profiles DO already exist while the alias-keyed groups are
+            // still missing, so bailing out on mere existence would defeat the backfill this versioned lock
+            // is here to perform. Per-profile hash checks below make the pass safely idempotent.
 
             // Call the worker's /api/profiles endpoint which now returns AllProfilesResponseDto with all three profile types
             string workerUrl = workerHost.TrimEnd('/');
@@ -1027,7 +1031,14 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
             (IReadOnlyList<PrinterModelDto> catalogModels, _) = await _catalogService.GetModelsAsync(null, ct);
 
             HashSet<string> catalogManufacturerNames = new HashSet<string>(catalogManufacturers.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
-            HashSet<string> catalogModelNames = new HashSet<string>(catalogModels.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
+
+            // #1779: the worker keys its ByHierarchy groups by each machine profile's `printer_model`.
+            // High-flow variants declare their own distinct printer_model ("Prusa CORE One HF"), which is
+            // never a catalog model Name — only a configured OrcaSlicer alias of one. Matching on base
+            // catalog names alone skipped those groups entirely, dropping all 8 CORE One / CORE One L HF
+            // machine profiles (plus their filament/process profiles) before they ever reached the
+            // database that /api/slicer/profiles/extended reads from.
+            HashSet<string> catalogModelNames = await OrcaSlicerCatalogModelNames.BuildAsync(_catalogService, catalogModels, ct);
 
             _logger.LogInformation("[SeedProfilesFromWorker] Filtering profiles for {CatalogManufacturerNamesCount} manufacturers and {CatalogModelsCount} models in catalog (using alias service for PrinterModel linking)", catalogManufacturerNames.Count, catalogModels.Count);
 

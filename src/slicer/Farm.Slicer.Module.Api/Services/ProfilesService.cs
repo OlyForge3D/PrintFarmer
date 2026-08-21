@@ -1396,38 +1396,12 @@ public class ProfilesService(
 
     /// <summary>
     /// Builds the set of OrcaSlicer worker hierarchy model-group keys ("printer_model" values) that
-    /// should be imported for a given catalog. This is the base catalog model <c>Name</c>s PLUS every
-    /// OrcaSlicer alias configured for each model (#1779): the worker groups its <c>ByHierarchy</c>
-    /// structure by <c>printer_model</c>, and high-flow (HF) machine variants (e.g. "Prusa CORE One HF")
-    /// have their own distinct <c>printer_model</c> value that is never equal to the base catalog
-    /// model's own <c>Name</c> — only configured as an alias of it. Matching against base names alone
-    /// silently skips those alias-only hierarchy groups during seeding. Mirrors the alias resolution
-    /// already used correctly by <see cref="ImportSelectedProfilesForModelAsync"/>.
+    /// should be imported for a given catalog. Delegates to <see cref="OrcaSlicerCatalogModelNames"/>
+    /// so that every seeding path — including the registration-triggered seed in
+    /// <c>SlicersService.SeedProfilesFromWorkerAsync</c> — resolves aliases identically (#1779).
     /// </summary>
-    private async Task<HashSet<string>> GetOrcaSlicerCatalogModelNamesAsync(IReadOnlyList<PrinterModelDto> catalogModels, CancellationToken ct)
-    {
-        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (PrinterModelDto model in catalogModels)
-        {
-            if (!string.IsNullOrWhiteSpace(model.Name))
-            {
-                names.Add(model.Name);
-            }
-
-            IEnumerable<SlicerModelAliasDto> aliases = await _catalogService.GetModelAliasesAsync(model.Id, ct);
-            foreach (SlicerModelAliasDto alias in aliases)
-            {
-                if (string.Equals(alias.SlicerType, "OrcaSlicer", StringComparison.OrdinalIgnoreCase) &&
-                    !string.IsNullOrWhiteSpace(alias.SlicerModelName))
-                {
-                    names.Add(alias.SlicerModelName.Trim());
-                }
-            }
-        }
-
-        return names;
-    }
+    private Task<HashSet<string>> GetOrcaSlicerCatalogModelNamesAsync(IReadOnlyList<PrinterModelDto> catalogModels, CancellationToken ct)
+        => OrcaSlicerCatalogModelNames.BuildAsync(_catalogService, catalogModels, ct);
 
     /// <summary>
     /// Seeds the database with system OrcaSlicer profiles downloaded from the worker service.
