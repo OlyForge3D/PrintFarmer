@@ -43,7 +43,7 @@ import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
 import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Alert, Input, Select, ColorPicker, ProgressBar, InfoTooltip } from '@/common/components/ui';
+import { Button, Alert, Input, Select, ColorPicker, ProgressBar } from '@/common/components/ui';
 import { LayersIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon, SwapHorizontalIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
@@ -259,7 +259,6 @@ export const NewSliceJobPage: React.FC = () => {
     () => registeredEngines?.find(e => (e?.engine ?? '').toLowerCase() === engineName.toLowerCase()),
     [registeredEngines, engineName],
   );
-  const versionsForEngine = useMemo(() => engineInfo?.versions ?? [], [engineInfo]);
   const versionEntriesForEngine = useMemo(() => engineInfo?.versionEntries ?? [], [engineInfo]);
   // Backend-computed "newest online-available" version. The backend returns
   // `null` in the legacy-single-worker case (no SlicerService rows registered
@@ -1778,10 +1777,8 @@ export const NewSliceJobPage: React.FC = () => {
     //      versionEntry.available is false so the job would sit
     //      unclaimable. In both cases `engineInfo.latest` is null; only the
     //      per-entry availability signal distinguishes them.
-    // The Latest-mode submit guard fires ONLY when we can prove all versions
-    // are unavailable. Manually pinning a version is separately validated by
-    // the dropdown's `disabled` state, and a legacy submission (fresh
-    // install) is legitimately unpinned.
+    // Latest-mode guard: fires only when we can prove every version is
+    // unavailable. A legacy submission (fresh install) is legitimately unpinned.
     const engineHasAnyAvailable = engineInfo
       ? versionEntriesForEngine.some(v => v.available)
       : true;
@@ -1793,6 +1790,49 @@ export const NewSliceJobPage: React.FC = () => {
       && !engineHasAnyAvailable
     ) {
       setError(`No online ${engineName} worker is available to accept this job.`);
+      return;
+    }
+
+    // Pinned-mode guard (Vasquez): the check above is gated on the pin being
+    // undefined, so an explicit pin was never validated at all. The picker hides
+    // unpickable versions, but a pin can go stale AFTER selection — the registry
+    // query has a 300s staleTime — and a job pinned to a version no worker
+    // advertises sits in the queue unclaimable forever. UI warnings are not
+    // enough while the dispatch path stays open, so hard-block here.
+    //
+    // NOTE: there is deliberately NO `engineInfo` guard and NO
+    // `versionEntriesForEngine.length > 0` exemption here. Both were present in
+    // earlier revisions and both let a pinned job escape:
+    //
+    //   * The length exemption was added on the theory that it protected the
+    //     legacy/fresh-install shape. It does not. In that shape the backend
+    //     marks EVERY entry available (`available = !anyServiceRows || ...`, see
+    //     SlicersController.ListEnginesAsync), so the list is non-empty and a
+    //     legitimate pin passes on the `.some(...)` clause below, not on any
+    //     length check. The exemption only ever applied to an empty list.
+    //   * Requiring `engineInfo` meant a registry refresh that drops the pinned
+    //     engine entirely (engineInfo → undefined) skipped the guard and
+    //     dispatched the stale pin (Hicks R3).
+    //
+    // Both cases dispatch a job carrying a version-specific capability tag that
+    // no worker advertises, so it sits in the queue unclaimable forever. Since
+    // `versionEntriesForEngine` is `engineInfo?.versionEntries ?? []` (keep that
+    // `?? []` — it is what makes the single test below cover the unknown-engine
+    // case, and dropping it is a compile error here and at the Latest-mode guard
+    // rather than a silent behaviour change), the single `.some(...)` test covers
+    // every case: unknown engine and empty list both yield `false`, which blocks.
+    // Unverifiable is treated as unusable.
+    //
+    // Failing closed is recoverable. The picker always renders a Latest control
+    // while a pin is held (SlicerSelector's `|| selectedVersion !== undefined`),
+    // and clearing the pin either routes to the Latest-mode guard above (engine
+    // known) or submits unpinned (engine unknown, where that guard short-circuits
+    // on `engineInfo`) — no trap either way.
+    if (
+      selectedEngineVersion !== undefined
+      && !versionEntriesForEngine.some(v => v.version === selectedEngineVersion && v.available)
+    ) {
+      setError(`${engineName} ${selectedEngineVersion} has no online worker to accept this job. Switch to Latest or start that worker.`);
       return;
     }
 
@@ -2151,50 +2191,31 @@ export const NewSliceJobPage: React.FC = () => {
              On narrow screens: slides over as fixed-width panel when toggled open. */}
         <div className={`${sidebarOpen ? 'absolute top-0 left-0 bottom-0 z-40 w-96 lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:w-96 space-y-1.5 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto bg-pf-bg-2 shadow-xl lg:shadow-none`}>
 
-          {/* SLICER SELECTION - Card selector with OrcaSlicer logo */}
+          {/* SLICER ENGINE + VERSION — one panel, because a version only means
+               anything relative to its engine (mirrors printer + machine profile).
+               `versionEntriesForEngine` is passed RAW: SlicerSelector filters for
+               display only, and the submit guard below still needs the unfiltered
+               list to detect "engine registered but zero available workers". */}
           <SlicerSelector
             selectedSlicerId={selectedSlicerId}
-            onSlicerChange={setSelectedSlicerId}
+            onSlicerChange={(slicerId) => {
+              // Clear the pin in the SAME commit as the engine change. The
+              // [selectedSlicerId] effect below also resets it, but effects flush
+              // after commit, so relying on it alone renders one frame where the
+              // new engine's versionEntries are paired with the old engine's pin
+              // — a visible wrong-version flash on a control whose entire job is
+              // version truth (Bishop). The effect stays as the safety net for
+              // any other path that changes the engine.
+              setSelectedSlicerId(slicerId);
+              setSelectedEngineVersion(undefined);
+            }}
             engineOptions={engineOptions}
+            versionEntries={versionEntriesForEngine}
+            latestVersion={latestAvailableForEngine}
+            selectedVersion={selectedEngineVersion}
+            onVersionChange={setSelectedEngineVersion}
+            engineName={engineName}
           />
-
-          {/* ENGINE VERSION PIN (issue #578) — shown when 2+ versions are registered.
-               Unavailable versions (no online worker) are rendered disabled so a
-               user cannot pin a job that will hang in the queue forever. */}
-          {versionsForEngine.length > 1 && (
-            <div className="bg-pf-panel border border-pf-border rounded-lg p-2.5">
-              <div className="flex items-center gap-1 mb-1.5">
-                <label htmlFor="slicer-engine-version" className="block text-sm font-semibold text-pf-text-primary">
-                  Engine version
-                </label>
-                <InfoTooltip
-                  content={
-                    <>
-                      Pins the slice job to a specific {engineName} engine. Leave on Latest
-                      unless you need a particular version for compatibility. Versions
-                      marked "offline" have no worker currently registered and cannot claim jobs.
-                    </>
-                  }
-                  label="More information about engine version"
-                />
-              </div>
-              <Select
-                id="slicer-engine-version"
-                value={selectedEngineVersion ?? ''}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setSelectedEngineVersion(v === '' ? undefined : v);
-                }}
-              >
-                <option value="">Latest ({latestAvailableForEngine ?? '—'})</option>
-                {versionEntriesForEngine.map(entry => (
-                  <option key={entry.version} value={entry.version} disabled={!entry.available}>
-                    {entry.version}{entry.available ? '' : ' (offline)'}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          )}
 
           {/* PRINTER + MACHINE SELECTION - one compact flow */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-2.5 space-y-2">

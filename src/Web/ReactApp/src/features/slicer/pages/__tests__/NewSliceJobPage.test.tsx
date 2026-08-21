@@ -267,17 +267,63 @@ vi.mock('../../components/job', () => ({
       {accessory && <div data-testid="printer-selector-accessory">{accessory}</div>}
     </div>
   ),
-  SlicerSelector: ({ onSlicerChange }: { selectedSlicerId: string; onSlicerChange: (id: string) => void }) => (
-    <div data-testid="slicer-selector">
-      <select data-testid="slicer-select" aria-label="Select slicer" onChange={(e) => onSlicerChange(e.target.value)}>
-        <option value="orcaslicer">OrcaSlicer</option>
-      </select>
-    </div>
-  ),
+  // Version selection now lives INSIDE SlicerSelector (one panel for engine +
+  // version), so its behaviour is covered by SlicerSelector's own unit tests.
+  // Here we only surface the forwarded props so the page's wiring contract —
+  // especially passing RAW, unfiltered versionEntries — stays under test.
+  SlicerSelector: (props: {
+    selectedSlicerId: number;
+    onSlicerChange: (id: number) => void;
+    versionEntries?: Array<{ version: string; available: boolean }>;
+    latestVersion?: string;
+    selectedVersion?: string;
+    engineName?: string;
+    onVersionChange?: (v: string | undefined) => void;
+  }) => {
+    const { onSlicerChange, versionEntries, latestVersion, engineName, onVersionChange } = props;
+    // Records EVERY render so tests can assert on intermediate frames, not just
+    // the settled state — e.g. that no frame ever pairs a new engine with the
+    // previous engine's pin.
+    slicerSelectorRenderSpy({ engineName, selectedVersion: props.selectedVersion });
+    return (
+      // Flat, primitive attributes only — the version entries are surfaced as
+      // two comma-joined lists rather than embedded JSON so the assertions stay
+      // readable and no raw object is interpolated into JSX.
+      <div
+        data-testid="slicer-selector"
+        data-all-versions={(versionEntries ?? []).map(v => v.version).join(',')}
+        data-available-versions={(versionEntries ?? []).filter(v => v.available).map(v => v.version).join(',')}
+        data-latest-version={latestVersion ?? ''}
+        data-selected-version={props.selectedVersion ?? ''}
+        data-engine-name={engineName ?? ''}
+      >
+        <select
+          data-testid="slicer-select"
+          aria-label="Select slicer"
+          onChange={(e) => onSlicerChange(Number(e.target.value))}
+        >
+          <option value="1">OrcaSlicer</option>
+          <option value="2">PrusaSlicer</option>
+        </select>
+        {/* Lets submit-guard tests drive a pin without the real component. */}
+        <button type="button" data-testid="pin-engine-version" onClick={() => onVersionChange?.('2.3.1')}>
+          pin 2.3.1
+        </button>
+      </div>
+    );
+  },
   SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
 }));
 
 const slicerWorkspaceSpy = vi.fn();
+
+/**
+ * Captures the SlicerSelector mock's props on EVERY render, so tests can assert
+ * on intermediate frames rather than only the settled state. Referenced from
+ * the `../../components/job` mock factory above; the reference resolves at
+ * render time, not at factory time, so declaration order is irrelevant.
+ */
+const slicerSelectorRenderSpy = vi.fn();
 
 vi.mock('@/features/slicer/components/viewer/SlicerWorkspace', () => ({
   SlicerWorkspace: (props: {
@@ -372,6 +418,7 @@ describe('NewSliceJobPage', () => {
     // gave it, so every test starts from the same state whatever the order.
     vi.resetAllMocks();
     slicerWorkspaceSpy.mockClear();
+    slicerSelectorRenderSpy.mockClear();
     vi.mocked(apiClient.get).mockResolvedValue({ data: mockModelList } as never);
   });
 
@@ -1127,9 +1174,15 @@ describe('NewSliceJobPage', () => {
     });
   });
 
-  describe('Engine Version (issue #1773)', () => {
+  describe('Engine Version wiring (issues #1772, #1773)', () => {
+    /**
+     * The reported case: 2.3.1 is in the plugin registry but has no online
+     * worker. The page must still forward the RAW, unfiltered entries —
+     * SlicerSelector hides unpickable versions at render time, while the
+     * submit guard needs the full list to detect "engine registered but zero
+     * available workers" (an emptied list reads as "nothing to check").
+     */
     beforeEach(() => {
-      // Only rendered when 2+ versions are registered for the engine.
       vi.mocked(slicerService.listEngines).mockResolvedValue([
         {
           engine: 'OrcaSlicer',
@@ -1143,48 +1196,292 @@ describe('NewSliceJobPage', () => {
       ]);
     });
 
-    it('shows the Engine version label without the helper text rendered permanently inline', async () => {
+    it('forwards the raw unfiltered version entries to the slicer selector', async () => {
       renderWithProviders(<NewSliceJobPage />);
 
       await waitFor(() => {
-        expect(screen.getByLabelText('Engine version')).toBeInTheDocument();
+        const selector = screen.getByTestId('slicer-selector');
+        // 2.3.1 must still reach the component (the submit guard needs it)
+        // even though the component will not offer it to the user.
+        expect(selector).toHaveAttribute('data-all-versions', '2.4.2,2.3.1');
+        expect(selector).toHaveAttribute('data-available-versions', '2.4.2');
       });
-
-      // The old permanent helper paragraph must no longer be visible by
-      // default. The tooltip keeps its content in the DOM for
-      // aria-describedby wiring, but it must carry the `hidden` class
-      // (not be an always-visible <p>) until the trigger is hovered/focused.
-      const helperText = screen.getByText(/Pins the slice job to a specific/i);
-      expect(helperText.closest('[role="tooltip"]')).not.toBeNull();
-      expect(helperText.closest('[role="tooltip"]')?.className).toContain('hidden');
     });
 
-    it('exposes the guidance text via an aria-describedby-wired info tooltip on the label', async () => {
+    it('forwards the backend-resolved latest version and engine name', async () => {
       renderWithProviders(<NewSliceJobPage />);
 
-      let engineVersionLabel: HTMLElement;
       await waitFor(() => {
-        engineVersionLabel = screen.getByText('Engine version');
-        expect(engineVersionLabel).toBeInTheDocument();
+        const selector = screen.getByTestId('slicer-selector');
+        expect(selector).toHaveAttribute('data-latest-version', '2.4.2');
+        expect(selector).toHaveAttribute('data-engine-name', 'OrcaSlicer');
+      });
+    });
+
+    it('does not render a standalone Engine version group box beside the engine panel', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('slicer-selector')).toBeInTheDocument();
       });
 
-      const infoButton = screen.getByRole('button', { name: 'More information about engine version' });
-      expect(infoButton).toBeInTheDocument();
+      // Engine and version are one decision in one panel now, so the page
+      // must not emit its own separate version control.
+      expect(screen.queryByLabelText('Engine version')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'More information about engine version' }))
+        .not.toBeInTheDocument();
+    });
+  });
 
-      const describedBy = infoButton.getAttribute('aria-describedby');
-      expect(describedBy).toBeTruthy();
+  describe('Engine Version submit guards (issues #578, #1772)', () => {
+    // The wiring tests above prove the raw entries REACH the component. These
+    // prove the dispatch path itself still refuses an unclaimable job — without
+    // them, filtering could later be reintroduced in the submit path and the
+    // wiring assertions would still pass (the exact #1792 regression class).
+    function mockEngines(entries: Array<{ version: string; available: boolean }>, latest: string | null) {
+      vi.mocked(slicerService.listEngines).mockResolvedValue([
+        { engine: 'OrcaSlicer', versions: entries.map(e => e.version), versionEntries: entries, latest },
+      ]);
+    }
 
-      // The guidance text is present in the DOM (available on demand) even
-      // though it isn't visible until the tooltip opens.
-      const tooltip = document.getElementById(describedBy!);
-      expect(tooltip).toHaveTextContent(/Pins the slice job to a specific OrcaSlicer engine/i);
-      expect(tooltip).toHaveTextContent(/Versions marked "offline" have no worker currently registered/i);
+    /**
+     * Drives the page to a state where onSlice will actually attempt a submit.
+     * Returns the QueryClient so a test can force a registry refetch mid-flow
+     * (the test client uses staleTime: Infinity).
+     */
+    async function reachSubmittableState() {
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
+        { name: 'Prusa MK4S 0.4 nozzle', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'MK4S' },
+      ] as OrcaMachineProfile[]);
+      vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue([
+        {
+          name: '0.20mm Standard @MK4S',
+          quality: 'Standard',
+          layerHeight: 0.2,
+          infillPercentage: 15,
+          printSpeed: 60,
+          supports: false,
+          compatiblePrinters: ['Prusa MK4S 0.4 nozzle'],
+        },
+      ] as OrcaProcessProfile[]);
 
-      // Keyboard-operable: focusing the trigger reveals the tooltip content.
+      const { queryClient } = renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
+
+      await waitFor(() => {
+        expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+      return queryClient;
+    }
+    async function waitForProcessProfile() {
+      await waitFor(() => {
+        const processSelect = Array.from(document.querySelectorAll('select'))
+          .find((s) => s.value.startsWith('system:'));
+        expect(processSelect?.value).toBe('system:0.20mm Standard @MK4S');
+      });
+    }
+
+    // onSlice is a useCallback closing over current state, so a handle captured
+    // earlier is stale and would bail out before reaching the version guards.
+    const latestOnSlice = () =>
+      (slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as { onSlice?: (ids?: string[]) => void } | undefined)?.onSlice;
+
+    async function submit() {
+      await waitFor(() => {
+        expect(latestOnSlice()).toBeTypeOf('function');
+      });
+      await act(async () => { latestOnSlice()!(); });
+    }
+
+    it('blocks an unpinned submission when every version is offline', async () => {
+      mockEngines([
+        { version: '2.4.2', available: false },
+        { version: '2.3.1', available: false },
+      ], null);
+
+      await reachSubmittableState();
+      await waitForProcessProfile();
+      await submit();
+
+      expect(await screen.findByText(/No online OrcaSlicer worker is available/i)).toBeInTheDocument();
+      expect(sliceJobService.submitJob).not.toHaveBeenCalled();
+    });
+
+    it('blocks a submission pinned to a version with no online worker', async () => {
+      // A pin can go stale AFTER selection (the registry query has a 300s
+      // staleTime), and the Latest-mode guard is gated on the pin being
+      // undefined, so it never covered this path.
+      mockEngines([
+        { version: '2.4.2', available: true },
+        { version: '2.3.1', available: false },
+      ], '2.4.2');
+
+      await reachSubmittableState();
+
+      // Pin first: changing the pin cascades a profile reset, so the process
+      // profile must be allowed to re-settle before submitting.
+      await waitFor(() => {
+        expect(screen.getByTestId('pin-engine-version')).toBeInTheDocument();
+      });
       act(() => {
-        infoButton.focus();
+        fireEvent.click(screen.getByTestId('pin-engine-version'));
       });
-      expect(tooltip?.className).not.toContain('hidden');
+
+      await waitForProcessProfile();
+      await submit();
+
+      expect(await screen.findByText(/OrcaSlicer 2\.3\.1 has no online worker/i)).toBeInTheDocument();
+      expect(sliceJobService.submitJob).not.toHaveBeenCalled();
+    });
+
+    it('allows an unpinned submission on the legacy fresh-install shape', async () => {
+      // No SlicerService rows: backend marks every entry available and returns
+      // latest:null. The job MUST go out unpinned so a legacy generic-capability
+      // worker can claim it (Vasquez R3 on #1792).
+      mockEngines([
+        { version: '2.4.2', available: true },
+        { version: '2.3.1', available: true },
+      ], null);
+
+      await reachSubmittableState();
+      await waitForProcessProfile();
+      await submit();
+
+      await waitFor(() => {
+        expect(sliceJobService.submitJob).toHaveBeenCalled();
+      }, { timeout: 3000 });
+
+      const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)?.[0] as { slicerEngineVersion?: string };
+      expect(request.slicerEngineVersion).toBeUndefined();
+    });
+
+    it('allows a PINNED submission on the legacy fresh-install shape', async () => {
+      // The pinned guard has no length exemption, so legacy is protected purely
+      // by the availability clause: with zero service rows the backend marks
+      // every entry available, so a pin is legitimately claimable. This test
+      // exists so a future edit that reorders or tightens those clauses cannot
+      // silently start blocking legacy deployments (Bishop nit 4).
+      mockEngines([
+        { version: '2.4.2', available: true },
+        { version: '2.3.1', available: true },
+      ], null);
+
+      await reachSubmittableState();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('pin-engine-version')).toBeInTheDocument();
+      });
+      act(() => {
+        fireEvent.click(screen.getByTestId('pin-engine-version'));
+      });
+
+      await waitForProcessProfile();
+      await submit();
+
+      await waitFor(() => {
+        expect(sliceJobService.submitJob).toHaveBeenCalled();
+      }, { timeout: 3000 });
+
+      const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)?.[0] as { slicerEngineVersion?: string };
+      expect(request.slicerEngineVersion).toBe('2.3.1');
+    });
+
+    it('blocks a pinned submission when the engine reports no version entries', async () => {
+      // A pin carries a version-specific capability tag that no generic worker
+      // can claim, so dispatching one against an empty registry guarantees a
+      // permanent queue hang. Verifying nothing is NOT the same as verifying
+      // it is fine — fail closed (Vasquez R2).
+      mockEngines([], null);
+
+      await reachSubmittableState();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('pin-engine-version')).toBeInTheDocument();
+      });
+      act(() => {
+        fireEvent.click(screen.getByTestId('pin-engine-version'));
+      });
+
+      await waitForProcessProfile();
+      await submit();
+
+      expect(await screen.findByText(/OrcaSlicer 2\.3\.1 has no online worker/i)).toBeInTheDocument();
+      expect(sliceJobService.submitJob).not.toHaveBeenCalled();
+    });
+
+    it('never renders a frame pairing a new engine with the previous engine pin', async () => {
+      // Asserting only the settled state would pass even without the inline
+      // reset, because the [selectedSlicerId] effect eventually clears the pin.
+      // The defect is the intermediate frame, so assert on every render (Hicks).
+      mockEngines([
+        { version: '2.4.2', available: true },
+        { version: '2.3.1', available: false },
+      ], '2.4.2');
+
+      await reachSubmittableState();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('pin-engine-version')).toBeInTheDocument();
+      });
+      act(() => {
+        fireEvent.click(screen.getByTestId('pin-engine-version'));
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId('slicer-selector')).toHaveAttribute('data-selected-version', '2.3.1');
+      });
+
+      slicerSelectorRenderSpy.mockClear();
+      act(() => {
+        fireEvent.change(screen.getByTestId('slicer-select'), { target: { value: '2' } });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('slicer-selector')).toHaveAttribute('data-engine-name', 'PrusaSlicer');
+      });
+
+      const frames = slicerSelectorRenderSpy.mock.calls.map(
+        (c) => c[0] as { engineName?: string; selectedVersion?: string },
+      );
+      // Guard against a vacuous pass: the switch must actually have rendered.
+      expect(frames.some((f) => f.engineName === 'PrusaSlicer')).toBe(true);
+      expect(
+        frames.filter((f) => f.engineName === 'PrusaSlicer' && f.selectedVersion !== undefined),
+      ).toEqual([]);
+    });
+
+    it('blocks a pinned submission when the pinned engine vanishes from the registry', async () => {
+      // A registry refresh can drop the engine entirely, leaving engineInfo
+      // undefined while the pin survives. Requiring engineInfo in the guard let
+      // that stale pin dispatch unvalidated (Hicks R3).
+      mockEngines([
+        { version: '2.4.2', available: true },
+        { version: '2.3.1', available: false },
+      ], '2.4.2');
+
+      const queryClient = await reachSubmittableState();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('pin-engine-version')).toBeInTheDocument();
+      });
+      act(() => {
+        fireEvent.click(screen.getByTestId('pin-engine-version'));
+      });
+      await waitForProcessProfile();
+
+      // OrcaSlicer disappears from the registry while the pin is still held.
+      vi.mocked(slicerService.listEngines).mockResolvedValue([
+        { engine: 'PrusaSlicer', versions: ['2.9.0'], versionEntries: [{ version: '2.9.0', available: true }], latest: '2.9.0' },
+      ]);
+      await act(async () => { await queryClient.invalidateQueries({ queryKey: ['slicer-engines-registry'] }); });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('slicer-selector')).toHaveAttribute('data-all-versions', '');
+      });
+
+      await submit();
+
+      expect(await screen.findByText(/OrcaSlicer 2\.3\.1 has no online worker/i)).toBeInTheDocument();
+      expect(sliceJobService.submitJob).not.toHaveBeenCalled();
     });
   });
 });

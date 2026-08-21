@@ -199,9 +199,13 @@ export interface SlicerEngineInfo {
    */
   versionEntries: SlicerEngineVersionEntry[];
   /**
-   * The newest AVAILABLE version (never returns an unavailable version unless
-   * every entry is unavailable). Prefer this over `versions[0]` when
-   * defaulting an unpinned submission to "latest".
+   * The newest AVAILABLE version, or `null` when nothing is available right now.
+   * The backend computes this as `versionEntries.FirstOrDefault(v => v.available)`
+   * (SlicersController.ListEnginesAsync), so it NEVER names an unavailable
+   * version — an all-unavailable engine yields `null`, as does the legacy
+   * no-service-rows case. NewSliceJobPage's Latest-mode submit guard depends on
+   * exactly that: it reads a null `latest` as "no pin target exists".
+   * Prefer this over `versions[0]` when defaulting an unpinned submission.
    */
   latest: string | null;
 }
