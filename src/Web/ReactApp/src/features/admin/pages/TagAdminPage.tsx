@@ -623,6 +623,7 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                                                         size="sm"
                                                         className="!p-2 !h-auto"
                                                         title="Delete tag"
+                                                        aria-label="Delete tag"
                                                         disabled={isPending}
                                                     >
                                                         {isPending ? (
