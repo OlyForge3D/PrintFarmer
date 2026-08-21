@@ -54,6 +54,58 @@ export function mentionsHighFlow(text: string): boolean {
 }
 
 /**
+ * True when `compatiblePrinters` names the CORE One family at all (standard
+ * or HF). Used to scope variant detection so it never fires against an
+ * unrelated compatible-printer entry.
+ */
+function isCoreOneFamilyName(printerName: string): boolean {
+  return printerName.toLowerCase().includes('core one');
+}
+
+/**
+ * Decides whether a process profile's HF/non-HF variant tagging is
+ * compatible with the selected machine's variant, for machine families (like
+ * Prusa CORE One) where the standard and HF profiles share `nozzleDiameter`
+ * and `printerVariant` and `nozzleType` is empty on both — so nothing
+ * structural distinguishes them and callers fall back to name text.
+ *
+ * A profile whose `compatiblePrinters` explicitly lists BOTH a standard and
+ * an HF machine name is dual-compatible and must be offered for either
+ * selection: an explicit `compatiblePrinters` match is stronger evidence than
+ * a name heuristic, so that same list must never be used to talk itself out
+ * of a match it just confirmed. Concatenating the whole list into one string
+ * before testing for "HF" — the bug this function replaces — treats "lists an
+ * HF-compatible entry" as "IS HF-only", which drops the profile for the
+ * standard machine while wrongly keeping it for the HF one.
+ *
+ * When `compatiblePrinters` carries no CORE-One-family entries at all (e.g.
+ * the list is empty, or only names unrelated printers), falls back to
+ * detecting the variant from the profile NAME alone, never from a joined
+ * compatible-printer string.
+ */
+export function isProcessProfileCoreOneVariantCompatible(
+  profileName: string,
+  compatiblePrinters: readonly string[] | undefined,
+  selectedIsHighFlow: boolean,
+): boolean {
+  const relevantCompatiblePrinters = (compatiblePrinters ?? []).filter(isCoreOneFamilyName);
+
+  let candidateIsHighFlow: boolean;
+  let candidateIsNonHighFlow: boolean;
+
+  if (relevantCompatiblePrinters.length > 0) {
+    candidateIsHighFlow = relevantCompatiblePrinters.some((printerName) => mentionsHighFlow(printerName));
+    candidateIsNonHighFlow = relevantCompatiblePrinters.some((printerName) => !mentionsHighFlow(printerName));
+  } else {
+    const nameIsHighFlow = mentionsHighFlow(profileName);
+    candidateIsHighFlow = nameIsHighFlow;
+    candidateIsNonHighFlow = !nameIsHighFlow;
+  }
+
+  return selectedIsHighFlow ? candidateIsHighFlow : candidateIsNonHighFlow;
+}
+
+/**
  * Removes a trailing nozzle token for display.
  *
  * Returns the original name when stripping would leave nothing, so a profile
