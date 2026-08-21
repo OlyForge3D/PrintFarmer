@@ -131,6 +131,34 @@ public class ModelAnalysisServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AnalyzeModelAsync_StlOverSizeCeiling_ReturnsIsValidFalseWithoutScanning()
+    {
+        // Regression (#1837, deferred from #1814 review): STL analysis had no size ceiling
+        // analogous to the 3MF archive-size guard, so a very large STL would be fully scanned
+        // regardless of size. Use a sparse file (SetLength, no real content written) so the test
+        // doesn't need to allocate hundreds of megabytes of real bytes; if the ceiling weren't
+        // enforced before parsing, the binary-STL path would try to read a phantom triangle count
+        // and fail with a different, non-size-related error instead.
+        //
+        // The ceiling (600 MiB) intentionally sits above the /api/3d-models/upload endpoint's own
+        // 512,000,000-byte request cap (see ModelAnalysisService.MaxStlFileSizeBytes remarks), so
+        // this test uses a size just over that ceiling rather than the endpoint cap itself.
+        string path = Path.Join(_tempDir, "oversized.stl");
+        using (FileStream fs = new(path, FileMode.Create, FileAccess.Write))
+        {
+            fs.SetLength(600L * 1024 * 1024 + 1);
+        }
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".stl", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.False(result!.IsValid);
+        Assert.Equal(0, result.TriangleCount);
+        Assert.NotNull(result.ValidationErrors);
+        Assert.Contains(result.ValidationErrors!, e => e.Contains("size", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task AnalyzeModelAsync_UppercaseStlExtension_IsStillAnalyzed()
     {
         // Regression: extension comparison used to be case-sensitive, so uploads that preserved

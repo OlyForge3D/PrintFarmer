@@ -22,6 +22,22 @@ public class ModelAnalysisService : IModelAnalysisService
     /// <summary>Maximum accepted total uncompressed 3MF archive size, in bytes.</summary>
     private const long MaxArchiveUncompressedBytes = 256L * 1024 * 1024;
 
+    /// <summary>
+    /// Maximum accepted STL file size, in bytes. This is a true backstop, not a validity gate:
+    /// a rejected file becomes <c>IsValid: false</c>, which the metadata backfill service persists
+    /// onto <c>Model3DFile.IsValid</c> — a column several repository queries use to filter model
+    /// *visibility* (e.g. <c>ListValidAsync</c>), not just printability. So this ceiling MUST sit
+    /// above every size the <c>/api/3d-models/upload</c> endpoint already accepts (500 MB model +
+    /// 10 MiB thumbnail + multipart overhead, capped at 512,000,000 bytes total per the #1838
+    /// review), or a large-but-legitimately-uploaded STL would silently disappear from listings
+    /// after the next backfill pass (caught in #1837 follow-up review by Bishop). The value below
+    /// (600 MiB) is comfortably above that endpoint cap, so it only trips for files that could
+    /// never have entered through the upload endpoint in the first place — i.e. it protects only
+    /// the metadata backfill path, which reads whatever already exists on disk regardless of size
+    /// and has no equivalent request-size gate of its own.
+    /// </summary>
+    private const long MaxStlFileSizeBytes = 600L * 1024 * 1024;
+
     /// <summary>Maximum accepted archive compression ratio before the input is treated as a bomb.</summary>
     private const long MaxArchiveCompressionRatio = 200;
 
@@ -64,6 +80,15 @@ public class ModelAnalysisService : IModelAnalysisService
             // Too small to contain even a binary STL header + triangle count: this is a
             // recognized STL upload that is structurally unreadable, not an unsupported format.
             return new ModelAnalysisResult(null, null, null, 0, IsValid: false, ValidationErrors: ["File is too small to be a valid STL (must be at least 84 bytes)"]);
+        }
+
+        if (fs.Length > MaxStlFileSizeBytes)
+        {
+            // Checked before any ASCII/binary parsing so an oversized file is never scanned:
+            // mirrors the 3MF archive-size guard (MaxArchiveUncompressedBytes) so this ceiling
+            // doesn't depend solely on the upload endpoint's request-size cap, and also protects
+            // the backfill path, which reads arbitrary existing files from disk (#1837).
+            return new ModelAnalysisResult(null, null, null, 0, IsValid: false, ValidationErrors: ["STL file exceeds the accepted size budget"]);
         }
 
         byte[] header = new byte[80];
