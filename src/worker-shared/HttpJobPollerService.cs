@@ -913,14 +913,33 @@ public abstract class HttpJobPollerService(
                 }
             }
 
-            // Apply user overrides — all keys are native snake_case, pass through directly
+            // Apply user overrides — all keys are native snake_case, pass through directly.
+            // The resolved profile is a SHARED CACHED instance (ListAvailableProcessProfilesAsync
+            // hands back the cache's own objects), so it is cloned first. Without that, one
+            // submission's overrides persist into the cache and silently apply to every later job
+            // — including other users' jobs — that names the same profile. This mirrors the
+            // clone-before-mutate rule the filament colour overrides below already follow.
             if (profile.ProcessProfile != null && root.TryGetProperty("overrides", out JsonElement overridesElem))
             {
+                ProcessProfileDto overridden = profile.ProcessProfile.Clone();
                 int applied = 0;
+                var rejected = new List<string>();
                 foreach (JsonProperty prop in overridesElem.EnumerateObject())
                 {
+                    // Overrides are print settings. Compatibility metadata is not a print setting:
+                    // it is what decides whether this process preset may be used with this printer
+                    // at all, and OrcaSlicer gates the slice on it. Letting a submission supply it
+                    // would let the submission authorize its own pairing, so it is dropped rather
+                    // than applied. The API's native-snapshot path applies the same policy — see
+                    // ProcessOverridePolicy. See issue #1795.
+                    if (ProcessOverridePolicy.IsRejectedOverrideKey(prop.Name))
+                    {
+                        rejected.Add(prop.Name);
+                        continue;
+                    }
+
                     // Store as properly-typed value, matching SerializeElementToDict format
-                    profile.ProcessProfile.Settings[prop.Name] = prop.Value.ValueKind switch
+                    overridden.Settings[prop.Name] = prop.Value.ValueKind switch
                     {
                         JsonValueKind.String => prop.Value.GetString() ?? string.Empty,
                         JsonValueKind.True => "1",
@@ -931,7 +950,17 @@ public abstract class HttpJobPollerService(
                     applied++;
                 }
 
+                profile.ProcessProfile = overridden;
                 _logger.LogInformation("Applied {Applied} overrides to process profile", applied);
+
+                if (rejected.Count > 0)
+                {
+                    _logger.LogWarning(
+                        "Ignored {Count} compatibility override(s) on the process profile: {Keys}. " +
+                        "Machine/process compatibility is decided by the profile, not by the submission.",
+                        rejected.Count,
+                        string.Join(", ", rejected));
+                }
             }
 
             return profile;

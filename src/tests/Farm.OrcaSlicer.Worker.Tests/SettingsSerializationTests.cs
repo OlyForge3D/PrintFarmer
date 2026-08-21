@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using Farm.OrcaSlicer.Worker.Services;
+using Farm.Slicer.Module.Dtos;
 using FluentAssertions;
 using Xunit;
 
@@ -386,5 +387,498 @@ public class SettingsSerializationTests
         corrected["printer_model"].Should().Be("Phrozen Arco");
         corrected["gcode_flavor"].Should().Be("klipper");
         corrected["nozzle_diameter"].Should().BeOfType<List<string>>();
+    }
+
+    // ── issue #1795: condition-only process profiles must satisfy OrcaSlicer's gate ────────────
+    //
+    // On the --load-settings path where both a machine and a process document are supplied,
+    // CLI::run decides compatibility by iterating ONLY the process document's compatible_printers
+    // array, comparing each entry against the machine's system preset name. It never evaluates
+    // compatible_printers_condition there, and the empty-array auto-pass sits in a different
+    // branch, so a profile expressing compatibility only through the condition — the entire Prusa
+    // MK4S and CORE One family, ~74 selectable presets — can never satisfy the gate and every such
+    // job exits CLI_PROCESS_NOT_COMPATIBLE (-17, surfacing as 239) about a second in.
+    //
+    // The machine's system preset name is `name` when the document's `from` is exactly "system",
+    // and `inherits` otherwise (OrcaSlicer.cpp, CLI::run).
+
+    /// <summary>A stock Prusa machine document: <c>from</c> is <c>"system"</c>.</summary>
+    private const string PrusaMk4SMachineProfile = """
+        {
+            "type": "machine",
+            "name": "Prusa MK4S 0.4 nozzle",
+            "inherits": "fdm_machine_common_mk4s",
+            "from": "system",
+            "printer_model": "Prusa MK4S",
+            "nozzle_diameter": [
+                "0.4"
+            ],
+            "printer_notes": [
+                "PRINTER_VENDOR_PRUSA3D\nPRINTER_MODEL_MK4S\nPG\nNO_TEMPLATES"
+            ]
+        }
+        """;
+
+    /// <summary>
+    /// A stock Prusa process document, in the shape it has once its inheritance chain is resolved:
+    /// an EMPTY <c>compatible_printers</c> array plus a condition. The source file declares no
+    /// array at all, but the resolved document carries an empty one — 163 process profiles in the
+    /// bundled library are in exactly this shape, and that empty list is what OrcaSlicer's gate
+    /// iterates and finds nothing in.
+    /// </summary>
+    private const string PrusaMk4SProcessProfile = """
+        {
+            "type": "process",
+            "name": "0.10mm FAST DETAIL @MK4S 0.4",
+            "inherits": "0.15mm SPEED @MK4S 0.4",
+            "from": "system",
+            "compatible_printers": [],
+            "compatible_printers_condition": "printer_notes=~/.*MK4S.*/ and nozzle_diameter[0]==0.4",
+            "layer_height": "0.1"
+        }
+        """;
+
+    private static MachineProfileDto MachineFrom(string json, string name)
+    {
+        using JsonDocument doc = JsonDocument.Parse(json);
+        return new MachineProfileDto
+        {
+            Name = name,
+            Settings = OrcaProfilesService.SerializeElementToDict(doc.RootElement),
+        };
+    }
+
+    private static ProcessProfileDto ProcessFrom(string json, string name)
+    {
+        using JsonDocument doc = JsonDocument.Parse(json);
+        return new ProcessProfileDto
+        {
+            Name = name,
+            Settings = OrcaProfilesService.SerializeElementToDict(doc.RootElement),
+        };
+    }
+
+    [Fact(DisplayName = "A condition-only process profile gains the machine it is paired with, so OrcaSlicer's gate has something to match")]
+    public void ResolveProcessCompatiblePrinters_ConditionOnlyProfile_MaterializesTheMachine()
+    {
+        OrcaSlicingPipelineService.ProcessCompatibilityResolution resolution =
+            OrcaSlicingPipelineService.ResolveProcessCompatiblePrinters(
+                ProcessFrom(PrusaMk4SProcessProfile, "0.10mm FAST DETAIL @MK4S 0.4"),
+                MachineFrom(PrusaMk4SMachineProfile, "Prusa MK4S 0.4 nozzle"));
+
+        resolution.Outcome.Should().Be(
+            OrcaSlicingPipelineService.ProcessCompatibilityOutcome.InjectedFromCondition);
+        resolution.Settings["compatible_printers"].Should().BeOfType<List<string>>()
+            .Which.Should().ContainSingle().Which.Should().Be("Prusa MK4S 0.4 nozzle");
+    }
+
+    [Fact(DisplayName = "The materialized entry survives serialization and matches the machine document's system preset name")]
+    public void ResolveProcessCompatiblePrinters_SerializedDocuments_SatisfyTheGate()
+    {
+        MachineProfileDto machine = MachineFrom(PrusaMk4SMachineProfile, "Prusa MK4S 0.4 nozzle");
+        string machineJson = OrcaSlicingPipelineService.SettingsDictToNativeJson(machine.Settings);
+        string processJson = OrcaSlicingPipelineService.SettingsDictToNativeJson(
+            OrcaSlicingPipelineService.ResolveProcessCompatiblePrinters(
+                ProcessFrom(PrusaMk4SProcessProfile, "0.10mm FAST DETAIL @MK4S 0.4"),
+                machine).Settings);
+
+        // The exact comparison OrcaSlicer performs, run over the serialized documents.
+        using JsonDocument writtenMachine = JsonDocument.Parse(machineJson);
+        using JsonDocument writtenProcess = JsonDocument.Parse(processJson);
+
+        // `from` is "system" here, so the system preset name is the document's `name` — NOT its
+        // `inherits`, which names the vendor bundle's internal base.
+        string systemPresetName = writtenMachine.RootElement.GetProperty("name").GetString()!;
+        systemPresetName.Should().Be("Prusa MK4S 0.4 nozzle");
+
+        writtenProcess.RootElement
+            .GetProperty("compatible_printers")
+            .EnumerateArray()
+            .Select(element => element.GetString()!)
+            .Should().Contain(
+                systemPresetName,
+                "otherwise OrcaSlicer exits -17 (CLI_PROCESS_NOT_COMPATIBLE) without slicing");
+
+        OrcaSlicingPipelineService.DescribeUnsatisfiableCompatibilityGate(machineJson, processJson)
+            .Should().BeNull();
+    }
+
+    [Theory(DisplayName = "Every condition-only family in the bundle — MK4S, CORE One and CORE One L — is materialized")]
+    [InlineData("PRINTER_MODEL_MK4S", "printer_notes=~/.*MK4S.*/ and nozzle_diameter[0]==0.4", "0.4")]
+    [InlineData("PRINTER_MODEL_COREONE ", "printer_notes=~/.*PRINTER_MODEL_COREONE[^_a-zA-Z0-9].*/ and nozzle_diameter[0]==0.6", "0.6")]
+    [InlineData("PRINTER_MODEL_COREONE_L ", "printer_notes=~/.*PRINTER_MODEL_COREONE_L[^_a-zA-Z0-9].*/ and nozzle_diameter[0]==0.25", "0.25")]
+    public void ResolveProcessCompatiblePrinters_EachAffectedFamily_IsMaterialized(
+        string printerNotesKeyword,
+        string condition,
+        string nozzleDiameter)
+    {
+        var machine = new MachineProfileDto
+        {
+            Name = $"Prusa {printerNotesKeyword.Trim()} {nozzleDiameter} nozzle",
+            Settings = new Dictionary<string, object>
+            {
+                ["name"] = $"Prusa {printerNotesKeyword.Trim()} {nozzleDiameter} nozzle",
+                ["from"] = "system",
+                ["nozzle_diameter"] = new List<string> { nozzleDiameter },
+                ["printer_notes"] = new List<string> { $"PRINTER_VENDOR_PRUSA3D\n{printerNotesKeyword}\nPG" },
+            },
+        };
+        var process = new ProcessProfileDto
+        {
+            Name = "condition-only",
+            Settings = new Dictionary<string, object>
+            {
+                ["compatible_printers_condition"] = condition,
+                ["layer_height"] = "0.1",
+            },
+        };
+
+        OrcaSlicingPipelineService.ProcessCompatibilityResolution resolution =
+            OrcaSlicingPipelineService.ResolveProcessCompatiblePrinters(process, machine);
+
+        resolution.Outcome.Should().Be(
+            OrcaSlicingPipelineService.ProcessCompatibilityOutcome.InjectedFromCondition);
+        resolution.Settings["compatible_printers"].Should().BeOfType<List<string>>()
+            .Which.Should().ContainSingle().Which.Should().Be(machine.Name);
+    }
+
+    [Fact(DisplayName = "A pairing whose condition does not hold is left unsatisfied rather than forced through")]
+    public void ResolveProcessCompatiblePrinters_ConditionDoesNotHold_LeavesTheGateUnsatisfied()
+    {
+        // Same MK4S process profile, but a 0.6 nozzle machine — the condition pins 0.4.
+        MachineProfileDto machine = MachineFrom(PrusaMk4SMachineProfile, "Prusa MK4S 0.6 nozzle");
+        machine.Settings!["nozzle_diameter"] = new List<string> { "0.6" };
+
+        OrcaSlicingPipelineService.ProcessCompatibilityResolution resolution =
+            OrcaSlicingPipelineService.ResolveProcessCompatiblePrinters(
+                ProcessFrom(PrusaMk4SProcessProfile, "0.10mm FAST DETAIL @MK4S 0.4"),
+                machine);
+
+        resolution.Outcome.Should().Be(
+            OrcaSlicingPipelineService.ProcessCompatibilityOutcome.ConditionNotSatisfied);
+        resolution.Settings.GetValueOrDefault("compatible_printers").As<List<string>>()
+            .Should().NotContain(
+                "Prusa MK4S 0.6 nozzle",
+                "injecting here would force an incompatible pairing past the gate");
+    }
+
+    [Fact(DisplayName = "A profile that names a different printer entirely is left untouched")]
+    public void ResolveProcessCompatiblePrinters_WrongFamily_LeavesTheGateUnsatisfied()
+    {
+        MachineProfileDto machine = MachineFrom(PrusaMk4SMachineProfile, "Prusa MK4S 0.4 nozzle");
+        var process = new ProcessProfileDto
+        {
+            Name = "0.10mm @MK3S 0.4",
+            Settings = new Dictionary<string, object>
+            {
+                ["compatible_printers"] = new List<string>(),
+                ["compatible_printers_condition"] = "printer_notes=~/.*PRINTER_MODEL_MK3.*/ and nozzle_diameter[0]==0.4",
+            },
+        };
+
+        OrcaSlicingPipelineService.ProcessCompatibilityResolution resolution =
+            OrcaSlicingPipelineService.ResolveProcessCompatiblePrinters(process, machine);
+
+        resolution.Outcome.Should().Be(
+            OrcaSlicingPipelineService.ProcessCompatibilityOutcome.ConditionNotSatisfied);
+        resolution.Settings["compatible_printers"].As<List<string>>().Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "A profile that already declares compatible printers keeps exactly what it declared")]
+    public void ResolveProcessCompatiblePrinters_ExplicitArray_IsNotRewritten()
+    {
+        MachineProfileDto machine = MachineFrom(SampleMachineProfile, "Phrozen Arco 0.4 nozzle");
+        machine.Settings!["from"] = "system";
+
+        OrcaSlicingPipelineService.ProcessCompatibilityResolution resolution =
+            OrcaSlicingPipelineService.ResolveProcessCompatiblePrinters(
+                ProcessFrom(SampleProcessProfile, "0.20mm Standard @Phrozen Arco 0.4 nozzle"),
+                machine);
+
+        resolution.Outcome.Should().Be(
+            OrcaSlicingPipelineService.ProcessCompatibilityOutcome.AlreadyDeclared);
+        resolution.Settings["compatible_printers"].Should().BeOfType<List<string>>()
+            .Which.Should().ContainSingle().Which.Should().Be("Phrozen Arco 0.4 nozzle");
+    }
+
+    [Fact(DisplayName = "A profile that declares an explicit array naming a DIFFERENT machine is still not rewritten")]
+    public void ResolveProcessCompatiblePrinters_ExplicitArrayForAnotherMachine_IsNotRewritten()
+    {
+        MachineProfileDto machine = MachineFrom(PrusaMk4SMachineProfile, "Prusa MK4S 0.4 nozzle");
+
+        OrcaSlicingPipelineService.ProcessCompatibilityResolution resolution =
+            OrcaSlicingPipelineService.ResolveProcessCompatiblePrinters(
+                ProcessFrom(SampleProcessProfile, "0.20mm Standard @Phrozen Arco 0.4 nozzle"),
+                machine);
+
+        // Rewriting here would silently repair a mismatch OrcaSlicer is entitled to reject.
+        resolution.Outcome.Should().Be(
+            OrcaSlicingPipelineService.ProcessCompatibilityOutcome.AlreadyDeclared);
+        resolution.Settings["compatible_printers"].Should().BeOfType<List<string>>()
+            .Which.Should().NotContain("Prusa MK4S 0.4 nozzle");
+    }
+
+    [Fact(DisplayName = "A profile constraining no printer at all is treated as universally available")]
+    public void ResolveProcessCompatiblePrinters_NoArrayAndNoCondition_IsMaterialized()
+    {
+        var process = new ProcessProfileDto
+        {
+            Name = "universal",
+            Settings = new Dictionary<string, object> { ["layer_height"] = "0.2" },
+        };
+
+        OrcaSlicingPipelineService.ProcessCompatibilityResolution resolution =
+            OrcaSlicingPipelineService.ResolveProcessCompatiblePrinters(
+                process,
+                MachineFrom(PrusaMk4SMachineProfile, "Prusa MK4S 0.4 nozzle"));
+
+        resolution.Outcome.Should().Be(
+            OrcaSlicingPipelineService.ProcessCompatibilityOutcome.InjectedUnconditional);
+        resolution.Settings["compatible_printers"].Should().BeOfType<List<string>>()
+            .Which.Should().ContainSingle().Which.Should().Be("Prusa MK4S 0.4 nozzle");
+    }
+
+    [Fact(DisplayName = "An empty compatible_printers array counts as no declaration, which is exactly the reported failure")]
+    public void ResolveProcessCompatiblePrinters_EmptyArray_IsTreatedAsUndeclared()
+    {
+        ProcessProfileDto process = ProcessFrom(SampleProcessProfile, "0.20mm Standard @Phrozen Arco 0.4 nozzle");
+        process.Settings["compatible_printers"] = new List<string>();
+
+        OrcaSlicingPipelineService.ProcessCompatibilityResolution resolution =
+            OrcaSlicingPipelineService.ResolveProcessCompatiblePrinters(
+                process,
+                MachineFrom(PrusaMk4SMachineProfile, "Prusa MK4S 0.4 nozzle"));
+
+        resolution.Outcome.Should().Be(
+            OrcaSlicingPipelineService.ProcessCompatibilityOutcome.InjectedUnconditional);
+        resolution.Settings["compatible_printers"].Should().BeOfType<List<string>>()
+            .Which.Should().ContainSingle().Which.Should().Be("Prusa MK4S 0.4 nozzle");
+    }
+
+    [Fact(DisplayName = "Reconciling the process document does not mutate the shared cached profile")]
+    public void ResolveProcessCompatiblePrinters_DoesNotMutateSourceOrDropKeys()
+    {
+        ProcessProfileDto process = ProcessFrom(PrusaMk4SProcessProfile, "0.10mm FAST DETAIL @MK4S 0.4");
+        int originalCount = process.Settings.Count;
+
+        OrcaSlicingPipelineService.ProcessCompatibilityResolution resolution =
+            OrcaSlicingPipelineService.ResolveProcessCompatiblePrinters(
+                process,
+                MachineFrom(PrusaMk4SMachineProfile, "Prusa MK4S 0.4 nozzle"));
+
+        // Profiles come from a shared cache, so the emitted document must not edit them.
+        process.Settings["compatible_printers"].As<List<string>>().Should().BeEmpty();
+        process.Settings.Should().HaveCount(originalCount);
+        resolution.Settings.Should().HaveCount(originalCount);
+        resolution.Settings["compatible_printers"].As<List<string>>()
+            .Should().ContainSingle().Which.Should().Be("Prusa MK4S 0.4 nozzle");
+        resolution.Settings["layer_height"].Should().Be("0.1");
+        resolution.Settings["name"].Should().Be("0.10mm FAST DETAIL @MK4S 0.4");
+    }
+
+    [Fact(DisplayName = "The condition is read from the DTO when the settings bag does not carry it")]
+    public void ResolveProcessCompatiblePrinters_ConditionOnlyOnDto_IsStillHonoured()
+    {
+        var process = new ProcessProfileDto
+        {
+            Name = "dto-only-condition",
+            CompatiblePrintersCondition = "printer_notes=~/.*PRINTER_MODEL_MK3.*/",
+            Settings = new Dictionary<string, object> { ["layer_height"] = "0.2" },
+        };
+
+        OrcaSlicingPipelineService.ProcessCompatibilityResolution resolution =
+            OrcaSlicingPipelineService.ResolveProcessCompatiblePrinters(
+                process,
+                MachineFrom(PrusaMk4SMachineProfile, "Prusa MK4S 0.4 nozzle"));
+
+        // Without the DTO fallback this would be mistaken for an unconstrained profile and
+        // materialized, forcing an MK3-only process onto an MK4S.
+        resolution.Outcome.Should().Be(
+            OrcaSlicingPipelineService.ProcessCompatibilityOutcome.ConditionNotSatisfied);
+        resolution.Settings.Should().NotContainKey("compatible_printers");
+    }
+
+    [Fact(DisplayName = "A submission override cannot relax the profile's own compatibility condition")]
+    public void ResolveProcessCompatiblePrinters_OverriddenCondition_CannotAuthorizeAPairing()
+    {
+        // A submission's `overrides` object writes arbitrary keys into the settings bag, so this
+        // is what an attempt to authorize an incompatible pairing looks like by the time it
+        // reaches the worker: the profile declares an MK3-only condition, the settings bag has
+        // been overwritten with one that matches anything.
+        var process = new ProcessProfileDto
+        {
+            Name = "0.10mm @MK3S 0.4",
+            CompatiblePrintersCondition = "printer_notes=~/.*PRINTER_MODEL_MK3.*/",
+            Settings = new Dictionary<string, object>
+            {
+                ["compatible_printers"] = new List<string>(),
+                ["compatible_printers_condition"] = "name=~/.*/",
+            },
+        };
+
+        OrcaSlicingPipelineService.ProcessCompatibilityResolution resolution =
+            OrcaSlicingPipelineService.ResolveProcessCompatiblePrinters(
+                process,
+                MachineFrom(PrusaMk4SMachineProfile, "Prusa MK4S 0.4 nozzle"));
+
+        resolution.Outcome.Should().Be(
+            OrcaSlicingPipelineService.ProcessCompatibilityOutcome.ConditionNotSatisfied,
+            "the profile's own declared condition must outrank the mutable settings bag");
+        resolution.Settings["compatible_printers"].As<List<string>>().Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Deleting the condition from the settings bag cannot turn a constrained profile into a universal one")]
+    public void ResolveProcessCompatiblePrinters_ConditionRemovedFromSettings_StillEnforced()
+    {
+        var process = new ProcessProfileDto
+        {
+            Name = "0.10mm @MK3S 0.4",
+            CompatiblePrintersCondition = "printer_notes=~/.*PRINTER_MODEL_MK3.*/",
+            Settings = new Dictionary<string, object>
+            {
+                ["compatible_printers"] = new List<string>(),
+                ["compatible_printers_condition"] = string.Empty,
+            },
+        };
+
+        OrcaSlicingPipelineService.ProcessCompatibilityResolution resolution =
+            OrcaSlicingPipelineService.ResolveProcessCompatiblePrinters(
+                process,
+                MachineFrom(PrusaMk4SMachineProfile, "Prusa MK4S 0.4 nozzle"));
+
+        resolution.Outcome.Should().NotBe(
+            OrcaSlicingPipelineService.ProcessCompatibilityOutcome.InjectedUnconditional,
+            "blanking the bag's condition must not be read as 'this profile constrains nothing'");
+        resolution.Settings["compatible_printers"].As<List<string>>().Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "The machine's system preset name mirrors OrcaSlicer's own derivation from `from`")]
+    [InlineData("system", "Prusa MK4S 0.4 nozzle")]
+    [InlineData("User", "fdm_machine_common_mk4s")]
+    [InlineData("user", "fdm_machine_common_mk4s")]
+    public void ResolveMachineSystemPresetName_FollowsTheFromKey(string from, string expected)
+    {
+        using JsonDocument doc = JsonDocument.Parse(PrusaMk4SMachineProfile);
+        Dictionary<string, object> settings = OrcaProfilesService.SerializeElementToDict(doc.RootElement);
+        settings["from"] = from;
+
+        OrcaSlicingPipelineService.ResolveMachineSystemPresetName(settings, "ignored fallback")
+            .Should().Be(expected);
+    }
+
+    [Fact(DisplayName = "A machine document with nothing to derive from falls back to the resolved profile name")]
+    public void ResolveMachineSystemPresetName_NothingDerivable_UsesTheFallback()
+    {
+        var settings = new Dictionary<string, object> { ["from"] = "system" };
+
+        OrcaSlicingPipelineService.ResolveMachineSystemPresetName(settings, "Prusa MK4S 0.4 nozzle")
+            .Should().Be("Prusa MK4S 0.4 nozzle");
+        OrcaSlicingPipelineService.ResolveMachineSystemPresetName(settings, null)
+            .Should().BeNull();
+    }
+
+    [Fact(DisplayName = "The pre-flight check names which document cannot satisfy the gate")]
+    public void DescribeUnsatisfiableCompatibilityGate_ReportsTheFailingDocument()
+    {
+        string machineJson = OrcaSlicingPipelineService.SettingsDictToNativeJson(
+            MachineFrom(PrusaMk4SMachineProfile, "Prusa MK4S 0.4 nozzle").Settings);
+
+        string undeclaredProcessJson = OrcaSlicingPipelineService.SettingsDictToNativeJson(
+            ProcessFrom(PrusaMk4SProcessProfile, "0.10mm FAST DETAIL @MK4S 0.4").Settings);
+        OrcaSlicingPipelineService.DescribeUnsatisfiableCompatibilityGate(machineJson, undeclaredProcessJson)
+            .Should().Contain("declares no compatible printers");
+
+        string mismatchedProcessJson = OrcaSlicingPipelineService.SettingsDictToNativeJson(
+            ProcessFrom(SampleProcessProfile, "0.20mm Standard @Phrozen Arco 0.4 nozzle").Settings);
+        OrcaSlicingPipelineService.DescribeUnsatisfiableCompatibilityGate(machineJson, mismatchedProcessJson)
+            .Should().Contain("do not include the machine's system preset 'Prusa MK4S 0.4 nozzle'");
+    }
+
+    [Fact(DisplayName = "The pre-flight check never reports a parsing problem as the cause of a failure")]
+    public void DescribeUnsatisfiableCompatibilityGate_UnreadableDocuments_ReportNothing()
+    {
+        // Malformed JSON.
+        OrcaSlicingPipelineService.DescribeUnsatisfiableCompatibilityGate("not json", "{}")
+            .Should().BeNull();
+
+        // A document that is not an object at all — JsonElement's property accessors throw
+        // InvalidOperationException, not JsonException, on these.
+        OrcaSlicingPipelineService.DescribeUnsatisfiableCompatibilityGate("[]", "{}")
+            .Should().BeNull();
+        OrcaSlicingPipelineService.DescribeUnsatisfiableCompatibilityGate("{}", "[]")
+            .Should().BeNull();
+
+        // A compatible_printers array holding non-string entries. This reaches the worker on the
+        // verbatim native-profile path, where documents are digest-verified but not shape-verified.
+        const string machine = """{"type":"machine","name":"M","from":"system"}""";
+        const string process = """{"type":"process","compatible_printers":[0.4,{"a":1},["b"]]}""";
+        Action act = () =>
+            OrcaSlicingPipelineService.DescribeUnsatisfiableCompatibilityGate(machine, process);
+        act.Should().NotThrow("a diagnostic must never become the reported cause of a job failure");
+        OrcaSlicingPipelineService.DescribeUnsatisfiableCompatibilityGate(machine, process)
+            .Should().Contain("do not include the machine's system preset 'M'");
+    }
+
+    // ── issue #1795 × #1768: the injected name must match the document actually emitted ────────
+    //
+    // #1768 rewrites the emitted machine document's `inherits` to the profile's name. OrcaSlicer
+    // reads the system preset name from `inherits` whenever `from` is not "system", so for a
+    // `from`: "User" machine the value it compares against is the REWRITTEN one. Deriving the
+    // injected entry from the cached profile settings instead would name the vendor bundle's
+    // internal base, and the pairing would still be rejected with -17 despite both fixes.
+
+    [Fact(DisplayName = "For a user preset the injected entry follows the emitted (rewritten) inherits, not the cached vendor base")]
+    public void ResolveProcessCompatiblePrinters_UserPreset_FollowsTheEmittedMachineDocument()
+    {
+        MachineProfileDto machine = MachineFrom(PrusaMk4SMachineProfile, "Prusa MK4S 0.4 nozzle");
+        machine.Settings!["from"] = "User";
+        machine.Settings["inherits"] = "fdm_machine_common_mk4s";
+
+        // Exactly what GenerateProfileJsonFilesAsync writes to machine.json.
+        Dictionary<string, object> emitted = OrcaSlicingPipelineService.WithSystemPresetInherits(
+            machine.Settings, machine.Name);
+        emitted["inherits"].Should().Be("Prusa MK4S 0.4 nozzle", "issue #1768 rewrites this key");
+
+        OrcaSlicingPipelineService.ProcessCompatibilityResolution resolution =
+            OrcaSlicingPipelineService.ResolveProcessCompatiblePrinters(
+                ProcessFrom(PrusaMk4SProcessProfile, "0.10mm FAST DETAIL @MK4S 0.4"),
+                machine,
+                emitted);
+
+        resolution.Outcome.Should().Be(
+            OrcaSlicingPipelineService.ProcessCompatibilityOutcome.InjectedFromCondition);
+        resolution.Settings["compatible_printers"].As<List<string>>()
+            .Should().ContainSingle().Which.Should().Be(
+                "Prusa MK4S 0.4 nozzle",
+                "OrcaSlicer reads the rewritten inherits for a from:\"User\" preset");
+        resolution.Settings["compatible_printers"].As<List<string>>()
+            .Should().NotContain(
+                "fdm_machine_common_mk4s",
+                "deriving from the cached settings would name the vendor base and still fail the gate");
+
+        // The full invariant, over the two documents as they will actually be written.
+        OrcaSlicingPipelineService.DescribeUnsatisfiableCompatibilityGate(
+            OrcaSlicingPipelineService.SettingsDictToNativeJson(emitted),
+            OrcaSlicingPipelineService.SettingsDictToNativeJson(resolution.Settings))
+            .Should().BeNull();
+    }
+
+    [Fact(DisplayName = "Serializing a profile never mutates the shared cached settings bag")]
+    public void SettingsDictToNativeJson_DoesNotMutateTheCallersSettings()
+    {
+        using JsonDocument doc = JsonDocument.Parse(SampleMachineProfile);
+        Dictionary<string, object> settings = OrcaProfilesService.SerializeElementToDict(doc.RootElement);
+        int originalCount = settings.Count;
+
+        string json = OrcaSlicingPipelineService.SettingsDictToNativeJson(settings);
+
+        // SanitizeForCli injects CLI-only defaults. Those belong in the emitted document, never in
+        // the shared cache: profiles are reused across concurrently-prepared jobs, so writing to
+        // them here is both a leak between jobs and an unsynchronized write to a Dictionary another
+        // thread may be reading.
+        settings.Should().HaveCount(originalCount);
+        settings.Should().NotContainKey("extruder_type");
+        settings.Should().NotContainKey("nozzle_volume_type");
+        json.Should().Contain("\"extruder_type\"", "the emitted document still carries the defaults");
     }
 }

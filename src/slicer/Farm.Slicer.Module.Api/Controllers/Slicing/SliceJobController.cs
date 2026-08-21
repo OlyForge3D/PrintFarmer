@@ -13,6 +13,7 @@ using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Contracts.Libraries;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
@@ -1808,6 +1809,15 @@ public partial class SliceJobController(
     /// profile document, matching the per-key overwrite semantics of the worker's legacy
     /// <c>ResolveProfileFromJsonAsync</c> path so this fast path does not drop user-tuned settings.
     /// </summary>
+    /// <remarks>
+    /// Compatibility keys are rejected here for the same reason the worker rejects them — see
+    /// <see cref="ProcessOverridePolicy"/>. This path snapshots a document the worker writes
+    /// verbatim after digest verification, so a compatibility override accepted here would bypass
+    /// the worker's own filter entirely.
+    /// </remarks>
+    /// <param name="rawJson">The resolved native process profile document.</param>
+    /// <param name="root">The submission's parsed <c>SlicerProfileJson</c>.</param>
+    /// <returns>The document with permitted overrides applied.</returns>
     private static string ApplyProcessOverrides(string rawJson, JsonElement root)
     {
         if (!root.TryGetProperty("overrides", out JsonElement overridesElem) ||
@@ -1826,6 +1836,11 @@ public partial class SliceJobController(
 
             foreach (JsonProperty prop in overridesElem.EnumerateObject())
             {
+                if (ProcessOverridePolicy.IsRejectedOverrideKey(prop.Name))
+                {
+                    continue;
+                }
+
                 obj[prop.Name] = ToNativeOverrideValue(prop.Value);
             }
 
