@@ -6,6 +6,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Web.Api.Services.Startup;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -158,5 +159,40 @@ public class DiscoveredPrinterCatalogResolutionTests : IAsyncLifetime
 
         IEnumerable<SlicerModelAliasDto> aliases = await _catalogService.GetModelAliasesAsync(persistedModelId, CancellationToken.None);
         aliases.Should().Contain(a => a.SlicerType == "OrcaSlicer" && a.SlicerModelName == "Prusa MK4S");
+    }
+
+    /// <summary>
+    /// A second, independent seed source - <see cref="MoonrakerEmulatorSeedSettings"/> (used by
+    /// <c>MoonrakerEmulatorSeeder</c> to populate isolated emulator/browser-validation stacks) -
+    /// hardcodes its own Manufacturer/Model strings rather than sharing
+    /// <see cref="DeterministicDiscoveryFixtureProvider"/>'s. It is resolved through the exact
+    /// same catalog-lookup path as discovery-created printers
+    /// (<c>ICatalogRepository.FindManufacturerByNameAsync</c> /
+    /// <c>FindModelByNameAsync</c>), so it is equally susceptible to drifting out of sync with the
+    /// seeded catalog and silently falling back to "Unknown / Unknown Model". This test asserts
+    /// every configured seed entry resolves to a real catalog manufacturer/model with an
+    /// OrcaSlicer alias, so a future edit to either seed list or the catalog data trips this test
+    /// instead of only reproducing as a 404 in the Slice Job page.
+    /// </summary>
+    [Fact]
+    public async Task MoonrakerEmulatorSeedSettings_DefaultPrinters_ResolveRealCatalogModel_NotUnknown()
+    {
+        var settings = new MoonrakerEmulatorSeedSettings();
+
+        foreach (MoonrakerEmulatorPrinterSeed seed in settings.Printers)
+        {
+            ManufacturerDto? manufacturer = await _catalogService.FindManufacturerByNameAsync(seed.Manufacturer, CancellationToken.None);
+            manufacturer.Should().NotBeNull(
+                $"MoonrakerEmulatorSeedSettings entry '{seed.Name}' manufacturer '{seed.Manufacturer}' should match a seeded catalog manufacturer");
+
+            PrinterModelDto? model = await _catalogService.FindModelByNameAsync(seed.Model, manufacturer!.Id, CancellationToken.None);
+            model.Should().NotBeNull(
+                $"MoonrakerEmulatorSeedSettings entry '{seed.Name}' model '{seed.Model}' should match a seeded catalog model under manufacturer '{seed.Manufacturer}'");
+
+            IEnumerable<SlicerModelAliasDto> aliases = await _catalogService.GetModelAliasesAsync(model!.Id, CancellationToken.None);
+            aliases.Should().Contain(
+                a => a.SlicerType == "OrcaSlicer",
+                $"resolved model for '{seed.Name}' should have an OrcaSlicer alias so the Slice Job page's machine-profiles lookup succeeds");
+        }
     }
 }
