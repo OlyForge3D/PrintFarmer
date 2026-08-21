@@ -642,8 +642,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // OrcaSlicer expects flat key-value JSON (native settings), not our DTO wrapper.
         // The Settings dictionary stores raw JSON text per key (from GetRawText()),
         // so we reconstruct proper JSON by writing the raw values directly.
+        // The guard above already proved MachineProfile non-null, so no null-conditional here.
         string machineJson = SettingsDictToNativeJson(
-            WithSystemPresetInherits(profile.MachineProfile?.Settings, profile.MachineProfile?.Name));
+            WithSystemPresetInherits(profile.MachineProfile.Settings, profile.MachineProfile.Name));
         string processJson = SettingsDictToNativeJson(profile.ProcessProfile?.Settings);
 
         await File.WriteAllTextAsync(machineJsonPath, machineJson, cancellationToken);
