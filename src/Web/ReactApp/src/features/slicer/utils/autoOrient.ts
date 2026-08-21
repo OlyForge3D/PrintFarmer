@@ -241,15 +241,17 @@ function buildOrientationScorer(
  * rotated so that candidate normal points down (-Z), and the candidate is
  * scored by `height * (1 + weight * unsupportedOverhangRatio)`.
  *
- * @param geometry centered model geometry (local space)
- * @param scale per-axis scale applied to the model
+ * Internal variant that also returns the built scorer function, so callers
+ * that need to score additional orientations (e.g. `assessOrientationStability`
+ * scoring the model's current orientation) can reuse the same per-triangle
+ * precompute instead of rebuilding it from scratch.
  */
-export function computeAutoOrientation(
+function computeAutoOrientationWithScorer(
   geometry: THREE.BufferGeometry,
-  scale: [number, number, number] = [1, 1, 1],
-): AutoOrientResult | null {
+  scale: [number, number, number],
+): { result: AutoOrientResult | null; scoreOrientation: ((q: THREE.Quaternion) => OrientationMetrics) | null } {
   const posAttr = geometry.getAttribute('position');
-  if (!posAttr || posAttr.count === 0) return null;
+  if (!posAttr || posAttr.count === 0) return { result: null, scoreOrientation: null };
 
   const faces = detectMajorFaces(geometry, 0.005, 20);
 
@@ -268,7 +270,7 @@ export function computeAutoOrientation(
 
   const scaleVec = new THREE.Vector3(scale[0], scale[1], scale[2]);
   const scoreOrientation = buildOrientationScorer(geometry, scaleVec);
-  if (!scoreOrientation) return null;
+  if (!scoreOrientation) return { result: null, scoreOrientation: null };
 
   let bestQ: THREE.Quaternion | null = null;
   let bestScore = Infinity;
@@ -285,13 +287,33 @@ export function computeAutoOrientation(
     }
   }
 
-  if (!bestQ) return null;
+  if (!bestQ) return { result: null, scoreOrientation };
   const euler = new THREE.Euler().setFromQuaternion(bestQ);
   return {
-    rotation: [euler.x, euler.y, euler.z],
-    quaternion: bestQ,
-    score: bestScore,
+    result: {
+      rotation: [euler.x, euler.y, euler.z],
+      quaternion: bestQ,
+      score: bestScore,
+    },
+    scoreOrientation,
   };
+}
+
+/**
+ * Compute the orientation that minimises model height while penalising
+ * unsupported overhangs. Candidate orientations come from the six principal
+ * axes plus each detected major face normal; for each, the model is virtually
+ * rotated so that candidate normal points down (-Z), and the candidate is
+ * scored by `height * (1 + weight * unsupportedOverhangRatio)`.
+ *
+ * @param geometry centered model geometry (local space)
+ * @param scale per-axis scale applied to the model
+ */
+export function computeAutoOrientation(
+  geometry: THREE.BufferGeometry,
+  scale: [number, number, number] = [1, 1, 1],
+): AutoOrientResult | null {
+  return computeAutoOrientationWithScorer(geometry, scale).result;
 }
 
 export interface OrientationAssessment {
@@ -335,12 +357,8 @@ export function assessOrientationStability(
   const posAttr = geometry.getAttribute('position');
   if (!posAttr || posAttr.count === 0) return null;
 
-  const suggested = computeAutoOrientation(geometry, scale);
-  if (!suggested) return null;
-
-  const scaleVec = new THREE.Vector3(scale[0], scale[1], scale[2]);
-  const scoreOrientation = buildOrientationScorer(geometry, scaleVec);
-  if (!scoreOrientation) return null;
+  const { result: suggested, scoreOrientation } = computeAutoOrientationWithScorer(geometry, scale);
+  if (!suggested || !scoreOrientation) return null;
 
   const current = scoreOrientation(currentQuaternion);
   const bestScore = suggested.score;

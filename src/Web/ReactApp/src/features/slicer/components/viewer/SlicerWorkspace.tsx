@@ -872,6 +872,17 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     }
   }, [computeArrangePositions, getModelsOnPlate, handleModelTransform, onModelTransform, plateState.plates, pushHistoryEntry, triplesEqual]);
 
+  // Per-model cache for the orientation heuristic below. The assessment only
+  // depends on a model's rotation, scale, and geometry — NOT its position —
+  // so a translate-only drag (which fires on every pointer-move frame via
+  // TransformControls' objectChange, recordHistory: false) leaves every
+  // cache entry valid and short-circuits to a Set rebuild with no geometry
+  // traversal at all. Even a rotate/scale drag only invalidates the entry for
+  // the model actually being manipulated, not the whole plate. See #1815.
+  const orientationAssessmentCacheRef = useRef(
+    new Map<string, { rotation: string; scale: string; geo: THREE.BufferGeometry | undefined; flagged: boolean }>(),
+  );
+
   /**
    * Issue #1815: proactively flag models whose CURRENT orientation is likely
    * to print poorly (e.g. a tall part balanced on a knife-edge footprint),
@@ -881,16 +892,40 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
    * any backend geometry metadata. Advisory only: never blocks slicing.
    */
   const likelyUnslicableModelIds = useMemo(() => {
+    const cache = orientationAssessmentCacheRef.current;
+    const liveIds = new Set<string>();
     const ids = new Set<string>();
     for (const model of visibleModels) {
+      liveIds.add(model.id);
       const geo = geometryRegistryRef.current.get(model.id) ?? model.geometry;
-      if (!geo || typeof geo.getAttribute !== 'function') continue;
+      const rotationKey = model.rotation.join(',');
+      const scaleKey = model.scale.join(',');
+      const cached = cache.get(model.id);
+      if (cached && cached.geo === geo && cached.rotation === rotationKey && cached.scale === scaleKey) {
+        if (cached.flagged) ids.add(model.id);
+        continue;
+      }
+
+      if (!geo || typeof geo.getAttribute !== 'function') {
+        cache.set(model.id, { rotation: rotationKey, scale: scaleKey, geo, flagged: false });
+        continue;
+      }
+
       const q = new THREE.Quaternion().setFromEuler(
         new THREE.Euler(model.rotation[0], model.rotation[1], model.rotation[2]),
       );
       const assessment = assessOrientationStability(geo, q, model.scale);
-      if (assessment?.isLikelyUnslicable) ids.add(model.id);
+      const flagged = assessment?.isLikelyUnslicable ?? false;
+      cache.set(model.id, { rotation: rotationKey, scale: scaleKey, geo, flagged });
+      if (flagged) ids.add(model.id);
     }
+
+    // Prune entries for models no longer present so the cache doesn't grow
+    // unbounded across a long session with many add/delete cycles.
+    for (const id of cache.keys()) {
+      if (!liveIds.has(id)) cache.delete(id);
+    }
+
     return ids;
     // geometryVersion isn't read directly, but the ref it guards is — depend on
     // it so this recomputes as soon as a model's geometry becomes available.

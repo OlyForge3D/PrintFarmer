@@ -123,13 +123,23 @@ describe('autoOrient', () => {
       expect(assessment!.currentScore).toBeCloseTo(assessment!.bestScore, 5);
     });
 
-    it('does not flag a short part even if not perfectly optimal', () => {
-      // Height is below the noise-floor threshold — should never warn
-      // regardless of ratio, to avoid flicker on tiny parts.
-      const tinyBox = new THREE.BoxGeometry(2, 2, 2).toNonIndexed();
-      const identity = new THREE.Quaternion();
-      const assessment = assessOrientationStability(tinyBox, identity);
+    it('does not flag a tiny knife-edge part below the height noise floor', () => {
+      // Same knife-edge-on-its-edge shape as the flagging test above, scaled
+      // down so its current-orientation height (~2mm) sits below
+      // MIN_HEIGHT_FOR_WARNING_MM (3mm). Without the height gate this would
+      // score just as badly as the full-size prism (same ratio, scale-
+      // invariant) and get flagged — so this asserts the gate itself, not
+      // just "small things don't warn" by coincidence.
+      const tinyPrism = new THREE.CylinderGeometry(0.5, 0.5, 2, 3).toNonIndexed();
+      tinyPrism.rotateX(Math.PI / 2);
+      tinyPrism.center();
+
+      const knifeEdgeUp = new THREE.Quaternion();
+      const assessment = assessOrientationStability(tinyPrism, knifeEdgeUp);
       expect(assessment).not.toBeNull();
+      // The ratio alone would flag this (same shape as the full-size case),
+      // proving the height gate — not the ratio check — is what suppresses it.
+      expect(assessment!.currentScore / assessment!.bestScore).toBeGreaterThan(1.6);
       expect(assessment!.isLikelyUnslicable).toBe(false);
     });
 
