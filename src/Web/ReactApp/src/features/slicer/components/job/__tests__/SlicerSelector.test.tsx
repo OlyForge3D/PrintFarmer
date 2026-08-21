@@ -53,6 +53,27 @@ describe('SlicerSelector', () => {
       expect(screen.getByText('2.9.0')).toBeInTheDocument();
     });
 
+    it('splits pre-release and build-suffixed versions out of the label', () => {
+      // The registry emits whatever the worker reports, so a suffixed version
+      // must not collapse the whole label into the name and duplicate on screen.
+      render(
+        <SlicerSelector
+          selectedSlicerId={1}
+          onSlicerChange={vi.fn()}
+          engineOptions={[
+            { label: 'OrcaSlicer 2.4.2-beta', value: 1 },
+            { label: 'PrusaSlicer v2.9.0+build7', value: 2 },
+          ]}
+          engineName="OrcaSlicer"
+        />,
+      );
+
+      expect(screen.getByText('OrcaSlicer')).toBeInTheDocument();
+      expect(screen.getByText('2.4.2-beta')).toBeInTheDocument();
+      expect(screen.getByText('PrusaSlicer')).toBeInTheDocument();
+      expect(screen.getByText('v2.9.0+build7')).toBeInTheDocument();
+    });
+
     it('marks the selected engine as pressed and notifies on change', () => {
       const { onSlicerChange } = renderSelector();
 
@@ -116,6 +137,49 @@ describe('SlicerSelector', () => {
       expect(within(group).getByRole('button', { name: /2\.3\.1/ })).toHaveAttribute('aria-pressed', 'true');
       expect(screen.getByText(/2\.3\.1 has no online worker/i)).toBeInTheDocument();
     });
+
+    it('keeps an escape hatch when a pin is held and every version goes offline', () => {
+      // Regression: the picker used to collapse whenever one entry survived
+      // filtering, which stranded the user on an unclaimable pin with no
+      // "Latest" control to escape to.
+      const onVersionChange = vi.fn();
+      renderSelector({
+        versionEntries: [
+          { version: '2.4.2', available: false },
+          { version: '2.3.1', available: false },
+        ],
+        selectedVersion: '2.3.1',
+        onVersionChange,
+      });
+
+      const group = screen.getByRole('group', { name: 'Engine version' });
+      const latest = within(group).getByRole('button', { name: /Latest/ });
+      expect(latest).toBeInTheDocument();
+      expect(screen.getByText(/2\.3\.1 has no online worker/i)).toBeInTheDocument();
+
+      fireEvent.click(latest);
+      expect(onVersionChange).toHaveBeenCalledWith(undefined);
+    });
+
+    it('renders nothing version-related when the engine reports no entries at all', () => {
+      renderSelector({ versionEntries: [] });
+
+      expect(screen.queryByText('Engine version')).not.toBeInTheDocument();
+      expect(screen.queryByText(/No online .* worker is registered/i)).not.toBeInTheDocument();
+    });
+
+    it('announces availability warnings to assistive tech', () => {
+      // These can appear from a background registry refetch with no user
+      // action, so they must be in a live region.
+      renderSelector({
+        versionEntries: [
+          { version: '2.4.2', available: false },
+          { version: '2.3.1', available: false },
+        ],
+      });
+
+      expect(screen.getByRole('status')).toHaveTextContent(/No online OrcaSlicer worker is registered/i);
+    });
   });
 
   describe('version pills', () => {
@@ -141,6 +205,7 @@ describe('SlicerSelector', () => {
     });
 
     it('falls back to a dropdown when there are more than three selectable versions', () => {
+      const onVersionChange = vi.fn();
       renderSelector({
         versionEntries: [
           { version: '2.4.2', available: true },
@@ -149,11 +214,33 @@ describe('SlicerSelector', () => {
           { version: '2.1.0', available: true },
         ],
         latestVersion: '2.4.2',
+        onVersionChange,
       });
 
       expect(screen.queryByRole('group', { name: 'Engine version' })).not.toBeInTheDocument();
       const select = screen.getByRole('combobox', { name: 'Engine version' });
       expect(within(select).getAllByRole('option')).toHaveLength(5); // Latest + 4
+
+      // The dropdown branch must drive the same callback contract as the pills.
+      fireEvent.change(select, { target: { value: '2.2.0' } });
+      expect(onVersionChange).toHaveBeenCalledWith('2.2.0');
+
+      fireEvent.change(select, { target: { value: '' } });
+      expect(onVersionChange).toHaveBeenCalledWith(undefined);
+    });
+
+    it('offers Latest without a version number on the legacy no-latest shape', () => {
+      // Fresh install / legacy single-worker: backend marks every entry
+      // available and returns latest:null. The picker must stay usable and must
+      // NOT force a pin, or legacy deployments lose their generic-capability
+      // worker (Vasquez R3 on #1792).
+      const onVersionChange = vi.fn();
+      renderSelector({ versionEntries: TWO_ONLINE, onVersionChange });
+
+      const group = screen.getByRole('group', { name: 'Engine version' });
+      const latest = within(group).getByRole('button', { name: 'Latest' });
+      expect(latest).toHaveAttribute('aria-pressed', 'true');
+      expect(onVersionChange).not.toHaveBeenCalled();
     });
   });
 

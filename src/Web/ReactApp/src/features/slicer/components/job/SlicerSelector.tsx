@@ -44,10 +44,13 @@ const MAX_PILL_VERSIONS = 3;
 /**
  * Parse engine label into name + version.
  * e.g. "OrcaSlicer v2.3.1" → { name: "OrcaSlicer", version: "v2.3.1" }
- * The `v` is optional because the registry emits bare versions ("OrcaSlicer 2.4.2").
+ * The `v` is optional because the registry emits bare versions ("OrcaSlicer 2.4.2"),
+ * and the tail is `\S*` so pre-release/build suffixes ("2.4.2-beta", "2.4.2+build")
+ * still split instead of collapsing the whole label into `name`. `.+?` is lazy and
+ * `\s+` is required, so an engine name ending in digits ("Slic3r 1.3") is safe.
  */
 function parseLabel(label: string): { name: string; version?: string } {
-  const match = label.match(/^(.+?)\s+(v?\d[\d.]*)$/i);
+  const match = label.match(/^(.+?)\s+(v?\d\S*)$/i);
   if (match) return { name: match[1].trim(), version: match[2].trim() };
   return { name: label };
 }
@@ -84,6 +87,7 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
   className,
 }) => {
   const labelId = useId();
+  const engineLabelId = `${labelId}-engine`;
   const entries = useMemo(() => versionEntries ?? [], [versionEntries]);
 
   // Versions a job could actually be dispatched to right now, plus the user's
@@ -97,8 +101,12 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
     return offered;
   }, [entries, selectedVersion]);
 
-  // A single choice is not a choice — the engine card already shows it.
-  const showVersionPicker = offeredVersions.length > 1;
+  // A single choice is not a choice — EXCEPT while a pin is held. Collapsing the
+  // picker then would strand the user on that pin with no "Latest" control to
+  // escape to, which is exactly the unclaimable-job trap this component exists
+  // to prevent (Bishop/Hicks). The pinned entry is always kept in
+  // `offeredVersions` for the same reason, so an escape hatch always renders.
+  const showVersionPicker = offeredVersions.length > 1 || selectedVersion !== undefined;
   const noVersionsAvailable = entries.length > 0 && !entries.some(e => e.available);
   const useDropdown = offeredVersions.length > MAX_PILL_VERSIONS;
   const pinnedVersionIsStale = selectedVersion !== undefined
@@ -110,8 +118,12 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
 
   return (
     <div className={clsx('bg-pf-panel border border-pf-border rounded-lg p-2.5', className)}>
-      <label className="block text-sm font-semibold text-pf-text-primary mb-1.5">Slicer Engine</label>
-      <div className="flex flex-col gap-2">
+      {/* Not a <label>: there is no single labelable control here, so a bare
+          <label> would be an orphan. The cards are a group, named by this span. */}
+      <span id={engineLabelId} className="block text-sm font-semibold text-pf-text-primary mb-1.5">
+        Slicer Engine
+      </span>
+      <div role="group" aria-labelledby={engineLabelId} className="flex flex-col gap-2">
         {engineOptions.map(opt => {
           const isSelected = opt.value === selectedSlicerId;
           const iconSrc = getSlicerIconSrc(opt.value);
@@ -227,7 +239,9 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
           )}
 
           {pinnedVersionIsStale && (
-            <p className="mt-1.5 text-xs text-pf-warning">
+            // role="status": this can appear from a BACKGROUND registry refetch,
+            // with no user action to draw attention to it.
+            <p role="status" className="mt-1.5 text-xs text-pf-warning">
               {selectedVersion} has no online worker. Switch back to Latest, or start that
               worker before slicing.
             </p>
@@ -237,7 +251,7 @@ export const SlicerSelector: React.FC<SlicerSelectorProps> = ({
 
       {noVersionsAvailable && (
         <div className="mt-2 border-t border-pf-border/70 pt-2">
-          <p className="text-xs text-pf-warning">
+          <p role="status" className="text-xs text-pf-warning">
             No online {engineName ?? 'slicer'} worker is registered. Slice jobs cannot be
             dispatched until one comes online.
           </p>

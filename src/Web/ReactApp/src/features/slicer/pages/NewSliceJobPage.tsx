@@ -1777,10 +1777,8 @@ export const NewSliceJobPage: React.FC = () => {
     //      versionEntry.available is false so the job would sit
     //      unclaimable. In both cases `engineInfo.latest` is null; only the
     //      per-entry availability signal distinguishes them.
-    // The Latest-mode submit guard fires ONLY when we can prove all versions
-    // are unavailable. Manually pinning a version is separately validated by
-    // the dropdown's `disabled` state, and a legacy submission (fresh
-    // install) is legitimately unpinned.
+    // Latest-mode guard: fires only when we can prove every version is
+    // unavailable. A legacy submission (fresh install) is legitimately unpinned.
     const engineHasAnyAvailable = engineInfo
       ? versionEntriesForEngine.some(v => v.available)
       : true;
@@ -1792,6 +1790,24 @@ export const NewSliceJobPage: React.FC = () => {
       && !engineHasAnyAvailable
     ) {
       setError(`No online ${engineName} worker is available to accept this job.`);
+      return;
+    }
+
+    // Pinned-mode guard (Vasquez): the check above is gated on the pin being
+    // undefined, so an explicit pin was never validated at all. The picker hides
+    // unpickable versions, but a pin can go stale AFTER selection — the registry
+    // query has a 300s staleTime — and a job pinned to a version no worker
+    // advertises sits in the queue unclaimable forever. UI warnings are not
+    // enough while the dispatch path stays open, so hard-block here.
+    // Deliberately skipped when the engine reports no entries at all, which is
+    // the legacy/fresh-install shape that must stay submittable.
+    if (
+      selectedEngineVersion !== undefined
+      && engineInfo
+      && versionEntriesForEngine.length > 0
+      && !versionEntriesForEngine.some(v => v.version === selectedEngineVersion && v.available)
+    ) {
+      setError(`${engineName} ${selectedEngineVersion} has no online worker to accept this job. Switch to Latest or start that worker.`);
       return;
     }
 
@@ -2157,7 +2173,17 @@ export const NewSliceJobPage: React.FC = () => {
                list to detect "engine registered but zero available workers". */}
           <SlicerSelector
             selectedSlicerId={selectedSlicerId}
-            onSlicerChange={setSelectedSlicerId}
+            onSlicerChange={(slicerId) => {
+              // Clear the pin in the SAME commit as the engine change. The
+              // [selectedSlicerId] effect below also resets it, but effects flush
+              // after commit, so relying on it alone renders one frame where the
+              // new engine's versionEntries are paired with the old engine's pin
+              // — a visible wrong-version flash on a control whose entire job is
+              // version truth (Bishop). The effect stays as the safety net for
+              // any other path that changes the engine.
+              setSelectedSlicerId(slicerId);
+              setSelectedEngineVersion(undefined);
+            }}
             engineOptions={engineOptions}
             versionEntries={versionEntriesForEngine}
             latestVersion={latestAvailableForEngine}
