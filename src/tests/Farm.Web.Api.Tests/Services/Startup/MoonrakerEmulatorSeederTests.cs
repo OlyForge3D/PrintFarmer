@@ -69,22 +69,22 @@ public sealed class MoonrakerEmulatorSeederTests
             .ReturnsAsync(Guid.NewGuid());
         catalog
             .Setup(repository => repository.FindManufacturerByNameAsync(
-                "Voron Design",
+                "Voron",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Manufacturer
             {
                 Id = manufacturerId,
-                Name = "Voron Design",
+                Name = "Voron",
             });
         catalog
             .Setup(repository => repository.FindModelByNameAsync(
-                "V2.4",
+                "Voron 2.4 300",
                 manufacturerId,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrinterModel
             {
                 Id = modelId,
-                Name = "V2.4",
+                Name = "Voron 2.4 300",
                 ManufacturerId = manufacturerId,
             });
 

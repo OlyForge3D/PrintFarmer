@@ -34,14 +34,14 @@ public sealed class DeterministicDiscoveryFixtureSettings
             "Discovered Voron V2.4",
             "moonraker-discovery-voron",
             BuildLocalUrl("moonraker-discovery-voron"),
-            "Voron Design",
-            "V2.4"),
+            "Voron",
+            "Voron 2.4 300"),
         new(
             "Discovered Prusa MK4S",
             "moonraker-discovery-prusa",
             BuildLocalUrl("moonraker-discovery-prusa"),
-            "Prusa Research",
-            "MK4S"),
+            "Prusa",
+            "Prusa MK4S"),
     ];
 
     private static string BuildLocalUrl(string host) =>

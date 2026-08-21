@@ -23,14 +23,14 @@ public sealed class MoonrakerEmulatorSeedSettings
             Guid.Parse("6b68328f-6495-4d32-8a2d-784119e59a01"),
             "Moonraker Ready",
             BuildLocalUrl("moonraker-ready"),
-            "Voron Design",
-            "V2.4"),
+            "Voron",
+            "Voron 2.4 300"),
         new(
             Guid.Parse("6b68328f-6495-4d32-8a2d-784119e59a02"),
             "Moonraker Printing",
             BuildLocalUrl("moonraker-printing"),
-            "Voron Design",
-            "V2.4")
+            "Voron",
+            "Voron 2.4 300")
         {
             ActiveJobId = Guid.Parse("7c79439f-75a6-4e43-9b3e-89522af6ab02"),
             ActiveJobStatus = PrintJobStatus.Printing,
@@ -39,8 +39,8 @@ public sealed class MoonrakerEmulatorSeedSettings
             Guid.Parse("6b68328f-6495-4d32-8a2d-784119e59a03"),
             "Moonraker Paused",
             BuildLocalUrl("moonraker-paused"),
-            "Voron Design",
-            "V2.4")
+            "Voron",
+            "Voron 2.4 300")
         {
             ActiveJobId = Guid.Parse("7c79439f-75a6-4e43-9b3e-89522af6ab03"),
             ActiveJobStatus = PrintJobStatus.Paused,
@@ -49,14 +49,14 @@ public sealed class MoonrakerEmulatorSeedSettings
             Guid.Parse("6b68328f-6495-4d32-8a2d-784119e59a04"),
             "Moonraker Shutdown",
             BuildLocalUrl("moonraker-shutdown"),
-            "Voron Design",
-            "V2.4"),
+            "Voron",
+            "Voron 2.4 300"),
         new(
             Guid.Parse("6b68328f-6495-4d32-8a2d-784119e59a05"),
             "Moonraker Offline",
             BuildLocalUrl("moonraker-offline"),
-            "Voron Design",
-            "V2.4"),
+            "Voron",
+            "Voron 2.4 300"),
     ];
 
     private static string BuildLocalUrl(string host) =>
