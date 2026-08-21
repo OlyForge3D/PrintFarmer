@@ -704,7 +704,16 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 FileHash = fileHash,
                 FileFormat = _fileManagementService.GetModelFileFormat(fileExtension),
                 UploadedAt = DateTime.UtcNow,
-                IsValid = true,
+
+                // Analysis is best-effort geometry metadata, not a slicing pre-flight gate (#1814):
+                // IsValid=false means the file could not be structurally read as a 3D model at all
+                // (corrupt archive, unreadable/truncated STL, empty mesh). When the format isn't
+                // supported by the analyzer (analysis is null), we don't know either way, so we
+                // keep the model listed (IsValid=true) rather than inferring invalidity.
+                IsValid = analysis?.IsValid ?? true,
+                ValidationErrors = analysis?.ValidationErrors is { Count: > 0 } errors
+                    ? System.Text.Json.JsonSerializer.Serialize(errors)
+                    : null,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 DimensionX = analysis?.DimensionX,

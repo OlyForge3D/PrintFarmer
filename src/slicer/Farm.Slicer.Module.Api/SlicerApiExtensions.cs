@@ -100,6 +100,10 @@ public static class SlicerApiExtensions
         // an existing deployment, instead of relying on an administrator invoking the admin POST.
         _ = services.AddHostedService<SystemProfileReconciliationService>();
 
+        // #1814: backfill geometry metadata (dimensions, triangle count) for models uploaded before
+        // real geometry analysis existed, so the library reflects real data without a re-upload.
+        _ = services.AddHostedService<ModelMetadataBackfillService>();
+
         // Printables import (preview, #349)
         _ = services.Configure<PrintablesGraphQlOptions>(configuration.GetSection(PrintablesGraphQlOptions.SectionName));
         _ = services.Configure<PrintablesOAuthOptions>(configuration.GetSection(PrintablesOAuthOptions.SectionName));

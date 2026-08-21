@@ -164,6 +164,18 @@ public class EfModel3DFileRepository(SlicerDbContext db) : IModel3DFileRepositor
     }
 
     /// <inheritdoc/>
+    public async Task<List<Model3D>> ListNeedingAnalysisAsync(int batchSize, CancellationToken ct)
+    {
+        return await _db.Models3D
+            .Where(m => m.TriangleCount == null &&
+                (m.FileFormat == Farm.Infrastructure.Domain.ModelFileFormat.STL ||
+                 m.FileFormat == Farm.Infrastructure.Domain.ModelFileFormat.TMF))
+            .OrderBy(m => m.UploadedAt)
+            .Take(batchSize)
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc/>
     public async Task SaveChangesAsync(CancellationToken ct)
     {
         _ = await _db.SaveChangesAsync(ct);
