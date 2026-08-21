@@ -467,8 +467,8 @@ public static class SliceFailureHints
     public const string SlicingEngineRejectedModel =
         "The slicing engine could not slice this model. This most often happens when a model sits " +
         "in an orientation the engine cannot handle — try the \"Auto-orient plate\" button on the " +
-        "plate controls in the slicer workspace, then slice again. If it still fails, ask a farm " +
-        "admin to check the job's error detail.";
+        "plate controls in the slicer workspace (unlock the plate first if it is locked), then " +
+        "slice again. If it still fails, ask a farm admin to check the job's error detail.";
 
     /// <summary>Guidance for <see cref="SliceFailureReason.NoPrintableObjects"/>.</summary>
     public const string NoPrintableObjects =

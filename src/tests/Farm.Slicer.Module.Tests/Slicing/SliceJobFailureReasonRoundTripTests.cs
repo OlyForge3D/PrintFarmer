@@ -39,6 +39,14 @@ public sealed class SliceJobFailureReasonRoundTripTests : IAsyncLifetime
     /// The detail the worker composes for a real exit-156 run, built from the byte-exact console
     /// output and <c>result.json</c> captured from OrcaSlicer 2.4.2 while reproducing issue #1811.
     /// </summary>
+    /// <remarks>
+    /// Held as a literal because this test project cannot reference the worker assemblies. That the
+    /// worker genuinely produces this shape, and genuinely puts it plus the classification on the
+    /// wire, is covered on the other side of the junction by
+    /// <c>Farm.OrcaSlicer.Worker.Tests.SlicerFailureReportTransmissionTests</c> and
+    /// <c>OrcaSlicerFailureDiagnosticsTests</c>. Those two plus this file cover the whole path; none
+    /// of them covers it alone.
+    /// </remarks>
     private const string RealWorkerDetail =
         "OrcaSlicer failed with exit code 156 (CLI_SLICING_ERROR, -100): Failed slicing the model. " +
         "Please verify the slicing of all plates on Orca Slicer before uploading. | slicer output: " +
@@ -177,6 +185,44 @@ public sealed class SliceJobFailureReasonRoundTripTests : IAsyncLifetime
         SliceJob persisted = await db.SliceJobs.AsNoTracking().SingleAsync(job => job.Id == jobId);
         _ = persisted.ErrorMessage.Should().Be(RealWorkerDetail);
         _ = persisted.FailureReason.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "Retrying a failed job clears the failure reason so no stale hint is shown")]
+    public async Task RetryAsync_ClearsFailureReason()
+    {
+        using HttpClient owner = await _factory.CreateOperatorClientAsync(
+            "queue", "read", username: "failure-reason-owner-5");
+        Guid ownerId = await GetUserIdAsync("failure-reason-owner-5");
+        Guid jobId = await SubmitJobAsync(ownerId);
+
+        using HttpClient worker = await _factory.CreateWorkerClientAsync(
+            workerName: "Failure Reason Worker 5",
+            username: "failure-reason-worker-5",
+            email: "failure-reason-worker-5@example.com");
+        WorkerSliceJobResponse claimed = await ClaimSuccessfullyAsync(worker, jobId);
+        _ = (await SendFailAsync(
+            worker, claimed, RealWorkerDetail, SliceFailureReason.SlicingEngineRejectedModel))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        _ = (await GetStatusAsync(owner, jobId)).FailureReason
+            .Should().Be(SliceFailureReason.SlicingEngineRejectedModel);
+
+        // Retry is strictly owner-scoped (a farm admin is Forbidden), so this must be the submitter.
+        HttpResponseMessage retry = await owner.PostAsync($"/api/slice/{jobId}/retry", content: null);
+        _ = retry.StatusCode.Should().Be(HttpStatusCode.OK, await retry.Content.ReadAsStringAsync());
+
+        SliceJobStatusResponse afterRetry = await GetStatusAsync(owner, jobId);
+
+        // The reason describes the attempt that was discarded. Leaving it behind would keep telling
+        // the operator to re-orient a model on a job that is queued again — or that then succeeds.
+        _ = afterRetry.FailureReason.Should().BeNull();
+        _ = afterRetry.FailureHint.Should().BeNull();
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        SliceJob persisted = await db.SliceJobs.AsNoTracking().SingleAsync(job => job.Id == jobId);
+        _ = persisted.FailureReason.Should().BeNull("the column must be cleared, not just hidden");
+        _ = persisted.ErrorMessage.Should().BeNull();
     }
 
     private async Task<SliceJobStatusResponse> GetStatusAsync(HttpClient client, Guid jobId)

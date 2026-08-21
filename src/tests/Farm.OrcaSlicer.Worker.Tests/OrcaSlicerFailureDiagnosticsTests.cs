@@ -212,6 +212,49 @@ public sealed class OrcaSlicerFailureDiagnosticsTests
         _ = SliceFailureHints.For((SliceFailureReason)9999).Should().BeNull();
     }
 
+    [Fact(DisplayName = "An implausibly large result.json is refused rather than read into memory")]
+    public void TryReadResult_OversizedFile_IsRefused()
+    {
+        string dir = Path.Join(Path.GetTempPath(), "pf1811-" + Guid.NewGuid().ToString("N"));
+        _ = Directory.CreateDirectory(dir);
+        try
+        {
+            // The engine writes a small fixed-shape document. Reading an arbitrarily large one could
+            // exhaust memory inside the very path that exists to report a failure, destroying it.
+            File.WriteAllText(
+                Path.Join(dir, OrcaSlicerFailureDiagnostics.ResultFileName),
+                new string('x', (256 * 1024) + 1));
+
+            _ = OrcaSlicerFailureDiagnostics.TryReadResult(dir).Should().BeNull();
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "A well-formed result.json on disk is read and parsed")]
+    public void TryReadResult_ReadsFromOutputDirectory()
+    {
+        string dir = Path.Join(Path.GetTempPath(), "pf1811-" + Guid.NewGuid().ToString("N"));
+        _ = Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(
+                Path.Join(dir, OrcaSlicerFailureDiagnostics.ResultFileName),
+                SlicingErrorResultJson);
+
+            OrcaSlicerFailureDiagnostics.OrcaResult? result = OrcaSlicerFailureDiagnostics.TryReadResult(dir);
+
+            _ = result.Should().NotBeNull();
+            _ = result!.ReturnCode.Should().Be(-100);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "The composed detail stays inside the API's fail-message length budget")]
     public void Describe_LongOutput_IsBounded()
     {

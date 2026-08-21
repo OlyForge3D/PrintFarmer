@@ -62,8 +62,8 @@ vi.mock('@/common/hooks/useViewModePreference', () => ({
 const ENGINE_REJECTED_HINT =
   'The slicing engine could not slice this model. This most often happens when a model sits in ' +
   'an orientation the engine cannot handle — try the "Auto-orient plate" button on the plate ' +
-  'controls in the slicer workspace, then slice again. If it still fails, ask a farm admin to ' +
-  "check the job's error detail.";
+  'controls in the slicer workspace (unlock the plate first if it is locked), then slice again. ' +
+  "If it still fails, ask a farm admin to check the job's error detail.";
 
 function renderPanel() {
   const queryClient = new QueryClient({

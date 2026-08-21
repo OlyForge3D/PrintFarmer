@@ -36,6 +36,13 @@ internal static class OrcaSlicerFailureDiagnostics
     private const int MaxStreamLines = 6;
 
     /// <summary>
+    /// Upper bound on the <c>result.json</c> bytes read. The engine writes a small fixed-shape
+    /// document, so anything larger is not a diagnostic worth parsing — and this path must never be
+    /// able to exhaust memory, because doing so would destroy the very failure it exists to report.
+    /// </summary>
+    private const int MaxResultFileBytes = 256 * 1024;
+
+    /// <summary>
     /// OrcaSlicer's CLI exit codes, transcribed from <c>CLI_*</c> in <c>src/libslic3r/Utils.hpp</c>
     /// at tag <c>v2.4.2</c> (the release this worker pins). The symbolic name is reported so an
     /// admin can search OrcaSlicer's own source for the exact exit site.
@@ -118,8 +125,16 @@ internal static class OrcaSlicerFailureDiagnostics
         string path = Path.Join(outputDirectory, ResultFileName);
         try
         {
-            if (!File.Exists(path))
+            FileInfo info = new(path);
+            if (!info.Exists)
             {
+                return null;
+            }
+
+            if (info.Length > MaxResultFileBytes)
+            {
+                // Bounded rather than caught: refusing to read an implausibly large document is what
+                // keeps this path incapable of masking the failure being reported.
                 return null;
             }
 
@@ -198,9 +213,20 @@ internal static class OrcaSlicerFailureDiagnostics
     /// <remarks>
     /// <c>result.json</c> is authoritative and is preferred whenever present, because a POSIX exit
     /// status is only the low 8 bits: OrcaSlicer's -100 is observed as 156. Reconstructing the sign
-    /// from the exit status alone is therefore ambiguous with signal terminations (128 + signal
-    /// occupies 129-159), so it is only used as a fallback and only for values that correspond to a
-    /// code this worker actually knows.
+    /// from the exit status alone is therefore ambiguous in principle with signal terminations
+    /// (128 + signal occupies 129-159), so it is only used as a fallback and only for values that
+    /// correspond to a code this worker actually knows.
+    /// <para>
+    /// The residual overlap is 154-156 (= -102..-100) against signals 26-28. It is accepted rather
+    /// than excluded, because excluding it would discard the classification for the exact failure
+    /// this was built for (exit 156) on any run whose <c>result.json</c> is missing, and the signals
+    /// involved cannot realistically terminate this process: SIGWINCH (28 → 156) is ignored by
+    /// default and so cannot kill anything, while SIGVTALRM (26) and SIGPROF (27) only fire when an
+    /// interval timer has been armed, which neither the worker nor a headless slice does. The
+    /// signals that genuinely do kill a container process — SIGKILL (9 → 137, e.g. an OOM kill),
+    /// SIGSEGV (11 → 139), SIGTERM (15 → 143) — decode to values absent from the table and so stay
+    /// unclassified, which is the outcome that matters.
+    /// </para>
     /// </remarks>
     /// <param name="result">Parsed <c>result.json</c>, when available.</param>
     /// <param name="exitCode">The observed process exit status.</param>
@@ -239,6 +265,12 @@ internal static class OrcaSlicerFailureDiagnostics
     /// <c>[error]</c>-prefixed lines are preferred when the engine emits them, but the CLI's
     /// slicing-failure path emits none, so plain lines mentioning an error/failure are collected too
     /// — all of them, in order, deduplicated, rather than only the first.
+    /// <para>
+    /// Read through a <see cref="StringReader"/> rather than <c>Split('\n')</c>: a failing run can
+    /// emit a very large log, and materializing an array of every line would allocate a second copy
+    /// of it. This path runs only while reporting a failure, so it must not be able to turn a
+    /// diagnosable failure into an out-of-memory crash that loses it.
+    /// </para>
     /// </remarks>
     /// <param name="output">Combined console output from the slicer process.</param>
     /// <returns>The informative lines, in the order the slicer emitted them.</returns>
@@ -249,12 +281,18 @@ internal static class OrcaSlicerFailureDiagnostics
             return [];
         }
 
-        string[] lines = output.Split('\n');
         List<string> tagged = [];
         List<string> plain = [];
 
-        foreach (string raw in lines)
+        using StringReader reader = new(output);
+        while (reader.ReadLine() is string raw)
         {
+            // Both buckets are full, so nothing later can change the result.
+            if (tagged.Count >= MaxStreamLines && plain.Count >= MaxStreamLines)
+            {
+                break;
+            }
+
             string line = raw.Trim();
             if (line.Length == 0)
             {
@@ -265,7 +303,9 @@ internal static class OrcaSlicerFailureDiagnostics
             if (marker >= 0)
             {
                 string stripped = line[(marker + "[error]".Length)..].TrimStart(':', ' ');
-                if (stripped.Length > 0 && !tagged.Contains(stripped, StringComparer.Ordinal))
+                if (stripped.Length > 0 &&
+                    tagged.Count < MaxStreamLines &&
+                    !tagged.Contains(stripped, StringComparer.Ordinal))
                 {
                     tagged.Add(stripped);
                 }
@@ -273,7 +313,8 @@ internal static class OrcaSlicerFailureDiagnostics
                 continue;
             }
 
-            if ((line.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+            if (plain.Count < MaxStreamLines &&
+                (line.Contains("error", StringComparison.OrdinalIgnoreCase) ||
                  line.Contains("fail", StringComparison.OrdinalIgnoreCase)) &&
                 !plain.Contains(line, StringComparer.Ordinal))
             {
@@ -281,8 +322,7 @@ internal static class OrcaSlicerFailureDiagnostics
             }
         }
 
-        List<string> selected = tagged.Count > 0 ? tagged : plain;
-        return selected.Count > MaxStreamLines ? selected[..MaxStreamLines] : selected;
+        return tagged.Count > 0 ? tagged : plain;
     }
 
     /// <summary>

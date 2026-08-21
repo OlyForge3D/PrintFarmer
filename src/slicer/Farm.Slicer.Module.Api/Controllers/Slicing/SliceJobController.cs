@@ -1192,8 +1192,15 @@ public partial class SliceJobController(
             // Safe for every caller by construction: FailureReason is a closed enum and FailureHint
             // is a constant string looked up from it, so neither can carry worker paths, filenames
             // or CLI arguments the way ErrorDetail can (issue #1811).
-            FailureReason = ParseFailureReason(job.FailureReason),
-            FailureHint = ParseFailureReason(job.FailureReason) is SliceFailureReason reason
+            //
+            // Gated on the terminal failed status as well as being cleared on retry: the reason
+            // describes one attempt, so a job that has been requeued or has since succeeded must
+            // never still be explaining a previous failure.
+            FailureReason = job.Status == SliceJobStatus.Failed
+                ? ParseFailureReason(job.FailureReason)
+                : null,
+            FailureHint = job.Status == SliceJobStatus.Failed &&
+                          ParseFailureReason(job.FailureReason) is SliceFailureReason reason
                 ? SliceFailureHints.For(reason)
                 : null,
             EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,

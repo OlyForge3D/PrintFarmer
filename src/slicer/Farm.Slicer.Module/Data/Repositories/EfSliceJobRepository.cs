@@ -1167,6 +1167,11 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                     .SetProperty(job => job.LeaseToken, (Guid?)null)
                     .SetProperty(job => job.LeaseExpiresAt, (DateTime?)null)
                     .SetProperty(job => job.ErrorMessage, (string?)null)
+
+                    // Cleared with ErrorMessage: the reason describes the attempt being discarded,
+                    // and MapToPublicStatusResponse would otherwise keep handing a stale hint to the
+                    // client for a job that is now queued again — or that goes on to succeed.
+                    .SetProperty(job => job.FailureReason, (string?)null)
                     .SetProperty(job => job.StartedAt, (DateTime?)null)
                     .SetProperty(job => job.CompletedAt, (DateTime?)null)
                     .SetProperty(job => job.ProgressPercent, 0)
