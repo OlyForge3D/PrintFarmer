@@ -9,7 +9,6 @@ import {
   type IGcodePreviewService,
   type DetailedParsedGCode,
   type DetailedLayer,
-  type GCodePoint,
 } from '@/features/slicer/services';
 
 interface ColorMode {
@@ -29,40 +28,43 @@ function GCodePath({ layer, visible, colorMode, minFeedColor, maxFeedColor }: {
   minFeedColor: string;
   maxFeedColor: string;
 }) {
+  // Reads `layer`'s typed-array views directly (see #1788): no per-point
+  // `GCodePoint` object is materialized here, only the `THREE.Vector3`
+  // instances Line actually needs for the segments being rendered.
   const { extrudeSegments, moveSegments } = useMemo(() => {
     const extrudeSegments: Array<{ points: THREE.Vector3[]; color: THREE.Color }> = [];
     const moveSegments: Array<{ points: THREE.Vector3[]; color: THREE.Color }> = [];
 
-    let currentSegment: GCodePoint[] = [];
-    let lastType: string = '';
+    let currentSegment: THREE.Vector3[] = [];
+    let currentFeedSum = 0;
+    let lastType = -1; // -1 = none yet, 0 = move, 1 = extrude
 
-    layer.points.forEach((point, idx) => {
-      if (point.type !== lastType && currentSegment.length > 0) {
-        const color = getPointColor(currentSegment, colorMode, minFeedColor, maxFeedColor);
-        const vectors = currentSegment.map(p => new THREE.Vector3(p.x, p.y, p.z));
+    const flush = () => {
+      if (currentSegment.length === 0) return;
+      const isExtrude = lastType === 1;
+      const avgFeed = currentFeedSum / currentSegment.length;
+      const color = getSegmentColor(isExtrude, avgFeed, colorMode, minFeedColor, maxFeedColor);
 
-        if (lastType === 'extrude') {
-          extrudeSegments.push({ points: vectors, color });
-        } else {
-          moveSegments.push({ points: vectors, color });
-        }
-
-        currentSegment = [];
+      if (isExtrude) {
+        extrudeSegments.push({ points: currentSegment, color });
+      } else {
+        moveSegments.push({ points: currentSegment, color });
       }
-      lastType = point.type;
-      currentSegment.push(point);
 
-      if (idx === layer.points.length - 1) {
-        const color = getPointColor(currentSegment, colorMode, minFeedColor, maxFeedColor);
-        const vectors = currentSegment.map(p => new THREE.Vector3(p.x, p.y, p.z));
+      currentSegment = [];
+      currentFeedSum = 0;
+    };
 
-        if (point.type === 'extrude') {
-          extrudeSegments.push({ points: vectors, color });
-        } else {
-          moveSegments.push({ points: vectors, color });
-        }
+    for (let i = 0; i < layer.count; i++) {
+      const type = layer.type[i];
+      if (type !== lastType && lastType !== -1) {
+        flush();
       }
-    });
+      lastType = type;
+      currentSegment.push(new THREE.Vector3(layer.x[i], layer.y[i], layer.pz[i]));
+      currentFeedSum += layer.feedRate[i] || 0;
+    }
+    flush();
 
     return { extrudeSegments, moveSegments };
   }, [layer, colorMode, minFeedColor, maxFeedColor]);
@@ -99,13 +101,12 @@ function GCodePath({ layer, visible, colorMode, minFeedColor, maxFeedColor }: {
   );
 }
 
-function getPointColor(points: GCodePoint[], colorMode: number, minFeedColor: string, maxFeedColor: string): THREE.Color {
+function getSegmentColor(isExtrude: boolean, avgFeed: number, colorMode: number, minFeedColor: string, maxFeedColor: string): THREE.Color {
   const color = new THREE.Color();
 
   if (colorMode === 0) {
     return color.setHSL(Math.random(), 0.8, 0.6);
   } else if (colorMode === 1) {
-    const avgFeed = points.reduce((sum, p) => sum + (p.feedRate || 0), 0) / points.length;
     const minFeed = 20;
     const maxFeed = 150;
     const normalized = Math.max(0, Math.min(1, (avgFeed - minFeed) / (maxFeed - minFeed)));
@@ -115,11 +116,44 @@ function getPointColor(points: GCodePoint[], colorMode: number, minFeedColor: st
 
     return color.lerpColors(min, max, normalized);
   } else if (colorMode === 2) {
-    const hasExtrusion = points.some(p => p.type === 'extrude');
-    return color.set(hasExtrusion ? '#FF6B35' : '#666666');
+    return color.set(isExtrude ? '#FF6B35' : '#666666');
   }
 
   return color;
+}
+
+/**
+ * Builds a tool-filtered `DetailedLayer` by copying only the enabled points
+ * into new typed arrays. Only called when the filter actually excludes at
+ * least one tool — the common "all tools enabled" case skips this entirely
+ * and reuses the original zero-copy layer views (see `filteredLayers` below).
+ */
+function filterLayerByTools(layer: DetailedLayer, enabledTools: Set<number>): DetailedLayer {
+  const indices: number[] = [];
+  for (let i = 0; i < layer.count; i++) {
+    if (enabledTools.has(layer.tool[i])) indices.push(i);
+  }
+
+  const count = indices.length;
+  const x = new Float32Array(count);
+  const y = new Float32Array(count);
+  const pz = new Float32Array(count);
+  const e = new Float32Array(count);
+  const feedRate = new Float32Array(count);
+  const type = new Uint8Array(count);
+  const tool = new Int32Array(count);
+
+  indices.forEach((srcIndex, i) => {
+    x[i] = layer.x[srcIndex];
+    y[i] = layer.y[srcIndex];
+    pz[i] = layer.pz[srcIndex];
+    e[i] = layer.e[srcIndex];
+    feedRate[i] = layer.feedRate[srcIndex];
+    type[i] = layer.type[srcIndex];
+    tool[i] = layer.tool[srcIndex];
+  });
+
+  return { ...layer, count, x, y, pz, e, feedRate, type, tool };
 }
 
 export interface GCodeViewerProps {
@@ -217,29 +251,33 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
     return () => clearInterval(interval);
   }, [playAnimation, parseResult]);
 
-  // Filter layers by enabled tools
+  // Filter layers by enabled tools. The common case (no tool disabled) skips
+  // filtering entirely and reuses the original zero-copy typed-array layer
+  // views; only a genuine subset triggers filterLayerByTools' typed-array copy.
   const filteredLayers = useMemo(() => {
     if (!parseResult) return [];
-    return parseResult.layers.map(layer => ({
-      ...layer,
-      points: layer.points.filter(p => enabledTools.has(p.tool)),
-    }));
+    if (enabledTools.size >= parseResult.tools.length) return parseResult.layers;
+    return parseResult.layers.map(layer => filterLayerByTools(layer, enabledTools));
   }, [parseResult, enabledTools]);
 
   const printStats = useMemo(() => {
     if (!parseResult || parseResult.layerCount === 0) return null;
 
-    const totalPoints = parseResult.layers.reduce((sum, layer) => sum + layer.points.length, 0);
+    let totalPoints = 0;
     const volume = { x: { min: Infinity, max: -Infinity }, y: { min: Infinity, max: -Infinity }, z: { min: Infinity, max: -Infinity } };
 
     for (const layer of parseResult.layers) {
-      for (const point of layer.points) {
-        volume.x.min = Math.min(volume.x.min, point.x);
-        volume.x.max = Math.max(volume.x.max, point.x);
-        volume.y.min = Math.min(volume.y.min, point.y);
-        volume.y.max = Math.max(volume.y.max, point.y);
-        volume.z.min = Math.min(volume.z.min, point.z);
-        volume.z.max = Math.max(volume.z.max, point.z);
+      totalPoints += layer.count;
+      for (let i = 0; i < layer.count; i++) {
+        const x = layer.x[i];
+        const y = layer.y[i];
+        const z = layer.pz[i];
+        volume.x.min = Math.min(volume.x.min, x);
+        volume.x.max = Math.max(volume.x.max, x);
+        volume.y.min = Math.min(volume.y.min, y);
+        volume.y.max = Math.max(volume.y.max, y);
+        volume.z.min = Math.min(volume.z.min, z);
+        volume.z.max = Math.max(volume.z.max, z);
       }
     }
 

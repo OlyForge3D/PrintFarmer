@@ -1,5 +1,6 @@
 export {
   createGcodePreviewService,
+  pointAt,
   type IGcodePreviewService,
   type ParsedGCode,
   type ParsedLayer,

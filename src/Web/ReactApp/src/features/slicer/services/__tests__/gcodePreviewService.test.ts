@@ -84,7 +84,9 @@ describe('GcodePreviewService.parseGCodeDetailed (no Worker — main-thread fall
 
   it('fetches the given URL itself rather than accepting raw text (#1788)', async () => {
     await service.parseGCodeDetailed('/models/print.gcode');
-    expect(global.fetch).toHaveBeenCalledWith('/models/print.gcode');
+    expect(global.fetch).toHaveBeenCalledWith('/models/print.gcode', expect.objectContaining({
+      signal: expect.any(AbortSignal),
+    }));
   });
 
   it('returns a detailed parse matching the pure parsing core', async () => {
@@ -94,18 +96,18 @@ describe('GcodePreviewService.parseGCodeDetailed (no Worker — main-thread fall
     expect(result.layerCount).toBe(expectedBuffers.layerCount);
     expect(result.tools).toEqual(Array.from(expectedBuffers.tools));
     // Layer 0: the Z-lift move (Z0.2, no E) plus 3 extrusion moves.
-    expect(result.layers[0].points).toHaveLength(4);
+    expect(result.layers[0].count).toBe(4);
 
-    const [liftPoint, firstExtrude] = result.layers[0].points;
-    expect(liftPoint.type).toBe('move');
-    expect(liftPoint.tool).toBe(0);
-    expect(liftPoint.z).toBeCloseTo(0.2, 4);
-    expect(liftPoint.feedRate).toBeCloseTo(3000, 4);
+    const layer0 = result.layers[0];
+    expect(layer0.type[0]).toBe(0); // move
+    expect(layer0.tool[0]).toBe(0);
+    expect(layer0.pz[0]).toBeCloseTo(0.2, 4);
+    expect(layer0.feedRate[0]).toBeCloseTo(3000, 4);
 
-    expect(firstExtrude.type).toBe('extrude');
-    expect(firstExtrude.x).toBeCloseTo(10, 4);
-    expect(firstExtrude.y).toBeCloseTo(10, 4);
-    expect(firstExtrude.e).toBeCloseTo(1, 4);
+    expect(layer0.type[1]).toBe(1); // extrude
+    expect(layer0.x[1]).toBeCloseTo(10, 4);
+    expect(layer0.y[1]).toBeCloseTo(10, 4);
+    expect(layer0.e[1]).toBeCloseTo(1, 4);
   });
 
   it('groups points by tool across a tool change', async () => {
@@ -117,8 +119,8 @@ describe('GcodePreviewService.parseGCodeDetailed (no Worker — main-thread fall
     const result = await service.parseGCodeDetailed('/multi-tool.gcode');
 
     expect(result.tools).toEqual([0, 1]);
-    const allPoints = result.layers.flatMap(l => l.points);
-    expect(allPoints.find(p => p.tool === 1)).toBeDefined();
+    const hasTool1 = result.layers.some(l => Array.from(l.tool).includes(1));
+    expect(hasTool1).toBe(true);
   });
 
   it('rejects with a descriptive error when the fetch response is not ok', async () => {
@@ -129,6 +131,22 @@ describe('GcodePreviewService.parseGCodeDetailed (no Worker — main-thread fall
     });
 
     await expect(service.parseGCodeDetailed('/missing.gcode')).rejects.toThrow(/404/);
+  });
+
+  it('aborts an in-flight fallback fetch when dispose() is called before it resolves', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    global.fetch = vi.fn((_url: string, init?: RequestInit) => {
+      capturedSignal = init?.signal ?? undefined;
+      return new Promise<never>((_resolve, reject) => {
+        capturedSignal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    });
+
+    const parsePromise = service.parseGCodeDetailed('/slow.gcode');
+    service.dispose();
+
+    await expect(parsePromise).rejects.toThrow();
+    expect(capturedSignal?.aborted).toBe(true);
   });
 });
 
@@ -180,8 +198,8 @@ describe('GcodePreviewService.parseGCodeDetailed (Worker path)', () => {
     );
     expect(result.layerCount).toBe(3);
     // Layer 0 begins with the Z-lift move (no E), then extrusion moves.
-    expect(result.layers[0].points[0].type).toBe('move');
-    expect(result.layers[0].points[1].type).toBe('extrude');
+    expect(result.layers[0].type[0]).toBe(0); // move
+    expect(result.layers[0].type[1]).toBe(1); // extrude
 
     service.dispose();
   });

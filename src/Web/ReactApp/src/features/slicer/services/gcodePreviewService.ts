@@ -53,11 +53,45 @@ export interface GCodePoint {
   tool: number;
 }
 
-/** A layer with full point data for Three.js rendering. */
+/**
+ * A layer's point data as typed-array views (Structure-of-Arrays), for
+ * Three.js rendering.
+ *
+ * These are `Float32Array`/`Uint8Array`/`Int32Array` *views* (`.subarray`)
+ * over the buffers the worker transferred back — building this layer index
+ * costs O(layerCount), not O(pointCount): no per-point `GCodePoint` object is
+ * materialized here. Per #1788, materializing every point into a discrete JS
+ * object at this boundary would reintroduce the ~130MB retained-heap problem
+ * the worker + typed-array parse was built to avoid. Consumers (GCodePath)
+ * read individual points via `pointAt(layer, i)` only for the points they
+ * actually render.
+ */
 export interface DetailedLayer {
   index: number;
   z: number;
-  points: GCodePoint[];
+  count: number;
+  x: Float32Array;
+  y: Float32Array;
+  /** Per-point Z (usually == the layer's `z`, but Z-hop moves can differ). */
+  pz: Float32Array;
+  e: Float32Array;
+  feedRate: Float32Array;
+  /** 0 = move, 1 = extrude. */
+  type: Uint8Array;
+  tool: Int32Array;
+}
+
+/** Reads a single point out of a `DetailedLayer`'s typed-array views on demand. */
+export function pointAt(layer: DetailedLayer, i: number): GCodePoint {
+  return {
+    x: layer.x[i],
+    y: layer.y[i],
+    z: layer.pz[i],
+    e: layer.e[i],
+    feedRate: layer.feedRate[i],
+    type: layer.type[i] === 1 ? 'extrude' : 'move',
+    tool: layer.tool[i],
+  };
 }
 
 /** Full parse result including rendering data and tool info. */
@@ -80,35 +114,35 @@ export interface IGcodePreviewService {
   dispose(): void;
 }
 
-/** Reconstructs the object-per-point shape consumers (GCodeViewer3D) expect from typed-array buffers. */
+/** Builds the (mostly zero-copy) layer index from typed-array buffers consumers (GCodeViewer3D) read. */
 function buffersToDetailedParsedGCode(buffers: DetailedParseBuffers): DetailedParsedGCode {
   const layers: DetailedLayer[] = new Array(buffers.layerCount);
 
   for (let li = 0; li < buffers.layerCount; li++) {
     const start = buffers.layerStart[li];
     const end = li + 1 < buffers.layerCount ? buffers.layerStart[li + 1] : buffers.pointCount;
-    const points: GCodePoint[] = new Array(end - start);
 
-    for (let i = start; i < end; i++) {
-      points[i - start] = {
-        x: buffers.x[i],
-        y: buffers.y[i],
-        z: buffers.z[i],
-        e: buffers.e[i],
-        feedRate: buffers.feedRate[i],
-        type: buffers.type[i] === 1 ? 'extrude' : 'move',
-        tool: buffers.tool[i],
-      };
-    }
-
-    layers[li] = { index: li, z: buffers.layerZ[li], points };
+    layers[li] = {
+      index: li,
+      z: buffers.layerZ[li],
+      count: end - start,
+      // `.subarray` is a zero-copy view over the same underlying ArrayBuffer
+      // — no per-point object is allocated building this layer index.
+      x: buffers.x.subarray(start, end),
+      y: buffers.y.subarray(start, end),
+      pz: buffers.z.subarray(start, end),
+      e: buffers.e.subarray(start, end),
+      feedRate: buffers.feedRate.subarray(start, end),
+      type: buffers.type.subarray(start, end),
+      tool: buffers.tool.subarray(start, end),
+    };
   }
 
   return { layers, layerCount: buffers.layerCount, tools: Array.from(buffers.tools) };
 }
 
-async function fetchGCodeText(gcodeUrl: string): Promise<string> {
-  const res = await fetch(gcodeUrl);
+async function fetchGCodeText(gcodeUrl: string, signal: AbortSignal): Promise<string> {
+  const res = await fetch(gcodeUrl, { signal });
   if (!res.ok) throw new Error(`Failed to load G-code: ${res.status}`);
   return res.text();
 }
@@ -135,6 +169,9 @@ export function createGcodePreviewService(): IGcodePreviewService {
   let worker: Worker | null = null;
   let requestSeq = 0;
   const pending = new Map<number, PendingRequest>();
+  // Tracks in-flight fallback (no-Worker) fetches so dispose() can abort them
+  // the same way it rejects pending Worker requests.
+  const fallbackControllers = new Set<AbortController>();
 
   function rejectAllPending(error: Error): void {
     for (const [id, request] of pending) {
@@ -189,10 +226,18 @@ export function createGcodePreviewService(): IGcodePreviewService {
 
       // Fallback for environments without Worker support (SSR, legacy
       // browsers, jsdom test environment): run the same parsing core
-      // synchronously on the main thread.
-      const gcodeText = await fetchGCodeText(gcodeUrl);
-      const buffers = parseDetailedLayersCore(gcodeText);
-      return buffersToDetailedParsedGCode(buffers);
+      // synchronously on the main thread. Tracked via AbortController so
+      // dispose() can cancel it, mirroring the Worker path's pending-request
+      // rejection.
+      const controller = new AbortController();
+      fallbackControllers.add(controller);
+      try {
+        const gcodeText = await fetchGCodeText(gcodeUrl, controller.signal);
+        const buffers = parseDetailedLayersCore(gcodeText);
+        return buffersToDetailedParsedGCode(buffers);
+      } finally {
+        fallbackControllers.delete(controller);
+      }
     },
 
     dispose(): void {
@@ -201,6 +246,10 @@ export function createGcodePreviewService(): IGcodePreviewService {
         worker = null;
       }
       rejectAllPending(new Error('G-code preview service disposed'));
+      for (const controller of fallbackControllers) {
+        controller.abort();
+      }
+      fallbackControllers.clear();
     },
   };
 }
