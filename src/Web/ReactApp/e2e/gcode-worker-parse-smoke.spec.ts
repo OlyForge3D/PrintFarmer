@@ -30,8 +30,6 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_DIR = resolve(__dirname, '../public/gcode-fixtures');
-const FIXTURE_PATH = resolve(FIXTURE_DIR, 'worker-smoke-generated.gcode');
-const FIXTURE_URL = '/gcode-fixtures/worker-smoke-generated.gcode';
 const POINTS_PER_LAYER = 2000;
 const LAYER_COUNT = 75; // 150,000 points total
 
@@ -51,13 +49,31 @@ function generateSyntheticGCode(layerCount: number, pointsPerLayer: number): str
 }
 
 test.describe('#1788 G-code Worker: real boundary + no main-thread long task', () => {
-  test.beforeAll(() => {
+  // Every Playwright project (chromium/firefox/webkit/mobile) runs this
+  // suite's beforeAll/afterAll hooks even though the test body below skips
+  // non-Chromium projects — the skip only takes effect once the test starts
+  // running, not before the suite hooks fire. A single shared fixture path
+  // would let one project's afterAll delete the file while another
+  // project's (Chromium's) test is still mid-parse reading it. Scoping the
+  // fixture path to the worker/project via testInfo removes that race
+  // entirely, regardless of hook/skip ordering or parallelism.
+  let fixturePath: string;
+  let fixtureUrl: string;
+
+  // Playwright requires the first beforeAll/afterAll parameter to use the
+  // object-destructuring fixture pattern even when no fixtures are needed;
+  // only `testInfo` is used here.
+  // eslint-disable-next-line no-empty-pattern
+  test.beforeAll(({}, testInfo) => {
+    const uniqueSuffix = `${testInfo.project.name}-${testInfo.workerIndex}`;
+    fixturePath = resolve(FIXTURE_DIR, `worker-smoke-generated-${uniqueSuffix}.gcode`);
+    fixtureUrl = `/gcode-fixtures/worker-smoke-generated-${uniqueSuffix}.gcode`;
     mkdirSync(FIXTURE_DIR, { recursive: true });
-    writeFileSync(FIXTURE_PATH, generateSyntheticGCode(LAYER_COUNT, POINTS_PER_LAYER));
+    writeFileSync(fixturePath, generateSyntheticGCode(LAYER_COUNT, POINTS_PER_LAYER));
   });
 
   test.afterAll(() => {
-    if (existsSync(FIXTURE_PATH)) rmSync(FIXTURE_PATH);
+    if (existsSync(fixturePath)) rmSync(fixturePath);
   });
 
   test('parses a large synthetic G-code file through the real gcodeParser.worker.ts entrypoint without a main-thread long task', async ({ page, browserName }) => {
@@ -67,14 +83,16 @@ test.describe('#1788 G-code Worker: real boundary + no main-thread long task', (
     test.skip(browserName !== 'chromium', 'Real-worker/long-task boundary only needs to be proven once, in Chromium.');
 
     await page.goto('/');
+    // Let the initial app load settle (network requests, first React render,
+    // Vite's HMR client handshake) before measuring, so one-time page-load
+    // costs unrelated to G-code parsing can't bleed into the long-task
+    // measurement window below.
+    await page.waitForLoadState('networkidle');
+    await page.evaluate(
+      () => new Promise<void>((r) => requestIdleCallback(() => r(), { timeout: 3000 })),
+    );
 
     const result = await page.evaluate(async (fixtureUrl) => {
-      const longTaskDurations: number[] = [];
-      const observer = new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) longTaskDurations.push(entry.duration);
-      });
-      observer.observe({ entryTypes: ['longtask'] });
-
       // Dynamically importing the real production module (served
       // unbundled by the Vite dev server) means this exercises the actual
       // shipped code path — including the real `new Worker(new URL(...))`
@@ -85,6 +103,16 @@ test.describe('#1788 G-code Worker: real boundary + no main-thread long task', (
       const mod = await import('/src/features/slicer/services/index.ts');
       const service = mod.createGcodePreviewService();
       const workerSupported = typeof Worker !== 'undefined';
+
+      // Start observing only once the module fetch/transform/evaluation and
+      // service construction are behind us, so a cold-start Vite module load
+      // (which itself can register as a main-thread long task, unrelated to
+      // G-code parsing) can never be misattributed to the parse under test.
+      const longTaskDurations: number[] = [];
+      const observer = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) longTaskDurations.push(entry.duration);
+      });
+      observer.observe({ entryTypes: ['longtask'] });
 
       const start = performance.now();
       const parsed = await service.parseGCodeDetailed(fixtureUrl);
@@ -98,7 +126,7 @@ test.describe('#1788 G-code Worker: real boundary + no main-thread long task', (
 
       const totalPoints = parsed.layers.reduce((sum: number, l: { count: number }) => sum + l.count, 0);
       return { workerSupported, layerCount: parsed.layerCount, totalPoints, elapsedMs, longTaskDurations };
-    }, FIXTURE_URL);
+    }, fixtureUrl);
 
     // Sanity: the real worker path actually ran and actually parsed the
     // full fixture (not a stub returning an empty/placeholder result).
