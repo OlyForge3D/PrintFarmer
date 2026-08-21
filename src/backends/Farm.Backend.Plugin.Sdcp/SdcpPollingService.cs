@@ -51,6 +51,23 @@ public sealed class SdcpPollingService(
     /// </summary>
     private readonly ConcurrentDictionary<Guid, long> _invalidationGenerations = new();
 
+    /// <summary>
+    /// Per-printer gate serializing <see cref="OnPrinterInvalidated"/>'s generation-bump-and-clear
+    /// against every write-back site's generation-check-and-publish (<see cref="RunAsync"/> and
+    /// <see cref="PollPrinterAsync"/>). Without this, "check generation, then write
+    /// <see cref="PrinterPollingState.CachedPrinter"/>" is two independent, unsynchronized
+    /// operations: a thread can pass the check, then be preempted before its write while
+    /// <see cref="OnPrinterInvalidated"/> runs and clears the cache, then resume and overwrite the
+    /// just-cleared cache with its (now provably stale) fetch result — silently undoing the
+    /// invalidation. Taking this lock around both the bump/clear and each check/write makes the
+    /// two sequences mutually exclusive, closing that race. Entries are never removed (matching
+    /// <see cref="_invalidationGenerations"/>'s non-removal policy), for the same reason: removing
+    /// a lock object while another thread might be holding or waiting on it would let a
+    /// subsequently created replacement lock run concurrently with the old one, reintroducing the
+    /// exact race this gate exists to prevent.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, object> _cacheGates = new();
+
     // Polling interval for SDCP printers (same as PrusaLink)
     private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(5);
 
@@ -115,13 +132,21 @@ public sealed class SdcpPollingService(
     /// </summary>
     private void OnPrinterInvalidated(Guid printerId)
     {
-        // Bump unconditionally (even if no PrinterPollingState exists yet) so an invalidation
-        // that races a first-ever fetch for this printer is still durably recorded.
-        _invalidationGenerations.AddOrUpdate(printerId, 1, static (_, current) => current + 1);
-
-        if (_printerStates.TryGetValue(printerId, out PrinterPollingState? state))
+        // Take the same per-printer gate every write-back site uses, so this can never
+        // interleave with an in-flight fetch's check-then-write: either the bump/clear runs
+        // fully before the write-back's check (which then correctly observes a mismatch), or
+        // fully after (the just-published stale row is immediately cleared again).
+        object gate = _cacheGates.GetOrAdd(printerId, static _ => new object());
+        lock (gate)
         {
-            state.CachedPrinter = null;
+            // Bump unconditionally (even if no PrinterPollingState exists yet) so an invalidation
+            // that races a first-ever fetch for this printer is still durably recorded.
+            _invalidationGenerations.AddOrUpdate(printerId, 1, static (_, current) => current + 1);
+
+            if (_printerStates.TryGetValue(printerId, out PrinterPollingState? state))
+            {
+                state.CachedPrinter = null;
+            }
         }
     }
 
@@ -190,11 +215,17 @@ public sealed class SdcpPollingService(
 
                         // Only publish if no invalidation raced the fetch above; otherwise this
                         // row may already be stale and the next tick's cache-miss re-read (or the
-                        // next reconciliation pass) will pick up the fresh value instead.
+                        // next reconciliation pass) will pick up the fresh value instead. Gate the
+                        // check-and-write under the same per-printer lock OnPrinterInvalidated
+                        // uses so the two are mutually exclusive.
                         long capturedGeneration = generationSnapshot.GetValueOrDefault(printer.Id, 0L);
-                        if (_invalidationGenerations.GetOrAdd(printer.Id, 0L) == capturedGeneration)
+                        object gate = _cacheGates.GetOrAdd(printer.Id, static _ => new object());
+                        lock (gate)
                         {
-                            refreshState.CachedPrinter = printer;
+                            if (_invalidationGenerations.GetOrAdd(printer.Id, 0L) == capturedGeneration)
+                            {
+                                refreshState.CachedPrinter = printer;
+                            }
                         }
                     }
 
@@ -261,10 +292,18 @@ public sealed class SdcpPollingService(
 
                     // Only cache the result if no invalidation raced this fetch; otherwise leave
                     // the cache empty so the very next tick re-reads instead of resurrecting a
-                    // row that may already be stale.
-                    if (_invalidationGenerations.GetOrAdd(printerId, 0L) == capturedGeneration)
+                    // row that may already be stale. Gate the check-and-write under the same
+                    // per-printer lock OnPrinterInvalidated uses, so this check is atomic with
+                    // any concurrent invalidation (an async continuation can resume long after
+                    // the underlying query completes, so a same-thread "before/after" read alone
+                    // is not enough).
+                    object gate = _cacheGates.GetOrAdd(printerId, static _ => new object());
+                    lock (gate)
                     {
-                        state.CachedPrinter = printer;
+                        if (_invalidationGenerations.GetOrAdd(printerId, 0L) == capturedGeneration)
+                        {
+                            state.CachedPrinter = printer;
+                        }
                     }
                 }
 
