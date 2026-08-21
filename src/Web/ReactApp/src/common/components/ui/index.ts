@@ -14,6 +14,7 @@ export { DataTable, type DataTableProps, type DataTableColumn } from './DataTabl
 export { EmptyState, type EmptyStateProps } from './EmptyState';
 export { FileUpload, type FileUploadProps } from './FileUpload';
 export { FormField, type FormFieldProps } from './FormField';
+export { InfoTooltip, type InfoTooltipProps } from './InfoTooltip';
 export { Input, type InputProps } from './Input';
 export { Label, type LabelProps } from './Label';
 export { LoadedFilamentCard, type LoadedFilamentCardProps } from './LoadedFilamentCard';

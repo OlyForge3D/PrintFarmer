@@ -43,7 +43,7 @@ import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
 import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Alert, Input, Select, ColorPicker, ProgressBar } from '@/common/components/ui';
+import { Button, Alert, Input, Select, ColorPicker, ProgressBar, InfoTooltip } from '@/common/components/ui';
 import { LayersIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon, SwapHorizontalIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
@@ -2176,9 +2176,21 @@ export const NewSliceJobPage: React.FC = () => {
                user cannot pin a job that will hang in the queue forever. */}
           {versionsForEngine.length > 1 && (
             <div className="bg-pf-panel border border-pf-border rounded-lg p-2.5">
-              <label htmlFor="slicer-engine-version" className="block text-sm font-semibold text-pf-text-primary mb-1.5">
-                Engine version
-              </label>
+              <div className="flex items-center gap-1 mb-1.5">
+                <label htmlFor="slicer-engine-version" className="block text-sm font-semibold text-pf-text-primary">
+                  Engine version
+                </label>
+                <InfoTooltip
+                  content={
+                    <>
+                      Pins the slice job to a specific {engineName} engine. Leave on Latest
+                      unless you need a particular version for compatibility. Versions
+                      marked "offline" have no worker currently registered and cannot claim jobs.
+                    </>
+                  }
+                  label="More information about engine version"
+                />
+              </div>
               <Select
                 id="slicer-engine-version"
                 value={selectedEngineVersion ?? ''}
@@ -2194,11 +2206,6 @@ export const NewSliceJobPage: React.FC = () => {
                   </option>
                 ))}
               </Select>
-              <p className="mt-1 text-xs text-pf-text-muted">
-                Pins the slice job to a specific {engineName} engine. Leave on Latest
-                unless you need a particular version for compatibility. Versions
-                marked "offline" have no worker currently registered and cannot claim jobs.
-              </p>
             </div>
           )}
 
