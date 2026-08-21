@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services.DataManagement;
 using Microsoft.EntityFrameworkCore;
@@ -849,20 +850,11 @@ public class DataSeedService : IDataSeedService
                 continue;
             }
 
-            // Parse nozzle type
-            NozzleType nozzleType = NozzleType.Brass;
-            if (!string.IsNullOrEmpty(dto.NozzleType) &&
-                Enum.TryParse<NozzleType>(dto.NozzleType.Replace(" ", string.Empty), out NozzleType parsedType))
-            {
-                nozzleType = parsedType;
-            }
-
-            NozzleHardnessOverride hardnessOverride = NozzleHardnessOverride.Auto;
-            if (!string.IsNullOrEmpty(dto.HardnessOverride) &&
-                Enum.TryParse<NozzleHardnessOverride>(dto.HardnessOverride.Replace(" ", string.Empty), true, out NozzleHardnessOverride parsedHardness))
-            {
-                hardnessOverride = parsedHardness;
-            }
+            NozzleType nozzleType = ParseSeedEnum(dto.NozzleType, NozzleType.Brass, nameof(dto.NozzleType), dto.Name);
+            NozzleHardnessOverride hardnessOverride = ParseSeedEnum(
+                dto.HardnessOverride, NozzleHardnessOverride.Auto, nameof(dto.HardnessOverride), dto.Name);
+            NozzleInterfaceType nozzleInterface = ParseSeedEnum(
+                dto.NozzleInterface, NozzleInterfaceType.V6, nameof(dto.NozzleInterface), dto.Name);
 
             NozzleModelDefinition? existing = await _context.NozzleModelDefinitions
                 .FirstOrDefaultAsync(n => n.Name == dto.Name && n.ManufacturerId == manufacturerId);
@@ -878,6 +870,7 @@ public class DataSeedService : IDataSeedService
                     MaxTemp = dto.MaxTemp,
                     NozzleType = nozzleType,
                     HardnessOverride = hardnessOverride,
+                    NozzleInterface = nozzleInterface,
                     Description = dto.Description,
                     Url = dto.Url
                 });
@@ -888,12 +881,47 @@ public class DataSeedService : IDataSeedService
                 existing.MaxTemp = dto.MaxTemp;
                 existing.NozzleType = nozzleType;
                 existing.HardnessOverride = hardnessOverride;
+                existing.NozzleInterface = nozzleInterface;
                 existing.Description = dto.Description;
                 existing.Url = dto.Url;
             }
         }
 
         await _context.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Parses an enum-valued seed field, warning rather than silently falling back when the
+    /// value is unrecognized. Silent fallback is unsafe here: nozzle hardness gates whether
+    /// abrasive filament may be dispatched, so a typo must not quietly re-enable a nozzle the
+    /// operator excluded.
+    /// </summary>
+    /// <typeparam name="TEnum">The enum type to parse into.</typeparam>
+    /// <param name="rawValue">Raw YAML value; null or empty yields <paramref name="fallback"/> without warning.</param>
+    /// <param name="fallback">Value to use when the field is absent or unparseable.</param>
+    /// <param name="fieldName">Field name, for the warning message.</param>
+    /// <param name="nozzleName">Owning nozzle name, for the warning message.</param>
+    /// <returns>The parsed value, or <paramref name="fallback"/>.</returns>
+    private TEnum ParseSeedEnum<TEnum>(string? rawValue, TEnum fallback, string fieldName, string nozzleName)
+        where TEnum : struct, Enum
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return fallback;
+        }
+
+        // Enum.TryParse also accepts raw numeric text and any undefined numeric value, so
+        // Enum.IsDefined is required to reject e.g. "42" landing as an invalid enum.
+        if (Enum.TryParse(rawValue.Replace(" ", string.Empty), true, out TEnum parsed) &&
+            Enum.IsDefined(parsed))
+        {
+            return parsed;
+        }
+
+        _logger.LogWarning(
+            "[SeedData] Unrecognized {Field} '{Value}' for nozzle '{Name}', using {Fallback}",
+            fieldName, LogSanitizer.Sanitize(rawValue), LogSanitizer.Sanitize(nozzleName), fallback);
+        return fallback;
     }
 
     private async Task SeedPrinterModelAliasesAsync(List<PrinterModelSeedDto> modelsData)

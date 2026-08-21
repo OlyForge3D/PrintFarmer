@@ -235,6 +235,12 @@ public class NozzleModelSeedDto
     /// </summary>
     public string? HardnessOverride { get; set; }
 
+    /// <summary>
+    /// Thread/mount type determining hotend compatibility: "V6" (default), "Volcano",
+    /// "Revo", or "Proprietary".
+    /// </summary>
+    public string? NozzleInterface { get; set; }
+
     public string? Description { get; set; }
 
     public string? Url { get; set; }

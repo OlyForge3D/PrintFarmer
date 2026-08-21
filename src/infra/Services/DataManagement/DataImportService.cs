@@ -592,6 +592,10 @@ public class DataImportService : IDataImportService
                 NozzleModelDefinition? existing = await _context.NozzleModelDefinitions
                     .FirstOrDefaultAsync(n => n.Name == dto.Name && n.ManufacturerId == manufacturer.Id, ct);
 
+                NozzleType nozzleType = ParseExportedEnum(dto.NozzleType, NozzleType.Brass);
+                NozzleHardnessOverride hardnessOverride = ParseExportedEnum(
+                    dto.HardnessOverride, NozzleHardnessOverride.Auto);
+
                 if (existing == null)
                 {
                     _context.NozzleModelDefinitions.Add(new NozzleModelDefinition
@@ -601,6 +605,8 @@ public class DataImportService : IDataImportService
                         ManufacturerId = manufacturer.Id,
                         Diameter = dto.Diameter,
                         MaxTemp = dto.MaxTemp,
+                        NozzleType = nozzleType,
+                        HardnessOverride = hardnessOverride,
                         NozzleInterface = (NozzleInterfaceType)dto.NozzleInterface,
                         Description = dto.Description
                     });
@@ -610,6 +616,8 @@ public class DataImportService : IDataImportService
                 {
                     existing.Diameter = dto.Diameter;
                     existing.MaxTemp = dto.MaxTemp;
+                    existing.NozzleType = nozzleType;
+                    existing.HardnessOverride = hardnessOverride;
                     existing.NozzleInterface = (NozzleInterfaceType)dto.NozzleInterface;
                     existing.Description = dto.Description;
                     imported++;
@@ -624,6 +632,29 @@ public class DataImportService : IDataImportService
 
         await _context.SaveChangesAsync(ct);
         return imported;
+    }
+
+    /// <summary>
+    /// Parses an enum exported by name, tolerating backups written before the field existed
+    /// (null/empty) and values from a newer schema this build does not know.
+    /// </summary>
+    /// <typeparam name="TEnum">The enum type to parse into.</typeparam>
+    /// <param name="rawValue">Exported enum name, or null for a pre-field backup.</param>
+    /// <param name="fallback">Value to use when absent or unrecognized.</param>
+    /// <returns>The parsed value, or <paramref name="fallback"/>.</returns>
+    private static TEnum ParseExportedEnum<TEnum>(string? rawValue, TEnum fallback)
+        where TEnum : struct, Enum
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return fallback;
+        }
+
+        // Enum.TryParse also accepts raw numeric text and undefined numeric values, so
+        // Enum.IsDefined is required to reject a malformed or hostile backup payload.
+        return Enum.TryParse(rawValue, true, out TEnum parsed) && Enum.IsDefined(parsed)
+            ? parsed
+            : fallback;
     }
 
     private async Task<int> ImportLocationsAsync(List<LocationExportDto> locations, ImportMode mode, List<string> errors, CancellationToken ct)

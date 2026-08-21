@@ -111,6 +111,10 @@ final class ToolheadModelsTests: XCTestCase {
             ("StainlessSteel", .stainlessSteel),
             ("TungstenCarbide", .tungstenCarbide),
             ("Abrasive", .abrasive),
+            ("Diamond", .diamond),
+            ("Ruby", .ruby),
+            ("PlatedCopper", .platedCopper),
+            ("ToolSteel", .toolSteel),
             ("Unknown", .unknown)
         ] as [(String, NozzleType)] {
             let json = "\"\(wire)\""

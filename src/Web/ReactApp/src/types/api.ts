@@ -902,10 +902,10 @@ export enum NozzleHardnessOverride {
   NotHardened = 'NotHardened'
 }
 
-export const NozzleHardnessOverrideLabels: Record<string, string> = {
-  'Auto': 'Auto (from material)',
-  'Hardened': 'Hardened',
-  'NotHardened': 'Not hardened'
+export const NozzleHardnessOverrideLabels: Record<NozzleHardnessOverride, string> = {
+  [NozzleHardnessOverride.Auto]: 'Auto (from material)',
+  [NozzleHardnessOverride.Hardened]: 'Hardened',
+  [NozzleHardnessOverride.NotHardened]: 'Not hardened'
 };
 
 // ============== Toolhead Types ==============

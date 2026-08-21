@@ -18,6 +18,7 @@ import { useNozzleModels, useCreateNozzleModel, useUpdateNozzleModel, useDeleteN
 import { CatalogContext, type NozzleModelDefinition, type CreateNozzleModelDto, type UpdateNozzleModelDto, NozzleTypeStringLabels, NozzleHardnessOverrideLabels } from '@/types/api';
 import { PlusIcon, EditIcon, DeleteIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
+import { isHardenedByMaterial } from '../nozzleHardness';
 
 /**
  * Converts a NozzleModelDefinition to the card display format
@@ -66,17 +67,6 @@ const DEFAULT_TEMPS_BY_TYPE: Record<string, number> = {
   'PlatedCopper': 400,
   'ToolSteel': 500,
 };
-
-// Materials whose hardness the backend derives when hardnessOverride is 'Auto'.
-// Mirrors NozzleModelDefinition.IsHardenedByMaterial in infra/Domain/ComponentModels.cs.
-const HARDENED_BY_MATERIAL = new Set([
-  'HardenedSteel',
-  'TungstenCarbide',
-  'Abrasive',
-  'Diamond',
-  'Ruby',
-  'ToolSteel',
-]);
 
 const emptyForm: NozzleFormState = {
   name: '',
@@ -654,7 +644,7 @@ function NozzleForm({
         label="Hardness"
         helper={
           formState.hardnessOverride === 'Auto'
-            ? `Derived from material — ${NozzleTypeStringLabels[formState.nozzleType] ?? formState.nozzleType} counts as ${HARDENED_BY_MATERIAL.has(formState.nozzleType) ? 'hardened' : 'not hardened'}.`
+            ? `Derived from material — ${NozzleTypeStringLabels[formState.nozzleType] ?? formState.nozzleType} counts as ${isHardenedByMaterial(formState.nozzleType) ? 'hardened' : 'not hardened'}.`
             : 'Pinned for this model, ignoring the material. Job dispatch uses this to decide whether abrasive filaments are safe.'
         }
       >

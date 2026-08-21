@@ -189,6 +189,21 @@ public class NozzleModelExportDto
 
     public int? MaxTemp { get; set; }
 
+    /// <summary>
+    /// Nozzle material, as the <c>NozzleType</c> enum name (e.g. "Brass", "Diamond").
+    /// Stored by name rather than ordinal so a future enum renumbering cannot silently
+    /// remap restored rows. Unrecognized or absent values restore as Brass.
+    /// </summary>
+    public string? NozzleType { get; set; }
+
+    /// <summary>
+    /// Per-model hardness override, as the <c>NozzleHardnessOverride</c> enum name
+    /// ("Auto", "Hardened", "NotHardened"). Round-tripping this matters for safety: an
+    /// operator-pinned "NotHardened" that restored as "Auto" would silently re-admit the
+    /// nozzle to abrasive-filament dispatch.
+    /// </summary>
+    public string? HardnessOverride { get; set; }
+
     public int NozzleInterface { get; set; }
 
     public string? Description { get; set; }
