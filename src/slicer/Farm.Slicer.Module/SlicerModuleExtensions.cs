@@ -91,7 +91,7 @@ public static class SlicerModuleExtensions
     /// <remarks>
     /// <para>
     /// Split and microservices hosts deliberately skip <see cref="AddSlicerModule"/>, so
-    /// <see cref="Farm.Web.Api.Services.Startup.MoonrakerEmulatorSeeder"/> — which runs on the
+    /// <c>Farm.Web.Api.Services.Startup.MoonrakerEmulatorSeeder</c> — which runs on the
     /// API host in every deployment topology, not just monolith — had no
     /// <c>IMachineProfileRepository</c>/<c>IProcessProfileRepository</c>/
     /// <c>IFilamentProfileRepository</c> registered when resolving them from its DI scope,
@@ -112,8 +112,13 @@ public static class SlicerModuleExtensions
     /// fixture data.
     /// </para>
     /// <para>
-    /// No-ops when <see cref="AddSlicerModule"/> already ran on this host (monolith hosts already
-    /// register these repositories) or when this method has already run once. Registers no hosted
+    /// No-ops when <see cref="IMachineProfileRepository"/> is already registered (monolith hosts,
+    /// where <see cref="AddSlicerModule"/> ran its full registration path) or when this method has
+    /// already run once. Deliberately does NOT gate on <see cref="AddSlicerModule"/>'s own marker:
+    /// that marker is added unconditionally, before <see cref="AddSlicerModule"/>'s split/
+    /// microservices early return, so on a "split"-mode host the marker would be present even
+    /// though the repositories were never registered — checking the marker here would silently
+    /// no-op on exactly the split-mode hosts this method exists to cover. Registers no hosted
     /// services, plugin discovery, or anything beyond the three repositories and the DbContext
     /// they need.
     /// </para>
@@ -125,9 +130,15 @@ public static class SlicerModuleExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // AddSlicerModule already registers these repositories (plus everything else) when it
-        // runs — nothing more to do here.
-        if (services.Any(sd => sd.ServiceType == typeof(SlicerModuleMarker)))
+        // Do NOT gate on SlicerModuleMarker here: AddSlicerModule adds that marker
+        // unconditionally, before its own split/microservices early return (see above), so on a
+        // "split"-mode host (as opposed to "microservices", which Program.cs never calls
+        // AddSlicerModule for at all) the marker is present even though AddSlicerModule returned
+        // early WITHOUT registering these repositories. Gating on the marker would silently no-op
+        // this method on exactly the split-mode hosts it exists to cover. Instead, check whether
+        // the repositories themselves are already registered — true only when AddSlicerModule ran
+        // its full (monolith) registration path.
+        if (services.Any(sd => sd.ServiceType == typeof(IMachineProfileRepository)))
         {
             return services;
         }

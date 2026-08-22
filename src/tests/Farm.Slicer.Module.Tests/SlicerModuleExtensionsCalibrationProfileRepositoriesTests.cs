@@ -68,6 +68,63 @@ public sealed class SlicerModuleExtensionsCalibrationProfileRepositoriesTests
     }
 
     [Fact]
+    public async Task AddSlicerCalibrationProfileRepositories_AfterSplitModeAddSlicerModule_StillRegistersRepositories()
+    {
+        // DEPLOYMENT_MODE=split (as opposed to "microservices") takes a DIFFERENT short-circuit
+        // inside AddSlicerModule: Program.cs's own literal "microservices" check does not match
+        // "split", so on a split-mode host Program.cs still calls AddSlicerModule. AddSlicerModule
+        // adds its SlicerModuleMarker unconditionally before its own split/microservices early
+        // return, so the marker ends up present on this host even though AddSlicerModule never
+        // reached AddSlicerRepositories. AddSlicerCalibrationProfileRepositories must not mistake
+        // that marker for "repositories already registered" and must still register them here.
+        string dbPath = Path.Combine(Path.GetTempPath(), $"slicer-calibration-repos-{Guid.NewGuid():N}.db");
+        try
+        {
+            IConfiguration configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["DEPLOYMENT_MODE"] = "split",
+                    ["DB_PROVIDER"] = "sqlite",
+                    ["ConnectionStrings:Default"] = $"Data Source={dbPath}",
+                })
+                .Build();
+
+            ServiceCollection services = new();
+            _ = services.AddSlicerModule(configuration);
+
+            // Confirm the split-mode early return really did skip repository registration, so
+            // this test actually exercises the scenario it claims to.
+            Assert.DoesNotContain(services, sd => sd.ServiceType == typeof(IMachineProfileRepository));
+
+            _ = services.AddSlicerCalibrationProfileRepositories(configuration);
+            await using ServiceProvider provider = services.BuildServiceProvider();
+
+            await using (AsyncServiceScope initScope = provider.CreateAsyncScope())
+            {
+                SlicerDbContext db = initScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+                _ = await db.Database.EnsureCreatedAsync();
+            }
+
+            await using AsyncServiceScope scope = provider.CreateAsyncScope();
+            IMachineProfileRepository machineProfiles =
+                scope.ServiceProvider.GetRequiredService<IMachineProfileRepository>();
+            IProcessProfileRepository processProfiles =
+                scope.ServiceProvider.GetRequiredService<IProcessProfileRepository>();
+            IFilamentProfileRepository filamentProfiles =
+                scope.ServiceProvider.GetRequiredService<IFilamentProfileRepository>();
+
+            Assert.Null(await machineProfiles.GetByHashAsync("missing-hash", CancellationToken.None));
+            Assert.Null(await processProfiles.GetByHashAsync("missing-hash", CancellationToken.None));
+            Assert.Null(await filamentProfiles.GetByHashAsync("missing-hash", CancellationToken.None));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
     public void AddSlicerCalibrationProfileRepositories_WhenSlicerModuleAlreadyRegistered_IsNoOp()
     {
         // Monolith hosts call AddSlicerModule, which already registers everything these
