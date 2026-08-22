@@ -323,6 +323,13 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                 worker.Version = svc.Version;
                 worker.UpdatedAt = DateTime.UtcNow;
                 worker.IsDisabled = false;
+
+                // Clear the state left behind by a previous deregistration. Without this a
+                // reclaimed worker comes back Online while still reporting
+                // "Disabled: Slicer service deregistered" and an OfflineAt timestamp,
+                // which is exactly the stale text operators saw after every redeploy.
+                worker.DisabledReason = null;
+                worker.OfflineAt = null;
             }
             else
             {
@@ -516,20 +523,55 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
     /// Deregisters a slicer worker service and revokes its worker credentials.
     /// </summary>
     /// <param name="id">The unique identifier of the slicer worker to deregister</param>
+    /// <param name="retainForReregistration">
+    /// Whether the caller will return under the same <see cref="SlicerService.InstanceId"/> and
+    /// wants its row kept so it can be re-identified. Defaults to <see langword="false"/>, which
+    /// preserves the historical delete-on-deregister behaviour for any client unaware of it.
+    /// </param>
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>True if deregistration was successful; false if worker not found</returns>
     /// <remarks>
-    /// This method performs the following operations:
-    /// - Removes the slicer service from active registration
-    /// - Revokes the worker key and disables its Worker record
-    /// - Records metrics for service deregistration
-    /// - Broadcasts deregistration events to all connected clients via SignalR
-    /// - Preserves worker history for audit trails
+    /// This is the worker-initiated path: a worker calls it from its own shutdown handler to
+    /// say "I am going away right now", which is not the same as "delete me permanently".
+    /// The administrative "remove this slicer" action is <see cref="PurgeAsync"/>.
+    ///
+    /// <para><b>Why retention is opt-in and caller-declared.</b> The service row is the only
+    /// anchor <see cref="UpsertServiceAndWorkerAsync"/> can match a returning worker against,
+    /// so unconditionally deleting it is what made every redeploy register a duplicate: a
+    /// graceful shutdown — exactly what <c>deploy-docker.sh</c> triggers when it recreates the
+    /// container — deleted the anchor, the replacement container then failed to match its own
+    /// InstanceId, and both a new <see cref="SlicerService"/> and, because Worker rows are
+    /// keyed by the service's Guid, a new <see cref="Worker"/> row were inserted, orphaning
+    /// the old one as "Disabled: Slicer service deregistered" forever. Retention fixes that.</para>
+    ///
+    /// <para>But retention is only ever correct when the worker really does return under the
+    /// same identity, and the presence of an InstanceId does <b>not</b> establish that. A
+    /// worker always sends one: it falls back to a fresh random per-process
+    /// <c>WorkerIdentity.Create()</c> GUID whenever no stable ID is configured, which is
+    /// precisely what <c>deploy-docker.sh</c> arranges for scaled deployments
+    /// (<c>ORCA_WORKER_COUNT != 1</c> leaves <c>ORCA_WORKER_INSTANCE_ID</c> empty, because
+    /// Compose gives every replica identical environment). Retaining rows for those throwaway
+    /// identities would leave one unreclaimable Offline row per replica per restart — the same
+    /// orphan accumulation this change exists to stop, on the one path that previously
+    /// cleaned up after itself.</para>
+    ///
+    /// <para>Only the worker knows which kind of identity it holds, so it declares it via
+    /// <paramref name="retainForReregistration"/>. The default is <see langword="false"/> so
+    /// the behaviour is fail-safe: a client that never sets it gets the old self-cleaning
+    /// delete. The InstanceId check below is a secondary guard — retention is meaningless
+    /// without an anchor to match on.</para>
+    ///
+    /// Credentials are revoked identically on both paths — the service key is cleared and the
+    /// Worker record is disabled and marked Offline — so a retained row can never be used to
+    /// keep authenticating. <c>SlicerApiKeyValidator</c> requires a matching service key
+    /// <i>and</i> an enabled, non-Offline Worker, so all three conditions fail after this
+    /// call. A worker that returns is issued a fresh key by registration; retention is never
+    /// a key-recovery mechanism.
     ///
     /// Deregistered workers are no longer available for job assignment. The system
     /// automatically fails over any pending jobs from deregistered workers.
     /// </remarks>
-    public async Task<bool> DeregisterAsync(Guid id, CancellationToken ct)
+    public async Task<bool> DeregisterAsync(Guid id, bool retainForReregistration, CancellationToken ct)
     {
         SlicerService? svc = await _repo.GetByIdAsync(id, ct);
         if (svc == null)
@@ -538,19 +580,26 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         }
 
         string slicerTypeName = GetSlicerTypeName(svc.SlicerType);
+        bool retain = retainForReregistration && !string.IsNullOrWhiteSpace(svc.InstanceId);
 
-        Worker? worker = await _workerRepo.GetByServiceIdAsync(id.ToString());
-        if (worker != null)
+        RevokeWorkerCredentials(await _workerRepo.GetByServiceIdAsync(id.ToString()));
+
+        if (retain)
         {
-            worker.Status = WorkerStatus.Offline;
-            worker.OfflineAt = DateTime.UtcNow;
-            worker.UpdatedAt = DateTime.UtcNow;
-            worker.IsDisabled = true;
-            worker.DisabledReason = "Slicer service deregistered";
-            worker.ApiKey = null;
+            svc.Status = "Offline";
+            svc.ApiKey = null;
+            svc.UpdatedAt = DateTime.UtcNow;
+
+            _logger.LogInformation(
+                "Slicer service {ServiceId} deregistered; retaining its row so worker instance {InstanceId} is re-identified when it returns.",
+                svc.Id,
+                LogSanitizer.Sanitize(svc.InstanceId));
+        }
+        else
+        {
+            await _repo.RemoveAsync(svc, ct);
         }
 
-        await _repo.RemoveAsync(svc, ct);
         await _repo.SaveChangesAsync(ct);
 
         // Record metrics
@@ -567,6 +616,80 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Permanently removes a slicer worker service and its paired <see cref="Worker"/> record.
+    /// </summary>
+    /// <param name="id">The unique identifier of the slicer worker to remove</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>True if the service was removed; false if it was not found</returns>
+    /// <remarks>
+    /// This is the administrative "remove this slicer" action, and it is deliberately separate
+    /// from <see cref="DeregisterAsync"/>. Worker-initiated deregistration now retains the row
+    /// of any worker carrying a stable InstanceId so the worker can be re-identified, so the
+    /// admin action needs its own path to still mean permanent removal.
+    ///
+    /// Unlike the old shared implementation this also deletes the paired <see cref="Worker"/>
+    /// row rather than leaving it disabled. An admin removing a service otherwise left a Worker
+    /// row whose <see cref="Worker.ServiceId"/> pointed at a service that no longer existed —
+    /// an orphan nothing could reclaim or clean up except the stale-worker sweep.
+    ///
+    /// A worker process that is still running will simply register again on its next heartbeat
+    /// cycle, exactly as it did before this method existed.
+    /// </remarks>
+    public async Task<bool> PurgeAsync(Guid id, CancellationToken ct)
+    {
+        SlicerService? svc = await _repo.GetByIdAsync(id, ct);
+        if (svc == null)
+        {
+            return false;
+        }
+
+        string slicerTypeName = GetSlicerTypeName(svc.SlicerType);
+
+        Worker? worker = await _workerRepo.GetByServiceIdAsync(id.ToString());
+        if (worker != null)
+        {
+            RevokeWorkerCredentials(worker);
+            await _workerRepo.DeleteAsync(worker.Id);
+        }
+
+        await _repo.RemoveAsync(svc, ct);
+        await _repo.SaveChangesAsync(ct);
+
+        _metrics.RecordServiceDeregistration(slicerTypeName, id.ToString(), "normal");
+
+        try
+        {
+            await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators)
+                .SendAsync(SlicerHubEvents.SlicerDeregistered, new { id = svc.Id, name = svc.Name }, ct);
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Revokes a worker record's credentials and marks it offline and disabled.
+    /// </summary>
+    /// <param name="worker">The worker record to revoke, or <see langword="null"/> when none is paired.</param>
+    private static void RevokeWorkerCredentials(Worker? worker)
+    {
+        if (worker == null)
+        {
+            return;
+        }
+
+        worker.Status = WorkerStatus.Offline;
+        worker.OfflineAt = DateTime.UtcNow;
+        worker.UpdatedAt = DateTime.UtcNow;
+        worker.IsDisabled = true;
+        worker.DisabledReason = "Slicer service deregistered";
+        worker.ApiKey = null;
     }
 
     /// <summary>

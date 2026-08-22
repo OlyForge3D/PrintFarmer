@@ -388,7 +388,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         (Guid id, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
 
         // Act
-        bool result = await slicersService.DeregisterAsync(id, CancellationToken.None);
+        bool result = await slicersService.DeregisterAsync(id, retainForReregistration: false, CancellationToken.None);
 
         // Assert
         result.Should().BeTrue();
@@ -405,7 +405,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
 
         // Act
-        bool result = await slicersService.DeregisterAsync(Guid.NewGuid(), CancellationToken.None);
+        bool result = await slicersService.DeregisterAsync(Guid.NewGuid(), retainForReregistration: false, CancellationToken.None);
 
         // Assert
         result.Should().BeFalse();
@@ -431,7 +431,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         (Guid id, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
 
         // Act
-        await slicersService.DeregisterAsync(id, CancellationToken.None);
+        await slicersService.DeregisterAsync(id, retainForReregistration: false, CancellationToken.None);
 
         // Assert - Check Worker record marked offline
         Worker? worker = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
@@ -440,6 +440,178 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         worker.OfflineAt.Should().NotBeNull();
         worker.IsDisabled.Should().BeTrue();
         worker.ApiKey.Should().BeNull();
+    }
+
+    /// <summary>
+    /// The redeploy regression: a worker with a stable InstanceId that deregisters on graceful
+    /// shutdown and comes back must be re-identified and updated in place, never added as a new
+    /// worker. Deleting the service row on deregistration destroyed the only anchor the
+    /// InstanceId upsert can match on, so every redeploy created a fresh service Guid and — since
+    /// Worker rows are keyed by that Guid — a fresh Worker row, orphaning the previous one as
+    /// "Disabled: Slicer service deregistered" forever.
+    /// </summary>
+    [Fact]
+    public async Task Redeploy_WithStableInstanceId_ReusesSameServiceAndWorkerRows()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+
+        const string instanceId = "orcaslicer-worker-1";
+
+        RegisterSlicerDto Dto() => new()
+        {
+            Name = "orca-redeploy",
+            SlicerType = 1,
+            Version = "2.3.1",
+            Host = "http://localhost:8080",
+            MaxConcurrentJobs = 5,
+            InstanceId = instanceId
+        };
+
+        (Guid firstId, string _) = await slicersService.RegisterAsync(Dto(), CancellationToken.None);
+        Worker? firstWorker = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == firstId.ToString());
+        firstWorker.Should().NotBeNull();
+        Guid firstWorkerId = firstWorker!.Id;
+
+        // Act - graceful shutdown, then the replacement container registers again
+        bool deregistered = await slicersService.DeregisterAsync(firstId, retainForReregistration: true, CancellationToken.None);
+        deregistered.Should().BeTrue();
+
+        (Guid secondId, string _) = await slicersService.RegisterAsync(Dto(), CancellationToken.None);
+
+        // Assert - same identity, and no duplicate rows accumulated
+        secondId.Should().Be(firstId, "a stable InstanceId must be re-identified, not registered as a new worker");
+
+        context.ChangeTracker.Clear();
+        context.Set<SlicerService>().Count(s => s.InstanceId == instanceId).Should().Be(1);
+        context.Set<Worker>().Count().Should().Be(1);
+
+        Worker? secondWorker = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == secondId.ToString());
+        secondWorker.Should().NotBeNull();
+        secondWorker!.Id.Should().Be(firstWorkerId, "the existing Worker row must be reclaimed rather than replaced");
+        secondWorker.Status.Should().Be("Online");
+        secondWorker.IsDisabled.Should().BeFalse();
+        secondWorker.DisabledReason.Should().BeNull("a reclaimed worker must not keep displaying stale disabled text");
+        secondWorker.OfflineAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DeregisterAsync_WithRetain_RetainsRowButRevokesCredentials()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+
+        var dto = new RegisterSlicerDto
+        {
+            Name = "orca-retain",
+            SlicerType = 1,
+            Version = "2.3.1",
+            Host = "http://localhost:8080",
+            MaxConcurrentJobs = 5,
+            InstanceId = "orcaslicer-worker-1"
+        };
+
+        (Guid id, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+
+        // Act
+        await slicersService.DeregisterAsync(id, retainForReregistration: true, CancellationToken.None);
+
+        // Assert - the row survives as the re-identification anchor, but cannot authenticate
+        context.ChangeTracker.Clear();
+        SlicerService? retained = await context.Set<SlicerService>().FindAsync(id);
+        retained.Should().NotBeNull();
+        retained!.Status.Should().Be("Offline");
+        retained.ApiKey.Should().BeNull();
+
+        Worker? worker = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+        worker.Should().NotBeNull();
+        worker!.IsDisabled.Should().BeTrue();
+        worker.Status.Should().Be("Offline");
+        worker.ApiKey.Should().BeNull();
+    }
+
+    /// <summary>
+    /// A worker that did not ask for retention is deleted even when it sent an InstanceId. The
+    /// worker always sends one — it falls back to a random per-process GUID when no stable ID is
+    /// configured, which is what scaled deployments do — so retention must be driven by the
+    /// caller's declaration, not by the mere presence of an InstanceId. Retaining throwaway
+    /// identities would strand one unreclaimable row per replica per restart.
+    /// </summary>
+    [Fact]
+    public async Task DeregisterAsync_WithoutRetain_DeletesRowEvenWithInstanceId()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+
+        var dto = new RegisterSlicerDto
+        {
+            Name = "orca-ephemeral",
+            SlicerType = 1,
+            Version = "2.3.1",
+            Host = "http://localhost:8080",
+            MaxConcurrentJobs = 5,
+            InstanceId = Guid.NewGuid().ToString("N")
+        };
+
+        (Guid id, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+
+        // Act
+        await slicersService.DeregisterAsync(id, retainForReregistration: false, CancellationToken.None);
+
+        // Assert
+        context.ChangeTracker.Clear();
+        SlicerService? deleted = await context.Set<SlicerService>().FindAsync(id);
+        deleted.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PurgeAsync_RemovesServiceAndPairedWorkerRow()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+
+        var dto = new RegisterSlicerDto
+        {
+            Name = "orca-purge",
+            SlicerType = 1,
+            Version = "2.3.1",
+            Host = "http://localhost:8080",
+            MaxConcurrentJobs = 5,
+            InstanceId = "orcaslicer-worker-1"
+        };
+
+        (Guid id, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+
+        // Act - the admin action means permanent removal even for a stable identity
+        bool purged = await slicersService.PurgeAsync(id, CancellationToken.None);
+
+        // Assert - no orphaned Worker row is left behind
+        purged.Should().BeTrue();
+        context.ChangeTracker.Clear();
+        (await context.Set<SlicerService>().FindAsync(id)).Should().BeNull();
+        context.Set<Worker>().Count(w => w.ServiceId == id.ToString()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PurgeAsync_WithInvalidId_ReturnsFalse()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
+
+        // Act
+        bool result = await slicersService.PurgeAsync(Guid.NewGuid(), CancellationToken.None);
+
+        // Assert
+        result.Should().BeFalse();
     }
 
     #endregion
@@ -590,7 +762,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         afterHeartbeat!.Status.Should().Be("Busy");
 
         // Act 3: Deregister
-        bool deregisterResult = await slicersService.DeregisterAsync(id, CancellationToken.None);
+        bool deregisterResult = await slicersService.DeregisterAsync(id, retainForReregistration: false, CancellationToken.None);
 
         // Assert 3
         deregisterResult.Should().BeTrue();

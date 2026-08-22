@@ -60,6 +60,15 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
     private readonly string _serviceVersion;
     private readonly string _serviceHost;
     private readonly string _workerInstanceId;
+
+    /// <summary>
+    /// Whether <see cref="_workerInstanceId"/> was explicitly configured and will therefore be
+    /// presented again by the replacement container, rather than being a random per-process
+    /// identity generated fresh on every start. Only a stable identity may ask the registry to
+    /// retain its row on deregistration — see <see cref="DeregisterAsync"/>.
+    /// </summary>
+    private readonly bool _hasStableInstanceId;
+
     private readonly string _registrationApiKey;
 
     /// <summary>Path of the image attestation describing the installed OrcaSlicer binary.</summary>
@@ -92,7 +101,9 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
         _serviceName = configuration["SlicerRegistry:ServiceName"] ?? Environment.GetEnvironmentVariable("HOSTNAME") ?? "orcaslicer-worker";
         _serviceVersion = configuration["SlicerRegistry:Version"] ?? WorkerConstants.SlicerVersion;
         _serviceHost = configuration["SlicerRegistry:Host"] ?? "http://orcaslicer-worker:8080";
-        _workerInstanceId = Normalize(configuration["Worker:InstanceId"]) ?? WorkerIdentity.Create();
+        string? configuredInstanceId = Normalize(configuration["Worker:InstanceId"]);
+        _hasStableInstanceId = configuredInstanceId is not null;
+        _workerInstanceId = configuredInstanceId ?? WorkerIdentity.Create();
         _registrationApiKey = ResolveRegistrationApiKey(configuration)
             ?? throw new InvalidOperationException(
                 "The OrcaSlicer worker requires a registration key. Configure " +
@@ -249,7 +260,19 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
     {
         try
         {
-            using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, $"{_apiBaseUrl}/api/slicers/{serviceId}/deregister");
+            // Ask the registry to retain this registration only when the instance ID was
+            // explicitly configured, because only then does the replacement container come
+            // back under the same identity and get re-identified instead of registering as a
+            // brand-new worker. When no instance ID is configured (scaled deployments, where
+            // deploy-docker.sh leaves ORCA_WORKER_INSTANCE_ID empty because Compose gives every
+            // replica identical environment) this worker generated a random per-process
+            // identity that will never be presented again, so retaining its row would strand an
+            // unreclaimable record on every restart. Those deregistrations stay deleting.
+            string retainQuery = _hasStableInstanceId ? "?retain=true" : string.Empty;
+
+            using HttpRequestMessage request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"{_apiBaseUrl}/api/slicers/{serviceId}/deregister{retainQuery}");
             request.Headers.Add("X-Slicer-Service-Api-Key", apiKey);
 
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);

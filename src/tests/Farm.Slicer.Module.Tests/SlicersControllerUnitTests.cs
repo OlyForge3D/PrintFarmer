@@ -89,7 +89,7 @@ public class SlicersControllerUnitTests
     {
         Guid id = Guid.NewGuid();
         Mock<ISlicersService> mockService = new Mock<ISlicersService>();
-        _ = mockService.Setup(s => s.DeregisterAsync(id, It.IsAny<CancellationToken>()))
+        _ = mockService.Setup(s => s.DeregisterAsync(id, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         SlicersController controller = new SlicersController(mockService.Object, new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>().Object);
@@ -98,7 +98,7 @@ public class SlicersControllerUnitTests
         IActionResult res = await controller.DeregisterAsync(id);
         _ = res.Should().BeOfType<NoContentResult>();
 
-        mockService.Verify(s => s.DeregisterAsync(id, It.IsAny<CancellationToken>()), Times.Once);
+        mockService.Verify(s => s.DeregisterAsync(id, false, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact(DisplayName = "GET /api/slicers/engines returns registered engines grouped by name (issue #578)")]

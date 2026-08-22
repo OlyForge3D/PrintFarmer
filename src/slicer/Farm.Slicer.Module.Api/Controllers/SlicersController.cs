@@ -269,15 +269,20 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
     }
 
     /// <summary>
-    /// Deregisters a slicer service.
+    /// Deregisters a slicer service at the worker's own request.
     /// </summary>
     /// <param name="id">The slicer service ID.</param>
+    /// <param name="retain">
+    /// Set by a worker that holds a stable, configured instance ID and will return under it, so
+    /// its registration row is kept and re-identified rather than replaced by a new worker.
+    /// Defaults to false, which deletes the row exactly as before.
+    /// </param>
     [HttpPost("{id}/deregister")]
     [RequireSlicerServiceApiKey]
     [AllowAnonymous] // Public to JWT auth because slicer hosts authenticate with their slicer API key.
-    public async Task<IActionResult> DeregisterAsync(Guid id)
+    public async Task<IActionResult> DeregisterAsync(Guid id, [FromQuery] bool retain = false)
     {
-        bool ok = await _service.DeregisterAsync(id, HttpContext.RequestAborted);
+        bool ok = await _service.DeregisterAsync(id, retain, HttpContext.RequestAborted);
         return ok ? NoContent() : NotFound();
     }
 

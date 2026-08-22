@@ -488,7 +488,7 @@ public class SlicersServiceWorkerSyncTests
         };
         (Guid id, _) = await svc.RegisterAsync(dto, CancellationToken.None);
 
-        bool ok = await svc.DeregisterAsync(id, CancellationToken.None);
+        bool ok = await svc.DeregisterAsync(id, retainForReregistration: false, CancellationToken.None);
         _ = ok.Should().BeTrue();
 
         Worker? worker = await workerRepo.GetByServiceIdAsync(id.ToString());
