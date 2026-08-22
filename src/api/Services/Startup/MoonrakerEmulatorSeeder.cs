@@ -1,7 +1,13 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using System.Security.Cryptography;
+using System.Text;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Services.Startup;
@@ -14,6 +20,23 @@ public sealed class MoonrakerEmulatorSeeder(
     IOptions<MoonrakerEmulatorSeedSettings> options,
     ILogger<MoonrakerEmulatorSeeder> logger) : BackgroundService
 {
+    // Serializes TrySeedAsync so the background ExecuteAsync retry loop can never overlap with a
+    // concurrent admin-triggered ResetAsync call (or two overlapping resets): without this, both
+    // callers could race past the same hash-lookup-then-insert check in
+    // GetOrCreate*ProfileAsync, and while the repositories' unique Hash index prevents duplicate
+    // rows, the losing writer's DbUpdateException retry still costs an extra round trip that a
+    // same-process lock avoids entirely. This only serializes calls within this single hosted
+    // service instance; it does not protect against a second application instance seeding the
+    // same database concurrently, which the unique-index + retry path still covers.
+    private readonly SemaphoreSlim _seedLock = new(1, 1);
+
+    /// <inheritdoc />
+    public override void Dispose()
+    {
+        _seedLock.Dispose();
+        base.Dispose();
+    }
+
     /// <summary>
     /// Restores the deterministic database state used by emulator-backed browser tests.
     /// </summary>
@@ -59,10 +82,33 @@ public sealed class MoonrakerEmulatorSeeder(
         bool resetRuntimeState,
         CancellationToken cancellationToken)
     {
+        await _seedLock.WaitAsync(cancellationToken);
+        try
+        {
+            return await TrySeedCoreAsync(settings, resetRuntimeState, cancellationToken);
+        }
+        finally
+        {
+            _seedLock.Release();
+        }
+    }
+
+    private async Task<bool> TrySeedCoreAsync(
+        MoonrakerEmulatorSeedSettings settings,
+        bool resetRuntimeState,
+        CancellationToken cancellationToken)
+    {
         using IServiceScope scope = scopeFactory.CreateScope();
         IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
         ICatalogRepository catalog = scope.ServiceProvider.GetRequiredService<ICatalogRepository>();
         IPrintersService printersService = scope.ServiceProvider.GetRequiredService<IPrintersService>();
+        IMachineProfileRepository machineProfiles =
+            scope.ServiceProvider.GetRequiredService<IMachineProfileRepository>();
+        IProcessProfileRepository processProfiles =
+            scope.ServiceProvider.GetRequiredService<IProcessProfileRepository>();
+        IFilamentProfileRepository filamentProfiles =
+            scope.ServiceProvider.GetRequiredService<IFilamentProfileRepository>();
+        Dictionary<Guid, CalibrationProfileTrio> profileTrioCache = [];
 
         Guid? unknownManufacturerId = await catalog.GetUnknownManufacturerIdAsync(cancellationToken);
         Guid? unknownModelId = await catalog.GetUnknownModelIdAsync(cancellationToken);
@@ -115,9 +161,10 @@ public sealed class MoonrakerEmulatorSeeder(
                 printer.Id == seed.Id ||
                 string.Equals(printer.ServerUrl, seed.ServerUrl, StringComparison.OrdinalIgnoreCase));
             Printer printer;
+            Guid modelId;
             if (existing is not null)
             {
-                Printer? tracked = await unitOfWork.Printers.FindByIdAsync(
+                Printer? tracked = await unitOfWork.Printers.FindByIdWithToolheadsAsync(
                     existing.Id,
                     cancellationToken);
                 if (tracked is null)
@@ -137,15 +184,17 @@ public sealed class MoonrakerEmulatorSeeder(
                         tracked.Id,
                         cancellationToken);
                 printer = tracked;
+                modelId = tracked.ModelId;
             }
             else
             {
-                (Guid manufacturerId, Guid modelId) = await ResolveCatalogIdsAsync(
+                (Guid manufacturerId, Guid resolvedModelId) = await ResolveCatalogIdsAsync(
                     catalog,
                     seed,
                     unknownManufacturerId.Value,
                     unknownModelId.Value,
                     cancellationToken);
+                modelId = resolvedModelId;
 
                 printer = new Printer
                 {
@@ -175,6 +224,15 @@ public sealed class MoonrakerEmulatorSeeder(
             }
 
             await SeedActiveJobAsync(unitOfWork, jobs, printer, seed, cancellationToken);
+
+            CalibrationProfileTrio trio = await EnsureCalibrationProfileTrioAsync(
+                machineProfiles,
+                processProfiles,
+                filamentProfiles,
+                modelId,
+                profileTrioCache,
+                cancellationToken);
+            ApplyCalibrationEligibilityDefaults(unitOfWork, printer, trio, isNewPrinter: existing is null);
         }
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -285,6 +343,349 @@ public sealed class MoonrakerEmulatorSeeder(
             cancellationToken);
         return (manufacturer.Id, model?.Id ?? unknownModelId);
     }
+
+    /// <summary>
+    /// Identifiers of the shared machine/process/filament profile trio backing calibration
+    /// eligibility for a given catalog printer model.
+    /// </summary>
+    private readonly record struct CalibrationProfileTrio(
+        Guid MachineProfileId,
+        Guid ProcessProfileId,
+        Guid FilamentProfileId,
+        string MachineProfileName);
+
+    /// <summary>
+    /// Finds or creates the OrcaSlicer machine/process/filament profile trio that lets the
+    /// daily-validation emulator printers demonstrate calibration eligibility end-to-end
+    /// (#1851). All seeded printers share a single catalog model (Voron 2.4 300), so one
+    /// content-hash-keyed trio per model is enough; profiles are looked up by hash first so
+    /// repeated seed/reset passes stay idempotent and never grow duplicate rows.
+    /// </summary>
+    private static async Task<CalibrationProfileTrio> EnsureCalibrationProfileTrioAsync(
+        IMachineProfileRepository machineProfiles,
+        IProcessProfileRepository processProfiles,
+        IFilamentProfileRepository filamentProfiles,
+        Guid modelId,
+        Dictionary<Guid, CalibrationProfileTrio> cache,
+        CancellationToken cancellationToken)
+    {
+        if (cache.TryGetValue(modelId, out CalibrationProfileTrio cached))
+        {
+            return cached;
+        }
+
+        DateTime nowUtc = DateTime.UtcNow;
+        const string machineProfileName = "Voron 2.4 300 (Emulator Calibration)";
+
+        // The model id is embedded in every RawJson payload (not just a random tiebreaker) so the
+        // content-addressed Hash is naturally scoped per catalog model: a hash lookup can never
+        // return a profile seeded for a different model, and re-seeding against the SAME model
+        // always reproduces the identical, idempotent RawJson/Hash pair.
+        string machineJson =
+            $$"""{"gcode_flavor":"klipper","nozzle_diameter":[0.4],"printer_variant":"Voron 2.4 300","printer_model_id":"{{modelId}}"}""";
+        string machineHash = ComputeSha256(machineJson);
+        MachineProfile machineProfile = await GetOrCreateMachineProfileAsync(
+            machineProfiles,
+            machineHash,
+            () => new MachineProfile
+            {
+                Id = Guid.NewGuid(),
+                Name = machineProfileName,
+                Manufacturer = "Voron",
+                SlicerType = SlicerType.OrcaSlicer,
+                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                PrinterModelId = modelId,
+                SlicerVersion = CalibrationContractConstants.SlicerVersion,
+                ProfileFormat = CalibrationContractConstants.ProfileFormat,
+                RawJson = machineJson,
+                Hash = machineHash,
+                IsSystem = true,
+                IsPublic = true,
+                CreatedAt = nowUtc,
+                UpdatedAt = nowUtc,
+            },
+            cancellationToken);
+
+        string processJson =
+            $$"""{"layer_height":0.2,"infill_density":20,"process_variant":"Voron 2.4 300 Calibration","printer_model_id":"{{modelId}}"}""";
+        string processHash = ComputeSha256(processJson);
+        ProcessProfile processProfile = await GetOrCreateProcessProfileAsync(
+            processProfiles,
+            processHash,
+            () => new ProcessProfile
+            {
+                Id = Guid.NewGuid(),
+                Name = "Voron 2.4 300 Calibration Process",
+                SlicerType = SlicerType.OrcaSlicer,
+                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                PrinterModelId = modelId,
+                LayerHeight = 0.2,
+                InfillPercentage = 20,
+                PrintSpeed = 100,
+                SlicerVersion = CalibrationContractConstants.SlicerVersion,
+                ProfileFormat = CalibrationContractConstants.ProfileFormat,
+                RawJson = processJson,
+                Hash = processHash,
+                CompatiblePrinters = machineProfile.Name,
+                IsSystem = true,
+                IsPublic = true,
+                CreatedAt = nowUtc,
+                UpdatedAt = nowUtc,
+            },
+            cancellationToken);
+
+        string filamentJson =
+            $$"""{"filament_max_volumetric_speed":12,"filament_variant":"Voron 2.4 300 PLA","printer_model_id":"{{modelId}}"}""";
+        string filamentHash = ComputeSha256(filamentJson);
+        FilamentProfile filamentProfile = await GetOrCreateFilamentProfileAsync(
+            filamentProfiles,
+            filamentHash,
+            () => new FilamentProfile
+            {
+                Id = Guid.NewGuid(),
+                Name = "Voron 2.4 300 Calibration PLA",
+                Material = "PLA",
+                Manufacturer = "Generic",
+                SlicerType = SlicerType.OrcaSlicer,
+                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                NozzleTemperature = 210,
+                BedTemperature = 60,
+                PrintSpeed = 100,
+                SlicerVersion = CalibrationContractConstants.SlicerVersion,
+                ProfileFormat = CalibrationContractConstants.ProfileFormat,
+                RawJson = filamentJson,
+                Hash = filamentHash,
+                CompatiblePrinters = machineProfile.Name,
+                IsSystem = true,
+                IsPublic = true,
+                CreatedAt = nowUtc,
+                UpdatedAt = nowUtc,
+            },
+            cancellationToken);
+
+        CalibrationProfileTrio trio = new(
+            machineProfile.Id,
+            processProfile.Id,
+            filamentProfile.Id,
+            machineProfile.Name);
+        cache[modelId] = trio;
+        return trio;
+    }
+
+    /// <summary>
+    /// Looks up a profile by its content-addressed hash and creates it when absent, tolerating a
+    /// concurrent seed/reset race: if two overlapping calls both miss the hash lookup and both
+    /// insert, the losing insert hits the repository's unique Hash index and throws
+    /// <see cref="DbUpdateException"/> — in that case the row the winner just committed is
+    /// re-queried and reused instead of the failure propagating to the caller (which, for
+    /// <c>ResetAsync</c>, has no retry of its own).
+    /// </summary>
+    private static async Task<MachineProfile> GetOrCreateMachineProfileAsync(
+        IMachineProfileRepository repository,
+        string hash,
+        Func<MachineProfile> createProfile,
+        CancellationToken cancellationToken)
+    {
+        MachineProfile? existing = await repository.GetByHashAsync(hash, cancellationToken);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        MachineProfile created = createProfile();
+        try
+        {
+            await repository.AddAsync(created, cancellationToken);
+            return created;
+        }
+        catch (DbUpdateException)
+        {
+            MachineProfile? winner = await repository.GetByHashAsync(hash, cancellationToken);
+            if (winner is null)
+            {
+                throw;
+            }
+
+            return winner;
+        }
+    }
+
+    /// <summary>See <see cref="GetOrCreateMachineProfileAsync"/> for the race-tolerance rationale.</summary>
+    private static async Task<ProcessProfile> GetOrCreateProcessProfileAsync(
+        IProcessProfileRepository repository,
+        string hash,
+        Func<ProcessProfile> createProfile,
+        CancellationToken cancellationToken)
+    {
+        ProcessProfile? existing = await repository.GetByHashAsync(hash, cancellationToken);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        ProcessProfile created = createProfile();
+        try
+        {
+            await repository.AddAsync(created, cancellationToken);
+            return created;
+        }
+        catch (DbUpdateException)
+        {
+            ProcessProfile? winner = await repository.GetByHashAsync(hash, cancellationToken);
+            if (winner is null)
+            {
+                throw;
+            }
+
+            return winner;
+        }
+    }
+
+    /// <summary>See <see cref="GetOrCreateMachineProfileAsync"/> for the race-tolerance rationale.</summary>
+    private static async Task<FilamentProfile> GetOrCreateFilamentProfileAsync(
+        IFilamentProfileRepository repository,
+        string hash,
+        Func<FilamentProfile> createProfile,
+        CancellationToken cancellationToken)
+    {
+        FilamentProfile? existing = await repository.GetByHashAsync(hash, cancellationToken);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        FilamentProfile created = createProfile();
+        try
+        {
+            await repository.AddAsync(created, cancellationToken);
+            return created;
+        }
+        catch (DbUpdateException)
+        {
+            FilamentProfile? winner = await repository.GetByHashAsync(hash, cancellationToken);
+            if (winner is null)
+            {
+                throw;
+            }
+
+            return winner;
+        }
+    }
+
+    /// <summary>
+    /// Populates every calibration-eligibility column <c>PrinterCalibrationContextService</c>
+    /// requires (firmware identity, slicer identity, hardware/motion specs, and a physical
+    /// toolhead) so seeded emulator printers report <c>eligible: true</c> instead of the ~40
+    /// missing-input rejections filed as #1851. The eligibility gate itself is never touched —
+    /// this only supplies the data it already requires.
+    /// </summary>
+    /// <param name="unitOfWork">
+    /// Provides the printer repository used to append a toolhead for an already-tracked printer.
+    /// </param>
+    /// <param name="printer">The printer to populate calibration-eligibility fields on.</param>
+    /// <param name="trio">The resolved machine/process/filament calibration profile trio.</param>
+    /// <param name="isNewPrinter">
+    /// <see langword="true"/> for a printer not yet tracked by EF Core (safe to append a child
+    /// <see cref="Toolhead"/> directly to <see cref="Printer.Toolheads"/>); <see langword="false"/>
+    /// for an already-tracked printer, where the toolhead must go through
+    /// <c>IPrintersRepository.AddToolheads</c> to avoid marking the parent row Modified
+    /// and tripping optimistic-concurrency RowVersion checks.
+    /// </param>
+    private static void ApplyCalibrationEligibilityDefaults(
+        IUnitOfWork unitOfWork,
+        Printer printer,
+        CalibrationProfileTrio trio,
+        bool isNewPrinter)
+    {
+        DateTime nowUtc = DateTime.UtcNow;
+
+        printer.FirmwareFamily = PrinterFirmwareFamily.Klipper;
+        printer.GcodeDialect = PrinterGcodeDialect.Klipper;
+        printer.FirmwareDetectionSource = FirmwareDetectionSource.Printer;
+        printer.FirmwareVersion = "v0.12.0";
+        printer.FirmwareDetectionVersion = "printer-info-v1";
+        printer.FirmwareDetectionConfidence = 1m;
+        printer.FirmwareDetectedAtUtc = nowUtc;
+        printer.FirmwareIdentityVerified = true;
+        printer.BackendVersion = "v0.9.3";
+        printer.BackendApiVersion = "v1";
+
+        printer.MaxBuildVolumeX = 250;
+        printer.MaxBuildVolumeY = 250;
+        printer.MaxBuildVolumeZ = 250;
+        printer.BedOriginX = 0;
+        printer.BedOriginY = 0;
+        printer.PrintablePolygonJson =
+            """[{"x":0,"y":0},{"x":250,"y":0},{"x":250,"y":250},{"x":0,"y":250}]""";
+        printer.ExcludedRegionsJson = "[]";
+        printer.CalibrationMotionType = CalibrationMotionType.CoreXY;
+        printer.MaxPrintSpeed = 300;
+        printer.MaxTravelSpeed = 500;
+        printer.MaxAcceleration = 10000;
+        printer.MaxTravelAcceleration = 12000;
+        printer.CalibrationHasHeatedBed = true;
+        printer.MaxBedTemp = 120;
+        printer.CalibrationHasEnclosure = false;
+        printer.CalibrationHasHeatedChamber = false;
+        printer.ActiveToolheadIndex = 0;
+        printer.SupportsPressureAdvance = true;
+        printer.SupportsFirmwareRetraction = true;
+        printer.CalibrationHardwareVerifiedAtUtc = nowUtc;
+
+        printer.CalibrationSlicerEngine = CalibrationContractConstants.SlicerEngine;
+        printer.CalibrationSlicerDistribution = CalibrationContractConstants.SlicerDistribution;
+        printer.CalibrationSlicerVersion = CalibrationContractConstants.SlicerVersion;
+        printer.CalibrationProfileFormat = CalibrationContractConstants.ProfileFormat;
+        printer.CalibrationMachineProfileId = trio.MachineProfileId;
+        printer.CalibrationProcessProfileId = trio.ProcessProfileId;
+        printer.CalibrationFilamentProfileId = trio.FilamentProfileId;
+
+        // Guard on ANY existing physical toolhead, not just index 0: these emulator-seeded
+        // fixture printers are exclusively created and managed by this seeder and never gain
+        // toolheads through any other code path, so "no physical toolhead yet" and "exactly one
+        // physical toolhead" are equivalent here — this only prevents re-adding T0 on a repeat
+        // seed/reset pass, it is not a general-purpose toolhead-count enforcement for arbitrary
+        // printers (which is intentionally out of scope for a seeder; the eligibility gate itself
+        // is the correct place to reject printers with unsupported extra toolheads).
+        if (!printer.Toolheads.Any(toolhead => toolhead.ToolheadType == ToolheadType.Physical))
+        {
+            Toolhead toolhead = new()
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Name = "T0",
+                Index = 0,
+                IsPrimary = true,
+                ToolheadType = ToolheadType.Physical,
+                OffsetX = 0,
+                OffsetY = 0,
+                OffsetZ = 0,
+                NozzleDiameter = 0.4,
+                NozzleType = NozzleType.Brass,
+                NozzleMaterial = "brass",
+                NozzleMaxTemperature = 300,
+                NozzleIsHardened = false,
+                HotendMaxTemperature = 300,
+                MaxVolumetricFlow = 15,
+                DriveType = "direct",
+                IsDirectDrive = true,
+                ExtruderGearRatio = "50:10",
+                SupportedMaterials = ["PLA", "PETG"],
+            };
+
+            if (isNewPrinter)
+            {
+                printer.Toolheads.Add(toolhead);
+            }
+            else
+            {
+                unitOfWork.Printers.AddToolheads([toolhead]);
+            }
+        }
+    }
+
+    private static string ComputeSha256(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
     private static void ValidateSeed(MoonrakerEmulatorPrinterSeed seed)
     {
