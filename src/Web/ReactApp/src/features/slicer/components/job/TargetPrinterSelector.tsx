@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button } from '@/common/components/ui';
+import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
 import type { PrinterBasicInfo } from './types';
 
 interface TargetPrinterSelectorProps {
@@ -29,8 +30,7 @@ export const TargetPrinterSelector: React.FC<TargetPrinterSelectorProps> = ({
             <p className="font-medium text-pf-text-primary">{selectedPrinter.name}</p>
             {selectedPrinter.modelName && (
               <p className="text-sm text-pf-text-muted">
-                {selectedPrinter.manufacturerName && `${selectedPrinter.manufacturerName} • `}
-                {selectedPrinter.modelName}
+                {formatPrinterModelSubtitle(selectedPrinter.manufacturerName, selectedPrinter.modelName)}
               </p>
             )}
           </div>

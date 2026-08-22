@@ -70,11 +70,7 @@ export function HarvestWizardStep1Selection({
   const uniqueModels = useMemo(() => {
     const models = new Set(
       onlinePrinters
-        .map(p => {
-          const model = p.modelName || 'Unknown';
-          const manufacturer = p.manufacturerName || 'Unknown';
-          return `${manufacturer} - ${model}`;
-        })
+        .map(p => formatPrinterModelSubtitle(p.manufacturerName, p.modelName))
         .filter(Boolean)
     );
     return Array.from(models).sort();
@@ -90,7 +86,7 @@ export function HarvestWizardStep1Selection({
 
       // Model filter
       if (selectedModel) {
-        const printerModel = `${p.manufacturerName || 'Unknown'} - ${p.modelName || 'Unknown'}`;
+        const printerModel = formatPrinterModelSubtitle(p.manufacturerName, p.modelName);
         if (printerModel !== selectedModel) {
           return false;
         }

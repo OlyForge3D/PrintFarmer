@@ -7,6 +7,7 @@ import { Check, Package, Printer, Palette, FolderOpen } from 'lucide-react';
 import { apiClient } from '@/services/api';
 import { tasksApi } from '@/services/tasksApi';
 import { officialProfilesService } from '@/services/officialProfilesService';
+import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
 import { toast } from 'sonner';
 
 // Import wizard step components
@@ -270,7 +271,7 @@ export const ProfileImportWizardPage: React.FC = () => {
   return (
     <PageTemplate
       title="Import Slicer Profiles"
-      subtitle={displayModelName ? `${displayManufacturerName} ${displayModelName}` : 'Select a printer model'}
+      subtitle={displayModelName ? formatPrinterModelSubtitle(displayManufacturerName, displayModelName) : 'Select a printer model'}
       icon={LayersIcon}
     >
       {/* Header with printer info - only show when model is selected */}

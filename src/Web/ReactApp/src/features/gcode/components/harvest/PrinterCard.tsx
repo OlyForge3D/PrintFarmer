@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Printer, GcodeHarvestOperation, HarvestOptions, GcodeHarvestStatus } from '@/types/api';
 import { getHarvestErrorInfo } from '@/common/utils/harvestErrorHelper';
+import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
 import { ProgressBar } from '@/common/components/ui';
 import { ErrorIcon } from './ErrorIcon';
 
@@ -30,7 +31,7 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
   const statusColor = printer.isOnline ? 'text-pf-success' : 'text-pf-text-tertiary';
   const statusLabel = printer.isOnline ? 'Online' : 'Offline';
   // Model/location string
-  const modelLoc = [printer.manufacturerName, printer.modelName].filter(Boolean).join(' • ');
+  const modelLoc = formatPrinterModelSubtitle(printer.manufacturerName, printer.modelName);
 
   // Progress (if operation is running)
   const isRunning = !!operation && operation.status === GcodeHarvestStatus.Running;
