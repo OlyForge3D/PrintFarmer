@@ -6,8 +6,9 @@ using System.Xml;
 namespace Farm.Infrastructure.Services.Models;
 
 /// <summary>
-/// Best-effort model analysis implementation. Supports STL (ASCII and binary) and 3MF to extract
-/// triangle count and bounding-box based dimensions. Returns null for unsupported formats.
+/// Best-effort model analysis implementation. Supports STL (ASCII and binary), 3MF, and OBJ to
+/// extract triangle/face count and bounding-box based dimensions. Returns null for unsupported
+/// formats.
 /// </summary>
 /// <remarks>
 /// This is deliberately best-effort metadata extraction, not a slicing pre-flight gate (see
@@ -67,7 +68,12 @@ public class ModelAnalysisService : IModelAnalysisService
             return await AnalyzeThreeMfAsync(filePath, cancellationToken);
         }
 
-        // Unsupported formats (OBJ, PLY, STEP, ...) return null: unanalyzed, not invalid.
+        if (extension == ".obj")
+        {
+            return await AnalyzeObjAsync(filePath, cancellationToken);
+        }
+
+        // Unsupported formats (PLY, STEP, ...) return null: unanalyzed, not invalid.
         return null;
     }
 
@@ -275,6 +281,106 @@ public class ModelAnalysisService : IModelAnalysisService
                 return new ModelAnalysisResult(null, null, null, (int)actualTriangles, IsValid: false, ValidationErrors: ["Failed to read binary STL triangle data"]);
             }
         }
+    }
+
+    /// <summary>
+    /// Analyzes a Wavefront OBJ file to extract vertex/face-derived bounding-box dimensions and a
+    /// face count. OBJ is a plain-text format with no structural framing (unlike STL's triangle
+    /// count or 3MF's ZIP/XML container), so "structurally unreadable" here means: no vertex data
+    /// at all, a vertex/face line that cannot be parsed, or a face referencing a vertex index that
+    /// doesn't exist (#1866) — not whether the geometry is watertight or printable (#1811/#1814).
+    /// </summary>
+    private static async Task<ModelAnalysisResult?> AnalyzeObjAsync(string filePath, CancellationToken cancellationToken)
+    {
+        using FileStream fs = File.OpenRead(filePath);
+        using StreamReader sr = new(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+
+        double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
+        double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
+        int vertexCount = 0;
+        int faceCount = 0;
+        string? line;
+        while ((line = await sr.ReadLineAsync(cancellationToken)) != null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string trimmed = line.Trim();
+            if (trimmed.Length == 0 || trimmed[0] == '#')
+            {
+                continue;
+            }
+
+            string[] parts = trimmed.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0)
+            {
+                continue;
+            }
+
+            // "v" is an exact token match so this doesn't also match "vn" (normals) or
+            // "vt" (texture coordinates), which have a different, unrelated float arity.
+            if (parts[0] == "v")
+            {
+                if (parts.Length < 4 ||
+                    !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double vx) ||
+                    !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double vy) ||
+                    !double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out double vz))
+                {
+                    return new ModelAnalysisResult(null, null, null, 0, IsValid: false, ValidationErrors: [$"Malformed vertex line: '{trimmed}'"]);
+                }
+
+                vertexCount++;
+                minX = Math.Min(minX, vx);
+                minY = Math.Min(minY, vy);
+                minZ = Math.Min(minZ, vz);
+                maxX = Math.Max(maxX, vx);
+                maxY = Math.Max(maxY, vy);
+                maxZ = Math.Max(maxZ, vz);
+            }
+            else if (parts[0] == "f")
+            {
+                if (parts.Length < 4)
+                {
+                    return new ModelAnalysisResult(null, null, null, 0, IsValid: false, ValidationErrors: [$"Malformed face line (needs at least 3 vertex references): '{trimmed}'"]);
+                }
+
+                for (int i = 1; i < parts.Length; i++)
+                {
+                    // Face vertex refs may be "v", "v/vt", "v/vt/vn", or "v//vn"; only the first
+                    // (vertex) index matters for structural validation.
+                    string indexToken = parts[i].Split('/')[0];
+                    if (!int.TryParse(indexToken, NumberStyles.Integer, CultureInfo.InvariantCulture, out int rawIndex) || rawIndex == 0)
+                    {
+                        return new ModelAnalysisResult(null, null, null, 0, IsValid: false, ValidationErrors: [$"Malformed face vertex index '{parts[i]}' in line: '{trimmed}'"]);
+                    }
+
+                    // OBJ indices are 1-based; negative indices are relative to the current vertex count.
+                    int resolvedIndex = rawIndex > 0 ? rawIndex : vertexCount + rawIndex + 1;
+                    if (resolvedIndex < 1 || resolvedIndex > vertexCount)
+                    {
+                        return new ModelAnalysisResult(null, null, null, 0, IsValid: false, ValidationErrors: [$"Face references vertex index {rawIndex}, which is out of range (mesh has {vertexCount} vertices so far)"]);
+                    }
+                }
+
+                faceCount++;
+            }
+        }
+
+        if (vertexCount == 0)
+        {
+            return new ModelAnalysisResult(null, null, null, 0, IsValid: false, ValidationErrors: ["No vertex data found in mesh"]);
+        }
+
+        if (double.IsInfinity(minX) || double.IsInfinity(minY) || double.IsInfinity(minZ))
+        {
+            return new ModelAnalysisResult(null, null, null, 0, IsValid: false, ValidationErrors: ["No vertex data found in mesh"]);
+        }
+
+        double dimX = maxX - minX;
+        double dimY = maxY - minY;
+        double dimZ = maxZ - minZ;
+
+        // faceCount is a polygon count, not a strict triangle count (OBJ faces need not be
+        // triangles), but it's the closest available analogue and is reported best-effort.
+        return new ModelAnalysisResult(dimX, dimY, dimZ, faceCount);
     }
 
     /// <summary>

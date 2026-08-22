@@ -500,11 +500,120 @@ public class ModelAnalysisServiceTests : IDisposable
     [Fact]
     public async Task AnalyzeModelAsync_UnsupportedExtension_ReturnsNull()
     {
-        string path = WriteFile("model.obj", Encoding.UTF8.GetBytes("v 0 0 0\n"));
+        string path = WriteFile("model.step", Encoding.UTF8.GetBytes("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n"));
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".step", CancellationToken.None);
+
+        Assert.Null(result);
+    }
+
+    // ---- OBJ (#1866) ------------------------------------------------------
+
+    [Fact]
+    public async Task AnalyzeModelAsync_ValidObj_ReturnsDimensionsAndFaceCount()
+    {
+        const string obj = "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 2 3\nf 1 2 4\n";
+        string path = WriteFile("model.obj", Encoding.UTF8.GetBytes(obj));
 
         ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".obj", CancellationToken.None);
 
-        Assert.Null(result);
+        Assert.NotNull(result);
+        Assert.True(result!.IsValid);
+        Assert.Equal(2, result.TriangleCount);
+        Assert.Equal(1.0, result.DimensionX);
+        Assert.Equal(1.0, result.DimensionY);
+        Assert.Equal(1.0, result.DimensionZ);
+    }
+
+    [Fact]
+    public async Task AnalyzeModelAsync_ObjCaseInsensitiveExtension_IsAnalyzed()
+    {
+        const string obj = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        string path = WriteFile("model.OBJ", Encoding.UTF8.GetBytes(obj));
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".OBJ", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.True(result!.IsValid);
+    }
+
+    [Fact]
+    public async Task AnalyzeModelAsync_ObjWithNoVertices_ReturnsInvalid()
+    {
+        // A plain-text file saved with a ".obj" extension (the #1866 repro): parseable as text,
+        // but no "v" lines at all, so there is no geometry to read.
+        string path = WriteFile("model.obj", Encoding.UTF8.GetBytes("This is not a 3D model.\n"));
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".obj", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.False(result!.IsValid);
+        Assert.Contains(result.ValidationErrors!, e => e.Contains("No vertex data", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task AnalyzeModelAsync_ObjWithMalformedVertexLine_ReturnsInvalid()
+    {
+        string path = WriteFile("model.obj", Encoding.UTF8.GetBytes("v 0 0 notanumber\n"));
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".obj", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.False(result!.IsValid);
+        Assert.Contains(result.ValidationErrors!, e => e.Contains("Malformed vertex", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task AnalyzeModelAsync_ObjFaceReferencesOutOfRangeVertex_ReturnsInvalid()
+    {
+        const string obj = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 99\n";
+        string path = WriteFile("model.obj", Encoding.UTF8.GetBytes(obj));
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".obj", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.False(result!.IsValid);
+        Assert.Contains(result.ValidationErrors!, e => e.Contains("out of range", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task AnalyzeModelAsync_ObjFaceWithFewerThanThreeVertices_ReturnsInvalid()
+    {
+        const string obj = "v 0 0 0\nv 1 0 0\nf 1 2\n";
+        string path = WriteFile("model.obj", Encoding.UTF8.GetBytes(obj));
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".obj", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.False(result!.IsValid);
+        Assert.Contains(result.ValidationErrors!, e => e.Contains("Malformed face", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task AnalyzeModelAsync_ObjFaceWithNonNumericVertexIndex_ReturnsInvalid()
+    {
+        const string obj = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 abc\n";
+        string path = WriteFile("model.obj", Encoding.UTF8.GetBytes(obj));
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".obj", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.False(result!.IsValid);
+        Assert.Contains(result.ValidationErrors!, e => e.Contains("Malformed face vertex index", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task AnalyzeModelAsync_ObjIgnoresNormalAndTextureLines()
+    {
+        // "vn"/"vt" lines must not be mistaken for "v" (vertex) lines.
+        const string obj = "vn 0 0 1\nvt 0 0\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        string path = WriteFile("model.obj", Encoding.UTF8.GetBytes(obj));
+
+        ModelAnalysisResult? result = await _sut.AnalyzeModelAsync(path, ".obj", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.True(result!.IsValid);
+        Assert.Equal(1, result.TriangleCount);
     }
 
     // ---- Test fixture builders --------------------------------------------
