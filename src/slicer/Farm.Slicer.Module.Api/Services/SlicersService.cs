@@ -259,6 +259,39 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
             bool insertingNewInstanceRecord = svc is null && hasInstanceId;
 
+            // Look up the paired Worker row before mutating anything, so a match against an
+            // existing InstanceId can be vetted for a live incumbent (issue #1860) prior to
+            // overwriting credentials. Reused below for the "synchronize to Worker table" step
+            // instead of querying a second time.
+            Worker? existingWorker = svc is not null
+                ? await _workerRepo.GetByServiceIdAsync(svc.Id.ToString())
+                : null;
+
+            if (attempt == 0 && svc is not null && existingWorker is not null && existingWorker.Status != WorkerStatus.Offline)
+            {
+                // Only applied on the first attempt: attempt 1 is reached exclusively via the
+                // DbUpdateException retry below, which recovers from two concurrent callers
+                // racing to *insert* the same brand-new InstanceId (insertingNewInstanceRecord
+                // was true on attempt 0 — there was no pre-existing row to squat). The row found
+                // on retry is the race winner's own just-created insert, not a previously
+                // established worker, so it must not be subjected to this guard.
+                //
+                // The shared registration key does not prove possession of this specific
+                // worker's identity. A worker whose paired row is not Offline is still live —
+                // its Status only reaches Offline via its own authenticated deregister call or
+                // the heartbeat monitor detecting a genuinely stale heartbeat — so allowing the
+                // overwrite here would let any holder of the shared key revoke a running
+                // worker's credentials by registering with its (predictable, per #1855)
+                // InstanceId. Reject instead of silently replacing credentials; a worker that
+                // actually crashed is reclaimed once the heartbeat monitor marks it Offline.
+                _logger.LogWarning(
+                    "Rejected registration for instance {InstanceId}: existing worker {WorkerId} is not Offline (status={Status}).",
+                    LogSanitizer.Sanitize(dto.InstanceId),
+                    existingWorker.Id,
+                    existingWorker.Status);
+                throw SlicerInstanceIdConflictException.ForInstanceId(dto.InstanceId!);
+            }
+
             if (svc is not null)
             {
                 _logger.LogInformation(
@@ -305,8 +338,11 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                 await _repo.AddAsync(svc, ct);
             }
 
-            // Synchronize to Worker table for dispatcher
-            Worker? worker = await _workerRepo.GetByServiceIdAsync(svc.Id.ToString());
+            // Synchronize to Worker table for dispatcher. For the update path this is the same
+            // row already fetched and vetted above (avoids a second query); for the insert path
+            // existingWorker is null (svc.Id didn't exist yet when it was fetched), so this
+            // falls through to a fresh lookup that correctly finds no row.
+            Worker? worker = existingWorker ?? await _workerRepo.GetByServiceIdAsync(svc.Id.ToString());
 
             if (worker != null)
             {
