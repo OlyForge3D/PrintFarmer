@@ -1020,6 +1020,11 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<int>("DisableSource")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("DisabledReason")
                         .HasMaxLength(1024)
                         .HasColumnType("nvarchar(1024)");

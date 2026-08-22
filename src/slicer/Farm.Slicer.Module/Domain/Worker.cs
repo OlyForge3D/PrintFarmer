@@ -108,14 +108,33 @@ public class Worker
     public DateTime UpdatedAt { get; set; }
 
     /// <summary>
-    /// Whether the worker is manually disabled by an admin.
+    /// Whether the worker is currently disabled, whether by an administrator or automatically.
     /// </summary>
+    /// <remarks>
+    /// Read <see cref="DisableSource"/> to tell which. A disabled worker keeps heartbeating but
+    /// is excluded from job assignment.
+    /// </remarks>
     public bool IsDisabled { get; set; }
 
     /// <summary>
-    /// Reason for disabling (if applicable).
+    /// Human-readable reason for disabling (if applicable). Display only — never branch on it.
     /// </summary>
+    /// <remarks>
+    /// This is free text: an administrator supplies it verbatim, so it can be made to look like
+    /// anything, including any value an automatic disabler writes. <see cref="DisableSource"/>
+    /// is the trustworthy discriminator.
+    /// </remarks>
     public string? DisabledReason { get; set; }
+
+    /// <summary>
+    /// What disabled this worker, used to decide whether the disable may be lifted automatically.
+    /// </summary>
+    /// <remarks>
+    /// The distinction matters because the sources must be treated very differently: an automatic
+    /// disable is lifted when the worker comes back, whereas an administrator's ban must survive a
+    /// restart, a redeploy, and a long outage. See <see cref="WorkerDisableSource"/>.
+    /// </remarks>
+    public WorkerDisableSource DisableSource { get; set; } = WorkerDisableSource.None;
 
     /// <summary>
     /// Total number of artifacts produced by this worker.
@@ -126,6 +145,85 @@ public class Worker
     /// Aggregate bytes written for produced artifacts (for capacity planning and monitoring).
     /// </summary>
     public long ArtifactBytesProduced { get; set; }
+}
+
+/// <summary>
+/// What caused a <see cref="Worker"/> to be disabled.
+/// </summary>
+/// <remarks>
+/// This exists because the reason text cannot safely carry this meaning. An earlier design
+/// inferred "an administrator did this" from the reason string — anything that was neither
+/// blank nor the deregistration literal was assumed to be an administrator's. That is wrong in
+/// both directions: the circuit breaker writes its own descriptive reason and was therefore
+/// misread as an administrator, which exempted circuit-broken workers from cleanup forever; and
+/// an administrator's reason is unvalidated free text, so typing the deregistration literal
+/// made a real ban clearable by the next registration. An explicit column makes the
+/// classification total: a new automatic disabler has to name itself here, rather than silently
+/// defaulting to the most privileged interpretation.
+/// </remarks>
+public enum WorkerDisableSource
+{
+    /// <summary>
+    /// The worker is not disabled, or was disabled before this column existed and could not be
+    /// attributed. Treated as automatic, which matches the behaviour before the column existed.
+    /// </summary>
+    None = 0,
+
+    /// <summary>
+    /// An administrator deliberately disabled this worker. The only value that survives a
+    /// restart, a redeploy, and the stale-worker sweep.
+    /// </summary>
+    Administrator = 1,
+
+    /// <summary>
+    /// Deregistration disabled the worker as it shut down. Lifted when the worker registers again.
+    /// </summary>
+    Deregistration = 2,
+
+    /// <summary>
+    /// The circuit breaker disabled the worker after repeated job failures. Automatic, so it is
+    /// lifted on re-registration and does not exempt the worker from the stale sweep.
+    /// </summary>
+    CircuitBreaker = 3,
+}
+
+/// <summary>
+/// Well-known <see cref="Worker.DisabledReason"/> texts, and the rule for telling an automatic
+/// lifecycle disable apart from an administrator's deliberate one.
+/// </summary>
+/// <remarks>
+/// The reason strings here are for display and logging only. Classification goes through
+/// <see cref="IsAdministrativeDisable"/>, which reads <see cref="Worker.DisableSource"/> and
+/// never the text — see <see cref="WorkerDisableSource"/> for why the text is untrustworthy.
+/// </remarks>
+public static class WorkerDisableReasons
+{
+    /// <summary>
+    /// Recorded when deregistration disables a worker, rather than an administrator.
+    /// </summary>
+    public const string Deregistered = "Slicer service deregistered";
+
+    /// <summary>
+    /// Builds the reason recorded when the circuit breaker disables a worker.
+    /// </summary>
+    /// <param name="failureCount">Number of failures observed in the window.</param>
+    /// <param name="windowSeconds">Length of the observation window, in seconds.</param>
+    /// <returns>The reason text to store.</returns>
+    public static string CircuitBreaker(int failureCount, int windowSeconds) =>
+        $"Circuit breaker: {failureCount} failures in {windowSeconds}s";
+
+    /// <summary>
+    /// Whether a worker's disabled state was applied deliberately by an administrator, and so
+    /// must be preserved across restarts and excluded from automatic cleanup.
+    /// </summary>
+    /// <param name="worker">The worker to classify.</param>
+    /// <returns><see langword="true"/> when an administrator disabled this worker.</returns>
+    public static bool IsAdministrativeDisable(Worker worker)
+    {
+        ArgumentNullException.ThrowIfNull(worker);
+
+        return worker.IsDisabled && worker.DisableSource == WorkerDisableSource.Administrator;
+    }
 }
 
 /// <summary>

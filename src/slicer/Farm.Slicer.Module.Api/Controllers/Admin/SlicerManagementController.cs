@@ -32,15 +32,20 @@ public class SlicerManagementController(
     }
 
     /// <summary>
-    /// Deregisters a slicer service (admin action).
+    /// Permanently removes a slicer service (admin action).
     /// </summary>
     /// <param name="id">The slicer service ID.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// Uses the purge path rather than worker deregistration: worker-initiated deregistration
+    /// may retain the row so a returning worker is re-identified, whereas this action means
+    /// permanent removal of both the service and its paired worker record.
+    /// </remarks>
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeregisterAsync(Guid id, CancellationToken ct)
     {
         _logger.LogWarning("Admin deregistering slicer service {SlicerId}", id);
-        bool ok = await _service.DeregisterAsync(id, ct);
+        bool ok = await _service.PurgeAsync(id, ct);
         return ok ? NoContent() : NotFound();
     }
 }

@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -68,7 +69,8 @@ public class WorkerCircuitBreakerService(
             {
                 await workerRepo.DisableWorkerAsync(
                     workerId,
-                    $"Circuit breaker: {failureCount} failures in {_settings.WindowSeconds}s");
+                    WorkerDisableReasons.CircuitBreaker(failureCount, _settings.WindowSeconds),
+                    WorkerDisableSource.CircuitBreaker);
                 await workerRepo.SaveChangesAsync();
             }
             catch (Exception ex)

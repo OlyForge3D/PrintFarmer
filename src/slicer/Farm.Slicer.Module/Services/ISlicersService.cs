@@ -30,11 +30,24 @@ public interface ISlicersService
     /// <returns>True if the heartbeat was recorded successfully.</returns>
     Task<bool> HeartbeatAsync(Guid id, HeartbeatDto dto, CancellationToken ct);
 
-    /// <summary>Deregisters a slicer service.</summary>
+    /// <summary>Deregisters a slicer service at the worker's own request.</summary>
     /// <param name="id">The slicer service identifier.</param>
+    /// <param name="retainForReregistration">
+    /// Whether the caller will return under the same instance identity and wants its row kept so
+    /// it can be re-identified instead of registering as a new worker. Only a worker with a
+    /// stable, configured instance ID may set this: workers that fall back to a random
+    /// per-process identity never return under the same ID, so retaining their rows would leave
+    /// an unreclaimable row behind on every restart.
+    /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>True if the service was successfully deregistered.</returns>
-    Task<bool> DeregisterAsync(Guid id, CancellationToken ct);
+    Task<bool> DeregisterAsync(Guid id, bool retainForReregistration, CancellationToken ct);
+
+    /// <summary>Permanently removes a slicer service and its paired worker record.</summary>
+    /// <param name="id">The slicer service identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>True if the service was removed; false if it was not found.</returns>
+    Task<bool> PurgeAsync(Guid id, CancellationToken ct);
 
     /// <summary>Rotates the API key for a slicer service.</summary>
     /// <param name="id">The slicer service identifier.</param>

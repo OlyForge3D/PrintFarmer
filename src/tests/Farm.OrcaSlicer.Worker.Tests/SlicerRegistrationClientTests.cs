@@ -154,6 +154,49 @@ public sealed class SlicerRegistrationClientTests
         }
     }
 
+    /// <summary>
+    /// Retention is opt-in and only a stable, configured instance ID may request it. A worker with
+    /// no configured ID generates a fresh random identity every process start, so asking the
+    /// registry to keep its row would strand an unreclaimable record on every restart. Workers
+    /// deployed by deploy-docker.sh always have an ID configured; ones started outside that
+    /// tooling need not.
+    /// </summary>
+    [Theory]
+    [InlineData("orcaslicer-worker-1", true)]
+    [InlineData("  worker-b  ", true)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    public async Task DeregisterAsync_RequestsRetentionOnlyForStableInstanceId(
+        string? configuredInstanceId,
+        bool expectRetain)
+    {
+        Uri? requestUri = null;
+        CapturingHandler handler = new CapturingHandler(request =>
+        {
+            requestUri = request.RequestUri;
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        using HttpClient httpClient = new HttpClient(handler);
+        IConfiguration configuration = CreateConfiguration(
+            new KeyValuePair<string, string?>("SlicerApi:BaseUrl", "http://api:5245"),
+            new KeyValuePair<string, string?>("WorkerAuth:SharedKey", "test-registration-key"),
+            new KeyValuePair<string, string?>("Worker:InstanceId", configuredInstanceId));
+        SlicerRegistrationClient client = new SlicerRegistrationClient(
+            httpClient,
+            configuration,
+            new StubBinaryDetector(),
+            NullLogger<SlicerRegistrationClient>.Instance,
+            new WorkerCapabilityProvider(configuration));
+
+        Guid serviceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        bool ok = await client.DeregisterAsync(serviceId, "service-key");
+
+        _ = ok.Should().BeTrue();
+        _ = requestUri.Should().NotBeNull();
+        _ = requestUri!.AbsolutePath.Should().Be($"/api/slicers/{serviceId}/deregister");
+        _ = requestUri.Query.Should().Be(expectRetain ? "?retain=true" : string.Empty);
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.OK, SlicerHeartbeatResult.Succeeded)]
     [InlineData(HttpStatusCode.ServiceUnavailable, SlicerHeartbeatResult.Retry)]
