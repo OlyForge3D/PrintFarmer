@@ -175,7 +175,11 @@ function AddPrinterModalContent({
         toast.error(result.message || 'Connection failed', { duration: 8000 });
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Connection test failed';
+      // `apiClient` rejects with a plain `ApiError` (not an `Error` instance) built by the
+      // Axios response interceptor, so `err instanceof Error` never matches and the real
+      // server-provided message (e.g. "The requested server address is not allowed.") was
+      // silently dropped in favor of a generic fallback. See #1865.
+      const message = getErrorMessage(err, 'Connection test failed');
       toast.error(message, { duration: 8000 });
     } finally {
       setIsTesting(false);

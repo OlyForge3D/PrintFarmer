@@ -4,10 +4,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AddPrinterModal } from '../AddPrinterModal';
 
 const createPrinter = vi.fn();
+const testConnection = vi.fn();
+
+const { mockToast } = vi.hoisted(() => ({
+  mockToast: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() },
+}));
+
+vi.mock('sonner', () => ({ toast: mockToast }));
 
 vi.mock('@/services/api', () => ({
   apiClient: {
     createPrinter: (...args: unknown[]) => createPrinter(...args),
+    testConnection: (...args: unknown[]) => testConnection(...args),
   },
 }));
 
@@ -146,5 +154,77 @@ describe('AddPrinterModal', () => {
     await user.click(screen.getByRole('button', { name: /add printer/i }));
 
     expect(await screen.findByText('Failed to add printer')).toBeInTheDocument();
+  });
+
+  // #1865: a failed connection test (e.g. an unreachable/rejected Moonraker URL) must
+  // surface the backend's actual rejection reason to the user, and must keep doing so
+  // on every retry rather than silently no-op'ing or collapsing to a generic message.
+  describe('Test connection feedback (#1865)', () => {
+    it('surfaces the backend rejection message via an error toast on test failure', async () => {
+      const user = userEvent.setup();
+      // apiClient rejects with the shared ApiError shape built by the Axios response
+      // interceptor (see src/services/api.ts) — not a raw Error instance.
+      testConnection.mockRejectedValue({
+        message: 'The requested server address is not allowed.',
+        statusCode: 400,
+        data: { success: false, message: 'The requested server address is not allowed.' },
+        isAxiosError: true,
+      });
+
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      await user.click(screen.getByRole('button', { name: /test/i }));
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith(
+          'The requested server address is not allowed.',
+          expect.objectContaining({ duration: 8000 })
+        );
+      });
+    });
+
+    it('continues to surface feedback on a repeated test attempt (no silent no-op on retry)', async () => {
+      const user = userEvent.setup();
+      testConnection.mockRejectedValue({
+        message: 'The requested server address is not allowed.',
+        statusCode: 400,
+        data: { success: false, message: 'The requested server address is not allowed.' },
+        isAxiosError: true,
+      });
+
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      const testButton = screen.getByRole('button', { name: /test/i });
+      await user.click(testButton);
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledTimes(1));
+
+      await user.click(testButton);
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledTimes(2));
+
+      expect(mockToast.error).toHaveBeenNthCalledWith(
+        2,
+        'The requested server address is not allowed.',
+        expect.objectContaining({ duration: 8000 })
+      );
+    });
+
+    it('shows a success toast when the connection test succeeds', async () => {
+      const user = userEvent.setup();
+      testConnection.mockResolvedValue({ success: true, message: 'Connected successfully' });
+
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      await user.click(screen.getByRole('button', { name: /test/i }));
+
+      await waitFor(() => {
+        expect(mockToast.success).toHaveBeenCalledWith(
+          'Connected successfully',
+          expect.objectContaining({ duration: 5000 })
+        );
+      });
+    });
   });
 });

@@ -7,6 +7,19 @@ import { PrinterBackend } from '@/types/api';
 const mockUsePrinterDetails = vi.fn();
 const mockUseUpdatePrinter = vi.fn();
 const mockUsePrinterCameras = vi.fn();
+const testConnection = vi.fn();
+
+const { mockToast } = vi.hoisted(() => ({
+  mockToast: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() },
+}));
+
+vi.mock('sonner', () => ({ toast: mockToast }));
+
+vi.mock('@/services/api', () => ({
+  apiClient: {
+    testConnection: (...args: unknown[]) => testConnection(...args),
+  },
+}));
 
 vi.mock('@/common/hooks/useApi', () => ({
   usePrinterDetails: (...args: unknown[]) => mockUsePrinterDetails(...args),
@@ -400,5 +413,50 @@ describe('EditPrinterModal', () => {
     const checkbox = await screen.findByLabelText(/enable obico monitoring for this printer/i);
     expect(checkbox).not.toBeDisabled();
     expect(checkbox).toBeChecked();
+  });
+
+  // #1865: a failed connection test (e.g. an unreachable/rejected Moonraker URL) must
+  // surface the backend's actual rejection reason to the user, and must keep doing so
+  // on every retry rather than silently no-op'ing or collapsing to a generic message.
+  describe('Test connection feedback (#1865)', () => {
+    it('surfaces the backend rejection message via an error toast on test failure, repeatedly', async () => {
+      const user = userEvent.setup();
+      // apiClient rejects with the shared ApiError shape built by the Axios response
+      // interceptor (see src/services/api.ts) — not a raw Error instance.
+      testConnection.mockRejectedValue({
+        message: 'The requested server address is not allowed.',
+        statusCode: 400,
+        data: { success: false, message: 'The requested server address is not allowed.' },
+        isAxiosError: true,
+      });
+
+      render(
+        <EditPrinterModal
+          printerId="printer-1"
+          isOpen
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+        />
+      );
+
+      const testButton = await screen.findByRole('button', { name: /test/i });
+
+      await user.click(testButton);
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith(
+          'The requested server address is not allowed.',
+          expect.objectContaining({ duration: 8000 })
+        );
+      });
+
+      // Retrying the test must keep surfacing feedback, not silently no-op.
+      await user.click(testButton);
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledTimes(2));
+      expect(mockToast.error).toHaveBeenNthCalledWith(
+        2,
+        'The requested server address is not allowed.',
+        expect.objectContaining({ duration: 8000 })
+      );
+    });
   });
 });
