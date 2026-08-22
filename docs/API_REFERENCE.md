@@ -56,7 +56,12 @@ Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields
   UPC-12 ↔ EAN-13 equivalence.
 - `gtin` is intentionally non-unique — multipacks and vendor parent listings
   legitimately share one. When several filaments match, the lowest-ID filament
-  wins deterministically.
+  wins deterministically. That tie-break applies to the matches actually found:
+  the server-side `gtin=` filter is an exact string match, and the unfiltered
+  equivalence scan runs only when it yields nothing, so a lower-ID filament
+  storing the same logical GTIN in a *different* format may not participate.
+  PrintFarmer always writes the canonical 14-digit form, so this only arises
+  from data written outside PrintFarmer.
 
 > **Operator note.** Barcode resolution requires a Spoolman instance exposing the
 > `gtin` field, which the bundled PrintFarmer Spoolman image provides. If you

@@ -60,7 +60,17 @@ class NormalizeGtinCSharpParityTests(unittest.TestCase):
         self.assertIsNone(normalize_gtin("123456789011"))
 
     def test_rejects_oversized_raw_input(self):
-        self.assertIsNone(normalize_gtin("9" * 65))
+        # Embeds a genuinely valid GTIN-13 padded with enough non-digit separators to push
+        # the RAW input past MAX_RAW_LENGTH. Without the length guard, digit-filtering would
+        # still extract "4006381333931" -- valid payload, correct check digit -- and return
+        # non-null. An all-digit oversized string (e.g. "9" * 65) would NOT test this: the
+        # 8/12/13/14 length check rejects it on its own, so the test would pass even with the
+        # guard removed. Mirrors Normalize_OversizedRawInput_ReturnsNullEvenWhenDigitsWould
+        # OtherwiseBeValid in GtinNormalizerTests.cs.
+        oversized_but_digits_valid = "-" * 60 + "4006381333931"
+        self.assertGreater(len(oversized_but_digits_valid), backfill.MAX_RAW_LENGTH)
+        self.assertEqual(normalize_gtin("4006381333931"), "04006381333931", "inner payload must be valid")
+        self.assertIsNone(normalize_gtin(oversized_but_digits_valid))
 
     def test_zero_pad_equivalence_across_formats(self):
         # GTIN-12/13/14 forms of the same product normalize identically.
@@ -91,6 +101,11 @@ class AsciiDigitBoundaryTests(unittest.TestCase):
         # must drop it before any int() conversion.
         self.assertTrue("\u00b3".isdigit())
         self.assertIsNone(normalize_gtin("85007871492\u00b3"))
+
+    def test_rejects_mixed_ascii_and_arabic_indic_digits(self):
+        # Mirrors Normalize_NonAsciiDecimalDigits in GtinNormalizerTests.cs: dropping the
+        # non-ASCII digits leaves only 9 ASCII digits, which is not a valid GTIN length.
+        self.assertIsNone(normalize_gtin("\u0661\u06623\u066456789012"))
 
     def test_result_is_always_ascii_when_accepted(self):
         for raw in ("40123455", "123456789012", "4006381333931", "04006381333931"):
