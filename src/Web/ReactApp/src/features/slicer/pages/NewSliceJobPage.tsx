@@ -3007,8 +3007,14 @@ export const NewSliceJobPage: React.FC = () => {
 
         </div>
 
-        {/* RIGHT SIDE: 3D Workspace */}
-        <div className="flex-1 flex flex-col min-h-0">
+        {/* RIGHT SIDE: 3D Workspace
+             `min-w-0` is required here: without it this flex-row item falls back to its
+             default `min-width: auto`, which is the max-content width of its descendants
+             (toolbar buttons, transform panels, etc). At the tablet (lg) breakpoint the
+             fixed-width left sidebar plus that unconstrained max-content width exceeds the
+             viewport, pushing the model viewer and the Slice Plate action past the
+             `overflow-hidden` form and off-screen (issue #1868). */}
+        <div data-testid="slicer-workspace-panel" className="min-w-0 flex-1 flex flex-col min-h-0">
           <div className="relative bg-pf-panel border border-pf-border rounded-lg flex-1 overflow-hidden flex flex-col min-h-0">
             {selectedPrinterId ? (
               <SlicerWorkspaceBoundary

@@ -482,6 +482,27 @@ describe('NewSliceJobPage', () => {
     });
   });
 
+  describe('Tablet-width workspace clipping (issue #1868)', () => {
+    it('gives the 3D workspace panel min-w-0 so it shrinks instead of overflowing the row', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('printer-slicer-selector')).toBeInTheDocument();
+      });
+
+      // The settings sidebar is a fixed-width flex sibling (`lg:w-96`); this
+      // panel must carry `min-w-0` or, lacking one, its default
+      // `min-width: auto` lets its descendants' max-content width (toolbar
+      // buttons, transform panels, etc.) push the row wider than the
+      // viewport at the tablet (lg) breakpoint, clipping the model viewer
+      // and the Slice Plate action outside the form's `overflow-hidden`
+      // bounds.
+      const workspacePanel = screen.getByTestId('slicer-workspace-panel');
+      expect(workspacePanel.className).toContain('min-w-0');
+      expect(workspacePanel.className).toContain('flex-1');
+    });
+  });
+
   describe('Slicer Dropdown', () => {
     it('should show slicer types not worker names', async () => {
       renderWithProviders(<NewSliceJobPage />);
