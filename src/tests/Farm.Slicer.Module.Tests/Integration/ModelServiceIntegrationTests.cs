@@ -712,8 +712,9 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// #1866: a malformed STL (truncated triangle data) must be rejected at upload time with a
-    /// clear validation error, instead of being silently persisted with IsValid=false metadata.
+    /// #1866: a malformed STL (triangle-count mismatch — header declares more triangles than the
+    /// file actually contains) must be rejected at upload time with a clear validation error,
+    /// instead of being silently persisted with IsValid=false metadata.
     /// </summary>
     [Fact]
     public async Task UploadModelAsync_WithTruncatedStlFile_ThrowsValidationException()
@@ -726,6 +727,29 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         byte[] content = new byte[84 + 50];
         BitConverter.GetBytes(5u).CopyTo(content, 80);
         IFormFile formFile = CreateMockFormFile("truncated.stl", content);
+
+        Func<Task> act = () => service.UploadModelAsync(formFile, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ArgumentException>())
+            .WithMessage("*failed validation*");
+    }
+
+    /// <summary>
+    /// #1866: a malformed STL with a truncated header (the file is smaller than the fixed
+    /// 84-byte STL header/triangle-count preamble, so it cannot even be classified as ASCII or
+    /// binary) must be rejected at upload time, not just triangle-count mismatches on an
+    /// otherwise-complete header.
+    /// </summary>
+    [Fact]
+    public async Task UploadModelAsync_WithTruncatedStlHeader_ThrowsValidationException()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+
+        // Only 10 bytes total: far short of the 80-byte header + 4-byte triangle count that a
+        // binary STL requires before any triangle data can even be located.
+        byte[] content = new byte[10];
+        IFormFile formFile = CreateMockFormFile("truncated-header.stl", content);
 
         Func<Task> act = () => service.UploadModelAsync(formFile, CancellationToken.None);
 

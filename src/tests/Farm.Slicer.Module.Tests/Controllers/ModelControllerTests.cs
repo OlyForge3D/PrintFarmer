@@ -133,6 +133,37 @@ public class ModelControllerTests
         Assert.Equal("clientUploadId must be a non-empty GUID.", badRequest.Value);
     }
 
+    /// <summary>
+    /// #1866: when the underlying service rejects a malformed STL/OBJ upload by throwing
+    /// <see cref="ArgumentException"/>, the controller must surface it as a 400 Bad Request
+    /// carrying the validation message, not let it propagate as an unhandled 500.
+    /// </summary>
+    [Fact]
+    public async Task UploadModelAsync_WhenServiceRejectsMalformedFile_ReturnsBadRequestWithValidationMessage()
+    {
+        Mock<IModel3DFileService> mockService = new(MockBehavior.Strict);
+        const string validationMessage = "Model file 'malformed.stl' failed validation: Declared 5 triangles but only 1 could be read; file may be truncated";
+        _ = mockService.Setup(s => s.UploadModelAsync(
+            It.IsAny<IFormFile>(),
+            It.IsAny<IFormFile?>(),
+            It.IsAny<Guid>(),
+            It.IsAny<Guid?>(),
+            It.IsAny<CancellationToken>())).ThrowsAsync(new ArgumentException(validationMessage));
+
+        Model3DFilesController controller = CreateController(mockService);
+        using MemoryStream fakeFileStream = new(Encoding.UTF8.GetBytes("x"));
+        FormFile fakeFile = new(fakeFileStream, 0, 1, "file", "malformed.stl");
+
+        IActionResult result = await controller.UploadModelAsync(
+            fakeFile,
+            thumbnailFile: null,
+            clientUploadId: null,
+            CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal(validationMessage, badRequest.Value);
+    }
+
     [Fact]
     public async Task UploadModelAsync_WithClientUploadIdAndNoUserId_ReturnsUnauthorized()
     {

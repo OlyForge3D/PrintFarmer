@@ -45,6 +45,16 @@ public class ModelAnalysisService : IModelAnalysisService
     /// <summary>Maximum accepted XML nesting depth inside a 3MF model part.</summary>
     private const int MaxXmlDepth = 64;
 
+    /// <summary>
+    /// Maximum accepted length, in characters, for a single OBJ line. OBJ has no line-length
+    /// framing of its own (unlike STL's fixed-size binary header/records), so a single
+    /// pathological line (e.g. one huge "v"/"f" line with no newline) could otherwise force an
+    /// unbounded buffered read and a correspondingly expensive tokenize/parse pass within the
+    /// upload endpoint's existing request-size cap. This is comfortably larger than any
+    /// legitimate OBJ vertex/face line (#1866 review by Vasquez).
+    /// </summary>
+    private const int MaxObjLineLength = 65_536;
+
     private const string ModelPartSuffix = "3dmodel.model";
 
     public async Task<ModelAnalysisResult?> AnalyzeModelAsync(string filePath, string extension, CancellationToken cancellationToken = default)
@@ -303,8 +313,17 @@ public class ModelAnalysisService : IModelAnalysisService
         while ((line = await sr.ReadLineAsync(cancellationToken)) != null)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            string trimmed = line.Trim();
-            if (trimmed.Length == 0 || trimmed[0] == '#')
+            if (line.Length > MaxObjLineLength)
+            {
+                return new ModelAnalysisResult(null, null, null, 0, IsValid: false, ValidationErrors: [$"Line exceeds maximum accepted length of {MaxObjLineLength} characters"]);
+            }
+
+            // Strip a trailing "# ..." comment (OBJ comments may follow real data on the same
+            // line, e.g. "f 1 2 3 # triangle") before trimming/tokenizing, so a comment's words
+            // are never mistaken for additional face/vertex tokens.
+            int commentIndex = line.IndexOf('#');
+            string trimmed = (commentIndex >= 0 ? line[..commentIndex] : line).Trim();
+            if (trimmed.Length == 0)
             {
                 continue;
             }
