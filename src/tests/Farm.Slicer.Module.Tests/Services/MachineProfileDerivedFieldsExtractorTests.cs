@@ -174,6 +174,60 @@ public sealed class MachineProfileDerivedFieldsExtractorTests
         _ = result.HotendMaxTemperature.Should().BeNull();
     }
 
+    [Theory]
+    [InlineData("brass", NozzleType.Brass)]
+    [InlineData("hardened_steel", NozzleType.HardenedSteel)]
+    [InlineData("stainless_steel", NozzleType.StainlessSteel)]
+    [InlineData("tungsten_carbide", NozzleType.TungstenCarbide)]
+    [InlineData("abrasive", NozzleType.Abrasive)]
+    [InlineData("diamond", NozzleType.Diamond)]
+    [InlineData("ruby", NozzleType.Ruby)]
+    [InlineData("plated_copper", NozzleType.PlatedCopper)]
+    [InlineData("tool_steel", NozzleType.ToolSteel)]
+    public void Extract_WithEachBuiltInNozzleTypeString_ParsesToCorrespondingEnumValue(
+        string rawValue,
+        NozzleType expected)
+    {
+        // #1827: prior to this test only "brass" was covered (Extract_WithFullySpecifiedProfile_
+        // DerivesAllFacts below); the other 8 built-in OrcaSlicer nozzle_type strings had no
+        // regression coverage at all.
+        MachineProfileDerivedFields result = MachineProfileDerivedFieldsExtractor.Extract(
+            $$"""{"nozzle_type": "{{rawValue}}"}""");
+
+        _ = result.NozzleType.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("brass", "Brass")]
+    [InlineData("hardened_steel", "HardenedSteel")]
+    [InlineData("stainless_steel", "StainlessSteel")]
+    [InlineData("tungsten_carbide", "TungstenCarbide")]
+    [InlineData("abrasive", "Abrasive")]
+    [InlineData("diamond", "Diamond")]
+    [InlineData("ruby", "Ruby")]
+    [InlineData("plated_copper", "PlatedCopper")]
+    [InlineData("tool_steel", "ToolSteel")]
+    public void Extract_ParsedNozzleType_MatchesBuiltInCatalogMaterialNameConvention(
+        string orcaSlicerRawValue,
+        string catalogMaterialName)
+    {
+        // #1827 dispatch/backward-compat parity: NozzleModelDefinition.NozzleType
+        // (ComponentModels.cs) recomputes the wire-contract enum via
+        // Enum.TryParse&lt;NozzleType&gt;(NozzleMaterial.Name, ...). For this OrcaSlicer-facing
+        // parser and the #1824 user-editable NozzleMaterial catalog to stay in parity, every
+        // built-in raw slicer string this extractor recognizes must parse to the same enum value
+        // as Enum.Parse&lt;NozzleType&gt; of the corresponding built-in NozzleMaterial.Name seeded
+        // by DataSeedService.SeedNozzleMaterialsAsync and the AddNozzleMaterialCatalog migration.
+        // catalogMaterialName is hardcoded independently here (not read from the seed source) so
+        // this test actually catches divergence between the two, rather than restating one side.
+        MachineProfileDerivedFields result = MachineProfileDerivedFieldsExtractor.Extract(
+            $$"""{"nozzle_type": "{{orcaSlicerRawValue}}"}""");
+
+        NozzleType expectedFromCatalogName = Enum.Parse<NozzleType>(catalogMaterialName);
+
+        _ = result.NozzleType.Should().Be(expectedFromCatalogName);
+    }
+
     [Fact]
     public void Extract_WithFullySpecifiedProfile_DerivesAllFacts()
     {

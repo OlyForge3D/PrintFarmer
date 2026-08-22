@@ -838,6 +838,69 @@ public sealed class PrinterCalibrationContextServiceTests
     }
 
     [Fact]
+    public async Task GetContextAsync_WithRequiredNozzleHrcAndNotHardenedNozzle_ReturnsTypedReason()
+    {
+        // #1827 dispatch/backward-compat parity: prior to this test, the
+        // "profile_nozzle_material_mismatch" rejection (PrinterCalibrationContextService.cs,
+        // ValidateFilamentSafety's required_nozzle_HRC check) had zero regression coverage.
+        // Toolhead.NozzleIsHardened is a separately-persisted, independently-set fact -- it is
+        // NOT derived from the #1824 NozzleMaterial catalog -- so this test also locks in that
+        // this consumer's behavior is unaffected by the catalog migration.
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.Toolheads.Single().NozzleIsHardened = false;
+        _ = await harness.Db.SaveChangesAsync();
+        harness.Profiles = harness.Profiles with
+        {
+            Filament = harness.Profiles.Filament! with
+            {
+                RawJson = """{"required_nozzle_HRC": 3}""",
+            },
+        };
+
+        CalibrationContextDto candidate = await harness.GetContextAsync();
+
+        _ = candidate.Eligible.Should().BeFalse();
+        _ = candidate.RejectionReasons.Select(reason => reason.Code)
+            .Should().Contain("profile_nozzle_material_mismatch");
+    }
+
+    [Fact]
+    public async Task GetContextAsync_WithRequiredNozzleHrcAndHardenedNozzle_DoesNotFlagMismatch()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.Toolheads.Single().NozzleIsHardened = true;
+        _ = await harness.Db.SaveChangesAsync();
+        harness.Profiles = harness.Profiles with
+        {
+            Filament = harness.Profiles.Filament! with
+            {
+                RawJson = """{"required_nozzle_HRC": 3}""",
+            },
+        };
+
+        CalibrationContextDto candidate = await harness.GetContextAsync();
+
+        _ = candidate.RejectionReasons.Select(reason => reason.Code)
+            .Should().NotContain("profile_nozzle_material_mismatch");
+    }
+
+    [Fact]
+    public async Task GetContextAsync_WithoutRequiredNozzleHrc_DoesNotFlagMismatchRegardlessOfHardening()
+    {
+        // A filament profile with no required_nozzle_HRC field must never trigger the mismatch
+        // rejection, even for a non-hardened nozzle -- this is the "existing/unchanged data"
+        // backward-compat baseline #1827 asks to confirm.
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.Toolheads.Single().NozzleIsHardened = false;
+        _ = await harness.Db.SaveChangesAsync();
+
+        CalibrationContextDto candidate = await harness.GetContextAsync();
+
+        _ = candidate.RejectionReasons.Select(reason => reason.Code)
+            .Should().NotContain("profile_nozzle_material_mismatch");
+    }
+
+    [Fact]
     public async Task GetContextAsync_WithCredentialBearingProfile_RedactsProfileAndReturnsTypedReason()
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
