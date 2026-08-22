@@ -83,6 +83,8 @@ public sealed class AnonymousEndpointArchitectureTests
                 "POST /api/slicers/{id}/deregister - authenticates the slicer host with its service API key.",
             ["Farm.Slicer.Module.Api.Controllers.SlicersController.RotateApiKeyAsync [api/slicers/{id}/rotate-key]"] =
                 "POST /api/slicers/{id}/rotate-key - authenticates the slicer host with its current service API key.",
+            ["Farm.Slicer.Module.Api.Controllers.Calibration.WorkerCompatibilityController.GetWorkerCompatibilityAsync [api/internal/capabilities/worker-compatibility]"] =
+                "GET /api/internal/capabilities/worker-compatibility - service-to-service hop from the main API's calibration capability probe (issue #1848); authenticates with the shared worker-authentication key via [RequireSlicerApiKey], not a forwarded JWT.",
             ["Farm.Slicer.Module.Api.Controllers.Slicing.SliceJobController.ClaimAsync [api/slice/claim]"] =
                 "POST /api/slice/claim - authenticates workers with the registry-issued worker key and identity.",
             ["Farm.Slicer.Module.Api.Controllers.Slicing.SliceJobController.ReportProgressAsync [api/slice/{id}/progress]"] =

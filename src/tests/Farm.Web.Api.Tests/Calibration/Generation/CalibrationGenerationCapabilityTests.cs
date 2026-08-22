@@ -2,6 +2,7 @@
 using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Services.Calibration.Generation;
 using FluentAssertions;
+using Moq;
 
 namespace Farm.Web.Api.Tests.Calibration.Generation;
 
@@ -360,5 +361,78 @@ public sealed class CalibrationGenerationCapabilityTests : IAsyncLifetime
         _ = pinned.BinarySha256.Should().Be(CalibrationGenerationHarness.BinaryDigest);
         _ = pinned.Version.Should().Be(CalibrationContractConstants.SlicerVersion);
         _ = pinned.Distribution.Should().Be("upstream");
+    }
+
+    [Fact(DisplayName =
+        "A split deployment without a local factory or a capability client reports no pinned worker")]
+    public async Task FindPinnedWorkerAsync_WithoutFactoryOrClient_ReturnsNull()
+    {
+        _ = await _harness.AddAttestedWorkerAsync();
+
+        CalibrationPinnedSlicerIdentity? pinned = await _harness
+            .CreateCapabilityProbe(new CalibrationGenerationHarnessOptions
+            {
+                SlicerFactoryRegistered = false,
+            })
+            .FindPinnedWorkerAsync(CancellationToken.None);
+
+        _ = pinned.Should().BeNull();
+    }
+
+    [Fact(DisplayName =
+        "A split deployment without a local factory delegates worker compatibility to the slicer host client")]
+    public async Task FindPinnedWorkerAsync_WithoutFactory_DelegatesToCapabilityClient()
+    {
+        Guid workerId = Guid.NewGuid();
+        WorkerCompatibilitySnapshotDto snapshot = new(
+            new WorkerCompatibilityPinnedIdentityDto(
+                CalibrationContractConstants.SlicerVersion,
+                "upstream",
+                CalibrationGenerationHarness.ContainerDigest,
+                CalibrationGenerationHarness.BinaryDigest,
+                workerId),
+            [CalibrationContractConstants.SlicerVersion],
+            true);
+        Mock<ISlicerHostCapabilityClient> capabilityClient = new(MockBehavior.Strict);
+        _ = capabilityClient
+            .Setup(client => client.GetWorkerCompatibilityAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(snapshot);
+
+        ICalibrationGenerationCapabilityProbe probe = _harness.CreateCapabilityProbe(
+            new CalibrationGenerationHarnessOptions
+            {
+                SlicerFactoryRegistered = false,
+                CapabilityClient = capabilityClient.Object,
+            });
+
+        CalibrationPinnedSlicerIdentity? pinned = await probe.FindPinnedWorkerAsync(CancellationToken.None);
+
+        _ = pinned.Should().NotBeNull();
+        _ = pinned!.WorkerId.Should().Be(workerId);
+        _ = pinned.ContainerDigest.Should().Be(CalibrationGenerationHarness.ContainerDigest);
+        _ = pinned.BinarySha256.Should().Be(CalibrationGenerationHarness.BinaryDigest);
+        capabilityClient.VerifyAll();
+    }
+
+    [Fact(DisplayName =
+        "A split deployment reports whatever empty/unsupported snapshot the slicer host client returns")]
+    public async Task FindPinnedWorkerAsync_WithoutFactory_ReflectsEmptyClientSnapshot()
+    {
+        Mock<ISlicerHostCapabilityClient> capabilityClient = new(MockBehavior.Strict);
+        _ = capabilityClient
+            .Setup(client => client.GetWorkerCompatibilityAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkerCompatibilitySnapshotDto.Empty);
+
+        ICalibrationGenerationCapabilityProbe probe = _harness.CreateCapabilityProbe(
+            new CalibrationGenerationHarnessOptions
+            {
+                SlicerFactoryRegistered = false,
+                CapabilityClient = capabilityClient.Object,
+            });
+
+        CalibrationPinnedSlicerIdentity? pinned = await probe.FindPinnedWorkerAsync(CancellationToken.None);
+
+        _ = pinned.Should().BeNull();
+        capabilityClient.VerifyAll();
     }
 }

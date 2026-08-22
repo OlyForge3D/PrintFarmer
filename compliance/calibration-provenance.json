@@ -1474,6 +1474,45 @@
       }
     },
     {
+      "id": "calibration-slicer-host-capability-client",
+      "destinationPath": "src/api/Services/Calibration/Generation/SlicerHostCapabilityClient.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1848"
+      ],
+      "statement": "Independent PrintFarmer implementation of the split-deployment worker-compatibility client that forwards the configured shared key to the peer slicer-host; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-22",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-host-capability-client-startup-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/SlicerHostCapabilityClientStartupTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1848"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering Program.cs registration of the worker-compatibility client only when the slicer module is disabled; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-22",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-host-capability-client-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/SlicerHostCapabilityClientTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1848"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering the worker-compatibility client's authenticated request construction, snapshot mapping, and timeout/error handling; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-22",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-slicer-host-profile-resolver",
       "destinationPath": "src/api/Services/Calibration/SlicerHostCalibrationProfileResolver.cs",
       "referenceUrls": [
@@ -1743,6 +1782,45 @@
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-08-11",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-worker-compatibility-contract",
+      "destinationPath": "src/infra/Calibration/WorkerCompatibilityContract.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1848"
+      ],
+      "statement": "Independent PrintFarmer implementation of the shared worker-compatibility wire contract exchanged between the main API and the slicer host; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-22",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-worker-compatibility-controller",
+      "destinationPath": "src/slicer/Farm.Slicer.Module.Api/Controllers/Calibration/WorkerCompatibilityController.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1848"
+      ],
+      "statement": "Independent PrintFarmer implementation of the slicer-host internal endpoint that reports worker compatibility from its own SlicerDbContext, guarded by the shared worker key; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-22",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-worker-compatibility-endpoint-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/WorkerCompatibilityEndpointTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1848"
+      ],
+      "statement": "Independent PrintFarmer end-to-end test implementation covering the real worker-compatibility controller, service, and client wire contract over an in-process TestServer; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-22",
         "decision": "approved"
       }
     }

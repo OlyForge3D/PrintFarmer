@@ -212,6 +212,11 @@ if (slicerModuleEnabled)
 // returns profile_service_unavailable).
 builder.Services.AddCalibrationProfileResolution(builder.Configuration);
 
+// Split/microservices deployments similarly have no local IDbContextFactory<SlicerDbContext> for
+// the calibration generation capability probe, so route worker-compatibility lookups to the slicer
+// host that owns the worker registry (issue #1848).
+builder.Services.AddSlicerHostCapabilityClient(builder.Configuration);
+
 builder.Services.AddEndpointsApiExplorer();
 
 // Native OpenAPI builds schemas from Http.Json metadata. MVC controller serialization is configured separately.

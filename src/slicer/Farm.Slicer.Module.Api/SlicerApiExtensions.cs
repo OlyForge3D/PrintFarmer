@@ -69,6 +69,12 @@ public static class SlicerApiExtensions
         _ = services.AddScoped<IProfilesService, ProfilesService>();
         _ = services.AddScoped<IWorkerAuthService, WorkerAuthService>();
         _ = services.AddScoped<ISlicerApiKeyValidator, SlicerApiKeyValidator>();
+
+        // Split/microservices worker-compatibility hop for the main API's calibration generation
+        // capability probe (issue #1848). Guarded by RequireSlicerApiKey, not JWT.
+        _ = services.AddScoped<
+            ISlicerHostWorkerCompatibilityService,
+            SlicerHostWorkerCompatibilityService>();
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, SlicerApiKeyStartupValidationService>());
 
