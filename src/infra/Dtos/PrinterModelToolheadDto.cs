@@ -26,7 +26,7 @@ public record PrinterModelToolheadDto(
     Guid? NozzleModelId = null,
     string? NozzleModelName = null,
     double? NozzleDiameter = null,   // Derived from NozzleModel.Diameter
-    NozzleType? NozzleType = null,   // Derived from NozzleModel.NozzleType
+    string? NozzleType = null,       // Derived from NozzleModel.NozzleMaterial.Name (open string set)
     double? MaxFlowRate = null,      // Derived from HotendModel.MaxFlowRate
     int? MaxTemp = null,             // Derived from HotendModel.MaxTemp
     string[]? SupportedMaterials = null,

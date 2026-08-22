@@ -116,7 +116,7 @@ public sealed class CatalogCache(IMemoryCache cache, IOptions<CatalogCacheOption
                     t.NozzleModelId,
                     t.NozzleModel != null ? t.NozzleModel.Name : null,
                     t.NozzleModel != null ? t.NozzleModel.Diameter : null,      // Derived from NozzleModel
-                    t.NozzleModel != null ? t.NozzleModel.NozzleType : null,    // Derived from NozzleModel
+                    t.NozzleModel != null && t.NozzleModel.NozzleMaterial != null ? t.NozzleModel.NozzleMaterial.Name : null,    // Derived from NozzleModel.NozzleMaterial.Name (open string set)
                     t.HotendModel != null ? t.HotendModel.MaxFlowRate : null,   // Derived from HotendModel
                     t.HotendModel != null ? t.HotendModel.MaxTemp : null,       // Derived from HotendModel
                     t.SupportedMaterials,

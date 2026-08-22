@@ -1203,7 +1203,7 @@ public class PrintersController(
             t.Name,
             t.Index,
             t.NozzleModel?.Diameter,  // Nozzle diameter from NozzleModel
-            t.NozzleModel?.NozzleType,  // Nozzle type from NozzleModel
+            t.NozzleModel?.NozzleMaterial?.Name ?? t.NozzleModel?.NozzleType.ToString(),  // Nozzle material name from NozzleModel (open string set)
             t.HotendModel?.MaxFlowRate,  // Max flow rate from HotendModel
             t.HotendModel?.MaxTemp,      // Max temp from HotendModel
 

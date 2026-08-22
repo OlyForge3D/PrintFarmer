@@ -108,6 +108,53 @@ public sealed class PrintJobStatusJsonConverter : JsonConverter<PrintJobStatus>
 }
 
 /// <summary>
+/// Backward-compatible converter for the <c>NozzleModelExportDto.NozzleInterface</c> export
+/// field (epic #1823 / issue #1826). The field itself is a plain <c>string?</c> holding the
+/// <see cref="NozzleInterfaceType"/> member name, matching the name-based treatment already
+/// given to <c>NozzleType</c>/<c>HardnessOverride</c> exports. Pre-existing export backups
+/// wrote this field as a raw JSON number (the enum ordinal); this converter accepts either
+/// shape on read so old backups keep restoring, and always writes the string form.
+/// </summary>
+public sealed class NozzleInterfaceExportJsonConverter : JsonConverter<string?>
+{
+    public override string? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        switch (reader.TokenType)
+        {
+            case JsonTokenType.Null:
+                return null;
+            case JsonTokenType.String:
+                return reader.GetString();
+            case JsonTokenType.Number:
+                // Legacy backup: raw ordinal. Translate to the member name when it maps to a
+                // known value; otherwise keep the numeric text so downstream validation can
+                // reject it explicitly rather than silently coercing to a default.
+                if (reader.TryGetInt32(out int ordinal) && Enum.IsDefined(typeof(NozzleInterfaceType), ordinal))
+                {
+                    return ((NozzleInterfaceType)ordinal).ToString();
+                }
+
+                return reader.TryGetInt32(out int raw) ? raw.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
+            default:
+                return null;
+        }
+    }
+
+    public override void Write(Utf8JsonWriter writer, string? value, JsonSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        if (value is null)
+        {
+            writer.WriteNullValue();
+        }
+        else
+        {
+            writer.WriteStringValue(value);
+        }
+    }
+}
+
+/// <summary>
 /// Permissive converter for bool that accepts string representations ("true", "false", "True", "False", "1", "0").
 /// Used for OrcaSlicer profile JSON where "instantiation": "true" is a string value.
 /// </summary>

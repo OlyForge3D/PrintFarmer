@@ -190,10 +190,12 @@ public class NozzleModelExportDto
     public int? MaxTemp { get; set; }
 
     /// <summary>
-    /// Nozzle material, as the <c>NozzleType</c> enum name (e.g. "Brass", "Diamond").
-    /// Stored by name rather than ordinal so a future enum renumbering cannot silently
-    /// remap restored rows. An absent value (a backup pre-dating this field) restores as
-    /// Brass; a present-but-unrecognized value rejects the row rather than guessing.
+    /// Nozzle material, as the <see cref="Farm.Infrastructure.Domain.NozzleMaterial"/> catalog
+    /// name (e.g. "Brass", "Diamond", or any user-defined material name — an open string set,
+    /// not a closed enum; see epic #1823 / issue #1826). Stored by name rather than an id/ordinal
+    /// so renumbering or reordering the catalog cannot silently remap restored rows. An absent
+    /// value (a backup pre-dating this field) restores as Brass; a present-but-unrecognized value
+    /// rejects the row rather than guessing.
     /// </summary>
     public string? NozzleType { get; set; }
 
@@ -205,7 +207,16 @@ public class NozzleModelExportDto
     /// </summary>
     public string? HardnessOverride { get; set; }
 
-    public int NozzleInterface { get; set; }
+    /// <summary>
+    /// Nozzle interface type, as the <c>NozzleInterfaceType</c> enum name (e.g. "V6", "Volcano").
+    /// Given the same name-based export treatment as <see cref="NozzleType"/>/
+    /// <see cref="HardnessOverride"/> so a future enum renumbering cannot silently remap
+    /// restored rows (epic #1823 / issue #1826). Older backups wrote this as a raw ordinal
+    /// number; <see cref="Farm.Infrastructure.Json.NozzleInterfaceExportJsonConverter"/>
+    /// accepts either shape on read.
+    /// </summary>
+    [JsonConverter(typeof(Farm.Infrastructure.Json.NozzleInterfaceExportJsonConverter))]
+    public string? NozzleInterface { get; set; }
 
     public string? Description { get; set; }
 }

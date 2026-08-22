@@ -591,7 +591,7 @@ public class CatalogService(
     {
         try
         {
-            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, NozzleType NozzleType, NozzleHardnessOverride HardnessOverride, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)> nozzles = await _repo.GetNozzleModelsAsync(ct);
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, string NozzleType, NozzleHardnessOverride HardnessOverride, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)> nozzles = await _repo.GetNozzleModelsAsync(ct);
             return nozzles.Select(n => new NozzleModelDto(
                 n.Id,
                 n.Name,
@@ -944,20 +944,20 @@ public class CatalogService(
         Domain.NozzleModelDefinition? created = await _repo.GetNozzleModelByIdAsync(model.Id, ct);
         return new NozzleModelDto(
             created!.Id, created.Name, created.ManufacturerId,
-            created.Manufacturer?.Name, created.Diameter, created.MaxTemp, created.NozzleType,
+            created.Manufacturer?.Name, created.Diameter, created.MaxTemp,
+            created.NozzleMaterial?.Name ?? created.NozzleType.ToString(),
             created.HardnessOverride, created.IsHardened,
             created.NozzleInterface, created.Description, created.Url);
     }
 
     /// <summary>
-    /// Resolves the legacy <see cref="NozzleType"/> enum used by the nozzle model create/update
-    /// wire contract to a <c>NozzleMaterial</c> row's ID. Built-in materials are seeded with
-    /// names matching the enum member names (see #1824's data migration), so this is a direct
-    /// name lookup. The material serialization itself is deferred to epic #1823 slice 3.
+    /// Resolves the nozzle model create/update wire contract's material name (an open string
+    /// set, not a closed enum — epic #1823 / issue #1826) to a <c>NozzleMaterial</c> row's ID
+    /// via an exact-name lookup against the catalog.
     /// </summary>
-    private async Task<Guid> ResolveNozzleMaterialIdAsync(NozzleType nozzleType, CancellationToken ct)
+    private async Task<Guid> ResolveNozzleMaterialIdAsync(string nozzleType, CancellationToken ct)
     {
-        Domain.NozzleMaterial? material = await _repo.GetNozzleMaterialByNameAsync(nozzleType.ToString(), ct);
+        Domain.NozzleMaterial? material = await _repo.GetNozzleMaterialByNameAsync(nozzleType, ct);
         if (material is null)
         {
             throw new KeyNotFoundException($"Nozzle material '{nozzleType}' not found");
@@ -1000,9 +1000,9 @@ public class CatalogService(
             model.MaxTemp = dto.MaxTemp;
         }
 
-        if (dto.NozzleType.HasValue)
+        if (dto.NozzleType is not null)
         {
-            model.NozzleMaterialId = await ResolveNozzleMaterialIdAsync(dto.NozzleType.Value, ct);
+            model.NozzleMaterialId = await ResolveNozzleMaterialIdAsync(dto.NozzleType, ct);
         }
 
         if (dto.HardnessOverride.HasValue)
@@ -1032,7 +1032,8 @@ public class CatalogService(
         model = await _repo.GetNozzleModelByIdAsync(id, ct);
         return new NozzleModelDto(
             model!.Id, model.Name, model.ManufacturerId,
-            model.Manufacturer?.Name, model.Diameter, model.MaxTemp, model.NozzleType,
+            model.Manufacturer?.Name, model.Diameter, model.MaxTemp,
+            model.NozzleMaterial?.Name ?? model.NozzleType.ToString(),
             model.HardnessOverride, model.IsHardened,
             model.NozzleInterface, model.Description, model.Url);
     }

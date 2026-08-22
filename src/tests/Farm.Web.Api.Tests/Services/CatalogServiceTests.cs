@@ -50,8 +50,9 @@ public class CatalogServiceTests
     }
 
     // Covers issue #1824's ResolveNozzleMaterialIdAsync resolution logic (via CreateNozzleModelAsync,
-    // since the resolver itself is private): a recognized NozzleType enum value must resolve to the
-    // matching built-in NozzleMaterial row's ID.
+    // since the resolver itself is private): a recognized material name (matching a built-in
+    // NozzleMaterial row) must resolve to that row's ID. Per #1826, the wire contract is now an
+    // open-set string, not a closed enum.
     [Fact]
     public async Task CreateNozzleModelAsync_ResolvesNozzleTypeToMaterialId()
     {
@@ -77,7 +78,7 @@ public class CatalogServiceTests
             .ReturnsAsync(() => capturedModel);
 
         CatalogService svc = CreateService(mockRepo);
-        CreateNozzleModelDto dto = new CreateNozzleModelDto("Vanadium", manufacturerId, NozzleType: NozzleType.HardenedSteel);
+        CreateNozzleModelDto dto = new CreateNozzleModelDto("Vanadium", manufacturerId, NozzleType: "HardenedSteel");
 
         NozzleModelDto result = await svc.CreateNozzleModelAsync(dto, CancellationToken.None);
 
@@ -97,7 +98,7 @@ public class CatalogServiceTests
         _ = mockRepo.Setup(r => r.GetNozzleMaterialByNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((NozzleMaterial?)null);
 
         CatalogService svc = CreateService(mockRepo);
-        CreateNozzleModelDto dto = new CreateNozzleModelDto("Mystery", manufacturerId, NozzleType: NozzleType.Unknown);
+        CreateNozzleModelDto dto = new CreateNozzleModelDto("Mystery", manufacturerId, NozzleType: "Unobtainium");
 
         _ = await Assert.ThrowsAsync<KeyNotFoundException>(() => svc.CreateNozzleModelAsync(dto, CancellationToken.None));
         mockRepo.Verify(r => r.AddNozzleModelAsync(It.IsAny<NozzleModelDefinition>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -128,7 +129,7 @@ public class CatalogServiceTests
         _ = mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         CatalogService svc = CreateService(mockRepo);
-        UpdateNozzleModelDto dto = new UpdateNozzleModelDto(NozzleType: NozzleType.TungstenCarbide);
+        UpdateNozzleModelDto dto = new UpdateNozzleModelDto(NozzleType: "TungstenCarbide");
 
         NozzleModelDto? result = await svc.UpdateNozzleModelAsync(nozzleId, dto, CancellationToken.None);
 
