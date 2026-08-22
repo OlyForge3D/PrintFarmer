@@ -64,12 +64,40 @@ def normalize_gtin(barcode: str | None) -> str | None:
         return None
     if len(barcode) > MAX_RAW_LENGTH:
         return None
-    digits = "".join(c for c in barcode if c.isdigit())
+    # ASCII digits ONLY, matching the C# `c is >= '0' and <= '9'`. Do NOT use
+    # str.isdigit(): it accepts fullwidth (U+FF10-19), Arabic-Indic (U+0660-69)
+    # and superscript digits, none of which the application accepts. Keeping
+    # them would write a `gtin` the read path can never match -- and since this
+    # script skips filaments that already have a `gtin`, a corrected re-run
+    # would never repair it. (Superscripts also make int() raise.)
+    digits = "".join(c for c in barcode if "0" <= c <= "9")
     if len(digits) not in (8, 12, 13, 14):
         return None
     if not has_valid_check_digit(digits):
         return None
     return digits.rjust(GTIN_LENGTH, "0")
+
+
+NETWORK_ERRORS = (
+    urllib.error.URLError,
+    urllib.error.HTTPError,
+    TimeoutError,
+    json.JSONDecodeError,
+    UnicodeDecodeError,
+)
+
+
+class _ArgumentParser(argparse.ArgumentParser):
+    """Exits usage errors with 1, not argparse's default 2.
+
+    Exit code 2 is reserved by this script's documented contract for "one or
+    more writes failed", so a usage error must not be indistinguishable from it.
+    """
+
+    def error(self, message: str):  # noqa: D102
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: error: {message}", file=sys.stderr)
+        raise SystemExit(1)
 
 
 def request_json(url: str, timeout: float, method: str = "GET", body: dict | None = None):
@@ -85,13 +113,24 @@ def request_json(url: str, timeout: float, method: str = "GET", body: dict | Non
 
 def fetch_all_filaments(base_url: str, timeout: float) -> list[dict]:
     filaments: list[dict] = []
+    seen_ids: set = set()
     offset = 0
     while True:
         query = urllib.parse.urlencode({"limit": PAGE_SIZE, "offset": offset})
         page = request_json(f"{base_url}/api/v1/filament?{query}", timeout)
         if not page:
             break
-        filaments.extend(page)
+
+        # An older Spoolman that ignores unknown query params returns the FULL
+        # set for every request. Without this guard, `offset` would advance
+        # forever while each page re-delivered the same rows -- an unbounded
+        # loop. Stop as soon as a page yields nothing new.
+        new_rows = [f for f in page if f.get("id") not in seen_ids]
+        if not new_rows:
+            break
+        seen_ids.update(f.get("id") for f in new_rows)
+        filaments.extend(new_rows)
+
         if len(page) < PAGE_SIZE:
             break
         offset += PAGE_SIZE
@@ -99,7 +138,7 @@ def fetch_all_filaments(base_url: str, timeout: float) -> list[dict]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
+    parser = _ArgumentParser(
         description="Backfill Spoolman filament gtin values from legacy article_number barcodes.",
     )
     parser.add_argument(
@@ -124,7 +163,7 @@ def main() -> int:
 
     try:
         filaments = fetch_all_filaments(base_url, args.timeout)
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+    except NETWORK_ERRORS as exc:
         print(f"ERROR: could not read filaments from {base_url}: {exc}", file=sys.stderr)
         return 1
 
@@ -172,14 +211,27 @@ def main() -> int:
     for filament, normalized in planned:
         filament_id = filament.get("id")
         try:
-            request_json(
+            updated = request_json(
                 f"{base_url}/api/v1/filament/{filament_id}",
                 args.timeout,
                 method="PATCH",
                 body={"gtin": normalized},
             )
+            # A Spoolman without the `gtin` column silently ignores the unknown
+            # field and still answers 200. Confirm the value actually landed,
+            # so exit 0 genuinely means "all planned writes applied".
+            written = (updated or {}).get("gtin")
+            if written != normalized:
+                failures += 1
+                print(
+                    f"  FAIL filament {filament_id}: server did not persist gtin "
+                    f"(sent {normalized}, read back {written!r}). "
+                    f"Does this Spoolman support the gtin field?",
+                    file=sys.stderr,
+                )
+                continue
             print(f"  OK   filament {filament_id} -> {normalized}")
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+        except NETWORK_ERRORS as exc:
             failures += 1
             print(f"  FAIL filament {filament_id}: {exc}", file=sys.stderr)
 
