@@ -47,14 +47,6 @@ namespace Farm.Slicer.Module.Api.Services;
 /// </remarks>
 public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 {
-    /// <summary>
-    /// Reason recorded on a <see cref="Worker"/> that was disabled by deregistration rather
-    /// than by an administrator. Re-registration lifts a disable carrying this reason and only
-    /// this reason, so an administrator's deliberate disable survives a worker restart. The
-    /// writer and the reader must use the same constant or a banned worker could un-ban itself.
-    /// </summary>
-    internal const string DeregisteredDisabledReason = "Slicer service deregistered";
-
     private readonly ISlicersRepository _repo;
     private readonly IWorkerRepository _workerRepo;
     private readonly IProcessProfileRepository _profileRepo;
@@ -335,17 +327,11 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                 worker.OfflineAt = null;
 
                 // Only lift the disable that deregistration itself applied. An administrator's
-                // deliberate disable carries a different reason and must survive a restart —
-                // otherwise any banned worker could clear its own ban just by re-registering
-                // under the same InstanceId, and the reason text recording why it was banned
-                // would be erased with it. Re-enabling stays an explicit admin action
-                // (IWorkerRepository.EnableWorkerAsync). A blank reason cannot be an admin
-                // disable, because DisableWorkerAsync rejects a blank one.
-                bool disabledByDeregistration =
-                    string.IsNullOrWhiteSpace(worker.DisabledReason)
-                    || string.Equals(worker.DisabledReason, DeregisteredDisabledReason, StringComparison.Ordinal);
-
-                if (disabledByDeregistration)
+                // deliberate disable must survive a restart — otherwise any banned worker could
+                // clear its own ban just by re-registering under the same InstanceId, and the
+                // reason text recording why it was banned would be erased with it. Re-enabling
+                // stays an explicit admin action (IWorkerRepository.EnableWorkerAsync).
+                if (!WorkerDisableReasons.IsAdministrativeDisable(worker))
                 {
                     // Without this a reclaimed worker comes back Online while still reporting
                     // "Disabled: Slicer service deregistered", which is exactly the stale text
@@ -700,6 +686,13 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
     /// <summary>
     /// Revokes a worker record's credentials and marks it offline and disabled.
     /// </summary>
+    /// <remarks>
+    /// An administrator's existing disable reason is preserved rather than overwritten. If it
+    /// were replaced with <see cref="WorkerDisableReasons.Deregistered"/>, the next registration
+    /// would mistake the ban for its own automatic disable and lift it — so a banned worker could
+    /// clear its own ban with nothing more exotic than an ordinary redeploy, which is the most
+    /// common path there is.
+    /// </remarks>
     /// <param name="worker">The worker record to revoke, or <see langword="null"/> when none is paired.</param>
     private static void RevokeWorkerCredentials(Worker? worker)
     {
@@ -711,8 +704,13 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         worker.Status = WorkerStatus.Offline;
         worker.OfflineAt = DateTime.UtcNow;
         worker.UpdatedAt = DateTime.UtcNow;
+
+        if (!WorkerDisableReasons.IsAdministrativeDisable(worker))
+        {
+            worker.DisabledReason = WorkerDisableReasons.Deregistered;
+        }
+
         worker.IsDisabled = true;
-        worker.DisabledReason = DeregisteredDisabledReason;
         worker.ApiKey = null;
     }
 

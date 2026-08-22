@@ -161,6 +161,7 @@ public class WorkersController(
         }
 
         await _workerRepository.DisableWorkerAsync(id, request.Reason);
+        await _workerRepository.SaveChangesAsync();
 
         _logger.LogWarning("Worker {WorkerId} disabled: {Reason}", id, LogSanitizer.Sanitize(request.Reason));
         return NoContent();
@@ -183,6 +184,7 @@ public class WorkersController(
         }
 
         await _workerRepository.EnableWorkerAsync(id);
+        await _workerRepository.SaveChangesAsync();
 
         _logger.LogInformation("Worker {WorkerId} enabled", id);
         return NoContent();
@@ -211,6 +213,7 @@ public class WorkersController(
         }
 
         await _workerRepository.UpdateTotalSlotsAsync(id, request.TotalSlots);
+        await _workerRepository.SaveChangesAsync();
 
         _logger.LogInformation("Worker {WorkerId} slots updated to {Slots}", id, request.TotalSlots);
         return NoContent();
@@ -250,6 +253,10 @@ public class WorkersController(
         {
             return NotFound();
         }
+
+        // Persists both the released jobs above and the counter reset: the worker and job
+        // repositories share this request's scoped SlicerDbContext.
+        await _workerRepository.SaveChangesAsync();
 
         _logger.LogWarning("Worker {WorkerId} reset by admin — released {ReleasedJobs} stuck job(s)", id, releasedJobs);
 

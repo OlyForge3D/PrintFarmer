@@ -583,6 +583,64 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// The redeploy path must not launder a ban. A graceful shutdown deregisters before the
+    /// replacement registers, so if deregistration overwrote the administrator's reason with its
+    /// own sentinel, the subsequent registration would read that sentinel, conclude the disable
+    /// was its own automatic one, and lift the ban — letting a banned worker clear its ban with
+    /// an ordinary redeploy. That is the most common path there is, so this is the case that
+    /// matters most, not the crash path.
+    /// </summary>
+    [Fact]
+    public async Task DeregisterThenReregister_PreservesAnAdministratorsDeliberateDisable()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+
+        const string adminReason = "Banned by administrator: bad nozzle";
+        var dto = new RegisterSlicerDto
+        {
+            Name = "orca-banned-redeploy",
+            SlicerType = 1,
+            Version = "2.3.1",
+            Host = "http://localhost:8080",
+            MaxConcurrentJobs = 5,
+            InstanceId = "orcaslicer-worker-banned-redeploy"
+        };
+
+        (Guid id, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+
+        Worker? banned = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+        banned.Should().NotBeNull();
+        banned!.IsDisabled = true;
+        banned.DisabledReason = adminReason;
+        _ = await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        // Act - a full redeploy: graceful shutdown deregisters, replacement re-registers.
+        await slicersService.DeregisterAsync(id, retainForReregistration: true, CancellationToken.None);
+
+        context.ChangeTracker.Clear();
+        Worker? deregistered = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+        deregistered.Should().NotBeNull();
+        deregistered!.DisabledReason.Should().Be(
+            adminReason,
+            "deregistration must not overwrite an administrator's reason with its own sentinel");
+
+        (Guid secondId, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+
+        // Assert
+        secondId.Should().Be(id);
+
+        context.ChangeTracker.Clear();
+        Worker? reclaimed = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+        reclaimed.Should().NotBeNull();
+        reclaimed!.IsDisabled.Should().BeTrue("a ban must survive a redeploy, not just a crash");
+        reclaimed.DisabledReason.Should().Be(adminReason);
+    }
+
+    /// <summary>
     /// The counterpart to <see cref="Reregistration_PreservesAnAdministratorsDeliberateDisable"/>:
     /// the automatic disable deregistration applies is lifted on reclaim, so a redeployed worker
     /// does not come back Online still reporting "Disabled: Slicer service deregistered" — the

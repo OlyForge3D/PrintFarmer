@@ -129,6 +129,44 @@ public class Worker
 }
 
 /// <summary>
+/// Well-known <see cref="Worker.DisabledReason"/> values, and the rules for telling an
+/// automatic lifecycle disable apart from an administrator's deliberate one.
+/// </summary>
+/// <remarks>
+/// The distinction matters because the two must be treated very differently: the automatic
+/// disable is lifted when the worker comes back, whereas an administrator's ban must survive
+/// a restart, a redeploy, and a long outage. There is no structured "disabled by" column, so
+/// the reason text is the discriminator — every writer and reader must go through this type
+/// rather than repeating the literal, or a ban becomes silently clearable.
+/// </remarks>
+public static class WorkerDisableReasons
+{
+    /// <summary>
+    /// Recorded when deregistration disables a worker, rather than an administrator.
+    /// </summary>
+    public const string Deregistered = "Slicer service deregistered";
+
+    /// <summary>
+    /// Whether a worker's disabled state was applied deliberately by an administrator, and so
+    /// must be preserved across restarts and excluded from automatic cleanup.
+    /// </summary>
+    /// <remarks>
+    /// A blank reason is never an administrator's: <c>DisableWorkerAsync</c> rejects a blank
+    /// reason, so a blank one can only be legacy or automatic state.
+    /// </remarks>
+    /// <param name="worker">The worker to classify.</param>
+    /// <returns><see langword="true"/> when an administrator disabled this worker.</returns>
+    public static bool IsAdministrativeDisable(Worker worker)
+    {
+        ArgumentNullException.ThrowIfNull(worker);
+
+        return worker.IsDisabled
+            && !string.IsNullOrWhiteSpace(worker.DisabledReason)
+            && !string.Equals(worker.DisabledReason, Deregistered, StringComparison.Ordinal);
+    }
+}
+
+/// <summary>
 /// Worker status constants.
 /// </summary>
 public static class WorkerStatus

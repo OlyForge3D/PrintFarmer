@@ -614,6 +614,59 @@ public class SlicersServiceWorkerSyncTests
         _ = db.Set<SlicerService>().Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "Stale worker cleanup retains workers an administrator disabled")]
+    public async Task StaleWorkerCleanup_Should_Retain_Administratively_Disabled_Workers()
+    {
+        using SlicerDbContext db = CreateDb();
+        Guid serviceId = Guid.NewGuid();
+        DateTime staleHeartbeat = DateTime.UtcNow.AddHours(-2);
+        _ = await db.Set<SlicerService>().AddAsync(new SlicerService
+        {
+            Id = serviceId,
+            Name = "banned-service",
+            ApiKey = null,
+            LastSeen = staleHeartbeat,
+        });
+        _ = await db.Set<Worker>().AddAsync(new Worker
+        {
+            Id = Guid.NewGuid(),
+            ServiceId = serviceId.ToString(),
+            Name = "banned-worker",
+            EndpointUrl = "http://banned-worker.internal",
+            Status = WorkerStatus.Offline,
+            IsDisabled = true,
+            DisabledReason = "Banned by administrator: producing scrap",
+            LastHeartbeat = staleHeartbeat,
+            RegisteredAt = staleHeartbeat,
+            CreatedAt = staleHeartbeat,
+            UpdatedAt = staleHeartbeat,
+        });
+        await db.SaveChangesAsync();
+
+        ServiceCollection services = new();
+        _ = services.AddSingleton<IWorkerRepository>(new EfWorkerRepository(db));
+        using ServiceProvider serviceProvider = services.BuildServiceProvider();
+        StaleWorkerCleanupSettings settings = new()
+        {
+            AutoDelete = true,
+            StaleAfterMinutes = 60,
+        };
+        var settingsMonitor = new Mock<IOptionsMonitor<StaleWorkerCleanupSettings>>();
+        _ = settingsMonitor.SetupGet(monitor => monitor.CurrentValue).Returns(settings);
+        StaleWorkerCleanupHostedService cleanup = new(
+            serviceProvider,
+            NullLogger<StaleWorkerCleanupHostedService>.Instance,
+            settingsMonitor.Object);
+
+        await cleanup.CleanupStaleWorkersAsync(settings);
+
+        // The ban lives in this row. Deleting it would let the worker return as brand new and
+        // come back enabled, so a banned worker could outlast its ban simply by staying offline.
+        db.ChangeTracker.Clear();
+        _ = db.Set<Worker>().Should().ContainSingle();
+        _ = db.Set<SlicerService>().Should().ContainSingle();
+    }
+
     private static Worker CreateWorker(
         string name,
         string status,

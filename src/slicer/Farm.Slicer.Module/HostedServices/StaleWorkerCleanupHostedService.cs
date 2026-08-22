@@ -183,6 +183,18 @@ public class StaleWorkerCleanupHostedService : BackgroundService
         {
             foreach (Worker worker in staleWorkers)
             {
+                // An administrator's ban lives in this row. Deleting it would erase the sanction:
+                // the worker could return at any time, register as brand new, and come back
+                // enabled. Keep it (already Offline) until an administrator acts explicitly.
+                if (WorkerDisableReasons.IsAdministrativeDisable(worker))
+                {
+                    _logger.LogDebug(
+                        "Retaining stale worker '{WorkerName}' (ID: {WorkerId}): disabled by an administrator",
+                        worker.Name,
+                        worker.Id);
+                    continue;
+                }
+
                 await workerRepository.DeleteAsync(worker.Id);
 
                 _logger.LogInformation(
