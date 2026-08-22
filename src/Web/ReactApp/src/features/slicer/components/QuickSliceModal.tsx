@@ -9,7 +9,11 @@ import { FormField } from '@/common/components/ui/FormField';
 import { Alert } from '@/common/components/ui/Alert';
 import { LayersIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
-import { sliceJobService, type SubmitSliceJobRequest } from '@/services/sliceJobService';
+import {
+  sliceJobService,
+  type SubmitSliceJobRequest,
+  formatQueuePositionSuffix,
+} from '@/services/sliceJobService';
 import { slicerService, type SlicerEngineInfo } from '@/services/slicerService';
 import {
   slicerProfilesService,
@@ -165,7 +169,8 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
   const submitMutation = useMutation({
     mutationFn: (req: SubmitSliceJobRequest) => sliceJobService.submitJob(req),
     onSuccess: (res) => {
-      toast.success(`Slice job queued — position ${res.queuePosition}`);
+      const positionSuffix = formatQueuePositionSuffix(res.queuePosition, ' — position ');
+      toast.success(`Slice job queued${positionSuffix}`);
       qc.invalidateQueries({ queryKey: ['slice-jobs-my'] });
       qc.invalidateQueries({ queryKey: ['slice-jobs'] });
       onClose();

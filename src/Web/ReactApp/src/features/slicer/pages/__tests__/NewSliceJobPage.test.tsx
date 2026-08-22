@@ -200,14 +200,18 @@ vi.mock('@/services/slicerService', () => ({
 }));
 
 // Mock slice job service
-vi.mock('@/services/sliceJobService', () => ({
-  sliceJobService: {
-    submitJob: vi.fn(() => Promise.resolve({ id: 'job-1', status: 'Queued' })),
-    parseOrcaNumeric: vi.fn(() => undefined),
-    getSpoolCostPerGram: vi.fn(() => Promise.resolve({ costPerGram: null, currency: '$', source: null })),
-    addSliceToQueue: vi.fn(() => Promise.resolve({ printJobId: 'pj-1', queuePosition: 1, message: 'Queued' })),
-  }
-}));
+vi.mock('@/services/sliceJobService', async () => {
+  const actual = await vi.importActual<typeof import('@/services/sliceJobService')>('@/services/sliceJobService');
+  return {
+    sliceJobService: {
+      submitJob: vi.fn(() => Promise.resolve({ id: 'job-1', status: 'Queued' })),
+      parseOrcaNumeric: vi.fn(() => undefined),
+      getSpoolCostPerGram: vi.fn(() => Promise.resolve({ costPerGram: null, currency: '$', source: null })),
+      addSliceToQueue: vi.fn(() => Promise.resolve({ printJobId: 'pj-1', queuePosition: 1, message: 'Queued' })),
+    },
+    formatQueuePositionSuffix: actual.formatQueuePositionSuffix,
+  };
+});
 
 // Force Advanced mode when needed so advanced-only sections render in tests.
 vi.mock('@/features/slicer/hooks/useSlicerMode', () => ({
@@ -1512,4 +1516,5 @@ describe('NewSliceJobPage', () => {
       expect(sliceJobService.submitJob).not.toHaveBeenCalled();
     });
   });
+
 });

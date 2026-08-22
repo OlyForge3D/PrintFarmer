@@ -49,11 +49,15 @@ vi.mock('@/services/slicerProfilesService', () => ({
 
 // Mock sliceJobService
 const mockSubmitJob = vi.fn(() => Promise.resolve({ jobId: 'job-123', status: 'Queued', queuedAt: '2026-05-31T00:00:00Z', queuePosition: 1 }));
-vi.mock('@/services/sliceJobService', () => ({
-  sliceJobService: {
-    submitJob: (...args: unknown[]) => mockSubmitJob(...args),
-  },
-}));
+vi.mock('@/services/sliceJobService', async () => {
+  const actual = await vi.importActual<typeof import('@/services/sliceJobService')>('@/services/sliceJobService');
+  return {
+    sliceJobService: {
+      submitJob: (...args: unknown[]) => mockSubmitJob(...args),
+    },
+    formatQueuePositionSuffix: actual.formatQueuePositionSuffix,
+  };
+});
 
 // Mock slicerService (issue #578 registry query — QuickSlice reads latest online version)
 vi.mock('@/services/slicerService', () => ({
@@ -68,6 +72,14 @@ vi.mock('@/services/slicerService', () => ({
 vi.mock('@/common/utils/apiUrlHelpers', () => ({
   getApiBaseUrl: () => 'http://localhost:5245/api',
   getHubUrl: () => 'http://localhost:5245/hubs',
+}));
+
+// Mock toast (issue #1869 — queue position message must not render literal "null")
+const mockToastSuccess = vi.fn();
+vi.mock('sonner', () => ({
+  toast: {
+    success: (...args: unknown[]) => mockToastSuccess(...args),
+  },
 }));
 
 const mockModel: Model = {
@@ -201,6 +213,47 @@ describe('QuickSliceModal', () => {
           '/admin/manage?tab=operations&sub=workers&workerTab=jobs',
         );
       });
+    });
+
+    it('shows the queue position in the confirmation toast when the API returns one (issue #1869)', async () => {
+      mockSubmitJob.mockResolvedValueOnce({
+        jobId: 'job-123',
+        status: 'Queued',
+        queuedAt: '2026-05-31T00:00:00Z',
+        queuePosition: 3,
+      });
+      renderModal();
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /slice/i })).not.toBeDisabled();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /slice/i }));
+
+      await waitFor(() => {
+        expect(mockToastSuccess).toHaveBeenCalledWith('Slice job queued — position 3');
+      });
+    });
+
+    it('omits the position phrase (and never shows literal "null") when the API returns no queue position (issue #1869)', async () => {
+      mockSubmitJob.mockResolvedValueOnce({
+        jobId: 'job-456',
+        status: 'Queued',
+        queuedAt: '2026-05-31T00:00:00Z',
+        queuePosition: null,
+      });
+      renderModal();
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /slice/i })).not.toBeDisabled();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /slice/i }));
+
+      await waitFor(() => {
+        expect(mockToastSuccess).toHaveBeenCalledWith('Slice job queued');
+      });
+      expect(mockToastSuccess).not.toHaveBeenCalledWith(expect.stringContaining('null'));
     });
   });
 
