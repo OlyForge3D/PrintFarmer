@@ -154,6 +154,22 @@ public static class WorkerStatus
     /// </summary>
     public const int ConfiguredFreshnessSeconds = 7 * 24 * 60 * 60;
 
+    /// <summary>
+    /// Maximum age of a worker's <c>LastHeartbeat</c> before it is no longer considered a
+    /// live incumbent for InstanceId-conflict purposes (issue #1860), regardless of its
+    /// current <c>Status</c>. Matches <c>WorkerHealthMonitorService</c>'s own stale-heartbeat
+    /// timeout. That monitor's sweep (via <c>IWorkerRepository.GetStaleWorkersAsync</c>)
+    /// only reclassifies stale <c>Online</c> workers to <c>Offline</c> — a worker that crashes
+    /// while <c>Busy</c>, <c>Draining</c>, or <c>Error</c> is never swept by that monitor and
+    /// would otherwise be stuck non-Offline (and therefore un-reclaimable by a legitimate
+    /// redeploy) until the much longer stale-worker cleanup job runs, by default up to 24h
+    /// later. Gating the InstanceId-conflict check on heartbeat freshness — not Status alone
+    /// — means any worker whose heartbeat has actually gone stale is immediately reclaimable
+    /// by a genuine redeploy, no matter what non-Offline status it was last reported in,
+    /// while a worker that is still heartbeating recently remains protected from squatting.
+    /// </summary>
+    public const int LiveHeartbeatTimeoutSeconds = 120;
+
     public const string Offline = "Offline";
     public const string Online = "Online";
     public const string Busy = "Busy";

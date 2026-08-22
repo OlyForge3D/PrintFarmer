@@ -45,6 +45,21 @@ public static class SlicerApiProblems
             code);
 
     /// <summary>
+    /// A registration attempted to claim an <c>InstanceId</c> whose existing worker is not
+    /// Offline (issue #1860): the shared registration key does not prove possession of that
+    /// worker's identity, so the claim is rejected rather than silently overwriting credentials.
+    /// </summary>
+    /// <param name="controller">The responding controller.</param>
+    /// <param name="code">A stable machine-readable reason such as <c>instance_id_worker_online</c>.</param>
+    /// <returns>A <c>409</c> problem-details result.</returns>
+    public static ObjectResult InstanceIdConflict(ControllerBase controller, string code) =>
+        Create(
+            controller.HttpContext,
+            StatusCodes.Status409Conflict,
+            "Worker instance conflict",
+            code);
+
+    /// <summary>
     /// The request body carried a value the canonical contract refuses to coerce.
     /// </summary>
     /// <param name="controller">The responding controller.</param>
