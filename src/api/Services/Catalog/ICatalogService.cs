@@ -93,6 +93,20 @@ public interface ICatalogService
     /// <summary>Deletes a nozzle model.</summary>
     Task DeleteNozzleModelAsync(Guid id, CancellationToken ct);
 
+    // Nozzle material catalog methods (see #1825)
+
+    /// <summary>Gets all nozzle material catalog entries.</summary>
+    Task<IReadOnlyList<NozzleMaterialDto>> GetNozzleMaterialsAsync(CancellationToken ct);
+
+    /// <summary>Creates a new nozzle material catalog entry.</summary>
+    Task<NozzleMaterialDto> CreateNozzleMaterialAsync(CreateNozzleMaterialDto dto, CancellationToken ct);
+
+    /// <summary>Updates a nozzle material catalog entry.</summary>
+    Task<NozzleMaterialDto?> UpdateNozzleMaterialAsync(Guid id, UpdateNozzleMaterialDto dto, CancellationToken ct);
+
+    /// <summary>Deletes a nozzle material catalog entry.</summary>
+    Task DeleteNozzleMaterialAsync(Guid id, CancellationToken ct);
+
     // Contextual manufacturer methods
 
     /// <summary>Gets manufacturers filtered by context (printers vs. components).</summary>

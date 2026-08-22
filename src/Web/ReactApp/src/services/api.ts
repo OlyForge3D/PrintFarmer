@@ -12,6 +12,7 @@ import {
   CreateExtruderModelDto,
   CreateFilamentTypeRequest,
   CreateHotendModelDto,
+  CreateNozzleMaterialDto,
   CreateNozzleModelDto,
   CreatePrinterDto,
   CreatePrinterGroupRequest,
@@ -35,6 +36,7 @@ import {
   ManufacturerDto,
   ManufacturersByContext,
   MoveRequest,
+  NozzleMaterialDto,
   NozzleModelDefinition,
   Printer,
   PrinterCameraUrlResult,
@@ -93,6 +95,7 @@ import {
   UpdateHotendModelDto,
   UpdateModelAliasesRequest,
   UpdateModelRequest,
+  UpdateNozzleMaterialDto,
   UpdateNozzleModelDto,
   UpdatePrinterDto,
   UpdatePrinterGroupRequest,
@@ -2018,6 +2021,46 @@ export class ApiClient {
 
   async deleteNozzleModel(id: string): Promise<void> {
     await this.client.delete(`/catalog/nozzles/${id}`);
+  }
+
+  // Nozzle Material CRUD
+  async getNozzleMaterials(): Promise<NozzleMaterialDto[]> {
+    const response = await this.client.get<NozzleMaterialDto[]>(
+      "/catalog/nozzle-materials"
+    );
+    return response.data;
+  }
+
+  async createNozzleMaterial(
+    dto: CreateNozzleMaterialDto
+  ): Promise<NozzleMaterialDto> {
+    const response = await this.client.post<NozzleMaterialDto>(
+      "/catalog/nozzle-materials",
+      dto
+    );
+    return response.data;
+  }
+
+  async updateNozzleMaterial(
+    id: string,
+    dto: UpdateNozzleMaterialDto
+  ): Promise<NozzleMaterialDto | null> {
+    try {
+      const response = await this.client.put<NozzleMaterialDto>(
+        `/catalog/nozzle-materials/${id}`,
+        dto
+      );
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async deleteNozzleMaterial(id: string): Promise<void> {
+    await this.client.delete(`/catalog/nozzle-materials/${id}`);
   }
 
   // Contextual Manufacturer Query

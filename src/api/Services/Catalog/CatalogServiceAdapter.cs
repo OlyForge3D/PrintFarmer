@@ -169,6 +169,19 @@ public class CatalogServiceAdapter(Farm.Infrastructure.Services.Catalog.ICatalog
     public Task DeleteNozzleModelAsync(Guid id, CancellationToken ct)
         => _coreCatalogService.DeleteNozzleModelAsync(id, ct);
 
+    // Nozzle material catalog CRUD (see #1825)
+    public Task<IReadOnlyList<NozzleMaterialDto>> GetNozzleMaterialsAsync(CancellationToken ct)
+        => _coreCatalogService.GetNozzleMaterialsAsync(ct);
+
+    public Task<NozzleMaterialDto> CreateNozzleMaterialAsync(CreateNozzleMaterialDto dto, CancellationToken ct)
+        => _coreCatalogService.CreateNozzleMaterialAsync(dto, ct);
+
+    public Task<NozzleMaterialDto?> UpdateNozzleMaterialAsync(Guid id, UpdateNozzleMaterialDto dto, CancellationToken ct)
+        => _coreCatalogService.UpdateNozzleMaterialAsync(id, dto, ct);
+
+    public Task DeleteNozzleMaterialAsync(Guid id, CancellationToken ct)
+        => _coreCatalogService.DeleteNozzleMaterialAsync(id, ct);
+
     // Contextual manufacturer query
     public Task<ManufacturersByContextDto> GetManufacturersByContextAsync(CatalogContext context, CancellationToken ct)
         => _coreCatalogService.GetManufacturersByContextAsync(context, ct);

@@ -199,6 +199,28 @@ public interface ICatalogService
     /// <summary>Deletes a nozzle model definition.</summary>
     Task DeleteNozzleModelAsync(Guid id, CancellationToken ct);
 
+    // ============ Nozzle Material Catalog Methods (see #1825) ============
+
+    /// <summary>Gets all nozzle material catalog entries, ordered by name.</summary>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<NozzleMaterialDto>> GetNozzleMaterialsAsync(CancellationToken ct);
+
+    /// <summary>Creates a new nozzle material catalog entry.</summary>
+    /// <exception cref="ArgumentException">Thrown when the name is missing or already in use.</exception>
+    Task<NozzleMaterialDto> CreateNozzleMaterialAsync(CreateNozzleMaterialDto dto, CancellationToken ct);
+
+    /// <summary>Updates an existing nozzle material catalog entry. Built-in materials can be edited.</summary>
+    /// <exception cref="ArgumentException">Thrown when the new name conflicts with an existing material.</exception>
+    Task<NozzleMaterialDto?> UpdateNozzleMaterialAsync(Guid id, UpdateNozzleMaterialDto dto, CancellationToken ct);
+
+    /// <summary>
+    /// Deletes a nozzle material catalog entry. Built-in materials and materials referenced by
+    /// any nozzle model cannot be deleted.
+    /// </summary>
+    /// <exception cref="KeyNotFoundException">Thrown when the material does not exist.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the material is built-in or in use.</exception>
+    Task DeleteNozzleMaterialAsync(Guid id, CancellationToken ct);
+
     // ============ Contextual Manufacturer Methods ============
 
     /// <summary>Gets manufacturers grouped by whether they have items in the specified catalog context.</summary>
