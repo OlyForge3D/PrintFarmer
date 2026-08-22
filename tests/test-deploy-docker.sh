@@ -934,6 +934,98 @@ EOF
     pass_test
 }
 
+# Test: stop_compose_services discovers and stops scaled orcaslicer-worker-N
+# services (issue #1847) using a positional `ps` filter rather than
+# `grep -E "$svc"`, so double-digit worker names (e.g. "orcaslicer-worker-10")
+# are never substring-matched by single-digit names (e.g. "orcaslicer-worker-1").
+test_stop_compose_services_scaled_workers_no_substring_match() {
+    start_test "stop_compose_services handles scaled workers without substring collisions"
+
+    cd "$TEST_TEMP_DIR"
+
+    local compose_file="$TEST_TEMP_DIR/teardown-compose.yml"
+    : > "$compose_file"
+
+    local call_log="$TEST_TEMP_DIR/docker-calls.log"
+    : > "$call_log"
+
+    local helper_script="$TEST_TEMP_DIR/teardown-helper.sh"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -uo pipefail
+
+# Mock 'docker' so no real containers are touched. Every invocation is
+# appended to CALL_LOG for later assertions.
+docker() {
+    printf '%s\n' "\$*" >> "$call_log"
+
+    if [ "\$1" = "compose" ]; then
+        shift
+        # Skip past -f/--env-file flags AND a spurious empty-string arg
+        # (docker compose "\${env_arg[@]:-}" injects one when env_arg is an
+        # empty array - a pre-existing bash empty-array `:-` fallback quirk,
+        # not something introduced by this fix) to find the subcommand.
+        while [ \$# -gt 0 ]; do
+            case "\$1" in
+                '') shift ;;
+                -f|--env-file) shift 2 ;;
+                *) break ;;
+            esac
+        done
+        local subcmd="\$1"; shift || true
+
+        case "\$subcmd" in
+            ps)
+                # Distinguish '--services' (discovery) from '--format ... [svc]' (status check)
+                if [ "\${1:-}" = "--services" ]; then
+                    printf '%s\n' frontend api orcaslicer-worker-1 orcaslicer-worker-2 orcaslicer-worker-10
+                elif [ "\${1:-}" = "--quiet" ]; then
+                    : # no container ids
+                else
+                    # --format '{{.Name}} {{.State}}' <svc> : report already-stopped
+                    # (empty output) for every service so the retry loop exits
+                    # immediately instead of sleeping.
+                    :
+                fi
+                ;;
+            stop|down|rm) : ;;
+            *) : ;;
+        esac
+    fi
+    return 0
+}
+
+source "$DEPLOY_SCRIPT"
+stop_compose_services "" "$compose_file"
+EOF
+    chmod +x "$helper_script"
+
+    capture_output "$helper_script 2>&1 || true"
+    local output=$(get_output)
+
+    # Both a single-digit and a double-digit scaled worker must be discovered
+    # and individually reported as stopped.
+    assert_contains "$output" "Stopping service: orcaslicer-worker-1" "Should discover and stop orcaslicer-worker-1"
+    assert_contains "$output" "Stopping service: orcaslicer-worker-10" "Should discover and stop orcaslicer-worker-10 (double-digit)"
+    assert_contains "$output" "Service orcaslicer-worker-1 stopped" "orcaslicer-worker-1 should report stopped"
+    assert_contains "$output" "Service orcaslicer-worker-10 stopped" "orcaslicer-worker-10 should report stopped"
+
+    local call_log_content
+    call_log_content=$(cat "$call_log")
+
+    # The status-check `ps --format ... <svc>` call must pass the exact
+    # service name as a positional argument to docker compose itself, not
+    # rely on piping unfiltered output through `grep -E`. Confirm both the
+    # single- and double-digit service names appear as their own
+    # standalone-argument invocations.
+    assert_contains "$call_log_content" "ps --format {{.Name}} {{.State}} orcaslicer-worker-1" "ps --format should be called with orcaslicer-worker-1 as a positional filter"
+    assert_contains "$call_log_content" "ps --format {{.Name}} {{.State}} orcaslicer-worker-10" "ps --format should be called with orcaslicer-worker-10 as a positional filter"
+
+    rm -f "$helper_script" "$compose_file" "$call_log" 2>/dev/null || true
+
+    pass_test
+}
+
 # Test: ensure_connection_string_password patches env file and shell export when password missing
 test_ensure_connection_string_password_updates_env_and_shell() {
     start_test "ensure_connection_string_password patches ConnectionStrings__Default"
@@ -1606,6 +1698,7 @@ run_all_tests() {
     test_env_file_sourcing_with_connection_strings
     test_connection_string_sync_resolves_stale_export
     test_connection_string_sync_noop_when_values_match
+    test_stop_compose_services_scaled_workers_no_substring_match
     test_ensure_connection_string_password_updates_env_and_shell
     test_pfarm_spoolman_baseurl_in_env
     test_pfarm_network_discovery_enable_in_env

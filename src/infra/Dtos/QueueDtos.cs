@@ -365,6 +365,8 @@ public class JobQueuePrintJobDto
 
     public string? FailureReason { get; set; }
 
+    public JobBlockedReasonCode? BlockedReasonCode { get; set; }
+
     public int? SpoolmanFilamentId { get; set; }
 
     public string? FilamentName { get; set; }

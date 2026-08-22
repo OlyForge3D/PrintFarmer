@@ -1,10 +1,13 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Services.Startup;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -16,6 +19,71 @@ namespace Farm.Web.Api.Tests.Services.Startup;
 
 public sealed class MoonrakerEmulatorSeederTests
 {
+    private static (
+        Mock<IMachineProfileRepository> Machine,
+        Mock<IProcessProfileRepository> Process,
+        Mock<IFilamentProfileRepository> Filament,
+        List<MachineProfile> AddedMachineProfiles,
+        List<ProcessProfile> AddedProcessProfiles,
+        List<FilamentProfile> AddedFilamentProfiles) CreateStrictCalibrationProfileMocks()
+    {
+        List<MachineProfile> addedMachineProfiles = [];
+        var machine = new Mock<IMachineProfileRepository>(MockBehavior.Strict);
+        machine
+            .Setup(repository => repository.GetByHashAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<string, CancellationToken>((hash, _) => Task.FromResult(
+                addedMachineProfiles.FirstOrDefault(profile => profile.Hash == hash)));
+        machine
+            .Setup(repository => repository.AddAsync(
+                It.IsAny<MachineProfile>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<MachineProfile, CancellationToken>(
+                (profile, _) => addedMachineProfiles.Add(profile))
+            .Returns(Task.CompletedTask);
+
+        List<ProcessProfile> addedProcessProfiles = [];
+        var process = new Mock<IProcessProfileRepository>(MockBehavior.Strict);
+        process
+            .Setup(repository => repository.GetByHashAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<string, CancellationToken>((hash, _) => Task.FromResult(
+                addedProcessProfiles.FirstOrDefault(profile => profile.Hash == hash)));
+        process
+            .Setup(repository => repository.AddAsync(
+                It.IsAny<ProcessProfile>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<ProcessProfile, CancellationToken>(
+                (profile, _) => addedProcessProfiles.Add(profile))
+            .Returns(Task.CompletedTask);
+
+        List<FilamentProfile> addedFilamentProfiles = [];
+        var filament = new Mock<IFilamentProfileRepository>(MockBehavior.Strict);
+        filament
+            .Setup(repository => repository.GetByHashAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<string, CancellationToken>((hash, _) => Task.FromResult(
+                addedFilamentProfiles.FirstOrDefault(profile => profile.Hash == hash)));
+        filament
+            .Setup(repository => repository.AddAsync(
+                It.IsAny<FilamentProfile>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<FilamentProfile, CancellationToken>(
+                (profile, _) => addedFilamentProfiles.Add(profile))
+            .Returns(Task.CompletedTask);
+
+        return (
+            machine,
+            process,
+            filament,
+            addedMachineProfiles,
+            addedProcessProfiles,
+            addedFilamentProfiles);
+    }
+
     [Fact]
     public async Task ExecuteAsync_EnabledSettings_SeedsRealMoonrakerPrinters()
     {
@@ -95,10 +163,21 @@ public sealed class MoonrakerEmulatorSeederTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((PrinterDto?)null);
 
+        (
+            Mock<IMachineProfileRepository> machineProfiles,
+            Mock<IProcessProfileRepository> processProfiles,
+            Mock<IFilamentProfileRepository> filamentProfiles,
+            List<MachineProfile> addedMachineProfiles,
+            List<ProcessProfile> addedProcessProfiles,
+            List<FilamentProfile> addedFilamentProfiles) = CreateStrictCalibrationProfileMocks();
+
         ServiceProvider provider = new ServiceCollection()
             .AddSingleton(unitOfWork.Object)
             .AddSingleton(catalog.Object)
             .AddSingleton(printersService.Object)
+            .AddSingleton(machineProfiles.Object)
+            .AddSingleton(processProfiles.Object)
+            .AddSingleton(filamentProfiles.Object)
             .BuildServiceProvider();
         var seeder = new MoonrakerEmulatorSeeder(
             provider.GetRequiredService<IServiceScopeFactory>(),
@@ -126,6 +205,65 @@ public sealed class MoonrakerEmulatorSeederTests
             job => Assert.Equal(PrintJobStatus.Printing, job.Status),
             job => Assert.Equal(PrintJobStatus.Paused, job.Status));
         Assert.Equal(4, printersService.Invocations.Count);
+
+        // #1851: every seeded printer must carry the calibration-eligibility data that
+        // production's PrinterCalibrationContextService requires, not just base identity.
+        Assert.All(added, printer =>
+        {
+            Assert.Equal(PrinterFirmwareFamily.Klipper, printer.FirmwareFamily);
+            Assert.Equal(PrinterGcodeDialect.Klipper, printer.GcodeDialect);
+            Assert.True(printer.FirmwareIdentityVerified);
+            Assert.NotNull(printer.FirmwareDetectedAtUtc);
+            Assert.Equal(CalibrationContractConstants.SlicerEngine, printer.CalibrationSlicerEngine);
+            Assert.Equal(
+                CalibrationContractConstants.SlicerDistribution,
+                printer.CalibrationSlicerDistribution);
+            Assert.Equal(
+                CalibrationContractConstants.ProfileFormat,
+                printer.CalibrationProfileFormat);
+            Assert.NotNull(printer.CalibrationMachineProfileId);
+            Assert.NotNull(printer.CalibrationProcessProfileId);
+            Assert.NotNull(printer.CalibrationFilamentProfileId);
+            Assert.Equal(250, printer.MaxBuildVolumeX);
+            Assert.Equal(250, printer.MaxBuildVolumeY);
+            Assert.Equal(250, printer.MaxBuildVolumeZ);
+            Assert.Equal(CalibrationMotionType.CoreXY, printer.CalibrationMotionType);
+            Assert.Equal(0, printer.ActiveToolheadIndex);
+            Assert.Single(printer.Toolheads);
+            Toolhead toolhead = printer.Toolheads.Single();
+            Assert.Equal(ToolheadType.Physical, toolhead.ToolheadType);
+            Assert.Equal(0, toolhead.Index);
+            Assert.Equal(0.4, toolhead.NozzleDiameter);
+            Assert.Equal(["PLA", "PETG"], toolhead.SupportedMaterials);
+        });
+
+        // All five seeded printers share the same catalog model, so exactly one machine,
+        // process, and filament profile should have been created (not one per printer).
+        Assert.Single(addedMachineProfiles);
+        Assert.Single(addedProcessProfiles);
+        Assert.Single(addedFilamentProfiles);
+        AssertHashMatchesRawJson(addedMachineProfiles[0].Hash, addedMachineProfiles[0].RawJson);
+        AssertHashMatchesRawJson(addedProcessProfiles[0].Hash, addedProcessProfiles[0].RawJson);
+        AssertHashMatchesRawJson(addedFilamentProfiles[0].Hash, addedFilamentProfiles[0].RawJson);
+        Assert.Equal(addedMachineProfiles[0].Name, addedProcessProfiles[0].CompatiblePrinters);
+        Assert.Equal(addedMachineProfiles[0].Name, addedFilamentProfiles[0].CompatiblePrinters);
+    }
+
+    /// <summary>
+    /// Asserts a profile's stored <c>Hash</c> equals the lowercase-hex SHA256 of its <c>RawJson</c>
+    /// — the exact computation <c>MoonrakerEmulatorSeeder.ComputeSha256</c> performs — for all
+    /// three profile kinds in the shared calibration trio (machine, process, filament), not just
+    /// the machine profile.
+    /// </summary>
+    private static void AssertHashMatchesRawJson(string? hash, string? rawJson)
+    {
+        Assert.NotNull(rawJson);
+        Assert.Equal(
+            Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(rawJson!)))
+                .ToLowerInvariant(),
+            hash);
     }
 
     [Fact]
@@ -177,11 +315,22 @@ public sealed class MoonrakerEmulatorSeederTests
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         printers
-            .Setup(repository => repository.FindByIdAsync(seedId, It.IsAny<CancellationToken>()))
+            .Setup(repository => repository.FindByIdWithToolheadsAsync(
+                seedId,
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(seedPrinter);
         printers
             .Setup(repository => repository.FindDispatchStateAsync(seedId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(seedPrinter.DispatchState);
+        printers
+            .Setup(repository => repository.AddToolheads(It.IsAny<IEnumerable<Toolhead>>()))
+            .Callback<IEnumerable<Toolhead>>(toolheads =>
+            {
+                foreach (Toolhead toolhead in toolheads)
+                {
+                    seedPrinter.Toolheads.Add(toolhead);
+                }
+            });
 
         var queue = new Mock<IQueueRepository>(MockBehavior.Strict);
         queue
@@ -209,10 +358,21 @@ public sealed class MoonrakerEmulatorSeederTests
             .Setup(service => service.RefreshCameraUrlsAsync(seedId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((PrinterDto?)null);
 
+        (
+            Mock<IMachineProfileRepository> machineProfiles,
+            Mock<IProcessProfileRepository> processProfiles,
+            Mock<IFilamentProfileRepository> filamentProfiles,
+            _,
+            _,
+            _) = CreateStrictCalibrationProfileMocks();
+
         ServiceProvider provider = new ServiceCollection()
             .AddSingleton(unitOfWork.Object)
             .AddSingleton(catalog.Object)
             .AddSingleton(printersService.Object)
+            .AddSingleton(machineProfiles.Object)
+            .AddSingleton(processProfiles.Object)
+            .AddSingleton(filamentProfiles.Object)
             .BuildServiceProvider();
         var settings = new MoonrakerEmulatorSeedSettings
         {
@@ -238,5 +398,13 @@ public sealed class MoonrakerEmulatorSeederTests
         printers.Verify(
             repository => repository.RemoveAsync(discoveredPrinter, It.IsAny<CancellationToken>()),
             Times.Once);
+        printers.Verify(
+            repository => repository.AddToolheads(It.IsAny<IEnumerable<Toolhead>>()),
+            Times.Once);
+        Assert.Single(seedPrinter.Toolheads);
+        Toolhead recreatedToolhead = seedPrinter.Toolheads.Single();
+        Assert.Equal(ToolheadType.Physical, recreatedToolhead.ToolheadType);
+        Assert.Equal(0, recreatedToolhead.Index);
+        Assert.Equal(["PLA", "PETG"], recreatedToolhead.SupportedMaterials);
     }
 }
