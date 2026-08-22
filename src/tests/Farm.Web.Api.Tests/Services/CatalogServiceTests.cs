@@ -218,7 +218,7 @@ public class CatalogServiceTests
             .ReturnsAsync(() => capturedModel);
 
         CatalogService svc = CreateService(mockRepo);
-        CreateNozzleModelDto dto = new CreateNozzleModelDto("Vanadium", manufacturerId, NozzleType: NozzleType.Brass, NozzleMaterialId: custom.Id);
+        CreateNozzleModelDto dto = new CreateNozzleModelDto("Vanadium", manufacturerId, NozzleType: "Brass", NozzleMaterialId: custom.Id);
 
         NozzleModelDto result = await svc.CreateNozzleModelAsync(dto, CancellationToken.None);
 
@@ -271,7 +271,7 @@ public class CatalogServiceTests
         _ = mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         CatalogService svc = CreateService(mockRepo);
-        UpdateNozzleModelDto dto = new UpdateNozzleModelDto(NozzleType: NozzleType.TungstenCarbide, NozzleMaterialId: custom.Id);
+        UpdateNozzleModelDto dto = new UpdateNozzleModelDto(NozzleType: "TungstenCarbide", NozzleMaterialId: custom.Id);
 
         NozzleModelDto? result = await svc.UpdateNozzleModelAsync(nozzleId, dto, CancellationToken.None);
 
