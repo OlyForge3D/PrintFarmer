@@ -598,7 +598,7 @@ public class DataImportService : IDataImportService
                 // or blank value means the backup pre-dates this field and restores as "Brass";
                 // any other value that doesn't match a catalog row rejects the row rather than
                 // guessing, exactly like the enum-backed fields below.
-                string nozzleTypeName = string.IsNullOrWhiteSpace(dto.NozzleType) ? "Brass" : dto.NozzleType;
+                string nozzleTypeName = string.IsNullOrWhiteSpace(dto.NozzleType) ? "Brass" : dto.NozzleType.Trim();
 
                 NozzleMaterial? nozzleMaterial = await _context.NozzleMaterials
                     .FirstOrDefaultAsync(m => m.Name == nozzleTypeName, ct);

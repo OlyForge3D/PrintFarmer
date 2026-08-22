@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Text.Json;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Repositories.Printers;
@@ -352,6 +353,39 @@ public sealed class NozzleModelExportRoundTripTests
 
         result.Success.Should().BeFalse();
         (await _targetContext.NozzleModelDefinitions.AnyAsync(n => n.Name == "Ordinal Nozzle"))
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Import_OverflowingNumericNozzleInterface_RejectsRow()
+    {
+        // Exercises NozzleInterfaceExportJsonConverter's read path directly: a JSON numeric
+        // token that overflows Int32 must not silently resolve to null/absent (which
+        // TryParseExportedEnum would then default to V6); it must surface as a
+        // non-numeric-parseable-but-non-empty string so the row is rejected, matching the
+        // "reject a present-but-unparseable value" contract the sibling NozzleType/
+        // HardnessOverride fields already enforce.
+        const string RawJson = """
+        {
+          "manufacturers": [{ "name": "Corrupt Mfg" }],
+          "nozzles": [
+            {
+              "name": "Overflow Nozzle",
+              "manufacturerName": "Corrupt Mfg",
+              "diameter": 0.4,
+              "nozzleInterface": 99999999999999999999
+            }
+          ]
+        }
+        """;
+
+        CatalogExportDto corrupt = JsonSerializer.Deserialize<CatalogExportDto>(
+            RawJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+
+        ImportResponseDto result = await _importService.ImportCatalogAsync(corrupt, ImportMode.Merge);
+
+        result.Success.Should().BeFalse("an out-of-range legacy ordinal must be rejected, not silently coerced to the V6 default");
+        (await _targetContext.NozzleModelDefinitions.AnyAsync(n => n.Name == "Overflow Nozzle"))
             .Should().BeFalse();
     }
 }

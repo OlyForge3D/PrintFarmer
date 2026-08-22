@@ -134,7 +134,12 @@ public sealed class NozzleInterfaceExportJsonConverter : JsonConverter<string?>
                     return ((NozzleInterfaceType)ordinal).ToString();
                 }
 
-                return reader.TryGetInt32(out int raw) ? raw.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
+                // Doesn't fit Int32, or isn't a defined ordinal (e.g. overflow, "3.5", or an
+                // out-of-range integer): preserve the raw numeric text so downstream validation
+                // (TryParseExportedEnum's numeric-string reject path) still sees a non-empty,
+                // non-name value and rejects the row explicitly, rather than this converter
+                // returning null and the row silently defaulting.
+                return System.Text.Encoding.UTF8.GetString(reader.ValueSpan);
             default:
                 return null;
         }

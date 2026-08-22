@@ -953,14 +953,18 @@ public class CatalogService(
     /// <summary>
     /// Resolves the nozzle model create/update wire contract's material name (an open string
     /// set, not a closed enum — epic #1823 / issue #1826) to a <c>NozzleMaterial</c> row's ID
-    /// via an exact-name lookup against the catalog.
+    /// via an exact-name lookup against the catalog. The name is trimmed first, matching the
+    /// sibling <c>Name</c> field's handling, since incidental whitespace (form input,
+    /// copy-paste) is no longer structurally impossible now that this is a free-form string
+    /// rather than a closed enum.
     /// </summary>
     private async Task<Guid> ResolveNozzleMaterialIdAsync(string nozzleType, CancellationToken ct)
     {
-        Domain.NozzleMaterial? material = await _repo.GetNozzleMaterialByNameAsync(nozzleType, ct);
+        string trimmed = nozzleType.Trim();
+        Domain.NozzleMaterial? material = await _repo.GetNozzleMaterialByNameAsync(trimmed, ct);
         if (material is null)
         {
-            throw new KeyNotFoundException($"Nozzle material '{nozzleType}' not found");
+            throw new KeyNotFoundException($"Nozzle material '{trimmed}' not found");
         }
 
         return material.Id;
