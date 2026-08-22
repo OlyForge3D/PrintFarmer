@@ -142,6 +142,29 @@ public sealed class SlicerHostCapabilityClientTests
     }
 
     [Fact]
+    public async Task GetWorkerCompatibilityAsync_RequestTimesOut_ReturnsEmptyWithoutThrowing()
+    {
+        // Exercises the dedicated `catch (OperationCanceledException) when
+        // (!cancellationToken.IsCancellationRequested)` branch: the internal per-call timeout fires
+        // (via CancelAfter on a linked token source) while the caller's own token is never cancelled,
+        // so the client must still degrade to Empty rather than let the cancellation propagate.
+        StallingHandler handler = new();
+        ISlicerHostCapabilityClient client = CreateClient(
+            handler,
+            sharedKey: "test-shared-key",
+            options: new SlicerHostCalibrationResolverOptions
+            {
+                BaseUrl = BaseUrl,
+                ResolveTimeout = TimeSpan.FromMilliseconds(50),
+            });
+
+        WorkerCompatibilitySnapshotDto snapshot =
+            await client.GetWorkerCompatibilityAsync(null, CancellationToken.None);
+
+        _ = snapshot.Should().Be(WorkerCompatibilitySnapshotDto.Empty);
+    }
+
+    [Fact]
     public async Task GetWorkerCompatibilityAsync_NoRequiredVersion_OmitsQueryParam()
     {
         HttpRequestMessage? capturedRequest = null;
@@ -165,7 +188,10 @@ public sealed class SlicerHostCapabilityClientTests
         _ = capturedRequest!.RequestUri!.Query.Should().BeEmpty();
     }
 
-    private static ISlicerHostCapabilityClient CreateClient(HttpMessageHandler handler, string? sharedKey)
+    private static ISlicerHostCapabilityClient CreateClient(
+        HttpMessageHandler handler,
+        string? sharedKey,
+        SlicerHostCalibrationResolverOptions? options = null)
     {
         HttpClient httpClient = new(handler) { BaseAddress = BaseUrl };
         System.Collections.Generic.Dictionary<string, string?> settings = new();
@@ -177,12 +203,27 @@ public sealed class SlicerHostCapabilityClientTests
         IConfiguration configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(settings)
             .Build();
-        SlicerHostCalibrationResolverOptions options = new() { BaseUrl = BaseUrl };
+        options ??= new SlicerHostCalibrationResolverOptions { BaseUrl = BaseUrl };
 
         return new SlicerHostCapabilityClient(
             httpClient,
             configuration,
             options,
             NullLogger<SlicerHostCapabilityClient>.Instance);
+    }
+
+    /// <summary>
+    /// Never completes on its own; only reacts to the caller's cancellation token, so it reliably
+    /// exercises the client's internal per-call timeout without racing a real network call.
+    /// </summary>
+    private sealed class StallingHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }
     }
 }

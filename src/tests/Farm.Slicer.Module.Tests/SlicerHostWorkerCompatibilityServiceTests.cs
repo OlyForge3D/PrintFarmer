@@ -86,6 +86,12 @@ public sealed class SlicerHostWorkerCompatibilityServiceTests : IDisposable
             await service.GetWorkerCompatibilityAsync("9.9.9", CancellationToken.None);
 
         _ = snapshot.PinnedIdentity.Should().BeNull();
+
+        // The online, attested service is still observed even though the required-version filter
+        // excludes it from pinning — observed/supported reporting is not gated by the caller's
+        // requiredSlicerVersion, which only narrows which worker may be pinned.
+        _ = snapshot.ObservedVersions.Should().Contain(CalibrationContractConstants.SlicerVersion);
+        _ = snapshot.HasSupportedVersion.Should().BeTrue();
     }
 
     [Fact]
@@ -102,6 +108,12 @@ public sealed class SlicerHostWorkerCompatibilityServiceTests : IDisposable
             await service.GetWorkerCompatibilityAsync(null, CancellationToken.None);
 
         _ = snapshot.PinnedIdentity.Should().BeNull();
+
+        // The service still attests the upstream slicer capability tag (just not a reproducible
+        // build identity), so it remains an observed/supported version even though no worker can be
+        // pinned to it.
+        _ = snapshot.ObservedVersions.Should().Contain(CalibrationContractConstants.SlicerVersion);
+        _ = snapshot.HasSupportedVersion.Should().BeTrue();
     }
 
     [Fact]
@@ -123,6 +135,11 @@ public sealed class SlicerHostWorkerCompatibilityServiceTests : IDisposable
             await service.GetWorkerCompatibilityAsync(null, CancellationToken.None);
 
         _ = snapshot.PinnedIdentity.Should().BeNull();
+
+        // Observed/supported reporting comes from the slicer service record, not the worker, so a
+        // disabled worker still leaves its service's version observed and supported.
+        _ = snapshot.ObservedVersions.Should().Contain(CalibrationContractConstants.SlicerVersion);
+        _ = snapshot.HasSupportedVersion.Should().BeTrue();
     }
 
     [Fact]
@@ -144,6 +161,11 @@ public sealed class SlicerHostWorkerCompatibilityServiceTests : IDisposable
             await service.GetWorkerCompatibilityAsync(null, CancellationToken.None);
 
         _ = snapshot.PinnedIdentity.Should().BeNull();
+
+        // The service's own heartbeat (LastSeen) is unaffected by the worker's stale heartbeat, so
+        // its version remains observed and supported even though no worker can be pinned.
+        _ = snapshot.ObservedVersions.Should().Contain(CalibrationContractConstants.SlicerVersion);
+        _ = snapshot.HasSupportedVersion.Should().BeTrue();
     }
 
     private static string AttestedCapabilitiesJson(string containerDigest, string binarySha256) =>
