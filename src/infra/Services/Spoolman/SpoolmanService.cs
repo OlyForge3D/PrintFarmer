@@ -518,7 +518,11 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         CancellationToken ct)
     {
         var matches = new List<SpoolmanFilamentDto>();
-        bool useFilter = true;
+
+        // Only meaningful when a filter is actually applied: the retry below exists to recover
+        // from a server that rejects the filter query param. With no filter there is nothing to
+        // drop, so retrying would reissue an identical request against an already-failing page.
+        bool useFilter = gtinFilter is not null;
         int offset = 0;
 
         while (true)

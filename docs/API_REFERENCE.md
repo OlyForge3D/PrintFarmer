@@ -43,6 +43,29 @@ Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields
 
 (Extend with additional DTO details as needed.)
 
+## Spoolman Barcode Resolution
+
+- `GET /api/spoolman/filaments/by-barcode?code=` resolves a scanned retail barcode
+  to a filament. The scanned value is normalized to a canonical 14-digit GTIN
+  (GTIN-8/12/13/14 are zero-pad equivalent) and matched against the filament
+  `gtin` field only. A value that fails length or GS1 mod-10 check-digit
+  validation is rejected without querying Spoolman.
+- `articleNumber` is a vendor article number / SKU and is **never** consulted for
+  barcode resolution. Matching scanned barcodes against a SKU field risks
+  collisions with numeric SKUs, and its exact-string semantics would break
+  UPC-12 ↔ EAN-13 equivalence.
+- `gtin` is intentionally non-unique — multipacks and vendor parent listings
+  legitimately share one. When several filaments match, the lowest-ID filament
+  wins deterministically.
+
+> **Operator note.** Barcode resolution requires a Spoolman instance exposing the
+> `gtin` field, which the bundled PrintFarmer Spoolman image provides. If you
+> point PrintFarmer at an upstream Spoolman without `gtin`, or at an instance
+> whose legacy barcodes still live in `article_number` and were never backfilled,
+> barcode scans will not resolve. Barcode *writes* have always targeted `gtin`
+> only, so this affects only records whose barcode was entered into
+> `article_number` directly.
+
 ## Spoolman Barcode Diagnostics
 
 - `GET /api/spoolman/barcodes/scan-logs?limit=` returns recent barcode scan
