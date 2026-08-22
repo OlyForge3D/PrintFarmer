@@ -269,13 +269,61 @@ public class ModelServiceAdditionalTests : IDisposable
     }
 
     /// <summary>
-    /// Before #1814, <c>IsValid</c> was hardcoded to <c>true</c> on upload regardless of what
-    /// analysis found. This pins that a real, structurally-invalid analysis result (e.g. a mesh
-    /// with no triangles) is now propagated onto the persisted model, along with its validation
-    /// errors serialized as JSON.
+    /// Before #1866, an analysis result with <c>IsValid: false</c> was persisted anyway — the
+    /// malformed file was accepted with only <c>IsValid=false</c> metadata, and broke later (e.g.
+    /// in the model viewer) instead of being rejected at upload time. STL/OBJ uploads that fail
+    /// structural analysis must now be rejected outright.
+    /// </summary>
+    [Theory]
+    [InlineData("model.stl")]
+    [InlineData("model.obj")]
+    public async Task UploadModelAsync_AnalysisReturnsInvalidForStlOrObj_RejectsUpload(string fileName)
+    {
+        IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
+        Mock<ILogger<Model3DFileService>> mockLogger = new Mock<ILogger<Model3DFileService>>();
+
+        Mock<IModel3DFileRepository> mockRepo = new Mock<IModel3DFileRepository>(MockBehavior.Strict);
+        _ = mockRepo.Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Model3D?)null);
+
+        Mock<IModelAnalysisService> mockAnalysis = new Mock<IModelAnalysisService>(MockBehavior.Strict);
+        _ = mockAnalysis.Setup(a => a.AnalyzeModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ModelAnalysisResult(
+                null,
+                null,
+                null,
+                0,
+                IsValid: false,
+                ValidationErrors: ["No triangles found in mesh"]));
+
+        Mock<IFileManagementService> mockFileManagement = new Mock<IFileManagementService>();
+        _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _ = mockFileManagement.Setup(s => s.ToHex(It.IsAny<byte[]>()))
+            .Returns<byte[]>(b => Convert.ToHexString(b).ToLowerInvariant());
+
+        Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock();
+
+        var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        string tempDir = Path.Join(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
+        mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
+
+        Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object, mockAnalysis.Object);
+
+        IFormFile file = CreateFormFile("file", "content", fileName);
+
+        ArgumentException ex = await Assert.ThrowsAsync<ArgumentException>(() => service.UploadModelAsync(file, CancellationToken.None));
+        Assert.Contains("No triangles found in mesh", ex.Message);
+
+        mockRepo.Verify(r => r.AddAsync(It.IsAny<Model3D>(), It.IsAny<CancellationToken>()), Times.Never);
+        mockRepo.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
+    /// The #1866 rejection gate is deliberately scoped to STL/OBJ only. 3MF keeps its established
+    /// best-effort behavior from #1814: a structurally-invalid 3MF is still persisted (with
+    /// <c>IsValid=false</c> metadata) rather than rejected outright.
     /// </summary>
     [Fact]
-    public async Task UploadModelAsync_AnalysisReturnsInvalid_PropagatesIsValidFalseAndValidationErrors()
+    public async Task UploadModelAsync_AnalysisReturnsInvalidFor3mf_StillPersistsAsInvalid()
     {
         IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection().Build();
         Mock<ILogger<Model3DFileService>> mockLogger = new Mock<ILogger<Model3DFileService>>();
@@ -311,7 +359,7 @@ public class ModelServiceAdditionalTests : IDisposable
 
         Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object, mockAnalysis.Object);
 
-        IFormFile file = CreateFormFile("file", "content", "model.stl");
+        IFormFile file = CreateFormFile("file", "content", "model.3mf");
 
         Model3DUploadResultDto result = await service.UploadModelAsync(file, CancellationToken.None);
 
@@ -323,7 +371,7 @@ public class ModelServiceAdditionalTests : IDisposable
     }
 
     /// <summary>
-    /// When analysis returns null (unsupported format, e.g. OBJ/PLY/STEP), the model must remain
+    /// When analysis returns null (unsupported format, e.g. PLY/STEP), the model must remain
     /// listed (<c>IsValid = true</c>): "not analyzed" must never be inferred as "invalid" — that
     /// would silently hide unrelated formats from the library (#1814).
     /// </summary>
@@ -358,7 +406,7 @@ public class ModelServiceAdditionalTests : IDisposable
 
         Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object, mockAnalysis.Object);
 
-        IFormFile file = CreateFormFile("file", "content", "model.obj");
+        IFormFile file = CreateFormFile("file", "content", "model.step");
 
         Model3DUploadResultDto result = await service.UploadModelAsync(file, CancellationToken.None);
 
