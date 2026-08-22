@@ -454,6 +454,34 @@ describe('NewSliceJobPage', () => {
     });
   });
 
+  describe('Mobile settings overlay dismissal (issue #1867)', () => {
+    it('renders a "Hide settings" control that closes the settings overlay', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('printer-slicer-selector')).toBeInTheDocument();
+      });
+
+      // The settings panel starts open (default sidebarOpen state), so the
+      // overlay covers the whole viewport on narrow screens including the
+      // workspace toolbar's own hamburger toggle underneath it.
+      const closeButton = screen.getByRole('button', { name: /hide settings/i });
+      expect(closeButton).toBeInTheDocument();
+
+      const sidebar = screen.getByTestId('slicer-settings-sidebar');
+      expect(sidebar.className).toContain('absolute');
+
+      fireEvent.click(closeButton);
+
+      // Closing collapses the overlay back to `hidden` so it stops covering
+      // the workspace (and the "Add model" action) underneath it.
+      await waitFor(() => {
+        expect(sidebar.className).toContain('hidden');
+        expect(sidebar.className).not.toContain('absolute');
+      });
+    });
+  });
+
   describe('Slicer Dropdown', () => {
     it('should show slicer types not worker names', async () => {
       renderWithProviders(<NewSliceJobPage />);
