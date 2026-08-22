@@ -46,9 +46,9 @@ public class SpoolmanBarcodeEndpointTests
     }
 
     [Fact]
-    public async Task GetFilamentByBarcodeAsync_KnownArticleNumber_ReturnsOkWithFilament()
+    public async Task GetFilamentByBarcodeAsync_KnownBarcode_ReturnsOkWithFilament()
     {
-        SpoolmanFilamentDto filament = CreateFilament(42, "012345678905");
+        SpoolmanFilamentDto filament = CreateFilament(42, articleNumber: "PLA-GB-1000", gtin: "00012345678905");
         spoolmanServiceMock
             .Setup(s => s.GetFilamentByBarcodeAsync("012345678905", It.IsAny<CancellationToken>()))
             .ReturnsAsync(filament);
@@ -58,12 +58,12 @@ public class SpoolmanBarcodeEndpointTests
         OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
         SpoolmanFilamentDto value = Assert.IsType<SpoolmanFilamentDto>(ok.Value);
         Assert.Equal(42, value.Id);
-        Assert.Equal("012345678905", value.ArticleNumber);
+        Assert.Equal("00012345678905", value.Gtin);
         VerifyLogged(BarcodeScanAction.Resolve, BarcodeScanOutcome.Resolved, 200, matchedFilamentId: 42);
     }
 
     [Fact]
-    public async Task GetFilamentByBarcodeAsync_UnknownArticleNumber_ReturnsNotFound()
+    public async Task GetFilamentByBarcodeAsync_UnknownBarcode_ReturnsNotFound()
     {
         spoolmanServiceMock
             .Setup(s => s.GetFilamentByBarcodeAsync("missing", It.IsAny<CancellationToken>()))
@@ -101,7 +101,7 @@ public class SpoolmanBarcodeEndpointTests
     public async Task GetFilamentByBarcodeAsync_QueryCodeWithSlashPercentAndSpace_ReturnsOkWithFilament()
     {
         const string barcode = "ABC/DEF 12%3";
-        SpoolmanFilamentDto filament = CreateFilament(44, barcode, gtin: "00123456789012");
+        SpoolmanFilamentDto filament = CreateFilament(44, articleNumber: barcode, gtin: "00123456789012");
         Mock<ISpoolmanService> routedSpoolmanServiceMock = new();
         routedSpoolmanServiceMock
             .Setup(s => s.GetFilamentByBarcodeAsync(barcode, It.IsAny<CancellationToken>()))

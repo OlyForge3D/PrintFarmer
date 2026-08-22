@@ -15,16 +15,19 @@ namespace Farm.Web.Api.Tests.Services;
 public class SpoolmanBarcodeServiceTests
 {
     [Fact]
-    public async Task GetFilamentByBarcodeAsync_DuplicateArticleNumbers_ReturnsLowestId()
+    public async Task GetFilamentByBarcodeAsync_DuplicateGtins_ReturnsLowestId()
     {
+        // `gtin` is intentionally non-unique (multipacks and vendor parent listings
+        // legitimately share one), so duplicates must resolve deterministically.
+        const string storedGtin = "00123456789012";
         using ServiceHarness harness = CreateService(req =>
         {
             if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
             {
                 object[] filaments =
                 [
-                    new { id = 12, name = "Second", article_number = "UPC123", material = "PLA" },
-                    new { id = 5, name = "First", article_number = "UPC123", material = "PLA" },
+                    new { id = 12, name = "Second", gtin = storedGtin, material = "PLA" },
+                    new { id = 5, name = "First", gtin = storedGtin, material = "PLA" },
                 ];
                 return JsonResponse(filaments, totalCount: "2");
             }
@@ -32,15 +35,15 @@ public class SpoolmanBarcodeServiceTests
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("UPC123", CancellationToken.None);
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("123456789012", CancellationToken.None);
 
         Assert.NotNull(result);
         Assert.Equal(5, result.Id);
-        Assert.Equal("UPC123", result.ArticleNumber);
+        Assert.Equal(storedGtin, result.Gtin);
     }
 
     [Fact]
-    public async Task GetFilamentByBarcodeAsync_UnknownArticleNumber_ReturnsNull()
+    public async Task GetFilamentByBarcodeAsync_UnknownBarcode_ReturnsNull()
     {
         using ServiceHarness harness = CreateService(req =>
         {
@@ -48,7 +51,7 @@ public class SpoolmanBarcodeServiceTests
             {
                 object[] filaments =
                 [
-                    new { id = 7, name = "Known", article_number = "OTHER", material = "PLA" },
+                    new { id = 7, name = "Known", gtin = "00012345678905", material = "PLA" },
                 ];
                 return JsonResponse(filaments, totalCount: "1");
             }
@@ -56,38 +59,52 @@ public class SpoolmanBarcodeServiceTests
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("UPC123", CancellationToken.None);
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("123456789012", CancellationToken.None);
 
         Assert.Null(result);
     }
 
     [Fact]
-    public async Task GetFilamentByBarcodeAsync_SpecialCharacters_EncodesOutboundArticleNumber()
+    public async Task GetFilamentByBarcodeAsync_InvalidBarcode_ReturnsNullWithoutQueryingSpoolman()
     {
-        const string barcode = "ABC/DEF 12%3&x=y";
-        Uri? requestedUri = null;
+        bool anyHttpCallMade = false;
+        using ServiceHarness harness = CreateService(_ =>
+        {
+            anyHttpCallMade = true;
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        // Not a GTIN in any accepted form; there is no `article_number` path left to try, so
+        // resolution must reject it outright rather than issuing a lookup.
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("ABC/DEF 12%3&x=y", CancellationToken.None);
+
+        Assert.Null(result);
+        Assert.False(anyHttpCallMade, "An unnormalizable barcode must be rejected before any Spoolman request is made.");
+    }
+
+    [Fact]
+    public async Task GetFilamentByBarcodeAsync_NeverQueriesSpoolmanByArticleNumber()
+    {
+        List<Uri> requestedUris = [];
         using ServiceHarness harness = CreateService(req =>
         {
-            requestedUri = req.RequestUri;
+            requestedUris.Add(req.RequestUri!);
             if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
             {
-                object[] filaments =
-                [
-                    new { id = 9, name = "Special", article_number = barcode, material = "PLA" },
-                ];
-                return JsonResponse(filaments, totalCount: "1");
+                // Nothing matches, forcing every resolution stage (filtered then full scan)
+                // to run so the assertion below covers all outbound lookups.
+                return JsonResponse(Array.Empty<object>(), totalCount: "0");
             }
 
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync(barcode, CancellationToken.None);
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("123456789012", CancellationToken.None);
 
-        Assert.NotNull(result);
-        Assert.Equal(9, result.Id);
-        Assert.Equal(barcode, result.ArticleNumber);
-        Assert.NotNull(requestedUri);
-        Assert.Contains("article_number=ABC%2FDEF%2012%253%26x%3Dy", requestedUri.Query);
+        Assert.Null(result);
+        Assert.NotEmpty(requestedUris);
+        Assert.All(requestedUris, uri => Assert.Null(GetQueryParam(uri, "article_number")));
+        Assert.Contains(requestedUris, uri => GetQueryParam(uri, "gtin") == "00123456789012");
     }
 
     [Fact]
@@ -136,18 +153,12 @@ public class SpoolmanBarcodeServiceTests
             {
                 object[] filaments = [new { id = 11, name = "Ean13Stored", gtin = storedGtin, material = "PLA" }];
                 string? gtinParam = GetQueryParam(req, "gtin");
-                string? articleNumberParam = GetQueryParam(req, "article_number");
 
                 if (gtinParam is not null)
                 {
                     return gtinParam == storedGtin
                         ? JsonResponse(filaments, totalCount: "1")
                         : JsonResponse(Array.Empty<object>(), totalCount: "0");
-                }
-
-                if (articleNumberParam is not null)
-                {
-                    return JsonResponse(Array.Empty<object>(), totalCount: "0");
                 }
 
                 // Unfiltered full scan: the fallback this test exercises.
@@ -178,18 +189,12 @@ public class SpoolmanBarcodeServiceTests
             {
                 object[] filaments = [new { id = 12, name = "Upc12Stored", gtin = storedGtin, material = "PLA" }];
                 string? gtinParam = GetQueryParam(req, "gtin");
-                string? articleNumberParam = GetQueryParam(req, "article_number");
 
                 if (gtinParam is not null)
                 {
                     return gtinParam == storedGtin
                         ? JsonResponse(filaments, totalCount: "1")
                         : JsonResponse(Array.Empty<object>(), totalCount: "0");
-                }
-
-                if (articleNumberParam is not null)
-                {
-                    return JsonResponse(Array.Empty<object>(), totalCount: "0");
                 }
 
                 // Unfiltered full scan: the fallback this test exercises.
@@ -207,17 +212,18 @@ public class SpoolmanBarcodeServiceTests
     }
 
     [Fact]
-    public async Task GetFilamentByBarcodeAsync_LegacyArticleNumberOnly_StillResolves()
+    public async Task GetFilamentByBarcodeAsync_ArticleNumberOnlyWithoutGtin_IsNotResolved()
     {
-        // Record predates the gtin column: gtin is null, only article_number holds the
-        // (verbatim, unnormalized) scanned value.
+        // `article_number` means a vendor article number / SKU. A filament reachable only
+        // through it must NOT be resolved by a barcode scan: matching a scanned barcode
+        // against a SKU field is a category error and risks colliding with numeric SKUs.
         using ServiceHarness harness = CreateService(req =>
         {
             if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
             {
                 object[] filaments =
                 [
-                    new { id = 20, name = "Legacy", article_number = "123456789012", gtin = (string?)null, material = "PLA" },
+                    new { id = 20, name = "SkuOnly", article_number = "123456789012", gtin = (string?)null, material = "PLA" },
                 ];
                 return JsonResponse(filaments, totalCount: "1");
             }
@@ -227,8 +233,7 @@ public class SpoolmanBarcodeServiceTests
 
         SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("123456789012", CancellationToken.None);
 
-        Assert.NotNull(result);
-        Assert.Equal(20, result.Id);
+        Assert.Null(result);
     }
 
     [Fact]
@@ -299,7 +304,7 @@ public class SpoolmanBarcodeServiceTests
         string? postPayload = null;
         SpoolmanImportSpoolByBarcodeRequest request = new()
         {
-            Barcode = "UPC123",
+            Barcode = "123456789012",
             RemainingWeight = 955.5,
             InitialWeight = 1000,
             SpoolWeight = 215,
@@ -315,7 +320,7 @@ public class SpoolmanBarcodeServiceTests
             {
                 object[] filaments =
                 [
-                    new { id = 7, name = "Target", article_number = "UPC123", material = "PLA" },
+                    new { id = 7, name = "Target", gtin = "00123456789012", material = "PLA" },
                 ];
                 return JsonResponse(filaments, totalCount: "1");
             }
@@ -374,7 +379,9 @@ public class SpoolmanBarcodeServiceTests
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        SpoolmanImportSpoolByBarcodeRequest request = new() { Barcode = "missing" };
+        // Valid GTIN so resolution actually queries Spoolman (which matches nothing) rather
+        // than short-circuiting on normalization.
+        SpoolmanImportSpoolByBarcodeRequest request = new() { Barcode = "123456789012" };
 
         SpoolmanSpoolDto? result = await harness.Service.CreateSpoolByBarcodeAsync(request, CancellationToken.None);
 
@@ -397,9 +404,12 @@ public class SpoolmanBarcodeServiceTests
     /// null if absent. Used by fake handlers to simulate Spoolman's real exact-string-match
     /// filtering behavior instead of ignoring the query string.
     /// </summary>
-    private static string? GetQueryParam(HttpRequestMessage req, string name)
+    private static string? GetQueryParam(HttpRequestMessage req, string name) =>
+        GetQueryParam(req.RequestUri!, name);
+
+    private static string? GetQueryParam(Uri uri, string name)
     {
-        string query = req.RequestUri!.Query.TrimStart('?');
+        string query = uri.Query.TrimStart('?');
         foreach (string pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
             string[] kv = pair.Split('=', 2);

@@ -59,8 +59,8 @@ public interface ISpoolmanService
 
     /// <summary>
     /// Gets the filament whose normalized GTIN-14 <c>gtin</c> matches the scanned barcode
-    /// (after normalizing both sides), falling back to an exact <c>articleNumber</c> match for
-    /// legacy filaments that have not yet been assigned a <c>gtin</c>.
+    /// (after normalizing both sides). <c>articleNumber</c> holds vendor SKUs and is never
+    /// consulted. Returns <c>null</c> if the barcode fails GTIN normalization.
     /// Returns the lowest-ID filament if duplicate matches exist.
     /// </summary>
     Task<SpoolmanFilamentDto?> GetFilamentByBarcodeAsync(string barcode, CancellationToken ct);

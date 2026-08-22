@@ -4,8 +4,8 @@ import Foundation
 
 protocol BarcodeIntakeServiceProtocol: Sendable {
     /// Sends the scanned value unchanged. The server normalizes and validates GTINs,
-    /// falls back to legacy `article_number` records, and chooses a deterministic
-    /// match when multiple filaments share a GTIN.
+    /// resolves against `gtin` only, and chooses a deterministic match when multiple
+    /// filaments share a GTIN.
     func resolveFilament(barcode: String) async throws -> SpoolmanFilament?
 
     /// Sends the scanned value unchanged for the server to persist in `gtin`.

@@ -448,38 +448,25 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
         const int pageSize = 500;
         string baseUrl = cfg.BaseUrl.TrimEnd('/');
+
+        // Resolution is by `gtin` only. `article_number` holds vendor SKUs, so matching a
+        // scanned barcode against it would be a category error (and would reintroduce the
+        // raw exact-match semantics that GTIN-14 normalization exists to eliminate).
         string? normalizedGtin = GtinNormalizer.Normalize(trimmedBarcode);
-
-        List<SpoolmanFilamentDto> matches = [];
-
-        if (normalizedGtin is not null)
+        if (normalizedGtin is null)
         {
-            matches = await CollectBarcodeMatchesAsync(
-                baseUrl,
-                pageSize,
-                articleNumberFilter: null,
-                gtinFilter: normalizedGtin,
-                isMatch: filament => string.Equals(GtinNormalizer.Normalize(filament.Gtin), normalizedGtin, StringComparison.Ordinal),
-                debugFilterName: "gtin",
-                ct);
+            return null;
         }
+
+        List<SpoolmanFilamentDto> matches = await CollectBarcodeMatchesAsync(
+            baseUrl,
+            pageSize,
+            gtinFilter: normalizedGtin,
+            isMatch: filament => string.Equals(GtinNormalizer.Normalize(filament.Gtin), normalizedGtin, StringComparison.Ordinal),
+            debugFilterName: "gtin",
+            ct);
 
         if (matches.Count == 0)
-        {
-            // Legacy fallback: filaments written before `gtin` existed store the scanned
-            // barcode verbatim in article_number. Compare with the raw (unnormalized) value
-            // so records that were never backfilled still resolve.
-            matches = await CollectBarcodeMatchesAsync(
-                baseUrl,
-                pageSize,
-                articleNumberFilter: trimmedBarcode,
-                gtinFilter: null,
-                isMatch: filament => string.Equals(filament.ArticleNumber, trimmedBarcode, StringComparison.Ordinal),
-                debugFilterName: "article_number",
-                ct);
-        }
-
-        if (matches.Count == 0 && normalizedGtin is not null)
         {
             // The server-side `gtin=` filter is an exact string match, so it only finds
             // records whose stored value is already normalized to 14 digits. A filament
@@ -493,7 +480,6 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             matches = await CollectBarcodeMatchesAsync(
                 baseUrl,
                 pageSize,
-                articleNumberFilter: null,
                 gtinFilter: null,
                 isMatch: filament => string.Equals(GtinNormalizer.Normalize(filament.Gtin), normalizedGtin, StringComparison.Ordinal),
                 debugFilterName: "gtin (full scan)",
@@ -526,7 +512,6 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     private async Task<List<SpoolmanFilamentDto>> CollectBarcodeMatchesAsync(
         string baseUrl,
         int pageSize,
-        string? articleNumberFilter,
         string? gtinFilter,
         Func<SpoolmanFilamentDto, bool> isMatch,
         string debugFilterName,
@@ -540,7 +525,6 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         {
             SpoolmanPagedResult<SpoolmanFilamentDto>? page = await FetchBarcodeFilamentPageAsync(
                 baseUrl,
-                useFilter ? articleNumberFilter : null,
                 useFilter ? gtinFilter : null,
                 pageSize,
                 offset,
@@ -624,7 +608,6 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
     private async Task<SpoolmanPagedResult<SpoolmanFilamentDto>?> FetchBarcodeFilamentPageAsync(
         string baseUrl,
-        string? articleNumber,
         string? gtin,
         int limit,
         int offset,
@@ -635,11 +618,6 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             $"limit={limit}",
             $"offset={offset}",
         ];
-
-        if (!string.IsNullOrWhiteSpace(articleNumber))
-        {
-            parts.Add($"article_number={Uri.EscapeDataString(articleNumber)}");
-        }
 
         if (!string.IsNullOrWhiteSpace(gtin))
         {
