@@ -687,9 +687,14 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
             await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators)
                 .SendAsync(SlicerHubEvents.SlicerDeregistered, new { id = svc.Id, name = svc.Name }, ct);
         }
-        catch
+        catch (Exception ex)
         {
-            // ignore
+            // Deregistration is already committed; a failed broadcast must not undo it or fail
+            // the caller. Narrowed from a bare catch so the failure is attributable (CodeQL).
+            _logger.LogWarning(
+                "[DeregisterAsync] Failed to broadcast slicer deregistration for {ServiceId}: {ExMessage}",
+                svc.Id,
+                ex.Message);
         }
 
         return true;
