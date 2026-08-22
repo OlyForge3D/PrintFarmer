@@ -1,9 +1,10 @@
 ﻿// Suppress hardcoded URI warning for this file
 #pragma warning disable CA1303 // Do not use hardcoded absolute paths or URIs
 #pragma warning disable S1075 // Do not use hardcoded absolute paths or URIs (Sonar)
-using System.Diagnostics;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
@@ -15,7 +16,7 @@ namespace Farm.Web.Api.Health;
 /// Comprehensive health check that validates database connectivity,
 /// external service availability, and system resources
 /// </summary>
-public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory httpClientFactory, ILogger<ComprehensiveHealthCheck> logger, Farm.Infrastructure.Settings.ISettingsService settingsService, IHostEnvironment hostEnvironment) : IHealthCheck
+public class ComprehensiveHealthCheck(AppDbContext dbContext, IEnumerable<IPrinterConnectionHealthProvider> connectionHealthProviders, ILogger<ComprehensiveHealthCheck> logger, Farm.Infrastructure.Settings.ISettingsService settingsService, IHostEnvironment hostEnvironment) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
@@ -117,99 +118,50 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
             checks["Memory"] = new { Status = "Error", Error = ex.Message };
         }
 
-        // External service connectivity (sample Moonraker check)
+        // External service connectivity, derived from the live per-backend connection
+        // health tracked by each registered IPrinterConnectionHealthProvider (currently
+        // Moonraker and SDCP). This reflects real, continuously-updated connection state
+        // for every printer on those backends, instead of issuing ad hoc probe requests
+        // that were previously gated behind a disabled-by-default setting and hard-filtered
+        // to Moonraker only - both of which caused an offline printer to be silently
+        // reported as healthy (see issue #1870).
         try
         {
-            // Select printers to probe for external service health based on settings
-            List<ExternalServicePrinter> printers;
-            int printersToCheck = 0; // default fallback: don't check external printers by default
-            try
+            List<PrinterConnectionHealth> printerHealth = new();
+            foreach (IPrinterConnectionHealthProvider provider in connectionHealthProviders)
             {
-                Farm.Infrastructure.Settings.ExternalServicesHealthSettings s = settingsService.Get<Farm.Infrastructure.Settings.ExternalServicesHealthSettings>();
-                if (s != null)
-                {
-                    printersToCheck = s.PrintersToCheck;
-                }
-            }
-            catch
-            {
-            }
-
-            if (printersToCheck == 0)
-            {
-                printers = [];
-            }
-            else
-            {
-                IQueryable<ExternalServicePrinter> printerQuery = dbContext.Printers
-                    .AsNoTracking()
-                    .Select(p => new ExternalServicePrinter(p.Id, p.Name, p.ServerUrl, p.Backend));
-
-                printers = printersToCheck < 0
-                    ? await printerQuery.ToListAsync(cancellationToken)
-                    : await printerQuery.Take(printersToCheck).ToListAsync(cancellationToken);
-            }
-
-            int externalServiceCount = 0;
-            int failedServices = 0;
-            List<object> failedDetails = new();
-
-            foreach (ExternalServicePrinter printer in printers.Where(printer =>
-                         printer.Backend == (int)PrinterBackend.Moonraker))
-            {
-                // Check Moonraker printers
-                externalServiceCount++;
                 try
                 {
-                    using HttpClient client = httpClientFactory.CreateClient();
-                    client.Timeout = TimeSpan.FromSeconds(2);
-                    string attemptedUrl = $"{printer.ServerUrl.TrimEnd('/')}/server/info";
-                    Stopwatch sw = Stopwatch.StartNew();
-                    HttpResponseMessage response = await client.GetAsync(attemptedUrl, cancellationToken);
-                    sw.Stop();
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        failedServices++;
-                        string snippet = string.Empty;
-                        try
-                        {
-                            string body = await response.Content.ReadAsStringAsync(cancellationToken) ?? string.Empty;
-                            snippet = body.Length > 200 ? body[..200] : body;
-                        }
-                        catch
-                        {
-                        }
-
-                        failedDetails.Add(new
-                        {
-                            printer.Id,
-                            printer.Name,
-                            printer.ServerUrl,
-                            printer.Backend,
-                            AttemptedUrl = attemptedUrl,
-                            CheckedAtUtc = DateTime.UtcNow,
-                            ElapsedMs = sw.ElapsedMilliseconds,
-                            StatusCode = (int)response.StatusCode,
-                            ResponseSnippet = snippet,
-                            ErrorMessage = "Non-200 response"
-                        });
-                    }
+                    printerHealth.AddRange(provider.GetConnectionHealth().Values);
                 }
                 catch (Exception ex)
                 {
-                    failedServices++;
-                    failedDetails.Add(new
-                    {
-                        printer.Id,
-                        printer.Name,
-                        printer.ServerUrl,
-                        printer.Backend,
-                        AttemptedUrl = $"{printer.ServerUrl.TrimEnd('/')}/server/info",
-                        CheckedAtUtc = DateTime.UtcNow,
-                        ElapsedMs = (long?)null,
-                        ErrorMessage = ex.Message
-                    });
+                    logger.LogWarning(ex, "Failed to read connection health from provider {ProviderType}", provider.GetType().Name);
                 }
+            }
+
+            int externalServiceCount = printerHealth.Count;
+            int failedServices = 0;
+            List<object> failedDetails = new();
+
+            foreach (PrinterConnectionHealth printer in printerHealth)
+            {
+                if (printer.ConnectionState == PrinterConnectionState.Connected)
+                {
+                    continue;
+                }
+
+                failedServices++;
+                failedDetails.Add(new
+                {
+                    Id = printer.PrinterId,
+                    Name = printer.PrinterName,
+                    printer.Backend,
+                    ConnectionState = printer.ConnectionState.ToString(),
+                    printer.LastConnectedUtc,
+                    printer.LastDisconnectedUtc,
+                    ErrorMessage = $"Printer is {printer.ConnectionState}",
+                });
             }
 
             string serviceStatus = failedServices == 0 ? "Healthy"
@@ -303,8 +255,6 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
 
         return result;
     }
-
-    private sealed record ExternalServicePrinter(Guid Id, string Name, string ServerUrl, int Backend);
 }
 
 // Re-enable warning at end of file
