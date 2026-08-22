@@ -108,6 +108,67 @@ public class SpoolmanBarcodeServiceTests
     }
 
     [Fact]
+    public async Task GetFilamentByBarcodeAsync_ServerRejectsGtinFilter_RetriesUnfilteredAndResolves()
+    {
+        // An older Spoolman that does not know the `gtin=` query param answers the filtered
+        // request with an error (NOT an empty result set). Resolution must drop the filter and
+        // retry with a full scan, so a farm running a lagging Spoolman still resolves scans.
+        const string storedGtin = "00123456789012";
+        List<bool> requestsHadGtinParam = [];
+        using ServiceHarness harness = CreateService(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
+            {
+                bool hasGtinParam = GetQueryParam(req, "gtin") is not null;
+                requestsHadGtinParam.Add(hasGtinParam);
+                object[] filaments = [new { id = 31, name = "LaggingServerMatch", gtin = storedGtin, material = "PLA" }];
+
+                return hasGtinParam
+                    ? new HttpResponseMessage(HttpStatusCode.BadRequest)
+                    : JsonResponse(filaments, totalCount: "1");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("123456789012", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(31, result.Id);
+        Assert.Equal([true, false], requestsHadGtinParam);
+    }
+
+    [Fact]
+    public async Task GetFilamentByBarcodeAsync_UnfilteredScanFails_DoesNotReissueIdenticalRequest()
+    {
+        // The filter-drop retry exists solely to recover from a server rejecting the `gtin=`
+        // param. The full-scan stage sends no filter, so there is nothing left to drop --
+        // retrying would reissue a byte-identical request against an already-failing endpoint.
+        int unfilteredRequestCount = 0;
+        using ServiceHarness harness = CreateService(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
+            {
+                if (GetQueryParam(req, "gtin") is not null)
+                {
+                    // Filtered stage succeeds but matches nothing, so the full scan runs next.
+                    return JsonResponse(Array.Empty<object>(), totalCount: "0");
+                }
+
+                unfilteredRequestCount++;
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("123456789012", CancellationToken.None);
+
+        Assert.Null(result);
+        Assert.Equal(1, unfilteredRequestCount);
+    }
+
+    [Fact]
     public async Task GetFilamentByBarcodeAsync_StoredGtinAlreadyNormalized_MatchesViaServerSideFilterDirectly()
     {
         // Stored gtin is already the normalized 14-digit form (as written by

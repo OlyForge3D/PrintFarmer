@@ -60,11 +60,12 @@ Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields
 
 > **Operator note.** Barcode resolution requires a Spoolman instance exposing the
 > `gtin` field, which the bundled PrintFarmer Spoolman image provides. If you
-> point PrintFarmer at an upstream Spoolman without `gtin`, or at an instance
-> whose legacy barcodes still live in `article_number` and were never backfilled,
-> barcode scans will not resolve. Barcode *writes* have always targeted `gtin`
-> only, so this affects only records whose barcode was entered into
-> `article_number` directly.
+> point PrintFarmer at an upstream Spoolman without `gtin`, barcode scans will
+> not resolve. PrintFarmer versions **before** the GTIN migration wrote scanned
+> barcodes into `article_number`; those legacy mappings — along with any barcode
+> typed into `article_number` by hand — must be backfilled into `gtin` to remain
+> scannable, as `article_number` is no longer consulted. Current PrintFarmer
+> writes target `gtin` only.
 
 ## Spoolman Barcode Diagnostics
 
