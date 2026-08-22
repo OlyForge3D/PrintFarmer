@@ -87,7 +87,7 @@ public sealed class CatalogServiceNozzleHardnessTests
                 ManufacturerId: Guid.NewGuid(),
                 Diameter: 0.4,
                 MaxTemp: 500,
-                NozzleType: nozzleType,
+                NozzleType: nozzleType.ToString(),
                 HardnessOverride: hardnessOverride),
             CancellationToken.None);
 
@@ -98,7 +98,7 @@ public sealed class CatalogServiceNozzleHardnessTests
             new CreateNozzleModelDto(
                 Name: "Diamondback V6",
                 ManufacturerId: Guid.NewGuid(),
-                NozzleType: NozzleType.Diamond),
+                NozzleType: nameof(NozzleType.Diamond)),
             CancellationToken.None);
 
         created.HardnessOverride.Should().Be(NozzleHardnessOverride.Auto);
@@ -168,7 +168,7 @@ public sealed class CatalogServiceNozzleHardnessTests
 
         NozzleModelDto? updated = await _service.UpdateNozzleModelAsync(
             created.Id,
-            new UpdateNozzleModelDto(NozzleType: NozzleType.Diamond),
+            new UpdateNozzleModelDto(NozzleType: nameof(NozzleType.Diamond)),
             CancellationToken.None);
 
         updated!.IsHardened.Should().BeTrue("Auto keeps hardness following the material");

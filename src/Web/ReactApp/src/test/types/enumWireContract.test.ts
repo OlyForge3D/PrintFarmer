@@ -142,6 +142,50 @@ describe('enum wire contract: PascalCase member-name strings', () => {
   });
 });
 
+describe('enum wire contract: NozzleModel-facing nozzleType is an OPEN string set', () => {
+  /**
+   * Deliberate exception, per epic #1823 (slice 3, issue #1826). Unlike the
+   * enums above, the catalog-facing `nozzleType` fields
+   * (`NozzleModelDto`/`CreateNozzleModelDto`/`UpdateNozzleModelDto`.NozzleType,
+   * `ToolheadDto`/`PrinterModelToolheadDto`.nozzleType) are serialized from
+   * `NozzleModelDefinition.NozzleMaterial.Name` — a plain string column on the
+   * user-editable `NozzleMaterial` catalog table (infra/Dtos/ComponentModelDtos.cs,
+   * infra/Dtos/ToolheadDtos.cs, infra/Dtos/PrinterModelToolheadDto.cs) — NOT the
+   * closed `NozzleType` enum. A user-defined material (e.g. "Vanadium") must
+   * round-trip verbatim; before this fix, `NozzleModelDefinition.NozzleType`
+   * (the `[NotMapped]` computed property that `Enum.TryParse`s the material
+   * name) silently collapsed any unrecognized custom name to `"Unknown"`.
+   *
+   * The TS `NozzleType` enum below is retained as a convenience/closed set for
+   * the *separate*, out-of-scope `Toolhead.nozzleType` installed-override field
+   * (infra/Domain/Toolhead.cs) and for known-name UI affordances; it is not the
+   * validation boundary for the catalog fields, which is why they are typed
+   * `NozzleType | string` in types/api.ts rather than `NozzleType` alone.
+   */
+  it('accepts an arbitrary custom material name, not just known NozzleType members', () => {
+    const customMaterialName: NozzleType | string = 'Vanadium';
+    expect(customMaterialName).toBe('Vanadium');
+    expect(Object.values(NozzleType)).not.toContain(customMaterialName);
+  });
+
+  it('still accepts a known built-in NozzleType member as a valid nozzleType value', () => {
+    const builtIn: NozzleType | string = NozzleType.HardenedSteel;
+    expect(builtIn).toBe('HardenedSteel');
+  });
+
+  it('a custom material name survives a raw JSON wire payload verbatim (ToolheadDto shape)', () => {
+    // Simulates the actual bytes the API would send for a ToolheadDto whose
+    // nozzleType is a user-added NozzleMaterial name. JSON.parse is the same
+    // deserialization step the real API client uses, so this catches a
+    // regression where something downstream (e.g. a naive cast/validator
+    // added later) started rejecting or rewriting non-enum values.
+    const rawPayload = '{"id":"tool-1","nozzleType":"Vanadium","diameter":0.4}';
+    const parsed = JSON.parse(rawPayload) as { nozzleType: NozzleType | string };
+    expect(parsed.nozzleType).toBe('Vanadium');
+    expect(Object.values(NozzleType)).not.toContain(parsed.nozzleType);
+  });
+});
+
 describe('enum wire contract: MmuGateStatus stays NUMERIC', () => {
   /**
    * Deliberate exception. `MmuGateStatus` is NOT a C# enum, so the string

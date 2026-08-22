@@ -593,17 +593,26 @@ public class DataImportService : IDataImportService
                 NozzleModelDefinition? existing = await _context.NozzleModelDefinitions
                     .FirstOrDefaultAsync(n => n.Name == dto.Name && n.ManufacturerId == manufacturer.Id, ct);
 
+                // NozzleType is resolved directly against the NozzleMaterial catalog by name — an
+                // open string set, not the closed legacy enum (epic #1823 / issue #1826). A null
+                // or blank value means the backup pre-dates this field and restores as "Brass";
+                // any other value that doesn't match a catalog row rejects the row rather than
+                // guessing, exactly like the enum-backed fields below.
+                string nozzleTypeName = string.IsNullOrWhiteSpace(dto.NozzleType) ? "Brass" : dto.NozzleType.Trim();
+
+                NozzleMaterial? nozzleMaterial = await _context.NozzleMaterials
+                    .FirstOrDefaultAsync(m => m.Name == nozzleTypeName, ct);
+                if (nozzleMaterial is null)
+                {
+                    errors.Add(
+                        $"Failed to import nozzle '{LogSanitizer.Sanitize(dto.Name)}': invalid nozzleType '{LogSanitizer.Sanitize(nozzleTypeName)}' (no matching NozzleMaterial catalog entry)");
+                    continue;
+                }
+
                 // A present-but-unparseable value is corruption, not a legacy backup, and must
                 // not fall back: a misspelled "NotHardened" on an abrasion-resistant material
                 // would resolve through Auto back to hardened, silently re-admitting the nozzle
                 // to abrasive dispatch. Reject the row instead so the operator is told.
-                if (!TryParseExportedEnum(dto.NozzleType, NozzleType.Brass, out NozzleType nozzleType))
-                {
-                    errors.Add(
-                        $"Failed to import nozzle '{LogSanitizer.Sanitize(dto.Name)}': unrecognized nozzleType '{LogSanitizer.Sanitize(dto.NozzleType)}'");
-                    continue;
-                }
-
                 if (!TryParseExportedEnum(
                         dto.HardnessOverride, NozzleHardnessOverride.Auto, out NozzleHardnessOverride hardnessOverride))
                 {
@@ -612,12 +621,16 @@ public class DataImportService : IDataImportService
                     continue;
                 }
 
-                NozzleMaterial? nozzleMaterial = await _context.NozzleMaterials
-                    .FirstOrDefaultAsync(m => m.Name == nozzleType.ToString(), ct);
-                if (nozzleMaterial is null)
+                // NozzleInterface is now name-based on export, given the same versioned/name-based
+                // treatment as NozzleType/HardnessOverride (epic #1823 / issue #1826). Older
+                // backups wrote this as a raw ordinal number; the export DTO's
+                // NozzleInterfaceExportJsonConverter already normalizes that to a name string on
+                // deserialization from JSON, so this parse only needs to handle names here.
+                if (!TryParseExportedEnum(
+                        dto.NozzleInterface, NozzleInterfaceType.V6, out NozzleInterfaceType nozzleInterface))
                 {
                     errors.Add(
-                        $"Failed to import nozzle '{LogSanitizer.Sanitize(dto.Name)}': no NozzleMaterial catalog entry for '{nozzleType}'");
+                        $"Failed to import nozzle '{LogSanitizer.Sanitize(dto.Name)}': unrecognized nozzleInterface '{LogSanitizer.Sanitize(dto.NozzleInterface)}'");
                     continue;
                 }
 
@@ -632,7 +645,7 @@ public class DataImportService : IDataImportService
                         MaxTemp = dto.MaxTemp,
                         NozzleMaterialId = nozzleMaterial.Id,
                         HardnessOverride = hardnessOverride,
-                        NozzleInterface = (NozzleInterfaceType)dto.NozzleInterface,
+                        NozzleInterface = nozzleInterface,
                         Description = dto.Description
                     });
                     imported++;
@@ -643,7 +656,7 @@ public class DataImportService : IDataImportService
                     existing.MaxTemp = dto.MaxTemp;
                     existing.NozzleMaterialId = nozzleMaterial.Id;
                     existing.HardnessOverride = hardnessOverride;
-                    existing.NozzleInterface = (NozzleInterfaceType)dto.NozzleInterface;
+                    existing.NozzleInterface = nozzleInterface;
                     existing.Description = dto.Description;
                     imported++;
                 }

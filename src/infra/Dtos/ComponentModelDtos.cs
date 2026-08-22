@@ -94,7 +94,11 @@ public record ToolheadModelDto(
 /// <param name="ManufacturerName">Name of the manufacturer (resolved from navigation).</param>
 /// <param name="Diameter">Nozzle diameter in millimeters (e.g., 0.4, 0.6, 0.8).</param>
 /// <param name="MaxTemp">Maximum temperature rating in °C.</param>
-/// <param name="NozzleType">The material type of this nozzle (Brass, HardenedSteel, Diamond, etc.).</param>
+/// <param name="NozzleType">
+/// The nozzle material's name (e.g. "Brass", "HardenedSteel", "Diamond", or any
+/// user-defined <see cref="Farm.Infrastructure.Domain.NozzleMaterial"/> name). This is an
+/// open string set, not a closed enum wire value — see epic #1823 / issue #1826.
+/// </param>
 /// <param name="HardnessOverride">Per-model override for hardness; <c>Auto</c> derives it from <paramref name="NozzleType"/>.</param>
 /// <param name="IsHardened">Effective hardness after applying <paramref name="HardnessOverride"/>.</param>
 /// <param name="NozzleInterface">Nozzle interface type that determines compatible hotends.</param>
@@ -108,7 +112,7 @@ public record NozzleModelDto(
     string? ManufacturerName = null,
     double Diameter = 0.4,
     int? MaxTemp = null,
-    NozzleType NozzleType = NozzleType.Brass,
+    string NozzleType = "Brass",
     NozzleHardnessOverride HardnessOverride = NozzleHardnessOverride.Auto,
     bool IsHardened = false,
     NozzleInterfaceType NozzleInterface = NozzleInterfaceType.V6,
@@ -231,7 +235,13 @@ public record UpdateToolheadModelDefDto(
 /// <param name="ManufacturerId">ID of the manufacturer</param>
 /// <param name="Diameter">Nozzle diameter in millimeters (e.g., 0.4, 0.6, 0.8)</param>
 /// <param name="MaxTemp">Maximum temperature rating in °C</param>
-/// <param name="NozzleType">The material type of this nozzle (Brass, HardenedSteel, Diamond, etc.). Ignored when <paramref name="NozzleMaterialId"/> is provided.</param>
+/// <param name="NozzleType">
+/// The nozzle material's name (e.g. "Brass", "HardenedSteel", "Diamond", or any
+/// user-defined <see cref="Farm.Infrastructure.Domain.NozzleMaterial"/> name); resolved
+/// against the <c>NozzleMaterial</c> catalog by exact name. Open string set, not a closed
+/// enum wire value — see epic #1823 / issue #1826. Ignored when
+/// <paramref name="NozzleMaterialId"/> is provided.
+/// </param>
 /// <param name="HardnessOverride">Per-model hardness override; <c>Auto</c> derives it from the material</param>
 /// <param name="NozzleInterface">Nozzle interface type for compatibility matching</param>
 /// <param name="Description">Optional description</param>
@@ -246,7 +256,7 @@ public record CreateNozzleModelDto(
     Guid ManufacturerId,
     double Diameter = 0.4,
     int? MaxTemp = null,
-    NozzleType NozzleType = NozzleType.Brass,
+    string NozzleType = "Brass",
     NozzleHardnessOverride HardnessOverride = NozzleHardnessOverride.Auto,
     NozzleInterfaceType NozzleInterface = NozzleInterfaceType.V6,
     string? Description = null,
@@ -268,7 +278,7 @@ public record UpdateNozzleModelDto(
     Guid? ManufacturerId = null,
     double? Diameter = null,
     int? MaxTemp = null,
-    NozzleType? NozzleType = null,
+    string? NozzleType = null,
     NozzleHardnessOverride? HardnessOverride = null,
     NozzleInterfaceType? NozzleInterface = null,
     string? Description = null,

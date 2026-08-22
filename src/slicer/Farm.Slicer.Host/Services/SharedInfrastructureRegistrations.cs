@@ -240,7 +240,7 @@ public static class SharedInfrastructureRegistrations
                         t.ToolheadModelDefId, t.ToolheadModelDef != null ? t.ToolheadModelDef.Name : null,
                         t.NozzleModelId, t.NozzleModel != null ? t.NozzleModel.Name : null,
                         t.NozzleModel != null ? t.NozzleModel.Diameter : null,
-                        t.NozzleModel != null ? t.NozzleModel.NozzleType : null,
+                        t.NozzleModel != null && t.NozzleModel.NozzleMaterial != null ? t.NozzleModel.NozzleMaterial.Name : null,
                         t.HotendModel != null ? t.HotendModel.MaxFlowRate : null,
                         t.HotendModel != null ? t.HotendModel.MaxTemp : null,
                         t.SupportedMaterials, t.IsPrimary)).ToArray())).ToListAsync(ct);

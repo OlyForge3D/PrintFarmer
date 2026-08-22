@@ -90,7 +90,7 @@ public record ToolheadDto(
     string? Name,
     int Index,
     double? NozzleDiameter,  // Derived from NozzleModel.Diameter
-    NozzleType? NozzleType,  // Derived from NozzleModel.NozzleType
+    string? NozzleType,     // Derived from NozzleModel.NozzleMaterial.Name (open string set)
     double? MaxFlowRate,     // Derived from HotendModel.MaxFlowRate
     int? MaxTemp,            // Derived from HotendModel.MaxTemp
 

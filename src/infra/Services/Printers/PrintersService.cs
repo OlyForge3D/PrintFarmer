@@ -2474,7 +2474,7 @@ public class PrintersService(
                 ["index"] = t.Index,
                 ["nozzleDiameter"] = t.NozzleModel?.Diameter ?? 0.4,
 
-                // Component model references - nozzle type comes from NozzleModel.NozzleType
+                // Component model references - nozzle type comes from NozzleModel.NozzleMaterial.Name
                 ["hotendModelId"] = t.HotendModelId,
                 ["hotendModelName"] = t.HotendModel?.Name,
                 ["extruderModelId"] = t.ExtruderModelId,
@@ -2485,7 +2485,9 @@ public class PrintersService(
                 ["nozzleModelName"] = t.NozzleModel?.Name,
 
                 // Include nozzle type from the nozzle model for API compatibility
-                ["nozzleType"] = t.NozzleModel?.NozzleType,
+                // (open string set — the NozzleMaterial catalog name, not a closed enum;
+                // epic #1823 / issue #1826)
+                ["nozzleType"] = t.NozzleModel?.NozzleMaterial?.Name ?? t.NozzleModel?.NozzleType.ToString(),
                 ["supportedMaterials"] = t.SupportedMaterials,
                 ["isPrimary"] = t.IsPrimary
             }).ToList() ?? new List<Dictionary<string, object?>>()

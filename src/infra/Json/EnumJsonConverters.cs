@@ -108,6 +108,62 @@ public sealed class PrintJobStatusJsonConverter : JsonConverter<PrintJobStatus>
 }
 
 /// <summary>
+/// Backward-compatible converter for the <c>NozzleModelExportDto.NozzleInterface</c> export
+/// field (epic #1823 / issue #1826). The field itself is a plain <c>string?</c> holding the
+/// <see cref="NozzleInterfaceType"/> member name, matching the name-based treatment already
+/// given to <c>NozzleType</c>/<c>HardnessOverride</c> exports. Pre-existing export backups
+/// wrote this field as a raw JSON number (the enum ordinal); this converter accepts either
+/// shape on read so old backups keep restoring, and always writes the string form.
+/// </summary>
+public sealed class NozzleInterfaceExportJsonConverter : JsonConverter<string?>
+{
+    public override string? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        switch (reader.TokenType)
+        {
+            case JsonTokenType.Null:
+                return null;
+            case JsonTokenType.String:
+                return reader.GetString();
+            case JsonTokenType.Number:
+                // Legacy backup: raw ordinal. Translate to the member name when it maps to a
+                // known value; otherwise keep the numeric text so downstream validation can
+                // reject it explicitly rather than silently coercing to a default.
+                if (reader.TryGetInt32(out int ordinal) && Enum.IsDefined(typeof(NozzleInterfaceType), ordinal))
+                {
+                    return ((NozzleInterfaceType)ordinal).ToString();
+                }
+
+                // Doesn't fit Int32, or isn't a defined ordinal (e.g. overflow, "3.5", or an
+                // out-of-range integer): preserve the raw numeric text so downstream validation
+                // (TryParseExportedEnum's numeric-string reject path) still sees a non-empty,
+                // non-name value and rejects the row explicitly, rather than this converter
+                // returning null and the row silently defaulting. ValueSpan is only valid when
+                // the reader isn't backed by a multi-segment buffer (e.g. large HTTP request
+                // bodies read off a PipeReader); fall back to ValueSequence otherwise.
+                return reader.HasValueSequence
+                    ? System.Text.Encoding.UTF8.GetString(System.Buffers.BuffersExtensions.ToArray(reader.ValueSequence))
+                    : System.Text.Encoding.UTF8.GetString(reader.ValueSpan);
+            default:
+                return null;
+        }
+    }
+
+    public override void Write(Utf8JsonWriter writer, string? value, JsonSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        if (value is null)
+        {
+            writer.WriteNullValue();
+        }
+        else
+        {
+            writer.WriteStringValue(value);
+        }
+    }
+}
+
+/// <summary>
 /// Permissive converter for bool that accepts string representations ("true", "false", "True", "False", "1", "0").
 /// Used for OrcaSlicer profile JSON where "instantiation": "true" is a string value.
 /// </summary>

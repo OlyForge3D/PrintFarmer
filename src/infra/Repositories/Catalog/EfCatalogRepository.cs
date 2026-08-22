@@ -186,7 +186,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
                     t.NozzleModelId,
                     t.NozzleModel?.Name,
                     t.NozzleModel?.Diameter,      // Derived from NozzleModel
-                    t.NozzleModel?.NozzleType,    // Derived from NozzleModel
+                    t.NozzleModel?.NozzleMaterial?.Name ?? t.NozzleModel?.NozzleType.ToString(),    // Derived from NozzleModel.NozzleMaterial.Name (open string set)
                     t.HotendModel?.MaxFlowRate,   // Derived from HotendModel
                     t.HotendModel?.MaxTemp,       // Derived from HotendModel
                     t.SupportedMaterials,
@@ -377,7 +377,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             t.DefaultNozzleId)).ToList();
     }
 
-    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, NozzleType NozzleType, NozzleHardnessOverride HardnessOverride, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url, Guid NozzleMaterialId)>> GetNozzleModelsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, string NozzleType, NozzleHardnessOverride HardnessOverride, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url, Guid NozzleMaterialId)>> GetNozzleModelsAsync(CancellationToken ct = default)
     {
         List<NozzleModelDefinition> nozzles = await _db.NozzleModelDefinitions
             .Include(n => n.Manufacturer)
@@ -394,7 +394,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             n.Manufacturer?.Name,
             n.Diameter,
             n.MaxTemp,
-            n.NozzleType,
+            n.NozzleMaterial?.Name ?? n.NozzleType.ToString(),
             n.HardnessOverride,
             n.IsHardened,
             n.NozzleInterface,

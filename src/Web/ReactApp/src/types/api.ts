@@ -1246,7 +1246,7 @@ export interface PrinterModelToolheadDto {
   name: string;
   index: number;
   nozzleDiameter?: number;     // Derived from NozzleModel.Diameter
-  nozzleType?: NozzleType | string;  // Derived from NozzleModel.NozzleType
+  nozzleType?: NozzleType | string;  // Derived from NozzleModel.NozzleMaterial.Name (open string set)
   maxFlowRate?: number;        // Derived from HotendModel.MaxFlowRate
   maxTemp?: number;            // Derived from HotendModel.MaxTemp
   // Component model references (IDs and resolved names from database)
@@ -1351,7 +1351,7 @@ export interface ToolheadDto {
   name?: string;
   index: number;
   nozzleDiameter?: number;     // Derived from NozzleModel.Diameter
-  nozzleType?: NozzleType | string;  // Derived from NozzleModel.NozzleType
+  nozzleType?: NozzleType | string;  // Derived from NozzleModel.NozzleMaterial.Name (open string set)
   maxFlowRate?: number;        // Derived from HotendModel.MaxFlowRate
   maxTemp?: number;            // Derived from HotendModel.MaxTemp
   // Component model references (IDs and resolved names from database)

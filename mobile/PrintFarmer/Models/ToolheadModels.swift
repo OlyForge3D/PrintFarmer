@@ -40,10 +40,14 @@ enum ToolheadType: String, Codable, Sendable {
     }
 }
 
-/// Nozzle material type — mirrors `Farm.Infrastructure.Domain.NozzleType`
-/// serialized as string via `JsonStringEnumConverter`. Unknown wire values
-/// fall through to `.unknown` rather than failing the decode so a new
-/// backend nozzle case never breaks the printer details response.
+/// Nozzle material type — mirrors `Farm.Infrastructure.ToolheadDto.NozzleType`,
+/// which is now an **open string set** sourced from `NozzleModelDefinition
+/// .NozzleMaterial.Name` (the user-editable nozzle-material catalog; epic
+/// #1823, slice 3 / issue #1826), not the closed `Farm.Infrastructure.Domain
+/// .NozzleType` enum. Any custom material name the backend sends (e.g. a
+/// user-defined "Vanadium" material) that is not one of the cases below
+/// decodes to `.unknown` here rather than failing the decode, so a new or
+/// custom backend nozzle material never breaks the printer details response.
 enum NozzleType: String, Codable, Sendable {
     case brass = "Brass"
     case hardenedSteel = "HardenedSteel"
