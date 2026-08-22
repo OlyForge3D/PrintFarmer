@@ -454,14 +454,15 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
         if (normalizedGtin is not null)
         {
-            matches = await CollectBarcodeMatchesAsync(
-                baseUrl,
-                pageSize,
-                articleNumberFilter: null,
-                gtinFilter: normalizedGtin,
-                isMatch: filament => string.Equals(GtinNormalizer.Normalize(filament.Gtin), normalizedGtin, StringComparison.Ordinal),
-                debugFilterName: "gtin",
-                ct);
+            // The server-side `gtin=` filter is an exact string match, so a duplicate whose
+            // `gtin` was populated outside PrintFarmer's own write path (e.g. directly in
+            // Spoolman, or via a future import) in a different -- but equivalent -- format
+            // (UPC-12 vs EAN-13 vs the canonical 14-digit form) would be invisible to a
+            // single filtered query even though it is the same logical product. Query every
+            // valid zero-pad literal encoding of the normalized value and merge the results
+            // by filament ID so all mixed-format duplicates participate in the lowest-ID
+            // tie-break below, not just the ones stored in canonical form.
+            matches = await CollectMatchesForEquivalentGtinLiteralsAsync(baseUrl, pageSize, normalizedGtin, ct);
         }
 
         if (matches.Count == 0)
@@ -481,15 +482,12 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
         if (matches.Count == 0 && normalizedGtin is not null)
         {
-            // The server-side `gtin=` filter is an exact string match, so it only finds
-            // records whose stored value is already normalized to 14 digits. A filament
-            // whose `gtin` was populated outside PrintFarmer's own write path (e.g. directly
-            // in Spoolman, or via a future import) may still store the equivalent UPC-12 or
-            // EAN-13 form. Spoolman answering with zero rows for that filter is NOT the same
-            // as the filter request failing, so the earlier "page is null" fallback never
-            // triggers for this case -- fall back to an unfiltered full scan comparing
-            // normalized GTIN values so the UPC-12 <-> EAN-13 equivalence acceptance
-            // criterion holds regardless of how the stored value was formatted.
+            // Belt-and-braces: a stored `gtin` formatted with separators (dashes/spaces) or in
+            // some other digit-preserving-but-non-literal form won't match any of the exact
+            // literal candidates queried above. Spoolman answering with zero rows for those
+            // filters is NOT the same as the filter request failing, so the earlier "page is
+            // null" fallback never triggers for this case -- fall back to an unfiltered full
+            // scan comparing normalized GTIN values.
             matches = await CollectBarcodeMatchesAsync(
                 baseUrl,
                 pageSize,
@@ -579,6 +577,81 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         return matches;
+    }
+
+    /// <summary>
+    /// Queries Spoolman's server-side <c>gtin</c> filter once per literal digit-string encoding
+    /// that normalizes to <paramref name="normalizedGtin"/> (see
+    /// <see cref="GetEquivalentGtinLiterals"/>), and merges the results by filament ID. This
+    /// lets mixed-format duplicates of the same product (e.g. one filament storing the UPC-12
+    /// form, another the canonical GTIN-14 form) all participate in the caller's lowest-ID
+    /// tie-break, instead of only whichever format happens to match a single exact-string query.
+    /// </summary>
+    private async Task<List<SpoolmanFilamentDto>> CollectMatchesForEquivalentGtinLiteralsAsync(
+        string baseUrl,
+        int pageSize,
+        string normalizedGtin,
+        CancellationToken ct)
+    {
+        var matchesById = new Dictionary<int, SpoolmanFilamentDto>();
+
+        foreach (string literal in GetEquivalentGtinLiterals(normalizedGtin))
+        {
+            List<SpoolmanFilamentDto> literalMatches = await CollectBarcodeMatchesAsync(
+                baseUrl,
+                pageSize,
+                articleNumberFilter: null,
+                gtinFilter: literal,
+                isMatch: filament => string.Equals(GtinNormalizer.Normalize(filament.Gtin), normalizedGtin, StringComparison.Ordinal),
+                debugFilterName: "gtin",
+                ct);
+
+            foreach (SpoolmanFilamentDto filament in literalMatches)
+            {
+                matchesById[filament.Id] = filament;
+            }
+        }
+
+        return matchesById.Values.ToList();
+    }
+
+    /// <summary>
+    /// Returns every valid GTIN-8/12/13/14 literal digit string that zero-pads to the same
+    /// canonical 14-digit <paramref name="normalizedGtin"/>. GTIN formats are zero-pad
+    /// equivalent (see <see cref="GtinNormalizer"/>): stripping <paramref name="normalizedGtin"/>
+    /// down to its significant (non-zero-padding) digits and re-padding to each valid target
+    /// length reconstructs every literal representation that could legitimately be stored for
+    /// the same product, without requiring an unfiltered full-table scan.
+    /// </summary>
+    private static List<string> GetEquivalentGtinLiterals(string normalizedGtin)
+    {
+        string significantDigits = normalizedGtin.TrimStart('0');
+        if (significantDigits.Length == 0)
+        {
+            // All-zero GTIN (shouldn't happen for a check-digit-valid value, but avoid producing
+            // an empty string that can't be padded back into a barcode).
+            significantDigits = "0";
+        }
+
+        int[] validLengths = [8, 12, 13, 14];
+        var literals = new List<string>(validLengths.Length);
+
+        foreach (int length in validLengths)
+        {
+            if (length < significantDigits.Length)
+            {
+                // Too many significant digits to fit at this length without truncation.
+                continue;
+            }
+
+            string literal = significantDigits.PadLeft(length, '0');
+            if (!literals.Contains(literal, StringComparer.Ordinal))
+            {
+                literals.Add(literal);
+            }
+        }
+
+        return literals;
     }
 
     /// <summary>

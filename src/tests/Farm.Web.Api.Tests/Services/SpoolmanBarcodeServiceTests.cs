@@ -207,6 +207,78 @@ public class SpoolmanBarcodeServiceTests
     }
 
     [Fact]
+    public async Task GetFilamentByBarcodeAsync_MixedFormatDuplicateGtins_LowestIdWinsAcrossFormats()
+    {
+        // Regression for #1872: two filaments share the same logical GTIN but were written in
+        // different literal formats (id 5 as the UPC-12 form, id 20 as the canonical 14-digit
+        // form). A real Spoolman `gtin=` filter does an EXACT STRING match, so the two records
+        // must be recognized as duplicates of the same normalized GTIN and merged into a single
+        // candidate set -- not treated as two independent single-match resolutions -- before the
+        // lowest-ID tie-break runs. The lower-ID filament (5, UPC-12) must win even though the
+        // canonical-form filament (20) would be found first by a naive single exact-match query.
+        const string upc12Gtin = "123456789012";
+        const string canonicalGtin = "00123456789012";
+        using ServiceHarness harness = CreateService(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
+            {
+                string? gtinParam = GetQueryParam(req, "gtin");
+                return gtinParam switch
+                {
+                    upc12Gtin => JsonResponse(
+                        new object[] { new { id = 5, name = "Upc12Duplicate", gtin = upc12Gtin, material = "PLA" } },
+                        totalCount: "1"),
+                    canonicalGtin => JsonResponse(
+                        new object[] { new { id = 20, name = "CanonicalDuplicate", gtin = canonicalGtin, material = "PLA" } },
+                        totalCount: "1"),
+                    _ => JsonResponse(Array.Empty<object>(), totalCount: "0"),
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync(canonicalGtin, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(5, result.Id);
+    }
+
+    [Fact]
+    public async Task GetFilamentByBarcodeAsync_MixedFormatDuplicateGtins_LowestIdWinsRegardlessOfScanFormat()
+    {
+        // Mirror of the test above, scanning the UPC-12 form instead of the canonical form.
+        // Regardless of which equivalent literal is scanned, normalization must recognize both
+        // stored records as the same GTIN and the deterministic lowest-ID selection must hold.
+        const string upc12Gtin = "123456789012";
+        const string canonicalGtin = "00123456789012";
+        using ServiceHarness harness = CreateService(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
+            {
+                string? gtinParam = GetQueryParam(req, "gtin");
+                return gtinParam switch
+                {
+                    upc12Gtin => JsonResponse(
+                        new object[] { new { id = 5, name = "Upc12Duplicate", gtin = upc12Gtin, material = "PLA" } },
+                        totalCount: "1"),
+                    canonicalGtin => JsonResponse(
+                        new object[] { new { id = 20, name = "CanonicalDuplicate", gtin = canonicalGtin, material = "PLA" } },
+                        totalCount: "1"),
+                    _ => JsonResponse(Array.Empty<object>(), totalCount: "0"),
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync(upc12Gtin, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(5, result.Id);
+    }
+
+    [Fact]
     public async Task GetFilamentByBarcodeAsync_LegacyArticleNumberOnly_StillResolves()
     {
         // Record predates the gtin column: gtin is null, only article_number holds the

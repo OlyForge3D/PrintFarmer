@@ -63,6 +63,15 @@ public interface ISpoolmanService
     /// legacy filaments that have not yet been assigned a <c>gtin</c>.
     /// Returns the lowest-ID filament if duplicate matches exist.
     /// </summary>
+    /// <remarks>
+    /// <c>gtin</c> is deliberately non-unique across filaments (multipacks and vendor parent
+    /// listings legitimately share one), and duplicates may be stored in different -- but
+    /// equivalent -- GTIN formats (UPC-12, EAN-13, GTIN-14) when written outside PrintFarmer's
+    /// own write path. Resolution normalizes and queries every valid zero-pad literal encoding
+    /// of the scanned barcode so mixed-format duplicates are recognized as the same product and
+    /// participate in the lowest-ID tie-break, falling back to an unfiltered full scan only for
+    /// stored values that aren't a plain zero-pad literal (e.g. formatted with separators).
+    /// </remarks>
     Task<SpoolmanFilamentDto?> GetFilamentByBarcodeAsync(string barcode, CancellationToken ct);
 
     /// <summary>
