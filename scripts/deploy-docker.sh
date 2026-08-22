@@ -1019,9 +1019,18 @@ generate_deployment_config() {
         generator_args+=("--include-go2rtc")
     fi
     
-    # Add worker configuration
+    # Add worker configuration. When scaling to more than one worker, pass the
+    # count itself so compose-generator.sh renders N distinct
+    # orcaslicer-worker-1..N services (each with its own Worker__InstanceId)
+    # instead of a single service later scaled with `--scale` (issue #1847:
+    # `--scale` gives every replica byte-identical environment, so a shared
+    # instance ID/env var cannot distinguish them).
     if [ -n "${ENABLE_ORCA_WORKER:-}" ]; then
-        generator_args+=("--enable-orca-worker" "$ENABLE_ORCA_WORKER")
+        if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "${ORCA_WORKER_COUNT:-1}" -gt 1 ]; then
+            generator_args+=("--enable-orca-worker" "$ORCA_WORKER_COUNT")
+        else
+            generator_args+=("--enable-orca-worker" "$ENABLE_ORCA_WORKER")
+        fi
     fi
 
     
@@ -2214,6 +2223,17 @@ tear_down_deployment() {
             set +a
             env_arg=(--env-file "$env_file")
         fi
+
+        # ORCA_WORKER_COUNT>1 renders orcaslicer-worker-1..N as distinct
+        # services instead of a single "orcaslicer-worker" (issue #1847);
+        # append any that exist in this compose file so they get the same
+        # graceful-stop-then-kill handling as the other worker names above.
+        # (The final `down` below would remove them regardless, but ordered
+        # stop lets other services drain first.)
+        local scaled_worker_svc
+        while IFS= read -r scaled_worker_svc; do
+            [ -n "$scaled_worker_svc" ] && ordered_services+=("$scaled_worker_svc")
+        done < <(docker compose "${env_arg[@]:-}" -f "$compose_file" ps --services 2>/dev/null | grep -E '^orcaslicer-worker-[0-9]+$' || true)
 
         for svc in "${ordered_services[@]}"; do
             # Check if the service exists in this compose file
@@ -3498,11 +3518,13 @@ normalize_worker_configuration() {
 
     # A stable Worker:InstanceId lets the registry upsert the same worker/service
     # record across redeploys instead of accumulating a duplicate every restart
-    # (issue #1528). That only works for a single, non-scaled worker: Docker
-    # Compose applies the same environment to every scaled replica, so sharing
-    # one instance ID across replicas would collapse them into a single
-    # registered worker. Only set it when exactly one worker is configured;
-    # scaled deployments keep generating a random per-process identity.
+    # (issue #1528). For a single worker that's this env var, applied via
+    # docker-compose.orcaslicer-worker.yml. For count>1 (issue #1847),
+    # compose-generator.sh instead renders N distinct orcaslicer-worker-1..N
+    # services, each with its own Worker__InstanceId literal baked directly
+    # into the compose file, so ORCA_WORKER_INSTANCE_ID stays unused/blank
+    # here for the scaled case -- setting it would be misleading since no
+    # single env var can identify N different services.
     if [[ "$ENABLE_ORCA_WORKER" == "yes" && "$ORCA_WORKER_COUNT" -eq 1 ]]; then
         ORCA_WORKER_INSTANCE_ID="orcaslicer-worker-1"
     else
@@ -5427,14 +5449,27 @@ EOF
         local build_compose_cmd=("${compose_cmd[@]}")
         if [ "${_PF_SKIP_ORCA_BUILD:-0}" = "1" ] && [ -n "${ORCA_VERSION:-}" ]; then
             ORCA_OVERRIDE_FILE="${SCRIPT_DIR}/.orca-binaries-override.yml"
-            cat > "${ORCA_OVERRIDE_FILE}" << EOF
-# Auto-generated: Use prebuilt orcaslicer-binaries image instead of building
-services:
-  orcaslicer-worker:
-    build:
-      additional_contexts:
-        orcaslicer-binaries: docker-image://orcaslicer-binaries:${ORCA_VERSION}
-EOF
+            {
+                echo "# Auto-generated: Use prebuilt orcaslicer-binaries image instead of building"
+                echo "services:"
+                if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "${ORCA_WORKER_COUNT:-1}" -gt 1 ]; then
+                    # count>1 renders orcaslicer-worker-1..N as distinct services
+                    # (issue #1847) rather than a single "orcaslicer-worker"
+                    # service, so this override must target every one of them.
+                    local orca_i
+                    for ((orca_i = 1; orca_i <= ORCA_WORKER_COUNT; orca_i++)); do
+                        echo "  orcaslicer-worker-${orca_i}:"
+                        echo "    build:"
+                        echo "      additional_contexts:"
+                        echo "        orcaslicer-binaries: docker-image://orcaslicer-binaries:${ORCA_VERSION}"
+                    done
+                else
+                    echo "  orcaslicer-worker:"
+                    echo "    build:"
+                    echo "      additional_contexts:"
+                    echo "        orcaslicer-binaries: docker-image://orcaslicer-binaries:${ORCA_VERSION}"
+                fi
+            } > "${ORCA_OVERRIDE_FILE}"
             print_info "Using prebuilt orcaslicer-binaries:${ORCA_VERSION} (via additional_contexts override)"
             # Add override file to BUILD command only (not the main compose_cmd used for 'up')
             build_compose_cmd+=(-f "${ORCA_OVERRIDE_FILE}")
@@ -5650,11 +5685,14 @@ EOF
         fi
     fi
 
-    # Scaling (only if counts >1). Use service names; if profiles not enabled skip scaling.
-    if [ "$DRY_RUN" != "true" ] && [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 1 ]; then
-        print_info "Scaling OrcaSlicer workers to $ORCA_WORKER_COUNT replicas"
-        "${final_compose_cmd[@]}" up -d --scale orcaslicer-worker="$ORCA_WORKER_COUNT"
-    fi
+    # Scaling: previously this ran `--scale orcaslicer-worker=$ORCA_WORKER_COUNT`
+    # here for ORCA_WORKER_COUNT>1. That approach is gone (issue #1847): giving
+    # Compose a single "orcaslicer-worker" service and scaling it produces
+    # byte-identical replicas with no way to assign each a stable identity.
+    # compose-generator.sh now renders N distinct orcaslicer-worker-1..N
+    # services (each with its own Worker__InstanceId baked in) whenever
+    # ORCA_WORKER_COUNT>1, and those are already started by the `up -d` calls
+    # above -- no separate scale step is required.
     
     if [ "$DRY_RUN" = "true" ]; then
         print_info "Dry-run complete. No containers launched."
@@ -6746,12 +6784,19 @@ verify_deployment() {
         local orca_checked=false
         local orca_container=""
         
-        # Get the first OrcaSlicer worker container (whether single or scaled)
-        orca_container=$(dc ps -q orcaslicer-worker 2>/dev/null | head -1)
+        # Get the first OrcaSlicer worker container. With ORCA_WORKER_COUNT=1
+        # the service is still named "orcaslicer-worker"; with count>1, N
+        # distinct services are rendered instead (issue #1847), named
+        # orcaslicer-worker-1..N, so probe -1 as representative.
+        local orca_service="orcaslicer-worker"
+        if [ "${ORCA_WORKER_COUNT:-1}" -gt 1 ]; then
+            orca_service="orcaslicer-worker-1"
+        fi
+        orca_container=$(dc ps -q "$orca_service" 2>/dev/null | head -1)
         
         if [ -n "$orca_container" ]; then
             # Check container health via docker compose exec
-            if dc exec -T orcaslicer-worker curl -sf "http://localhost:8080/healthz" >/dev/null 2>&1; then
+            if dc exec -T "$orca_service" curl -sf "http://localhost:8080/healthz" >/dev/null 2>&1; then
                 print_success "✓ OrcaSlicer worker: Healthy"
                 orca_checked=true
             fi

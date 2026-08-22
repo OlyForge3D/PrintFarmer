@@ -439,11 +439,74 @@ PY
     return 0
 }
 
+# Render an N-replica variant of the OrcaSlicer worker addon template.
+#
+# Docker Compose gives every replica of a `--scale`'d service byte-identical
+# environment, so a single Worker__InstanceId cannot distinguish them (issue
+# #1847). Instead of scaling one "orcaslicer-worker" service, this renders
+# `count` distinct top-level services (orcaslicer-worker-1..orcaslicer-worker-N),
+# each with its own literal Worker__InstanceId baked in, so every worker keeps
+# a stable identity across restarts/redeploys.
+#
+# Only called when count > 1; ORCA_WORKER_COUNT=1 (the common case) continues
+# to use the static single-service template untouched.
+#
+# Echoes the path to a generated temp file the caller must delete.
+render_scaled_orcaslicer_worker_template() {
+    local count="$1"
+    local base_template="$TEMPLATES_DIR/docker-compose.orcaslicer-worker.yml"
+    local out
+    out="$(mktemp)"
+
+    if [[ ! -f "$base_template" ]]; then
+        log_error "OrcaSlicer worker template not found: $base_template"
+        rm -f "$out"
+        return 1
+    fi
+
+    # Everything before the single "orcaslicer-worker:" service (anchors,
+    # the "services:" header, etc.) is preserved verbatim exactly once.
+    awk '/^  orcaslicer-worker:/{exit} {print}' "$base_template" > "$out"
+
+    local i
+    for ((i = 1; i <= count; i++)); do
+        # Only the service body itself (from "  orcaslicer-worker:" to EOF) is
+        # replicated per worker -- the anchors above it must appear exactly
+        # once in the rendered file, or YAML parsing fails on duplicate anchors.
+        awk -v idx="$i" '
+            /^  orcaslicer-worker:/ { started=1 }
+            !started { next }
+            /^  orcaslicer-worker:/ {
+                print "  orcaslicer-worker-" idx ":"
+                print "    container_name: printfarmer-orcaslicer-worker-" idx
+                next
+            }
+            /Worker__InstanceId=\$\{ORCA_WORKER_INSTANCE_ID:-\}/ {
+                print "      - Worker__InstanceId=orcaslicer-worker-" idx
+                next
+            }
+            { print }
+        ' "$base_template" >> "$out"
+    done
+
+    printf '%s\n' "$out"
+}
+
 # Function to merge addon services into the main compose file
 merge_addon_services() {
     local compose_file="$1"
     local addon_type="$2"
+    local worker_count="${3:-1}"
     local addon_template="$TEMPLATES_DIR/docker-compose.$addon_type.yml"
+    local generated_worker_template=""
+
+    if [[ "$addon_type" == "orcaslicer-worker" ]] && [[ "$worker_count" =~ ^[0-9]+$ ]] && [[ "$worker_count" -gt 1 ]]; then
+        if ! generated_worker_template="$(render_scaled_orcaslicer_worker_template "$worker_count")"; then
+            log_error "Failed to render scaled OrcaSlicer worker template for $worker_count workers"
+            return 1
+        fi
+        addon_template="$generated_worker_template"
+    fi
 
     if [[ "$addon_type" == "monitoring" ]]; then
         # If user explicitly disabled elastic stack, prefer the lite template when available
@@ -497,6 +560,7 @@ merge_addon_services() {
                 if [[ -z "$PYTHON_CMD" ]]; then
                     log_error "No working Python interpreter found (tried python3, python, py)"
                     log_error "       A runnable Python 3 interpreter is required for addon service merging"
+                    rm -f "$generated_worker_template"
                     return 1
                 fi
                 temp_filtered_services="$(mktemp)"
@@ -619,9 +683,11 @@ PY
         fi
     else
         log_error "Addon template not found: $addon_template"
+        rm -f "$generated_worker_template"
         return 1
     fi
 
+    rm -f "$generated_worker_template"
     return 0
 }
 
@@ -800,7 +866,13 @@ generate_compose() {
         local need_orca_worker="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
         # Parse yes/no and numeric values
         if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || [[ "$need_orca_worker" =~ ^[0-9]+$ && "$need_orca_worker" -gt 0 ]]; then
-            if merge_addon_services "$compose_file" "orcaslicer-worker"; then
+            # A numeric ENABLE_ORCA_WORKER/ORCA_WORKER_COUNT (e.g. "3") is the
+            # worker count. Anything else (yes/true/1) means exactly one worker.
+            local orca_worker_count=1
+            if [[ "$need_orca_worker" =~ ^[0-9]+$ ]]; then
+                orca_worker_count="$need_orca_worker"
+            fi
+            if merge_addon_services "$compose_file" "orcaslicer-worker" "$orca_worker_count"; then
                 log_info "Merged OrcaSlicer worker service (ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER)"
                 addons_merged=true
             else

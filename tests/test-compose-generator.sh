@@ -318,7 +318,30 @@ test_orcaslicer_worker_variations() {
         
         # Validate worker target and service
         assert_contains "$compose_content" "target: orcaslicer-worker" "Should contain OrcaSlicer worker target for $count workers"
-        assert_contains "$compose_content" "orcaslicer-worker:" "Should have OrcaSlicer worker service for $count workers"
+
+        if [[ "$count" == "1" ]]; then
+            # Single-worker deployments (the common case) must keep using the
+            # unscaled, static single-service template untouched (issue #1847).
+            assert_contains "$compose_content" "orcaslicer-worker:" "Should have single OrcaSlicer worker service for $count workers"
+            assert_not_contains "$compose_content" "orcaslicer-worker-1:" "Should NOT render a numbered worker service when count=1"
+        else
+            # count>1 renders N distinct services (orcaslicer-worker-1..N), each
+            # with its own literal Worker__InstanceId, instead of scaling one
+            # service (issue #1847: --scale gives every replica byte-identical
+            # environment, so a shared instance ID/env var cannot distinguish them).
+            assert_not_contains "$compose_content" $'\n  orcaslicer-worker:' "Should NOT have an unscaled orcaslicer-worker service for $count workers"
+            local w
+            for ((w = 1; w <= count; w++)); do
+                assert_contains "$compose_content" "orcaslicer-worker-$w:" "Should have distinct orcaslicer-worker-$w service for $count workers"
+                assert_contains "$compose_content" "container_name: printfarmer-orcaslicer-worker-$w" "Should set container_name for orcaslicer-worker-$w"
+                assert_contains "$compose_content" "Worker__InstanceId=orcaslicer-worker-$w" "Should bake a distinct Worker__InstanceId into orcaslicer-worker-$w"
+            done
+            # Anchors must appear exactly once regardless of worker count, or the
+            # rendered compose file has duplicate YAML anchor definitions.
+            local anchor_occurrences
+            anchor_occurrences=$(printf '%s\n' "$compose_content" | grep -c '^x-orcaslicer-build:' || true)
+            assert_equals "1" "$anchor_occurrences" "x-orcaslicer-build anchor should be defined exactly once for $count workers"
+        fi
         
         # Validate worker deployment configuration
         assert_contains "$compose_content" "deploy:" "Should have deployment configuration for workers"
