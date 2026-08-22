@@ -64,7 +64,19 @@ export interface SubmitSliceJobResponse {
   jobId: string;
   status: string;
   queuedAt: string;
-  queuePosition: number;
+  queuePosition: number | null;
+}
+
+/**
+ * Builds the "position N" suffix for a slice-job queued confirmation message.
+ * Returns an empty string when the API doesn't return a queue position, so
+ * callers never render a literal "null" (issue #1869).
+ */
+export function formatQueuePositionSuffix(
+  queuePosition: number | null | undefined,
+  separator = ' position ',
+): string {
+  return queuePosition != null ? `${separator}${queuePosition}` : '';
 }
 
 export interface SliceJobStatusResponse {

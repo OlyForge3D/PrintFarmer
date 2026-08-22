@@ -2,7 +2,11 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
+import {
+  sliceJobService,
+  SubmitSliceJobRequest,
+  formatQueuePositionSuffix,
+} from '@/services/sliceJobService';
 import { slicerService, type SlicerEngineInfo } from '@/services/slicerService';
 import { 
   slicerProfilesService,
@@ -1746,7 +1750,9 @@ export const NewSliceJobPage: React.FC = () => {
   const submitMutation = useMutation({
     mutationFn: async (req: SubmitSliceJobRequest) => sliceJobService.submitJob(req),
     onSuccess: (res) => {
-      setMessage(`Job queued (id ${res.jobId.substring(0, 8)}) position ${res.queuePosition}`);
+      setMessage(
+        `Job queued (id ${res.jobId.substring(0, 8)})${formatQueuePositionSuffix(res.queuePosition)}`,
+      );
       setError(null);
       setSubmittedJobId(res.jobId);
       qc.invalidateQueries({ queryKey: ['slice-jobs-my'] });
