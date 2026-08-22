@@ -162,6 +162,31 @@ test_environment_variables() {
     pass_test
 }
 
+test_api_deployable_health_statuses() {
+    start_test "API deployment accepts healthy and degraded readiness states"
+
+    local helper_script="$TEST_TEMP_DIR/api-health-status-helper.sh"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$DEPLOY_SCRIPT"
+api_health_status_is_deployable Healthy
+api_health_status_is_deployable Degraded
+if api_health_status_is_deployable Unhealthy; then
+    exit 1
+fi
+if api_health_status_is_deployable ""; then
+    exit 1
+fi
+EOF
+    chmod +x "$helper_script"
+
+    assert_exit_code 0 "$helper_script" "Only Healthy and Degraded API states should permit deployment"
+    rm -f "$helper_script"
+
+    pass_test
+}
+
 # Test no Redis configuration
 test_no_redis_configuration() {
     start_test "no Redis configuration prompts"
@@ -1677,6 +1702,7 @@ run_all_tests() {
     test_batch_mode
     test_config_file_generation
     test_environment_variables
+    test_api_deployable_health_statuses
     test_password_not_logged_to_stdout
     test_no_redis_configuration
     test_no_prusaslicer_configuration

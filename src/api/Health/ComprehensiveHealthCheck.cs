@@ -13,16 +13,15 @@ using Microsoft.Extensions.Logging;
 namespace Farm.Web.Api.Health;
 
 /// <summary>
-/// Comprehensive health check that validates database connectivity,
-/// external service availability, and system resources
+/// Comprehensive health check that validates server dependencies and system resources
+/// while reporting registered printer connectivity as diagnostic data.
 /// </summary>
-public class ComprehensiveHealthCheck(AppDbContext dbContext, IEnumerable<IPrinterConnectionHealthProvider> connectionHealthProviders, ILogger<ComprehensiveHealthCheck> logger, Farm.Infrastructure.Settings.ISettingsService settingsService, IHostEnvironment hostEnvironment) : IHealthCheck
+public class ComprehensiveHealthCheck(AppDbContext dbContext, IEnumerable<IPrinterConnectionHealthProvider> connectionHealthProviders, ILogger<ComprehensiveHealthCheck> logger, IHostEnvironment hostEnvironment) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
         Dictionary<string, object> checks = new();
         bool overallHealthy = true;
-        bool degraded = false; // Track non-critical degradations (eg. external printers offline)
         List<string> issues = new();
 
         // Database connectivity and initialization
@@ -166,10 +165,8 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IEnumerable<IPrint
                 });
             }
 
-            // A provider that failed to report connection health at all means some (or all)
-            // printers on that backend could not be verified. Never report "Healthy" in that
-            // case - the previous bug class (issue #1870) was exactly this: a subsystem going
-            // silently green because its state simply wasn't checked.
+            // A provider error must remain visible in the printer-connectivity diagnostics,
+            // without changing whether the PrintFarmer server itself is healthy.
             bool hasProviderErrors = providerErrors.Count > 0;
             string serviceStatus = failedServices == 0 && !hasProviderErrors ? "Healthy"
                                   : failedServices > 0 && failedServices >= externalServiceCount ? "Unhealthy"
@@ -193,48 +190,6 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IEnumerable<IPrint
             }
 
             checks["ExternalServices"] = externalServicesObj;
-
-            // External printers being offline is considered a degradation by default.
-            // Use application settings to determine when the failure threshold should escalate
-            // to an Unhealthy status.
-            int percentFailed = externalServiceCount == 0 ? 0 : (int)Math.Round((double)failedServices / externalServiceCount * 100);
-            int threshold = 100; // default: only unhealthy when 100% fail
-            try
-            {
-                Farm.Infrastructure.Settings.ExternalServicesHealthSettings s = settingsService.Get<Farm.Infrastructure.Settings.ExternalServicesHealthSettings>();
-                if (s != null)
-                {
-                    threshold = Math.Clamp(s.PercentFailedThreshold, 0, 100);
-                }
-            }
-            catch
-            {
-            }
-
-            if (failedServices > 0)
-            {
-                if (percentFailed >= threshold)
-                {
-                    // Treat as Unhealthy when percentFailed meets/exceeds configured threshold
-                    overallHealthy = false;
-                    issues.Add($"External services unreachable ({failedServices}/{externalServiceCount}) - threshold {threshold}% reached");
-                }
-                else
-                {
-                    degraded = true;
-                    issues.Add($"External services unreachable ({failedServices}/{externalServiceCount}) - percentFailed={percentFailed}% (<{threshold}%)");
-                }
-            }
-
-            if (hasProviderErrors)
-            {
-                // A provider that couldn't report connection health leaves some printers
-                // unverified. Surface this as at least Degraded rather than letting the
-                // overall status stay Healthy when nothing failed among the printers we
-                // *did* manage to check.
-                degraded = true;
-                issues.Add($"Unable to read connection health from {providerErrors.Count} printer connection provider(s)");
-            }
         }
         catch (Exception ex)
         {
@@ -251,25 +206,8 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IEnumerable<IPrint
             Version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "Unknown"
         };
 
-        // Determine overall health status: prefer Unhealthy for critical failures,
-        // Degraded when only non-critical external services are affected, otherwise Healthy.
-        HealthStatus finalStatus;
-        string description;
-        if (!overallHealthy)
-        {
-            finalStatus = HealthStatus.Unhealthy;
-            description = string.Join("; ", issues);
-        }
-        else if (degraded)
-        {
-            finalStatus = HealthStatus.Degraded;
-            description = string.Join("; ", issues);
-        }
-        else
-        {
-            finalStatus = HealthStatus.Healthy;
-            description = "All systems operational";
-        }
+        HealthStatus finalStatus = overallHealthy ? HealthStatus.Healthy : HealthStatus.Unhealthy;
+        string description = overallHealthy ? "Server systems operational" : string.Join("; ", issues);
 
         HealthCheckResult result = new(
             finalStatus,

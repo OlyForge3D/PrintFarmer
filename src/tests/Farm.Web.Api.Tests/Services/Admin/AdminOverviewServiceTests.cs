@@ -166,8 +166,8 @@ public class AdminOverviewServiceTests
 
         HealthReport report = BuildReport(
             comprehensive: new HealthCheckResult(
-                HealthStatus.Degraded,
-                "External services unreachable (1/2)",
+                HealthStatus.Healthy,
+                "Server systems operational",
                 data: new Dictionary<string, object>
                 {
                     ["Database"] = new { Status = "Healthy", Provider = "Npgsql.EntityFrameworkCore.PostgreSQL", ManufacturerCount = 8, Initialized = true },

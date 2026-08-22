@@ -2158,9 +2158,9 @@ test_healthcheck_properties() {
     local common_file="$REPO_ROOT/scripts/docker/compose-templates/docker-compose.common.yml"
     local common_content=$(cat "$common_file")
     
-    # API healthcheck should test /health endpoint with status check
-    assert_contains "$common_content" "curl -f http://api:5245/health" "API healthcheck should test /health endpoint"
-    assert_contains "$common_content" "grep -q 'Healthy'" "API healthcheck should verify Healthy status"
+    # Container health tracks API readiness, not optional external-service availability.
+    assert_contains "$common_content" "curl\", \"-f\", \"http://api:5245/healthz" "API healthcheck should test /healthz readiness endpoint"
+    assert_not_contains "$common_content" "grep -q 'Healthy'" "API healthcheck should not parse the comprehensive health payload"
     
     # Worker healthcheck properties - verify endpoint (allow localhost or service hostname)
     if echo "$common_content" | grep -q "http://orcaslicer-worker:8080/healthz" || echo "$common_content" | grep -q "http://localhost:8080/healthz"; then

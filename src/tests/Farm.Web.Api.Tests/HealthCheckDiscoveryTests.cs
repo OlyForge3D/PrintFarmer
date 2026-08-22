@@ -341,14 +341,6 @@ public class HealthCheckDiscoveryTests
         await dbContext.SaveChangesAsync();
         dbContext.ChangeTracker.Clear();
 
-        Mock<ISettingsService> settingsService = new();
-        _ = settingsService
-            .Setup(s => s.Get<ExternalServicesHealthSettings>())
-            .Returns(new ExternalServicesHealthSettings
-            {
-                PercentFailedThreshold = 100
-            });
-
         Mock<IHostEnvironment> hostEnvironment = new();
         _ = hostEnvironment.Setup(h => h.EnvironmentName).Returns("Testing");
 
@@ -369,7 +361,6 @@ public class HealthCheckDiscoveryTests
             dbContext,
             new[] { connectionProvider.Object },
             _mockLogger.Object,
-            settingsService.Object,
             hostEnvironment.Object);
 
         HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
@@ -379,7 +370,7 @@ public class HealthCheckDiscoveryTests
     }
 
     [Fact]
-    public async Task ComprehensiveHealthCheck_WhenRegisteredPrinterIsOffline_ReportsExternalServicesDegraded()
+    public async Task ComprehensiveHealthCheck_WhenRegisteredPrinterIsOffline_ReportsServerHealthyAndExternalServiceUnhealthy()
     {
         // Regression test for #1870: an offline registered printer must be reflected in
         // /api/admin/overview instead of being reported as healthy. Previously the external
@@ -400,14 +391,6 @@ public class HealthCheckDiscoveryTests
         await dbContext.SaveChangesAsync();
         dbContext.ChangeTracker.Clear();
 
-        Mock<ISettingsService> settingsService = new();
-        _ = settingsService
-            .Setup(s => s.Get<ExternalServicesHealthSettings>())
-            .Returns(new ExternalServicesHealthSettings
-            {
-                PercentFailedThreshold = 100
-            });
-
         Mock<IHostEnvironment> hostEnvironment = new();
         _ = hostEnvironment.Setup(h => h.EnvironmentName).Returns("Testing");
 
@@ -416,13 +399,6 @@ public class HealthCheckDiscoveryTests
         _ = connectionProvider.Setup(p => p.GetConnectionHealth()).Returns(
             new Dictionary<Guid, PrinterConnectionHealth>
             {
-                [Guid.NewGuid()] = new()
-                {
-                    PrinterId = Guid.NewGuid(),
-                    PrinterName = "Online Printer",
-                    Backend = PrinterBackend.Moonraker,
-                    ConnectionState = PrinterConnectionState.Connected
-                },
                 [offlinePrinterId] = new()
                 {
                     PrinterId = offlinePrinterId,
@@ -436,29 +412,29 @@ public class HealthCheckDiscoveryTests
             dbContext,
             new[] { connectionProvider.Object },
             _mockLogger.Object,
-            settingsService.Object,
             hostEnvironment.Object);
 
         HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
 
-        _ = result.Status.Should().Be(HealthStatus.Degraded);
+        _ = result.Status.Should().Be(HealthStatus.Healthy);
         _ = result.Data.Should().ContainKey("ExternalServices");
         Dictionary<string, object> externalServices = result.Data["ExternalServices"].Should()
             .BeOfType<Dictionary<string, object>>().Subject;
 
-        _ = externalServices["CheckedCount"].Should().Be(2);
+        _ = externalServices["Status"].Should().Be("Unhealthy");
+        _ = externalServices["CheckedCount"].Should().Be(1);
         _ = externalServices["FailedCount"].Should().Be(1);
         _ = externalServices.Should().ContainKey("FailedServicesDetails");
     }
 
     [Fact]
-    public async Task ComprehensiveHealthCheck_WhenConnectionProviderThrows_NeverReportsHealthy()
+    public async Task ComprehensiveHealthCheck_WhenConnectionProviderThrows_ReportsServerHealthyAndExternalServicesDegraded()
     {
         // Regression test for #1870 (reviewer follow-up): a provider that fails to report
         // connection health must never leave ExternalServices silently "Healthy" just
         // because zero printers ended up being counted. That would recreate the same class
-        // of bug the offline-printer fix addresses - the aggregate going green while a
-        // whole backend's real state is unknown.
+        // of bug the offline-printer fix addresses. The server remains healthy because
+        // printer connectivity is diagnostic data rather than a server dependency.
         await using SqliteConnection connection = new("DataSource=:memory:");
         await connection.OpenAsync();
 
@@ -474,14 +450,6 @@ public class HealthCheckDiscoveryTests
         await dbContext.SaveChangesAsync();
         dbContext.ChangeTracker.Clear();
 
-        Mock<ISettingsService> settingsService = new();
-        _ = settingsService
-            .Setup(s => s.Get<ExternalServicesHealthSettings>())
-            .Returns(new ExternalServicesHealthSettings
-            {
-                PercentFailedThreshold = 100
-            });
-
         Mock<IHostEnvironment> hostEnvironment = new();
         _ = hostEnvironment.Setup(h => h.EnvironmentName).Returns("Testing");
 
@@ -493,13 +461,11 @@ public class HealthCheckDiscoveryTests
             dbContext,
             new[] { connectionProvider.Object },
             _mockLogger.Object,
-            settingsService.Object,
             hostEnvironment.Object);
 
         HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
 
-        // Never 500/throw, and never silently Healthy despite CheckedCount being 0.
-        _ = result.Status.Should().Be(HealthStatus.Degraded);
+        _ = result.Status.Should().Be(HealthStatus.Healthy);
         _ = result.Data.Should().ContainKey("ExternalServices");
         Dictionary<string, object> externalServices = result.Data["ExternalServices"].Should()
             .BeOfType<Dictionary<string, object>>().Subject;
@@ -546,14 +512,6 @@ public class HealthCheckDiscoveryTests
         await dbContext.SaveChangesAsync();
         dbContext.ChangeTracker.Clear();
 
-        Mock<ISettingsService> settingsService = new();
-        _ = settingsService
-            .Setup(s => s.Get<ExternalServicesHealthSettings>())
-            .Returns(new ExternalServicesHealthSettings
-            {
-                PercentFailedThreshold = 100
-            });
-
         // Simulate a real deployment: NOT the "Testing" environment (e.g. E2E/Production).
         Mock<IHostEnvironment> hostEnvironment = new();
         _ = hostEnvironment.Setup(h => h.EnvironmentName).Returns("E2E");
@@ -562,7 +520,6 @@ public class HealthCheckDiscoveryTests
             dbContext,
             Array.Empty<IPrinterConnectionHealthProvider>(),
             _mockLogger.Object,
-            settingsService.Object,
             hostEnvironment.Object);
 
         HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
@@ -739,4 +696,3 @@ public class HealthCheckDiscoveryTests
 
     #endregion
 }
-
