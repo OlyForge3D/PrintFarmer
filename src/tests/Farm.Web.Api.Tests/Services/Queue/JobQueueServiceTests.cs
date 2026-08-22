@@ -1161,6 +1161,45 @@ public class JobQueueServiceTests
         result!.HarvestedAt.Should().Be(harvestedAt);
     }
 
+    // #1850: BlockedReasonCode must round-trip through JobQueuePrintJobDto
+    // alongside FailureReason so refusals seen via queue-GET can be
+    // translated to operator wording.
+    [Fact]
+    public async Task GetJobAsync_WithBlockedReasonCode_ProjectsBlockedReasonCode()
+    {
+        PrintJob job = new PrintJobBuilder()
+            .WithName("Test Job")
+            .AsQueued()
+            .Build();
+        job.BlockedReasonCode = JobBlockedReasonCode.FilamentCheckFailed;
+
+        _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+
+        JobQueuePrintJobDto? result = await _sut.GetJobAsync(job.Id, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.BlockedReasonCode.Should().Be(JobBlockedReasonCode.FilamentCheckFailed);
+    }
+
+    [Fact]
+    public async Task GetJobAsync_WithoutBlockedReasonCode_ReturnsNullBlockedReasonCode()
+    {
+        PrintJob job = new PrintJobBuilder()
+            .WithName("Test Job")
+            .AsQueued()
+            .Build();
+        job.BlockedReasonCode = null;
+
+        _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+
+        JobQueuePrintJobDto? result = await _sut.GetJobAsync(job.Id, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.BlockedReasonCode.Should().BeNull();
+    }
+
     [Fact]
     public async Task GetJobAsync_AfterOtherClientStartsAttemptB_HydratesLatestAttemptFence()
     {

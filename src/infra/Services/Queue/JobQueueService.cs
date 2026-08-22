@@ -1663,6 +1663,7 @@ public class JobQueueService : IJobQueueService
             ActualPrintTime = job.ActualPrintTime,
             ActualFilamentUsage = job.ActualFilamentUsage,
             FailureReason = job.FailureReason,
+            BlockedReasonCode = job.BlockedReasonCode,
             SpoolmanFilamentId = job.SpoolmanFilamentId,
             FilamentName = job.FilamentName,
             FilamentVendor = job.FilamentVendor,
