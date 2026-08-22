@@ -16,7 +16,7 @@ This reference lists environment variables common to all per-engine slicing work
 ## Worker Identity & Queueing
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
-| `Worker__InstanceId` | No | Auto-generated GUID (random per process) | Stable identity used to upsert the worker/service record on redeploy instead of creating a duplicate (issue #1528); always issued a fresh API key regardless of match. Only set for a single, non-scaled worker — scaled replicas must leave this unset/distinct so Compose doesn't collapse them into one record. See "Redeploy identity" below for how the registry keeps this usable across a graceful shutdown. |
+| `Worker__InstanceId` | No | Auto-generated GUID (random per process) | Stable identity used to upsert the worker/service record on redeploy instead of creating a duplicate (issue #1528); always issued a fresh API key regardless of match. Must be distinct per worker — `deploy-docker.sh` sets it automatically (single deployments via `ORCA_WORKER_INSTANCE_ID`; scaled deployments get a literal value per generated service block, issue #1847). See "Redeploy identity" below for how the registry keeps this usable across a graceful shutdown. |
 | `Worker__QueueName` | Yes | (engine-specific initializer) | Redis list / stream / queue name from which jobs are consumed. Distinct per engine. |
 | `Worker__WorkingDirectory` | No | `/app/temp` | Scratch space for slicing operations; periodically cleaned. |
 
@@ -33,11 +33,11 @@ Deregistration therefore takes a `?retain=true` query parameter meaning "I will 
 same instance ID". The row is kept as `Offline` with its credentials revoked, so the next
 registration re-identifies it and updates both rows in place.
 
-The worker sets `retain=true` only when `Worker__InstanceId` is explicitly configured. With no
-configured ID it generates a fresh random identity every process start — which is exactly what
-scaled deployments do, since `deploy-docker.sh` leaves `ORCA_WORKER_INSTANCE_ID` empty when
-`ORCA_WORKER_COUNT != 1` — and retaining rows for identities that never return would strand one
-unreclaimable record per replica per restart. Those deregistrations keep deleting the row.
+The worker sets `retain=true` only when `Worker__InstanceId` is explicitly configured. Every
+worker `deploy-docker.sh` generates is, so they all take the retaining path. A worker started
+without one — run by hand, from a local dev process, or by a bespoke host — generates a fresh
+random identity every process start, and retaining rows for identities that never return would
+strand one unreclaimable record per restart. Those deregistrations keep deleting the row.
 
 Retention is never a credential-recovery mechanism: registration always issues a fresh API key,
 and a retained row cannot authenticate because its service key is cleared and its `Workers` record
@@ -90,7 +90,7 @@ Worker__QueueName=<engine-queue-name>
 ```
 Optional but recommended:
 ```
-Worker__InstanceId=<stable-id>  # only for a single, non-scaled worker
+Worker__InstanceId=<stable-id>  # must be distinct per worker; deploy-docker.sh sets this automatically
 Logging__LogLevel__Default=Information
 ```
 

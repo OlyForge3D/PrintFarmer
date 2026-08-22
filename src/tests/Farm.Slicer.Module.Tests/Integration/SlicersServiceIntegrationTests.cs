@@ -535,11 +535,101 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// An administrator's deliberate disable must survive a worker restart. Reclaiming a retained
+    /// row lifts only the automatic disable that deregistration itself applied; if it lifted every
+    /// disable, any banned worker could clear its own ban simply by re-registering under the same
+    /// InstanceId, and the reason recording why it was banned would be erased with it.
+    /// </summary>
+    [Fact]
+    public async Task Reregistration_PreservesAnAdministratorsDeliberateDisable()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+
+        const string adminReason = "Banned by administrator: producing scrap";
+        var dto = new RegisterSlicerDto
+        {
+            Name = "orca-banned",
+            SlicerType = 1,
+            Version = "2.3.1",
+            Host = "http://localhost:8080",
+            MaxConcurrentJobs = 5,
+            InstanceId = "orcaslicer-worker-banned"
+        };
+
+        (Guid id, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+
+        // An administrator bans the worker while it is running.
+        Worker? banned = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+        banned.Should().NotBeNull();
+        banned!.IsDisabled = true;
+        banned.DisabledReason = adminReason;
+        _ = await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        // Act - the worker restarts and re-registers under the same stable identity.
+        (Guid secondId, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+
+        // Assert - same row reclaimed, but the ban and its audit trail are intact.
+        secondId.Should().Be(id);
+
+        context.ChangeTracker.Clear();
+        Worker? reclaimed = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+        reclaimed.Should().NotBeNull();
+        reclaimed!.IsDisabled.Should().BeTrue("an administrator's ban must survive a restart");
+        reclaimed.DisabledReason.Should().Be(adminReason);
+    }
+
+    /// <summary>
+    /// The counterpart to <see cref="Reregistration_PreservesAnAdministratorsDeliberateDisable"/>:
+    /// the automatic disable deregistration applies is lifted on reclaim, so a redeployed worker
+    /// does not come back Online still reporting "Disabled: Slicer service deregistered" — the
+    /// stale text operators saw after every redeploy.
+    /// </summary>
+    [Fact]
+    public async Task Reregistration_ClearsTheDisableLeftByDeregistration()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+
+        var dto = new RegisterSlicerDto
+        {
+            Name = "orca-redeployed",
+            SlicerType = 1,
+            Version = "2.3.1",
+            Host = "http://localhost:8080",
+            MaxConcurrentJobs = 5,
+            InstanceId = "orcaslicer-worker-redeployed"
+        };
+
+        (Guid id, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+        await slicersService.DeregisterAsync(id, retainForReregistration: true, CancellationToken.None);
+
+        // Act
+        (Guid secondId, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+
+        // Assert
+        secondId.Should().Be(id);
+
+        context.ChangeTracker.Clear();
+        Worker? reclaimed = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+        reclaimed.Should().NotBeNull();
+        reclaimed!.IsDisabled.Should().BeFalse();
+        reclaimed.DisabledReason.Should().BeNull();
+        reclaimed.OfflineAt.Should().BeNull();
+        reclaimed.Status.Should().Be("Online");
+    }
+
+    /// <summary>
     /// A worker that did not ask for retention is deleted even when it sent an InstanceId. The
     /// worker always sends one — it falls back to a random per-process GUID when no stable ID is
-    /// configured, which is what scaled deployments do — so retention must be driven by the
-    /// caller's declaration, not by the mere presence of an InstanceId. Retaining throwaway
-    /// identities would strand one unreclaimable row per replica per restart.
+    /// configured — so retention must be driven by the caller's declaration, not by the mere
+    /// presence of an InstanceId. Retaining throwaway identities would strand one unreclaimable
+    /// row per process start.
     /// </summary>
     [Fact]
     public async Task DeregisterAsync_WithoutRetain_DeletesRowEvenWithInstanceId()

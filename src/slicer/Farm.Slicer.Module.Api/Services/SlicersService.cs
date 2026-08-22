@@ -47,6 +47,14 @@ namespace Farm.Slicer.Module.Api.Services;
 /// </remarks>
 public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 {
+    /// <summary>
+    /// Reason recorded on a <see cref="Worker"/> that was disabled by deregistration rather
+    /// than by an administrator. Re-registration lifts a disable carrying this reason and only
+    /// this reason, so an administrator's deliberate disable survives a worker restart. The
+    /// writer and the reader must use the same constant or a banned worker could un-ban itself.
+    /// </summary>
+    internal const string DeregisteredDisabledReason = "Slicer service deregistered";
+
     private readonly ISlicersRepository _repo;
     private readonly IWorkerRepository _workerRepo;
     private readonly IProcessProfileRepository _profileRepo;
@@ -322,14 +330,29 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                 worker.ApiKey = svc.ApiKey;
                 worker.Version = svc.Version;
                 worker.UpdatedAt = DateTime.UtcNow;
-                worker.IsDisabled = false;
 
-                // Clear the state left behind by a previous deregistration. Without this a
-                // reclaimed worker comes back Online while still reporting
-                // "Disabled: Slicer service deregistered" and an OfflineAt timestamp,
-                // which is exactly the stale text operators saw after every redeploy.
-                worker.DisabledReason = null;
+                // The worker is demonstrably running again, so it is no longer Offline.
                 worker.OfflineAt = null;
+
+                // Only lift the disable that deregistration itself applied. An administrator's
+                // deliberate disable carries a different reason and must survive a restart —
+                // otherwise any banned worker could clear its own ban just by re-registering
+                // under the same InstanceId, and the reason text recording why it was banned
+                // would be erased with it. Re-enabling stays an explicit admin action
+                // (IWorkerRepository.EnableWorkerAsync). A blank reason cannot be an admin
+                // disable, because DisableWorkerAsync rejects a blank one.
+                bool disabledByDeregistration =
+                    string.IsNullOrWhiteSpace(worker.DisabledReason)
+                    || string.Equals(worker.DisabledReason, DeregisteredDisabledReason, StringComparison.Ordinal);
+
+                if (disabledByDeregistration)
+                {
+                    // Without this a reclaimed worker comes back Online while still reporting
+                    // "Disabled: Slicer service deregistered", which is exactly the stale text
+                    // operators saw after every redeploy.
+                    worker.IsDisabled = false;
+                    worker.DisabledReason = null;
+                }
             }
             else
             {
@@ -547,13 +570,14 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
     /// <para>But retention is only ever correct when the worker really does return under the
     /// same identity, and the presence of an InstanceId does <b>not</b> establish that. A
     /// worker always sends one: it falls back to a fresh random per-process
-    /// <c>WorkerIdentity.Create()</c> GUID whenever no stable ID is configured, which is
-    /// precisely what <c>deploy-docker.sh</c> arranges for scaled deployments
-    /// (<c>ORCA_WORKER_COUNT != 1</c> leaves <c>ORCA_WORKER_INSTANCE_ID</c> empty, because
-    /// Compose gives every replica identical environment). Retaining rows for those throwaway
-    /// identities would leave one unreclaimable Offline row per replica per restart — the same
-    /// orphan accumulation this change exists to stop, on the one path that previously
-    /// cleaned up after itself.</para>
+    /// <c>WorkerIdentity.Create()</c> GUID whenever no stable ID is configured. Workers
+    /// deployed by <c>deploy-docker.sh</c> always have one configured — single deployments
+    /// through <c>ORCA_WORKER_INSTANCE_ID</c>, scaled ones through a literal
+    /// <c>Worker__InstanceId</c> baked into each per-replica service block (issue #1847) — but
+    /// a worker started outside that tooling need not, and retaining rows for those throwaway
+    /// identities would leave one unreclaimable Offline row per process start — the same orphan
+    /// accumulation this change exists to stop, on the one path that previously cleaned up
+    /// after itself.</para>
     ///
     /// <para>Only the worker knows which kind of identity it holds, so it declares it via
     /// <paramref name="retainForReregistration"/>. The default is <see langword="false"/> so
@@ -688,7 +712,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         worker.OfflineAt = DateTime.UtcNow;
         worker.UpdatedAt = DateTime.UtcNow;
         worker.IsDisabled = true;
-        worker.DisabledReason = "Slicer service deregistered";
+        worker.DisabledReason = DeregisteredDisabledReason;
         worker.ApiKey = null;
     }
 

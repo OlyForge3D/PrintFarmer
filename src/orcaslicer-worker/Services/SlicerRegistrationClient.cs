@@ -263,10 +263,12 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
             // Ask the registry to retain this registration only when the instance ID was
             // explicitly configured, because only then does the replacement container come
             // back under the same identity and get re-identified instead of registering as a
-            // brand-new worker. When no instance ID is configured (scaled deployments, where
-            // deploy-docker.sh leaves ORCA_WORKER_INSTANCE_ID empty because Compose gives every
-            // replica identical environment) this worker generated a random per-process
-            // identity that will never be presented again, so retaining its row would strand an
+            // brand-new worker. Every worker deploy-docker.sh generates is configured that way
+            // (single deployments via ORCA_WORKER_INSTANCE_ID, scaled ones via a literal
+            // Worker__InstanceId baked into each per-replica service block since #1847), so
+            // they all take this path. A worker started without one — run by hand, from a local
+            // dev process, or by a bespoke host — falls back to a random per-process identity
+            // that will never be presented again, so retaining its row would strand an
             // unreclaimable record on every restart. Those deregistrations stay deleting.
             string retainQuery = _hasStableInstanceId ? "?retain=true" : string.Empty;
 

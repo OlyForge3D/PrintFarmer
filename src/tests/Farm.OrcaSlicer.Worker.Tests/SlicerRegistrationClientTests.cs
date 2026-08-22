@@ -156,9 +156,10 @@ public sealed class SlicerRegistrationClientTests
 
     /// <summary>
     /// Retention is opt-in and only a stable, configured instance ID may request it. A worker with
-    /// no configured ID generates a fresh random identity every process start (which is exactly
-    /// what deploy-docker.sh arranges for scaled replicas), so asking the registry to keep its row
-    /// would strand an unreclaimable record on every restart.
+    /// no configured ID generates a fresh random identity every process start, so asking the
+    /// registry to keep its row would strand an unreclaimable record on every restart. Workers
+    /// deployed by deploy-docker.sh always have an ID configured; ones started outside that
+    /// tooling need not.
     /// </summary>
     [Theory]
     [InlineData("orcaslicer-worker-1", true)]
