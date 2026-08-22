@@ -16,9 +16,35 @@ This reference lists environment variables common to all per-engine slicing work
 ## Worker Identity & Queueing
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
-| `Worker__InstanceId` | No | Auto-generated GUID (random per process) | Stable identity used to upsert the worker/service record on redeploy instead of creating a duplicate (issue #1528); always issued a fresh API key regardless of match. Only set for a single, non-scaled worker — scaled replicas must leave this unset/distinct so Compose doesn't collapse them into one record. |
+| `Worker__InstanceId` | No | Auto-generated GUID (random per process) | Stable identity used to upsert the worker/service record on redeploy instead of creating a duplicate (issue #1528); always issued a fresh API key regardless of match. Only set for a single, non-scaled worker — scaled replicas must leave this unset/distinct so Compose doesn't collapse them into one record. See "Redeploy identity" below for how the registry keeps this usable across a graceful shutdown. |
 | `Worker__QueueName` | Yes | (engine-specific initializer) | Redis list / stream / queue name from which jobs are consumed. Distinct per engine. |
 | `Worker__WorkingDirectory` | No | `/app/temp` | Scratch space for slicing operations; periodically cleaned. |
+
+### Redeploy identity
+
+The registry upserts on `Worker__InstanceId`, but it can only match a worker against a service
+row that still exists. A worker recreated by `deploy-docker.sh` shuts down gracefully and calls
+`POST /api/slicers/{id}/deregister` first, so deregistration must not destroy that row or the
+replacement container registers as a brand-new worker — and, because `Workers` rows are keyed by
+the service's Guid, leaves the previous `Workers` row stranded as
+`Disabled: Slicer service deregistered`.
+
+Deregistration therefore takes a `?retain=true` query parameter meaning "I will return under this
+same instance ID". The row is kept as `Offline` with its credentials revoked, so the next
+registration re-identifies it and updates both rows in place.
+
+The worker sets `retain=true` only when `Worker__InstanceId` is explicitly configured. With no
+configured ID it generates a fresh random identity every process start — which is exactly what
+scaled deployments do, since `deploy-docker.sh` leaves `ORCA_WORKER_INSTANCE_ID` empty when
+`ORCA_WORKER_COUNT != 1` — and retaining rows for identities that never return would strand one
+unreclaimable record per replica per restart. Those deregistrations keep deleting the row.
+
+Retention is never a credential-recovery mechanism: registration always issues a fresh API key,
+and a retained row cannot authenticate because its service key is cleared and its `Workers` record
+is left disabled and `Offline`.
+
+Permanently removing a slicer is a separate administrative action
+(`DELETE /api/admin/slicers/{id}`), which deletes both the service and its paired worker record.
 
 ## Engine Binary Path Pattern
 Each engine exposes a binary path override following the pattern:
