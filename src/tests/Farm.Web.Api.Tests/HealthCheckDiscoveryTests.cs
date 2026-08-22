@@ -511,7 +511,6 @@ public class HealthCheckDiscoveryTests
         _ = result.Status.Should().Be(HealthStatus.Healthy);
     }
 
-
     [Fact]
     public async Task ComprehensiveHealthCheck_WithEnabledDiscovery_RequiresValidSubnets()
     {
