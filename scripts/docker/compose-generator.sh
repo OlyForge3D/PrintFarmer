@@ -439,11 +439,89 @@ PY
     return 0
 }
 
+# Render an N-replica variant of the OrcaSlicer worker addon template.
+#
+# Docker Compose gives every replica of a `--scale`'d service byte-identical
+# environment, so a single Worker__InstanceId cannot distinguish them (issue
+# #1847). Instead of scaling one "orcaslicer-worker" service, this renders
+# `count` distinct top-level services (orcaslicer-worker-1..orcaslicer-worker-N),
+# each with its own literal Worker__InstanceId baked in, so every worker keeps
+# a stable identity across restarts/redeploys.
+#
+# Only called when count > 1; ORCA_WORKER_COUNT=1 (the common case) continues
+# to use the static single-service template untouched.
+#
+# Echoes the path to a generated temp file the caller must delete.
+render_scaled_orcaslicer_worker_template() {
+    local count="$1"
+    # Normalize defensively: the `for ((...))` arithmetic below misparses a
+    # leading-zero operand (e.g. "08") as octal and errors on invalid
+    # digits, silently skipping every iteration instead of rendering the
+    # requested number of workers.
+    if [[ "$count" =~ ^[0-9]+$ ]]; then
+        count=$((10#$count))
+    fi
+    local base_template="$TEMPLATES_DIR/docker-compose.orcaslicer-worker.yml"
+    local out
+    out="$(mktemp)"
+
+    if [[ ! -f "$base_template" ]]; then
+        log_error "OrcaSlicer worker template not found: $base_template"
+        rm -f "$out"
+        return 1
+    fi
+
+    # Everything before the single "orcaslicer-worker:" service (anchors,
+    # the "services:" header, etc.) is preserved verbatim exactly once.
+    awk '/^  orcaslicer-worker:/{exit} {print}' "$base_template" > "$out"
+
+    local i
+    for ((i = 1; i <= count; i++)); do
+        # Only the service body itself (from "  orcaslicer-worker:" to EOF) is
+        # replicated per worker -- the anchors above it must appear exactly
+        # once in the rendered file, or YAML parsing fails on duplicate anchors.
+        awk -v idx="$i" '
+            /^  orcaslicer-worker:/ { started=1 }
+            !started { next }
+            /^  orcaslicer-worker:/ {
+                print "  orcaslicer-worker-" idx ":"
+                print "    container_name: printfarmer-orcaslicer-worker-" idx
+                next
+            }
+            /Worker__InstanceId=\$\{ORCA_WORKER_INSTANCE_ID:-\}/ {
+                print "      - Worker__InstanceId=orcaslicer-worker-" idx
+                next
+            }
+            { print }
+        ' "$base_template" >> "$out"
+    done
+
+    printf '%s\n' "$out"
+}
+
 # Function to merge addon services into the main compose file
 merge_addon_services() {
     local compose_file="$1"
     local addon_type="$2"
+    local worker_count="${3:-1}"
     local addon_template="$TEMPLATES_DIR/docker-compose.$addon_type.yml"
+    local generated_worker_template=""
+
+    # Normalize defensively: this function's worker_count is a public entry
+    # point (not just reached via the single call site above), and bash's
+    # `[[ ]]` arithmetic below would otherwise misparse a leading-zero
+    # operand (e.g. "08") as octal and error on invalid digits.
+    if [[ "$worker_count" =~ ^[0-9]+$ ]]; then
+        worker_count=$((10#$worker_count))
+    fi
+
+    if [[ "$addon_type" == "orcaslicer-worker" ]] && [[ "$worker_count" =~ ^[0-9]+$ ]] && [[ "$worker_count" -gt 1 ]]; then
+        if ! generated_worker_template="$(render_scaled_orcaslicer_worker_template "$worker_count")"; then
+            log_error "Failed to render scaled OrcaSlicer worker template for $worker_count workers"
+            return 1
+        fi
+        addon_template="$generated_worker_template"
+    fi
 
     if [[ "$addon_type" == "monitoring" ]]; then
         # If user explicitly disabled elastic stack, prefer the lite template when available
@@ -497,6 +575,7 @@ merge_addon_services() {
                 if [[ -z "$PYTHON_CMD" ]]; then
                     log_error "No working Python interpreter found (tried python3, python, py)"
                     log_error "       A runnable Python 3 interpreter is required for addon service merging"
+                    rm -f "$generated_worker_template"
                     return 1
                 fi
                 temp_filtered_services="$(mktemp)"
@@ -619,9 +698,11 @@ PY
         fi
     else
         log_error "Addon template not found: $addon_template"
+        rm -f "$generated_worker_template"
         return 1
     fi
 
+    rm -f "$generated_worker_template"
     return 0
 }
 
@@ -798,9 +879,24 @@ generate_compose() {
         log_info "ℹ️  Slicing services disabled${SLICING_REASON:+ ($SLICING_REASON)}"
     else
         local need_orca_worker="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
-        # Parse yes/no and numeric values
-        if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || [[ "$need_orca_worker" =~ ^[0-9]+$ && "$need_orca_worker" -gt 0 ]]; then
-            if merge_addon_services "$compose_file" "orcaslicer-worker"; then
+        # Parse yes/no and numeric values. The numeric comparison is split into
+        # its own `[ ]` test rather than combined inside `[[ ]]`: bash's `[[ ]]`
+        # arithmetic evaluates a leading-zero operand (e.g. "08") as octal and
+        # errors on invalid octal digits, silently taking the false branch and
+        # disabling the worker addon; the classic `[ ]` builtin does not.
+        if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || { [[ "$need_orca_worker" =~ ^[0-9]+$ ]] && [ "$need_orca_worker" -gt 0 ]; }; then
+            # A numeric ENABLE_ORCA_WORKER/ORCA_WORKER_COUNT (e.g. "3") is the
+            # worker count. Anything else (yes/true/1) means exactly one worker.
+            local orca_worker_count=1
+            if [[ "$need_orca_worker" =~ ^[0-9]+$ ]]; then
+                # Normalize to a canonical base-10 string (e.g. "08" -> "8")
+                # so every downstream arithmetic comparison and C-style `for`
+                # loop -- which, unlike `[ ]`, interpret a leading-zero
+                # operand as octal and error on invalid digits -- sees a
+                # clean decimal count instead of silently mis-rendering.
+                orca_worker_count=$((10#$need_orca_worker))
+            fi
+            if merge_addon_services "$compose_file" "orcaslicer-worker" "$orca_worker_count"; then
                 log_info "Merged OrcaSlicer worker service (ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER)"
                 addons_merged=true
             else
@@ -1071,8 +1167,9 @@ show_dry_run() {
     echo "Dockerfiles:"
     # Determine worker configuration for dry run display
     local need_orca_worker="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
-    # Parse yes/no and numeric values
-    if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || [[ "$need_orca_worker" =~ ^[0-9]+$ && "$need_orca_worker" -gt 0 ]]; then
+    # Parse yes/no and numeric values (see comment at the main call site on why
+    # the numeric check is split out of `[[ ]]` to avoid octal misparsing).
+    if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || { [[ "$need_orca_worker" =~ ^[0-9]+$ ]] && [ "$need_orca_worker" -gt 0 ]; }; then
         need_orca_worker="true"
     else
         need_orca_worker="false"
@@ -1105,7 +1202,7 @@ show_dry_run() {
         echo "  - Includes Moonraker protocol emulator (internal network only)"
     fi
     local dry_run_orca="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
-    if [[ "$dry_run_orca" =~ ^(yes|true|1)$ ]] || [[ "$dry_run_orca" =~ ^[0-9]+$ && "$dry_run_orca" -gt 0 ]]; then
+    if [[ "$dry_run_orca" =~ ^(yes|true|1)$ ]] || { [[ "$dry_run_orca" =~ ^[0-9]+$ ]] && [ "$dry_run_orca" -gt 0 ]; }; then
         echo "  - Includes slicer-host service (distributed slicing orchestrator)"
     fi
     
