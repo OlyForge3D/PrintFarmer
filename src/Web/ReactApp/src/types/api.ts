@@ -1041,6 +1041,42 @@ export interface NozzleModelDefinition {
   nozzleInterface: NozzleInterfaceType;
   description?: string;
   url?: string;
+  /** ID of the NozzleMaterial row backing this model (built-in or custom) */
+  nozzleMaterialId: string;
+}
+
+/**
+ * Nozzle material catalog entry (name, hardened flag, default max temp).
+ * Built-in rows (isBuiltIn: true) are editable but cannot be deleted.
+ */
+export interface NozzleMaterialDto {
+  id: string;
+  name: string;
+  isHardened: boolean;
+  defaultMaxTemp: number;
+  isBuiltIn: boolean;
+  description?: string;
+}
+
+/**
+ * DTO for creating a new nozzle material
+ */
+export interface CreateNozzleMaterialDto {
+  name: string;
+  isHardened?: boolean;
+  defaultMaxTemp?: number;
+  description?: string;
+}
+
+/**
+ * DTO for updating an existing nozzle material.
+ * All fields are optional - only provided fields are updated.
+ */
+export interface UpdateNozzleMaterialDto {
+  name?: string;
+  isHardened?: boolean;
+  defaultMaxTemp?: number;
+  description?: string;
 }
 
 // ============== Component Model CRUD DTOs ==============
@@ -1139,6 +1175,12 @@ export interface CreateNozzleModelDto {
   nozzleInterface?: NozzleInterfaceType;
   description?: string;
   url?: string;
+  /**
+   * Optional direct reference to a NozzleMaterial row (built-in or custom). When provided,
+   * takes precedence over nozzleType and is the only way to select a custom (non-enum)
+   * material added via the Materials CRUD.
+   */
+  nozzleMaterialId?: string;
 }
 
 /**
@@ -1157,6 +1199,12 @@ export interface UpdateNozzleModelDto {
   nozzleInterface?: NozzleInterfaceType;
   description?: string;
   url?: string;
+  /**
+   * Optional direct reference to a NozzleMaterial row (built-in or custom). When provided,
+   * takes precedence over nozzleType and is the only way to select a custom (non-enum)
+   * material added via the Materials CRUD.
+   */
+  nozzleMaterialId?: string;
 }
 
 // ============== Contextual Manufacturer Types ==============

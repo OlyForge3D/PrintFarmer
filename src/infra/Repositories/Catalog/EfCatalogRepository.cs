@@ -377,7 +377,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             t.DefaultNozzleId)).ToList();
     }
 
-    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, string NozzleType, NozzleHardnessOverride HardnessOverride, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, string NozzleType, NozzleHardnessOverride HardnessOverride, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url, Guid NozzleMaterialId)>> GetNozzleModelsAsync(CancellationToken ct = default)
     {
         List<NozzleModelDefinition> nozzles = await _db.NozzleModelDefinitions
             .Include(n => n.Manufacturer)
@@ -399,7 +399,8 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             n.IsHardened,
             n.NozzleInterface,
             n.Description,
-            n.Url)).ToList();
+            n.Url,
+            n.NozzleMaterialId)).ToList();
     }
 
     public Task<NozzleMaterial?> GetNozzleMaterialByNameAsync(string name, CancellationToken ct = default)
@@ -497,4 +498,36 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
 
     public Task<int> CountNozzleModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default)
         => _db.NozzleModelDefinitions.CountAsync(n => n.ManufacturerId == manufacturerId, ct);
+
+    // Nozzle material catalog CRUD (see #1825)
+
+    public async Task<IReadOnlyList<NozzleMaterial>> GetNozzleMaterialsAsync(CancellationToken ct = default)
+        => await _db.NozzleMaterials
+            .AsNoTracking()
+            .OrderBy(m => m.Name)
+            .ToListAsync(ct);
+
+    public Task<NozzleMaterial?> GetNozzleMaterialByIdAsync(Guid id, CancellationToken ct = default)
+        => _db.NozzleMaterials.FirstOrDefaultAsync(m => m.Id == id, ct);
+
+    public Task<bool> NozzleMaterialNameExistsAsync(string name, Guid? excludeId, CancellationToken ct = default)
+        => _db.NozzleMaterials.AnyAsync(m => m.Name == name && (excludeId == null || m.Id != excludeId), ct);
+
+    public async Task AddNozzleMaterialAsync(NozzleMaterial material, CancellationToken ct = default)
+    {
+        _ = _db.NozzleMaterials.Add(material);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task RemoveNozzleMaterialAsync(Guid id, CancellationToken ct = default)
+    {
+        NozzleMaterial? material = await _db.NozzleMaterials.FindAsync(new object[] { id }, ct);
+        if (material is not null)
+        {
+            _ = _db.NozzleMaterials.Remove(material);
+        }
+    }
+
+    public Task<int> CountNozzleModelsByMaterialAsync(Guid materialId, CancellationToken ct = default)
+        => _db.NozzleModelDefinitions.CountAsync(n => n.NozzleMaterialId == materialId, ct);
 }

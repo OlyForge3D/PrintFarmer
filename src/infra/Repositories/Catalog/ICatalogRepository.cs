@@ -133,7 +133,7 @@ public interface ICatalogRepository
 
     /// <summary>Gets all nozzle model definitions.</summary>
     /// <param name="ct">Cancellation token.</param>
-    Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, string NozzleType, NozzleHardnessOverride HardnessOverride, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)>> GetNozzleModelsAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, string NozzleType, NozzleHardnessOverride HardnessOverride, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url, Guid NozzleMaterialId)>> GetNozzleModelsAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Looks up a nozzle material by exact name (e.g. "Brass", "HardenedSteel"). Used to
@@ -236,4 +236,36 @@ public interface ICatalogRepository
     /// <param name="manufacturerId">The manufacturer identifier.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<int> CountNozzleModelsByManufacturerAsync(Guid manufacturerId, CancellationToken ct = default);
+
+    // Nozzle material catalog CRUD (see #1825)
+
+    /// <summary>Gets all nozzle material catalog entries, ordered by name.</summary>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<Domain.NozzleMaterial>> GetNozzleMaterialsAsync(CancellationToken ct = default);
+
+    /// <summary>Gets a nozzle material catalog entry by ID.</summary>
+    /// <param name="id">The nozzle material identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<Domain.NozzleMaterial?> GetNozzleMaterialByIdAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>Checks whether a nozzle material name is already in use, optionally excluding one ID (for updates).</summary>
+    /// <param name="name">The nozzle material name to check.</param>
+    /// <param name="excludeId">Optional ID to exclude from the check (the material being updated).</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<bool> NozzleMaterialNameExistsAsync(string name, Guid? excludeId, CancellationToken ct = default);
+
+    /// <summary>Adds a new nozzle material catalog entry.</summary>
+    /// <param name="material">The nozzle material to add.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task AddNozzleMaterialAsync(Domain.NozzleMaterial material, CancellationToken ct = default);
+
+    /// <summary>Removes a nozzle material catalog entry by ID.</summary>
+    /// <param name="id">The nozzle material identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task RemoveNozzleMaterialAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>Counts nozzle models referencing a given nozzle material (used to guard deletion of in-use materials).</summary>
+    /// <param name="materialId">The nozzle material identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<int> CountNozzleModelsByMaterialAsync(Guid materialId, CancellationToken ct = default);
 }

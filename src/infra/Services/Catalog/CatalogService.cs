@@ -591,9 +591,10 @@ public class CatalogService(
     {
         try
         {
-            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, string NozzleType, NozzleHardnessOverride HardnessOverride, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url)> nozzles = await _repo.GetNozzleModelsAsync(ct);
+            IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, string NozzleType, NozzleHardnessOverride HardnessOverride, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url, Guid NozzleMaterialId)> nozzles = await _repo.GetNozzleModelsAsync(ct);
             return nozzles.Select(n => new NozzleModelDto(
                 n.Id,
+                n.NozzleMaterialId,
                 n.Name,
                 n.ManufacturerId,
                 n.ManufacturerName,
@@ -922,7 +923,7 @@ public class CatalogService(
             throw new KeyNotFoundException("Manufacturer not found");
         }
 
-        Guid nozzleMaterialId = await ResolveNozzleMaterialIdAsync(dto.NozzleType, ct);
+        Guid nozzleMaterialId = await ResolveNozzleMaterialAsync(dto.NozzleMaterialId, dto.NozzleType, ct);
 
         Domain.NozzleModelDefinition model = new()
         {
@@ -943,7 +944,7 @@ public class CatalogService(
 
         Domain.NozzleModelDefinition? created = await _repo.GetNozzleModelByIdAsync(model.Id, ct);
         return new NozzleModelDto(
-            created!.Id, created.Name, created.ManufacturerId,
+            created!.Id, created.NozzleMaterialId, created.Name, created.ManufacturerId,
             created.Manufacturer?.Name, created.Diameter, created.MaxTemp,
             created.NozzleMaterial?.Name ?? created.NozzleType.ToString(),
             created.HardnessOverride, created.IsHardened,
@@ -965,6 +966,35 @@ public class CatalogService(
         if (material is null)
         {
             throw new KeyNotFoundException($"Nozzle material '{trimmed}' not found");
+        }
+
+        return material.Id;
+    }
+
+    /// <summary>
+    /// Resolves the material to assign to a nozzle model. When <paramref name="nozzleMaterialId"/>
+    /// is supplied it takes precedence — this is the only way to select a custom (non-enum)
+    /// material added through the Materials CRUD (see #1825). Otherwise falls back to the
+    /// <paramref name="nozzleType"/> name lookup for backward compatibility (see #1826 — this
+    /// is an open string, not the legacy closed <c>NozzleType</c> enum).
+    /// </summary>
+    private async Task<Guid> ResolveNozzleMaterialAsync(Guid? nozzleMaterialId, string nozzleType, CancellationToken ct)
+    {
+        if (nozzleMaterialId.HasValue)
+        {
+            return await ResolveNozzleMaterialIdByIdAsync(nozzleMaterialId.Value, ct);
+        }
+
+        return await ResolveNozzleMaterialIdAsync(nozzleType, ct);
+    }
+
+    /// <summary>Resolves a <c>NozzleMaterial</c> row's own ID, verifying it exists.</summary>
+    private async Task<Guid> ResolveNozzleMaterialIdByIdAsync(Guid nozzleMaterialId, CancellationToken ct)
+    {
+        Domain.NozzleMaterial? material = await _repo.GetNozzleMaterialByIdAsync(nozzleMaterialId, ct);
+        if (material is null)
+        {
+            throw new KeyNotFoundException($"Nozzle material {nozzleMaterialId} not found");
         }
 
         return material.Id;
@@ -1004,7 +1034,11 @@ public class CatalogService(
             model.MaxTemp = dto.MaxTemp;
         }
 
-        if (dto.NozzleType is not null)
+        if (dto.NozzleMaterialId.HasValue)
+        {
+            model.NozzleMaterialId = await ResolveNozzleMaterialIdByIdAsync(dto.NozzleMaterialId.Value, ct);
+        }
+        else if (dto.NozzleType is not null)
         {
             model.NozzleMaterialId = await ResolveNozzleMaterialIdAsync(dto.NozzleType, ct);
         }
@@ -1035,7 +1069,7 @@ public class CatalogService(
         // Re-fetch to get updated manufacturer navigation property
         model = await _repo.GetNozzleModelByIdAsync(id, ct);
         return new NozzleModelDto(
-            model!.Id, model.Name, model.ManufacturerId,
+            model!.Id, model.NozzleMaterialId, model.Name, model.ManufacturerId,
             model.Manufacturer?.Name, model.Diameter, model.MaxTemp,
             model.NozzleMaterial?.Name ?? model.NozzleType.ToString(),
             model.HardnessOverride, model.IsHardened,
@@ -1048,6 +1082,127 @@ public class CatalogService(
         await _repo.SaveChangesAsync(ct);
         _logger.LogInformation("Deleted nozzle model with ID {Id}", id);
     }
+
+    #endregion
+
+    #region Nozzle Material CRUD
+
+    public async Task<IReadOnlyList<NozzleMaterialDto>> GetNozzleMaterialsAsync(CancellationToken ct)
+    {
+        IReadOnlyList<Domain.NozzleMaterial> materials = await _repo.GetNozzleMaterialsAsync(ct);
+        return materials.Select(MapToNozzleMaterialDto).ToList();
+    }
+
+    public async Task<NozzleMaterialDto> CreateNozzleMaterialAsync(CreateNozzleMaterialDto dto, CancellationToken ct)
+    {
+        string trimmedName = dto.Name?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmedName))
+        {
+            throw new ArgumentException("Name is required", nameof(dto));
+        }
+
+        bool nameExists = await _repo.NozzleMaterialNameExistsAsync(trimmedName, null, ct);
+        if (nameExists)
+        {
+            throw new ArgumentException($"A nozzle material named '{trimmedName}' already exists.", nameof(dto));
+        }
+
+        Domain.NozzleMaterial material = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = trimmedName,
+            IsHardened = dto.IsHardened,
+            DefaultMaxTemp = dto.DefaultMaxTemp,
+            IsBuiltIn = false,
+            Description = dto.Description
+        };
+
+        await _repo.AddNozzleMaterialAsync(material, ct);
+        _logger.LogInformation("Created nozzle material '{MaterialName}' with ID {MaterialId}", LogSanitizer.Sanitize(material.Name), material.Id);
+
+        return MapToNozzleMaterialDto(material);
+    }
+
+    public async Task<NozzleMaterialDto?> UpdateNozzleMaterialAsync(Guid id, UpdateNozzleMaterialDto dto, CancellationToken ct)
+    {
+        Domain.NozzleMaterial? material = await _repo.GetNozzleMaterialByIdAsync(id, ct);
+        if (material is null)
+        {
+            return null;
+        }
+
+        if (dto.Name is not null)
+        {
+            string trimmedName = dto.Name.Trim();
+            if (string.IsNullOrWhiteSpace(trimmedName))
+            {
+                throw new ArgumentException("Name is required", nameof(dto));
+            }
+
+            if (!string.Equals(material.Name, trimmedName, StringComparison.Ordinal))
+            {
+                bool conflict = await _repo.NozzleMaterialNameExistsAsync(trimmedName, id, ct);
+                if (conflict)
+                {
+                    throw new ArgumentException($"A nozzle material named '{trimmedName}' already exists.", nameof(dto));
+                }
+            }
+
+            material.Name = trimmedName;
+        }
+
+        if (dto.IsHardened.HasValue)
+        {
+            material.IsHardened = dto.IsHardened.Value;
+        }
+
+        if (dto.DefaultMaxTemp.HasValue)
+        {
+            material.DefaultMaxTemp = dto.DefaultMaxTemp.Value;
+        }
+
+        if (dto.Description is not null)
+        {
+            material.Description = dto.Description;
+        }
+
+        await _repo.SaveChangesAsync(ct);
+        _logger.LogInformation("Updated nozzle material '{MaterialName}' with ID {MaterialId}", LogSanitizer.Sanitize(material.Name), material.Id);
+
+        return MapToNozzleMaterialDto(material);
+    }
+
+    public async Task DeleteNozzleMaterialAsync(Guid id, CancellationToken ct)
+    {
+        Domain.NozzleMaterial? material = await _repo.GetNozzleMaterialByIdAsync(id, ct);
+        if (material is null)
+        {
+            throw new KeyNotFoundException($"Nozzle material {id} not found.");
+        }
+
+        if (material.IsBuiltIn)
+        {
+            throw new InvalidOperationException($"Cannot delete built-in nozzle material '{material.Name}'.");
+        }
+
+        int inUseCount = await _repo.CountNozzleModelsByMaterialAsync(id, ct);
+        if (inUseCount > 0)
+        {
+            throw new InvalidOperationException($"Cannot delete nozzle material '{material.Name}' because it is used by {inUseCount} nozzle model(s).");
+        }
+
+        await _repo.RemoveNozzleMaterialAsync(id, ct);
+        await _repo.SaveChangesAsync(ct);
+        _logger.LogInformation("Deleted nozzle material '{MaterialName}' with ID {MaterialId}", LogSanitizer.Sanitize(material.Name), id);
+    }
+
+    private static NozzleMaterialDto MapToNozzleMaterialDto(Domain.NozzleMaterial material) => new(
+        material.Id,
+        material.Name,
+        material.IsHardened,
+        material.DefaultMaxTemp,
+        material.IsBuiltIn,
+        material.Description);
 
     #endregion
 

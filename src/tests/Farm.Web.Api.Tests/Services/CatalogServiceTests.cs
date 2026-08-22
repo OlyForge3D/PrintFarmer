@@ -189,4 +189,248 @@ public class CatalogServiceTests
         Assert.Equal(brass.Id, existing.NozzleMaterialId);
         mockRepo.Verify(r => r.GetNozzleMaterialByNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    // Covers #1825's additive wire-contract extension: an explicit NozzleMaterialId (e.g. a custom,
+    // non-enum material created through the new CRUD) must take precedence over the legacy NozzleType
+    // enum field and must be resolved by direct ID lookup rather than by name.
+    [Fact]
+    public async Task CreateNozzleModelAsync_WithExplicitNozzleMaterialId_TakesPrecedenceOverNozzleType()
+    {
+        Guid manufacturerId = Guid.NewGuid();
+        NozzleMaterial custom = new NozzleMaterial
+        {
+            Id = Guid.NewGuid(),
+            Name = "Custom Exotic Alloy",
+            IsHardened = true,
+            DefaultMaxTemp = 450,
+            IsBuiltIn = false
+        };
+
+        Mock<ICatalogRepository> mockRepo = new Mock<ICatalogRepository>();
+        _ = mockRepo.Setup(r => r.ManufacturerExistsAsync(manufacturerId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _ = mockRepo.Setup(r => r.GetNozzleMaterialByIdAsync(custom.Id, It.IsAny<CancellationToken>())).ReturnsAsync(custom);
+
+        NozzleModelDefinition? capturedModel = null;
+        _ = mockRepo.Setup(r => r.AddNozzleModelAsync(It.IsAny<NozzleModelDefinition>(), It.IsAny<CancellationToken>()))
+            .Callback<NozzleModelDefinition, CancellationToken>((m, _) => capturedModel = m)
+            .Returns(Task.CompletedTask);
+        _ = mockRepo.Setup(r => r.GetNozzleModelByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => capturedModel);
+
+        CatalogService svc = CreateService(mockRepo);
+        CreateNozzleModelDto dto = new CreateNozzleModelDto("Vanadium", manufacturerId, NozzleType: NozzleType.Brass, NozzleMaterialId: custom.Id);
+
+        NozzleModelDto result = await svc.CreateNozzleModelAsync(dto, CancellationToken.None);
+
+        Assert.NotNull(capturedModel);
+        Assert.Equal(custom.Id, capturedModel!.NozzleMaterialId);
+        Assert.Equal(custom.Id, result.NozzleMaterialId);
+        mockRepo.Verify(r => r.GetNozzleMaterialByIdAsync(custom.Id, It.IsAny<CancellationToken>()), Times.Once);
+        mockRepo.Verify(r => r.GetNozzleMaterialByNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateNozzleModelAsync_WithUnrecognizedNozzleMaterialId_ThrowsKeyNotFoundException()
+    {
+        Guid manufacturerId = Guid.NewGuid();
+        Guid missingMaterialId = Guid.NewGuid();
+
+        Mock<ICatalogRepository> mockRepo = new Mock<ICatalogRepository>();
+        _ = mockRepo.Setup(r => r.ManufacturerExistsAsync(manufacturerId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _ = mockRepo.Setup(r => r.GetNozzleMaterialByIdAsync(missingMaterialId, It.IsAny<CancellationToken>())).ReturnsAsync((NozzleMaterial?)null);
+
+        CatalogService svc = CreateService(mockRepo);
+        CreateNozzleModelDto dto = new CreateNozzleModelDto("Mystery", manufacturerId, NozzleMaterialId: missingMaterialId);
+
+        _ = await Assert.ThrowsAsync<KeyNotFoundException>(() => svc.CreateNozzleModelAsync(dto, CancellationToken.None));
+        mockRepo.Verify(r => r.AddNozzleModelAsync(It.IsAny<NozzleModelDefinition>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateNozzleModelAsync_WithExplicitNozzleMaterialId_TakesPrecedenceOverNozzleType()
+    {
+        Guid nozzleId = Guid.NewGuid();
+        Guid manufacturerId = Guid.NewGuid();
+        NozzleMaterial brass = new NozzleMaterial { Id = Guid.NewGuid(), Name = "Brass", IsHardened = false, DefaultMaxTemp = 260, IsBuiltIn = true };
+        NozzleMaterial custom = new NozzleMaterial { Id = Guid.NewGuid(), Name = "Custom Exotic Alloy", IsHardened = true, DefaultMaxTemp = 450, IsBuiltIn = false };
+
+        NozzleModelDefinition existing = new NozzleModelDefinition
+        {
+            Id = nozzleId,
+            Name = "Undertaker",
+            ManufacturerId = manufacturerId,
+            NozzleMaterialId = brass.Id,
+            NozzleMaterial = brass
+        };
+
+        Mock<ICatalogRepository> mockRepo = new Mock<ICatalogRepository>();
+        _ = mockRepo.SetupSequence(r => r.GetNozzleModelByIdAsync(nozzleId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existing)
+            .ReturnsAsync(existing);
+        _ = mockRepo.Setup(r => r.GetNozzleMaterialByIdAsync(custom.Id, It.IsAny<CancellationToken>())).ReturnsAsync(custom);
+        _ = mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        CatalogService svc = CreateService(mockRepo);
+        UpdateNozzleModelDto dto = new UpdateNozzleModelDto(NozzleType: NozzleType.TungstenCarbide, NozzleMaterialId: custom.Id);
+
+        NozzleModelDto? result = await svc.UpdateNozzleModelAsync(nozzleId, dto, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(custom.Id, existing.NozzleMaterialId);
+        mockRepo.Verify(r => r.GetNozzleMaterialByIdAsync(custom.Id, It.IsAny<CancellationToken>()), Times.Once);
+        mockRepo.Verify(r => r.GetNozzleMaterialByNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    #region Nozzle Material CRUD
+
+    [Fact]
+    public async Task GetNozzleMaterialsAsync_ReturnsMappedDtos()
+    {
+        NozzleMaterial brass = new NozzleMaterial { Id = Guid.NewGuid(), Name = "Brass", IsHardened = false, DefaultMaxTemp = 260, IsBuiltIn = true };
+        NozzleMaterial custom = new NozzleMaterial { Id = Guid.NewGuid(), Name = "Custom", IsHardened = true, DefaultMaxTemp = 450, IsBuiltIn = false, Description = "My alloy" };
+
+        Mock<ICatalogRepository> mockRepo = new Mock<ICatalogRepository>();
+        _ = mockRepo.Setup(r => r.GetNozzleMaterialsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<NozzleMaterial> { brass, custom });
+
+        CatalogService svc = CreateService(mockRepo);
+        IReadOnlyList<NozzleMaterialDto> result = await svc.GetNozzleMaterialsAsync(CancellationToken.None);
+
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, m => m.Id == brass.Id && m.IsBuiltIn && !m.IsHardened);
+        Assert.Contains(result, m => m.Id == custom.Id && !m.IsBuiltIn && m.IsHardened && m.Description == "My alloy");
+    }
+
+    [Fact]
+    public async Task CreateNozzleMaterialAsync_CreatesNonBuiltInMaterial()
+    {
+        Mock<ICatalogRepository> mockRepo = new Mock<ICatalogRepository>();
+        _ = mockRepo.Setup(r => r.NozzleMaterialNameExistsAsync("Custom Exotic Alloy", null, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        NozzleMaterial? added = null;
+        _ = mockRepo.Setup(r => r.AddNozzleMaterialAsync(It.IsAny<NozzleMaterial>(), It.IsAny<CancellationToken>()))
+            .Callback<NozzleMaterial, CancellationToken>((m, _) => added = m)
+            .Returns(Task.CompletedTask);
+
+        CatalogService svc = CreateService(mockRepo);
+        CreateNozzleMaterialDto dto = new CreateNozzleMaterialDto("Custom Exotic Alloy", true, 450, "Notes");
+
+        NozzleMaterialDto result = await svc.CreateNozzleMaterialAsync(dto, CancellationToken.None);
+
+        Assert.NotNull(added);
+        Assert.False(added!.IsBuiltIn);
+        Assert.Equal("Custom Exotic Alloy", result.Name);
+        Assert.True(result.IsHardened);
+        Assert.Equal(450, result.DefaultMaxTemp);
+        Assert.False(result.IsBuiltIn);
+    }
+
+    [Fact]
+    public async Task CreateNozzleMaterialAsync_WithDuplicateName_ThrowsArgumentException()
+    {
+        Mock<ICatalogRepository> mockRepo = new Mock<ICatalogRepository>();
+        _ = mockRepo.Setup(r => r.NozzleMaterialNameExistsAsync("Brass", null, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        CatalogService svc = CreateService(mockRepo);
+        CreateNozzleMaterialDto dto = new CreateNozzleMaterialDto("Brass", false, 260, null);
+
+        _ = await Assert.ThrowsAsync<ArgumentException>(() => svc.CreateNozzleMaterialAsync(dto, CancellationToken.None));
+        mockRepo.Verify(r => r.AddNozzleMaterialAsync(It.IsAny<NozzleMaterial>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateNozzleMaterialAsync_UpdatesFields()
+    {
+        NozzleMaterial material = new NozzleMaterial { Id = Guid.NewGuid(), Name = "Custom", IsHardened = false, DefaultMaxTemp = 260, IsBuiltIn = false };
+
+        Mock<ICatalogRepository> mockRepo = new Mock<ICatalogRepository>();
+        _ = mockRepo.Setup(r => r.GetNozzleMaterialByIdAsync(material.Id, It.IsAny<CancellationToken>())).ReturnsAsync(material);
+        _ = mockRepo.Setup(r => r.NozzleMaterialNameExistsAsync("Renamed", material.Id, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        _ = mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        CatalogService svc = CreateService(mockRepo);
+        UpdateNozzleMaterialDto dto = new UpdateNozzleMaterialDto("Renamed", true, 500, "New notes");
+
+        NozzleMaterialDto? result = await svc.UpdateNozzleMaterialAsync(material.Id, dto, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal("Renamed", result!.Name);
+        Assert.True(result.IsHardened);
+        Assert.Equal(500, result.DefaultMaxTemp);
+        Assert.Equal("New notes", result.Description);
+    }
+
+    [Fact]
+    public async Task UpdateNozzleMaterialAsync_WhenNotFound_ReturnsNull()
+    {
+        Mock<ICatalogRepository> mockRepo = new Mock<ICatalogRepository>();
+        _ = mockRepo.Setup(r => r.GetNozzleMaterialByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((NozzleMaterial?)null);
+
+        CatalogService svc = CreateService(mockRepo);
+        UpdateNozzleMaterialDto dto = new UpdateNozzleMaterialDto("Renamed", null, null, null);
+
+        NozzleMaterialDto? result = await svc.UpdateNozzleMaterialAsync(Guid.NewGuid(), dto, CancellationToken.None);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task DeleteNozzleMaterialAsync_WhenBuiltIn_ThrowsInvalidOperationException()
+    {
+        NozzleMaterial builtIn = new NozzleMaterial { Id = Guid.NewGuid(), Name = "Brass", IsHardened = false, DefaultMaxTemp = 260, IsBuiltIn = true };
+
+        Mock<ICatalogRepository> mockRepo = new Mock<ICatalogRepository>();
+        _ = mockRepo.Setup(r => r.GetNozzleMaterialByIdAsync(builtIn.Id, It.IsAny<CancellationToken>())).ReturnsAsync(builtIn);
+
+        CatalogService svc = CreateService(mockRepo);
+
+        _ = await Assert.ThrowsAsync<InvalidOperationException>(() => svc.DeleteNozzleMaterialAsync(builtIn.Id, CancellationToken.None));
+        mockRepo.Verify(r => r.RemoveNozzleMaterialAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteNozzleMaterialAsync_WhenInUse_ThrowsInvalidOperationException()
+    {
+        NozzleMaterial custom = new NozzleMaterial { Id = Guid.NewGuid(), Name = "Custom", IsHardened = false, DefaultMaxTemp = 260, IsBuiltIn = false };
+
+        Mock<ICatalogRepository> mockRepo = new Mock<ICatalogRepository>();
+        _ = mockRepo.Setup(r => r.GetNozzleMaterialByIdAsync(custom.Id, It.IsAny<CancellationToken>())).ReturnsAsync(custom);
+        _ = mockRepo.Setup(r => r.CountNozzleModelsByMaterialAsync(custom.Id, It.IsAny<CancellationToken>())).ReturnsAsync(2);
+
+        CatalogService svc = CreateService(mockRepo);
+
+        _ = await Assert.ThrowsAsync<InvalidOperationException>(() => svc.DeleteNozzleMaterialAsync(custom.Id, CancellationToken.None));
+        mockRepo.Verify(r => r.RemoveNozzleMaterialAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteNozzleMaterialAsync_WhenUnusedAndCustom_Deletes()
+    {
+        NozzleMaterial custom = new NozzleMaterial { Id = Guid.NewGuid(), Name = "Custom", IsHardened = false, DefaultMaxTemp = 260, IsBuiltIn = false };
+
+        Mock<ICatalogRepository> mockRepo = new Mock<ICatalogRepository>();
+        _ = mockRepo.Setup(r => r.GetNozzleMaterialByIdAsync(custom.Id, It.IsAny<CancellationToken>())).ReturnsAsync(custom);
+        _ = mockRepo.Setup(r => r.CountNozzleModelsByMaterialAsync(custom.Id, It.IsAny<CancellationToken>())).ReturnsAsync(0);
+        _ = mockRepo.Setup(r => r.RemoveNozzleMaterialAsync(custom.Id, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        _ = mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        CatalogService svc = CreateService(mockRepo);
+        await svc.DeleteNozzleMaterialAsync(custom.Id, CancellationToken.None);
+
+        mockRepo.Verify(r => r.RemoveNozzleMaterialAsync(custom.Id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteNozzleMaterialAsync_WhenNotFound_ThrowsKeyNotFoundException()
+    {
+        Mock<ICatalogRepository> mockRepo = new Mock<ICatalogRepository>();
+        _ = mockRepo.Setup(r => r.GetNozzleMaterialByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((NozzleMaterial?)null);
+
+        CatalogService svc = CreateService(mockRepo);
+
+        _ = await Assert.ThrowsAsync<KeyNotFoundException>(() => svc.DeleteNozzleMaterialAsync(Guid.NewGuid(), CancellationToken.None));
+    }
+
+    #endregion
 }
+

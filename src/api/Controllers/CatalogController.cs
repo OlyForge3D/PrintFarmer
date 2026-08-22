@@ -735,6 +735,113 @@ public class CatalogController(
 
     #endregion
 
+    #region Nozzle Material CRUD
+
+    /// <summary>
+    /// Gets all nozzle material catalog entries.
+    /// </summary>
+    [HttpGet("nozzle-materials")]
+    [ProducesResponseType(typeof(IEnumerable<NozzleMaterialDto>), 200)]
+    public async Task<ActionResult<IEnumerable<NozzleMaterialDto>>> GetNozzleMaterialsAsync(CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<NozzleMaterialDto> materials = await _catalogService.GetNozzleMaterialsAsync(ct);
+            return Ok(materials);
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] GetNozzleMaterialsAsync failed: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve nozzle materials" });
+        }
+    }
+
+    /// <summary>
+    /// Creates a new nozzle material catalog entry.
+    /// </summary>
+    [RequirePermission("catalog", "admin")]
+    [HttpPost("nozzle-materials")]
+    [ProducesResponseType(typeof(NozzleMaterialDto), 201)]
+    [ProducesResponseType(400)]
+    public async Task<ActionResult<NozzleMaterialDto>> CreateNozzleMaterialAsync([FromBody] CreateNozzleMaterialDto dto, CancellationToken ct)
+    {
+        try
+        {
+            NozzleMaterialDto created = await _catalogService.CreateNozzleMaterialAsync(dto, ct);
+            return CreatedAtAction("GetNozzleMaterials", new { }, created);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] CreateNozzleMaterialAsync failed: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to create nozzle material" });
+        }
+    }
+
+    /// <summary>
+    /// Updates an existing nozzle material catalog entry. Built-in materials can be edited
+    /// (e.g. renaming a display label, adjusting default max temp) but not deleted.
+    /// </summary>
+    [RequirePermission("catalog", "admin")]
+    [HttpPut("nozzle-materials/{id:guid}")]
+    [ProducesResponseType(typeof(NozzleMaterialDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<NozzleMaterialDto>> UpdateNozzleMaterialAsync(Guid id, [FromBody] UpdateNozzleMaterialDto dto, CancellationToken ct)
+    {
+        try
+        {
+            NozzleMaterialDto? updated = await _catalogService.UpdateNozzleMaterialAsync(id, dto, ct);
+            return updated is null ? NotFound() : Ok(updated);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] UpdateNozzleMaterialAsync failed: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update nozzle material" });
+        }
+    }
+
+    /// <summary>
+    /// Deletes a nozzle material catalog entry. Built-in materials and materials referenced by
+    /// any nozzle model are rejected with a 409 Conflict.
+    /// </summary>
+    [RequirePermission("catalog", "admin")]
+    [HttpDelete("nozzle-materials/{id:guid}")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    public async Task<ActionResult> DeleteNozzleMaterialAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            await _catalogService.DeleteNozzleMaterialAsync(id, ct);
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _unifiedLoggingService?.LogWarning(ex, "[CatalogController] DeleteNozzleMaterialAsync blocked: {Message}", ex.Message);
+            return Conflict(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, "[CatalogController] DeleteNozzleMaterialAsync failed: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to delete nozzle material" });
+        }
+    }
+
+    #endregion
+
     #region Contextual Manufacturer Query
 
     /// <summary>

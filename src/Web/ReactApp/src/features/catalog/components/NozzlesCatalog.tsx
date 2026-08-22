@@ -14,11 +14,18 @@ import {
 import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type NozzleModelCardData } from '@/common/components/ComponentModelCard';
-import { useNozzleModels, useCreateNozzleModel, useUpdateNozzleModel, useDeleteNozzleModel } from '@/common/hooks/useApi';
-import { CatalogContext, type NozzleModelDefinition, type CreateNozzleModelDto, type UpdateNozzleModelDto, NozzleTypeStringLabels, NozzleHardnessOverrideLabels } from '@/types/api';
+import {
+  useNozzleModels,
+  useCreateNozzleModel,
+  useUpdateNozzleModel,
+  useDeleteNozzleModel,
+  useNozzleMaterials,
+} from '@/common/hooks/useApi';
+import { CatalogContext, type NozzleModelDefinition, type NozzleMaterialDto, type CreateNozzleModelDto, type UpdateNozzleModelDto, NozzleHardnessOverrideLabels } from '@/types/api';
 import { PlusIcon, EditIcon, DeleteIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
-import { isHardenedByMaterial } from '../nozzleHardness';
+import { Tabs } from '@/common/components/ui/Tabs';
+import { NozzleMaterialsCatalog } from './NozzleMaterialsCatalog';
 
 /**
  * Converts a NozzleModelDefinition to the card display format
@@ -46,7 +53,7 @@ interface NozzleFormState {
   manufacturerName?: string;
   diameter: string;
   maxTemp: string;
-  nozzleType: string;
+  nozzleMaterialId: string;
   hardnessOverride: string;
   description: string;
   url: string;
@@ -55,25 +62,12 @@ interface NozzleFormState {
 // Common nozzle diameters in mm
 const COMMON_NOZZLE_DIAMETERS = ['0.2', '0.25', '0.3', '0.4', '0.5', '0.6', '0.8', '1.0', '1.2'];
 
-// Default max temperatures by nozzle type (°C). Keys must match the backend NozzleType names.
-const DEFAULT_TEMPS_BY_TYPE: Record<string, number> = {
-  'Brass': 300,
-  'HardenedSteel': 500,
-  'StainlessSteel': 300,
-  'TungstenCarbide': 500,
-  'Abrasive': 500,
-  'Diamond': 550,
-  'Ruby': 500,
-  'PlatedCopper': 400,
-  'ToolSteel': 500,
-};
-
 const emptyForm: NozzleFormState = {
   name: '',
   manufacturerId: '',
   diameter: '0.4',
   maxTemp: '300',
-  nozzleType: 'Brass',
+  nozzleMaterialId: '',
   hardnessOverride: 'Auto',
   description: '',
   url: '',
@@ -91,6 +85,10 @@ const emptyForm: NozzleFormState = {
 export function NozzlesCatalog() {
   // Data queries
   const { data: nozzleModels, isLoading, isError } = useNozzleModels();
+  const { data: nozzleMaterials } = useNozzleMaterials();
+
+  // Sub-tab state: Models vs Materials
+  const [activeTab, setActiveTab] = useState<'models' | 'materials'>('models');
 
   // Mutations
   const createMutation = useCreateNozzleModel();
@@ -143,10 +141,15 @@ export function NozzlesCatalog() {
 
   // Open add modal
   const handleAddClick = useCallback(() => {
-    setFormState(emptyForm);
+    const defaultMaterial = nozzleMaterials?.find(m => m.name === 'Brass') ?? nozzleMaterials?.[0];
+    setFormState({
+      ...emptyForm,
+      nozzleMaterialId: defaultMaterial?.id ?? '',
+      maxTemp: defaultMaterial?.defaultMaxTemp?.toString() ?? emptyForm.maxTemp,
+    });
     setFormErrors({});
     setIsAddModalOpen(true);
-  }, []);
+  }, [nozzleMaterials]);
 
   // Open edit modal
   const handleEditClick = useCallback((card: NozzleModelCardData) => {
@@ -159,7 +162,7 @@ export function NozzlesCatalog() {
       manufacturerName: model.manufacturerName,
       diameter: model.diameter?.toString() ?? '0.4',
       maxTemp: model.maxTemp?.toString() ?? '',
-      nozzleType: typeof model.nozzleType === 'string' ? model.nozzleType : 'Brass',
+      nozzleMaterialId: model.nozzleMaterialId ?? '',
       hardnessOverride: typeof model.hardnessOverride === 'string' ? model.hardnessOverride : 'Auto',
       description: model.description ?? '',
       url: model.url ?? '',
@@ -179,7 +182,7 @@ export function NozzlesCatalog() {
       manufacturerName: model.manufacturerName,
       diameter: model.diameter?.toString() ?? '0.4',
       maxTemp: model.maxTemp?.toString() ?? '',
-      nozzleType: typeof model.nozzleType === 'string' ? model.nozzleType : 'Brass',
+      nozzleMaterialId: model.nozzleMaterialId ?? '',
       hardnessOverride: typeof model.hardnessOverride === 'string' ? model.hardnessOverride : 'Auto',
       description: model.description ?? '',
       url: model.url ?? '',
@@ -223,6 +226,9 @@ export function NozzlesCatalog() {
     if (!formState.manufacturerId) {
       errors.manufacturerId = 'Manufacturer is required';
     }
+    if (!formState.nozzleMaterialId) {
+      errors.nozzleMaterialId = 'Material is required';
+    }
     if (formState.maxTemp && (isNaN(Number(formState.maxTemp)) || Number(formState.maxTemp) < 0)) {
       errors.maxTemp = 'Max temperature must be a positive number';
     }
@@ -234,14 +240,15 @@ export function NozzlesCatalog() {
     return Object.keys(errors).length === 0;
   }, [formState]);
 
-  // Handle nozzle type change - update default temp
-  const handleNozzleTypeChange = useCallback((newType: string) => {
+  // Handle material selection change - update default max temp from the material
+  const handleMaterialChange = useCallback((newMaterialId: string) => {
+    const material = nozzleMaterials?.find(m => m.id === newMaterialId);
     setFormState(prev => ({
       ...prev,
-      nozzleType: newType,
-      maxTemp: DEFAULT_TEMPS_BY_TYPE[newType]?.toString() || prev.maxTemp,
+      nozzleMaterialId: newMaterialId,
+      maxTemp: material?.defaultMaxTemp?.toString() ?? prev.maxTemp,
     }));
-  }, []);
+  }, [nozzleMaterials]);
 
   // Handle form submission for add
   const handleAdd = useCallback(async () => {
@@ -252,7 +259,7 @@ export function NozzlesCatalog() {
       manufacturerId: formState.manufacturerId,
       diameter: formState.diameter ? Number(formState.diameter) : 0.4,
       maxTemp: formState.maxTemp ? Number(formState.maxTemp) : undefined,
-      nozzleType: formState.nozzleType,
+      nozzleMaterialId: formState.nozzleMaterialId || undefined,
       hardnessOverride: formState.hardnessOverride,
       description: formState.description.trim() || undefined,
       url: formState.url.trim() || undefined,
@@ -275,7 +282,7 @@ export function NozzlesCatalog() {
       manufacturerId: formState.manufacturerId,
       diameter: formState.diameter ? Number(formState.diameter) : undefined,
       maxTemp: formState.maxTemp ? Number(formState.maxTemp) : undefined,
-      nozzleType: formState.nozzleType,
+      nozzleMaterialId: formState.nozzleMaterialId || undefined,
       hardnessOverride: formState.hardnessOverride,
       description: formState.description.trim() || undefined,
       url: formState.url.trim() || undefined,
@@ -339,6 +346,14 @@ export function NozzlesCatalog() {
 
   return (
     <div className="space-y-4">
+      <Tabs activeTab={activeTab} onTabChange={(id) => setActiveTab(id as 'models' | 'materials')}>
+        <Tabs.List aria-label="Nozzle catalog sections">
+          <Tabs.Tab id="models">Models</Tabs.Tab>
+          <Tabs.Tab id="materials">Materials</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panels>
+          <Tabs.Panel id="models">
+      <div className="space-y-4">
       {/* Header with Add button */}
       <div className="flex justify-between items-center">
         <h2 className="text-lg font-semibold text-pf-text-primary">
@@ -426,9 +441,10 @@ export function NozzlesCatalog() {
         <NozzleForm
           formState={formState}
           formErrors={formErrors}
+          materials={nozzleMaterials ?? []}
           onFieldChange={handleFieldChange}
           onManufacturerChange={handleManufacturerChange}
-          onNozzleTypeChange={handleNozzleTypeChange}
+          onMaterialChange={handleMaterialChange}
           onSubmit={handleAdd}
           onCancel={handleCloseAddModal}
           isSubmitting={createMutation.isPending}
@@ -446,9 +462,10 @@ export function NozzlesCatalog() {
         <NozzleForm
           formState={formState}
           formErrors={formErrors}
+          materials={nozzleMaterials ?? []}
           onFieldChange={handleFieldChange}
           onManufacturerChange={handleManufacturerChange}
-          onNozzleTypeChange={handleNozzleTypeChange}
+          onMaterialChange={handleMaterialChange}
           onSubmit={handleUpdate}
           onCancel={handleCloseEditModal}
           isSubmitting={updateMutation.isPending}
@@ -482,6 +499,13 @@ export function NozzlesCatalog() {
           </div>
         </div>
       </Modal>
+      </div>
+          </Tabs.Panel>
+          <Tabs.Panel id="materials">
+            <NozzleMaterialsCatalog />
+          </Tabs.Panel>
+        </Tabs.Panels>
+      </Tabs>
     </div>
   );
 }
@@ -492,9 +516,10 @@ export function NozzlesCatalog() {
 interface NozzleFormProps {
   formState: NozzleFormState;
   formErrors: Partial<Record<keyof NozzleFormState, string>>;
+  materials: NozzleMaterialDto[];
   onFieldChange: (field: keyof NozzleFormState, value: string) => void;
   onManufacturerChange: (manufacturerId: string | undefined, manufacturerName?: string) => void;
-  onNozzleTypeChange: (nozzleType: string) => void;
+  onMaterialChange: (nozzleMaterialId: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
   isSubmitting: boolean;
@@ -504,9 +529,10 @@ interface NozzleFormProps {
 function NozzleForm({
   formState,
   formErrors,
+  materials,
   onFieldChange,
   onManufacturerChange,
-  onNozzleTypeChange,
+  onMaterialChange,
   onSubmit,
   onCancel,
   isSubmitting,
@@ -610,18 +636,17 @@ function NozzleForm({
           )}
         </FormField>
 
-        <FormField label="Nozzle Type">
+        <FormField label="Material" required error={formErrors.nozzleMaterialId}>
           <Select
-            value={formState.nozzleType}
-            onChange={(e) => {
-              const newType = e.target.value;
-              onFieldChange('nozzleType', newType);
-              onNozzleTypeChange(newType);
-            }}
+            value={formState.nozzleMaterialId}
+            onChange={(e) => onMaterialChange(e.target.value)}
           >
-            {Object.entries(NozzleTypeStringLabels).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
+            <option value="" disabled>
+              Select material...
+            </option>
+            {materials.map((material) => (
+              <option key={material.id} value={material.id}>
+                {material.name}{material.isHardened ? ' (hardened)' : ''}
               </option>
             ))}
           </Select>
@@ -644,7 +669,12 @@ function NozzleForm({
         label="Hardness"
         helper={
           formState.hardnessOverride === 'Auto'
-            ? `Derived from material — ${NozzleTypeStringLabels[formState.nozzleType] ?? formState.nozzleType} counts as ${isHardenedByMaterial(formState.nozzleType) ? 'hardened' : 'not hardened'}.`
+            ? (() => {
+                const material = materials.find(m => m.id === formState.nozzleMaterialId);
+                return material
+                  ? `Derived from material — ${material.name} counts as ${material.isHardened ? 'hardened' : 'not hardened'}.`
+                  : 'Derived from the selected material.';
+              })()
             : 'Pinned for this model, ignoring the material. Job dispatch uses this to decide whether abrasive filaments are safe.'
         }
       >

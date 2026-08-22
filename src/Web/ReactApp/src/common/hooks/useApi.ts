@@ -7,6 +7,7 @@ import {
   CreateExtruderModelDto,
   CreateFilamentTypeRequest,
   CreateHotendModelDto,
+  CreateNozzleMaterialDto,
   CreateNozzleModelDto,
   CreatePrinterDto,
   CreateToolheadModelDto,
@@ -23,6 +24,7 @@ import {
   HotendModelDefinition,
   ManufacturerDto,
   ManufacturersByContext,
+  NozzleMaterialDto,
   NozzleModelDefinition,
   PrinterBackendCapabilitiesDto,
   PrinterCapabilitiesDto,
@@ -40,6 +42,7 @@ import {
   ToolheadModelDefinition,
   UpdateExtruderModelDto,
   UpdateHotendModelDto,
+  UpdateNozzleMaterialDto,
   UpdateNozzleModelDto,
   UpdatePrinterDto,
   UpdateToolheadModelDefDto,
@@ -102,6 +105,7 @@ export const queryKeys = {
   extruderModels: ['extruder-models'] as const,
   toolheadModels: ['toolhead-models'] as const,
   nozzleModels: ['nozzle-models'] as const,
+  nozzleMaterials: ['nozzle-materials'] as const,
   filamentTypes: ['filament-types'] as const,
   filamentTypesPaged: (page?: number, pageSize?: number, search?: string) => ['filament-types', page, pageSize, search] as const,
   filamentPresets: ['presets', 'filament'] as const,
@@ -663,6 +667,15 @@ export function useNozzleModels(options?: QueryOptions<NozzleModelDefinition[]>)
   });
 }
 
+export function useNozzleMaterials(options?: QueryOptions<NozzleMaterialDto[]>) {
+  return useQuery({
+    queryKey: queryKeys.nozzleMaterials,
+    queryFn: () => apiClient.getNozzleMaterials(),
+    staleTime: 300000, // 5 minutes - materials change rarely
+    ...options,
+  });
+}
+
 // ============ Component Model Mutation Hooks ============
 
 // Hotend mutations
@@ -837,6 +850,52 @@ export function useDeleteNozzleModel() {
     },
     onError: (error: ApiError) => {
       toast.error(`Failed to delete nozzle model: ${error.message}`);
+    },
+  });
+}
+
+// Nozzle Material mutations
+export function useCreateNozzleMaterial() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateNozzleMaterialDto) => apiClient.createNozzleMaterial(dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nozzleMaterials });
+      toast.success('Nozzle material created');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to create nozzle material: ${error.message}`);
+    },
+  });
+}
+
+export function useUpdateNozzleMaterial() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: UpdateNozzleMaterialDto }) =>
+      apiClient.updateNozzleMaterial(id, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nozzleMaterials });
+      // A material name/hardened flag/max temp change affects nozzle-model derived hardness display too
+      queryClient.invalidateQueries({ queryKey: queryKeys.nozzleModels });
+      toast.success('Nozzle material updated');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to update nozzle material: ${error.message}`);
+    },
+  });
+}
+
+export function useDeleteNozzleMaterial() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteNozzleMaterial(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nozzleMaterials });
+      toast.success('Nozzle material deleted');
+    },
+    onError: (error: ApiError) => {
+      toast.error(`Failed to delete nozzle material: ${error.message}`);
     },
   });
 }
