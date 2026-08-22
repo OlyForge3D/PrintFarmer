@@ -63,8 +63,42 @@ public sealed class NozzleModelExportRoundTripTests
         // built-in materials (see DataSeedService.SeedNozzleMaterialsAsync).
         context.NozzleMaterials.AddRange(
             new NozzleMaterial { Id = Guid.NewGuid(), Name = nameof(NozzleType.Brass), IsHardened = false, DefaultMaxTemp = 260, IsBuiltIn = true },
-            new NozzleMaterial { Id = Guid.NewGuid(), Name = nameof(NozzleType.Diamond), IsHardened = true, DefaultMaxTemp = 500, IsBuiltIn = true });
+            new NozzleMaterial { Id = Guid.NewGuid(), Name = nameof(NozzleType.Diamond), IsHardened = true, DefaultMaxTemp = 500, IsBuiltIn = true },
+            // A genuinely custom, user-added material with no matching NozzleType enum member.
+            // Both source and target already have this row so the round trip resolves by name
+            // rather than exercising the "unrecognized" rejection path (see
+            // Import_UnrecognizedNozzleType_RejectsRow for that case).
+            new NozzleMaterial { Id = Guid.NewGuid(), Name = "Vibranium", IsHardened = true, DefaultMaxTemp = 600, IsBuiltIn = false });
         context.SaveChanges();
+    }
+
+    private async Task SeedSourceNozzleWithCustomMaterialAsync(string name, string materialName)
+    {
+        Manufacturer manufacturer =
+            await _sourceContext.Manufacturers.FirstOrDefaultAsync(m => m.Name == "Diamondback")
+            ?? new Manufacturer { Id = Guid.NewGuid(), Name = "Diamondback" };
+
+        if (_sourceContext.Entry(manufacturer).State == EntityState.Detached)
+        {
+            _ = await _sourceContext.Manufacturers.AddAsync(manufacturer);
+        }
+
+        NozzleMaterial nozzleMaterial = await _sourceContext.NozzleMaterials
+            .FirstAsync(m => m.Name == materialName);
+
+        _ = await _sourceContext.NozzleModelDefinitions.AddAsync(new NozzleModelDefinition
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            ManufacturerId = manufacturer.Id,
+            Diameter = 0.4,
+            MaxTemp = 550,
+            NozzleMaterialId = nozzleMaterial.Id,
+            HardnessOverride = NozzleHardnessOverride.Auto,
+            NozzleInterface = NozzleInterfaceType.V6,
+        });
+
+        await _sourceContext.SaveChangesAsync();
     }
 
     private async Task SeedSourceNozzleAsync(
@@ -122,6 +156,25 @@ public sealed class NozzleModelExportRoundTripTests
 
         restored.NozzleType.Should().Be(NozzleType.Diamond, "restoring a backup must not reset the material to Brass");
         restored.IsHardened.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RoundTrip_PreservesCustomNonBuiltInMaterialNameExactly()
+    {
+        // Issue #1826: the wire contract is an open string set, not the closed NozzleType
+        // enum, precisely so a user-added material like "Vibranium" (no matching enum member)
+        // survives export/import verbatim instead of being collapsed to "Unknown". This is the
+        // scenario the enum-backed contract silently broke; every other test in this file uses
+        // a material name that also happens to be a NozzleType member, so none of them alone
+        // would catch a regression back to serializing the enum.
+        await SeedSourceNozzleWithCustomMaterialAsync("Custom Material Nozzle", "Vibranium");
+
+        NozzleModelDefinition restored = await RoundTripAsync("Custom Material Nozzle");
+
+        restored.NozzleMaterial.Should().NotBeNull();
+        restored.NozzleMaterial!.Name.Should().Be(
+            "Vibranium",
+            "a custom material name must round-trip exactly, not collapse to the closed NozzleType enum");
     }
 
     [Fact]

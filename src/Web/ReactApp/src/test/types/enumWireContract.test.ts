@@ -172,6 +172,18 @@ describe('enum wire contract: NozzleModel-facing nozzleType is an OPEN string se
     const builtIn: NozzleType | string = NozzleType.HardenedSteel;
     expect(builtIn).toBe('HardenedSteel');
   });
+
+  it('a custom material name survives a raw JSON wire payload verbatim (ToolheadDto shape)', () => {
+    // Simulates the actual bytes the API would send for a ToolheadDto whose
+    // nozzleType is a user-added NozzleMaterial name. JSON.parse is the same
+    // deserialization step the real API client uses, so this catches a
+    // regression where something downstream (e.g. a naive cast/validator
+    // added later) started rejecting or rewriting non-enum values.
+    const rawPayload = '{"id":"tool-1","nozzleType":"Vanadium","diameter":0.4}';
+    const parsed = JSON.parse(rawPayload) as { nozzleType: NozzleType | string };
+    expect(parsed.nozzleType).toBe('Vanadium');
+    expect(Object.values(NozzleType)).not.toContain(parsed.nozzleType);
+  });
 });
 
 describe('enum wire contract: MmuGateStatus stays NUMERIC', () => {
