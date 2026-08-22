@@ -16,7 +16,10 @@ public class WorkerHealthMonitorService(
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     private readonly ILogger<WorkerHealthMonitorService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly TimeSpan _checkInterval = TimeSpan.FromSeconds(30);
-    private readonly TimeSpan _heartbeatTimeout = TimeSpan.FromMinutes(2);
+
+    // Shared with SlicersService's InstanceId-conflict guard (issue #1860) so the two stay
+    // in lockstep: a worker is never treated as "live" by one and "stale" by the other.
+    private readonly TimeSpan _heartbeatTimeout = TimeSpan.FromSeconds(WorkerStatus.LiveHeartbeatTimeoutSeconds);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

@@ -267,7 +267,12 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                 ? await _workerRepo.GetByServiceIdAsync(svc.Id.ToString())
                 : null;
 
-            if (attempt == 0 && svc is not null && existingWorker is not null && existingWorker.Status != WorkerStatus.Offline)
+            bool existingWorkerIsLive = existingWorker is not null
+                && existingWorker.Status != WorkerStatus.Offline
+                && existingWorker.LastHeartbeat.HasValue
+                && DateTime.UtcNow - existingWorker.LastHeartbeat.Value < TimeSpan.FromSeconds(WorkerStatus.LiveHeartbeatTimeoutSeconds);
+
+            if (attempt == 0 && svc is not null && existingWorkerIsLive)
             {
                 // Only applied on the first attempt: attempt 1 is reached exclusively via the
                 // DbUpdateException retry below, which recovers from two concurrent callers
@@ -277,18 +282,23 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                 // established worker, so it must not be subjected to this guard.
                 //
                 // The shared registration key does not prove possession of this specific
-                // worker's identity. A worker whose paired row is not Offline is still live —
-                // its Status only reaches Offline via its own authenticated deregister call or
-                // the heartbeat monitor detecting a genuinely stale heartbeat — so allowing the
-                // overwrite here would let any holder of the shared key revoke a running
-                // worker's credentials by registering with its (predictable, per #1855)
-                // InstanceId. Reject instead of silently replacing credentials; a worker that
-                // actually crashed is reclaimed once the heartbeat monitor marks it Offline.
+                // worker's identity. Gating on heartbeat freshness rather than Status alone
+                // (issue #1860 follow-up) matters because WorkerHealthMonitorService's stale
+                // sweep only reclassifies stale *Online* workers to Offline — a worker that
+                // crashes while Busy/Draining/Error is never swept by that monitor and would
+                // otherwise stay non-Offline (and un-reclaimable by a legitimate redeploy)
+                // until the much longer stale-worker cleanup job runs. Checking LastHeartbeat
+                // directly means any worker whose heartbeat has actually gone stale is
+                // immediately reclaimable no matter what non-Offline status it last reported,
+                // while a worker that is still heartbeating recently — in any status — remains
+                // protected from a shared-key holder registering with its (predictable, per
+                // #1855) InstanceId to silently replace its credentials.
                 _logger.LogWarning(
-                    "Rejected registration for instance {InstanceId}: existing worker {WorkerId} is not Offline (status={Status}).",
+                    "Rejected registration for instance {InstanceId}: existing worker {WorkerId} is still live (status={Status}, lastHeartbeat={LastHeartbeat}).",
                     LogSanitizer.Sanitize(dto.InstanceId),
-                    existingWorker.Id,
-                    existingWorker.Status);
+                    existingWorker!.Id,
+                    existingWorker.Status,
+                    existingWorker.LastHeartbeat);
                 throw SlicerInstanceIdConflictException.ForInstanceId(dto.InstanceId!);
             }
 
