@@ -146,6 +146,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             .Include(m => m.Toolheads).ThenInclude(t => t.ExtruderModel)
             .Include(m => m.Toolheads).ThenInclude(t => t.ToolheadModelDef)
             .Include(m => m.Toolheads).ThenInclude(t => t.NozzleModel)
+                .ThenInclude(n => n!.NozzleMaterial)
             .AsSplitQuery()
             .FirstOrDefaultAsync(m => m.Id == id, ct);
         return model is null
@@ -380,6 +381,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
     {
         List<NozzleModelDefinition> nozzles = await _db.NozzleModelDefinitions
             .Include(n => n.Manufacturer)
+            .Include(n => n.NozzleMaterial)
             .AsNoTracking()
             .OrderBy(n => n.Manufacturer!.Name)
             .ThenBy(n => n.Name)
@@ -400,6 +402,9 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
             n.Url)).ToList();
     }
 
+    public Task<NozzleMaterial?> GetNozzleMaterialByNameAsync(string name, CancellationToken ct = default)
+        => _db.NozzleMaterials.FirstOrDefaultAsync(m => m.Name == name, ct);
+
     // ============ Component Model CRUD Methods ============
 
     // Get By Id
@@ -413,7 +418,7 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
         => _db.ToolheadModelDefinitions.Include(t => t.Manufacturer).FirstOrDefaultAsync(t => t.Id == id, ct);
 
     public Task<NozzleModelDefinition?> GetNozzleModelByIdAsync(Guid id, CancellationToken ct = default)
-        => _db.NozzleModelDefinitions.Include(n => n.Manufacturer).FirstOrDefaultAsync(n => n.Id == id, ct);
+        => _db.NozzleModelDefinitions.Include(n => n.Manufacturer).Include(n => n.NozzleMaterial).FirstOrDefaultAsync(n => n.Id == id, ct);
 
     // Add
     public async Task AddHotendModelAsync(HotendModelDefinition model, CancellationToken ct = default)

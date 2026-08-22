@@ -108,6 +108,7 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
 
             await _dataSeedService.SeedFilamentTypesAsync();
             await _dataSeedService.SeedManufacturersAsync();
+            await _dataSeedService.SeedNozzleMaterialsAsync();  // Must come before component models so nozzle seeding can resolve materials
             await _dataSeedService.SeedComponentModelsAsync();  // Must come before printer models so toolhead defaults exist
             await _dataSeedService.SeedPrinterModelsAsync();    // Now includes toolhead seeding
             await _dataSeedService.SeedMaintenanceTasksAsync(); // Seed global maintenance task catalog

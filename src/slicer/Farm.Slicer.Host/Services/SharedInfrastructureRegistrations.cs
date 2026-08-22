@@ -216,6 +216,7 @@ public static class SharedInfrastructureRegistrations
                 .Include(m => m.Toolheads).ThenInclude(t => t.ExtruderModel)
                 .Include(m => m.Toolheads).ThenInclude(t => t.ToolheadModelDef)
                 .Include(m => m.Toolheads).ThenInclude(t => t.NozzleModel)
+                    .ThenInclude(n => n!.NozzleMaterial)
                 .AsSplitQuery();
             if (manufacturerId is Guid mid)
             {

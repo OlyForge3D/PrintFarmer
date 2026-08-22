@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Linq;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Services.DataManagement;
@@ -37,6 +38,10 @@ public sealed class DataSeedServiceNozzleTests
         _context = new AppDbContext(options);
 
         _context.Manufacturers.Add(new Manufacturer { Id = _manufacturerId, Name = "Diamondback" });
+        _context.NozzleMaterials.AddRange(
+            new NozzleMaterial { Id = Guid.NewGuid(), Name = nameof(NozzleType.Brass), IsHardened = false, DefaultMaxTemp = 260, IsBuiltIn = true },
+            new NozzleMaterial { Id = Guid.NewGuid(), Name = nameof(NozzleType.HardenedSteel), IsHardened = true, DefaultMaxTemp = 300, IsBuiltIn = true },
+            new NozzleMaterial { Id = Guid.NewGuid(), Name = nameof(NozzleType.Diamond), IsHardened = true, DefaultMaxTemp = 500, IsBuiltIn = true });
         _context.SaveChanges();
 
         // Only nozzles matter here; the other component readers return empty lists.
@@ -69,7 +74,7 @@ public sealed class DataSeedServiceNozzleTests
         };
 
     private Task<NozzleModelDefinition?> FindAsync(string name) =>
-        _context.NozzleModelDefinitions.FirstOrDefaultAsync(n => n.Name == name);
+        _context.NozzleModelDefinitions.Include(n => n.NozzleMaterial).FirstOrDefaultAsync(n => n.Name == name);
 
     private bool WarningLogged() => _logger.Invocations.Any(i =>
         i.Method.Name == nameof(ILogger.Log) &&
@@ -99,7 +104,7 @@ public sealed class DataSeedServiceNozzleTests
             Name = "Diamondback Volcano",
             ManufacturerId = _manufacturerId,
             NozzleInterface = NozzleInterfaceType.V6,
-            NozzleType = NozzleType.Brass,
+            NozzleMaterialId = _context.NozzleMaterials.Single(m => m.Name == nameof(NozzleType.Brass)).Id,
         });
         await _context.SaveChangesAsync();
 

@@ -21,6 +21,13 @@ public interface IDataSeedService
     Task SeedPrinterModelsAsync();
 
     /// <summary>
+    /// Seed the built-in NozzleMaterial catalog rows (one per legacy NozzleType enum member).
+    /// Idempotent; safe to call on every startup. Must run before <see cref="SeedComponentModelsAsync"/>
+    /// so nozzle seeding can resolve materials by name.
+    /// </summary>
+    Task SeedNozzleMaterialsAsync();
+
+    /// <summary>
     /// Load and seed filament types from YAML file
     /// </summary>
     Task SeedFilamentTypesAsync();

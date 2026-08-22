@@ -10,6 +10,16 @@ namespace Farm.Web.Api.Tests.Domain;
 /// </summary>
 public sealed class NozzleModelDefinitionHardnessTests
 {
+    private static NozzleMaterial Material(NozzleType nozzleType) => new()
+    {
+        Id = Guid.NewGuid(),
+        Name = nozzleType.ToString(),
+        IsHardened = nozzleType is NozzleType.HardenedSteel or NozzleType.TungstenCarbide
+            or NozzleType.Abrasive or NozzleType.Diamond or NozzleType.Ruby or NozzleType.ToolSteel,
+        DefaultMaxTemp = 500,
+        IsBuiltIn = true
+    };
+
     [Theory]
     [InlineData(NozzleType.HardenedSteel)]
     [InlineData(NozzleType.TungstenCarbide)]
@@ -19,7 +29,7 @@ public sealed class NozzleModelDefinitionHardnessTests
     [InlineData(NozzleType.ToolSteel)]
     public void IsHardened_AbrasionResistantMaterial_DefaultsToHardened(NozzleType nozzleType)
     {
-        NozzleModelDefinition nozzle = new() { NozzleType = nozzleType };
+        NozzleModelDefinition nozzle = new() { NozzleMaterial = Material(nozzleType) };
 
         nozzle.HardnessOverride.Should().Be(NozzleHardnessOverride.Auto);
         nozzle.IsHardened.Should().BeTrue();
@@ -29,11 +39,19 @@ public sealed class NozzleModelDefinitionHardnessTests
     [InlineData(NozzleType.Brass)]
     [InlineData(NozzleType.StainlessSteel)]
     [InlineData(NozzleType.PlatedCopper)]
-    [InlineData(NozzleType.Unknown)]
     public void IsHardened_SoftMaterial_DefaultsToNotHardened(NozzleType nozzleType)
     {
-        NozzleModelDefinition nozzle = new() { NozzleType = nozzleType };
+        NozzleModelDefinition nozzle = new() { NozzleMaterial = Material(nozzleType) };
 
+        nozzle.IsHardened.Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsHardened_NoMaterialResolved_DefaultsToNotHardened()
+    {
+        NozzleModelDefinition nozzle = new();
+
+        nozzle.NozzleType.Should().Be(NozzleType.Unknown);
         nozzle.IsHardened.Should().BeFalse();
     }
 
@@ -42,7 +60,7 @@ public sealed class NozzleModelDefinitionHardnessTests
     {
         NozzleModelDefinition nozzle = new()
         {
-            NozzleType = NozzleType.Brass,
+            NozzleMaterial = Material(NozzleType.Brass),
             HardnessOverride = NozzleHardnessOverride.Hardened
         };
 
@@ -54,7 +72,7 @@ public sealed class NozzleModelDefinitionHardnessTests
     {
         NozzleModelDefinition nozzle = new()
         {
-            NozzleType = NozzleType.Diamond,
+            NozzleMaterial = Material(NozzleType.Diamond),
             HardnessOverride = NozzleHardnessOverride.NotHardened
         };
 
@@ -64,20 +82,19 @@ public sealed class NozzleModelDefinitionHardnessTests
     [Fact]
     public void IsHardened_AutoOverride_TracksMaterialChanges()
     {
-        NozzleModelDefinition nozzle = new() { NozzleType = NozzleType.Brass };
+        NozzleModelDefinition nozzle = new() { NozzleMaterial = Material(NozzleType.Brass) };
         nozzle.IsHardened.Should().BeFalse();
 
-        nozzle.NozzleType = NozzleType.Diamond;
+        nozzle.NozzleMaterial = Material(NozzleType.Diamond);
 
         nozzle.IsHardened.Should().BeTrue("Auto keeps hardness following the material");
     }
 
     [Fact]
-    public void NewNozzle_DefaultsToBrassAndAuto()
+    public void NewNozzle_DefaultsToAutoAndNotHardened()
     {
         NozzleModelDefinition nozzle = new();
 
-        nozzle.NozzleType.Should().Be(NozzleType.Brass);
         nozzle.HardnessOverride.Should().Be(NozzleHardnessOverride.Auto);
         nozzle.IsHardened.Should().BeFalse();
     }

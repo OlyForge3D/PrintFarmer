@@ -105,6 +105,27 @@ public class DispatchScorerTests : IDisposable
         return printer;
     }
 
+    private NozzleMaterial GetOrCreateNozzleMaterial(NozzleType nozzleType)
+    {
+        NozzleMaterial? material = _context.NozzleMaterials.Local.FirstOrDefault(m => m.Name == nozzleType.ToString())
+            ?? _context.NozzleMaterials.FirstOrDefault(m => m.Name == nozzleType.ToString());
+        if (material is not null)
+        {
+            return material;
+        }
+
+        material = new NozzleMaterial
+        {
+            Id = Guid.NewGuid(),
+            Name = nozzleType.ToString(),
+            IsHardened = nozzleType is NozzleType.HardenedSteel or NozzleType.TungstenCarbide or NozzleType.Abrasive,
+            DefaultMaxTemp = 500,
+            IsBuiltIn = true
+        };
+        _context.NozzleMaterials.Add(material);
+        return material;
+    }
+
     private Toolhead CreateToolhead(
         Guid printerId,
         NozzleType nozzleType = NozzleType.Brass,
@@ -112,12 +133,14 @@ public class DispatchScorerTests : IDisposable
         string[]? supportedMaterials = null,
         bool isPrimary = true)
     {
+        NozzleMaterial nozzleMaterial = GetOrCreateNozzleMaterial(nozzleType);
         var nozzleModel = new NozzleModelDefinition
         {
             Id = Guid.NewGuid(),
             Name = $"{nozzleType} 0.{(int)(nozzleDiameter * 10)}",
             Diameter = nozzleDiameter,
-            NozzleType = nozzleType
+            NozzleMaterialId = nozzleMaterial.Id,
+            NozzleMaterial = nozzleMaterial
         };
         _context.NozzleModelDefinitions.Add(nozzleModel);
 

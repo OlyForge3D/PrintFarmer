@@ -922,6 +922,8 @@ public class CatalogService(
             throw new KeyNotFoundException("Manufacturer not found");
         }
 
+        Guid nozzleMaterialId = await ResolveNozzleMaterialIdAsync(dto.NozzleType, ct);
+
         Domain.NozzleModelDefinition model = new()
         {
             Id = Guid.NewGuid(),
@@ -929,7 +931,7 @@ public class CatalogService(
             ManufacturerId = dto.ManufacturerId,
             Diameter = dto.Diameter,
             MaxTemp = dto.MaxTemp,
-            NozzleType = dto.NozzleType,
+            NozzleMaterialId = nozzleMaterialId,
             HardnessOverride = dto.HardnessOverride,
             NozzleInterface = dto.NozzleInterface,
             Description = dto.Description,
@@ -945,6 +947,23 @@ public class CatalogService(
             created.Manufacturer?.Name, created.Diameter, created.MaxTemp, created.NozzleType,
             created.HardnessOverride, created.IsHardened,
             created.NozzleInterface, created.Description, created.Url);
+    }
+
+    /// <summary>
+    /// Resolves the legacy <see cref="NozzleType"/> enum used by the nozzle model create/update
+    /// wire contract to a <c>NozzleMaterial</c> row's ID. Built-in materials are seeded with
+    /// names matching the enum member names (see #1824's data migration), so this is a direct
+    /// name lookup. The material serialization itself is deferred to epic #1823 slice 3.
+    /// </summary>
+    private async Task<Guid> ResolveNozzleMaterialIdAsync(NozzleType nozzleType, CancellationToken ct)
+    {
+        Domain.NozzleMaterial? material = await _repo.GetNozzleMaterialByNameAsync(nozzleType.ToString(), ct);
+        if (material is null)
+        {
+            throw new KeyNotFoundException($"Nozzle material '{nozzleType}' not found");
+        }
+
+        return material.Id;
     }
 
     public async Task<NozzleModelDto?> UpdateNozzleModelAsync(Guid id, UpdateNozzleModelDto dto, CancellationToken ct)
@@ -983,7 +1002,7 @@ public class CatalogService(
 
         if (dto.NozzleType.HasValue)
         {
-            model.NozzleType = dto.NozzleType.Value;
+            model.NozzleMaterialId = await ResolveNozzleMaterialIdAsync(dto.NozzleType.Value, ct);
         }
 
         if (dto.HardnessOverride.HasValue)

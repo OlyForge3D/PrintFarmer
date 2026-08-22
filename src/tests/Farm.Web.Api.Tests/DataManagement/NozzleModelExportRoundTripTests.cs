@@ -33,6 +33,8 @@ public sealed class NozzleModelExportRoundTripTests
     {
         _sourceContext = NewContext();
         _targetContext = NewContext();
+        SeedNozzleMaterials(_sourceContext);
+        SeedNozzleMaterials(_targetContext);
 
         _exportService = new DataExportService(_sourceContext, Mock.Of<ILogger<DataExportService>>());
 
@@ -55,6 +57,16 @@ public sealed class NozzleModelExportRoundTripTests
         return new AppDbContext(options);
     }
 
+    private static void SeedNozzleMaterials(AppDbContext context)
+    {
+        // Only the materials exercised by this suite's tests; a real deployment seeds all 9
+        // built-in materials (see DataSeedService.SeedNozzleMaterialsAsync).
+        context.NozzleMaterials.AddRange(
+            new NozzleMaterial { Id = Guid.NewGuid(), Name = nameof(NozzleType.Brass), IsHardened = false, DefaultMaxTemp = 260, IsBuiltIn = true },
+            new NozzleMaterial { Id = Guid.NewGuid(), Name = nameof(NozzleType.Diamond), IsHardened = true, DefaultMaxTemp = 500, IsBuiltIn = true });
+        context.SaveChanges();
+    }
+
     private async Task SeedSourceNozzleAsync(
         string name,
         NozzleType nozzleType,
@@ -70,6 +82,9 @@ public sealed class NozzleModelExportRoundTripTests
             _ = await _sourceContext.Manufacturers.AddAsync(manufacturer);
         }
 
+        NozzleMaterial nozzleMaterial = await _sourceContext.NozzleMaterials
+            .FirstAsync(m => m.Name == nozzleType.ToString());
+
         _ = await _sourceContext.NozzleModelDefinitions.AddAsync(new NozzleModelDefinition
         {
             Id = Guid.NewGuid(),
@@ -77,7 +92,7 @@ public sealed class NozzleModelExportRoundTripTests
             ManufacturerId = manufacturer.Id,
             Diameter = 0.4,
             MaxTemp = 550,
-            NozzleType = nozzleType,
+            NozzleMaterialId = nozzleMaterial.Id,
             HardnessOverride = hardnessOverride,
             NozzleInterface = nozzleInterface,
         });
@@ -92,6 +107,7 @@ public sealed class NozzleModelExportRoundTripTests
         result.Success.Should().BeTrue(because: string.Join("; ", result.Errors));
 
         NozzleModelDefinition? restored = await _targetContext.NozzleModelDefinitions
+            .Include(n => n.NozzleMaterial)
             .FirstOrDefaultAsync(n => n.Name == name);
         restored.Should().NotBeNull();
         return restored!;
@@ -169,6 +185,7 @@ public sealed class NozzleModelExportRoundTripTests
         result.Success.Should().BeTrue(because: string.Join("; ", result.Errors));
 
         NozzleModelDefinition restored = (await _targetContext.NozzleModelDefinitions
+            .Include(n => n.NozzleMaterial)
             .FirstOrDefaultAsync(n => n.Name == "Legacy Nozzle"))!;
         restored.NozzleType.Should().Be(NozzleType.Brass);
         restored.HardnessOverride.Should().Be(NozzleHardnessOverride.Auto);

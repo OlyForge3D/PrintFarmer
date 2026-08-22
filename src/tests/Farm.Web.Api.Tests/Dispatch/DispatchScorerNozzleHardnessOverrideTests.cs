@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure;
+﻿using System.Linq;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Queue.Dispatch;
@@ -48,6 +49,9 @@ public sealed class DispatchScorerNozzleHardnessOverrideTests : IDisposable
             FolderType = "gcode",
             CreatedAt = DateTime.UtcNow,
         });
+        _context.NozzleMaterials.AddRange(
+            new NozzleMaterial { Id = Guid.NewGuid(), Name = nameof(NozzleType.Brass), IsHardened = false, DefaultMaxTemp = 260, IsBuiltIn = true },
+            new NozzleMaterial { Id = Guid.NewGuid(), Name = nameof(NozzleType.Diamond), IsHardened = true, DefaultMaxTemp = 500, IsBuiltIn = true });
         _context.SaveChanges();
     }
 
@@ -86,7 +90,7 @@ public sealed class DispatchScorerNozzleHardnessOverrideTests : IDisposable
             Id = Guid.NewGuid(),
             Name = $"{nozzleType} 0.4",
             Diameter = 0.4,
-            NozzleType = nozzleType,
+            NozzleMaterialId = _context.NozzleMaterials.Single(m => m.Name == nozzleType.ToString()).Id,
             HardnessOverride = hardnessOverride,
             ManufacturerId = mfg.Id,
         };

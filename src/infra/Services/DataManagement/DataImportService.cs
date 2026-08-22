@@ -612,6 +612,15 @@ public class DataImportService : IDataImportService
                     continue;
                 }
 
+                NozzleMaterial? nozzleMaterial = await _context.NozzleMaterials
+                    .FirstOrDefaultAsync(m => m.Name == nozzleType.ToString(), ct);
+                if (nozzleMaterial is null)
+                {
+                    errors.Add(
+                        $"Failed to import nozzle '{LogSanitizer.Sanitize(dto.Name)}': no NozzleMaterial catalog entry for '{nozzleType}'");
+                    continue;
+                }
+
                 if (existing == null)
                 {
                     _context.NozzleModelDefinitions.Add(new NozzleModelDefinition
@@ -621,7 +630,7 @@ public class DataImportService : IDataImportService
                         ManufacturerId = manufacturer.Id,
                         Diameter = dto.Diameter,
                         MaxTemp = dto.MaxTemp,
-                        NozzleType = nozzleType,
+                        NozzleMaterialId = nozzleMaterial.Id,
                         HardnessOverride = hardnessOverride,
                         NozzleInterface = (NozzleInterfaceType)dto.NozzleInterface,
                         Description = dto.Description
@@ -632,7 +641,7 @@ public class DataImportService : IDataImportService
                 {
                     existing.Diameter = dto.Diameter;
                     existing.MaxTemp = dto.MaxTemp;
-                    existing.NozzleType = nozzleType;
+                    existing.NozzleMaterialId = nozzleMaterial.Id;
                     existing.HardnessOverride = hardnessOverride;
                     existing.NozzleInterface = (NozzleInterfaceType)dto.NozzleInterface;
                     existing.Description = dto.Description;

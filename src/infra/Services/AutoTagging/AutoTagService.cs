@@ -314,6 +314,7 @@ public class AutoTagService : IAutoTagService
     {
         Toolhead? primaryToolhead = await _db.Toolheads
             .Include(t => t.NozzleModel)
+                .ThenInclude(n => n!.NozzleMaterial)
             .Where(t => t.PrinterId == printerId && t.IsPrimary)
             .FirstOrDefaultAsync(ct);
 
@@ -322,6 +323,7 @@ public class AutoTagService : IAutoTagService
             // Fall back to any toolhead with index 0
             primaryToolhead = await _db.Toolheads
                 .Include(t => t.NozzleModel)
+                    .ThenInclude(n => n!.NozzleMaterial)
                 .Where(t => t.PrinterId == printerId && t.Index == 0)
                 .FirstOrDefaultAsync(ct);
         }

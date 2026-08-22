@@ -37,6 +37,7 @@ public class DataSeedService : IDataSeedService
         await SeedManufacturersAsync();
         await SeedFilamentTypesAsync();
         await SeedBedTypesAsync();
+        await SeedNozzleMaterialsAsync();  // Must come before component models so nozzle seeding can resolve materials
         await SeedComponentModelsAsync();  // Must come before printer models so toolhead defaults exist
         await SeedPrinterModelsAsync();
         await SeedMaintenanceTasksAsync();
@@ -173,6 +174,60 @@ public class DataSeedService : IDataSeedService
         catch (Exception ex)
         {
             _logger.LogError(ex, "[SeedData] Error seeding bed types: {Message}", ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Seeds the built-in NozzleMaterial catalog rows, one per legacy NozzleType enum member.
+    /// These are also seeded by the AddNozzleMaterialCatalog data migration for deployed
+    /// databases; this method covers local dev/test setups that use
+    /// <c>DatabaseFacade.EnsureCreated</c> instead of applying migrations, where the migration's
+    /// data-seed SQL never runs. Values and fixed IDs are kept in sync with the migration so both
+    /// paths produce identical rows.
+    /// </summary>
+    public async Task SeedNozzleMaterialsAsync()
+    {
+        try
+        {
+            var builtInMaterials = new (Guid Id, string Name, bool IsHardened, int DefaultMaxTemp, string Description)[]
+            {
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000001"), nameof(NozzleType.Brass), false, 260, "Standard brass nozzle - not abrasion resistant"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000002"), nameof(NozzleType.HardenedSteel), true, 300, "Hardened steel nozzle - abrasion resistant"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000003"), nameof(NozzleType.StainlessSteel), false, 300, "Stainless steel nozzle - food safe, not abrasion resistant"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000004"), nameof(NozzleType.TungstenCarbide), true, 500, "Tungsten carbide nozzle - highly abrasion resistant"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000005"), nameof(NozzleType.Abrasive), true, 500, "Generic abrasion-resistant nozzle material"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000006"), nameof(NozzleType.Diamond), true, 500, "Diamond-tipped nozzle - extreme abrasion resistance combined with high thermal conductivity"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000007"), nameof(NozzleType.Ruby), true, 300, "Ruby-tipped nozzle in a brass body - abrasion resistant while retaining good thermal conductivity"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000008"), nameof(NozzleType.PlatedCopper), false, 300, "Plated copper nozzle - excellent thermal conductivity for high-flow printing, not abrasion resistant"),
+                (Guid.Parse("9f5a1c1e-0001-4a1a-8c1a-000000000009"), nameof(NozzleType.ToolSteel), true, 500, "Tool steel nozzle - abrasion resistant with high temperature tolerance"),
+            };
+
+            _logger.LogInformation("[SeedData] Seeding {Count} built-in nozzle materials", builtInMaterials.Length);
+
+            foreach ((Guid id, string name, bool isHardened, int defaultMaxTemp, string description) in builtInMaterials)
+            {
+                bool exists = await _context.NozzleMaterials.AnyAsync(m => m.Name == name);
+                if (!exists)
+                {
+                    _context.NozzleMaterials.Add(new NozzleMaterial
+                    {
+                        Id = id,
+                        Name = name,
+                        IsHardened = isHardened,
+                        DefaultMaxTemp = defaultMaxTemp,
+                        IsBuiltIn = true,
+                        Description = description,
+                    });
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("[SeedData] Nozzle materials seeded successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SeedData] Error seeding nozzle materials: {Message}", ex.Message);
             throw;
         }
     }
@@ -841,6 +896,16 @@ public class DataSeedService : IDataSeedService
 
         _logger.LogInformation("[SeedData] Seeding {NozzlesCount} nozzle models", nozzles.Count);
 
+        // Built-in materials are seeded by the #1824 data migration with names matching the
+        // legacy NozzleType enum member names, so this is a direct name lookup.
+        Dictionary<string, Guid> materialsByName = await _context.NozzleMaterials
+            .ToDictionaryAsync(m => m.Name, m => m.Id, StringComparer.OrdinalIgnoreCase);
+
+        if (!materialsByName.TryGetValue(nameof(NozzleType.Brass), out Guid defaultMaterialId))
+        {
+            _logger.LogWarning("[SeedData] Built-in nozzle material '{Material}' not found, nozzle seeding may be incomplete", nameof(NozzleType.Brass));
+        }
+
         foreach (NozzleModelSeedDto dto in nozzles)
         {
             if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
@@ -857,6 +922,17 @@ public class DataSeedService : IDataSeedService
             NozzleInterfaceType nozzleInterface = ParseSeedEnum(
                 dto.NozzleInterface, NozzleInterfaceType.V6, nameof(dto.NozzleInterface), dto.Name);
 
+            // Resolve the parsed material enum to its NozzleMaterial catalog row by name. Built-in
+            // materials are seeded with names matching the enum member names (see #1824's data
+            // migration), so this is a direct name lookup once the enum itself has been safely parsed.
+            if (!materialsByName.TryGetValue(nozzleType.ToString(), out Guid nozzleMaterialId))
+            {
+                nozzleMaterialId = defaultMaterialId;
+                _logger.LogWarning(
+                    "[SeedData] Nozzle material '{NozzleType}' not found for nozzle '{Name}', defaulting to Brass",
+                    nozzleType, dto.Name);
+            }
+
             NozzleModelDefinition? existing = await _context.NozzleModelDefinitions
                 .FirstOrDefaultAsync(n => n.Name == dto.Name && n.ManufacturerId == manufacturerId);
 
@@ -869,7 +945,7 @@ public class DataSeedService : IDataSeedService
                     ManufacturerId = manufacturerId,
                     Diameter = dto.Diameter,
                     MaxTemp = dto.MaxTemp,
-                    NozzleType = nozzleType,
+                    NozzleMaterialId = nozzleMaterialId,
                     HardnessOverride = hardnessOverride,
                     NozzleInterface = nozzleInterface,
                     Description = dto.Description,
@@ -880,7 +956,7 @@ public class DataSeedService : IDataSeedService
             {
                 existing.Diameter = dto.Diameter;
                 existing.MaxTemp = dto.MaxTemp;
-                existing.NozzleType = nozzleType;
+                existing.NozzleMaterialId = nozzleMaterialId;
                 existing.HardnessOverride = hardnessOverride;
                 existing.NozzleInterface = nozzleInterface;
                 existing.Description = dto.Description;

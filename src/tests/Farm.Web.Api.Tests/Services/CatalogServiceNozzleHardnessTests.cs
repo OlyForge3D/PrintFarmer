@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure;
+﻿using System.Linq;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Catalog;
@@ -22,15 +23,53 @@ public sealed class CatalogServiceNozzleHardnessTests
     private readonly CatalogService _service;
     private readonly List<NozzleModelDefinition> _stored = [];
 
+    /// <summary>
+    /// Materials keyed by <see cref="NozzleType"/> name, standing in for the built-in
+    /// <see cref="NozzleMaterial"/> catalog rows that <see cref="CatalogService"/> resolves
+    /// against (see #1824). Only the materials these tests exercise are stubbed.
+    /// </summary>
+    private readonly Dictionary<string, NozzleMaterial> _materials = new()
+    {
+        [nameof(NozzleType.Brass)] = new NozzleMaterial
+        {
+            Id = Guid.NewGuid(),
+            Name = nameof(NozzleType.Brass),
+            IsHardened = false,
+            DefaultMaxTemp = 300,
+            IsBuiltIn = true
+        },
+        [nameof(NozzleType.Diamond)] = new NozzleMaterial
+        {
+            Id = Guid.NewGuid(),
+            Name = nameof(NozzleType.Diamond),
+            IsHardened = true,
+            DefaultMaxTemp = 500,
+            IsBuiltIn = true
+        },
+    };
+
     public CatalogServiceNozzleHardnessTests()
     {
         _ = _repo.Setup(r => r.ManufacturerExistsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
+        _ = _repo.Setup(r => r.GetNozzleMaterialByNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string name, CancellationToken _) => _materials.GetValueOrDefault(name));
         _ = _repo.Setup(r => r.AddNozzleModelAsync(It.IsAny<NozzleModelDefinition>(), It.IsAny<CancellationToken>()))
             .Callback<NozzleModelDefinition, CancellationToken>((m, _) => _stored.Add(m))
             .Returns(Task.CompletedTask);
+        // Mirrors EfCatalogRepository.GetNozzleModelByIdAsync's `.Include(n => n.NozzleMaterial)`
+        // by re-resolving the navigation from the model's current FK on every fetch, so a
+        // material change made mid-update (before the service's re-fetch) is reflected.
         _ = _repo.Setup(r => r.GetNozzleModelByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid id, CancellationToken _) => _stored.Find(m => m.Id == id));
+            .ReturnsAsync((Guid id, CancellationToken _) =>
+            {
+                NozzleModelDefinition? found = _stored.Find(m => m.Id == id);
+                if (found is not null)
+                {
+                    found.NozzleMaterial = _materials.Values.FirstOrDefault(mat => mat.Id == found.NozzleMaterialId);
+                }
+                return found;
+            });
         _ = _repo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         _service = new CatalogService(
