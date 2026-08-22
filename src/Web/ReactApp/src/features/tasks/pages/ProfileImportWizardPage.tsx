@@ -284,7 +284,7 @@ export const ProfileImportWizardPage: React.FC = () => {
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-pf-text-primary">
-                  {displayManufacturerName} {displayModelName}
+                  {formatPrinterModelSubtitle(displayManufacturerName, displayModelName)}
                 </h2>
                 <p className="text-sm text-pf-text-secondary">Configure slicer profiles for this printer</p>
               </div>
