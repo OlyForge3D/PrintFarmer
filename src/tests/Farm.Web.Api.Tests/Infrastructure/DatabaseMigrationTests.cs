@@ -57,6 +57,91 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public async Task CoreMigration_SeedsBuiltInNozzleMaterialsMatchingPreCatalogHardnessBaseline()
+    {
+        // #1827 dispatch/backward-compat parity: prior to this test, no test asserted the actual
+        // seeded IsHardened values from the AddNozzleMaterialCatalog migration's raw SQL --
+        // DatabaseMigrationTests only asserted migration name ordering. Baseline recovered from
+        // the pre-catalog IsHardenedByMaterial(NozzleType) static switch (commit eb2804eb1's
+        // predecessor), which this migration's SQL and DataSeedService.SeedNozzleMaterialsAsync
+        // must both continue to reproduce exactly.
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+
+        _ = await ProviderAwareMigrationRunner.MigrateAsync(
+            context,
+            DatabaseMigrationTarget.Core,
+            NullLogger.Instance);
+        context.ChangeTracker.Clear();
+
+        var seeded = await context.NozzleMaterials
+            .OrderBy(m => m.Name)
+            .Select(m => new { m.Name, m.IsHardened, m.IsBuiltIn })
+            .ToListAsync();
+
+        seeded.Should().BeEquivalentTo(new[]
+        {
+            new { Name = "Abrasive", IsHardened = true, IsBuiltIn = true },
+            new { Name = "Brass", IsHardened = false, IsBuiltIn = true },
+            new { Name = "Diamond", IsHardened = true, IsBuiltIn = true },
+            new { Name = "HardenedSteel", IsHardened = true, IsBuiltIn = true },
+            new { Name = "PlatedCopper", IsHardened = false, IsBuiltIn = true },
+            new { Name = "Ruby", IsHardened = true, IsBuiltIn = true },
+            new { Name = "StainlessSteel", IsHardened = false, IsBuiltIn = true },
+            new { Name = "ToolSteel", IsHardened = true, IsBuiltIn = true },
+            new { Name = "TungstenCarbide", IsHardened = true, IsBuiltIn = true },
+        });
+    }
+
+    [Fact]
+    public async Task CoreMigration_BackfillsLegacyNozzleTypeToMatchingNozzleMaterial()
+    {
+        // #1827: locks in that a pre-existing NozzleModelDefinition row (created before the
+        // catalog existed, with the legacy int NozzleType column) is backfilled to the
+        // NozzleMaterial with the matching Name -- and that the resulting IsHardened value is
+        // unchanged from what the pre-catalog NozzleType would have implied.
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.Database.GetService<IMigrator>();
+        await migrator.MigrateAsync("20260821152002_AddNozzleHardnessOverride");
+
+        Guid manufacturerId = Guid.NewGuid();
+        context.Manufacturers.Add(new Manufacturer
+        {
+            Id = manufacturerId,
+            Name = "Legacy Mfg",
+        });
+        _ = await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        // Legacy NozzleType enum value 5 = Diamond (Brass=0, HardenedSteel=1, StainlessSteel=2,
+        // TungstenCarbide=3, Abrasive=4, Diamond=5, Ruby=6, PlatedCopper=7, ToolSteel=8).
+        Guid nozzleId = Guid.NewGuid();
+        _ = await context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO "NozzleModelDefinitions"
+                ("Id", "Name", "Diameter", "NozzleType", "HardnessOverride", "NozzleInterface", "MaxTemp", "ManufacturerId")
+            VALUES ({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7});
+            """,
+            nozzleId, "Legacy Diamond 0.4", 0.4, 5, 0, 0, 500, manufacturerId);
+
+        _ = await ProviderAwareMigrationRunner.MigrateAsync(
+            context,
+            DatabaseMigrationTarget.Core,
+            NullLogger.Instance);
+        context.ChangeTracker.Clear();
+
+        NozzleModelDefinition migrated = await context.NozzleModelDefinitions
+            .Include(n => n.NozzleMaterial)
+            .SingleAsync(n => n.Id == nozzleId);
+
+        _ = migrated.NozzleMaterial!.Name.Should().Be(nameof(NozzleType.Diamond));
+        _ = migrated.IsHardened.Should().BeTrue(
+            "the pre-catalog NozzleType=Diamond row must backfill to the Diamond " +
+            "NozzleMaterial, which is hardened");
+    }
+
+    [Fact]
     public async Task CoreMigration_NormalizesLegacyPrintJobPrioritiesBeforeAddingConstraint()
     {
         await using SqliteConnection connection = await OpenConnectionAsync();
