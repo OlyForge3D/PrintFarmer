@@ -242,14 +242,28 @@ public sealed class MoonrakerEmulatorSeederTests
         Assert.Single(addedMachineProfiles);
         Assert.Single(addedProcessProfiles);
         Assert.Single(addedFilamentProfiles);
+        AssertHashMatchesRawJson(addedMachineProfiles[0].Hash, addedMachineProfiles[0].RawJson);
+        AssertHashMatchesRawJson(addedProcessProfiles[0].Hash, addedProcessProfiles[0].RawJson);
+        AssertHashMatchesRawJson(addedFilamentProfiles[0].Hash, addedFilamentProfiles[0].RawJson);
+        Assert.Equal(addedMachineProfiles[0].Name, addedProcessProfiles[0].CompatiblePrinters);
+        Assert.Equal(addedMachineProfiles[0].Name, addedFilamentProfiles[0].CompatiblePrinters);
+    }
+
+    /// <summary>
+    /// Asserts a profile's stored <c>Hash</c> equals the lowercase-hex SHA256 of its <c>RawJson</c>
+    /// — the exact computation <c>MoonrakerEmulatorSeeder.ComputeSha256</c> performs — for all
+    /// three profile kinds in the shared calibration trio (machine, process, filament), not just
+    /// the machine profile.
+    /// </summary>
+    private static void AssertHashMatchesRawJson(string? hash, string? rawJson)
+    {
+        Assert.NotNull(rawJson);
         Assert.Equal(
             Convert.ToHexString(
                 System.Security.Cryptography.SHA256.HashData(
-                    System.Text.Encoding.UTF8.GetBytes(addedMachineProfiles[0].RawJson!)))
+                    System.Text.Encoding.UTF8.GetBytes(rawJson!)))
                 .ToLowerInvariant(),
-            addedMachineProfiles[0].Hash);
-        Assert.Equal(addedMachineProfiles[0].Name, addedProcessProfiles[0].CompatiblePrinters);
-        Assert.Equal(addedMachineProfiles[0].Name, addedFilamentProfiles[0].CompatiblePrinters);
+            hash);
     }
 
     [Fact]
@@ -384,5 +398,13 @@ public sealed class MoonrakerEmulatorSeederTests
         printers.Verify(
             repository => repository.RemoveAsync(discoveredPrinter, It.IsAny<CancellationToken>()),
             Times.Once);
+        printers.Verify(
+            repository => repository.AddToolheads(It.IsAny<IEnumerable<Toolhead>>()),
+            Times.Once);
+        Assert.Single(seedPrinter.Toolheads);
+        Toolhead recreatedToolhead = seedPrinter.Toolheads.Single();
+        Assert.Equal(ToolheadType.Physical, recreatedToolhead.ToolheadType);
+        Assert.Equal(0, recreatedToolhead.Index);
+        Assert.Equal(["PLA", "PETG"], recreatedToolhead.SupportedMaterials);
     }
 }
