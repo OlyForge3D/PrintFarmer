@@ -144,6 +144,24 @@ public sealed class CalibrationCapabilityService(
             await GetGenerationCapabilityAsync(cancellationToken);
         bool calibrationGenerationOperational = generationCapability?.Operational == true;
 
+        // The calibration command/gcode generation pipeline, calibration queue integration
+        // (JobQueueService), exact-job bed-clear acknowledgement (BedClearAcknowledgementService)
+        // and dispatch claiming/safety gating (DispatchClaimService/DispatchSafetyGates) are all
+        // unconditionally registered in ServiceCollectionExtensions and ship in every deployment:
+        // there is no configuration toggle that compiles them out. These four booleans therefore
+        // reflect that build-time fact, matching the existing ContextImplemented precedent. Only
+        // "Operational" below depends on runtime evidence.
+        const bool calibrationCommandsImplemented = true;
+        const bool calibrationGenerationImplemented = true;
+        const bool calibrationQueueIntegrationImplemented = true;
+        const bool calibrationEventStreamImplemented = true;
+        bool calibrationOperational =
+            calibrationContextOperational &&
+            calibrationCommandsImplemented &&
+            calibrationGenerationImplemented &&
+            calibrationQueueIntegrationImplemented &&
+            calibrationEventStreamImplemented;
+
         List<CapabilityUnavailableReasonDto> unavailableReasons =
             BuildUnavailableReasons(
                 slicingEnabled,
@@ -224,7 +242,11 @@ public sealed class CalibrationCapabilityService(
             Calibration = new CalibrationFeatureCapabilitiesDto
             {
                 ContextImplemented = true,
-                Operational = calibrationContextOperational,
+                CommandsImplemented = calibrationCommandsImplemented,
+                GenerationImplemented = calibrationGenerationImplemented,
+                QueueIntegrationImplemented = calibrationQueueIntegrationImplemented,
+                EventStreamImplemented = calibrationEventStreamImplemented,
+                Operational = calibrationOperational,
             },
             Routes = SafeRoutes,
             Limits = new CapabilityLimitsDto

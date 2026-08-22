@@ -58,6 +58,14 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         _ = root.GetProperty("calibrationSchemaVersion").GetString().Should().Be("1.0");
         _ = root.GetProperty("calibration").GetProperty("contextImplemented")
             .GetBoolean().Should().BeTrue();
+        _ = root.GetProperty("calibration").GetProperty("commandsImplemented")
+            .GetBoolean().Should().BeTrue();
+        _ = root.GetProperty("calibration").GetProperty("generationImplemented")
+            .GetBoolean().Should().BeTrue();
+        _ = root.GetProperty("calibration").GetProperty("queueIntegrationImplemented")
+            .GetBoolean().Should().BeTrue();
+        _ = root.GetProperty("calibration").GetProperty("eventStreamImplemented")
+            .GetBoolean().Should().BeTrue();
         _ = root.GetProperty("calibration").GetProperty("operational")
             .GetBoolean().Should().BeTrue();
         _ = root.GetProperty("calibrationContextEnabled").GetBoolean().Should().BeTrue();
@@ -360,6 +368,16 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         _ = capabilities.Calibration.Operational.Should().BeFalse();
         _ = capabilities.UnavailableReasons.Select(reason => reason.Code)
             .Should().Contain("profile_service_unavailable");
+
+        // Issue #1849: the subsystems these flags describe (calibration commands/generation,
+        // queue integration, event streaming) are always compiled in and registered, so they
+        // must never be misreported as unimplemented just because the profile store happens to
+        // be unreachable in this deployment. Only "operational" should reflect that.
+        _ = capabilities.Calibration.ContextImplemented.Should().BeTrue();
+        _ = capabilities.Calibration.CommandsImplemented.Should().BeTrue();
+        _ = capabilities.Calibration.GenerationImplemented.Should().BeTrue();
+        _ = capabilities.Calibration.QueueIntegrationImplemented.Should().BeTrue();
+        _ = capabilities.Calibration.EventStreamImplemented.Should().BeTrue();
     }
 
     [Fact]

@@ -120,6 +120,10 @@ caller-specific permissions:
   ],
   "calibration": {
     "contextImplemented": true,
+    "commandsImplemented": true,
+    "generationImplemented": true,
+    "queueIntegrationImplemented": true,
+    "eventStreamImplemented": true,
     "operational": true
   },
   "routes": {

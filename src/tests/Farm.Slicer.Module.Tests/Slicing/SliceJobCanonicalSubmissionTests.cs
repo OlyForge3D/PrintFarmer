@@ -249,6 +249,44 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
         _ = claimed.SlicerVersion.Should().Be("2.3.1");
     }
 
+    [Fact(DisplayName = "An ID-based submission that resolves to a system/stock profile stored as a DTO unwraps the native document instead of snapshotting the DTO envelope (#1846)")]
+    public async Task Claim_WithSystemProfileStoredAsDto_UnwrapsNativeProfilesInsteadOfSnapshottingTheDtoEnvelope()
+    {
+        // Regression coverage for #1846: system/stock profiles imported by ProfilesService (either
+        // manually or via SystemProfileReconciliationService) store RawJson as a serialized CLR DTO
+        // (MachineProfileDto/ProcessProfileDto/FilamentProfileDto — PascalCase properties plus a
+        // top-level "Settings" bag), not flat native OrcaSlicer JSON. Snapshotting that DTO verbatim
+        // onto the job produces a machine/process/filament.json OrcaSlicer's own config parser
+        // cannot parse, failing every job at preset-parse time with CLI_CONFIG_FILE_ERROR (exit
+        // 251) before slicing ever begins — regardless of model or printer.
+        Guid userId = await GetAuthenticatedUserIdAsync();
+        (Guid machineId, Guid processId, Guid filamentId) = await AddDtoShapedProfilesAsync(userId);
+
+        HttpResponseMessage submit = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = userId,
+            ModelFileUrl = "models/test.stl",
+            ModelFileName = "test.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            MachineProfileId = machineId,
+            ProcessProfileId = processId,
+            FilamentProfileId = filamentId,
+        });
+        _ = submit.StatusCode.Should().Be(HttpStatusCode.Created, await submit.Content.ReadAsStringAsync());
+
+        WorkerSliceJobResponse claimed = await ClaimAsync();
+
+        // The worker must receive the verbatim upstream-Orca document preserved in the DTO's
+        // "Settings" bag, not the PascalCase DTO envelope wrapping it.
+        _ = claimed.MachineProfileJson.Should().Be(MachineProfileJson);
+        _ = claimed.ProcessProfileJson.Should().Be(ProcessProfileJson);
+        _ = claimed.FilamentProfileJson.Should().Be(FilamentProfileJson);
+        _ = claimed.MachineProfileSha256.Should().Be(Sha256(MachineProfileJson));
+        _ = claimed.ProcessProfileSha256.Should().Be(Sha256(ProcessProfileJson));
+        _ = claimed.FilamentProfileSha256.Should().Be(Sha256(FilamentProfileJson));
+        _ = claimed.MachineProfileJson.Should().NotContain("Settings");
+    }
+
     [Fact(DisplayName = "Completion rejects profile digests that differ from what was delivered")]
     public async Task Complete_WithMismatchedProfileDigest_ReturnsBadRequest()
     {
@@ -539,5 +577,88 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
         _ = db.FilamentProfiles.Add(filament);
         _ = await db.SaveChangesAsync();
         return (machine.Id, process.Id, filament.Id);
+    }
+
+    private async Task<(Guid MachineId, Guid ProcessId, Guid FilamentId)> AddDtoShapedProfilesAsync(Guid ownerId)
+    {
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+
+        string dtoMachineJson = BuildDtoShapedProfileJson("Test Machine", MachineProfileJson);
+        string dtoProcessJson = BuildDtoShapedProfileJson("Test Process", ProcessProfileJson);
+        string dtoFilamentJson = BuildDtoShapedProfileJson("Test Filament", FilamentProfileJson);
+
+        MachineProfile machine = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Test Machine",
+            SlicerType = SlicerType.OrcaSlicer,
+            SlicerDistribution = "upstream",
+            SlicerVersion = "2.3.1",
+            ProfileFormat = "orca-json",
+            RawJson = dtoMachineJson,
+            Hash = Sha256(dtoMachineJson),
+            CreatedByUserId = ownerId,
+            IsPublic = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        ProcessProfile process = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Test Process",
+            SlicerType = SlicerType.OrcaSlicer,
+            SlicerDistribution = "upstream",
+            SlicerVersion = "2.3.1",
+            ProfileFormat = "orca-json",
+            RawJson = dtoProcessJson,
+            Hash = Sha256(dtoProcessJson),
+            CreatedByUserId = ownerId,
+            IsPublic = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        FilamentProfile filament = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Test Filament",
+            SlicerType = SlicerType.OrcaSlicer,
+            SlicerDistribution = "upstream",
+            SlicerVersion = "2.3.1",
+            ProfileFormat = "orca-json",
+            RawJson = dtoFilamentJson,
+            Hash = Sha256(dtoFilamentJson),
+            CreatedByUserId = ownerId,
+            IsPublic = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        _ = db.MachineProfiles.Add(machine);
+        _ = db.ProcessProfiles.Add(process);
+        _ = db.FilamentProfiles.Add(filament);
+        _ = await db.SaveChangesAsync();
+        return (machine.Id, process.Id, filament.Id);
+    }
+
+    /// <summary>
+    /// Mirrors how ProfilesService persists system/stock profiles: a serialized CLR DTO envelope
+    /// (PascalCase properties) with the original flat native OrcaSlicer document preserved verbatim
+    /// in a nested "Settings" bag, rather than the flat native document alone.
+    /// </summary>
+    private static string BuildDtoShapedProfileJson(string name, string flatNativeJson)
+    {
+        using JsonDocument settings = JsonDocument.Parse(flatNativeJson);
+        using MemoryStream stream = new();
+        using (Utf8JsonWriter writer = new(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("Name", name);
+            writer.WritePropertyName("Settings");
+            settings.RootElement.WriteTo(writer);
+            writer.WriteEndObject();
+        }
+
+        return Encoding.UTF8.GetString(stream.ToArray());
     }
 }
