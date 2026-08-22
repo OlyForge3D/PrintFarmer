@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Api.Filters;
+﻿using Farm.Slicer.Module.Api.Authorization;
+using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Contracts.Libraries;
 using Farm.Slicer.Module.Domain;
@@ -236,9 +237,16 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
     public async Task<IActionResult> RegisterAsync([FromBody] RegisterSlicerDto dto)
     {
         CancellationToken ct = HttpContext.RequestAborted;
-        (Guid id, string? apiKey) = await _service.RegisterAsync(dto, ct);
-        string location = $"/api/slicers/{id}";
-        return Created(location, new { id, apiKey });
+        try
+        {
+            (Guid id, string? apiKey) = await _service.RegisterAsync(dto, ct);
+            string location = $"/api/slicers/{id}";
+            return Created(location, new { id, apiKey });
+        }
+        catch (SlicerInstanceIdConflictException)
+        {
+            return SlicerApiProblems.InstanceIdConflict(this, SlicerInstanceIdConflictException.Code);
+        }
     }
 
     /// <summary>

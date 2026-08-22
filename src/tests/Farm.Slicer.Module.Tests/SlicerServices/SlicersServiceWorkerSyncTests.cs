@@ -9,6 +9,7 @@ using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Api.Services;
 using Farm.Slicer.Module.HostedServices;
+using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Services.Metrics;
 using FluentAssertions;
@@ -223,6 +224,13 @@ public class SlicersServiceWorkerSyncTests
         // hardware where both calls could otherwise land in the same UtcNow tick.
         await Task.Delay(15);
 
+        // Simulate the worker cleanly shutting down (deregister) or the heartbeat monitor
+        // detecting a stale heartbeat before the redeploy's registration arrives. Re-registering
+        // over a still-Online worker is now rejected (issue #1860) — this Offline transition is
+        // the legitimate precondition a real redeploy satisfies.
+        firstWorker.Status = WorkerStatus.Offline;
+        _ = await db.SaveChangesAsync();
+
         (Guid secondId, string secondApiKey) = await svc.RegisterAsync(dto, CancellationToken.None);
 
         _ = secondId.Should().Be(firstId, "re-registering under the same InstanceId must update the existing service, not create a new one");
@@ -236,6 +244,137 @@ public class SlicersServiceWorkerSyncTests
         _ = worker!.Id.Should().Be(firstWorkerId, "the same Worker row must be reused, not replaced, on redeploy");
         _ = worker.ApiKey.Should().Be(secondApiKey);
         _ = worker.LastHeartbeat.Should().BeAfter(firstHeartbeat!.Value, "the heartbeat must be refreshed on re-registration");
+    }
+
+    [Fact(DisplayName = "RegisterAsync rejects claiming a still-Online worker's InstanceId instead of revoking its credentials (issue #1860)")]
+    public async Task RegisterAsync_WithInstanceIdOfOnlineWorker_RejectsWithoutMutatingCredentials()
+    {
+        using SlicerDbContext db = CreateDb();
+        EfSlicersRepository slicerRepo = new EfSlicersRepository(db);
+        EfWorkerRepository workerRepo = new EfWorkerRepository(db);
+        Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out _);
+        SlicerServiceMetrics metrics = CreateMetrics();
+        IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
+        HttpClient httpClient = CreateMockHttpClient();
+        Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+        Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
+        ILogger<SlicersService> logger = CreateMockLogger();
+        Mock<ICatalogService> catalogService = CreateMockCatalogService();
+        Mock<IPrinterModelAliasService> aliasService = CreateMockAliasService();
+        Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
+        Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
+        Mock<IMachineModelProfileRepository> machineModelProfileRepo = CreateMockMachineModelProfileRepository();
+        SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, machineModelProfileRepo.Object, catalogService.Object, aliasService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger, settings);
+
+        RegisterSlicerDto dto = new RegisterSlicerDto
+        {
+            Name = "live-worker",
+            SlicerType = 0,
+            Version = "0.9.0",
+            Host = "http://worker-host",
+            MaxConcurrentJobs = 3,
+            CapabilitiesJson = "[\"orcaslicer\"]",
+            InstanceId = "orcaslicer-worker-1"
+        };
+
+        (Guid firstId, string firstApiKey) = await svc.RegisterAsync(dto, CancellationToken.None);
+
+        Worker? firstWorker = await workerRepo.GetByServiceIdAsync(firstId.ToString());
+        _ = firstWorker.Should().NotBeNull();
+        _ = firstWorker!.Status.Should().Be(WorkerStatus.Online, "a freshly registered worker starts Online (it is still live, not squatted)");
+        DateTime? firstHeartbeat = firstWorker.LastHeartbeat;
+
+        // A holder of the shared registration key attempts to re-register the SAME InstanceId
+        // while the worker is still Online — this is exactly the squatting attack from #1860:
+        // no proof of possession of the live worker's own credentials is required to reach here.
+        RegisterSlicerDto attackerDto = new RegisterSlicerDto
+        {
+            Name = "attacker-controlled-name",
+            SlicerType = 0,
+            Version = "9.9.9",
+            Host = "http://attacker-host",
+            MaxConcurrentJobs = 99,
+            CapabilitiesJson = "[\"orcaslicer\"]",
+            InstanceId = "orcaslicer-worker-1"
+        };
+
+        Func<Task> act = async () => await svc.RegisterAsync(attackerDto, CancellationToken.None);
+        _ = await act.Should().ThrowAsync<SlicerInstanceIdConflictException>(
+            "a live (non-Offline) worker's credentials must never be silently overwritten by a squatting registration");
+
+        // No credentials, status, or fields were mutated: the guard must reject before any save.
+        _ = db.Set<SlicerService>().Should().HaveCount(1);
+        _ = db.Set<Worker>().Should().HaveCount(1);
+
+        SlicerService? unchangedService = await db.Set<SlicerService>().FindAsync(firstId);
+        _ = unchangedService.Should().NotBeNull();
+        _ = unchangedService!.ApiKey.Should().Be(firstApiKey, "the attacker's registration must not rotate the live worker's credentials");
+        _ = unchangedService.Name.Should().Be("live-worker", "the attacker's fields must not overwrite the live worker's own registration");
+
+        Worker? unchangedWorker = await workerRepo.GetByServiceIdAsync(firstId.ToString());
+        _ = unchangedWorker.Should().NotBeNull();
+        _ = unchangedWorker!.ApiKey.Should().Be(firstApiKey);
+        _ = unchangedWorker.Status.Should().Be(WorkerStatus.Online, "the worker must remain Online, unaffected by the rejected squatting attempt");
+        _ = unchangedWorker.LastHeartbeat.Should().Be(firstHeartbeat, "the heartbeat must not be touched by a rejected registration");
+    }
+
+    [Fact(DisplayName = "RegisterAsync reclaims a non-Offline worker whose heartbeat has actually gone stale (issue #1860 follow-up)")]
+    public async Task RegisterAsync_WithStaleHeartbeatOnNonOfflineWorker_AllowsLegitimateRedeploy()
+    {
+        using SlicerDbContext db = CreateDb();
+        EfSlicersRepository slicerRepo = new EfSlicersRepository(db);
+        EfWorkerRepository workerRepo = new EfWorkerRepository(db);
+        Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out _);
+        SlicerServiceMetrics metrics = CreateMetrics();
+        IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
+        HttpClient httpClient = CreateMockHttpClient();
+        Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+        Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
+        ILogger<SlicersService> logger = CreateMockLogger();
+        Mock<ICatalogService> catalogService = CreateMockCatalogService();
+        Mock<IPrinterModelAliasService> aliasService = CreateMockAliasService();
+        Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
+        Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
+        Mock<IMachineModelProfileRepository> machineModelProfileRepo = CreateMockMachineModelProfileRepository();
+        SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, machineModelProfileRepo.Object, catalogService.Object, aliasService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger, settings);
+
+        RegisterSlicerDto dto = new RegisterSlicerDto
+        {
+            Name = "flaky-worker",
+            SlicerType = 0,
+            Version = "0.9.0",
+            Host = "http://worker-host",
+            MaxConcurrentJobs = 3,
+            CapabilitiesJson = "[\"orcaslicer\"]",
+            InstanceId = "orcaslicer-worker-7"
+        };
+
+        (Guid firstId, string firstApiKey) = await svc.RegisterAsync(dto, CancellationToken.None);
+
+        Worker? firstWorker = await workerRepo.GetByServiceIdAsync(firstId.ToString());
+        _ = firstWorker.Should().NotBeNull();
+        Guid firstWorkerId = firstWorker!.Id;
+
+        // Simulate the worker crashing mid-job: it never reaches Offline because
+        // WorkerHealthMonitorService's stale sweep only reclassifies stale *Online* workers
+        // (see EfWorkerRepository.GetStaleWorkersAsync) — a worker that dies while Busy is
+        // never swept by that monitor. Without gating on heartbeat freshness, this worker
+        // would stay non-Offline and un-reclaimable by a legitimate redeploy until the much
+        // longer stale-worker cleanup job runs (default up to 24h).
+        firstWorker.Status = WorkerStatus.Busy;
+        firstWorker.LastHeartbeat = DateTime.UtcNow.AddSeconds(-(WorkerStatus.LiveHeartbeatTimeoutSeconds + 30));
+        _ = await db.SaveChangesAsync();
+
+        (Guid secondId, string secondApiKey) = await svc.RegisterAsync(dto, CancellationToken.None);
+
+        _ = secondId.Should().Be(firstId, "redeploy of a genuinely stale worker must update the existing service, not be rejected");
+        _ = secondApiKey.Should().NotBe(firstApiKey, "redeploy must always issue fresh credentials");
+
+        Worker? worker = await workerRepo.GetByServiceIdAsync(firstId.ToString());
+        _ = worker.Should().NotBeNull();
+        _ = worker!.Id.Should().Be(firstWorkerId, "the same Worker row must be reused, not replaced, on redeploy");
+        _ = worker.ApiKey.Should().Be(secondApiKey);
+        _ = worker.Status.Should().Be(WorkerStatus.Online, "the reclaimed worker must be reported Online after a successful redeploy");
     }
 
     [Fact(DisplayName = "RegisterAsync sanitizes a CRLF-injected InstanceId before logging it (cs/log-forging)")]
@@ -271,8 +410,13 @@ public class SlicersServiceWorkerSyncTests
         };
 
         // First call inserts the row; the second call hits the "Re-registering" log path
-        // (svc is not null) that interpolates InstanceId directly.
+        // (svc is not null) that interpolates InstanceId directly. Mark the worker Offline in
+        // between so the second call represents a legitimate redeploy rather than squatting a
+        // still-live instance (issue #1860).
         _ = await svc.RegisterAsync(dto, CancellationToken.None);
+        Worker? crlfWorker = await workerRepo.GetByServiceIdAsync((await slicerRepo.GetByInstanceIdAsync(maliciousInstanceId, CancellationToken.None))!.Id.ToString());
+        crlfWorker!.Status = WorkerStatus.Offline;
+        _ = await db.SaveChangesAsync();
         _ = await svc.RegisterAsync(dto, CancellationToken.None);
 
         loggerMock.Verify(

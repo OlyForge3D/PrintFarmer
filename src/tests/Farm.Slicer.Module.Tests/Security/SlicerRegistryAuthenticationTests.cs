@@ -112,11 +112,26 @@ public sealed class SlicerRegistryAuthenticationTests : IAsyncLifetime
         // reuse the existing service/worker record rather than creating a duplicate
         // (issue #1528). The API key still rotates on every registration, so the
         // previous credential is no longer valid once the newer one is issued.
+        //
+        // A live (non-Offline, recently-heartbeated) worker's InstanceId can no longer
+        // be re-registered over without first going through a legitimate
+        // deregister/heartbeat-timeout transition to Offline (issue #1860) — simulate
+        // that here exactly like the redeploy fixtures above, so this test still models
+        // a genuine redeploy rather than the squatting attack #1860 now rejects.
         using HttpClient client = _factory.CreateClient();
         RegisteredService first = await RegisterAsync(
             client,
             "first-replica",
             instanceId: "shared-diagnostic-instance");
+
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+            Worker worker = db.Set<Worker>().Single(w => w.ServiceId == first.Id.ToString());
+            worker.Status = WorkerStatus.Offline;
+            await db.SaveChangesAsync();
+        }
+
         RegisteredService second = await RegisterAsync(
             client,
             "second-replica",

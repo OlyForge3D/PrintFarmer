@@ -259,6 +259,49 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
             bool insertingNewInstanceRecord = svc is null && hasInstanceId;
 
+            // Look up the paired Worker row before mutating anything, so a match against an
+            // existing InstanceId can be vetted for a live incumbent (issue #1860) prior to
+            // overwriting credentials. Reused below for the "synchronize to Worker table" step
+            // instead of querying a second time.
+            Worker? existingWorker = svc is not null
+                ? await _workerRepo.GetByServiceIdAsync(svc.Id.ToString())
+                : null;
+
+            bool existingWorkerIsLive = existingWorker is not null
+                && existingWorker.Status != WorkerStatus.Offline
+                && existingWorker.LastHeartbeat.HasValue
+                && DateTime.UtcNow - existingWorker.LastHeartbeat.Value < TimeSpan.FromSeconds(WorkerStatus.LiveHeartbeatTimeoutSeconds);
+
+            if (attempt == 0 && svc is not null && existingWorkerIsLive)
+            {
+                // Only applied on the first attempt: attempt 1 is reached exclusively via the
+                // DbUpdateException retry below, which recovers from two concurrent callers
+                // racing to *insert* the same brand-new InstanceId (insertingNewInstanceRecord
+                // was true on attempt 0 — there was no pre-existing row to squat). The row found
+                // on retry is the race winner's own just-created insert, not a previously
+                // established worker, so it must not be subjected to this guard.
+                //
+                // The shared registration key does not prove possession of this specific
+                // worker's identity. Gating on heartbeat freshness rather than Status alone
+                // (issue #1860 follow-up) matters because WorkerHealthMonitorService's stale
+                // sweep only reclassifies stale *Online* workers to Offline — a worker that
+                // crashes while Busy/Draining/Error is never swept by that monitor and would
+                // otherwise stay non-Offline (and un-reclaimable by a legitimate redeploy)
+                // until the much longer stale-worker cleanup job runs. Checking LastHeartbeat
+                // directly means any worker whose heartbeat has actually gone stale is
+                // immediately reclaimable no matter what non-Offline status it last reported,
+                // while a worker that is still heartbeating recently — in any status — remains
+                // protected from a shared-key holder registering with its (predictable, per
+                // #1855) InstanceId to silently replace its credentials.
+                _logger.LogWarning(
+                    "Rejected registration for instance {InstanceId}: existing worker {WorkerId} is still live (status={Status}, lastHeartbeat={LastHeartbeat}).",
+                    LogSanitizer.Sanitize(dto.InstanceId),
+                    existingWorker!.Id,
+                    existingWorker.Status,
+                    existingWorker.LastHeartbeat);
+                throw SlicerInstanceIdConflictException.ForInstanceId(dto.InstanceId!);
+            }
+
             if (svc is not null)
             {
                 _logger.LogInformation(
@@ -305,8 +348,11 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                 await _repo.AddAsync(svc, ct);
             }
 
-            // Synchronize to Worker table for dispatcher
-            Worker? worker = await _workerRepo.GetByServiceIdAsync(svc.Id.ToString());
+            // Synchronize to Worker table for dispatcher. For the update path this is the same
+            // row already fetched and vetted above (avoids a second query); for the insert path
+            // existingWorker is null (svc.Id didn't exist yet when it was fetched), so this
+            // falls through to a fresh lookup that correctly finds no row.
+            Worker? worker = existingWorker ?? await _workerRepo.GetByServiceIdAsync(svc.Id.ToString());
             bool reclaimedExistingWorker = worker != null;
 
             if (worker != null)
