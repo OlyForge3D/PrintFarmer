@@ -22,7 +22,7 @@ namespace Farm.Web.Api.Tests.Services;
 /// </remarks>
 public class SettingsMetadataAttributeTests
 {
-    private const int ExpectedDisplayLabelCount = 111;
+    private const int ExpectedDisplayLabelCount = 110;
 
     private static readonly string[] CanonicalTerms =
     [
