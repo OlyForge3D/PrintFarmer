@@ -4,6 +4,7 @@ import type {
   CreateExtruderModelDto,
   CreateFilamentTypeRequest,
   CreateHotendModelDto,
+  CreateNozzleMaterialDto,
   CreateNozzleModelDto,
   CreateToolheadModelDto,
   ExtruderModelDefinition,
@@ -13,6 +14,7 @@ import type {
   HotendModelDefinition,
   ManufacturerDto,
   ManufacturersByContext,
+  NozzleMaterialDto,
   NozzleModelDefinition,
   OfdBrand,
   OfdBrandDetail,
@@ -34,6 +36,7 @@ import type {
   UpdateHotendModelDto,
   UpdateModelAliasesRequest,
   UpdateModelRequest,
+  UpdateNozzleMaterialDto,
   UpdateNozzleModelDto,
   UpdateToolheadModelDefDto,
 } from '@/types/api';
@@ -176,6 +179,22 @@ export const catalogService = {
 
   async deleteNozzleModel(id: string): Promise<void> {
     return apiClient.deleteNozzleModel(id);
+  },
+
+  async getNozzleMaterials(): Promise<NozzleMaterialDto[]> {
+    return apiClient.getNozzleMaterials();
+  },
+
+  async createNozzleMaterial(dto: CreateNozzleMaterialDto): Promise<NozzleMaterialDto> {
+    return apiClient.createNozzleMaterial(dto);
+  },
+
+  async updateNozzleMaterial(id: string, dto: UpdateNozzleMaterialDto): Promise<NozzleMaterialDto | null> {
+    return apiClient.updateNozzleMaterial(id, dto);
+  },
+
+  async deleteNozzleMaterial(id: string): Promise<void> {
+    return apiClient.deleteNozzleMaterial(id);
   },
 
   // ── Filament Types ────────────────────────────────────────────────────

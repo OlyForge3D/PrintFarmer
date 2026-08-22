@@ -84,6 +84,11 @@ public record ToolheadModelDto(
 /// Contains nozzle properties including diameter, temperature rating and interface type.
 /// </summary>
 /// <param name="Id">Unique identifier for this nozzle model.</param>
+/// <param name="NozzleMaterialId">
+/// ID of the <c>NozzleMaterial</c> row backing this model. Lets the catalog UI resolve/select
+/// the exact material (including custom, non-enum materials added via the Materials CRUD)
+/// without relying solely on the legacy <paramref name="NozzleType"/> enum.
+/// </param>
 /// <param name="Name">Name of the nozzle model (e.g., "Undertaker", "Vanadium").</param>
 /// <param name="ManufacturerId">ID of the manufacturer.</param>
 /// <param name="ManufacturerName">Name of the manufacturer (resolved from navigation).</param>
@@ -97,6 +102,7 @@ public record ToolheadModelDto(
 /// <param name="Url">Optional product page URL.</param>
 public record NozzleModelDto(
     Guid Id,
+    Guid NozzleMaterialId,
     string Name,
     Guid ManufacturerId,
     string? ManufacturerName = null,
@@ -225,11 +231,16 @@ public record UpdateToolheadModelDefDto(
 /// <param name="ManufacturerId">ID of the manufacturer</param>
 /// <param name="Diameter">Nozzle diameter in millimeters (e.g., 0.4, 0.6, 0.8)</param>
 /// <param name="MaxTemp">Maximum temperature rating in °C</param>
-/// <param name="NozzleType">The material type of this nozzle (Brass, HardenedSteel, Diamond, etc.)</param>
+/// <param name="NozzleType">The material type of this nozzle (Brass, HardenedSteel, Diamond, etc.). Ignored when <paramref name="NozzleMaterialId"/> is provided.</param>
 /// <param name="HardnessOverride">Per-model hardness override; <c>Auto</c> derives it from the material</param>
 /// <param name="NozzleInterface">Nozzle interface type for compatibility matching</param>
 /// <param name="Description">Optional description</param>
 /// <param name="Url">Optional product URL</param>
+/// <param name="NozzleMaterialId">
+/// Optional direct reference to a <c>NozzleMaterial</c> row (built-in or custom). When provided,
+/// this takes precedence over <paramref name="NozzleType"/> and is the only way to select a
+/// custom (non-enum) material added via the Materials CRUD.
+/// </param>
 public record CreateNozzleModelDto(
     string Name,
     Guid ManufacturerId,
@@ -239,13 +250,19 @@ public record CreateNozzleModelDto(
     NozzleHardnessOverride HardnessOverride = NozzleHardnessOverride.Auto,
     NozzleInterfaceType NozzleInterface = NozzleInterfaceType.V6,
     string? Description = null,
-    string? Url = null);
+    string? Url = null,
+    Guid? NozzleMaterialId = null);
 
 /// <summary>
 /// DTO for updating an existing nozzle model definition.
 /// All fields are optional - only provided fields are updated. Send
 /// <c>HardnessOverride: "Auto"</c> to clear a previously pinned hardness.
 /// </summary>
+/// <param name="NozzleMaterialId">
+/// Optional direct reference to a <c>NozzleMaterial</c> row (built-in or custom). When provided,
+/// this takes precedence over <paramref name="NozzleType"/> and is the only way to select a
+/// custom (non-enum) material added via the Materials CRUD.
+/// </param>
 public record UpdateNozzleModelDto(
     string? Name = null,
     Guid? ManufacturerId = null,
@@ -255,7 +272,55 @@ public record UpdateNozzleModelDto(
     NozzleHardnessOverride? HardnessOverride = null,
     NozzleInterfaceType? NozzleInterface = null,
     string? Description = null,
-    string? Url = null);
+    string? Url = null,
+    Guid? NozzleMaterialId = null);
+
+#endregion
+
+#region Nozzle Material DTOs
+
+/// <summary>
+/// A user-editable nozzle material catalog entry (e.g., Brass, HardenedSteel, or a custom
+/// material). See #1825 - lets a farm administrator add materials from the catalog UI
+/// without a code change or redeploy.
+/// </summary>
+/// <param name="Id">Unique identifier for this nozzle material.</param>
+/// <param name="Name">Material name (e.g., "Brass", "HardenedSteel", or a custom name).</param>
+/// <param name="IsHardened">Whether nozzles made of this material are hardened/abrasion-resistant.</param>
+/// <param name="DefaultMaxTemp">Default maximum temperature rating in °C for nozzles of this material.</param>
+/// <param name="IsBuiltIn">True for the built-in rows seeded from the legacy <c>NozzleType</c> enum; false for user-created custom materials. Built-in rows can be edited but not deleted.</param>
+/// <param name="Description">Optional description or notes about this material.</param>
+public record NozzleMaterialDto(
+    Guid Id,
+    string Name,
+    bool IsHardened,
+    int DefaultMaxTemp,
+    bool IsBuiltIn,
+    string? Description = null);
+
+/// <summary>
+/// DTO for creating a new nozzle material catalog entry.
+/// </summary>
+/// <param name="Name">Material name. Must be unique across the catalog.</param>
+/// <param name="IsHardened">Whether nozzles made of this material are hardened/abrasion-resistant.</param>
+/// <param name="DefaultMaxTemp">Default maximum temperature rating in °C.</param>
+/// <param name="Description">Optional description or notes.</param>
+public record CreateNozzleMaterialDto(
+    string Name,
+    bool IsHardened = false,
+    int DefaultMaxTemp = 500,
+    string? Description = null);
+
+/// <summary>
+/// DTO for updating an existing nozzle material catalog entry.
+/// All fields are optional - only provided fields are updated. Built-in materials
+/// (<see cref="NozzleMaterialDto.IsBuiltIn"/>) can be edited but not deleted.
+/// </summary>
+public record UpdateNozzleMaterialDto(
+    string? Name = null,
+    bool? IsHardened = null,
+    int? DefaultMaxTemp = null,
+    string? Description = null);
 
 #endregion
 
