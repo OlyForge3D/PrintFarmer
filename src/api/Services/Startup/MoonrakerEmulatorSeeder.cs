@@ -1,4 +1,5 @@
-﻿using System.Security.Cryptography;
+﻿using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.PrinterCalibration;
@@ -38,14 +39,49 @@ public sealed class MoonrakerEmulatorSeeder(
     }
 
     /// <summary>
+    /// Number of transient-failure retry attempts <see cref="ResetAsync"/> tolerates before
+    /// giving up. On split/microservices hosts the API's own <c>SlicerDbContext</c> connection
+    /// can race a freshly-started stack's slicer-host container, which owns applying that
+    /// schema's migrations independently of the API's own readiness (#1858): the API can report
+    /// itself healthy and start accepting admin-triggered reset calls before slicer-host has
+    /// finished migrating. This bounded retry absorbs that narrow startup window without masking
+    /// a genuinely broken stack indefinitely.
+    /// </summary>
+    private const int ResetRetryAttempts = 20;
+
+    /// <summary>
     /// Restores the deterministic database state used by emulator-backed browser tests.
     /// </summary>
     public async Task<bool> ResetAsync(CancellationToken cancellationToken)
     {
         MoonrakerEmulatorSeedSettings settings = options.Value;
-        return settings.Enabled &&
-            settings.Printers.Count > 0 &&
-            await TrySeedAsync(settings, resetRuntimeState: true, cancellationToken);
+        if (!settings.Enabled || settings.Printers.Count == 0)
+        {
+            return false;
+        }
+
+        for (int attempt = 1; attempt <= ResetRetryAttempts; attempt++)
+        {
+            try
+            {
+                return await TrySeedAsync(settings, resetRuntimeState: true, cancellationToken);
+            }
+            catch (Exception exception) when (
+                attempt < ResetRetryAttempts && !cancellationToken.IsCancellationRequested)
+            {
+                logger.LogDebug(
+                    exception,
+                    "Moonraker emulator reset is waiting for database initialization (attempt {Attempt}/{MaxAttempts})",
+                    attempt,
+                    ResetRetryAttempts);
+                await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+            }
+        }
+
+        // Unreachable: the final attempt (attempt == ResetRetryAttempts) has no retry guard on
+        // its catch clause, so a still-failing exception propagates out of the try block above
+        // instead of falling through to here.
+        throw new UnreachableException();
     }
 
     /// <inheritdoc />
