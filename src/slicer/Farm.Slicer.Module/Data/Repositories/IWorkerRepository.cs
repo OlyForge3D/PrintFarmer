@@ -115,9 +115,17 @@ public interface IWorkerRepository
     /// and the write happen together in one conditional <c>UPDATE</c> the database evaluates.
     /// </para>
     /// <para>
-    /// Call this <b>before</b> mutating the tracked <see cref="Worker"/>: it bypasses the change
-    /// tracker, so it refreshes unchanged tracked copies afterwards to keep the caller's
-    /// subsequent edits layered on top of what was just committed rather than on a stale snapshot.
+    /// Call this when the tracked <see cref="Worker"/> has no pending edits — before mutating it,
+    /// or after the caller's save has succeeded. It bypasses the change tracker, so it refreshes
+    /// unchanged tracked copies afterwards to keep any later edits layered on top of what was just
+    /// committed rather than on a stale snapshot.
+    /// </para>
+    /// <para>
+    /// It also commits on its own. A caller that re-enables a worker <i>before</i> persisting the
+    /// registration that justifies it is fail-open: a circuit-breaker disable leaves
+    /// <see cref="Worker.Status"/> Online, so a failure after the clear would return a worker the
+    /// breaker had taken out of rotation straight to dispatch, with stale credentials. Clearing
+    /// last keeps every failure direction disabled.
     /// </para>
     /// </remarks>
     Task<bool> ClearAutomaticDisableAsync(string serviceId, CancellationToken ct = default);
@@ -138,12 +146,21 @@ public interface IWorkerRepository
     /// <param name="ct">Cancellation token.</param>
     /// <returns><see langword="true"/> when the worker was deleted.</returns>
     /// <remarks>
+    /// <para>
     /// The stale-worker sweep selects its candidates from an <c>AsNoTracking</c> snapshot and then
     /// deletes them one at a time, so an administrator can ban a worker after it has been picked
     /// but before it is removed. An unconditional delete would erase that ban along with the row,
     /// and the worker could return, register as brand new and come back enabled — the sanction
     /// laundered by a background job. The exemption is therefore re-checked by the database in the
     /// same statement that performs the delete, rather than trusted from the snapshot.
+    /// </para>
+    /// <para>
+    /// The worker and its paired service are removed inside one transaction. As two independent
+    /// statements a failure between them would orphan the service permanently: the sweep
+    /// enumerates workers, so a service with no worker is invisible to it and no later pass can
+    /// collect it. When the caller already owns a transaction this enlists in it rather than
+    /// opening a second.
+    /// </para>
     /// </remarks>
     Task<bool> DeleteIfNotAdministrativelyDisabledAsync(Guid id, CancellationToken ct = default);
 

@@ -2,6 +2,7 @@
 using Farm.Slicer.Module.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Farm.Slicer.Module.Data.Repositories;
 
@@ -377,45 +378,84 @@ public class EfWorkerRepository(SlicerDbContext context) : IWorkerRepository
             return false;
         }
 
-        // The exemption is evaluated by the database inside the delete itself, so a ban committed
-        // after the caller picked this worker still blocks the delete. Testing it in memory first
-        // would only re-check the same stale snapshot the caller already holds.
-        int affected = await _context.Workers
-            .Where(w => w.Id == id
-                && !(w.IsDisabled && w.DisableSource == WorkerDisableSource.Administrator))
-            .ExecuteDeleteAsync(ct);
+        // The worker row and its paired service row must go together. As two independent
+        // statements, a failure or cancellation between them orphans the service permanently:
+        // the stale sweep enumerates Workers, so a service with no worker is invisible to it and
+        // no later pass can collect it. A concurrent registration could also reclaim the
+        // surviving service and hang a fresh worker off it. Enlist in the caller's transaction
+        // when there is one, rather than opening a second.
+        IDbContextTransaction? transaction = _context.Database.CurrentTransaction is null
+            ? await _context.Database.BeginTransactionAsync(ct)
+            : null;
 
-        if (affected == 0)
+        try
         {
-            return false;
-        }
-
-        Guid? deletedServiceId = null;
-
-        if (Guid.TryParse(serviceIdText, out Guid serviceId))
-        {
-            deletedServiceId = serviceId;
-
-            _ = await _context.SlicerServices
-                .Where(s => s.Id == serviceId)
+            // The exemption is evaluated by the database inside the delete itself, so a ban
+            // committed after the caller picked this worker still blocks the delete. Testing it in
+            // memory first would only re-check the same stale snapshot the caller already holds.
+            int affected = await _context.Workers
+                .Where(w => w.Id == id
+                    && !(w.IsDisabled && w.DisableSource == WorkerDisableSource.Administrator))
                 .ExecuteDeleteAsync(ct);
-        }
 
-        // These statements bypass the change tracker, so any copy still materialised here refers
-        // to rows that no longer exist. Drop them rather than let a later SaveChangesAsync try to
-        // update or re-insert them.
-        foreach (EntityEntry entry in _context.ChangeTracker.Entries<Worker>()
-            .Where(e => e.Entity.Id == id)
-            .Cast<EntityEntry>()
-            .Concat(_context.ChangeTracker.Entries<SlicerService>()
-                .Where(e => deletedServiceId != null && e.Entity.Id == deletedServiceId)
-                .Cast<EntityEntry>())
-            .ToList())
+            if (affected == 0)
+            {
+                if (transaction is not null)
+                {
+                    await transaction.RollbackAsync(ct);
+                }
+
+                return false;
+            }
+
+            Guid? deletedServiceId = null;
+
+            if (Guid.TryParse(serviceIdText, out Guid serviceId))
+            {
+                deletedServiceId = serviceId;
+
+                _ = await _context.SlicerServices
+                    .Where(s => s.Id == serviceId)
+                    .ExecuteDeleteAsync(ct);
+            }
+
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(ct);
+            }
+
+            // These statements bypass the change tracker, so any copy still materialised here
+            // refers to rows that no longer exist. Drop them rather than let a later
+            // SaveChangesAsync try to update or re-insert them.
+            foreach (EntityEntry entry in _context.ChangeTracker.Entries<Worker>()
+                .Where(e => e.Entity.Id == id)
+                .Cast<EntityEntry>()
+                .Concat(_context.ChangeTracker.Entries<SlicerService>()
+                    .Where(e => deletedServiceId != null && e.Entity.Id == deletedServiceId)
+                    .Cast<EntityEntry>())
+                .ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+
+            return true;
+        }
+        catch
         {
-            entry.State = EntityState.Detached;
-        }
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+            }
 
-        return true;
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
     }
 
     /// <inheritdoc/>

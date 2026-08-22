@@ -307,26 +307,10 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
             // Synchronize to Worker table for dispatcher
             Worker? worker = await _workerRepo.GetByServiceIdAsync(svc.Id.ToString());
+            bool reclaimedExistingWorker = worker != null;
 
             if (worker != null)
             {
-                // Only lift a disable that the system applied itself. An administrator's
-                // deliberate disable must survive a restart — otherwise any banned worker could
-                // clear its own ban just by re-registering under the same InstanceId, and the
-                // reason text recording why it was banned would be erased with it. Re-enabling
-                // stays an explicit admin action (IWorkerRepository.EnableWorkerAsync).
-                //
-                // Without this a reclaimed worker comes back Online while still reporting
-                // "Disabled: Slicer service deregistered", which is exactly the stale text
-                // operators saw after every redeploy.
-                //
-                // The test and the write happen together in the database. Deciding it here from
-                // the instance loaded above would read a snapshot an administrator can invalidate
-                // mid-request, and saving that snapshot would write IsDisabled = false straight
-                // over a ban committed since. Runs before the edits below, because it refreshes
-                // the tracked copy.
-                _ = await _workerRepo.ClearAutomaticDisableAsync(svc.Id.ToString(), ct);
-
                 worker.ServiceId = svc.Id.ToString();
                 worker.Name = svc.Name;
                 worker.EndpointUrl = svc.Host ?? string.Empty;
@@ -370,11 +354,13 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                 await _workerRepo.AddAsync(worker);
             }
 
+            bool saved = false;
+
             try
             {
                 // SlicerService and Worker share the scoped DbContext, so this single save is atomic.
                 await _repo.SaveChangesAsync(ct);
-                return svc;
+                saved = true;
             }
             catch (DbUpdateException) when (attempt == 0 && insertingNewInstanceRecord)
             {
@@ -382,6 +368,38 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                     "Concurrent registration for instance {InstanceId} won the race to insert a new row; retrying as an update against its record.",
                     LogSanitizer.Sanitize(dto.InstanceId));
                 _repo.ClearTracking();
+            }
+
+            if (saved)
+            {
+                if (reclaimedExistingWorker)
+                {
+                    // Only lift a disable that the system applied itself. An administrator's
+                    // deliberate disable must survive a restart — otherwise any banned worker
+                    // could clear its own ban just by re-registering under the same InstanceId,
+                    // and the reason text recording why it was banned would be erased with it.
+                    // Re-enabling stays an explicit admin action (EnableWorkerAsync).
+                    //
+                    // Without this a reclaimed worker comes back Online while still reporting
+                    // "Disabled: Slicer service deregistered", which is exactly the stale text
+                    // operators saw after every redeploy.
+                    //
+                    // The test and the write happen together in the database. Deciding it here
+                    // from the instance loaded above would read a snapshot an administrator can
+                    // invalidate mid-request, and saving that snapshot would write
+                    // IsDisabled = false straight over a ban committed since.
+                    //
+                    // Deliberately last, and only once the save has succeeded. It commits on its
+                    // own, so running it first would re-enable the worker before the registration
+                    // that justifies it is durable: a circuit-breaker disable leaves Status
+                    // Online, so a failure after the clear would put a worker the breaker had
+                    // taken out of rotation straight back into dispatch with stale credentials.
+                    // In this order every failure leaves the worker disabled, and the next
+                    // registration repairs it.
+                    _ = await _workerRepo.ClearAutomaticDisableAsync(svc.Id.ToString(), ct);
+                }
+
+                return svc;
             }
         }
 

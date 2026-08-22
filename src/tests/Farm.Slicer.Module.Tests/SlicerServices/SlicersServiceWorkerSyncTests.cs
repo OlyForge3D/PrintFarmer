@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,7 +13,10 @@ using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Services.Metrics;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -779,6 +783,247 @@ public class SlicersServiceWorkerSyncTests
         db.ChangeTracker.Clear();
         _ = db.Set<Worker>().Should().ContainSingle();
         _ = db.Set<SlicerService>().Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "Stale worker cleanup delete enlists in the caller's transaction")]
+    public async Task StaleWorkerCleanup_Delete_Should_Enlist_In_The_Callers_Transaction()
+    {
+        using SlicerDbContext db = CreateDb();
+        Guid serviceId = Guid.NewGuid();
+        DateTime staleHeartbeat = DateTime.UtcNow.AddHours(-2);
+        _ = await db.Set<SlicerService>().AddAsync(new SlicerService
+        {
+            Id = serviceId,
+            Name = "atomic-service",
+            ApiKey = null,
+            LastSeen = staleHeartbeat,
+        });
+        _ = await db.Set<Worker>().AddAsync(new Worker
+        {
+            Id = Guid.NewGuid(),
+            ServiceId = serviceId.ToString(),
+            Name = "atomic-worker",
+            EndpointUrl = "http://atomic-worker.internal",
+            Status = WorkerStatus.Offline,
+            IsDisabled = false,
+            LastHeartbeat = staleHeartbeat,
+            RegisteredAt = staleHeartbeat,
+            CreatedAt = staleHeartbeat,
+            UpdatedAt = staleHeartbeat,
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        EfWorkerRepository repository = new(db);
+        Guid workerId = db.Set<Worker>().AsNoTracking().Single().Id;
+        db.ChangeTracker.Clear();
+
+        // The worker row and its paired service row must go together. Two independent statements
+        // would orphan the service if the second never ran, and no later sweep could collect it:
+        // cleanup enumerates Workers, so a service with no worker is invisible to it. Rolling back
+        // an enclosing transaction proves both deletes belong to one atomic unit — and that the
+        // method enlists in the caller's transaction instead of opening and committing its own.
+        await using (IDbContextTransaction transaction = await db.Database.BeginTransactionAsync())
+        {
+            bool deleted = await repository.DeleteIfNotAdministrativelyDisabledAsync(workerId);
+            _ = deleted.Should().BeTrue();
+
+            await transaction.RollbackAsync();
+        }
+
+        db.ChangeTracker.Clear();
+        _ = db.Set<Worker>().Should().ContainSingle();
+        _ = db.Set<SlicerService>().Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "Stale worker cleanup does not orphan the service when its delete fails")]
+    public async Task StaleWorkerCleanup_Delete_Should_Roll_Back_The_Worker_When_The_Service_Delete_Fails()
+    {
+        SqliteConnection connection = new("DataSource=:memory:");
+        await connection.OpenAsync();
+
+        DbContextOptions<SlicerDbContext> options = new DbContextOptionsBuilder<SlicerDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(new FailServiceDeleteInterceptor())
+            .Options;
+
+        using SlicerDbContext db = new(options);
+        _ = db.Database.EnsureCreated();
+
+        Guid serviceId = Guid.NewGuid();
+        Guid workerId = Guid.NewGuid();
+        DateTime staleHeartbeat = DateTime.UtcNow.AddHours(-2);
+        _ = await db.Set<SlicerService>().AddAsync(new SlicerService
+        {
+            Id = serviceId,
+            Name = "orphan-service",
+            ApiKey = null,
+            LastSeen = staleHeartbeat,
+        });
+        _ = await db.Set<Worker>().AddAsync(new Worker
+        {
+            Id = workerId,
+            ServiceId = serviceId.ToString(),
+            Name = "orphan-worker",
+            EndpointUrl = "http://orphan-worker.internal",
+            Status = WorkerStatus.Offline,
+            IsDisabled = false,
+            LastHeartbeat = staleHeartbeat,
+            RegisteredAt = staleHeartbeat,
+            CreatedAt = staleHeartbeat,
+            UpdatedAt = staleHeartbeat,
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        EfWorkerRepository repository = new(db);
+
+        Func<Task> delete = async () => await repository.DeleteIfNotAdministrativelyDisabledAsync(workerId);
+        _ = await delete.Should().ThrowAsync<InvalidOperationException>();
+
+        // Two independent statements would have committed the worker delete before the service
+        // delete failed, orphaning the service for good: the sweep enumerates Workers, so a
+        // service with no worker is invisible to it and no later pass can collect it. In one
+        // transaction the pair either both go or both stay.
+        db.ChangeTracker.Clear();
+        _ = db.Set<Worker>().Should().ContainSingle("the worker delete must roll back with the service delete");
+        _ = db.Set<SlicerService>().Should().ContainSingle();
+
+        await connection.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Fails the paired service delete so the atomicity of the two statements can be observed.
+    /// </summary>
+    private sealed class FailServiceDeleteInterceptor : DbCommandInterceptor
+    {
+        public override InterceptionResult<int> NonQueryExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result)
+        {
+            ThrowIfDeletingAService(command);
+            return base.NonQueryExecuting(command, eventData, result);
+        }
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDeletingAService(command);
+            return base.NonQueryExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        private static void ThrowIfDeletingAService(DbCommand command)
+        {
+            if (command.CommandText.Contains("DELETE", StringComparison.OrdinalIgnoreCase)
+                && command.CommandText.Contains("SlicerServices", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Simulated failure deleting the paired service row.");
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Registration leaves a worker disabled when its save fails")]
+    public async Task RegisterAsync_Should_Leave_Worker_Disabled_When_The_Save_Fails()
+    {
+        using SlicerDbContext db = CreateDb();
+        EfSlicersRepository slicerRepo = new EfSlicersRepository(db);
+        EfWorkerRepository workerRepo = new EfWorkerRepository(db);
+        Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out Mock<IClientProxy>? _);
+        SlicersService svc = new SlicersService(
+            slicerRepo,
+            workerRepo,
+            CreateMockProfileRepository().Object,
+            CreateMockFilamentProfileRepository().Object,
+            CreateMockMachineProfileRepository().Object,
+            CreateMockMachineModelProfileRepository().Object,
+            CreateMockCatalogService().Object,
+            CreateMockAliasService().Object,
+            CreateMockSettingsService().Object,
+            mockHub.Object,
+            CreateMetrics(),
+            CreateMockHttpClient(),
+            CreateMockLogger(),
+            CreateMockSlicerSettings());
+
+        RegisterSlicerDto dto = new RegisterSlicerDto
+        {
+            Name = "breaker-tripped-worker",
+            SlicerType = 1,
+            Version = "2.3.1",
+            Host = "http://breaker-worker.internal",
+            MaxConcurrentJobs = 3,
+            InstanceId = "orcaslicer-worker-breaker-save-failure",
+        };
+
+        (Guid id, string _) = await svc.RegisterAsync(dto, CancellationToken.None);
+
+        // The circuit breaker takes a failing worker out of rotation but leaves it Online, so the
+        // only thing keeping it out of dispatch is IsDisabled.
+        await workerRepo.DisableWorkerAsync(
+            db.Set<Worker>().Single(w => w.ServiceId == id.ToString()).Id,
+            WorkerDisableReasons.CircuitBreaker(5, 60),
+            WorkerDisableSource.CircuitBreaker);
+        await workerRepo.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        // Re-register through a repository whose save always fails.
+        SlicersService failing = new SlicersService(
+            new SaveFailingSlicersRepository(slicerRepo),
+            workerRepo,
+            CreateMockProfileRepository().Object,
+            CreateMockFilamentProfileRepository().Object,
+            CreateMockMachineProfileRepository().Object,
+            CreateMockMachineModelProfileRepository().Object,
+            CreateMockCatalogService().Object,
+            CreateMockAliasService().Object,
+            CreateMockSettingsService().Object,
+            mockHub.Object,
+            CreateMetrics(),
+            CreateMockHttpClient(),
+            CreateMockLogger(),
+            CreateMockSlicerSettings());
+
+        Func<Task> register = async () => await failing.RegisterAsync(dto, CancellationToken.None);
+        _ = await register.Should().ThrowAsync<DbUpdateException>();
+
+        // Clearing the disable commits on its own, so doing it before the registration is durable
+        // would hand a worker the breaker had removed straight back to the dispatcher — with stale
+        // credentials — and leave it there. Every failure direction must leave it disabled.
+        db.ChangeTracker.Clear();
+        Worker afterFailure = db.Set<Worker>().Single(w => w.ServiceId == id.ToString());
+        _ = afterFailure.IsDisabled.Should().BeTrue(
+            "a registration that did not persist must not re-enable the worker");
+        _ = afterFailure.DisableSource.Should().Be(WorkerDisableSource.CircuitBreaker);
+
+        IReadOnlyList<Worker> dispatchable = await workerRepo.GetAvailableWorkersAsync();
+        _ = dispatchable.Should().BeEmpty("the breaker's disable is all that keeps this worker out of dispatch");
+    }
+
+    /// <summary>
+    /// Wraps a real repository and fails every save, to exercise the ordering guarantee that a
+    /// worker is only re-enabled once the registration justifying it is durable.
+    /// </summary>
+    private sealed class SaveFailingSlicersRepository(ISlicersRepository inner) : ISlicersRepository
+    {
+        public Task<IReadOnlyList<SlicerService>> ListAsync(CancellationToken ct) => inner.ListAsync(ct);
+
+        public Task AddAsync(SlicerService svc, CancellationToken ct) => inner.AddAsync(svc, ct);
+
+        public Task<SlicerService?> GetByIdAsync(Guid id, CancellationToken ct) => inner.GetByIdAsync(id, ct);
+
+        public Task<SlicerService?> GetByInstanceIdAsync(string instanceId, CancellationToken ct)
+            => inner.GetByInstanceIdAsync(instanceId, ct);
+
+        public Task RemoveAsync(SlicerService svc, CancellationToken ct) => inner.RemoveAsync(svc, ct);
+
+        public Task SaveChangesAsync(CancellationToken ct)
+            => throw new DbUpdateException("Simulated save failure.");
+
+        public void ClearTracking() => inner.ClearTracking();
     }
 
     private static Worker CreateWorker(
