@@ -594,6 +594,7 @@ public class CatalogService(
             IReadOnlyList<(Guid Id, string Name, Guid ManufacturerId, string? ManufacturerName, double Diameter, int? MaxTemp, NozzleType NozzleType, NozzleHardnessOverride HardnessOverride, bool IsHardened, NozzleInterfaceType NozzleInterface, string? Description, string? Url, Guid NozzleMaterialId)> nozzles = await _repo.GetNozzleModelsAsync(ct);
             return nozzles.Select(n => new NozzleModelDto(
                 n.Id,
+                n.NozzleMaterialId,
                 n.Name,
                 n.ManufacturerId,
                 n.ManufacturerName,
@@ -604,8 +605,7 @@ public class CatalogService(
                 n.IsHardened,
                 n.NozzleInterface,
                 n.Description,
-                n.Url,
-                n.NozzleMaterialId)).ToList();
+                n.Url)).ToList();
         }
         catch (Exception ex)
         {
@@ -944,10 +944,10 @@ public class CatalogService(
 
         Domain.NozzleModelDefinition? created = await _repo.GetNozzleModelByIdAsync(model.Id, ct);
         return new NozzleModelDto(
-            created!.Id, created.Name, created.ManufacturerId,
+            created!.Id, created.NozzleMaterialId, created.Name, created.ManufacturerId,
             created.Manufacturer?.Name, created.Diameter, created.MaxTemp, created.NozzleType,
             created.HardnessOverride, created.IsHardened,
-            created.NozzleInterface, created.Description, created.Url, created.NozzleMaterialId);
+            created.NozzleInterface, created.Description, created.Url);
     }
 
     /// <summary>
@@ -1064,10 +1064,10 @@ public class CatalogService(
         // Re-fetch to get updated manufacturer navigation property
         model = await _repo.GetNozzleModelByIdAsync(id, ct);
         return new NozzleModelDto(
-            model!.Id, model.Name, model.ManufacturerId,
+            model!.Id, model.NozzleMaterialId, model.Name, model.ManufacturerId,
             model.Manufacturer?.Name, model.Diameter, model.MaxTemp, model.NozzleType,
             model.HardnessOverride, model.IsHardened,
-            model.NozzleInterface, model.Description, model.Url, model.NozzleMaterialId);
+            model.NozzleInterface, model.Description, model.Url);
     }
 
     public async Task DeleteNozzleModelAsync(Guid id, CancellationToken ct)

@@ -84,6 +84,11 @@ public record ToolheadModelDto(
 /// Contains nozzle properties including diameter, temperature rating and interface type.
 /// </summary>
 /// <param name="Id">Unique identifier for this nozzle model.</param>
+/// <param name="NozzleMaterialId">
+/// ID of the <c>NozzleMaterial</c> row backing this model. Lets the catalog UI resolve/select
+/// the exact material (including custom, non-enum materials added via the Materials CRUD)
+/// without relying solely on the legacy <paramref name="NozzleType"/> enum.
+/// </param>
 /// <param name="Name">Name of the nozzle model (e.g., "Undertaker", "Vanadium").</param>
 /// <param name="ManufacturerId">ID of the manufacturer.</param>
 /// <param name="ManufacturerName">Name of the manufacturer (resolved from navigation).</param>
@@ -95,13 +100,9 @@ public record ToolheadModelDto(
 /// <param name="NozzleInterface">Nozzle interface type that determines compatible hotends.</param>
 /// <param name="Description">Optional description or notes.</param>
 /// <param name="Url">Optional product page URL.</param>
-/// <param name="NozzleMaterialId">
-/// ID of the <c>NozzleMaterial</c> row backing this model. Lets the catalog UI resolve/select
-/// the exact material (including custom, non-enum materials added via the Materials CRUD)
-/// without relying solely on the legacy <paramref name="NozzleType"/> enum.
-/// </param>
 public record NozzleModelDto(
     Guid Id,
+    Guid NozzleMaterialId,
     string Name,
     Guid ManufacturerId,
     string? ManufacturerName = null,
@@ -112,8 +113,7 @@ public record NozzleModelDto(
     bool IsHardened = false,
     NozzleInterfaceType NozzleInterface = NozzleInterfaceType.V6,
     string? Description = null,
-    string? Url = null,
-    Guid NozzleMaterialId = default);
+    string? Url = null);
 
 #endregion
 
