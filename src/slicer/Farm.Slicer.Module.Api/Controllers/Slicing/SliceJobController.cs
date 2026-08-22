@@ -1629,12 +1629,33 @@ public partial class SliceJobController(
                 "The referenced profiles do not carry native slicer JSON.");
         }
 
-        job.MachineProfileJson = resolved.Machine.RawJson;
-        job.ProcessProfileJson = resolved.Process.RawJson;
-        job.FilamentProfileJson = resolved.Filament.RawJson;
-        job.MachineProfileSha256 = ComputeSha256(resolved.Machine.RawJson);
-        job.ProcessProfileSha256 = ComputeSha256(resolved.Process.RawJson);
-        job.FilamentProfileSha256 = ComputeSha256(resolved.Filament.RawJson);
+        // #1846: a profile resolved by ID can be a system/stock profile imported by ProfilesService
+        // (manually, or via SystemProfileReconciliationService), whose RawJson is a serialized CLR
+        // DTO (MachineProfileDto/ProcessProfileDto/FilamentProfileDto — PascalCase properties plus a
+        // top-level "Settings" bag), not the flat native OrcaSlicer document NativeSlicerProfiles
+        // promises to deliver verbatim. Snapshotting that DTO envelope directly produces a
+        // machine/process/filament.json OrcaSlicer's own config parser rejects at preset-parse time
+        // (CLI_CONFIG_FILE_ERROR, exit 251) before slicing ever begins. Unwrap it to the verbatim
+        // upstream document preserved in "Settings" instead, mirroring the same shape distinction
+        // ResolveNamedProfilesAsync already makes for the name-based submission path.
+        string? machineJson = ExtractFlatNativeProfileJson(resolved.Machine.RawJson);
+        string? processJson = ExtractFlatNativeProfileJson(resolved.Process.RawJson);
+        string? filamentJson = ExtractFlatNativeProfileJson(resolved.Filament.RawJson);
+
+        if (machineJson is null || processJson is null || filamentJson is null)
+        {
+            return SlicerApiProblems.InvalidRequest(
+                this,
+                "profile_content_unavailable",
+                "The referenced profiles do not carry native slicer JSON.");
+        }
+
+        job.MachineProfileJson = machineJson;
+        job.ProcessProfileJson = processJson;
+        job.FilamentProfileJson = filamentJson;
+        job.MachineProfileSha256 = ComputeSha256(machineJson);
+        job.ProcessProfileSha256 = ComputeSha256(processJson);
+        job.FilamentProfileSha256 = ComputeSha256(filamentJson);
         job.SlicerDistribution = resolved.Machine.SlicerDistribution ?? CalibrationContractConstants.SlicerDistribution;
         job.SlicerVersion = resolved.Machine.SlicerVersion ?? CalibrationContractConstants.SlicerVersion;
 
@@ -1867,6 +1888,47 @@ public partial class SliceJobController(
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Resolves a stored profile's RawJson to the flat native OrcaSlicer document that
+    /// <see cref="Models.NativeSlicerProfiles"/> promises to write verbatim.
+    /// </summary>
+    /// <remarks>
+    /// When <paramref name="rawJson"/> is already flat native (see
+    /// <see cref="IsFlatNativeProfileJson"/>) it is returned unchanged. When it is instead a
+    /// serialized CLR profile DTO (MachineProfileDto/ProcessProfileDto/FilamentProfileDto —
+    /// PascalCase properties plus a top-level "Settings" bag, as produced by
+    /// <c>ProfilesService</c>'s system-profile import), the verbatim upstream-Orca document is
+    /// unwrapped from that bag and returned instead: the promoted DTO envelope itself is not
+    /// something OrcaSlicer's own config parser understands (issue #1846 — every ID-based
+    /// submission that resolved to a system/stock profile snapshotted the DTO envelope verbatim
+    /// and failed at preset-parse time with <c>CLI_CONFIG_FILE_ERROR</c>, exit 251).
+    /// </remarks>
+    /// <returns>The flat native document, or <see langword="null"/> when neither shape applies.</returns>
+    private static string? ExtractFlatNativeProfileJson(string rawJson)
+    {
+        if (IsFlatNativeProfileJson(rawJson))
+        {
+            return rawJson;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(rawJson);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("Settings", out JsonElement settingsElem) &&
+                settingsElem.ValueKind == JsonValueKind.Object)
+            {
+                return settingsElem.GetRawText();
+            }
+        }
+        catch (JsonException)
+        {
+            // Fall through to null below.
+        }
+
+        return null;
     }
 
     private static string? GetJsonString(JsonElement root, string propertyName) =>
