@@ -66,6 +66,16 @@ Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields
 > typed into `article_number` by hand — must be backfilled into `gtin` to remain
 > scannable, as `article_number` is no longer consulted. Current PrintFarmer
 > writes target `gtin` only.
+>
+> Run `scripts/backfill-spoolman-gtin.py` to migrate legacy mappings. It is
+> dry-run by default, only ever *adds* a `gtin`, never modifies or clears
+> `article_number`, and skips values that are genuine vendor SKUs rather than
+> barcodes:
+>
+> ```bash
+> python3 scripts/backfill-spoolman-gtin.py --spoolman-url http://localhost:7912
+> python3 scripts/backfill-spoolman-gtin.py --spoolman-url http://localhost:7912 --apply
+> ```
 
 ## Spoolman Barcode Diagnostics
 
