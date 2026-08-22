@@ -587,6 +587,13 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     /// form, another the canonical GTIN-14 form) all participate in the caller's lowest-ID
     /// tie-break, instead of only whichever format happens to match a single exact-string query.
     /// </summary>
+    /// <remarks>
+    /// If Spoolman rejects/errors on the <c>gtin=</c> filter for any candidate literal, this
+    /// stops querying further literals and performs a single unfiltered full scan instead --
+    /// falling through to <see cref="CollectBarcodeMatchesAsync"/>'s own full-scan fallback once
+    /// per literal candidate would otherwise multiply one barcode lookup into several full
+    /// table scans on Spoolman instances that don't support the filter.
+    /// </remarks>
     private async Task<List<SpoolmanFilamentDto>> CollectMatchesForEquivalentGtinLiteralsAsync(
         string baseUrl,
         int pageSize,
@@ -594,17 +601,28 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         CancellationToken ct)
     {
         var matchesById = new Dictionary<int, SpoolmanFilamentDto>();
+        Func<SpoolmanFilamentDto, bool> isMatch =
+            filament => string.Equals(GtinNormalizer.Normalize(filament.Gtin), normalizedGtin, StringComparison.Ordinal);
 
         foreach (string literal in GetEquivalentGtinLiterals(normalizedGtin))
         {
-            List<SpoolmanFilamentDto> literalMatches = await CollectBarcodeMatchesAsync(
-                baseUrl,
-                pageSize,
-                articleNumberFilter: null,
-                gtinFilter: literal,
-                isMatch: filament => string.Equals(GtinNormalizer.Normalize(filament.Gtin), normalizedGtin, StringComparison.Ordinal),
-                debugFilterName: "gtin",
-                ct);
+            List<SpoolmanFilamentDto>? literalMatches = await CollectGtinFilteredMatchesOrNullAsync(baseUrl, pageSize, literal, isMatch, ct);
+
+            if (literalMatches is null)
+            {
+                // The gtin= filter itself was rejected/errored (not merely "zero rows"). Do one
+                // unfiltered full scan -- which, since isMatch normalizes on the client side,
+                // already recovers every equivalent-format duplicate in a single pass -- instead
+                // of letting each remaining literal candidate independently retry a full scan.
+                return await CollectBarcodeMatchesAsync(
+                    baseUrl,
+                    pageSize,
+                    articleNumberFilter: null,
+                    gtinFilter: null,
+                    isMatch: isMatch,
+                    debugFilterName: "gtin (full scan, filter unsupported)",
+                    ct);
+            }
 
             foreach (SpoolmanFilamentDto filament in literalMatches)
             {
@@ -613,6 +631,52 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         return matchesById.Values.ToList();
+    }
+
+    /// <summary>
+    /// Pages through Spoolman filaments using only the server-side <c>gtin=</c> filter for a
+    /// single literal value (no automatic full-scan fallback), returning the matches or
+    /// <see langword="null"/> if the filtered request itself failed (as opposed to succeeding
+    /// with zero rows). Used by <see cref="CollectMatchesForEquivalentGtinLiteralsAsync"/> so a
+    /// filter rejection can be handled once for all literal candidates rather than per-candidate.
+    /// </summary>
+    private async Task<List<SpoolmanFilamentDto>?> CollectGtinFilteredMatchesOrNullAsync(
+        string baseUrl,
+        int pageSize,
+        string gtinLiteral,
+        Func<SpoolmanFilamentDto, bool> isMatch,
+        CancellationToken ct)
+    {
+        var matches = new List<SpoolmanFilamentDto>();
+        int offset = 0;
+
+        while (true)
+        {
+            SpoolmanPagedResult<SpoolmanFilamentDto>? page = await FetchBarcodeFilamentPageAsync(baseUrl, null, gtinLiteral, pageSize, offset, ct);
+            if (page is null)
+            {
+                return null;
+            }
+
+            foreach (SpoolmanFilamentDto filament in page.Items.Where(isMatch))
+            {
+                matches.Add(filament);
+            }
+
+            if (page.Items.Count == 0 || page.Items.Count < pageSize)
+            {
+                break;
+            }
+
+            if (page.TotalCount > 0 && offset + page.Items.Count >= page.TotalCount)
+            {
+                break;
+            }
+
+            offset += pageSize;
+        }
+
+        return matches;
     }
 
     /// <summary>
