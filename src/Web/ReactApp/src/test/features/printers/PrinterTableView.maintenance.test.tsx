@@ -86,4 +86,19 @@ describe('PrinterTableView - maintenance button', () => {
     expect(screen.getByText('Pending Ready')).toBeInTheDocument();
     expect(screen.getByText('Awaiting bed clear • 2 queued')).toBeInTheDocument();
   });
+
+  it('collapses the backend "Unknown" / "Unknown Model" sentinel pair into a single coherent subtitle', () => {
+    render(
+      <PrinterTableView
+        printers={[{ ...basePrinter, manufacturerName: 'Unknown', modelName: 'Unknown Model' }]}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onBulkSetMaintenance={vi.fn()}
+        onOpenMaintenance={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Unknown model')).toBeInTheDocument();
+    expect(screen.queryByText(/unknown.*unknown/i)).not.toBeInTheDocument();
+  });
 });
