@@ -134,6 +134,66 @@ public class AdminOverviewServiceTests
     }
 
     [Fact]
+    public async Task GetOverviewAsync_WhenBackendsDegradedWithConnectionHealthShape_AddsAttentionForOfflinePrinter()
+    {
+        // Regression test for #1870: ComprehensiveHealthCheck now emits FailedServicesDetails
+        // entries shaped from IPrinterConnectionHealthProvider aggregation (Id, Name, Backend,
+        // ConnectionState, LastConnectedUtc, LastDisconnectedUtc, ErrorMessage) instead of the
+        // old HTTP-probe shape (ServerUrl/AttemptedUrl/StatusCode). This proves AdminOverviewService
+        // still surfaces an offline printer correctly with the *current* producer contract, not
+        // just the legacy shape asserted elsewhere in this file.
+        Guid offlinePrinterId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+
+        object externalServices = new Dictionary<string, object>
+        {
+            ["Status"] = "Degraded",
+            ["CheckedCount"] = 2,
+            ["FailedCount"] = 1,
+            ["FailedServicesDetails"] = new[]
+            {
+                new
+                {
+                    Id = offlinePrinterId,
+                    Name = "printer-offline",
+                    Backend = "Moonraker",
+                    ConnectionState = "Offline",
+                    LastConnectedUtc = (DateTime?)DateTime.UtcNow.AddMinutes(-10),
+                    LastDisconnectedUtc = (DateTime?)DateTime.UtcNow.AddMinutes(-1),
+                    ErrorMessage = "Printer is Offline",
+                },
+            },
+        };
+
+        HealthReport report = BuildReport(
+            comprehensive: new HealthCheckResult(
+                HealthStatus.Degraded,
+                "External services unreachable (1/2)",
+                data: new Dictionary<string, object>
+                {
+                    ["Database"] = new { Status = "Healthy", Provider = "Npgsql.EntityFrameworkCore.PostgreSQL", ManufacturerCount = 8, Initialized = true },
+                    ["ExternalServices"] = externalServices,
+                }),
+            signalr: HealthCheckResult.Healthy("ok"),
+            spoolman: HealthCheckResult.Healthy("Spoolman not configured"));
+
+        _healthCheckService.Setup(s => s.CheckHealthAsync(It.IsAny<System.Func<HealthCheckRegistration, bool>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(report);
+
+        AdminOverviewDto overview = await CreateService().GetOverviewAsync();
+
+        SubsystemHealthDto backends = overview.Subsystems.Single(s => s.Key == "backends");
+        backends.Status.Should().Be(SubsystemStatus.Degraded);
+        backends.Detail.Should().Be("1 / 2 reachable");
+
+        string expectedKey = $"printer-{offlinePrinterId}-unreachable";
+        overview.Attention.Should().Contain(a => a.Key == expectedKey);
+        AttentionItemDto printerItem = overview.Attention.Single(a => a.Key == expectedKey);
+        printerItem.Severity.Should().Be(AttentionSeverity.Warning);
+        printerItem.Title.Should().Contain("printer-offline");
+        printerItem.Detail.Should().Contain("Printer is Offline");
+    }
+
+    [Fact]
     public async Task GetOverviewAsync_WhenDatabaseNotInitialized_AddsErrorAttentionAndDegradesTile()
     {
         HealthReport report = BuildReport(

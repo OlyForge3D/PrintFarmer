@@ -128,6 +128,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IEnumerable<IPrint
         try
         {
             List<PrinterConnectionHealth> printerHealth = new();
+            List<object> providerErrors = new();
             foreach (IPrinterConnectionHealthProvider provider in connectionHealthProviders)
             {
                 try
@@ -137,6 +138,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IEnumerable<IPrint
                 catch (Exception ex)
                 {
                     logger.LogWarning(ex, "Failed to read connection health from provider {ProviderType}", provider.GetType().Name);
+                    providerErrors.Add(new { Provider = provider.GetType().Name, Error = ex.Message });
                 }
             }
 
@@ -164,8 +166,14 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IEnumerable<IPrint
                 });
             }
 
-            string serviceStatus = failedServices == 0 ? "Healthy"
-                                  : failedServices < externalServiceCount ? "Degraded" : "Unhealthy";
+            // A provider that failed to report connection health at all means some (or all)
+            // printers on that backend could not be verified. Never report "Healthy" in that
+            // case - the previous bug class (issue #1870) was exactly this: a subsystem going
+            // silently green because its state simply wasn't checked.
+            bool hasProviderErrors = providerErrors.Count > 0;
+            string serviceStatus = failedServices == 0 && !hasProviderErrors ? "Healthy"
+                                  : failedServices > 0 && failedServices >= externalServiceCount ? "Unhealthy"
+                                  : "Degraded";
 
             Dictionary<string, object> externalServicesObj = new()
             {
@@ -177,6 +185,11 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IEnumerable<IPrint
             if (failedDetails.Count > 0)
             {
                 externalServicesObj["FailedServicesDetails"] = failedDetails;
+            }
+
+            if (hasProviderErrors)
+            {
+                externalServicesObj["ProviderErrors"] = providerErrors;
             }
 
             checks["ExternalServices"] = externalServicesObj;
@@ -211,6 +224,16 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IEnumerable<IPrint
                     degraded = true;
                     issues.Add($"External services unreachable ({failedServices}/{externalServiceCount}) - percentFailed={percentFailed}% (<{threshold}%)");
                 }
+            }
+
+            if (hasProviderErrors)
+            {
+                // A provider that couldn't report connection health leaves some printers
+                // unverified. Surface this as at least Degraded rather than letting the
+                // overall status stay Healthy when nothing failed among the printers we
+                // *did* manage to check.
+                degraded = true;
+                issues.Add($"Unable to read connection health from {providerErrors.Count} printer connection provider(s)");
             }
         }
         catch (Exception ex)

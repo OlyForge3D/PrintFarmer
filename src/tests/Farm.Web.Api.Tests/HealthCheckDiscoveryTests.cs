@@ -452,6 +452,65 @@ public class HealthCheckDiscoveryTests
     }
 
     [Fact]
+    public async Task ComprehensiveHealthCheck_WhenConnectionProviderThrows_NeverReportsHealthy()
+    {
+        // Regression test for #1870 (reviewer follow-up): a provider that fails to report
+        // connection health must never leave ExternalServices silently "Healthy" just
+        // because zero printers ended up being counted. That would recreate the same class
+        // of bug the offline-printer fix addresses - the aggregate going green while a
+        // whole backend's real state is unknown.
+        await using SqliteConnection connection = new("DataSource=:memory:");
+        await connection.OpenAsync();
+
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using AppDbContext dbContext = new(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        dbContext.Manufacturers.Add(new Manufacturer { Id = Guid.NewGuid(), Name = "Regression Manufacturer" });
+        dbContext.FilamentTypes.Add(new FilamentType { Id = Guid.NewGuid(), Name = "PLA" });
+        await dbContext.SaveChangesAsync();
+        dbContext.ChangeTracker.Clear();
+
+        Mock<ISettingsService> settingsService = new();
+        _ = settingsService
+            .Setup(s => s.Get<ExternalServicesHealthSettings>())
+            .Returns(new ExternalServicesHealthSettings
+            {
+                PercentFailedThreshold = 100
+            });
+
+        Mock<IHostEnvironment> hostEnvironment = new();
+        _ = hostEnvironment.Setup(h => h.EnvironmentName).Returns("Testing");
+
+        Mock<IPrinterConnectionHealthProvider> connectionProvider = new();
+        _ = connectionProvider.Setup(p => p.GetConnectionHealth())
+            .Throws(new InvalidOperationException("simulated provider failure"));
+
+        ComprehensiveHealthCheck healthCheck = new(
+            dbContext,
+            new[] { connectionProvider.Object },
+            _mockLogger.Object,
+            settingsService.Object,
+            hostEnvironment.Object);
+
+        HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
+
+        // Never 500/throw, and never silently Healthy despite CheckedCount being 0.
+        _ = result.Status.Should().Be(HealthStatus.Degraded);
+        _ = result.Data.Should().ContainKey("ExternalServices");
+        Dictionary<string, object> externalServices = result.Data["ExternalServices"].Should()
+            .BeOfType<Dictionary<string, object>>().Subject;
+
+        _ = externalServices["Status"].Should().Be("Degraded");
+        _ = externalServices["CheckedCount"].Should().Be(0);
+        _ = externalServices["FailedCount"].Should().Be(0);
+        _ = externalServices.Should().ContainKey("ProviderErrors");
+    }
+
+    [Fact]
     public async Task ComprehensiveHealthCheck_InNonTestingEnvironment_DoesNotCallProtectedCatalogOrFilamentRoutes()
     {
         // Regression test for #1540: CatalogController and FilamentTypeController are
