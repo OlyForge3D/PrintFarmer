@@ -678,6 +678,165 @@ public sealed class DatabaseMigrationTests
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Proves the <c>AddWorkerDisableSource</c> backfill actually classifies pre-existing rows.
+    /// </summary>
+    /// <remarks>
+    /// The other slicer migration tests either migrate an empty database or seed through the
+    /// current model, so neither ever produces a Worker row written before the column existed —
+    /// the only rows the backfill acts on. Without this the classification SQL could be deleted
+    /// or misclassify every legacy row and the whole suite would still pass.
+    ///
+    /// The stakes are asymmetric: a row left <c>None</c> is an administrator ban the next
+    /// registration silently lifts, and a row wrongly promoted to <c>Administrator</c> is a
+    /// worker the stale sweep then refuses to collect forever.
+    /// </remarks>
+    [Fact]
+    public async Task SlicerMigration_AddWorkerDisableSource_AttributesLegacyDisablesFromReasonText()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using SlicerDbContext context = CreateSlicerContext(connection);
+
+        // Stop one migration short of the column so the inserts below are genuinely legacy rows.
+        await context.GetService<IMigrator>().MigrateAsync("20260821151953_AddSliceJobFailureReason");
+
+        await InsertLegacyWorkerAsync(connection, "admin-ban", isDisabled: true, reason: "Banned by an operator");
+        await InsertLegacyWorkerAsync(connection, "admin-ban-oddly-worded", isDisabled: true, reason: "circuit breaker tripped too often, benching it");
+        await InsertLegacyWorkerAsync(connection, "deregistered", isDisabled: true, reason: "Slicer service deregistered");
+        await InsertLegacyWorkerAsync(connection, "circuit-breaker", isDisabled: true, reason: "Circuit breaker: 5 failures in 60s");
+        await InsertLegacyWorkerAsync(connection, "blank-reason", isDisabled: true, reason: "   ");
+        await InsertLegacyWorkerAsync(connection, "null-reason", isDisabled: true, reason: null);
+        await InsertLegacyWorkerAsync(connection, "enabled", isDisabled: false, reason: null);
+        await InsertLegacyWorkerAsync(connection, "enabled-with-stale-reason", isDisabled: false, reason: "Banned by an operator");
+
+        await context.GetService<IMigrator>().MigrateAsync();
+
+        Dictionary<string, int> sources = await ReadDisableSourcesAsync(connection);
+
+        _ = sources["admin-ban"].Should().Be((int)WorkerDisableSource.Administrator,
+            "an administrator's ban is the one thing the backfill must never lose");
+        _ = sources["deregistered"].Should().Be((int)WorkerDisableSource.Deregistration);
+        _ = sources["circuit-breaker"].Should().Be((int)WorkerDisableSource.CircuitBreaker);
+
+        // 'Circuit breaker:' with the colon is the literal the breaker writes. This row only
+        // resembles it, so it must stay an administrator ban rather than be swept as automatic.
+        _ = sources["admin-ban-oddly-worded"].Should().Be((int)WorkerDisableSource.Administrator,
+            "only the exact automatic prefix may be treated as automatic");
+
+        // No reason text is no evidence of an administrator, and DisableWorkerAsync rejects a
+        // blank reason, so these cannot be bans. Leaving them clearable is the safe direction.
+        _ = sources["blank-reason"].Should().Be((int)WorkerDisableSource.None);
+        _ = sources["null-reason"].Should().Be((int)WorkerDisableSource.None);
+
+        // Enabled rows must be untouched even when they still carry a stale reason, or the
+        // stale sweep would refuse to collect a worker that is not banned at all.
+        _ = sources["enabled"].Should().Be((int)WorkerDisableSource.None);
+        _ = sources["enabled-with-stale-reason"].Should().Be((int)WorkerDisableSource.None,
+            "the backfill is guarded on IsDisabled, not on the reason text alone");
+    }
+
+    /// <summary>
+    /// Pins the shape of the backfill in every dialect.
+    /// </summary>
+    /// <remarks>
+    /// PostgreSQL and SQL Server need this because their SQL is hand-written per provider, cannot
+    /// run against SQLite, and the live-provider jobs only migrate an empty database.
+    ///
+    /// SQLite needs it too, despite the behavioural test above, because that test cannot see a
+    /// missing exclusion: dropping <c>NOT LIKE 'Circuit breaker:%'</c> from the administrator pass
+    /// leaves it over-broad, but the later circuit-breaker pass overwrites the row and hides it.
+    /// The exclusions are what make the three passes order-independent, so they are asserted
+    /// directly rather than inferred from the end state.
+    /// </remarks>
+    [Theory]
+    [InlineData("postgres", "Farm.Slicer.Migrations.PostgreSQL", "20260821151926_AddSliceJobFailureReason", "20260822141629_AddWorkerDisableSource")]
+    [InlineData("sqlserver", "Farm.Slicer.Migrations.SqlServer", "20260821151939_AddSliceJobFailureReason", "20260822141635_AddWorkerDisableSource")]
+    [InlineData("sqlite", "Farm.Slicer.Migrations.Sqlite", "20260821151953_AddSliceJobFailureReason", "20260822141641_AddWorkerDisableSource")]
+    public void SlicerMigration_AddWorkerDisableSource_ClassifiesEveryCategoryOnEveryProvider(
+        string provider,
+        string slicerAssembly,
+        string fromMigration,
+        string toMigration)
+    {
+        DbContextOptionsBuilder<SlicerDbContext> options = new();
+        if (provider == "postgres")
+        {
+            _ = options.UseNpgsql(
+                "Host=localhost;Database=printfarmer;Username=test;******",
+                npgsql => npgsql.MigrationsAssembly(slicerAssembly));
+        }
+        else if (provider == "sqlserver")
+        {
+            _ = options.UseSqlServer(
+                "Server=localhost;Database=printfarmer;User Id=test;******;TrustServerCertificate=true",
+                sqlServer => sqlServer.MigrationsAssembly(slicerAssembly));
+        }
+        else
+        {
+            _ = options.UseSqlite(
+                "Data Source=:memory:",
+                sqlite => sqlite.MigrationsAssembly(slicerAssembly));
+        }
+
+        using SlicerDbContext slicer = new(options.Options);
+        string script = slicer.GetService<IMigrator>().GenerateScript(fromMigration, toMigration);
+
+        // Normalise away the per-provider identifier quoting so one assertion covers all three.
+        string normalized = script
+            .Replace("\"", string.Empty, StringComparison.Ordinal)
+            .Replace("[", string.Empty, StringComparison.Ordinal)
+            .Replace("]", string.Empty, StringComparison.Ordinal);
+
+        _ = normalized.Should().Contain("DisableSource = 1", "administrator bans must be backfilled");
+        _ = normalized.Should().Contain("DisableSource = 2", "deregistration disables must be backfilled");
+        _ = normalized.Should().Contain("DisableSource = 3", "circuit-breaker disables must be backfilled");
+
+        // The administrator pass is the dangerous one: it must exclude both automatic patterns,
+        // or a circuit-broken worker is promoted to a ban the stale sweep will never collect.
+        _ = normalized.Should().Contain("DisabledReason <> 'Slicer service deregistered'");
+        _ = normalized.Should().Contain("DisabledReason NOT LIKE 'Circuit breaker:%'");
+    }
+
+    private static async Task InsertLegacyWorkerAsync(
+        SqliteConnection connection,
+        string name,
+        bool isDisabled,
+        string? reason)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            """
+            INSERT INTO "Workers"
+                ("Id", "ActiveJobs", "ArtifactBytesProduced", "ArtifactsProduced", "CapabilitiesJson",
+                 "CompletedJobs", "CreatedAt", "DisabledReason", "EndpointUrl", "FailedJobs",
+                 "IsDisabled", "Name", "RegisteredAt", "ServiceId", "Status", "TotalSlots", "UpdatedAt")
+            VALUES
+                ($id, 0, 0, 0, '[]', 0, $now, $reason, 'http://worker.invalid', 0,
+                 $isDisabled, $name, $now, $serviceId, 'Online', 1, $now);
+            """;
+        _ = command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString());
+        _ = command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
+        _ = command.Parameters.AddWithValue("$reason", reason is null ? DBNull.Value : reason);
+        _ = command.Parameters.AddWithValue("$isDisabled", isDisabled ? 1 : 0);
+        _ = command.Parameters.AddWithValue("$name", name);
+        _ = command.Parameters.AddWithValue("$serviceId", Guid.NewGuid().ToString());
+        _ = await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<Dictionary<string, int>> ReadDisableSourcesAsync(SqliteConnection connection)
+    {
+        Dictionary<string, int> sources = [];
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """SELECT "Name", "DisableSource" FROM "Workers";""";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            sources[reader.GetString(0)] = reader.GetInt32(1);
+        }
+
+        return sources;
+    }
+
     [Fact]
     public async Task SlicerMigration_BaselinePreservesPopulatedLegacyData()
     {
