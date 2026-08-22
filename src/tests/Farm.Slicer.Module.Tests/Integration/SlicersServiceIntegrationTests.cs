@@ -567,6 +567,12 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         banned!.IsDisabled = true;
         banned.DisabledReason = adminReason;
         banned.DisableSource = WorkerDisableSource.Administrator;
+
+        // The worker then actually goes down. #1863 only lets a registration reclaim an
+        // incumbent's identity once that incumbent is no longer live, so age the heartbeat past
+        // the liveness window. Without this the re-registration below is indistinguishable from
+        // a squatting attempt and is rejected before ban preservation is ever reached.
+        banned.LastHeartbeat = DateTime.UtcNow.AddSeconds(-(WorkerStatus.LiveHeartbeatTimeoutSeconds + 30));
         _ = await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
 
@@ -676,6 +682,9 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         banned!.IsDisabled = true;
         banned.DisabledReason = WorkerDisableReasons.Deregistered;
         banned.DisableSource = WorkerDisableSource.Administrator;
+
+        // As above: the worker has to be non-live before its identity can be reclaimed at all.
+        banned.LastHeartbeat = DateTime.UtcNow.AddSeconds(-(WorkerStatus.LiveHeartbeatTimeoutSeconds + 30));
         _ = await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
 

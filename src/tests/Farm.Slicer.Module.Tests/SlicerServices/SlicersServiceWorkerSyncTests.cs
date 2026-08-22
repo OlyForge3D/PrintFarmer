@@ -1111,6 +1111,12 @@ public class SlicersServiceWorkerSyncTests
             db.Set<Worker>().Single(w => w.ServiceId == id.ToString()).Id,
             WorkerDisableReasons.CircuitBreaker(5, 60),
             WorkerDisableSource.CircuitBreaker);
+
+        // The worker then restarts. #1863 only permits reclaiming a non-live incumbent, so age
+        // the heartbeat past the liveness window; otherwise the re-registration below is rejected
+        // as squatting and never reaches the save-failure path this test is about.
+        db.Set<Worker>().Single(w => w.ServiceId == id.ToString()).LastHeartbeat =
+            DateTime.UtcNow.AddSeconds(-(WorkerStatus.LiveHeartbeatTimeoutSeconds + 30));
         await workerRepo.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
