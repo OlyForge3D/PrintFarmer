@@ -138,8 +138,12 @@ public sealed class NozzleInterfaceExportJsonConverter : JsonConverter<string?>
                 // out-of-range integer): preserve the raw numeric text so downstream validation
                 // (TryParseExportedEnum's numeric-string reject path) still sees a non-empty,
                 // non-name value and rejects the row explicitly, rather than this converter
-                // returning null and the row silently defaulting.
-                return System.Text.Encoding.UTF8.GetString(reader.ValueSpan);
+                // returning null and the row silently defaulting. ValueSpan is only valid when
+                // the reader isn't backed by a multi-segment buffer (e.g. large HTTP request
+                // bodies read off a PipeReader); fall back to ValueSequence otherwise.
+                return reader.HasValueSequence
+                    ? System.Text.Encoding.UTF8.GetString(System.Buffers.BuffersExtensions.ToArray(reader.ValueSequence))
+                    : System.Text.Encoding.UTF8.GetString(reader.ValueSpan);
             default:
                 return null;
         }
