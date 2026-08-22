@@ -454,6 +454,13 @@ PY
 # Echoes the path to a generated temp file the caller must delete.
 render_scaled_orcaslicer_worker_template() {
     local count="$1"
+    # Normalize defensively: the `for ((...))` arithmetic below misparses a
+    # leading-zero operand (e.g. "08") as octal and errors on invalid
+    # digits, silently skipping every iteration instead of rendering the
+    # requested number of workers.
+    if [[ "$count" =~ ^[0-9]+$ ]]; then
+        count=$((10#$count))
+    fi
     local base_template="$TEMPLATES_DIR/docker-compose.orcaslicer-worker.yml"
     local out
     out="$(mktemp)"
@@ -499,6 +506,14 @@ merge_addon_services() {
     local worker_count="${3:-1}"
     local addon_template="$TEMPLATES_DIR/docker-compose.$addon_type.yml"
     local generated_worker_template=""
+
+    # Normalize defensively: this function's worker_count is a public entry
+    # point (not just reached via the single call site above), and bash's
+    # `[[ ]]` arithmetic below would otherwise misparse a leading-zero
+    # operand (e.g. "08") as octal and error on invalid digits.
+    if [[ "$worker_count" =~ ^[0-9]+$ ]]; then
+        worker_count=$((10#$worker_count))
+    fi
 
     if [[ "$addon_type" == "orcaslicer-worker" ]] && [[ "$worker_count" =~ ^[0-9]+$ ]] && [[ "$worker_count" -gt 1 ]]; then
         if ! generated_worker_template="$(render_scaled_orcaslicer_worker_template "$worker_count")"; then
@@ -864,13 +879,22 @@ generate_compose() {
         log_info "ℹ️  Slicing services disabled${SLICING_REASON:+ ($SLICING_REASON)}"
     else
         local need_orca_worker="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
-        # Parse yes/no and numeric values
-        if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || [[ "$need_orca_worker" =~ ^[0-9]+$ && "$need_orca_worker" -gt 0 ]]; then
+        # Parse yes/no and numeric values. The numeric comparison is split into
+        # its own `[ ]` test rather than combined inside `[[ ]]`: bash's `[[ ]]`
+        # arithmetic evaluates a leading-zero operand (e.g. "08") as octal and
+        # errors on invalid octal digits, silently taking the false branch and
+        # disabling the worker addon; the classic `[ ]` builtin does not.
+        if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || { [[ "$need_orca_worker" =~ ^[0-9]+$ ]] && [ "$need_orca_worker" -gt 0 ]; }; then
             # A numeric ENABLE_ORCA_WORKER/ORCA_WORKER_COUNT (e.g. "3") is the
             # worker count. Anything else (yes/true/1) means exactly one worker.
             local orca_worker_count=1
             if [[ "$need_orca_worker" =~ ^[0-9]+$ ]]; then
-                orca_worker_count="$need_orca_worker"
+                # Normalize to a canonical base-10 string (e.g. "08" -> "8")
+                # so every downstream arithmetic comparison and C-style `for`
+                # loop -- which, unlike `[ ]`, interpret a leading-zero
+                # operand as octal and error on invalid digits -- sees a
+                # clean decimal count instead of silently mis-rendering.
+                orca_worker_count=$((10#$need_orca_worker))
             fi
             if merge_addon_services "$compose_file" "orcaslicer-worker" "$orca_worker_count"; then
                 log_info "Merged OrcaSlicer worker service (ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER)"
@@ -1143,8 +1167,9 @@ show_dry_run() {
     echo "Dockerfiles:"
     # Determine worker configuration for dry run display
     local need_orca_worker="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
-    # Parse yes/no and numeric values
-    if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || [[ "$need_orca_worker" =~ ^[0-9]+$ && "$need_orca_worker" -gt 0 ]]; then
+    # Parse yes/no and numeric values (see comment at the main call site on why
+    # the numeric check is split out of `[[ ]]` to avoid octal misparsing).
+    if [[ "$need_orca_worker" =~ ^(yes|true|1)$ ]] || { [[ "$need_orca_worker" =~ ^[0-9]+$ ]] && [ "$need_orca_worker" -gt 0 ]; }; then
         need_orca_worker="true"
     else
         need_orca_worker="false"
@@ -1177,7 +1202,7 @@ show_dry_run() {
         echo "  - Includes Moonraker protocol emulator (internal network only)"
     fi
     local dry_run_orca="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
-    if [[ "$dry_run_orca" =~ ^(yes|true|1)$ ]] || [[ "$dry_run_orca" =~ ^[0-9]+$ && "$dry_run_orca" -gt 0 ]]; then
+    if [[ "$dry_run_orca" =~ ^(yes|true|1)$ ]] || { [[ "$dry_run_orca" =~ ^[0-9]+$ ]] && [ "$dry_run_orca" -gt 0 ]; }; then
         echo "  - Includes slicer-host service (distributed slicing orchestrator)"
     fi
     

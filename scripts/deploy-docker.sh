@@ -2169,6 +2169,90 @@ deploy_offline_mode() {
 }
 
 # Tear down existing deployment
+# Improved tear-down: stop services in a safe order with retries and a kill
+# fallback. Extracted to top-level scope (rather than nested inside
+# tear_down_deployment) so it can be unit-tested in isolation by sourcing
+# this script and calling it directly with a mocked `docker` function
+# (issue #1847).
+stop_compose_services() {
+    local env_file="$1"; shift
+    local compose_file="$1"; shift
+
+    print_info "Tearing down compose project: env_file='${env_file:-<none>}' compose_file='$compose_file'"
+
+    # Preferred ordered list: stop frontends and API first, then workers, then monitoring/telemetry, then database
+    # NOTE: pgAdmin is NOT in this list - it is intentionally preserved during teardown for debugging
+    local ordered_services=(frontend api orcaslicer-worker orcaslicer-worker-multistage worker prometheus grafana jaeger otel-collector database registry)
+
+    # If an env file was provided, load its variables and pass it to docker compose commands
+    local env_arg=( )
+    if [ -n "${env_file:-}" ] && [ -f "$env_file" ]; then
+        # Source the env file to export variables into the current shell context
+        # This prevents "variable is not set. Defaulting to a blank string" warnings from docker compose
+        set -a
+        # shellcheck source=/dev/null
+        source "$env_file"
+        set +a
+        env_arg=(--env-file "$env_file")
+    fi
+
+    # ORCA_WORKER_COUNT>1 renders orcaslicer-worker-1..N as distinct
+    # services instead of a single "orcaslicer-worker" (issue #1847);
+    # append any that exist in this compose file so they get the same
+    # graceful-stop-then-kill handling as the other worker names above.
+    # (The final `down` below would remove them regardless, but ordered
+    # stop lets other services drain first.)
+    local scaled_worker_svc
+    while IFS= read -r scaled_worker_svc; do
+        [ -n "$scaled_worker_svc" ] && ordered_services+=("$scaled_worker_svc")
+    done < <(docker compose "${env_arg[@]:-}" -f "$compose_file" ps --services 2>/dev/null | grep -E '^orcaslicer-worker-[0-9]+$' || true)
+
+    for svc in "${ordered_services[@]}"; do
+        # Check if the service exists in this compose file
+        if docker compose "${env_arg[@]:-}" -f "$compose_file" ps --services 2>/dev/null | grep -qx "$svc"; then
+            print_info "Stopping service: $svc"
+            # Attempt a graceful stop first
+            docker compose "${env_arg[@]:-}" -f "$compose_file" stop -t 20 "$svc" || true
+
+            # Wait up to 20s for container(s) to exit. Pass "$svc" as a
+            # positional filter to `ps` itself (rather than grep -E "$svc"
+            # over unfiltered output) so e.g. "orcaslicer-worker-1" cannot
+            # substring-match "orcaslicer-worker-10"/"-11" once counts
+            # reach double digits (issue #1847).
+            for i in $(seq 1 10); do
+                running=$(docker compose "${env_arg[@]:-}" -f "$compose_file" ps --format '{{.Name}} {{.State}}' "$svc" 2>/dev/null || true)
+                if [ -z "$running" ]; then
+                    print_success "Service $svc stopped"
+                    break
+                fi
+                sleep 2
+            done
+
+            # If still present, attempt docker kill then rm -f
+            running_now=$(docker compose "${env_arg[@]:-}" -f "$compose_file" ps --format '{{.Name}} {{.State}}' "$svc" 2>/dev/null || true)
+            if [ -n "$running_now" ]; then
+                print_warning "Service $svc did not stop cleanly; killing container(s)"
+                # Get container ids for the service (compose project-scoped names)
+                docker compose "${env_arg[@]:-}" -f "$compose_file" ps --quiet "$svc" | xargs -r docker kill || true
+                docker compose "${env_arg[@]:-}" -f "$compose_file" rm -f -v "$svc" || true
+            else
+                # Remove the stopped service to clean up networks/volumes when possible
+                docker compose "${env_arg[@]:-}" -f "$compose_file" rm -f -v "$svc" 2>/dev/null || true
+            fi
+        fi
+    done
+
+    # Finally, bring remaining services down and remove volumes
+    # Use --rmi local to only remove locally-built images, preserving base images
+    print_info "Running: docker compose ${env_file:+--env-file $env_file} -f $compose_file down --volumes --rmi local"
+    # shellcheck disable=SC2086
+    if [ -n "${env_file:-}" ] && [ -f "$env_file" ]; then
+        docker compose --env-file "$env_file" -f "$compose_file" down --volumes --rmi local || true
+    else
+        docker compose -f "$compose_file" down --volumes --rmi local || true
+    fi
+}
+
 tear_down_deployment() {
     print_header "🧹 Tearing Down PrintFarmer Deployment"
     
@@ -2200,82 +2284,6 @@ tear_down_deployment() {
     # First attempt: bring down compose-managed stacks so containers created by compose
     # are removed with the correct project name and associated volumes/networks.
     print_info "Attempting to stop compose stacks..."
-    
-    # Improved tear-down: stop services in a safe order with retries and a kill fallback
-    stop_compose_services() {
-        local env_file="$1"; shift
-        local compose_file="$1"; shift
-
-        print_info "Tearing down compose project: env_file='${env_file:-<none>}' compose_file='$compose_file'"
-
-        # Preferred ordered list: stop frontends and API first, then workers, then monitoring/telemetry, then database
-        # NOTE: pgAdmin is NOT in this list - it is intentionally preserved during teardown for debugging
-        local ordered_services=(frontend api orcaslicer-worker orcaslicer-worker-multistage worker prometheus grafana jaeger otel-collector database registry)
-
-        # If an env file was provided, load its variables and pass it to docker compose commands
-        local env_arg=( )
-        if [ -n "${env_file:-}" ] && [ -f "$env_file" ]; then
-            # Source the env file to export variables into the current shell context
-            # This prevents "variable is not set. Defaulting to a blank string" warnings from docker compose
-            set -a
-            # shellcheck source=/dev/null
-            source "$env_file"
-            set +a
-            env_arg=(--env-file "$env_file")
-        fi
-
-        # ORCA_WORKER_COUNT>1 renders orcaslicer-worker-1..N as distinct
-        # services instead of a single "orcaslicer-worker" (issue #1847);
-        # append any that exist in this compose file so they get the same
-        # graceful-stop-then-kill handling as the other worker names above.
-        # (The final `down` below would remove them regardless, but ordered
-        # stop lets other services drain first.)
-        local scaled_worker_svc
-        while IFS= read -r scaled_worker_svc; do
-            [ -n "$scaled_worker_svc" ] && ordered_services+=("$scaled_worker_svc")
-        done < <(docker compose "${env_arg[@]:-}" -f "$compose_file" ps --services 2>/dev/null | grep -E '^orcaslicer-worker-[0-9]+$' || true)
-
-        for svc in "${ordered_services[@]}"; do
-            # Check if the service exists in this compose file
-            if docker compose "${env_arg[@]:-}" -f "$compose_file" ps --services 2>/dev/null | grep -qx "$svc"; then
-                print_info "Stopping service: $svc"
-                # Attempt a graceful stop first
-                docker compose "${env_arg[@]:-}" -f "$compose_file" stop -t 20 "$svc" || true
-
-                # Wait up to 20s for container(s) to exit
-                for i in $(seq 1 10); do
-                    running=$(docker compose "${env_arg[@]:-}" -f "$compose_file" ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep -E "${svc}" || true)
-                    if [ -z "$running" ]; then
-                        print_success "Service $svc stopped"
-                        break
-                    fi
-                    sleep 2
-                done
-
-                # If still present, attempt docker kill then rm -f
-                running_now=$(docker compose "${env_arg[@]:-}" -f "$compose_file" ps --format '{{.Name}} {{.State}}' 2>/dev/null | grep -E "${svc}" || true)
-                if [ -n "$running_now" ]; then
-                    print_warning "Service $svc did not stop cleanly; killing container(s)"
-                    # Get container ids for the service (compose project-scoped names)
-                    docker compose "${env_arg[@]:-}" -f "$compose_file" ps --quiet "$svc" | xargs -r docker kill || true
-                    docker compose "${env_arg[@]:-}" -f "$compose_file" rm -f -v "$svc" || true
-                else
-                    # Remove the stopped service to clean up networks/volumes when possible
-                    docker compose "${env_arg[@]:-}" -f "$compose_file" rm -f -v "$svc" 2>/dev/null || true
-                fi
-            fi
-        done
-
-        # Finally, bring remaining services down and remove volumes
-        # Use --rmi local to only remove locally-built images, preserving base images
-        print_info "Running: docker compose ${env_file:+--env-file $env_file} -f $compose_file down --volumes --rmi local"
-        # shellcheck disable=SC2086
-        if [ -n "${env_file:-}" ] && [ -f "$env_file" ]; then
-            docker compose --env-file "$env_file" -f "$compose_file" down --volumes --rmi local || true
-        else
-            docker compose -f "$compose_file" down --volumes --rmi local || true
-        fi
-    }
 
     # Run tear-down with appropriate env file and compose file
     if [ -f docker-compose.yml ]; then

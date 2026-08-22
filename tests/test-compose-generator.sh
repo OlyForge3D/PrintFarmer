@@ -330,12 +330,27 @@ test_orcaslicer_worker_variations() {
             # service (issue #1847: --scale gives every replica byte-identical
             # environment, so a shared instance ID/env var cannot distinguish them).
             assert_not_contains "$compose_content" $'\n  orcaslicer-worker:' "Should NOT have an unscaled orcaslicer-worker service for $count workers"
+            # The runtime placeholder must be gone -- every worker's
+            # Worker__InstanceId has to be a literal baked in at generation
+            # time, not left to fall back to a shared/empty env var, or all N
+            # replicas would collapse back to the same (or no) identity.
+            assert_not_contains "$compose_content" 'Worker__InstanceId=${ORCA_WORKER_INSTANCE_ID' "Should NOT leave Worker__InstanceId as an unresolved env var placeholder for $count workers"
             local w
             for ((w = 1; w <= count; w++)); do
                 assert_contains "$compose_content" "orcaslicer-worker-$w:" "Should have distinct orcaslicer-worker-$w service for $count workers"
                 assert_contains "$compose_content" "container_name: printfarmer-orcaslicer-worker-$w" "Should set container_name for orcaslicer-worker-$w"
                 assert_contains "$compose_content" "Worker__InstanceId=orcaslicer-worker-$w" "Should bake a distinct Worker__InstanceId into orcaslicer-worker-$w"
             done
+            # Exactly N worker services must be rendered -- not N-1 (a
+            # dropped replica) and not N+1 (an off-by-one that would render
+            # an extra "orcaslicer-worker-$((count+1))" service).
+            local service_occurrences
+            service_occurrences=$(printf '%s\n' "$compose_content" | grep -cE '^  orcaslicer-worker-[0-9]+:' || true)
+            assert_equals "$count" "$service_occurrences" "Should render exactly $count orcaslicer-worker-N services, not more or fewer"
+            local instance_id_occurrences
+            instance_id_occurrences=$(printf '%s\n' "$compose_content" | grep -cE 'Worker__InstanceId=orcaslicer-worker-[0-9]+' || true)
+            assert_equals "$count" "$instance_id_occurrences" "Should bake exactly $count distinct Worker__InstanceId literals, not more or fewer"
+            assert_not_contains "$compose_content" "orcaslicer-worker-$((count + 1)):" "Should NOT render an off-by-one extra orcaslicer-worker-$((count + 1)) service"
             # Anchors must appear exactly once regardless of worker count, or the
             # rendered compose file has duplicate YAML anchor definitions.
             local anchor_occurrences
@@ -357,7 +372,21 @@ test_orcaslicer_worker_variations() {
         # Validate no Redis references
         assert_not_contains "$compose_content" "redis:" "Should not contain Redis service for $count workers"
     done
-    
+
+    # A leading-zero count (e.g. "08") must be treated identically to its
+    # decimal value ("8"), not silently disable the worker addon. bash's
+    # `[[ ]]` arithmetic misparses leading-zero operands as octal and errors
+    # on invalid octal digits (e.g. "08", "09"); the generator must not rely
+    # on that path for the enable/count check (issue #1847 follow-up).
+    local temp_octal_dir="$TEST_TEMP_DIR/test-worker-octal"
+    mkdir -p "$temp_octal_dir"
+    assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker 08 --output-dir $temp_octal_dir"
+    assert_file_exists "$temp_octal_dir/docker-compose.yml" "Should create compose file with leading-zero worker count"
+    local octal_compose_content
+    octal_compose_content=$(cat "$temp_octal_dir/docker-compose.yml")
+    assert_contains "$octal_compose_content" "orcaslicer-worker-8:" "Leading-zero count '08' should render 8 workers just like '8'"
+    assert_not_contains "$octal_compose_content" "orcaslicer-worker-9:" "Leading-zero count '08' should render exactly 8 workers, not 9"
+
     # Test with no workers
     local temp_no_workers_dir="$TEST_TEMP_DIR/test-no-workers"
     mkdir -p "$temp_no_workers_dir"
