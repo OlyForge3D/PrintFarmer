@@ -1004,6 +1004,11 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("DisableSource")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("DisabledReason")
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");

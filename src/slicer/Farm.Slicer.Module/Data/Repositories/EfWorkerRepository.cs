@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Slicer.Module.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace Farm.Slicer.Module.Data.Repositories;
 
@@ -210,15 +211,23 @@ public class EfWorkerRepository(SlicerDbContext context) : IWorkerRepository
     }
 
     /// <inheritdoc/>
-    public async Task DisableWorkerAsync(Guid id, string reason)
+    public async Task DisableWorkerAsync(Guid id, string reason, WorkerDisableSource source)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+
+        if (source == WorkerDisableSource.None)
+        {
+            throw new ArgumentException(
+                "A disable must be attributed to a source; None means 'not disabled'.",
+                nameof(source));
+        }
 
         Worker? worker = await _context.Workers.FindAsync(id);
         if (worker != null)
         {
             worker.IsDisabled = true;
             worker.DisabledReason = reason;
+            worker.DisableSource = source;
             worker.UpdatedAt = DateTime.UtcNow;
         }
     }
@@ -231,8 +240,53 @@ public class EfWorkerRepository(SlicerDbContext context) : IWorkerRepository
         {
             worker.IsDisabled = false;
             worker.DisabledReason = null;
+            worker.DisableSource = WorkerDisableSource.None;
             worker.UpdatedAt = DateTime.UtcNow;
         }
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> RevokeForDeregistrationAsync(string serviceId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serviceId);
+
+        DateTime now = DateTime.UtcNow;
+
+        int affected = await _context.Workers
+            .Where(w => w.ServiceId == serviceId)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(w => w.Status, WorkerStatus.Offline)
+                    .SetProperty(w => w.OfflineAt, (DateTime?)now)
+                    .SetProperty(w => w.UpdatedAt, now)
+                    .SetProperty(w => w.ApiKey, (string?)null)
+                    .SetProperty(w => w.IsDisabled, true),
+                ct);
+
+        if (affected == 0)
+        {
+            return false;
+        }
+
+        _ = await _context.Workers
+            .Where(w => w.ServiceId == serviceId && w.DisableSource != WorkerDisableSource.Administrator)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(w => w.DisabledReason, WorkerDisableReasons.Deregistered)
+                    .SetProperty(w => w.DisableSource, WorkerDisableSource.Deregistration),
+                ct);
+
+        // These statements bypass the change tracker, so any instance already materialised in
+        // this context still holds the pre-revocation values. Detach it rather than leave a stale
+        // copy that a later SaveChangesAsync could write back over what was just committed.
+        foreach (EntityEntry<Worker> entry in _context.ChangeTracker.Entries<Worker>()
+            .Where(e => e.Entity.ServiceId == serviceId)
+            .ToList())
+        {
+            entry.State = EntityState.Detached;
+        }
+
+        return true;
     }
 
     /// <inheritdoc/>

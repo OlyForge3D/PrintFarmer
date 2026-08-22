@@ -64,14 +64,38 @@ public interface IWorkerRepository
     /// <param name="processingTimeSeconds">Job processing time in seconds.</param>
     Task DecrementActiveJobsAsync(Guid id, bool success, double processingTimeSeconds);
 
-    /// <summary>Disables a worker with a reason.</summary>
+    /// <summary>Disables a worker with a reason and an attributed source.</summary>
     /// <param name="id">The worker identifier.</param>
-    /// <param name="reason">The reason for disabling.</param>
-    Task DisableWorkerAsync(Guid id, string reason);
+    /// <param name="reason">The human-readable reason for disabling. Display only.</param>
+    /// <param name="source">
+    /// What is disabling the worker. Only <see cref="WorkerDisableSource.Administrator"/>
+    /// survives re-registration and the stale-worker sweep, so an automatic disabler must
+    /// name itself rather than borrowing the administrator's privileges.
+    /// </param>
+    Task DisableWorkerAsync(Guid id, string reason, WorkerDisableSource source);
 
     /// <summary>Re-enables a disabled worker.</summary>
     /// <param name="id">The worker identifier.</param>
     Task EnableWorkerAsync(Guid id);
+
+    /// <summary>
+    /// Marks the worker paired with a slicer service offline and revokes its API key as part of
+    /// that service deregistering, without disturbing an administrator's deliberate disable.
+    /// </summary>
+    /// <param name="serviceId">The paired <see cref="Worker.ServiceId"/>.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><see langword="true"/> when a paired worker existed and was revoked.</returns>
+    /// <remarks>
+    /// This is deliberately not a read-modify-write. An administrator can ban a worker in the
+    /// window between a deregistration request loading the row and saving it; a read-modify-write
+    /// would then write back the pre-ban state it had loaded, replacing the ban's attribution with
+    /// <see cref="WorkerDisableSource.Deregistration"/> — and the next registration, seeing an
+    /// automatic disable, would lift the ban. So the attribution is written by a conditional
+    /// <c>UPDATE … WHERE DisableSource &lt;&gt; Administrator</c> evaluated by the database, which
+    /// cannot observe a stale value. The offline/credential-revocation columns are applied
+    /// unconditionally because they are correct for a banned worker too.
+    /// </remarks>
+    Task<bool> RevokeForDeregistrationAsync(string serviceId, CancellationToken ct = default);
 
     /// <summary>Resets a worker's active job count to zero and sets status to Online.</summary>
     /// <param name="id">The worker identifier.</param>

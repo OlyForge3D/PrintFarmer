@@ -566,6 +566,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         banned.Should().NotBeNull();
         banned!.IsDisabled = true;
         banned.DisabledReason = adminReason;
+        banned.DisableSource = WorkerDisableSource.Administrator;
         _ = await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
 
@@ -615,6 +616,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         banned.Should().NotBeNull();
         banned!.IsDisabled = true;
         banned.DisabledReason = adminReason;
+        banned.DisableSource = WorkerDisableSource.Administrator;
         _ = await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
 
@@ -637,6 +639,134 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         Worker? reclaimed = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
         reclaimed.Should().NotBeNull();
         reclaimed!.IsDisabled.Should().BeTrue("a ban must survive a redeploy, not just a crash");
+        reclaimed.DisabledReason.Should().Be(adminReason);
+        reclaimed.DisableSource.Should().Be(WorkerDisableSource.Administrator);
+    }
+
+    /// <summary>
+    /// An administrator's reason is unvalidated free text, so it can be made to look like any
+    /// automatic disabler's. If classification read the reason text, an administrator who happened
+    /// to type the deregistration literal would produce a ban the next registration silently
+    /// lifted — the ban would be undone by the wording used to record it. Attribution therefore
+    /// lives in a column the administrator does not control.
+    /// </summary>
+    [Fact]
+    public async Task Reregistration_PreservesABanWhoseReasonImpersonatesAnAutomaticDisable()
+    {
+        // Arrange
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ISlicersService slicersService = scope.ServiceProvider.GetRequiredService<ISlicersService>();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+
+        var dto = new RegisterSlicerDto
+        {
+            Name = "orca-banned-impersonating",
+            SlicerType = 1,
+            Version = "2.3.1",
+            Host = "http://localhost:8080",
+            MaxConcurrentJobs = 5,
+            InstanceId = "orcaslicer-worker-banned-impersonating"
+        };
+
+        (Guid id, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+
+        // The administrator's reason is byte-for-byte the text deregistration writes.
+        Worker? banned = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+        banned.Should().NotBeNull();
+        banned!.IsDisabled = true;
+        banned.DisabledReason = WorkerDisableReasons.Deregistered;
+        banned.DisableSource = WorkerDisableSource.Administrator;
+        _ = await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        // Act
+        (Guid secondId, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+
+        // Assert
+        secondId.Should().Be(id);
+
+        context.ChangeTracker.Clear();
+        Worker? reclaimed = context.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+        reclaimed.Should().NotBeNull();
+        reclaimed!.IsDisabled.Should().BeTrue(
+            "the reason text an administrator happens to type must not decide whether their ban holds");
+        reclaimed.DisableSource.Should().Be(WorkerDisableSource.Administrator);
+    }
+
+    /// <summary>
+    /// A ban committed after a deregistration request has already materialised the worker must
+    /// still hold. A read-modify-write would write back the pre-ban state it loaded, re-attributing
+    /// the disable to deregistration, and the next registration would then lift it — so the ban
+    /// would be destroyed by a request that never saw it. The attribution is written by a
+    /// conditional UPDATE evaluated by the database, which cannot observe a stale value.
+    /// </summary>
+    [Fact]
+    public async Task Deregistration_DoesNotClobberABanCommittedAfterItLoadedTheWorker()
+    {
+        // Arrange
+        using AsyncServiceScope requestScope = _factory.Services.CreateAsyncScope();
+        ISlicersService slicersService = requestScope.ServiceProvider.GetRequiredService<ISlicersService>();
+        SlicerDbContext requestContext = requestScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+
+        const string adminReason = "Banned by administrator: racing the redeploy";
+        var dto = new RegisterSlicerDto
+        {
+            Name = "orca-banned-race",
+            SlicerType = 1,
+            Version = "2.3.1",
+            Host = "http://localhost:8080",
+            MaxConcurrentJobs = 5,
+            InstanceId = "orcaslicer-worker-banned-race"
+        };
+
+        (Guid id, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+        requestContext.ChangeTracker.Clear();
+
+        // The API key filter materialises the worker into the deregistration request's scope
+        // before the action body runs, so this request now holds a pre-ban view of the row.
+        Worker? preBanView = requestContext.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+        preBanView.Should().NotBeNull();
+        preBanView!.IsDisabled.Should().BeFalse();
+
+        // Meanwhile an administrator bans the worker from a different request, and commits.
+        using (AsyncServiceScope adminScope = _factory.Services.CreateAsyncScope())
+        {
+            SlicerDbContext adminContext = adminScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+            Worker? banned = adminContext.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+            banned.Should().NotBeNull();
+            banned!.IsDisabled = true;
+            banned.DisabledReason = adminReason;
+            banned.DisableSource = WorkerDisableSource.Administrator;
+            _ = await adminContext.SaveChangesAsync();
+        }
+
+        // Act - the deregistration proceeds, still holding its stale view.
+        await slicersService.DeregisterAsync(id, retainForReregistration: true, CancellationToken.None);
+
+        // Assert
+        using AsyncServiceScope verifyScope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext verifyContext = verifyScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        Worker? afterDeregister = verifyContext.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+        afterDeregister.Should().NotBeNull();
+        afterDeregister!.DisableSource.Should().Be(
+            WorkerDisableSource.Administrator,
+            "a deregistration that never observed the ban must not re-attribute it to itself");
+        afterDeregister.DisabledReason.Should().Be(adminReason);
+
+        // The offline and credential-revocation half of deregistration still applies.
+        afterDeregister.IsDisabled.Should().BeTrue();
+        afterDeregister.Status.Should().Be(WorkerStatus.Offline);
+        afterDeregister.ApiKey.Should().BeNull();
+
+        // And the ban still holds when the worker comes back.
+        (Guid secondId, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+        secondId.Should().Be(id);
+
+        using AsyncServiceScope finalScope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext finalContext = finalScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        Worker? reclaimed = finalContext.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+        reclaimed.Should().NotBeNull();
+        reclaimed!.IsDisabled.Should().BeTrue("the ban survived deregistration, so it must survive the return too");
         reclaimed.DisabledReason.Should().Be(adminReason);
     }
 

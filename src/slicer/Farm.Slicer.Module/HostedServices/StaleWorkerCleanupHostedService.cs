@@ -186,6 +186,10 @@ public class StaleWorkerCleanupHostedService : BackgroundService
                 // An administrator's ban lives in this row. Deleting it would erase the sanction:
                 // the worker could return at any time, register as brand new, and come back
                 // enabled. Keep it (already Offline) until an administrator acts explicitly.
+                //
+                // Only an administrator's ban is exempt. Automatic disables — deregistration, the
+                // circuit breaker — must still be swept, or every worker the circuit breaker ever
+                // tripped would be retained for good and this table would grow without bound.
                 if (WorkerDisableReasons.IsAdministrativeDisable(worker))
                 {
                     _logger.LogDebug(

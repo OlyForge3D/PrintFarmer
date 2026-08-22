@@ -326,7 +326,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                 // The worker is demonstrably running again, so it is no longer Offline.
                 worker.OfflineAt = null;
 
-                // Only lift the disable that deregistration itself applied. An administrator's
+                // Only lift a disable that the system applied itself. An administrator's
                 // deliberate disable must survive a restart — otherwise any banned worker could
                 // clear its own ban just by re-registering under the same InstanceId, and the
                 // reason text recording why it was banned would be erased with it. Re-enabling
@@ -338,6 +338,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                     // operators saw after every redeploy.
                     worker.IsDisabled = false;
                     worker.DisabledReason = null;
+                    worker.DisableSource = WorkerDisableSource.None;
                 }
             }
             else
@@ -592,7 +593,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         string slicerTypeName = GetSlicerTypeName(svc.SlicerType);
         bool retain = retainForReregistration && !string.IsNullOrWhiteSpace(svc.InstanceId);
 
-        RevokeWorkerCredentials(await _workerRepo.GetByServiceIdAsync(id.ToString()));
+        _ = await _workerRepo.RevokeForDeregistrationAsync(id.ToString(), ct);
 
         if (retain)
         {
@@ -661,7 +662,8 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         Worker? worker = await _workerRepo.GetByServiceIdAsync(id.ToString());
         if (worker != null)
         {
-            RevokeWorkerCredentials(worker);
+            // No credential revocation here: unlike deregistration this deletes the row outright,
+            // so blanking its columns first would write state nothing can ever read.
             await _workerRepo.DeleteAsync(worker.Id);
         }
 
@@ -681,37 +683,6 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         }
 
         return true;
-    }
-
-    /// <summary>
-    /// Revokes a worker record's credentials and marks it offline and disabled.
-    /// </summary>
-    /// <remarks>
-    /// An administrator's existing disable reason is preserved rather than overwritten. If it
-    /// were replaced with <see cref="WorkerDisableReasons.Deregistered"/>, the next registration
-    /// would mistake the ban for its own automatic disable and lift it — so a banned worker could
-    /// clear its own ban with nothing more exotic than an ordinary redeploy, which is the most
-    /// common path there is.
-    /// </remarks>
-    /// <param name="worker">The worker record to revoke, or <see langword="null"/> when none is paired.</param>
-    private static void RevokeWorkerCredentials(Worker? worker)
-    {
-        if (worker == null)
-        {
-            return;
-        }
-
-        worker.Status = WorkerStatus.Offline;
-        worker.OfflineAt = DateTime.UtcNow;
-        worker.UpdatedAt = DateTime.UtcNow;
-
-        if (!WorkerDisableReasons.IsAdministrativeDisable(worker))
-        {
-            worker.DisabledReason = WorkerDisableReasons.Deregistered;
-        }
-
-        worker.IsDisabled = true;
-        worker.ApiKey = null;
     }
 
     /// <summary>

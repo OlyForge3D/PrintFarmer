@@ -64,6 +64,7 @@ public sealed class WorkersControllerPersistenceTests
         Worker worker = CreateWorker(workerId);
         worker.IsDisabled = true;
         worker.DisabledReason = "Banned by administrator: producing scrap";
+        worker.DisableSource = WorkerDisableSource.Administrator;
         _ = db.Set<Worker>().Add(worker);
         _ = await db.SaveChangesAsync();
 
