@@ -723,6 +723,64 @@ public class SlicersServiceWorkerSyncTests
         _ = db.Set<SlicerService>().Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "Stale worker cleanup keeps a worker banned after its snapshot was taken")]
+    public async Task StaleWorkerCleanup_Should_Retain_A_Worker_Banned_After_The_Sweep_Read_It()
+    {
+        using SlicerDbContext db = CreateDb();
+        Guid serviceId = Guid.NewGuid();
+        DateTime staleHeartbeat = DateTime.UtcNow.AddHours(-2);
+        _ = await db.Set<SlicerService>().AddAsync(new SlicerService
+        {
+            Id = serviceId,
+            Name = "raced-service",
+            ApiKey = null,
+            LastSeen = staleHeartbeat,
+        });
+        _ = await db.Set<Worker>().AddAsync(new Worker
+        {
+            Id = Guid.NewGuid(),
+            ServiceId = serviceId.ToString(),
+            Name = "raced-worker",
+            EndpointUrl = "http://raced-worker.internal",
+            Status = WorkerStatus.Offline,
+            IsDisabled = false,
+            LastHeartbeat = staleHeartbeat,
+            RegisteredAt = staleHeartbeat,
+            CreatedAt = staleHeartbeat,
+            UpdatedAt = staleHeartbeat,
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        EfWorkerRepository repository = new(db);
+
+        // The sweep selects its candidates from an AsNoTracking snapshot, so this detached copy is
+        // exactly what it carries into the delete loop. At this point the worker is not banned.
+        IReadOnlyList<Worker> snapshot = await repository.GetAllAsync(int.MaxValue, 0);
+        Worker staleSnapshot = snapshot.Should().ContainSingle().Subject;
+        _ = staleSnapshot.IsDisabled.Should().BeFalse();
+
+        // An administrator bans it while the sweep is still working through its list.
+        await repository.DisableWorkerAsync(
+            staleSnapshot.Id,
+            "Banned by administrator: racing the sweep",
+            WorkerDisableSource.Administrator);
+        await repository.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        // The sweep proceeds on the stale snapshot, which still reports the worker as enabled.
+        bool deleted = await repository.DeleteIfNotAdministrativelyDisabledAsync(staleSnapshot.Id);
+
+        // An unconditional delete would erase the ban along with the row, and the worker could
+        // return, register as brand new and come back enabled — the sanction laundered by a
+        // background job. The exemption is re-checked by the database inside the delete instead.
+        _ = deleted.Should().BeFalse();
+
+        db.ChangeTracker.Clear();
+        _ = db.Set<Worker>().Should().ContainSingle();
+        _ = db.Set<SlicerService>().Should().ContainSingle();
+    }
+
     private static Worker CreateWorker(
         string name,
         string status,

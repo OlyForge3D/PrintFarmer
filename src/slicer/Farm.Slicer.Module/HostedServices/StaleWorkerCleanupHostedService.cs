@@ -190,6 +190,11 @@ public class StaleWorkerCleanupHostedService : BackgroundService
                 // Only an administrator's ban is exempt. Automatic disables — deregistration, the
                 // circuit breaker — must still be swept, or every worker the circuit breaker ever
                 // tripped would be retained for good and this table would grow without bound.
+                //
+                // staleWorkers is an untracked snapshot taken before this loop, so the check below
+                // is only a cheap pre-filter that saves a round trip. The exemption that actually
+                // protects the ban is re-evaluated by the database inside the delete, which is why
+                // a ban committed while this loop is running still survives.
                 if (WorkerDisableReasons.IsAdministrativeDisable(worker))
                 {
                     _logger.LogDebug(
@@ -199,7 +204,14 @@ public class StaleWorkerCleanupHostedService : BackgroundService
                     continue;
                 }
 
-                await workerRepository.DeleteAsync(worker.Id);
+                if (!await workerRepository.DeleteIfNotAdministrativelyDisabledAsync(worker.Id))
+                {
+                    _logger.LogInformation(
+                        "Retained stale worker '{WorkerName}' (ID: {WorkerId}): it was disabled by an administrator or removed while this sweep was running",
+                        worker.Name,
+                        worker.Id);
+                    continue;
+                }
 
                 _logger.LogInformation(
                     "Deleted stale worker '{WorkerName}' (ID: {WorkerId}) due to inactivity",

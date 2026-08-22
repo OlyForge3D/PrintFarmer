@@ -290,6 +290,38 @@ public class EfWorkerRepository(SlicerDbContext context) : IWorkerRepository
     }
 
     /// <inheritdoc/>
+    public async Task<bool> ClearAutomaticDisableAsync(string serviceId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serviceId);
+
+        int affected = await _context.Workers
+            .Where(w => w.ServiceId == serviceId
+                && w.IsDisabled
+                && w.DisableSource != WorkerDisableSource.Administrator)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(w => w.IsDisabled, false)
+                    .SetProperty(w => w.DisabledReason, (string?)null)
+                    .SetProperty(w => w.DisableSource, WorkerDisableSource.None)
+                    .SetProperty(w => w.UpdatedAt, DateTime.UtcNow),
+                ct);
+
+        // The statement above bypasses the change tracker, so a copy already materialised in this
+        // context still holds whatever it read before. Refresh it, so the caller's own edits are
+        // saved on top of the current row — including an administrator's ban committed in the
+        // meantime, which this statement deliberately did not touch. Only untouched entries are
+        // refreshed: reloading a modified one would silently discard the caller's work.
+        foreach (EntityEntry<Worker> entry in _context.ChangeTracker.Entries<Worker>()
+            .Where(e => e.State == EntityState.Unchanged && e.Entity.ServiceId == serviceId)
+            .ToList())
+        {
+            await entry.ReloadAsync(ct);
+        }
+
+        return affected > 0;
+    }
+
+    /// <inheritdoc/>
     public async Task<bool> ResetAsync(Guid id)
     {
         Worker? worker = await _context.Workers.FindAsync(id);
@@ -327,6 +359,63 @@ public class EfWorkerRepository(SlicerDbContext context) : IWorkerRepository
 
             _ = _context.Workers.Remove(worker);
         }
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> DeleteIfNotAdministrativelyDisabledAsync(Guid id, CancellationToken ct = default)
+    {
+        // Read the pairing before the delete: afterwards the row is gone and there is no way back
+        // to the service it belonged to.
+        string? serviceIdText = await _context.Workers
+            .AsNoTracking()
+            .Where(w => w.Id == id)
+            .Select(w => w.ServiceId)
+            .FirstOrDefaultAsync(ct);
+
+        if (serviceIdText is null)
+        {
+            return false;
+        }
+
+        // The exemption is evaluated by the database inside the delete itself, so a ban committed
+        // after the caller picked this worker still blocks the delete. Testing it in memory first
+        // would only re-check the same stale snapshot the caller already holds.
+        int affected = await _context.Workers
+            .Where(w => w.Id == id
+                && !(w.IsDisabled && w.DisableSource == WorkerDisableSource.Administrator))
+            .ExecuteDeleteAsync(ct);
+
+        if (affected == 0)
+        {
+            return false;
+        }
+
+        Guid? deletedServiceId = null;
+
+        if (Guid.TryParse(serviceIdText, out Guid serviceId))
+        {
+            deletedServiceId = serviceId;
+
+            _ = await _context.SlicerServices
+                .Where(s => s.Id == serviceId)
+                .ExecuteDeleteAsync(ct);
+        }
+
+        // These statements bypass the change tracker, so any copy still materialised here refers
+        // to rows that no longer exist. Drop them rather than let a later SaveChangesAsync try to
+        // update or re-insert them.
+        foreach (EntityEntry entry in _context.ChangeTracker.Entries<Worker>()
+            .Where(e => e.Entity.Id == id)
+            .Cast<EntityEntry>()
+            .Concat(_context.ChangeTracker.Entries<SlicerService>()
+                .Where(e => deletedServiceId != null && e.Entity.Id == deletedServiceId)
+                .Cast<EntityEntry>())
+            .ToList())
+        {
+            entry.State = EntityState.Detached;
+        }
+
+        return true;
     }
 
     /// <inheritdoc/>

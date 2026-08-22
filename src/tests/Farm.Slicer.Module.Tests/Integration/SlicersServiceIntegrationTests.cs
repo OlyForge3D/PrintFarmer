@@ -771,6 +771,76 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// A ban committed after a registration request has already materialised the worker must still
+    /// hold. Deciding in memory whether the disable is automatic reads the snapshot taken when the
+    /// row was loaded, and saving that instance would write IsDisabled = false straight over the
+    /// ban — a worker would clear a sanction simply by registering with the right timing.
+    /// Re-reading does not help: EF returns the same stale tracked instance. So the test and the
+    /// write happen together in one conditional UPDATE the database evaluates.
+    /// </summary>
+    [Fact]
+    public async Task Reregistration_DoesNotClobberABanCommittedAfterItLoadedTheWorker()
+    {
+        // Arrange
+        using AsyncServiceScope setupScope = _factory.Services.CreateAsyncScope();
+        ISlicersService setupService = setupScope.ServiceProvider.GetRequiredService<ISlicersService>();
+
+        const string adminReason = "Banned by administrator: racing the re-registration";
+        var dto = new RegisterSlicerDto
+        {
+            Name = "orca-banned-reregister-race",
+            SlicerType = 1,
+            Version = "2.3.1",
+            Host = "http://localhost:8080",
+            MaxConcurrentJobs = 5,
+            InstanceId = "orcaslicer-worker-banned-reregister-race"
+        };
+
+        (Guid id, string _) = await setupService.RegisterAsync(dto, CancellationToken.None);
+
+        // A graceful redeploy leaves the worker disabled by deregistration — an automatic disable,
+        // so the registration below is entitled to lift it.
+        await setupService.DeregisterAsync(id, retainForReregistration: true, CancellationToken.None);
+
+        // The replacement worker's registration request materialises the row before it decides
+        // anything, so it now holds a view in which the disable is merely automatic.
+        using AsyncServiceScope requestScope = _factory.Services.CreateAsyncScope();
+        ISlicersService slicersService = requestScope.ServiceProvider.GetRequiredService<ISlicersService>();
+        SlicerDbContext requestContext = requestScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+
+        Worker? preBanView = requestContext.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+        preBanView.Should().NotBeNull();
+        preBanView!.DisableSource.Should().Be(WorkerDisableSource.Deregistration);
+
+        // Meanwhile an administrator bans the worker from a different request, and commits.
+        using (AsyncServiceScope adminScope = _factory.Services.CreateAsyncScope())
+        {
+            SlicerDbContext adminContext = adminScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+            Worker? banned = adminContext.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+            banned.Should().NotBeNull();
+            banned!.IsDisabled = true;
+            banned.DisabledReason = adminReason;
+            banned.DisableSource = WorkerDisableSource.Administrator;
+            _ = await adminContext.SaveChangesAsync();
+        }
+
+        // Act - the registration proceeds, still holding its stale view.
+        (Guid secondId, string _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+
+        // Assert
+        secondId.Should().Be(id);
+
+        using AsyncServiceScope verifyScope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext verifyContext = verifyScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        Worker? reclaimed = verifyContext.Set<Worker>().FirstOrDefault(w => w.ServiceId == id.ToString());
+        reclaimed.Should().NotBeNull();
+        reclaimed!.IsDisabled.Should().BeTrue(
+            "a registration that never observed the ban must not lift it");
+        reclaimed.DisabledReason.Should().Be(adminReason);
+        reclaimed.DisableSource.Should().Be(WorkerDisableSource.Administrator);
+    }
+
+    /// <summary>
     /// The counterpart to <see cref="Reregistration_PreservesAnAdministratorsDeliberateDisable"/>:
     /// the automatic disable deregistration applies is lifted on reclaim, so a redeployed worker
     /// does not come back Online still reporting "Disabled: Slicer service deregistered" — the

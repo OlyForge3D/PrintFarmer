@@ -310,6 +310,23 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
             if (worker != null)
             {
+                // Only lift a disable that the system applied itself. An administrator's
+                // deliberate disable must survive a restart — otherwise any banned worker could
+                // clear its own ban just by re-registering under the same InstanceId, and the
+                // reason text recording why it was banned would be erased with it. Re-enabling
+                // stays an explicit admin action (IWorkerRepository.EnableWorkerAsync).
+                //
+                // Without this a reclaimed worker comes back Online while still reporting
+                // "Disabled: Slicer service deregistered", which is exactly the stale text
+                // operators saw after every redeploy.
+                //
+                // The test and the write happen together in the database. Deciding it here from
+                // the instance loaded above would read a snapshot an administrator can invalidate
+                // mid-request, and saving that snapshot would write IsDisabled = false straight
+                // over a ban committed since. Runs before the edits below, because it refreshes
+                // the tracked copy.
+                _ = await _workerRepo.ClearAutomaticDisableAsync(svc.Id.ToString(), ct);
+
                 worker.ServiceId = svc.Id.ToString();
                 worker.Name = svc.Name;
                 worker.EndpointUrl = svc.Host ?? string.Empty;
@@ -325,21 +342,6 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
                 // The worker is demonstrably running again, so it is no longer Offline.
                 worker.OfflineAt = null;
-
-                // Only lift a disable that the system applied itself. An administrator's
-                // deliberate disable must survive a restart — otherwise any banned worker could
-                // clear its own ban just by re-registering under the same InstanceId, and the
-                // reason text recording why it was banned would be erased with it. Re-enabling
-                // stays an explicit admin action (IWorkerRepository.EnableWorkerAsync).
-                if (!WorkerDisableReasons.IsAdministrativeDisable(worker))
-                {
-                    // Without this a reclaimed worker comes back Online while still reporting
-                    // "Disabled: Slicer service deregistered", which is exactly the stale text
-                    // operators saw after every redeploy.
-                    worker.IsDisabled = false;
-                    worker.DisabledReason = null;
-                    worker.DisableSource = WorkerDisableSource.None;
-                }
             }
             else
             {

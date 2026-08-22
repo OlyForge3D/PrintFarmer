@@ -97,6 +97,31 @@ public interface IWorkerRepository
     /// </remarks>
     Task<bool> RevokeForDeregistrationAsync(string serviceId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Lifts a disable that the system applied itself — deregistration or the circuit breaker —
+    /// from the worker paired with a slicer service, leaving an administrator's ban untouched.
+    /// </summary>
+    /// <param name="serviceId">The paired <see cref="Worker.ServiceId"/>.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><see langword="true"/> when an automatic disable was actually lifted.</returns>
+    /// <remarks>
+    /// <para>
+    /// This is the registration-side twin of <see cref="RevokeForDeregistrationAsync"/> and exists
+    /// for the same reason. Deciding in memory whether a disable is automatic reads a snapshot
+    /// taken when the row was loaded; an administrator can commit a ban after that read, and
+    /// saving the tracked instance would then write <c>IsDisabled = false</c> straight over the
+    /// ban — the worker would clear a sanction simply by registering with the right timing.
+    /// Re-reading does not help, because EF returns the same stale tracked instance. So the test
+    /// and the write happen together in one conditional <c>UPDATE</c> the database evaluates.
+    /// </para>
+    /// <para>
+    /// Call this <b>before</b> mutating the tracked <see cref="Worker"/>: it bypasses the change
+    /// tracker, so it refreshes unchanged tracked copies afterwards to keep the caller's
+    /// subsequent edits layered on top of what was just committed rather than on a stale snapshot.
+    /// </para>
+    /// </remarks>
+    Task<bool> ClearAutomaticDisableAsync(string serviceId, CancellationToken ct = default);
+
     /// <summary>Resets a worker's active job count to zero and sets status to Online.</summary>
     /// <param name="id">The worker identifier.</param>
     /// <returns>True if the worker was found and reset; false if not found.</returns>
@@ -105,6 +130,22 @@ public interface IWorkerRepository
     /// <summary>Deletes a worker.</summary>
     /// <param name="id">The worker identifier.</param>
     Task DeleteAsync(Guid id);
+
+    /// <summary>
+    /// Deletes a worker and its paired slicer service unless an administrator has disabled it.
+    /// </summary>
+    /// <param name="id">The worker identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><see langword="true"/> when the worker was deleted.</returns>
+    /// <remarks>
+    /// The stale-worker sweep selects its candidates from an <c>AsNoTracking</c> snapshot and then
+    /// deletes them one at a time, so an administrator can ban a worker after it has been picked
+    /// but before it is removed. An unconditional delete would erase that ban along with the row,
+    /// and the worker could return, register as brand new and come back enabled — the sanction
+    /// laundered by a background job. The exemption is therefore re-checked by the database in the
+    /// same statement that performs the delete, rather than trusted from the snapshot.
+    /// </remarks>
+    Task<bool> DeleteIfNotAdministrativelyDisabledAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>Updates a worker's total processing slot count.</summary>
     /// <param name="id">The worker identifier.</param>
