@@ -236,7 +236,7 @@ public sealed class CalibrationGenerationCapabilityProbe(
             _serviceProvider.GetService<IDbContextFactory<SlicerDbContext>>();
         if (factory is null)
         {
-            return WorkerCompatibilitySnapshot.Empty;
+            return await FindWorkerCompatibilityViaSlicerHostAsync(requiredSlicerVersion, cancellationToken);
         }
 
         try
@@ -348,6 +348,37 @@ public sealed class CalibrationGenerationCapabilityProbe(
                 exception.GetType().Name);
             return WorkerCompatibilitySnapshot.Empty;
         }
+    }
+
+    private async Task<WorkerCompatibilitySnapshot> FindWorkerCompatibilityViaSlicerHostAsync(
+        string? requiredSlicerVersion,
+        CancellationToken cancellationToken)
+    {
+        ISlicerHostCapabilityClient? capabilityClient =
+            _serviceProvider.GetService<ISlicerHostCapabilityClient>();
+        if (capabilityClient is null)
+        {
+            return WorkerCompatibilitySnapshot.Empty;
+        }
+
+        WorkerCompatibilitySnapshotDto snapshot = await capabilityClient.GetWorkerCompatibilityAsync(
+            requiredSlicerVersion,
+            cancellationToken);
+        return ToWorkerCompatibilitySnapshot(snapshot);
+    }
+
+    private static WorkerCompatibilitySnapshot ToWorkerCompatibilitySnapshot(
+        WorkerCompatibilitySnapshotDto snapshot)
+    {
+        CalibrationPinnedSlicerIdentity? pinnedIdentity = snapshot.PinnedIdentity is { } identity
+            ? new CalibrationPinnedSlicerIdentity(
+                identity.Version,
+                identity.Distribution,
+                identity.ContainerDigest,
+                identity.BinarySha256,
+                identity.WorkerId)
+            : null;
+        return new(pinnedIdentity, snapshot.ObservedVersions, snapshot.HasSupportedVersion);
     }
 
     private bool IsSplitDeployment() =>

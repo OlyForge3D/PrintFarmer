@@ -26,6 +26,15 @@ builder.Services.AddSlicerModule(builder.Configuration);
 // Slicer API-layer services (real implementations from Farm.Slicer.Module.Api).
 builder.Services.AddSlicerApiServices(builder.Configuration);
 
+// Mirrors the main API's registration so both processes agree on which slicer versions are
+// eligible for calibration generation (issue #1848). SlicerHostWorkerCompatibilityService already
+// falls back to CalibrationSlicerCompatibilityPolicy.Default when this is not registered.
+builder.Services.AddSingleton(
+    new CalibrationSlicerCompatibilityPolicy(
+        builder.Configuration
+            .GetSection(CalibrationSlicerCompatibilityPolicy.ConfigurationKey)
+            .Get<string[]>()));
+
 // Cross-domain lookup services must follow AddSlicerApiServices so the HTTP adapters win.
 builder.Services.AddCrossDomainLookupServices(builder.Configuration);
 

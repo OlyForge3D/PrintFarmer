@@ -588,7 +588,16 @@ internal sealed class CalibrationGenerationHarness : IDisposable
     {
         ServiceCollection services = [];
         _ = services.AddSingleton(core);
-        _ = services.AddSingleton(slicerFactory);
+        if (options.SlicerFactoryRegistered)
+        {
+            _ = services.AddSingleton(slicerFactory);
+        }
+
+        if (options.CapabilityClient is not null)
+        {
+            _ = services.AddSingleton(options.CapabilityClient);
+        }
+
         _ = services.AddSingleton(promoter);
         if (options.DeterministicCoreAvailable)
         {
@@ -740,6 +749,19 @@ internal sealed record CalibrationGenerationHarnessOptions
 
     /// <summary>Optional test-only decorator around the production model repository.</summary>
     public Func<IModel3DFileRepository, IModel3DFileRepository>? ModelRepositoryDecorator { get; init; }
+
+    /// <summary>
+    /// Whether the harness registers a local <c>IDbContextFactory&lt;SlicerDbContext&gt;</c>, as a
+    /// monolith deployment does. Set to <see langword="false"/> to reproduce a split/microservices
+    /// deployment, where the probe must fall back to <see cref="CapabilityClient"/> (issue #1848).
+    /// </summary>
+    public bool SlicerFactoryRegistered { get; init; } = true;
+
+    /// <summary>
+    /// Optional <see cref="ISlicerHostCapabilityClient"/> substitute to register instead of a local
+    /// slicer factory, exercising the probe's split-deployment delegation path.
+    /// </summary>
+    public ISlicerHostCapabilityClient? CapabilityClient { get; init; }
 }
 
 // CalibrationGenerationFixture lives in CalibrationGenerationFixture.cs so the pinned-worker smoke
