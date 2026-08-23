@@ -420,6 +420,202 @@ public sealed class PrinterCalibrationContextServiceTests
     }
 
     [Fact]
+    public async Task GetCandidatesAsync_WithPrinterAndProfileSilent_FallsBackToCatalogModel()
+    {
+        // #1922: when the printer row and machine profile are both silent, the printer's
+        // catalog model (PrinterModel/PrinterModelToolhead/component definitions) is the
+        // third fallback tier. Fully populating the catalog model must let an otherwise-blank
+        // printer reach eligibility with zero missing inputs and zero manual entry.
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.MaxBuildVolumeX = null;
+        harness.Printer.MaxBuildVolumeY = null;
+        harness.Printer.MaxBuildVolumeZ = null;
+        harness.Printer.BedOriginX = null;
+        harness.Printer.BedOriginY = null;
+        harness.Printer.PrintablePolygonJson = null;
+        harness.Printer.CalibrationMotionType = null;
+        harness.Printer.MaxAcceleration = null;
+        harness.Printer.MaxTravelAcceleration = null;
+        harness.Printer.CalibrationHasHeatedBed = null;
+        harness.Printer.CalibrationHasHeatedChamber = null;
+        harness.Printer.CalibrationHasEnclosure = null;
+        harness.Printer.ActiveToolheadIndex = null;
+        Toolhead toolhead = harness.Printer.Toolheads.Single();
+        toolhead.NozzleDiameter = null;
+        toolhead.NozzleType = null;
+        toolhead.NozzleMaterial = null;
+        toolhead.NozzleMaxTemperature = null;
+        toolhead.NozzleIsHardened = null;
+        toolhead.HotendMaxTemperature = null;
+        toolhead.MaxVolumetricFlow = null;
+        toolhead.DriveType = null;
+        toolhead.IsDirectDrive = null;
+        toolhead.ExtruderGearRatio = null;
+        toolhead.SupportedMaterials = null;
+        toolhead.OffsetX = null;
+        toolhead.OffsetY = null;
+        toolhead.OffsetZ = null;
+        _ = await harness.Db.SaveChangesAsync();
+        harness.Profiles = harness.Profiles with
+        {
+            // Keep the machine profile itself silent on nozzle diameter so this test genuinely
+            // exercises "printer row AND machine profile both silent" for every catalog-coverable
+            // field (#1922), rather than exercising machine-profile-derived precedence.
+            Machine = harness.Profiles.Machine!.WithRawJson("""{"gcode_flavor":"klipper"}"""),
+        };
+        await CalibrationHarness.SeedFullyPopulatedCatalogModelAsync(
+            harness.Db, harness.Printer.ModelId, toolhead.Index);
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.Eligible.Should().BeTrue(
+            string.Join(", ", candidate.RejectionReasons.Select(reason => reason.Code)));
+        _ = candidate.MissingInputs.Should().BeEmpty();
+        _ = candidate.BuildVolume.X.Should().Be(300);
+        _ = candidate.BuildVolume.Y.Should().Be(300);
+        _ = candidate.BuildVolume.Z.Should().Be(300);
+        _ = candidate.BedOrigin.X.Should().Be(0);
+        _ = candidate.BedOrigin.Y.Should().Be(0);
+        _ = candidate.PrintablePolygon.Should().NotBeNull();
+        _ = candidate.MotionType.Should().Be("Cartesian");
+        _ = candidate.MaxAcceleration.Should().Be(5000);
+        _ = candidate.MaxTravelAcceleration.Should().Be(6000);
+        _ = candidate.HasHeatedBed.Should().BeTrue();
+        _ = candidate.HasHeatedChamber.Should().BeFalse();
+        _ = candidate.HasEnclosure.Should().BeTrue();
+        _ = candidate.ActiveToolheadIndex.Should().Be(0);
+        CalibrationToolheadDto activeToolhead = candidate.Toolheads.Should().ContainSingle().Which;
+        _ = activeToolhead.NozzleDiameter.Should().Be(0.6);
+        _ = activeToolhead.NozzleType.Should().Be("HardenedSteel");
+        _ = activeToolhead.NozzleMaterial.Should().Be("HardenedSteel");
+        _ = activeToolhead.NozzleMaxTemperature.Should().Be(500);
+        _ = activeToolhead.NozzleIsHardened.Should().BeTrue();
+        _ = activeToolhead.HotendMaxTemperature.Should().Be(400);
+        _ = activeToolhead.MaxVolumetricFlow.Should().Be(20);
+        _ = activeToolhead.DriveType.Should().Be("bowden");
+        _ = activeToolhead.IsDirectDrive.Should().BeFalse();
+        _ = activeToolhead.ExtruderGearRatio.Should().Be("3:1");
+        _ = activeToolhead.SupportedMaterials.Should().BeEquivalentTo(["ABS"]);
+        _ = activeToolhead.Offset.X.Should().Be(0);
+        _ = activeToolhead.Offset.Y.Should().Be(0);
+        _ = activeToolhead.Offset.Z.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_WithExplicitPrinterRowValues_OverridesCatalogModel()
+    {
+        // #1922 AC: an explicit printer-row value always overrides the catalog default, even
+        // when the catalog model asserts a conflicting value for the same fact.
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        await CalibrationHarness.SeedFullyPopulatedCatalogModelAsync(
+            harness.Db, harness.Printer.ModelId, harness.Printer.Toolheads.Single().Index);
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.Eligible.Should().BeTrue(
+            string.Join(", ", candidate.RejectionReasons.Select(reason => reason.Code)));
+        _ = candidate.BuildVolume.X.Should().Be(250);
+        _ = candidate.MotionType.Should().Be("CoreXY");
+        _ = candidate.MaxAcceleration.Should().Be(10000);
+        _ = candidate.MaxTravelAcceleration.Should().Be(12000);
+        _ = candidate.HasEnclosure.Should().BeFalse();
+        CalibrationToolheadDto activeToolhead = candidate.Toolheads.Should().ContainSingle().Which;
+        _ = activeToolhead.NozzleDiameter.Should().Be(0.4);
+        _ = activeToolhead.NozzleType.Should().Be("Brass");
+        _ = activeToolhead.HotendMaxTemperature.Should().Be(300);
+        _ = activeToolhead.DriveType.Should().Be("direct");
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_WithUnsetActiveToolheadIndex_ResolvesFromCatalogPrimaryToolhead()
+    {
+        // #1922 AC: activeToolheadIndex resolves from PrinterModelToolhead.IsPrimary when the
+        // printer row does not assert one explicitly.
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.ActiveToolheadIndex = null;
+        Toolhead toolhead = harness.Printer.Toolheads.Single();
+        toolhead.Index = 2;
+        _ = await harness.Db.SaveChangesAsync();
+        await CalibrationHarness.SeedFullyPopulatedCatalogModelAsync(
+            harness.Db, harness.Printer.ModelId, primaryToolheadIndex: 2);
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.ActiveToolheadIndex.Should().Be(2);
+        _ = candidate.Eligible.Should().BeTrue(
+            string.Join(", ", candidate.RejectionReasons.Select(reason => reason.Code)));
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_WithSingleToolheadAndUnsetOffsets_DoesNotRequireManualOffsetEntry()
+    {
+        // #1922 AC: single-toolhead printers do not require manual toolhead offsets.
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        Toolhead toolhead = harness.Printer.Toolheads.Single();
+        toolhead.OffsetX = null;
+        toolhead.OffsetY = null;
+        toolhead.OffsetZ = null;
+        _ = await harness.Db.SaveChangesAsync();
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.Eligible.Should().BeTrue(
+            string.Join(", ", candidate.RejectionReasons.Select(reason => reason.Code)));
+        _ = candidate.MissingInputs.Should().NotContain(
+            "toolheads[0].offset.x", "toolheads[0].offset.y", "toolheads[0].offset.z");
+        CalibrationToolheadDto activeToolhead = candidate.Toolheads.Should().ContainSingle().Which;
+        _ = activeToolhead.Offset.X.Should().Be(0);
+        _ = activeToolhead.Offset.Y.Should().Be(0);
+        _ = activeToolhead.Offset.Z.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_WithCatalogFallbackAndOnlyMaxPrintSpeedMissing_ReportsOnlyGenuinelyMissingInput()
+    {
+        // #1922 AC: missingInputs reports only what is genuinely underivable. maxPrintSpeed has
+        // no catalog (or machine-profile) fallback tier, so it must remain the sole reported gap
+        // while every catalog-coverable field resolves silently.
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.MaxBuildVolumeX = null;
+        harness.Printer.MaxBuildVolumeY = null;
+        harness.Printer.MaxBuildVolumeZ = null;
+        harness.Printer.BedOriginX = null;
+        harness.Printer.BedOriginY = null;
+        harness.Printer.PrintablePolygonJson = null;
+        harness.Printer.CalibrationMotionType = null;
+        harness.Printer.MaxAcceleration = null;
+        harness.Printer.MaxTravelAcceleration = null;
+        harness.Printer.CalibrationHasHeatedBed = null;
+        harness.Printer.CalibrationHasHeatedChamber = null;
+        harness.Printer.CalibrationHasEnclosure = null;
+        harness.Printer.MaxPrintSpeed = null;
+        _ = await harness.Db.SaveChangesAsync();
+        await CalibrationHarness.SeedFullyPopulatedCatalogModelAsync(
+            harness.Db, harness.Printer.ModelId, harness.Printer.Toolheads.Single().Index);
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.MissingInputs.Should().Contain("maxPrintSpeed");
+        _ = candidate.MissingInputs.Should().NotContain(
+            "buildVolume.x", "buildVolume.y", "buildVolume.z",
+            "motionType", "maxAcceleration", "maxTravelAcceleration",
+            "hasHeatedBed", "hasHeatedChamber", "hasEnclosure");
+        _ = candidate.Eligible.Should().BeFalse();
+        _ = candidate.RejectionReasons.Select(reason => reason.Code).Should().ContainSingle(
+            code => code == "max_print_speed_missing");
+    }
+
+    [Fact]
     public async Task GetContextAsync_WithExplicitNozzleDiameterOverridingProfile_PrefersOverrideButStillFlagsMismatch()
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
@@ -1100,6 +1296,12 @@ public sealed class PrinterCalibrationContextServiceTests
             Printer printer = CreatePrinter(Now.UtcDateTime);
             printer.Name = name;
             _ = Db.Printers.Add(printer);
+            _ = Db.PrinterModels.Add(new PrinterModel
+            {
+                Id = printer.ModelId,
+                Name = "Unknown Model",
+                ManufacturerId = printer.ManufacturerId,
+            });
             _ = await Db.SaveChangesAsync();
         }
 
@@ -1179,8 +1381,107 @@ public sealed class PrinterCalibrationContextServiceTests
             DateTime nowUtc = new DateTime(2026, 7, 25, 12, 0, 0, DateTimeKind.Utc);
             Printer printer = CreatePrinter(nowUtc);
             _ = db.Printers.Add(printer);
+
+            // Mirrors the real-world invariant (Printer.ModelId is non-nullable and always
+            // points at a real catalog row, defaulting to "Unknown Model" -- see
+            // EfCatalogRepository) that PrinterCalibrationContextService's Model.Toolheads
+            // Include chain (#1922) relies on: Model is a required FK
+            // (PrinterConfiguration.HasOne(p => p.Model)), so Include performs an inner join
+            // and would otherwise silently drop every printer whose ModelId does not resolve.
+            _ = db.PrinterModels.Add(new PrinterModel
+            {
+                Id = printer.ModelId,
+                Name = "Unknown Model",
+                ManufacturerId = printer.ManufacturerId,
+            });
             _ = await db.SaveChangesAsync();
             return new CalibrationHarness(db, printer);
+        }
+
+        /// <summary>
+        /// Seeds a fully-populated catalog model (<see cref="PrinterModel"/> +
+        /// <see cref="PrinterModelToolhead"/> + component definitions) for use as the third
+        /// (#1922) calibration fallback tier. All catalog values are deliberately distinct from
+        /// <see cref="CreatePrinter"/>'s printer-row defaults so tests can prove which tier a
+        /// resolved value actually came from.
+        /// </summary>
+        public static async Task SeedFullyPopulatedCatalogModelAsync(
+            AppDbContext db,
+            Guid modelId,
+            int primaryToolheadIndex)
+        {
+            NozzleMaterial nozzleMaterial = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "HardenedSteel",
+                IsHardened = true,
+                DefaultMaxTemp = 500,
+                IsBuiltIn = true,
+            };
+            NozzleModelDefinition nozzle = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "Catalog nozzle",
+                ManufacturerId = Guid.NewGuid(),
+                Diameter = 0.6,
+                MaxTemp = 500,
+                NozzleMaterialId = nozzleMaterial.Id,
+                NozzleMaterial = nozzleMaterial,
+            };
+            HotendModelDefinition hotend = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "Catalog hotend",
+                ManufacturerId = Guid.NewGuid(),
+                MaxTemp = 400,
+                MaxFlowRate = 20,
+            };
+            ExtruderModelDefinition extruder = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "Catalog extruder",
+                ManufacturerId = Guid.NewGuid(),
+                GearRatio = "3:1",
+                IsDirectDrive = false,
+            };
+            PrinterModel? model = await db.PrinterModels.FindAsync(modelId);
+            if (model is null)
+            {
+                model = new PrinterModel { Id = modelId, ManufacturerId = Guid.NewGuid() };
+                _ = db.PrinterModels.Add(model);
+            }
+
+            model.Name = "Catalog model";
+            model.MotionType = (int)CalibrationMotionType.Cartesian;
+            model.MaxX = 300;
+            model.MaxY = 300;
+            model.MaxZ = 300;
+            model.HasHeatedBed = true;
+            model.HasEnclosure = true;
+            model.HasHeatedChamber = false;
+            model.MaxAcceleration = 5000;
+            model.MaxTravelAcceleration = 6000;
+            PrinterModelToolhead toolhead = new()
+            {
+                Id = Guid.NewGuid(),
+                PrinterModelId = modelId,
+                Name = "Catalog toolhead",
+                Index = primaryToolheadIndex,
+                IsPrimary = true,
+                NozzleModelId = nozzle.Id,
+                NozzleModel = nozzle,
+                HotendModelId = hotend.Id,
+                HotendModel = hotend,
+                ExtruderModelId = extruder.Id,
+                ExtruderModel = extruder,
+                SupportedMaterials = ["ABS"],
+            };
+            _ = db.NozzleMaterials.Add(nozzleMaterial);
+            _ = db.NozzleModelDefinitions.Add(nozzle);
+            _ = db.HotendModelDefinitions.Add(hotend);
+            _ = db.ExtruderModelDefinitions.Add(extruder);
+            _ = db.PrinterModelToolheads.Add(toolhead);
+            _ = await db.SaveChangesAsync();
         }
 
         public PrinterStatusSnapshot CreateStatus(

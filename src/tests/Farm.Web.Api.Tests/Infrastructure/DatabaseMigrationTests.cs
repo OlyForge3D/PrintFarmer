@@ -50,7 +50,8 @@ public sealed class DatabaseMigrationTests
             "20260816094836_RenameHasHeatedChamberToCalibrationHasHeatedChamber",
             "20260820064025_AddQueueRetentionIndexes",
             "20260821152002_AddNozzleHardnessOverride",
-            "20260821205923_AddNozzleMaterialCatalog");
+            "20260821205923_AddNozzleMaterialCatalog",
+            "20260823210035_AddPrinterModelAccelerationFields");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -404,7 +405,8 @@ public sealed class DatabaseMigrationTests
             "20260816094836_RenameHasHeatedChamberToCalibrationHasHeatedChamber",
             "20260820064025_AddQueueRetentionIndexes",
             "20260821152002_AddNozzleHardnessOverride",
-            "20260821205923_AddNozzleMaterialCatalog");
+            "20260821205923_AddNozzleMaterialCatalog",
+            "20260823210035_AddPrinterModelAccelerationFields");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -926,6 +928,7 @@ public sealed class DatabaseMigrationTests
                 "20260820051034_AddQueueRetentionIndexes",
                 "20260821151937_AddNozzleHardnessOverride",
                 "20260821205704_AddNozzleMaterialCatalog",
+                "20260823205528_AddPrinterModelAccelerationFields",
             ]
             :
             [
@@ -941,6 +944,7 @@ public sealed class DatabaseMigrationTests
                 "20260820051046_AddQueueRetentionIndexes",
                 "20260821151949_AddNozzleHardnessOverride",
                 "20260821205829_AddNozzleMaterialCatalog",
+                "20260823205544_AddPrinterModelAccelerationFields",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");
