@@ -2,6 +2,11 @@ import { test, expect } from '../fixtures/emulator-setup';
 
 const TEST_TAG_NAME = `E2E Test Tag ${Date.now()}`;
 
+// The API normalizes tag names to PascalCase on creation (see TagService.ToPascalCase),
+// e.g. "E2E Test Tag 123" -> "E2eTestTag123". Assertions after creation must use the
+// normalized name returned by the API, not the raw input string.
+let createdTagName = TEST_TAG_NAME;
+
 /**
  * Admin Tags CRUD E2E Tests — Emulator-backed
  *
@@ -81,17 +86,28 @@ test.describe('Admin Tags — Emulator', () => {
 
     const saveButton = dialog.getByRole('button', { name: 'Create tag', exact: true });
     await expect(saveButton).toBeVisible();
+    const createResponsePromise = page.waitForResponse((response) =>
+      response.request().method() === 'POST'
+      && /\/api\/tags\/?$/.test(new URL(response.url()).pathname)
+    );
     await saveButton.click();
 
+    // The API normalizes the submitted name to PascalCase (e.g. "E2E Test Tag 123"
+    // -> "E2eTestTag123"); use the value it returns rather than the raw input.
+    const createResponse = await createResponsePromise;
+    expect(createResponse.ok()).toBe(true);
+    const createdTag = await createResponse.json();
+    createdTagName = createdTag.name;
+
     await expect(dialog).toBeHidden();
-    await expect(page.getByRole('cell', { name: TEST_TAG_NAME, exact: true })).toBeVisible();
+    await expect(page.getByRole('cell', { name: createdTagName, exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
 
   test('tags have color indicators', async ({ page }) => {
     const tagRow = page.getByRole('row').filter({
-      has: page.getByRole('cell', { name: TEST_TAG_NAME, exact: true }),
+      has: page.getByRole('cell', { name: createdTagName, exact: true }),
     });
     await expect(tagRow).toBeVisible();
     expect(await tagRow.locator('div[style*="background-color"]').count()).toBeGreaterThan(0);
@@ -119,7 +135,7 @@ test.describe('Admin Tags — Emulator', () => {
   });
 
   test('can delete a tag', async ({ page }) => {
-    const tagCell = page.getByRole('cell', { name: TEST_TAG_NAME, exact: true });
+    const tagCell = page.getByRole('cell', { name: createdTagName, exact: true });
     const tagRow = page.getByRole('row').filter({ has: tagCell });
     await expect(tagRow).toBeVisible();
 
@@ -133,7 +149,7 @@ test.describe('Admin Tags — Emulator', () => {
 
     await page.reload();
     await page.waitForLoadState('networkidle');
-    await expect(page.getByRole('cell', { name: TEST_TAG_NAME, exact: true })).toHaveCount(0);
+    await expect(page.getByRole('cell', { name: createdTagName, exact: true })).toHaveCount(0);
 
     expect(criticalErrors()).toHaveLength(0);
   });
