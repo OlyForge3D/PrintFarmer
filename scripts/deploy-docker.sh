@@ -6456,6 +6456,93 @@ prepare_external_storage_directories() {
     fi
 }
 
+# Pre-create the OrcaSlicer worker's per-job temp directory (and the previous-version
+# worker's temp directory, when enabled) with permissions the immutable worker container
+# can write to.
+#
+# Unlike EXTERNAL_MODELS_PATH/EXTERNAL_GCODE_PATH/EXTERNAL_PROFILES_PATH/etc. (handled by
+# prepare_external_storage_directories(), gated behind USE_EXTERNAL_STORAGE=yes), the worker's
+# /app/temp bind mount is NOT optional: docker-compose.orcaslicer-worker.yml (and the
+# -previous variant) always bind-mount a host directory there, falling back to
+# .volumes/printfarmer-orcaslicer-temp when EXTERNAL_ORCA_WORKER_TEMP is unset, regardless of
+# USE_EXTERNAL_STORAGE. If that host directory does not already exist, Docker auto-creates it
+# as root:root when the bind mount is first used, which shadows the appuser:appuser ownership
+# the image sets on /app/temp at build time (Dockerfile.multistage, orcaslicer-worker stage).
+#
+# The main API container recovers from the same root-owned-bind-mount situation because its
+# entrypoint.sh runs as root and chowns mounted volumes before dropping to appuser via gosu.
+# The OrcaSlicer worker intentionally has no such entrypoint -- it execs
+# `dotnet Farm.OrcaSlicer.Worker.dll` directly as `USER appuser` (read_only root filesystem,
+# cap_drop: ALL) as part of its immutable/non-root security posture -- so it has no
+# opportunity to self-heal permissions at container start. Every per-job temp directory
+# creation then fails with UnauthorizedAccessException (issue #1908).
+#
+# This must run whenever ENABLE_ORCA_WORKER=yes, independent of USE_EXTERNAL_STORAGE.
+prepare_orcaslicer_worker_temp_directories() {
+    if [ "${ENABLE_ORCA_WORKER:-no}" != "yes" ]; then
+        return 0
+    fi
+
+    print_header "📁 Pre-creating OrcaSlicer Worker Temp Directories"
+
+    local paths_created=0
+    local paths_failed=0
+
+    # Array of paths to create: "path:description"
+    local worker_paths_to_create=()
+
+    local orca_worker_temp="${EXTERNAL_ORCA_WORKER_TEMP:-.volumes/printfarmer-orcaslicer-temp}"
+    worker_paths_to_create+=("${orca_worker_temp}:OrcaSlicer Worker Temp")
+
+    if [ "${ENABLE_ORCA_WORKER_PREVIOUS:-no}" = "yes" ]; then
+        local orca_worker_previous_temp="${EXTERNAL_ORCA_WORKER_PREVIOUS_TEMP:-.volumes/printfarmer-orcaslicer-previous-temp}"
+        worker_paths_to_create+=("${orca_worker_previous_temp}:Previous OrcaSlicer Worker Temp")
+    fi
+
+    for path_entry in "${worker_paths_to_create[@]}"; do
+        local path="${path_entry%:*}"
+        local desc="${path_entry#*:}"
+
+        if [ -z "$path" ]; then
+            continue
+        fi
+
+        if [ ! -d "$path" ]; then
+            print_info "Creating directory: [$desc] $path"
+            if ! mkdir -p "$path" 2>/dev/null; then
+                print_error "Failed to create directory: $path"
+                ((paths_failed++))
+                continue
+            fi
+            print_success "Created: $path"
+            ((paths_created++))
+        else
+            print_info "Directory already exists: [$desc] $path"
+        fi
+
+        # Fix permissions to 775 (rwxrwxr-x) so the container's non-root appuser
+        # (UID 1001) can write per-job temp directories even though the host directory
+        # is not owned by that UID.
+        if ! chmod 775 "$path" 2>/dev/null; then
+            print_warning "Could not set permissions on $path - may have restricted access"
+            ((paths_failed++))
+            continue
+        fi
+
+        print_success "  Permissions set to 775 (rwxrwxr-x) ✓"
+    done
+
+    if [ $paths_failed -gt 0 ]; then
+        print_warning "Failed to prepare $paths_failed OrcaSlicer worker temp directories"
+        print_warning "⚠️  Slice jobs may fail with UnauthorizedAccessException if permissions are not fixed."
+        print_info "Fix manually: mkdir -p <path> && chmod 775 <path>"
+        return 1
+    fi
+
+    print_success "✓ OrcaSlicer worker temp directories ready ($paths_created created)"
+    return 0
+}
+
 # Prepare pgAdmin volume directory and auto-configuration
 prepare_pgadmin_setup() {
     # Skip if pgAdmin is not enabled
@@ -7168,6 +7255,11 @@ redeploy_existing() {
     # CRITICAL: Must happen BEFORE docker compose up
     prepare_external_storage_directories || print_warning "Some external storage directories could not be prepared - Docker will attempt to create them"
     
+    # Pre-create the OrcaSlicer worker's temp directory(ies). Unlike external storage,
+    # this bind mount is not optional when the worker is enabled, so it runs regardless
+    # of USE_EXTERNAL_STORAGE (issue #1908).
+    prepare_orcaslicer_worker_temp_directories || print_warning "OrcaSlicer worker temp directories could not be prepared - Docker will attempt to create them"
+    
     # Prepare pgAdmin volume and configuration
     prepare_pgadmin_setup || print_warning "pgAdmin setup could not be fully prepared"
     
@@ -7561,6 +7653,11 @@ main() {
     # This prevents Docker from creating them as root when bind-mounting
     # CRITICAL: Must happen BEFORE docker compose up
     prepare_external_storage_directories || print_warning "Some external storage directories could not be prepared - Docker will attempt to create them"
+    
+    # Pre-create the OrcaSlicer worker's temp directory(ies). Unlike external storage,
+    # this bind mount is not optional when the worker is enabled, so it runs regardless
+    # of USE_EXTERNAL_STORAGE (issue #1908).
+    prepare_orcaslicer_worker_temp_directories || print_warning "OrcaSlicer worker temp directories could not be prepared - Docker will attempt to create them"
     
     # Prepare pgAdmin volume and configuration
     prepare_pgadmin_setup || print_warning "pgAdmin setup could not be fully prepared"
