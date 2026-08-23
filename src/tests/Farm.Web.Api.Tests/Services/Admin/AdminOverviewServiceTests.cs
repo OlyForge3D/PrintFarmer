@@ -2,8 +2,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Web.Api.Services.Admin;
 using FluentAssertions;
