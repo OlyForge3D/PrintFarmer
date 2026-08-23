@@ -41,8 +41,16 @@ test.describe('Header narrow viewport clipping — Emulator', () => {
       // All three controls named in the issue's acceptance criteria must be
       // visible and fully within the viewport — none of these are optional,
       // so no assertion here is skipped based on a runtime visibility check.
+      // The accessible name is assembled by the browser from two sibling
+      // <span>s ("System" and ", Healthy health"), and the accname
+      // computation inserts a normalizing space between concatenated
+      // sibling text nodes — so the rendered name is
+      // "System , Healthy health" (space before the comma), not
+      // "System, Healthy health". Tolerate that boundary whitespace with
+      // `\s*` rather than requiring an exact literal, since it's an
+      // artifact of the DOM structure, not semantic content.
       const systemStatusButton = header.getByRole('button', {
-        name: /^System(?:, (?:Healthy|Degraded|Critical) health| status degraded, view system status)$/i,
+        name: /^System(?:\s*, (?:Healthy|Degraded|Critical) health| status degraded, view system status)$/i,
       });
       const notificationButton = header.getByRole('button', {
         name: /^Notifications(?: \(\d+ unread\))?$/,
@@ -103,8 +111,11 @@ test.describe('Header narrow viewport clipping — Emulator', () => {
     expect(hasHorizontalScroll, 'Unexpected horizontal scroll at 768px').toBeFalsy();
 
     const header = page.locator('header:visible');
+    // See the comment above the same construct in the narrow-viewport test
+    // block: the browser inserts a normalizing space before the comma when
+    // concatenating the sibling "System" and ", Healthy health" text nodes.
     const systemStatusButton = header.getByRole('button', {
-      name: /^System(?:, (?:Healthy|Degraded|Critical) health| status degraded, view system status)$/i,
+      name: /^System(?:\s*, (?:Healthy|Degraded|Critical) health| status degraded, view system status)$/i,
     });
     const accountMenuButton = header.getByRole('button', { name: / account menu$/i });
     await expect(accountMenuButton, 'Account menu button not visible at 768px').toBeVisible();
