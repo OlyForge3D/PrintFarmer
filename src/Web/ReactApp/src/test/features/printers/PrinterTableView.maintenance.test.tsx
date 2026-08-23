@@ -20,6 +20,10 @@ vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
   useAllAutoDispatchStatuses: () => useAllAutoDispatchStatusesMock(),
 }));
 
+vi.mock('@/features/printers/components/CalibrationSetupPrompt', () => ({
+  CalibrationSetupPrompt: () => null,
+}));
+
 describe('PrinterTableView - maintenance button', () => {
   afterEach(() => {
     vi.clearAllMocks();

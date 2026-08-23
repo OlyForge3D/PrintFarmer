@@ -94,6 +94,10 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
   FailureDetectionMonitoringBadge: () => null,
 }));
 
+vi.mock('@/features/printers/components/CalibrationSetupPrompt', () => ({
+  CalibrationSetupPrompt: () => null,
+}));
+
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({
   FailureDetectionMonitoringSummary: () => null,
 }));

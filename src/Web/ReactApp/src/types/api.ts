@@ -1598,6 +1598,27 @@ export interface FirmwareDetectionResultDto {
 }
 
 /**
+ * Fleet-wide calibration eligibility snapshot for one printer, as returned by
+ * `GET /api/printers/calibration-candidates` (issue #1923). A leaner sibling
+ * of `CalibrationContextDto` — it omits the per-printer-only audit/snapshot
+ * fields (e.g. `calibrationHardwareVerifiedAtUtc`) that require a single
+ * printer id + slicer type round trip, but carries enough of the same
+ * eligibility signal to drive list-level UI without an N+1 fetch.
+ */
+export interface CalibrationCandidateDto {
+  id: string;
+  name: string;
+  eligible: boolean;
+  missingInputs: string[];
+  rejectionReasons: CalibrationRejectionReasonDto[];
+  activeToolheadIndex?: number | null;
+  excludedRegions?: CalibrationExcludedRegionDto[] | null;
+  firmware: CalibrationFirmwareIdentityDto;
+  slicer?: CalibrationSlicerIdentityDto | null;
+  toolheads: CalibrationToolheadDto[];
+}
+
+/**
  * Read-only calibration-eligibility snapshot for a printer, combining
  * profile-owned facts (#1614/#1615) with the residual manual fields this PR
  * exposes. Used to reflect eligibility changes after a calibration-setup
