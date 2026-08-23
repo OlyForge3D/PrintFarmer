@@ -41,6 +41,15 @@ export function useSliceJobProgress(jobId: string | null): SliceJobProgressState
   // would stay permanently "satisfied" once any non-terminal event had ever
   // arrived, even across a reconnect that missed the terminal one.
   const hasLiveEventRef = useRef(false);
+  // Monotonic token identifying the most recent (re)subscribe attempt. Each
+  // call to reconcileStatus() captures the token value current at its own
+  // start; if a newer (re)subscribe attempt starts (and bumps the token)
+  // before an older reconcileStatus's REST call resolves, the older
+  // response is discarded even though it is not the *last* one to resolve.
+  // Without this, a slow response from attempt A racing a fast reconnect
+  // into attempt B could land after B's correct result and clobber it back
+  // to stale data.
+  const reconcileAttemptRef = useRef(0);
 
   // React-recommended "adjust state during render" pattern for prop changes
   if (jobId !== prevJobId) {
@@ -81,11 +90,12 @@ export function useSliceJobProgress(jobId: string | null): SliceJobProgressState
     // most recent (re)subscribe attempt, so a real-time event — past or
     // still to come — always wins.
     const reconcileStatus = async () => {
+      const attempt = ++reconcileAttemptRef.current;
       try {
         const current = await sliceJobService.getJobStatus(jobId);
-        if (cancelled || hasLiveEventRef.current) return;
+        if (cancelled || hasLiveEventRef.current || attempt !== reconcileAttemptRef.current) return;
         setState(prev => {
-          if (hasLiveEventRef.current) return prev;
+          if (hasLiveEventRef.current || attempt !== reconcileAttemptRef.current) return prev;
           return {
             ...prev,
             status: current.status,

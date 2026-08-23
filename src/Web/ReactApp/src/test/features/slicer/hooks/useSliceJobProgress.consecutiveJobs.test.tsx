@@ -348,4 +348,85 @@ describe('useSliceJobProgress across consecutive jobs (issue #1912)', () => {
     await Promise.resolve();
     expect(result.current.status).toBe('Failed');
   });
+
+  it('never lets an older, still-in-flight reconciliation response overwrite a newer one after a fast reconnect', async () => {
+    // Distinct from both races above: here there are TWO reconcileStatus()
+    // calls in flight for the same job (initial subscribe, then a
+    // reconnect-driven resubscribe that fires before the first REST call
+    // has resolved). The reconnect's response resolves first and is
+    // correct ('Failed'); the original, slower response then resolves
+    // *after* it with stale data. Without an attempt token, nothing stops
+    // the older response from winning simply because it resolved last.
+    const pendingResolvers: Array<(value: {
+      id: string;
+      status: string;
+      progressPercent: number;
+      queuedAt: string;
+    }) => void> = [];
+    mockGetJobStatus.mockImplementation(
+      () =>
+        new Promise(resolve => {
+          pendingResolvers.push(resolve);
+        }),
+    );
+
+    const { result } = renderHook(() => useSliceJobProgress('job-2'));
+
+    await waitFor(() => {
+      expect(hubTestState.connection.on).toHaveBeenCalledWith('slicejobevent', expect.any(Function));
+    });
+    await waitFor(() => {
+      expect(mockGetJobStatus).toHaveBeenCalledTimes(1);
+    });
+
+    // Reconnect fires before the initial reconcileStatus() call resolves,
+    // starting a second, independent reconcileStatus() call.
+    const reconnectedHandler = hubTestState.connection.onreconnected.mock.calls[0]?.[0] as
+      | ((connectionId: string | undefined) => Promise<void>)
+      | undefined;
+    expect(reconnectedHandler).toBeDefined();
+
+    await act(async () => {
+      void reconnectedHandler!('new-connection-id');
+      // Let the resubscribe chain progress up to its own await (the REST
+      // call), without waiting for that REST call to resolve.
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(mockGetJobStatus).toHaveBeenCalledTimes(2);
+    });
+
+    // The newer (reconnect) attempt resolves first, with the correct
+    // terminal status.
+    act(() => {
+      pendingResolvers[1]({
+        id: 'job-2',
+        status: 'Failed',
+        progressPercent: 0,
+        queuedAt: new Date().toISOString(),
+      });
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('Failed');
+    });
+
+    // The older, initial-subscribe attempt resolves afterwards with stale
+    // data — it must be discarded, not applied just because it settled last.
+    await act(async () => {
+      pendingResolvers[0]({
+        id: 'job-2',
+        status: 'Queued',
+        progressPercent: 0,
+        queuedAt: new Date().toISOString(),
+      });
+      // Give the resolved promise's continuation (including its setState
+      // call) a chance to run before asserting, so a real regression
+      // reliably shows up instead of racing the assertion.
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.status).toBe('Failed');
+  });
 });
