@@ -222,6 +222,30 @@ describe('CalibrationSetupModal', () => {
     expect(await screen.findByText(/Calibration setup needed/i)).toBeInTheDocument();
   });
 
+  it('still reads as onboarding, not in-progress, when the family is known but the version is whitespace-only', async () => {
+    // Isolates the version-side of the parity fix from the family-side: a known,
+    // non-"Unknown" family paired with a whitespace-only version string must still fail
+    // the backend's !string.IsNullOrWhiteSpace(printer.FirmwareVersion) gate, so
+    // firmwareDetected must require version.trim().length > 0, not just Boolean(version).
+    renderModal({
+      missingInputs: ['slicer.machineProfileId'],
+      firmware: {
+        family: 'Klipper',
+        gcodeDialect: null,
+        detectionSource: null,
+        version: '   ',
+        detectionVersion: null,
+        detectionConfidence: null,
+        detectedAtUtc: null,
+        verified: false,
+      },
+      calibrationHardwareVerifiedAtUtc: null,
+    });
+    await waitFor(() => expect(mockGetCalibrationContext).toHaveBeenCalledWith('printer-1'));
+
+    expect(await screen.findByText(/Calibration setup needed/i)).toBeInTheDocument();
+  });
+
   it('does not surface profile-derivable fields as blockers before profiles are selected', async () => {
     renderModal({
       missingInputs: ['buildVolume.x', 'slicer.machineProfileId'],
