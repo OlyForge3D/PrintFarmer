@@ -111,6 +111,124 @@ public class PrintJobManagementServiceQueueMappingTests
     }
 
     [Fact]
+    public async Task GetAllQueuedJobsAsync_GcodeFileWithoutThumbnailMetadata_OmitsThumbnailUrl()
+    {
+        // Regression test for #1911: a queued gcode file with no embedded thumbnail
+        // metadata (ThumbnailFileName is null) must NOT get a thumbnail URL. Building
+        // one unconditionally makes the frontend request a URL that 404s and renders
+        // the browser's broken-image icon instead of the placeholder.
+        GcodeFile fileWithoutThumbnail = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "no-thumbnail.gcode",
+            FileName = "no-thumbnail.gcode",
+            ThumbnailFileName = null,
+        };
+
+        PrintJob job = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "no-thumbnail-print",
+            Status = PrintJobStatus.Queued,
+            GcodeFile = fileWithoutThumbnail,
+            QueuedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetFilteredJobsAsync(
+                It.IsAny<PrintJobStatus?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([job]);
+
+        Mock<IStoredFileOperationsService> fileOperations = new();
+        fileOperations
+            .Setup(f => f.BuildGcodeThumbnailUrl(It.IsAny<Guid>()))
+            .Returns<Guid>(id => $"/api/gcode-files/thumbnail/{id}");
+
+        PrintJobManagementService service = CreateService(repository, fileOperations: fileOperations);
+
+        List<Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobWithFileMetaDto> result =
+            await service.GetAllQueuedJobsAsync();
+
+        Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobWithFileMetaDto dto = Assert.Single(result);
+        Assert.Null(dto.GcodeFile.ThumbnailUrl);
+
+        // MapToQueuedPrintJobDto (the sibling mapping method) sets its own,
+        // independent ThumbnailUrl on QueuedPrintJobDto — it must be gated the
+        // same way as QueueGcodeFileMetaDto.ThumbnailUrl above.
+        Assert.Null(dto.Job.ThumbnailUrl);
+    }
+
+    [Fact]
+    public async Task GetAllQueuedJobsAsync_GcodeFileWithThumbnailMetadata_BuildsThumbnailUrl()
+    {
+        // Companion to the regression test above: a gcode file that DOES have
+        // embedded thumbnail metadata must still get a thumbnail URL.
+        Guid fileId = Guid.NewGuid();
+        GcodeFile fileWithThumbnail = new()
+        {
+            Id = fileId,
+            Name = "with-thumbnail.gcode",
+            FileName = "with-thumbnail.gcode",
+            ThumbnailFileName = "with-thumbnail.png",
+        };
+
+        PrintJob job = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "with-thumbnail-print",
+            Status = PrintJobStatus.Queued,
+            GcodeFile = fileWithThumbnail,
+            QueuedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetFilteredJobsAsync(
+                It.IsAny<PrintJobStatus?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([job]);
+
+        Mock<IStoredFileOperationsService> fileOperations = new();
+        fileOperations
+            .Setup(f => f.BuildGcodeThumbnailUrl(It.IsAny<Guid>()))
+            .Returns<Guid>(id => $"/api/gcode-files/thumbnail/{id}");
+
+        PrintJobManagementService service = CreateService(repository, fileOperations: fileOperations);
+
+        List<Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobWithFileMetaDto> result =
+            await service.GetAllQueuedJobsAsync();
+
+        Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobWithFileMetaDto dto = Assert.Single(result);
+        Assert.Equal($"/api/gcode-files/thumbnail/{fileId}", dto.GcodeFile.ThumbnailUrl);
+
+        // Companion assertion: MapToQueuedPrintJobDto's own ThumbnailUrl must
+        // also be populated when thumbnail metadata is present.
+        Assert.Equal($"/api/gcode-files/thumbnail/{fileId}", dto.Job.ThumbnailUrl);
+    }
+
+    [Fact]
     public async Task GetAllQueuedJobsAsync_ActiveView_DoesNotApplyQueuedDateWindow()
     {
         // The active queue reflects current state; a job still waiting must appear regardless of
@@ -591,7 +709,8 @@ public class PrintJobManagementServiceQueueMappingTests
         IPartOutputSnapshotService? snapshots = null,
         IStoragePathService? storage = null,
         AppDbContext? appDbContext = null,
-        IDispatchClaimService? dispatchClaimService = null)
+        IDispatchClaimService? dispatchClaimService = null,
+        Mock<IStoredFileOperationsService>? fileOperations = null)
     {
         return new PrintJobManagementService(
             repository.Object,
@@ -599,7 +718,7 @@ public class PrintJobManagementServiceQueueMappingTests
             Mock.Of<IPrintersService>(),
             storage ?? Mock.Of<IStoragePathService>(),
             Mock.Of<IHubContext<PrinterHub>>(),
-            Mock.Of<IStoredFileOperationsService>(),
+            fileOperations?.Object ?? Mock.Of<IStoredFileOperationsService>(),
             Mock.Of<IPrinterStatusCacheReader>(),
             notificationService: Mock.Of<INotificationService>(),
             retryService: Mock.Of<IRetryService>(),

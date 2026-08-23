@@ -407,6 +407,45 @@ describe("QueueJobsTable Component", () => {
     expect(container.querySelector('img[src="http://printer/other-job.png"]')).not.toBeInTheDocument();
   });
 
+  it("should render the placeholder, not a broken <img>, when the gcode file has no thumbnail metadata (#1911)", () => {
+    const mockHandlers = {
+      onPause: vi.fn(),
+      onResume: vi.fn(),
+      onCancel: vi.fn(),
+      onPriority: vi.fn(),
+    };
+
+    // A queued/idle job whose gcode file has no embedded thumbnail: the backend
+    // must omit gcodeFile.thumbnailUrl entirely (not point at a 404), and the
+    // row must fall back to the placeholder rather than an <img> tag.
+    const jobWithoutThumbnail = createMockJob({
+      id: "no-thumb-1",
+      job: {
+        id: "no-thumb-1",
+        name: "no-thumbnail-print",
+        gcodeFileId: "file-no-thumb",
+        status: "Queued",
+        priority: PrintJobPriority.Low,
+        queuePosition: 1,
+        createdAtUtc: new Date().toISOString(),
+        updatedAtUtc: new Date().toISOString(),
+        queuedAtUtc: new Date().toISOString(),
+      },
+      gcodeFile: {
+        id: "file-no-thumb",
+        fileName: "no-thumbnail-print.gcode",
+        fileSizeBytes: 0,
+        createdAtUtc: new Date().toISOString(),
+        // thumbnailUrl intentionally omitted — no embedded thumbnail metadata.
+      },
+    });
+
+    const { container } = render(<QueueJobsTable jobs={[jobWithoutThumbnail]} {...mockHandlers} />);
+
+    expect(container.querySelector("img")).not.toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
   it("should call onEdit when the detail row is clicked", () => {
     const onEdit = vi.fn();
     const mockHandlers = {

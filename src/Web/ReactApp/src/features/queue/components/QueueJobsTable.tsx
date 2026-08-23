@@ -208,6 +208,7 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
         ? printThumbnailByPrinterId?.[livePrinterId]
         : undefined;
     const thumbnailUrl = jobWrapper.gcodeFile?.thumbnailUrl || liveThumbnailUrl;
+    const [thumbnailFailedUrl, setThumbnailFailedUrl] = useState<string | undefined>();
     const estimatedCost = job.estimatedCost;
     const deadlineAtUtc = job.deadlineAtUtc;
     const deadlineState = getDeadlineState(deadlineAtUtc, status);
@@ -253,11 +254,12 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
           {/* Thumbnail */}
           <td className="px-2 pt-2.5 pb-1 align-middle">
             <div className="flex items-center justify-center">
-              {thumbnailUrl ? (
+              {thumbnailUrl && thumbnailUrl !== thumbnailFailedUrl ? (
                 <img
                   src={thumbnailUrl}
                   alt=""
                   className="w-10 h-10 min-w-10 rounded object-cover bg-pf-bg-2"
+                  onError={() => setThumbnailFailedUrl(thumbnailUrl)}
                 />
               ) : (
                 <div className="w-10 h-10 min-w-10 rounded bg-pf-bg-2 flex items-center justify-center text-pf-text-tertiary text-xs">
