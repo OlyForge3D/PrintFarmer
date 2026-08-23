@@ -139,6 +139,13 @@ test.describe('Printer Status — Moonraker', () => {
     // real page load — this asserts the actual `isLoading` skeleton branch
     // rather than assuming it flashes by fast enough to "probably" be seen.
     const printersCollectionRoute = '**/api/printers*';
+    // Track the exact delayed request's own completion. This is what lets us
+    // safely unroute below without racing this handler's own pending
+    // `route.continue()` call (see comment near `page.unroute` for why that
+    // race existed — issue #1895).
+    const printersResponse = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === '/api/printers'
+    );
     await page.route(printersCollectionRoute, async (route) => {
       if (new URL(route.request().url()).pathname !== '/api/printers') {
         await route.continue();
@@ -153,6 +160,16 @@ test.describe('Printer Status — Moonraker', () => {
     const loadingRegion = page.locator('[role="status"][aria-busy="true"]');
     await expect(loadingRegion).toBeVisible();
 
+    // Wait for the delayed handler's own `route.continue()` to actually
+    // finish before unrouting. Unrouting while that continue() call is still
+    // pending races Playwright's route-cleanup (triggered by `unroute`)
+    // against this handler's in-flight completion: the cleanup settles the
+    // route first, and this handler's own subsequent `route.continue()` call
+    // then throws "Route is already handled!" — an unhandled rejection that
+    // surfaces asynchronously and was bleeding into the *next* test
+    // (issue #1895). Awaiting the response here guarantees the handler has
+    // already completed before we unroute.
+    await printersResponse;
     await page.unroute(printersCollectionRoute);
   });
 
