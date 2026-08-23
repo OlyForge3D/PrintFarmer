@@ -13,6 +13,7 @@ import { slicerProfilesService } from '../../../../services/slicerProfilesServic
 import { slicerRegistry } from '../../../../services/slicerRegistry';
 import { slicerService } from '@/services/slicerService';
 import { sliceJobService } from '@/services/sliceJobService';
+import { toast } from 'sonner';
 
 // Mutable slicer-mode ref so individual describes can opt into Advanced mode.
 // Hoisted because vi.mock factories run before module-body initialization.
@@ -222,6 +223,15 @@ vi.mock('@/features/slicer/hooks/useSlicerMode', () => ({
     setMode: vi.fn(),
   }),
   SLICER_MODE_STORAGE_KEY: 'pf.slicerMode',
+}));
+
+// Mock sonner toast (used by the "Use URL" reachability check, issue #1910)
+vi.mock('sonner', () => ({
+  toast: {
+    loading: vi.fn(() => 'toast-id'),
+    success: vi.fn(),
+    error: vi.fn(),
+  },
 }));
 
 // Mock asset service
@@ -1237,6 +1247,98 @@ describe('NewSliceJobPage', () => {
         expect(new Set(ids).size).toBe(2);
         expect(ids).toContain(firstInstanceId);
       });
+    });
+  });
+
+  describe('Enter URL (issue #1910)', () => {
+    // Regression tests: the "Use URL" action used to close the dialog
+    // without validating input, sending a request, or adding anything to the
+    // plate — a silent no-op. See NewSliceJobPage's handleUrlModelSubmit and
+    // SearchablePickerModal's isValidModelSourceUrl/handleUrlConfirm.
+    async function renderAndOpenUrlTab() {
+      renderWithProviders(<NewSliceJobPage />);
+      await waitFor(() => {
+        expect(screen.getByTestId('printer-select')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+      await waitFor(() => {
+        expect(screen.getByTestId('slicer-workspace')).toBeInTheDocument();
+      });
+      act(() => {
+        fireEvent.click(screen.getByRole('button', { name: /add model/i }));
+      });
+      const urlTabButton = await screen.findByRole('button', { name: 'Enter URL' });
+      act(() => {
+        fireEvent.click(urlTabButton);
+      });
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('rejects malformed input with an inline error and neither sends a request nor adds a model', async () => {
+      const fetchSpy = vi.fn();
+      vi.stubGlobal('fetch', fetchSpy);
+
+      await renderAndOpenUrlTab();
+
+      fireEvent.change(screen.getByLabelText('File URL'), { target: { value: 'not a url' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toHaveTextContent(/enter a valid/i);
+      });
+      // Dialog stays open — the URL input is still present, unlike the
+      // pre-fix behaviour where the dialog closed regardless of input.
+      expect(screen.getByLabelText('File URL')).toBeInTheDocument();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? []).toHaveLength(0);
+    });
+
+    it('adds the model to the plate and shows a success toast for a reachable URL', async () => {
+      const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+      vi.stubGlobal('fetch', fetchSpy);
+
+      await renderAndOpenUrlTab();
+
+      fireEvent.change(screen.getByLabelText('File URL'), {
+        target: { value: 'https://example.com/model.stl' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalledWith(
+          'https://example.com/model.stl',
+          expect.objectContaining({ method: 'HEAD' }),
+        );
+      });
+      await waitFor(() => {
+        const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
+        expect(models).toHaveLength(1);
+        expect(models[0].url).toBe('https://example.com/model.stl');
+      });
+      expect(toast.success).toHaveBeenCalled();
+    });
+
+    it('shows an error toast and adds nothing to the plate for an unreachable URL', async () => {
+      const fetchSpy = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+      vi.stubGlobal('fetch', fetchSpy);
+
+      await renderAndOpenUrlTab();
+
+      fireEvent.change(screen.getByLabelText('File URL'), {
+        target: { value: 'https://example.com/missing.stl' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalled();
+      });
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalled();
+      });
+      expect(slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? []).toHaveLength(0);
     });
   });
 

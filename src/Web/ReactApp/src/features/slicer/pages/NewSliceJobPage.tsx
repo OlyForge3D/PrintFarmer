@@ -2044,6 +2044,53 @@ export const NewSliceJobPage: React.FC = () => {
     setModelPickerOpen(true);
   }, []);
 
+  // Handles the "Enter URL" tab of the model picker. The picker already
+  // rejects malformed input client-side (see SearchablePickerModal), so by
+  // the time this runs `url` is a well-formed http(s) URL or server-relative
+  // path. Previously this just stashed the URL/name in state and did
+  // nothing else — no request was ever sent, nothing was added to the bed,
+  // and the plate silently stayed at 0 objects (issue #1910). Now it
+  // actively verifies the URL is reachable before adding it to the bed, and
+  // surfaces the outcome via toast either way.
+  const handleUrlModelSubmit = useCallback((url: string, fileName: string) => {
+    // Relative server paths (e.g. "/api/3d-models/file/...") are resolved
+    // against the configured API base the same way other server-relative
+    // model URLs are (see handleWorkspaceModelsReplace); absolute http(s)
+    // URLs are used as-is.
+    const resolvedUrl = url.startsWith('/') ? `${getApiBaseUrl()}${url.replace(/^\/api/, '')}` : url;
+    const fileType = getSlicerViewerFileType(fileName);
+    const toastId = toast.loading(`Fetching "${fileName}"…`);
+
+    void fetch(resolvedUrl, { method: 'HEAD' })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Server responded with ${response.status} ${response.statusText}`.trim());
+        }
+
+        setSelectedModelId('');
+        setModelFileUrl(resolvedUrl);
+        setModelFileName(fileName);
+        setBedModels((prev) => {
+          const offset = prev.length * 30; // offset each model so they don't overlap
+          const instance: LoadedModel = {
+            id: `url-${Date.now()}`,
+            url: resolvedUrl,
+            viewerUrl: resolvedUrl,
+            fileName,
+            fileType,
+            position: [offset, 0, 0] as [number, number, number],
+            rotation: [0, 0, 0] as [number, number, number],
+            scale: [1, 1, 1] as [number, number, number],
+          };
+          return [...prev, instance];
+        });
+        toast.success(`Added "${fileName}" from URL.`, { id: toastId });
+      })
+      .catch((err: unknown) => {
+        toast.error(`Could not load model from URL: ${getErrorMessage(err, 'the file could not be reached')}`, { id: toastId });
+      });
+  }, []);
+
   const handleWorkspaceModelSelect = useCallback((modelId: string | null) => {
     setSelectedBedModelId(modelId);
   }, []);
@@ -2977,12 +3024,7 @@ export const NewSliceJobPage: React.FC = () => {
             searchPlaceholder="Search models by filename..."
             emptyMessage="No models match your search."
             isLoading={isLoadingModels}
-            onUrlSubmit={(url, name) => {
-              setModelFileUrl(url);
-              setModelFileName(name);
-              setSelectedModelId('');
-              setBedModels([]);
-            }}
+            onUrlSubmit={handleUrlModelSubmit}
           />
 
           {/* STATUS MESSAGES */}
