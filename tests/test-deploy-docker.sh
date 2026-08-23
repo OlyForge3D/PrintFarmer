@@ -280,6 +280,124 @@ EOF
     pass_test
 }
 
+# Regression test for issue #1908: the OrcaSlicer worker's /app/temp bind mount must be
+# pre-created with permissions the immutable, non-root worker container (UID 1001) can
+# write to -- even when USE_EXTERNAL_STORAGE=no (the default), since
+# docker-compose.orcaslicer-worker.yml always bind-mounts a host directory there.
+# Without this, Docker auto-creates the host directory as root:root on first use, which
+# shadows the appuser:appuser ownership baked into the image, causing every slice job to
+# fail immediately with UnauthorizedAccessException.
+test_orcaslicer_worker_temp_directory_permissions() {
+    start_test "OrcaSlicer worker temp directory permissions (issue #1908)"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    # USE_EXTERNAL_STORAGE is deliberately omitted/no here: the worker temp bind mount
+    # is not gated behind that flag, unlike models/gcode/profiles.
+    cat > "$TEST_TEMP_DIR/.deploy-config" << 'EOF'
+ARCHITECTURE=microservices
+ENABLE_ORCA_WORKER=yes
+ORCA_WORKER_COUNT=1
+ENABLE_DISTRIBUTED_SLICING=true
+DB_PROVIDER=postgres
+USE_EXTERNAL_STORAGE=no
+EOF
+    
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
+    local output=$(get_output)
+    
+    assert_contains "$output" "Pre-creating OrcaSlicer Worker Temp Directories" \
+        "Should announce OrcaSlicer worker temp directory preparation"
+    assert_dir_exists "$TEST_TEMP_DIR/.volumes/printfarmer-orcaslicer-temp" \
+        "OrcaSlicer worker temp directory should be pre-created"
+    
+    local perms
+    perms=$(stat -c '%a' "$TEST_TEMP_DIR/.volumes/printfarmer-orcaslicer-temp" 2>/dev/null || stat -f '%A' "$TEST_TEMP_DIR/.volumes/printfarmer-orcaslicer-temp" 2>/dev/null || echo "unknown")
+    assert_equals "777" "$perms" "OrcaSlicer worker temp directory should be world-writable (777) so appuser (container UID/GID 1001) can write per-job temp directories regardless of which host UID/GID owns the directory"
+    
+    write_default_deploy_config
+    
+    pass_test
+}
+
+# Regression test for issue #1908: an upgrade-in-place scenario. A deployment that hit
+# the original bug can be left with the worker temp directory already existing with
+# permissions that block the non-root appuser from writing to it (e.g. root:root from
+# Docker auto-creating the bind mount). The fix must end up with 777 permissions either
+# way -- whether that's a direct chmod (this test's same-owner case, where chmod succeeds
+# regardless of the directory's current mode) or, when the deploy user does not own the
+# directory (e.g. a real root:root leftover, which this harness cannot simulate without
+# root/sudo), the rm -rf + recreate fallback in prepare_orcaslicer_worker_temp_directories().
+# This test exercises the observable contract (pre-existing directory with wrong
+# permissions ends up at 777) as a regression guard for the recovery behavior overall.
+test_orcaslicer_worker_temp_directory_recreated_when_permissions_are_wrong() {
+    start_test "OrcaSlicer worker temp directory recreated when pre-existing with bad permissions (issue #1908)"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    # Simulate a directory left over from a prior broken deploy: it exists, but with
+    # permissions that block the group/other write access appuser needs (000 here
+    # stands in for "not writable by appuser", regardless of the exact original owner).
+    mkdir -p "$TEST_TEMP_DIR/.volumes/printfarmer-orcaslicer-temp"
+    chmod 000 "$TEST_TEMP_DIR/.volumes/printfarmer-orcaslicer-temp"
+    
+    cat > "$TEST_TEMP_DIR/.deploy-config" << 'EOF'
+ARCHITECTURE=microservices
+ENABLE_ORCA_WORKER=yes
+ORCA_WORKER_COUNT=1
+ENABLE_DISTRIBUTED_SLICING=true
+DB_PROVIDER=postgres
+USE_EXTERNAL_STORAGE=no
+EOF
+    
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
+    local output=$(get_output)
+    
+    assert_dir_exists "$TEST_TEMP_DIR/.volumes/printfarmer-orcaslicer-temp" \
+        "OrcaSlicer worker temp directory should still exist after recovery"
+    
+    local perms
+    perms=$(stat -c '%a' "$TEST_TEMP_DIR/.volumes/printfarmer-orcaslicer-temp" 2>/dev/null || stat -f '%A' "$TEST_TEMP_DIR/.volumes/printfarmer-orcaslicer-temp" 2>/dev/null || echo "unknown")
+    assert_equals "777" "$perms" "A pre-existing directory with unwritable permissions should be recreated with 777 so appuser can write again regardless of host UID/GID"
+    
+    write_default_deploy_config
+    
+    pass_test
+}
+
+# Regression test for issue #1908: when the worker is disabled, no temp directory
+# preparation should occur (no unnecessary directory creation / noise).
+test_orcaslicer_worker_temp_directory_skipped_when_disabled() {
+    start_test "OrcaSlicer worker temp directory skipped when worker disabled (issue #1908)"
+    
+    cd "$TEST_TEMP_DIR"
+    
+    # Remove any worker temp directory left behind by an earlier test in this suite run
+    # so this test genuinely proves nothing gets (re-)created, not just that it's already there.
+    rm -rf "$TEST_TEMP_DIR/.volumes/printfarmer-orcaslicer-temp"
+    
+    cat > "$TEST_TEMP_DIR/.deploy-config" << 'EOF'
+ARCHITECTURE=microservices
+ENABLE_ORCA_WORKER=no
+ENABLE_DISTRIBUTED_SLICING=false
+DB_PROVIDER=postgres
+USE_EXTERNAL_STORAGE=no
+EOF
+    
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
+    local output=$(get_output)
+    
+    assert_not_contains "$output" "Pre-creating OrcaSlicer Worker Temp Directories" \
+        "Should not prepare worker temp directories when the worker is disabled"
+    if [ -d "$TEST_TEMP_DIR/.volumes/printfarmer-orcaslicer-temp" ]; then
+        fail_test "OrcaSlicer worker temp directory should not be created when the worker is disabled"
+    fi
+    
+    write_default_deploy_config
+    
+    pass_test
+}
+
 # Test network configuration
 test_network_configuration() {
     start_test "network configuration"
@@ -1709,6 +1827,9 @@ run_all_tests() {
     test_port_validation
     test_deployment_config_output
     test_worker_configuration
+    test_orcaslicer_worker_temp_directory_permissions
+    test_orcaslicer_worker_temp_directory_recreated_when_permissions_are_wrong
+    test_orcaslicer_worker_temp_directory_skipped_when_disabled
     test_network_configuration  
     test_database_configuration
     test_all_database_combinations
