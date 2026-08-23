@@ -4,7 +4,6 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
@@ -13,10 +12,9 @@ using Microsoft.Extensions.Logging;
 namespace Farm.Web.Api.Health;
 
 /// <summary>
-/// Comprehensive health check that validates server dependencies and system resources
-/// while reporting registered printer connectivity as diagnostic data.
+/// Comprehensive health check that validates server dependencies and system resources.
 /// </summary>
-public class ComprehensiveHealthCheck(AppDbContext dbContext, IEnumerable<IPrinterConnectionHealthProvider> connectionHealthProviders, ILogger<ComprehensiveHealthCheck> logger, IHostEnvironment hostEnvironment) : IHealthCheck
+public class ComprehensiveHealthCheck(AppDbContext dbContext, ILogger<ComprehensiveHealthCheck> logger, IHostEnvironment hostEnvironment) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
@@ -115,86 +113,6 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IEnumerable<IPrint
         {
             logger.LogWarning(ex, "Memory health check failed");
             checks["Memory"] = new { Status = "Error", Error = ex.Message };
-        }
-
-        // External service connectivity, derived from the live per-backend connection
-        // health tracked by each registered IPrinterConnectionHealthProvider (currently
-        // Moonraker and SDCP). This reflects real, continuously-updated connection state
-        // for every printer on those backends, instead of issuing ad hoc probe requests
-        // that were previously gated behind a disabled-by-default setting and hard-filtered
-        // to Moonraker only - both of which caused an offline printer to be silently
-        // reported as healthy (see issue #1870).
-        try
-        {
-            List<PrinterConnectionHealth> printerHealth = new();
-            List<object> providerErrors = new();
-            foreach (IPrinterConnectionHealthProvider provider in connectionHealthProviders)
-            {
-                try
-                {
-                    printerHealth.AddRange(provider.GetConnectionHealth().Values);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Failed to read connection health from provider {ProviderType}", provider.GetType().Name);
-                    providerErrors.Add(new { Provider = provider.GetType().Name, Error = ex.Message });
-                }
-            }
-
-            int externalServiceCount = printerHealth.Count;
-            int failedServices = 0;
-            List<object> failedDetails = new();
-
-            foreach (PrinterConnectionHealth printer in printerHealth)
-            {
-                if (printer.ConnectionState == PrinterConnectionState.Connected)
-                {
-                    continue;
-                }
-
-                failedServices++;
-                failedDetails.Add(new
-                {
-                    Id = printer.PrinterId,
-                    Name = printer.PrinterName,
-                    printer.Backend,
-                    ConnectionState = printer.ConnectionState.ToString(),
-                    printer.LastConnectedUtc,
-                    printer.LastDisconnectedUtc,
-                    ErrorMessage = $"Printer is {printer.ConnectionState}",
-                });
-            }
-
-            // A provider error must remain visible in the printer-connectivity diagnostics,
-            // without changing whether the PrintFarmer server itself is healthy.
-            bool hasProviderErrors = providerErrors.Count > 0;
-            string serviceStatus = failedServices == 0 && !hasProviderErrors ? "Healthy"
-                                  : failedServices > 0 && failedServices >= externalServiceCount ? "Unhealthy"
-                                  : "Degraded";
-
-            Dictionary<string, object> externalServicesObj = new()
-            {
-                ["Status"] = serviceStatus,
-                ["CheckedCount"] = externalServiceCount,
-                ["FailedCount"] = failedServices
-            };
-
-            if (failedDetails.Count > 0)
-            {
-                externalServicesObj["FailedServicesDetails"] = failedDetails;
-            }
-
-            if (hasProviderErrors)
-            {
-                externalServicesObj["ProviderErrors"] = providerErrors;
-            }
-
-            checks["ExternalServices"] = externalServicesObj;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "External service health check failed");
-            checks["ExternalServices"] = new { Status = "Error", Error = ex.Message };
         }
 
         // Application metrics

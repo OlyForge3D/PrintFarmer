@@ -1,7 +1,10 @@
 ﻿using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Web.Api.Services.Admin;
 using FluentAssertions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -14,32 +17,41 @@ namespace Farm.Web.Api.Tests.Services.Admin;
 /// <summary>
 /// Unit tests for <see cref="AdminOverviewService"/>. These verify that the aggregation:
 /// 1. Composes the existing <see cref="HealthCheckService"/> results into the expected tiles.
-/// 2. Splits the <c>comprehensive</c> health check's Data payload into finer database and
-///    backends tiles when possible.
+/// 2. Splits the <c>comprehensive</c> health check's Data payload into database status.
 /// 3. Degrades gracefully when the health check service throws.
 /// 4. Ranks attention items by severity (Error > Warning > Info).
-/// 5. Extracts per-printer attention items from ExternalServices.FailedServicesDetails.
+/// 5. Extracts per-printer attention items from connection-provider snapshots.
 /// 6. Hides the spoolman tile when it reports "not configured".
 /// 7. Sends enum values as strings on the wire.
 /// </summary>
 public class AdminOverviewServiceTests
 {
     private readonly Mock<HealthCheckService> _healthCheckService = new();
+    private readonly List<IPrinterConnectionHealthProvider> _connectionHealthProviders = new();
 
     private AdminOverviewService CreateService()
-        => new(_healthCheckService.Object, NullLogger<AdminOverviewService>.Instance);
+        => new(_healthCheckService.Object, _connectionHealthProviders, NullLogger<AdminOverviewService>.Instance);
+
+    private void SetPrinterConnectivity(params PrinterConnectionHealth[] printers)
+    {
+        Mock<IPrinterConnectionHealthProvider> provider = new();
+        _ = provider.Setup(p => p.GetConnectionHealth())
+            .Returns(printers.ToDictionary(p => p.PrinterId));
+        _connectionHealthProviders.Add(provider.Object);
+    }
 
     // ─── Happy path ───────────────────────────────────────────────────────────
 
     [Fact]
     public async Task GetOverviewAsync_WhenAllChecksHealthy_ReturnsAllHealthyTiles()
     {
+        SetPrinterConnectivity(
+            ConnectedPrinter("printer-01"),
+            ConnectedPrinter("printer-02"),
+            ConnectedPrinter("printer-03"));
+
         HealthReport report = BuildReport(
-            comprehensive: HealthCheckResult.Healthy("All systems operational", BuildComprehensiveData(
-                databaseStatus: "Healthy",
-                externalServicesStatus: "Healthy",
-                checkedCount: 3,
-                failedCount: 0)),
+            comprehensive: HealthCheckResult.Healthy("All systems operational", BuildComprehensiveData()),
             signalr: HealthCheckResult.Healthy("SignalR fully operational"),
             spoolman: HealthCheckResult.Healthy("Spoolman not configured"));
 
@@ -76,24 +88,17 @@ public class AdminOverviewServiceTests
     [Fact]
     public async Task GetOverviewAsync_WhenBackendsDegraded_MarksBackendsTileDegradedAndAddsAttention()
     {
-        object externalServices = new Dictionary<string, object>
-        {
-            ["Status"] = "Degraded",
-            ["CheckedCount"] = 3,
-            ["FailedCount"] = 1,
-            ["FailedServicesDetails"] = new[]
+        Guid offlinePrinterId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        SetPrinterConnectivity(
+            ConnectedPrinter("printer-01"),
+            new PrinterConnectionHealth
             {
-                new
-                {
-                    Id = "11111111-1111-1111-1111-111111111111",
-                    Name = "printer-02",
-                    ServerUrl = "http://printer-02.local:7125",
-                    AttemptedUrl = "http://printer-02.local:7125/server/info",
-                    StatusCode = (int?)null,
-                    ErrorMessage = "Connection refused",
-                },
+                PrinterId = offlinePrinterId,
+                PrinterName = "printer-02",
+                Backend = PrinterBackend.Moonraker,
+                ConnectionState = PrinterConnectionState.Offline,
             },
-        };
+            ConnectedPrinter("printer-03"));
 
         HealthReport report = BuildReport(
             comprehensive: new HealthCheckResult(
@@ -102,7 +107,6 @@ public class AdminOverviewServiceTests
                 data: new Dictionary<string, object>
                 {
                     ["Database"] = new { Status = "Healthy", Provider = "Npgsql.EntityFrameworkCore.PostgreSQL", ManufacturerCount = 8, Initialized = true },
-                    ["ExternalServices"] = externalServices,
                 }),
             signalr: HealthCheckResult.Healthy("ok"),
             spoolman: HealthCheckResult.Healthy("Spoolman not configured"));
@@ -122,11 +126,11 @@ public class AdminOverviewServiceTests
         database.Detail.Should().Contain("PostgreSQL").And.Contain("8 manufacturers");
 
         // Attention: printer-specific item, not just a generic "backends degraded"
-        overview.Attention.Should().Contain(a => a.Key == "printer-11111111-1111-1111-1111-111111111111-unreachable");
-        AttentionItemDto printerItem = overview.Attention.Single(a => a.Key == "printer-11111111-1111-1111-1111-111111111111-unreachable");
+        overview.Attention.Should().Contain(a => a.Key == $"printer-{offlinePrinterId}-unreachable");
+        AttentionItemDto printerItem = overview.Attention.Single(a => a.Key == $"printer-{offlinePrinterId}-unreachable");
         printerItem.Severity.Should().Be(AttentionSeverity.Warning);
         printerItem.Title.Should().Contain("printer-02");
-        printerItem.Detail.Should().Contain("Connection refused");
+        printerItem.Detail.Should().Contain("Offline");
         // /printers has no ADMIN_DESTINATIONS registry entry (it's a top-level operational page),
         // so this attention item routes via ActionRoute directly rather than a destination id.
         printerItem.ActionDestinationId.Should().BeNull();
@@ -144,25 +148,17 @@ public class AdminOverviewServiceTests
         // just the legacy shape asserted elsewhere in this file.
         Guid offlinePrinterId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
-        object externalServices = new Dictionary<string, object>
-        {
-            ["Status"] = "Degraded",
-            ["CheckedCount"] = 2,
-            ["FailedCount"] = 1,
-            ["FailedServicesDetails"] = new[]
+        SetPrinterConnectivity(
+            ConnectedPrinter("printer-online"),
+            new PrinterConnectionHealth
             {
-                new
-                {
-                    Id = offlinePrinterId,
-                    Name = "printer-offline",
-                    Backend = "Moonraker",
-                    ConnectionState = "Offline",
-                    LastConnectedUtc = (DateTime?)DateTime.UtcNow.AddMinutes(-10),
-                    LastDisconnectedUtc = (DateTime?)DateTime.UtcNow.AddMinutes(-1),
-                    ErrorMessage = "Printer is Offline",
-                },
-            },
-        };
+                PrinterId = offlinePrinterId,
+                PrinterName = "printer-offline",
+                Backend = PrinterBackend.Moonraker,
+                ConnectionState = PrinterConnectionState.Offline,
+                LastConnectedUtc = DateTime.UtcNow.AddMinutes(-10),
+                LastDisconnectedUtc = DateTime.UtcNow.AddMinutes(-1),
+            });
 
         HealthReport report = BuildReport(
             comprehensive: new HealthCheckResult(
@@ -171,7 +167,6 @@ public class AdminOverviewServiceTests
                 data: new Dictionary<string, object>
                 {
                     ["Database"] = new { Status = "Healthy", Provider = "Npgsql.EntityFrameworkCore.PostgreSQL", ManufacturerCount = 8, Initialized = true },
-                    ["ExternalServices"] = externalServices,
                 }),
             signalr: HealthCheckResult.Healthy("ok"),
             spoolman: HealthCheckResult.Healthy("Spoolman not configured"));
@@ -190,7 +185,7 @@ public class AdminOverviewServiceTests
         AttentionItemDto printerItem = overview.Attention.Single(a => a.Key == expectedKey);
         printerItem.Severity.Should().Be(AttentionSeverity.Warning);
         printerItem.Title.Should().Contain("printer-offline");
-        printerItem.Detail.Should().Contain("Printer is Offline");
+        printerItem.Detail.Should().Contain("is Offline");
     }
 
     [Fact]
@@ -237,7 +232,9 @@ public class AdminOverviewServiceTests
         // No exception surfaces to the caller. Response still populated.
         overview.Subsystems.Should().NotBeEmpty();
         overview.Subsystems.Should().Contain(s => s.Key == "api" && s.Status == SubsystemStatus.Degraded);
-        overview.Subsystems.Where(s => s.Key != "api").Should().OnlyContain(s => s.Status == SubsystemStatus.Unknown);
+        overview.Subsystems.Should().Contain(s => s.Key == "database" && s.Status == SubsystemStatus.Unknown);
+        overview.Subsystems.Should().Contain(s => s.Key == "signalr" && s.Status == SubsystemStatus.Unknown);
+        overview.Subsystems.Should().Contain(s => s.Key == "backends" && s.Status == SubsystemStatus.Healthy);
 
         overview.Attention.Should().Contain(a => a.Key == "admin-overview-probe-failed"
             && a.Severity == AttentionSeverity.Error
@@ -284,23 +281,21 @@ public class AdminOverviewServiceTests
     [Fact]
     public async Task GetOverviewAsync_RanksAttentionByErrorThenWarning()
     {
+        SetPrinterConnectivity(new PrinterConnectionHealth
+        {
+            PrinterId = Guid.NewGuid(),
+            PrinterName = "printer-A",
+            Backend = PrinterBackend.Moonraker,
+            ConnectionState = PrinterConnectionState.Offline,
+        });
+
         HealthReport report = BuildReport(
             comprehensive: new HealthCheckResult(
-                HealthStatus.Degraded,
-                "backends degraded",
+                HealthStatus.Unhealthy,
+                "database unavailable",
                 data: new Dictionary<string, object>
                 {
                     ["Database"] = new { Status = "Unhealthy", Provider = "Microsoft.EntityFrameworkCore.Sqlite", ManufacturerCount = 0, Initialized = false },
-                    ["ExternalServices"] = new Dictionary<string, object>
-                    {
-                        ["Status"] = "Degraded",
-                        ["CheckedCount"] = 2,
-                        ["FailedCount"] = 1,
-                        ["FailedServicesDetails"] = new[]
-                        {
-                            new { Id = "abc", Name = "printer-A", ServerUrl = "http://a.local", ErrorMessage = "timeout" },
-                        },
-                    },
                 }),
             signalr: HealthCheckResult.Healthy("ok"),
             spoolman: HealthCheckResult.Healthy("Spoolman not configured"));
@@ -404,10 +399,7 @@ public class AdminOverviewServiceTests
     }
 
     private static IReadOnlyDictionary<string, object> BuildComprehensiveData(
-        string databaseStatus = "Healthy",
-        string externalServicesStatus = "Healthy",
-        int checkedCount = 0,
-        int failedCount = 0)
+        string databaseStatus = "Healthy")
     {
         return new Dictionary<string, object>
         {
@@ -418,12 +410,14 @@ public class AdminOverviewServiceTests
                 ManufacturerCount = 8,
                 Initialized = databaseStatus == "Healthy",
             },
-            ["ExternalServices"] = new Dictionary<string, object>
-            {
-                ["Status"] = externalServicesStatus,
-                ["CheckedCount"] = checkedCount,
-                ["FailedCount"] = failedCount,
-            },
         };
     }
+
+    private static PrinterConnectionHealth ConnectedPrinter(string name) => new()
+    {
+        PrinterId = Guid.NewGuid(),
+        PrinterName = name,
+        Backend = PrinterBackend.Moonraker,
+        ConnectionState = PrinterConnectionState.Connected,
+    };
 }
