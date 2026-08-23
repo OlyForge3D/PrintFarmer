@@ -47,7 +47,13 @@ test.describe('Cameras — Emulator', () => {
   }
 
   test('cameras page loads with heading', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: 'Cameras', exact: true })).toBeVisible();
+    // The canonical URL-driven settings shell renders one top-level H1 naming
+    // the scope ("System Settings" for `/admin/settings`), not a per-section
+    // "Cameras" heading — see docs/SETTINGS_ARCHITECTURE.md. `CamerasPage` is
+    // mounted `embedded`, which suppresses its own heading, so the Cameras
+    // section is surfaced instead as the selected sub-page tab.
+    await expect(page.getByRole('heading', { name: 'System Settings', exact: true })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Cameras', exact: true })).toHaveAttribute('aria-selected', 'true');
 
     expect(criticalErrors()).toHaveLength(0);
   });
