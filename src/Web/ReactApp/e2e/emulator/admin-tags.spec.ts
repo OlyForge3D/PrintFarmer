@@ -2,6 +2,33 @@ import { test, expect } from '../fixtures/emulator-setup';
 
 const TEST_TAG_NAME = `E2E Test Tag ${Date.now()}`;
 
+// The API normalizes tag names to PascalCase on creation (see TagService.ToPascalCase):
+// whitespace-only input (per .NET's IsNullOrWhiteSpace, which treats any Unicode
+// whitespace as blank) is returned unchanged; otherwise lowercase, split on space/dash/
+// underscore only (not other whitespace), capitalize each word, concatenate with no
+// separator -- e.g. "E2E Test Tag 123" -> "E2eTestTag123". If splitting on those three
+// delimiters produces no words, the original input is returned unchanged. Mirrored here
+// exactly, character-for-character, so the test asserts the documented normalization
+// contract itself, not merely "whatever the API happened to echo back" (which would
+// still pass even if normalization regressed).
+function toExpectedPascalCase(raw: string): string {
+  if (/^\s*$/.test(raw)) {
+    return raw;
+  }
+  const lowered = raw.toLowerCase();
+  const words = lowered.split(/[ _-]+/).filter(Boolean);
+  if (words.length === 0) {
+    return raw;
+  }
+  return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join('');
+}
+
+const EXPECTED_TAG_NAME = toExpectedPascalCase(TEST_TAG_NAME);
+
+// Assertions after creation must use the normalized name returned by the API, not the
+// raw input string.
+let createdTagName = TEST_TAG_NAME;
+
 /**
  * Admin Tags CRUD E2E Tests — Emulator-backed
  *
@@ -81,17 +108,32 @@ test.describe('Admin Tags — Emulator', () => {
 
     const saveButton = dialog.getByRole('button', { name: 'Create tag', exact: true });
     await expect(saveButton).toBeVisible();
+    const createResponsePromise = page.waitForResponse((response) =>
+      response.request().method() === 'POST'
+      && /\/api\/tags\/?$/.test(new URL(response.url()).pathname)
+    );
     await saveButton.click();
 
+    // The API normalizes the submitted name to PascalCase (e.g. "E2E Test Tag 123"
+    // -> "E2eTestTag123"); assert the response matches the documented normalization
+    // contract (not just "whatever came back") before trusting it for later assertions.
+    const createResponse = await createResponsePromise;
+    expect(createResponse.ok()).toBe(true);
+    const createdTag = await createResponse.json();
+    expect(typeof createdTag.name).toBe('string');
+    expect(createdTag.name.length).toBeGreaterThan(0);
+    expect(createdTag.name).toBe(EXPECTED_TAG_NAME);
+    createdTagName = createdTag.name;
+
     await expect(dialog).toBeHidden();
-    await expect(page.getByRole('cell', { name: TEST_TAG_NAME, exact: true })).toBeVisible();
+    await expect(page.getByRole('cell', { name: createdTagName, exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
 
   test('tags have color indicators', async ({ page }) => {
     const tagRow = page.getByRole('row').filter({
-      has: page.getByRole('cell', { name: TEST_TAG_NAME, exact: true }),
+      has: page.getByRole('cell', { name: createdTagName, exact: true }),
     });
     await expect(tagRow).toBeVisible();
     expect(await tagRow.locator('div[style*="background-color"]').count()).toBeGreaterThan(0);
@@ -119,7 +161,7 @@ test.describe('Admin Tags — Emulator', () => {
   });
 
   test('can delete a tag', async ({ page }) => {
-    const tagCell = page.getByRole('cell', { name: TEST_TAG_NAME, exact: true });
+    const tagCell = page.getByRole('cell', { name: createdTagName, exact: true });
     const tagRow = page.getByRole('row').filter({ has: tagCell });
     await expect(tagRow).toBeVisible();
 
@@ -133,7 +175,7 @@ test.describe('Admin Tags — Emulator', () => {
 
     await page.reload();
     await page.waitForLoadState('networkidle');
-    await expect(page.getByRole('cell', { name: TEST_TAG_NAME, exact: true })).toHaveCount(0);
+    await expect(page.getByRole('cell', { name: createdTagName, exact: true })).toHaveCount(0);
 
     expect(criticalErrors()).toHaveLength(0);
   });
