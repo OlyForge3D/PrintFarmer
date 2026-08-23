@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button, ProgressBar, Select, Spinner } from "@/common/components/ui";
 import clsx from "clsx";
 import { AlertTriangle, Clock, DollarSign, FolderOpen, Layers, Palette, Timer } from "lucide-react";
@@ -237,6 +238,7 @@ function QueueJobCommon({
       ? printThumbnailByPrinterId?.[livePrinterId]
       : undefined;
   const thumbnailUrl = jobWrapper.gcodeFile?.thumbnailUrl || liveThumbnailUrl;
+  const [thumbnailFailedUrl, setThumbnailFailedUrl] = useState<string | undefined>();
   const liveProgressRaw = livePrinterId ? printProgressByPrinterId?.[livePrinterId] : undefined;
   const showLiveProgress =
     (status === "Printing" || status === "Paused") && typeof liveProgressRaw === "number";
@@ -264,8 +266,13 @@ function QueueJobCommon({
     >
       <div className={clsx("flex gap-3", compact ? "items-start" : "items-start")}>
         <div className="w-14 h-14 shrink-0 rounded bg-pf-bg-2 overflow-hidden flex items-center justify-center">
-          {thumbnailUrl ? (
-            <img src={thumbnailUrl} alt={`Thumbnail for ${fileName}`} className="w-full h-full object-cover" />
+          {thumbnailUrl && thumbnailUrl !== thumbnailFailedUrl ? (
+            <img
+              src={thumbnailUrl}
+              alt={`Thumbnail for ${fileName}`}
+              className="w-full h-full object-cover"
+              onError={() => setThumbnailFailedUrl(thumbnailUrl)}
+            />
           ) : (
             <span className="text-pf-text-tertiary text-xs">—</span>
           )}

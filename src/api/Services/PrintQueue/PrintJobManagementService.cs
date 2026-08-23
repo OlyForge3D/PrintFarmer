@@ -4406,7 +4406,9 @@ public class PrintJobManagementService(
             CompletedCopies = job.CompletedCopies,
             RemainingCopies = job.RemainingCopies,
             ProjectFileId = job.ProjectFileId,
-            ThumbnailUrl = job.GcodeFile != null ? _fileOperations.BuildGcodeThumbnailUrl(job.GcodeFile.Id) : null,
+            ThumbnailUrl = !string.IsNullOrEmpty(job.GcodeFile?.ThumbnailFileName)
+                ? _fileOperations.BuildGcodeThumbnailUrl(job.GcodeFile!.Id)
+                : null,
             CreatedAtUtc = job.CreatedAt,
             UpdatedAtUtc = job.UpdatedAt,
             QueuedAtUtc = job.QueuedAt,
@@ -4547,7 +4549,9 @@ public class PrintJobManagementService(
             EstimatedPrintTimeSeconds = (int?)(file.EstimatedPrintTimeMinutes.HasValue ? file.EstimatedPrintTimeMinutes * 60 : null),
             EstimatedFilamentUsageGrams = (int?)file.EstimatedFilamentWeightG,
             CreatedAtUtc = file.CreatedAt,
-            ThumbnailUrl = _fileOperations.BuildGcodeThumbnailUrl(file.Id)
+            ThumbnailUrl = string.IsNullOrEmpty(file.ThumbnailFileName)
+                ? null
+                : _fileOperations.BuildGcodeThumbnailUrl(file.Id)
         };
     }
 
