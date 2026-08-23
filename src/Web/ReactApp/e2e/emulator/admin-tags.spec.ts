@@ -3,13 +3,18 @@ import { test, expect } from '../fixtures/emulator-setup';
 const TEST_TAG_NAME = `E2E Test Tag ${Date.now()}`;
 
 // The API normalizes tag names to PascalCase on creation (see TagService.ToPascalCase):
-// lowercase, split on space/dash/underscore only (not other whitespace), capitalize each
-// word, concatenate with no separator -- e.g. "E2E Test Tag 123" -> "E2eTestTag123". If
-// splitting produces no words (delimiter-only input), the original input is returned
-// unchanged. Mirrored here exactly, character-for-character, so the test asserts the
-// documented normalization contract itself, not merely "whatever the API happened to
-// echo back" (which would still pass even if normalization regressed).
+// whitespace-only input (per .NET's IsNullOrWhiteSpace, which treats any Unicode
+// whitespace as blank) is returned unchanged; otherwise lowercase, split on space/dash/
+// underscore only (not other whitespace), capitalize each word, concatenate with no
+// separator -- e.g. "E2E Test Tag 123" -> "E2eTestTag123". If splitting on those three
+// delimiters produces no words, the original input is returned unchanged. Mirrored here
+// exactly, character-for-character, so the test asserts the documented normalization
+// contract itself, not merely "whatever the API happened to echo back" (which would
+// still pass even if normalization regressed).
 function toExpectedPascalCase(raw: string): string {
+  if (/^\s*$/.test(raw)) {
+    return raw;
+  }
   const lowered = raw.toLowerCase();
   const words = lowered.split(/[ _-]+/).filter(Boolean);
   if (words.length === 0) {
