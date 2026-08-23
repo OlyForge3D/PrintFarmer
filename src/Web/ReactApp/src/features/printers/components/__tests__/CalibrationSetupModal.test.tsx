@@ -212,6 +212,27 @@ describe('CalibrationSetupModal', () => {
     expect(screen.queryByText(/From your selected profiles/i)).not.toBeInTheDocument();
   });
 
+  it('surfaces a still-missing profile-derivable field as a real blocker once all profiles are bound', async () => {
+    renderModal({
+      missingInputs: ['buildVolume.x'],
+      slicer: {
+        engine: 'orca',
+        distribution: 'orca',
+        version: '2.0',
+        profileFormat: 'orca-json',
+        machineProfileId: 'machine-1',
+        processProfileId: 'process-1',
+        filamentProfileId: 'filament-1',
+      },
+    });
+    await waitFor(() => expect(mockGetCalibrationContext).toHaveBeenCalledWith('printer-1'));
+
+    // All three profiles are bound, so a profile-derived field that's still missing (e.g.
+    // an incompatible profile) is a genuine blocker again, not suppressed as "not yet".
+    expect(await screen.findByText(/From your selected profiles/i)).toBeInTheDocument();
+    expect(screen.getByText('Build volume X (mm)')).toBeInTheDocument();
+  });
+
   it('surfaces fields not settable in this modal under "Needs an administrator" with a pointer to where they can be set', async () => {
     renderModal({ missingInputs: ['hasEnclosure', 'maxTravelAcceleration'] });
     await waitFor(() => expect(mockGetCalibrationContext).toHaveBeenCalledWith('printer-1'));

@@ -27,7 +27,7 @@ export interface CalibrationFieldGroupInfo {
 export const CALIBRATION_FIELD_GROUPS: Record<CalibrationFieldGroup, CalibrationFieldGroupInfo> = {
   here: {
     title: 'You can set this here',
-    description: 'Fill these in below, in this dialog.',
+    description: 'Fill these in, or trigger the relevant action, below in this dialog.',
   },
   profile: {
     title: 'From your selected profiles',
@@ -54,6 +54,23 @@ export interface CalibrationFieldGuidance {
   label: string;
   group: CalibrationFieldGroup;
 }
+
+/**
+ * Nozzle facts the backend only resolves from the bound machine profile for the
+ * currently-active toolhead (`ResolveActiveToolheadFacts` in
+ * PrinterCalibrationContextService.cs). For any other toolhead these same fields have no
+ * profile fallback at all — they're plain `Toolhead` entity columns, settable only via
+ * `UpdateToolheadDto` (the same `PUT /api/printers/{id}` payload used for
+ * `supportedMaterials`), and this modal has no control for them. Grouping them under
+ * "from your selected profiles" for a non-active toolhead would suppress a real blocker
+ * before profile binding, then never actually resolve it once profiles are bound.
+ */
+const ACTIVE_TOOLHEAD_ONLY_PROFILE_FIELDS = new Set([
+  'nozzleDiameter',
+  'nozzleType',
+  'nozzleMaxTemperature',
+  'hotendMaxTemperature',
+]);
 
 /** Guidance for fields shared by every toolhead, keyed by the path suffix after `toolheads[N].`. */
 const TOOLHEAD_FIELD_GUIDANCE: Record<string, CalibrationFieldGuidance> = {
@@ -156,14 +173,30 @@ export interface ClassifiedCalibrationField {
   group: CalibrationFieldGroup;
 }
 
-/** Classifies a single raw `missingInputs` path into a human label and resolution group. */
-export function classifyCalibrationField(path: string): ClassifiedCalibrationField {
+/**
+ * Classifies a single raw `missingInputs` path into a human label and resolution group.
+ *
+ * @param activeToolheadIndex The printer's active toolhead index, if any. Required to
+ * correctly classify per-toolhead nozzle facts: the backend only resolves those from the
+ * bound machine profile for the active toolhead (see
+ * `ACTIVE_TOOLHEAD_ONLY_PROFILE_FIELDS`); on any other toolhead the same fields are plain
+ * entity columns with no fallback and no control in this modal, so they belong in
+ * `admin`, not `profile`.
+ */
+export function classifyCalibrationField(
+  path: string,
+  activeToolheadIndex: number | null = null
+): ClassifiedCalibrationField {
   const toolheadMatch = TOOLHEAD_PATH_PATTERN.exec(path);
   if (toolheadMatch) {
-    const [, index, suffix] = toolheadMatch;
+    const [, indexText, suffix] = toolheadMatch;
+    const index = Number(indexText);
     const guidance = TOOLHEAD_FIELD_GUIDANCE[suffix];
     if (guidance) {
-      return { path, label: `Toolhead ${index} — ${guidance.label}`, group: guidance.group };
+      const isNonActiveProfileOnlyField =
+        ACTIVE_TOOLHEAD_ONLY_PROFILE_FIELDS.has(suffix) && index !== activeToolheadIndex;
+      const group = isNonActiveProfileOnlyField ? 'admin' : guidance.group;
+      return { path, label: `Toolhead ${index} — ${guidance.label}`, group };
     }
     return { path, label: `Toolhead ${index} — ${humanizeFallbackLabel(suffix)}`, group: 'other' };
   }
@@ -186,11 +219,12 @@ export type GroupedCalibrationFields = Record<CalibrationFieldGroup, ClassifiedC
  */
 export function groupMissingInputs(
   missingInputs: readonly string[],
-  allProfilesBound: boolean
+  allProfilesBound: boolean,
+  activeToolheadIndex: number | null = null
 ): GroupedCalibrationFields {
   const grouped: GroupedCalibrationFields = { here: [], profile: [], signoff: [], admin: [], other: [] };
   for (const path of missingInputs) {
-    const classified = classifyCalibrationField(path);
+    const classified = classifyCalibrationField(path, activeToolheadIndex);
     if (classified.group === 'profile' && !allProfilesBound) {
       continue;
     }

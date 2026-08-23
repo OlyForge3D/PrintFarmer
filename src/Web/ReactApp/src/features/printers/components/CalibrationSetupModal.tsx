@@ -295,12 +295,18 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
   const allProfilesBound = Boolean(
     data?.slicer?.machineProfileId && data?.slicer?.processProfileId && data?.slicer?.filamentProfileId
   );
-  const groupedMissingInputs = data ? groupMissingInputs(data.missingInputs, allProfilesBound) : null;
+  const groupedMissingInputs = data
+    ? groupMissingInputs(data.missingInputs, allProfilesBound, data.activeToolheadIndex ?? null)
+    : null;
   const calibrationStatus = data
     ? getCalibrationStatus({
         eligible: data.eligible,
         anyProfileBound: allProfilesBound,
-        firmwareDetected: Boolean(data.firmware?.family || data.firmware?.version),
+        // `firmware.family` always reports a non-null string ("Unknown" for a never-probed
+        // printer, per CalibrationFirmwareIdentityDto), so a bare truthiness check would
+        // always read as "detected". Mirror the backend's own HasRecordedIdentity gate:
+        // a known family plus a recorded version string.
+        firmwareDetected: Boolean(data.firmware?.family && data.firmware.family !== 'Unknown' && data.firmware?.version),
         hardwareOrFirmwareVerified: Boolean(data.calibrationHardwareVerifiedAtUtc || data.firmware?.verified),
       })
     : null;
