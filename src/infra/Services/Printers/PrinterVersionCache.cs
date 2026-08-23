@@ -158,15 +158,20 @@ public sealed class PrinterVersionCache(
     }
 
     /// <summary>
-    /// Read-through path for Moonraker/Klipper printers (#1656): the persisted
-    /// <c>Printer.Firmware*</c> columns are the single authoritative store, so the version
-    /// endpoint reports exactly what <c>PrinterCalibrationContextService.ValidateFirmware</c>
-    /// reads — it can never show a firmware identity the calibration gate considers missing.
-    /// A live probe of the physical printer runs on every cache miss, exactly as it always has
-    /// (this is unchanged from the pre-#1656 thin-probe behavior, so no new printer traffic is
-    /// introduced), and still supplies <c>BackendVersion</c>/<c>ApiVersion</c> for display.
-    /// Persisting the probed firmware identity to the database — the part of this flow that can
-    /// mutate state and therefore needs throttling — is gated by
+    /// Read-through path for Moonraker/Klipper printers (#1656, #1894): the persisted
+    /// <c>Printer.Firmware*</c> columns are the single authoritative store for calibration
+    /// eligibility, so <c>PrinterCalibrationContextService.ValidateFirmware</c> — and the
+    /// <see cref="PrinterVersionInfoDto.RecordedFirmwareIdentity"/> field this method returns —
+    /// always reflect exactly what is persisted, never a live-only reading the calibration gate
+    /// hasn't accepted. Displayed <c>FirmwareVersion</c> is different: it prefers the freshly
+    /// live-probed value (like <c>BackendVersion</c>/<c>ApiVersion</c> already did), falling back
+    /// to the persisted value only when the live probe didn't yield one (probe failure, or the
+    /// firmware field came back null/blank) — see #1894, where the endpoint kept reporting stale
+    /// recorded firmware even while a live probe against the printer succeeded and returned a
+    /// newer version. A live probe of the physical printer runs on every cache miss, exactly as
+    /// it always has (this is unchanged from the pre-#1656 thin-probe behavior, so no new printer
+    /// traffic is introduced). Persisting the probed firmware identity to the database — the part
+    /// of this flow that can mutate state and therefore needs throttling — is gated by
     /// <see cref="IPrintersService.IsFirmwareReprobeDue"/>, reusing the same
     /// <c>Discovery:FirmwareReprobeIntervalHours</c> cadence guard that already governs discovery
     /// writes, so this hot read path cannot write the database more often than that cadence
@@ -179,6 +184,7 @@ public sealed class PrinterVersionCache(
         CancellationToken ct)
     {
         string? message = null;
+        string? liveFirmwareVersion = null;
         string? liveBackendVersion = null;
         string? liveApiVersion = null;
 
@@ -186,6 +192,7 @@ public sealed class PrinterVersionCache(
         {
             StandardPrinterInfo info = await infoClient.GetPrinterInformationAsync(printer.BackendUrl, printer.Credential, ct);
             string? firmware = string.IsNullOrWhiteSpace(info.Firmware) ? null : info.Firmware;
+            liveFirmwareVersion = firmware;
             liveBackendVersion = string.IsNullOrWhiteSpace(info.BackendVersion) ? null : info.BackendVersion;
             liveApiVersion = string.IsNullOrWhiteSpace(info.ApiVersion) ? null : info.ApiVersion;
 
@@ -275,11 +282,18 @@ public sealed class PrinterVersionCache(
             PrinterId: printer.Id,
             Backend: backend,
             Supported: true,
-            FirmwareVersion: printer.FirmwareVersion,
+
+            // #1894: prefer the freshly live-probed firmware reading, matching how
+            // BackendVersion/ApiVersion already fall back to the persisted value only when the
+            // live probe didn't yield one. Falling back to printer.FirmwareVersion unconditionally
+            // (as before) meant the Version section kept showing stale/recorded firmware even when
+            // a live probe against the printer succeeded and returned a newer value.
+            FirmwareVersion: liveFirmwareVersion ?? printer.FirmwareVersion,
             BackendVersion: liveBackendVersion ?? printer.BackendVersion,
             ApiVersion: liveApiVersion ?? printer.BackendApiVersion,
             RetrievedAtUtc: DateTime.UtcNow,
             Message: message,
+
             // #1656, PR #1660 review round 5 (Hicks, blocking): a never-probed printer whose
             // very first live probe attempt fails still has FirmwareFamily == Unknown and
             // FirmwareVersion == null — FromPrinter(printer) unconditionally would still build a
