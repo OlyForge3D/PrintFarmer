@@ -197,6 +197,31 @@ describe('CalibrationSetupModal', () => {
     expect(await screen.findByText(/Calibration setup needed/i)).toBeInTheDocument();
   });
 
+  it('still reads as onboarding, not in-progress, when firmware.family is the "Unknown" sentinel rather than null', async () => {
+    // CalibrationFirmwareIdentityDto.family is a non-nullable string that defaults to the
+    // literal "Unknown" for a never-probed printer (see HasRecordedIdentity in
+    // CalibrationContracts.cs) — a bare truthiness check on `family` would misread this as
+    // "detected" and skip straight to "in progress". Also cover a whitespace-only version
+    // string, which the backend's !string.IsNullOrWhiteSpace gate treats as absent.
+    renderModal({
+      missingInputs: ['slicer.machineProfileId'],
+      firmware: {
+        family: 'Unknown',
+        gcodeDialect: null,
+        detectionSource: null,
+        version: '   ',
+        detectionVersion: null,
+        detectionConfidence: null,
+        detectedAtUtc: null,
+        verified: false,
+      },
+      calibrationHardwareVerifiedAtUtc: null,
+    });
+    await waitFor(() => expect(mockGetCalibrationContext).toHaveBeenCalledWith('printer-1'));
+
+    expect(await screen.findByText(/Calibration setup needed/i)).toBeInTheDocument();
+  });
+
   it('does not surface profile-derivable fields as blockers before profiles are selected', async () => {
     renderModal({
       missingInputs: ['buildVolume.x', 'slicer.machineProfileId'],

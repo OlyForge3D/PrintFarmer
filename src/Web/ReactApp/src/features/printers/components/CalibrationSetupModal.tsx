@@ -305,8 +305,14 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
         // `firmware.family` always reports a non-null string ("Unknown" for a never-probed
         // printer, per CalibrationFirmwareIdentityDto), so a bare truthiness check would
         // always read as "detected". Mirror the backend's own HasRecordedIdentity gate:
-        // a known family plus a recorded version string.
-        firmwareDetected: Boolean(data.firmware?.family && data.firmware.family !== 'Unknown' && data.firmware?.version),
+        // a known family plus a non-whitespace recorded version string (backend uses
+        // !string.IsNullOrWhiteSpace(printer.FirmwareVersion), not a bare truthiness check).
+        firmwareDetected: Boolean(
+          data.firmware?.family &&
+            data.firmware.family !== 'Unknown' &&
+            data.firmware?.version &&
+            data.firmware.version.trim().length > 0
+        ),
         hardwareOrFirmwareVerified: Boolean(data.calibrationHardwareVerifiedAtUtc || data.firmware?.verified),
       })
     : null;
