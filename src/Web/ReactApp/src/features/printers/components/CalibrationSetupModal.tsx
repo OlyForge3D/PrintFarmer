@@ -12,6 +12,21 @@ import type {
   CalibrationSetupRequestDto,
   CalibrationToolheadSetupDto,
 } from '@/types/api';
+import {
+  CALIBRATION_FIELD_GROUPS,
+  getCalibrationStatus,
+  groupMissingInputs,
+  type CalibrationFieldGroup,
+} from '../utils/calibrationFieldGuidance';
+
+/** Display order for resolution-group cards in the "remaining work" section. */
+const CALIBRATION_FIELD_GROUP_ORDER: CalibrationFieldGroup[] = [
+  'here',
+  'profile',
+  'signoff',
+  'admin',
+  'other',
+];
 
 /** The all-zero Guid the calibration-setup endpoint interprets as "clear this binding".
  * Omitting the field means "leave unchanged", so an explicit sentinel is required to
@@ -276,6 +291,26 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
 
   const firmware = contextQuery.data?.firmware;
 
+  const data = contextQuery.data;
+  const allProfilesBound = Boolean(
+    data?.slicer?.machineProfileId && data?.slicer?.processProfileId && data?.slicer?.filamentProfileId
+  );
+  const groupedMissingInputs = data ? groupMissingInputs(data.missingInputs, allProfilesBound) : null;
+  const calibrationStatus = data
+    ? getCalibrationStatus({
+        eligible: data.eligible,
+        anyProfileBound: allProfilesBound,
+        firmwareDetected: Boolean(data.firmware?.family || data.firmware?.version),
+        hardwareOrFirmwareVerified: Boolean(data.calibrationHardwareVerifiedAtUtc || data.firmware?.verified),
+      })
+    : null;
+  const statusHeadline =
+    calibrationStatus === 'ready'
+      ? 'Ready — this printer is eligible for calibration.'
+      : calibrationStatus === 'in-progress'
+        ? 'Setup in progress — a few things are still needed before calibration is possible.'
+        : "Calibration setup needed — this printer hasn't been set up for calibration yet.";
+
   return (
     <Modal
       isOpen={isOpen}
@@ -299,11 +334,37 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
       )}
       {contextQuery.data && (
         <div className="flex flex-col gap-4">
-          <Alert type={contextQuery.data.eligible ? 'success' : 'warning'}>
-            {contextQuery.data.eligible
-              ? 'This printer is currently eligible for calibration.'
-              : `Not yet eligible. Missing: ${contextQuery.data.missingInputs.join(', ') || 'unknown'}`}
-          </Alert>
+          <Alert type={calibrationStatus === 'ready' ? 'success' : 'info'}>{statusHeadline}</Alert>
+
+          {calibrationStatus !== 'ready' && groupedMissingInputs && (
+            <div className="flex flex-col gap-2">
+              {CALIBRATION_FIELD_GROUP_ORDER.map((groupKey) => {
+                const items = groupedMissingInputs[groupKey];
+                if (items.length === 0) return null;
+                const groupInfo = CALIBRATION_FIELD_GROUPS[groupKey];
+                return (
+                  <div key={groupKey} className="border border-pf-border rounded-sm p-2">
+                    <p className="text-sm font-semibold">{groupInfo.title}</p>
+                    <p className="text-xs text-pf-text-secondary mb-1">{groupInfo.description}</p>
+                    <ul className="list-disc list-inside text-sm">
+                      {items.map((item) => (
+                        <li key={item.path}>{item.label}</li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+              {contextQuery.data.missingInputs.length > 0 && (
+                <CollapsibleSection title="Technical details (raw field paths)" defaultExpanded={false}>
+                  <ul className="list-disc list-inside text-xs font-mono text-pf-text-secondary">
+                    {contextQuery.data.missingInputs.map((path) => (
+                      <li key={path}>{path}</li>
+                    ))}
+                  </ul>
+                </CollapsibleSection>
+              )}
+            </div>
+          )}
 
           <CollapsibleSection title="Slicer profiles" defaultExpanded>
             <div className="flex flex-col gap-2">
