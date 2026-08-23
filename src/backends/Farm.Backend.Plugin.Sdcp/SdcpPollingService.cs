@@ -631,18 +631,19 @@ public sealed class SdcpPollingService(
     /// <inheritdoc/>
     public IReadOnlyDictionary<Guid, PrinterConnectionHealth> GetConnectionHealth()
     {
-        foreach (var health in _connectionHealth.Values)
+        return _connectionHealth.ToDictionary(entry => entry.Key, entry =>
         {
-            health.UpdateUptimePercent(TimeSpan.FromHours(1));
-            health.ConnectionMode = "Polling";
+            PrinterConnectionHealth snapshot = entry.Value.CreateSnapshot();
+            snapshot.UpdateUptimePercent(TimeSpan.FromHours(1));
+            snapshot.ConnectionMode = "Polling";
 
-            if (_printerStates.TryGetValue(health.PrinterId, out var state))
+            if (_printerStates.TryGetValue(snapshot.PrinterId, out var state))
             {
-                health.ConsecutiveFailures = state.ConsecutiveFailures;
+                snapshot.ConsecutiveFailures = state.ConsecutiveFailures;
             }
-        }
 
-        return _connectionHealth;
+            return snapshot;
+        });
     }
 
     private void RecordHealthTransition(Guid printerId, string printerName, PrinterConnectionState newState, string? reason)

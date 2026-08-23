@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace Farm.Infrastructure.Settings;
 
 [AppSetting(SystemLogSettings.SectionName)]
-[SettingGroup("System", DisplayName = "System", Description = "System-level configuration", Icon = "pf-icon-system", Order = 10)]
+[SettingGroup("System", DisplayName = "System", Description = "Core system configuration", Icon = "pf-icon-system", Order = 6)]
 [SettingDisplay(Name = "System Logging", Description = "Database logging configuration, retention, and export settings.", Icon = "pf-icon-systemlog", Group = "System", Order = 4)]
 public class SystemLogSettings : IAppSetting, IValidatableSetting
 {

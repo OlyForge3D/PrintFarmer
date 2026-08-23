@@ -97,6 +97,17 @@ public class SettingsMetadataAttributeTests
     }
 
     [Fact]
+    public void SystemLogSettings_PreservesCanonicalSystemGroupMetadata()
+    {
+        SettingGroupAttribute group = Assert.IsType<SettingGroupAttribute>(
+            typeof(SystemLogSettings).GetCustomAttribute<SettingGroupAttribute>());
+
+        Assert.Equal("System", group.GroupKey);
+        Assert.Equal("Core system configuration", group.Description);
+        Assert.Equal(6, group.Order);
+    }
+
+    [Fact]
     public void EveryUserVisibleSettingDisplayLabel_UsesSentenceCase()
     {
         (Type Type, PropertyInfo Property, string Label)[] labels = SettingsAssemblies()

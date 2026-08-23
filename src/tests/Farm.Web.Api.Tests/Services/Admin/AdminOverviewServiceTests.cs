@@ -255,6 +255,31 @@ public class AdminOverviewServiceTests
     }
 
     [Fact]
+    public async Task GetOverviewAsync_WhenConnectionProviderThrows_DegradesBackendsAndAddsAttention()
+    {
+        Mock<IPrinterConnectionHealthProvider> provider = new();
+        _ = provider.Setup(p => p.GetConnectionHealth())
+            .Throws(new InvalidOperationException("provider crashed"));
+        _connectionHealthProviders.Add(provider.Object);
+
+        HealthReport report = BuildReport(
+            comprehensive: HealthCheckResult.Healthy("ok", BuildComprehensiveData()),
+            signalr: HealthCheckResult.Healthy("ok"),
+            spoolman: HealthCheckResult.Healthy("Spoolman not configured"));
+        _healthCheckService.Setup(s => s.CheckHealthAsync(It.IsAny<System.Func<HealthCheckRegistration, bool>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(report);
+
+        AdminOverviewDto overview = await CreateService().GetOverviewAsync();
+
+        overview.Subsystems.Should().Contain(s => s.Key == "backends"
+            && s.Status == SubsystemStatus.Degraded
+            && s.Detail == "Printer status unavailable");
+        overview.Attention.Should().Contain(a => a.Key == "backends-degraded"
+            && a.Severity == AttentionSeverity.Warning
+            && a.Detail.Contains("1 printer connection provider(s) failed", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task GetOverviewAsync_WhenCallerCancels_PropagatesCancellation()
     {
         using CancellationTokenSource cts = new();
