@@ -163,6 +163,11 @@ public class PrintJobManagementServiceQueueMappingTests
 
         Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobWithFileMetaDto dto = Assert.Single(result);
         Assert.Null(dto.GcodeFile.ThumbnailUrl);
+
+        // MapToQueuedPrintJobDto (the sibling mapping method) sets its own,
+        // independent ThumbnailUrl on QueuedPrintJobDto — it must be gated the
+        // same way as QueueGcodeFileMetaDto.ThumbnailUrl above.
+        Assert.Null(dto.Job.ThumbnailUrl);
     }
 
     [Fact]
@@ -217,6 +222,10 @@ public class PrintJobManagementServiceQueueMappingTests
 
         Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobWithFileMetaDto dto = Assert.Single(result);
         Assert.Equal($"/api/gcode-files/thumbnail/{fileId}", dto.GcodeFile.ThumbnailUrl);
+
+        // Companion assertion: MapToQueuedPrintJobDto's own ThumbnailUrl must
+        // also be populated when thumbnail metadata is present.
+        Assert.Equal($"/api/gcode-files/thumbnail/{fileId}", dto.Job.ThumbnailUrl);
     }
 
     [Fact]
