@@ -6,10 +6,18 @@ using FluentAssertions;
 namespace Farm.Web.Api.Tests.Services.Calibration.Generation;
 
 /// <summary>
-/// Golden determinism tests: for every supported method the whole pipeline must produce identical
-/// canonical specification, plan, G-code and manifest digests for identical inputs.
+/// Verifies that the calibration generation pipeline is deterministic: for every supported method,
+/// repeated invocations with identical inputs within the same build must produce identical canonical
+/// specification, plan, G-code, and manifest digests.
 /// </summary>
-public sealed class CalibrationGoldenGenerationTests
+/// <remarks>
+/// This suite does NOT verify parity with OrcaSlicer's own output — it does not compare generated
+/// artifacts against anything OrcaSlicer itself produces. It only guarantees that PrintFarmer's own
+/// generation pipeline is reproducible across repeated calls. See
+/// https://github.com/OlyForge3D/PrintFarmer/issues/1926 for the OrcaSlicer parity gap this suite
+/// does not close.
+/// </remarks>
+public sealed class CalibrationGenerationDeterminismTests
 {
     private static readonly CalibrationMethod[] AllMethods =
     [

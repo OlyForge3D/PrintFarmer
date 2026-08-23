@@ -341,12 +341,12 @@
       }
     },
     {
-      "id": "calibration-generation-golden-tests",
-      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationGoldenGenerationTests.cs",
+      "id": "calibration-generation-determinism-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationGenerationDeterminismTests.cs",
       "referenceUrls": [
         "https://github.com/OlyForge3D/PrintFarmer/issues/899"
       ],
-      "statement": "Independent PrintFarmer test implementation covering golden-file coverage for issue #899 calibration generation; no external calibration source code was copied or adapted.",
+      "statement": "Independent PrintFarmer test implementation covering determinism (repeated-invocation reproducibility, not OrcaSlicer parity) for issue #899 calibration generation; no external calibration source code was copied or adapted.",
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-07-25",
