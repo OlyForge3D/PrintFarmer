@@ -78,7 +78,7 @@ import {
   canUseManualMove,
   getPrinterSupport,
 } from '@/features/printers/utils/printerSupport';
-import { getStatusHeaderClassName } from '@/features/printers/utils/statusColors';
+import { getStatusHeaderClassName, isPrinterStateShutdown } from '@/features/printers/utils/statusColors';
 import {
   getPresetTargets,
   getExtrudeMinTemp,
@@ -278,7 +278,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const isEnabled = printer.isEnabled ?? true;
   const isPrinting = isOnline && state === 'Printing';
   const isPaused = state === 'Paused';
-  const isShutdown = state === 'Offline' || state === 'Shutdown' || state === 'Halted';
+  const isShutdown = isPrinterStateShutdown(state);
   const statusLabel = getPrinterDisplayState({
     printerState: state,
     autoDispatchState: autoDispatchStatus?.state,

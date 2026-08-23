@@ -44,7 +44,7 @@ import {
   DEFAULT_EXTRUDE_SPEED_MMS,
 } from '@/features/printers/constants/temperaturePresets';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
-import { getStatusHeaderClassName, getStatusIndicatorColor } from '@/features/printers/utils/statusColors';
+import { getStatusHeaderClassName, getStatusIndicatorColor, isPrinterStateShutdown } from '@/features/printers/utils/statusColors';
 // This component's scrollable content follows PRINTER_DETAIL_SECTION_ORDER
 // (see printerDetailSectionOrder.ts): Statistics, Version, Control, Objects,
 // Move, Temperature, Materials/MMU, Spool. DetailedPrinterCard mirrors this
@@ -435,7 +435,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   });
   const isPrinting = rawState.toLowerCase().includes('printing');
   const isPaused = rawState.toLowerCase().includes('paused');
-  const isShutdown = rawState.toLowerCase().includes('shutdown') || rawState.toLowerCase().includes('error');
+  const isShutdown = isPrinterStateShutdown(rawState);
   const headerClassName = getStatusHeaderClassName({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
   const statusIndicatorClassName = getStatusIndicatorColor({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
 

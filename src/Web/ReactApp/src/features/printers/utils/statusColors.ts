@@ -43,6 +43,26 @@ export function getStatusHeaderClassName(options: StatusColorOptions): string {
 }
 
 /**
+ * Determine whether a printer's state string represents a fatal/unresponsive
+ * condition (Klippy shutdown, backend error, offline, or halted).
+ *
+ * This is the single source of truth for "shutdown-like" state detection so
+ * status coloring and movement-control gating (#1909) never disagree about
+ * which states are fatal. Both `DetailedPrinterCard` and
+ * `PrinterDetailsSidebar` must derive their local `isShutdown` flag through
+ * this helper rather than re-implementing their own substring checks.
+ */
+export function isPrinterStateShutdown(state: string | undefined | null): boolean {
+  const stateLower = (state ?? 'unknown').toLowerCase();
+  return (
+    stateLower.includes('shutdown') ||
+    stateLower.includes('error') ||
+    stateLower.includes('offline') ||
+    stateLower.includes('halted')
+  );
+}
+
+/**
  * Get status indicator color from state string (for simple cases).
  * 
  * @param state - Printer state string
@@ -57,6 +77,6 @@ export function getStatusIndicatorColorFromState(state: string, isOnline: boolea
     isOnline,
     isPrinting: stateLower.includes('printing'),
     isPaused: stateLower.includes('paused'),
-    isShutdown: stateLower.includes('shutdown') || stateLower.includes('error') || stateLower.includes('offline') || stateLower.includes('halted'),
+    isShutdown: isPrinterStateShutdown(state),
   });
 }
