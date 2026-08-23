@@ -67,6 +67,32 @@ public sealed class PrinterConnectionHealth
     public const int MaxTransitions = 20;
 
     /// <summary>
+    /// Creates an independent point-in-time copy for diagnostics consumers.
+    /// </summary>
+    public PrinterConnectionHealth CreateSnapshot()
+    {
+        lock (_transitionLock)
+        {
+            PrinterConnectionHealth snapshot = new()
+            {
+                PrinterId = PrinterId,
+                PrinterName = PrinterName,
+                Backend = Backend,
+                ConnectionState = ConnectionState,
+                LastConnectedUtc = LastConnectedUtc,
+                LastDisconnectedUtc = LastDisconnectedUtc,
+                ReconnectAttempts = ReconnectAttempts,
+                TotalReconnects = TotalReconnects,
+                ConsecutiveFailures = ConsecutiveFailures,
+                UptimePercent = UptimePercent,
+                ConnectionMode = ConnectionMode,
+            };
+            snapshot._transitions.AddRange(_transitions);
+            return snapshot;
+        }
+    }
+
+    /// <summary>
     /// Records a state transition and updates connection timestamps.
     /// </summary>
     public void RecordTransition(PrinterConnectionState newState, string? reason = null)

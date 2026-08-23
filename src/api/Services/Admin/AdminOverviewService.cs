@@ -1,7 +1,10 @@
 ﻿using System.Collections;
 using System.Diagnostics;
 using System.Globalization;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 
@@ -9,24 +12,27 @@ namespace Farm.Web.Api.Services.Admin;
 
 /// <summary>
 /// Aggregates <see cref="HealthCheckService"/> results into a single admin overview snapshot.
-/// This does not run any new probes — it composes the health checks already registered by
-/// <c>AddPrintFarmerHealthChecks()</c>: <c>comprehensive</c>, <c>signalr</c>, and <c>spoolman</c>.
+/// This composes the registered server health checks and reads existing printer connection
+/// snapshots for the admin-only backend status.
 ///
 /// The comprehensive check bundles several sub-probes into its <see cref="HealthReportEntry.Data"/>
-/// dictionary (Database, CatalogApi, FilamentTypesApi, ExternalServices, Memory, Application).
-/// This service reads those payloads to split the single check into the finer per-subsystem tiles
-/// the Control Center UI needs (database, api, backends).
+/// dictionary (Database, CatalogApi, FilamentTypesApi, Memory, Application).
 /// </summary>
 public sealed class AdminOverviewService : IAdminOverviewService
 {
     private static readonly TimeSpan HealthCheckTimeout = TimeSpan.FromSeconds(8);
 
     private readonly HealthCheckService _healthCheckService;
+    private readonly IEnumerable<IPrinterConnectionHealthProvider> _connectionHealthProviders;
     private readonly ILogger<AdminOverviewService> _logger;
 
-    public AdminOverviewService(HealthCheckService healthCheckService, ILogger<AdminOverviewService> logger)
+    public AdminOverviewService(
+        HealthCheckService healthCheckService,
+        IEnumerable<IPrinterConnectionHealthProvider> connectionHealthProviders,
+        ILogger<AdminOverviewService> logger)
     {
         _healthCheckService = healthCheckService ?? throw new ArgumentNullException(nameof(healthCheckService));
+        _connectionHealthProviders = connectionHealthProviders ?? throw new ArgumentNullException(nameof(connectionHealthProviders));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -61,8 +67,9 @@ public sealed class AdminOverviewService : IAdminOverviewService
             probeError = "Health check aggregation failed: " + ex.Message;
         }
 
-        List<SubsystemHealthDto> subsystems = BuildSubsystems(report, probeError);
-        List<AttentionItemDto> attention = BuildAttention(report, probeError);
+        PrinterConnectivitySnapshot printerConnectivity = GetPrinterConnectivity();
+        List<SubsystemHealthDto> subsystems = BuildSubsystems(report, probeError, printerConnectivity);
+        List<AttentionItemDto> attention = BuildAttention(report, probeError, printerConnectivity);
 
         return new AdminOverviewDto
         {
@@ -72,7 +79,31 @@ public sealed class AdminOverviewService : IAdminOverviewService
         };
     }
 
-    private static List<SubsystemHealthDto> BuildSubsystems(HealthReport? report, string? probeError)
+    private PrinterConnectivitySnapshot GetPrinterConnectivity()
+    {
+        List<PrinterConnectionHealth> printers = new();
+        int providerErrorCount = 0;
+
+        foreach (IPrinterConnectionHealthProvider provider in _connectionHealthProviders)
+        {
+            try
+            {
+                printers.AddRange(provider.GetConnectionHealth().Values);
+            }
+            catch (Exception ex)
+            {
+                providerErrorCount++;
+                _logger.LogWarning(ex, "Admin overview: failed to read printer connectivity from provider {ProviderType}", provider.GetType().Name);
+            }
+        }
+
+        return new PrinterConnectivitySnapshot(printers, providerErrorCount);
+    }
+
+    private static List<SubsystemHealthDto> BuildSubsystems(
+        HealthReport? report,
+        string? probeError,
+        PrinterConnectivitySnapshot printerConnectivity)
     {
         // The API is answering this very request, so it is by definition responding.
         // Its status downgrades only when the aggregation itself failed (in which case
@@ -94,7 +125,7 @@ public sealed class AdminOverviewService : IAdminOverviewService
             // UI can render tiles rather than showing nothing.
             tiles.Add(UnknownTile("database", "Database", probeError));
             tiles.Add(UnknownTile("signalr", "SignalR Hub", probeError));
-            tiles.Add(UnknownTile("backends", "Printer Backends", probeError));
+            tiles.Add(BuildBackendsTile(printerConnectivity));
             return tiles;
         }
 
@@ -115,14 +146,7 @@ public sealed class AdminOverviewService : IAdminOverviewService
         // SignalR is its own registered check, so map its status directly.
         tiles.Add(BuildTileFromEntry("signalr", "SignalR Hub", signalr, SignalRDetail));
 
-        // Backends — pulled from comprehensive.Data["ExternalServices"] (printer HTTP probes).
-        tiles.Add(BuildTileFromSubcheck(
-            key: "backends",
-            name: "Printer Backends",
-            fallbackEntry: comprehensive,
-            data: comprehensive.Data,
-            subCheckKey: "ExternalServices",
-            detailBuilder: BackendsDetail));
+        tiles.Add(BuildBackendsTile(printerConnectivity));
 
         // Spoolman is optional; hide the tile when it explicitly reports "not configured".
         if (IsSpoolmanConfigured(spoolman))
@@ -140,6 +164,29 @@ public sealed class AdminOverviewService : IAdminOverviewService
         Status = SubsystemStatus.Unknown,
         Detail = detail,
     };
+
+    private static SubsystemHealthDto BuildBackendsTile(PrinterConnectivitySnapshot connectivity)
+    {
+        int failedCount = connectivity.Printers.Count(p => p.ConnectionState != PrinterConnectionState.Connected);
+        int totalCount = connectivity.Printers.Count;
+        SubsystemStatus status = failedCount == 0 && connectivity.ProviderErrorCount == 0
+            ? SubsystemStatus.Healthy
+            : failedCount == totalCount && totalCount > 0
+                ? SubsystemStatus.Unhealthy
+                : SubsystemStatus.Degraded;
+
+        string detail = totalCount == 0
+            ? connectivity.ProviderErrorCount == 0 ? "No registered printers reported" : "Printer status unavailable"
+            : string.Create(CultureInfo.InvariantCulture, $"{totalCount - failedCount} / {totalCount} reachable");
+
+        return new SubsystemHealthDto
+        {
+            Key = "backends",
+            Name = "Printer Backends",
+            Status = status,
+            Detail = detail,
+        };
+    }
 
     private static SubsystemHealthDto BuildTileFromEntry(
         string key,
@@ -226,36 +273,6 @@ public sealed class AdminOverviewService : IAdminOverviewService
             : TruncateDescription(entry.Description) ?? "See health details";
     }
 
-    private static string? BackendsDetail(IDictionary<string, object?>? subData, HealthReportEntry fallbackEntry)
-    {
-        if (subData is null)
-        {
-            return TruncateDescription(fallbackEntry.Description);
-        }
-
-        int? checkedCount = TryReadInt(subData, "CheckedCount");
-        int? failedCount = TryReadInt(subData, "FailedCount");
-        string? error = TryReadString(subData, "Error");
-
-        if (!string.IsNullOrWhiteSpace(error))
-        {
-            return "Error: " + error;
-        }
-
-        if (checkedCount is null)
-        {
-            return null;
-        }
-
-        if (checkedCount == 0)
-        {
-            return "No external printers probed";
-        }
-
-        int reachable = checkedCount.Value - (failedCount ?? 0);
-        return string.Create(CultureInfo.InvariantCulture, $"{reachable} / {checkedCount.Value} reachable");
-    }
-
     private static string? SpoolmanDetail(HealthReportEntry entry)
     {
         if (!string.IsNullOrWhiteSpace(entry.Description))
@@ -291,7 +308,10 @@ public sealed class AdminOverviewService : IAdminOverviewService
     // this is intentional and caught by the frontend registry tests.
     private const string OpsStatusDestinationId = "ops-status";
 
-    private static List<AttentionItemDto> BuildAttention(HealthReport? report, string? probeError)
+    private static List<AttentionItemDto> BuildAttention(
+        HealthReport? report,
+        string? probeError,
+        PrinterConnectivitySnapshot printerConnectivity)
     {
         List<AttentionItemDto> items = new();
 
@@ -316,6 +336,8 @@ public sealed class AdminOverviewService : IAdminOverviewService
             }
         }
 
+        AppendPrinterConnectivityAttention(printerConnectivity, items);
+
         // Sort: Error > Warning > Info, then stable by Title.
         items.Sort((a, b) =>
         {
@@ -330,11 +352,9 @@ public sealed class AdminOverviewService : IAdminOverviewService
 
     private static void AppendAttentionForEntry(string entryName, HealthReportEntry entry, List<AttentionItemDto> items)
     {
-        // Extract per-printer failures from ExternalServices, if the payload exposes them.
         if (string.Equals(entryName, "comprehensive", StringComparison.Ordinal))
         {
             AppendDatabaseAttention(entry, items);
-            AppendExternalServicesAttention(entry, items);
         }
         else if (entry.Status != HealthStatus.Healthy)
         {
@@ -389,92 +409,41 @@ public sealed class AdminOverviewService : IAdminOverviewService
         });
     }
 
-    private static void AppendExternalServicesAttention(HealthReportEntry comprehensive, List<AttentionItemDto> items)
+    private static void AppendPrinterConnectivityAttention(
+        PrinterConnectivitySnapshot connectivity,
+        List<AttentionItemDto> items)
     {
-        if (comprehensive.Data is null
-            || !comprehensive.Data.TryGetValue("ExternalServices", out object? extObj)
-            || extObj is null)
+        if (connectivity.ProviderErrorCount > 0)
         {
-            return;
-        }
-
-        Dictionary<string, object?>? data = ReadAnonymous(extObj);
-        if (data is null)
-        {
-            return;
-        }
-
-        int failedCount = TryReadInt(data, "FailedCount") ?? 0;
-        if (failedCount == 0)
-        {
-            return;
-        }
-
-        if (!data.TryGetValue("FailedServicesDetails", out object? detailsObj) || detailsObj is not IEnumerable enumerable)
-        {
-            int checkedCount = TryReadInt(data, "CheckedCount") ?? 0;
             items.Add(new AttentionItemDto
             {
                 Key = "backends-degraded",
                 Severity = AttentionSeverity.Warning,
-                Title = "Some printer backends are unreachable",
-                Detail = string.Create(CultureInfo.InvariantCulture, $"{failedCount} of {checkedCount} probed printer backends failed to respond."),
+                Title = "Some printer backends are not reporting",
+                Detail = string.Create(CultureInfo.InvariantCulture, $"{connectivity.ProviderErrorCount} printer connection provider(s) failed to report status."),
                 ActionLabel = "Open Printers",
                 ActionRoute = "/printers",
             });
-            return;
         }
 
-        int reported = 0;
-        foreach (object? entry in enumerable)
+        foreach (PrinterConnectionHealth printer in connectivity.Printers.Where(
+                     p => p.ConnectionState != PrinterConnectionState.Connected))
         {
-            if (entry is null)
-            {
-                continue;
-            }
-
-            Dictionary<string, object?>? printerData = ReadAnonymous(entry);
-            if (printerData is null)
-            {
-                continue;
-            }
-
-            string? printerId = TryReadString(printerData, "Id");
-            string name = TryReadString(printerData, "Name") ?? "Unknown printer";
-            string? errorMessage = TryReadString(printerData, "ErrorMessage");
-            int? statusCode = TryReadInt(printerData, "StatusCode");
-            string? url = TryReadString(printerData, "AttemptedUrl") ?? TryReadString(printerData, "ServerUrl");
-
-            string reasonPart;
-            if (statusCode.HasValue)
-            {
-                reasonPart = string.Create(CultureInfo.InvariantCulture, $"HTTP {statusCode.Value}");
-            }
-            else if (!string.IsNullOrWhiteSpace(errorMessage))
-            {
-                reasonPart = errorMessage;
-            }
-            else
-            {
-                reasonPart = "no response";
-            }
-
-            string detail = url is null
-                ? $"{name} did not respond ({reasonPart})."
-                : $"{name} did not respond at {url} ({reasonPart}).";
-
             items.Add(new AttentionItemDto
             {
-                Key = printerId is null ? $"printer-unreachable-{reported}" : "printer-" + printerId + "-unreachable",
+                Key = "printer-" + printer.PrinterId + "-unreachable",
                 Severity = AttentionSeverity.Warning,
-                Title = $"Printer '{name}' is unreachable",
-                Detail = detail,
+                Title = $"Printer '{printer.PrinterName}' is unreachable",
+                Detail = $"{printer.PrinterName} is {printer.ConnectionState}.",
                 ActionLabel = "Open Printers",
                 ActionRoute = "/printers",
             });
-            reported++;
         }
     }
+
+    private sealed record PrinterConnectivitySnapshot(
+        IReadOnlyList<PrinterConnectionHealth> Printers,
+        int ProviderErrorCount);
 
     private static SubsystemStatus MapStatus(HealthStatus status) => status switch
     {

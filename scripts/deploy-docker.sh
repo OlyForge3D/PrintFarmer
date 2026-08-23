@@ -5966,8 +5966,13 @@ fetch_api_health_summary() {
     return 0
 }
 
+api_health_status_is_deployable() {
+    local status="$1"
+    [ "$status" = "Healthy" ] || [ "$status" = "Degraded" ]
+}
+
 wait_for_api() {
-    print_info "Waiting for API to become healthy (validated via /health)..."
+    print_info "Waiting for API to become ready (validated via /health)..."
     local timeout=${API_WAIT_TIMEOUT:-180}
     local interval=3
     local elapsed=0
@@ -5993,8 +5998,13 @@ wait_for_api() {
 
         local health_status="" health_desc="" health_http="" health_payload=""
         if fetch_api_health_summary "$api_base" health_status health_desc health_http health_payload; then
-            if [ "$health_status" = "Healthy" ]; then
-                print_success "API /health reports Healthy (HTTP ${health_http:-200})"
+            if api_health_status_is_deployable "$health_status"; then
+                if [ "$health_status" = "Degraded" ]; then
+                    print_warning "API is ready but /health reports Degraded (HTTP ${health_http:-200})."
+                    [ -n "$health_desc" ] && print_info "Health description: $health_desc"
+                else
+                    print_success "API /health reports Healthy (HTTP ${health_http:-200})"
+                fi
                 return 0
             fi
 
@@ -6018,7 +6028,7 @@ wait_for_api() {
         fi
 
         if [ $((elapsed % 15)) -eq 0 ]; then
-            print_info "Still waiting for API to be fully healthy... ($elapsed/$timeout seconds)"
+            print_info "Still waiting for API to become ready... ($elapsed/$timeout seconds)"
             dc ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | grep -E "api|frontend|orcaslicer" || true
         fi
 
@@ -6026,12 +6036,12 @@ wait_for_api() {
         elapsed=$((elapsed + interval))
     done
 
-    print_warning "Timeout waiting for API comprehensive health after ${timeout}s. Proceeding with deployment but UI may show errors until API stabilizes."
+    print_warning "Timeout waiting for API readiness after ${timeout}s. Proceeding with deployment but UI may show errors until API stabilizes."
     local fail_on_timeout=${API_FAIL_ON_TIMEOUT:-true}
 
     if [ "$fail_on_timeout" = "true" ] || [ "$fail_on_timeout" = "1" ]; then
         run_api_diagnostics "🩺 API Startup Diagnostics"
-        print_error "API did not reach Healthy status within ${timeout}s and API_FAIL_ON_TIMEOUT is enabled. Failing deployment."
+        print_error "API did not reach a deployable health status within ${timeout}s and API_FAIL_ON_TIMEOUT is enabled. Failing deployment."
         echo
         print_info "Useful diagnostic commands to investigate the API container:"
         echo "  docker compose --env-file $ENV_FILE ps"

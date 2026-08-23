@@ -4,7 +4,7 @@
 
 # Health check definitions
 x-api-healthcheck: &api-healthcheck
-  test: ["CMD", "sh", "-c", "curl -f http://api:5245/health | grep -q 'Healthy'"]
+  test: ["CMD", "curl", "-f", "http://api:5245/healthz"]
   interval: 30s
   timeout: 15s
   retries: 5

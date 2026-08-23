@@ -3273,15 +3273,15 @@ public sealed class MoonrakerSubscriptionService(
     /// <inheritdoc/>
     public IReadOnlyDictionary<Guid, PrinterConnectionHealth> GetConnectionHealth()
     {
-        // Update uptime percentages before returning
-        foreach (var health in _connectionHealth.Values)
+        return _connectionHealth.ToDictionary(entry => entry.Key, entry =>
         {
-            health.UpdateUptimePercent(TimeSpan.FromHours(1));
+            PrinterConnectionHealth snapshot = entry.Value.CreateSnapshot();
+            snapshot.UpdateUptimePercent(TimeSpan.FromHours(1));
 
             // Sync connection mode from polling mode
-            if (_pollingModes.TryGetValue(health.PrinterId, out var mode))
+            if (_pollingModes.TryGetValue(snapshot.PrinterId, out var mode))
             {
-                health.ConnectionMode = mode switch
+                snapshot.ConnectionMode = mode switch
                 {
                     PollingMode.WebSocketRealTime => "WebSocket",
                     PollingMode.HttpPollingOnly => "HTTP Polling",
@@ -3291,15 +3291,15 @@ public sealed class MoonrakerSubscriptionService(
             }
 
             // Sync metrics
-            if (_connectionMetrics.TryGetValue(health.PrinterId, out var metrics))
+            if (_connectionMetrics.TryGetValue(snapshot.PrinterId, out var metrics))
             {
-                health.ReconnectAttempts = metrics.ReconnectAttempts;
-                health.TotalReconnects = metrics.TotalReconnects;
-                health.ConsecutiveFailures = metrics.ConsecutiveFailures;
+                snapshot.ReconnectAttempts = metrics.ReconnectAttempts;
+                snapshot.TotalReconnects = metrics.TotalReconnects;
+                snapshot.ConsecutiveFailures = metrics.ConsecutiveFailures;
             }
-        }
 
-        return _connectionHealth;
+            return snapshot;
+        });
     }
 
     private PrinterConnectionHealth GetOrCreateHealth(Guid printerId, string printerName)

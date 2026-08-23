@@ -131,6 +131,30 @@ public class PrinterConnectionHealthTests
     }
 
     [Fact]
+    public void CreateSnapshot_ReturnsIndependentCopyWithTransitions()
+    {
+        var health = new PrinterConnectionHealth
+        {
+            PrinterId = Guid.NewGuid(),
+            PrinterName = "TestPrinter",
+            Backend = PrinterBackend.Moonraker,
+            ConnectionState = PrinterConnectionState.Offline,
+            ConnectionMode = "Original",
+        };
+        health.RecordTransition(PrinterConnectionState.Connected, "connected");
+
+        PrinterConnectionHealth snapshot = health.CreateSnapshot();
+        snapshot.ConnectionMode = "Snapshot";
+        snapshot.RecordTransition(PrinterConnectionState.Offline, "disconnected");
+
+        Assert.Equal("Original", health.ConnectionMode);
+        Assert.Equal(PrinterConnectionState.Connected, health.ConnectionState);
+        Assert.Single(health.RecentTransitions);
+        Assert.Equal(PrinterConnectionState.Offline, snapshot.ConnectionState);
+        Assert.Equal(2, snapshot.RecentTransitions.Count);
+    }
+
+    [Fact]
     public void RecordTransition_MultipleReconnects_CountsCorrectly()
     {
         var health = new PrinterConnectionHealth

@@ -22,7 +22,7 @@ namespace Farm.Web.Api.Tests.Services;
 /// </remarks>
 public class SettingsMetadataAttributeTests
 {
-    private const int ExpectedDisplayLabelCount = 110;
+    private const int ExpectedDisplayLabelCount = 109;
 
     private static readonly string[] CanonicalTerms =
     [
@@ -94,6 +94,17 @@ public class SettingsMetadataAttributeTests
         // persisted/editable setting, and lacking [JsonPropertyName] it would otherwise break metadata.
         PropertyInfo prop = typeof(SlicerSettings).GetProperty(nameof(SlicerSettings.EffectiveEnabledModes))!;
         Assert.NotNull(prop.GetCustomAttribute<JsonIgnoreAttribute>());
+    }
+
+    [Fact]
+    public void SystemLogSettings_PreservesCanonicalSystemGroupMetadata()
+    {
+        SettingGroupAttribute group = Assert.IsType<SettingGroupAttribute>(
+            typeof(SystemLogSettings).GetCustomAttribute<SettingGroupAttribute>());
+
+        Assert.Equal("System", group.GroupKey);
+        Assert.Equal("Core system configuration", group.Description);
+        Assert.Equal(6, group.Order);
     }
 
     [Fact]
