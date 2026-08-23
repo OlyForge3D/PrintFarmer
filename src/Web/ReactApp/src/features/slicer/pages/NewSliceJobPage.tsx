@@ -58,6 +58,7 @@ import type { LoadedModel, BedConfig } from '@/features/slicer/components/viewer
 import type { BufferGeometry } from 'three';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 import { buildSlicerViewerModelUrl, getSlicerViewerFileType } from '@/features/slicer/utils/model-file-utils';
+import { loadModelArrayBuffer } from '@/common/utils/authenticatedModelUrl';
 import { buildSlicePayloadModels, resolveModel3DId, modelTransformJson, diffProcessOverrides } from '@/features/slicer/utils/slicePayload';
 import { readOrcaBundle } from '@/features/slicer/utils/orcaBundleLoader';
 import { SlicerWorkspaceBoundary } from '@/features/slicer/components/viewer/SlicerWorkspaceBoundary';
@@ -2052,6 +2053,13 @@ export const NewSliceJobPage: React.FC = () => {
   // and the plate silently stayed at 0 objects (issue #1910). Now it
   // actively verifies the URL is reachable before adding it to the bed, and
   // surfaces the outcome via toast either way.
+  //
+  // Reachability is checked via `loadModelArrayBuffer` rather than a bare
+  // `fetch`: a server-relative `/api/3d-models/file/{id}` path is one of the
+  // API's authenticated file endpoints (see `AuthenticatedModelSource` /
+  // #1711), so an unauthenticated request would always 401 even though the
+  // viewer can load it fine. `loadModelArrayBuffer` attaches the bearer
+  // token for those endpoints and falls back to a plain fetch otherwise.
   const handleUrlModelSubmit = useCallback((url: string, fileName: string) => {
     // Relative server paths (e.g. "/api/3d-models/file/...") are resolved
     // against the configured API base the same way other server-relative
@@ -2061,12 +2069,8 @@ export const NewSliceJobPage: React.FC = () => {
     const fileType = getSlicerViewerFileType(fileName);
     const toastId = toast.loading(`Fetching "${fileName}"…`);
 
-    void fetch(resolvedUrl, { method: 'HEAD' })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`Server responded with ${response.status} ${response.statusText}`.trim());
-        }
-
+    void loadModelArrayBuffer(resolvedUrl)
+      .then(() => {
         setSelectedModelId('');
         setModelFileUrl(resolvedUrl);
         setModelFileName(fileName);

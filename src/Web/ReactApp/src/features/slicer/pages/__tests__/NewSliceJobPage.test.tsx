@@ -1297,7 +1297,11 @@ describe('NewSliceJobPage', () => {
     });
 
     it('adds the model to the plate and shows a success toast for a reachable URL', async () => {
-      const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+      const fetchSpy = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+      });
       vi.stubGlobal('fetch', fetchSpy);
 
       await renderAndOpenUrlTab();
@@ -1308,10 +1312,7 @@ describe('NewSliceJobPage', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
 
       await waitFor(() => {
-        expect(fetchSpy).toHaveBeenCalledWith(
-          'https://example.com/model.stl',
-          expect.objectContaining({ method: 'HEAD' }),
-        );
+        expect(fetchSpy).toHaveBeenCalledWith('https://example.com/model.stl', expect.anything());
       });
       await waitFor(() => {
         const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
@@ -1339,6 +1340,37 @@ describe('NewSliceJobPage', () => {
         expect(toast.error).toHaveBeenCalled();
       });
       expect(slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? []).toHaveLength(0);
+    });
+
+    it('uses the authenticated apiClient (not a bare fetch) for an internal /api/3d-models/file/ URL, so it succeeds instead of 401ing', async () => {
+      // Regression coverage: /api/3d-models/file/{id} is one of the API's
+      // authenticated file endpoints (see AuthenticatedModelSource / #1711).
+      // A bare, unauthenticated fetch to it always 401s even though the
+      // viewer can load it fine via the bearer-token-attached apiClient.
+      const fetchSpy = vi.fn();
+      vi.stubGlobal('fetch', fetchSpy);
+
+      await renderAndOpenUrlTab();
+
+      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: new ArrayBuffer(0) } as never);
+
+      fireEvent.change(screen.getByLabelText('File URL'), {
+        target: { value: '/api/3d-models/file/model-3d-1' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+      await waitFor(() => {
+        expect(apiClient.get).toHaveBeenCalledWith(
+          '/api/3d-models/file/model-3d-1',
+          expect.objectContaining({ responseType: 'arraybuffer' }),
+        );
+      });
+      await waitFor(() => {
+        const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
+        expect(models).toHaveLength(1);
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(toast.success).toHaveBeenCalled();
     });
   });
 
