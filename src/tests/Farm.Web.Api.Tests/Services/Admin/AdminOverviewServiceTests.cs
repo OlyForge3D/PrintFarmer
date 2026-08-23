@@ -224,6 +224,15 @@ public class AdminOverviewServiceTests
     [Fact]
     public async Task GetOverviewAsync_WhenHealthServiceThrows_ReturnsDegradedResponseNotError()
     {
+        Guid offlinePrinterId = Guid.NewGuid();
+        SetPrinterConnectivity(new PrinterConnectionHealth
+        {
+            PrinterId = offlinePrinterId,
+            PrinterName = "printer-offline",
+            Backend = PrinterBackend.Moonraker,
+            ConnectionState = PrinterConnectionState.Offline,
+        });
+
         _healthCheckService.Setup(s => s.CheckHealthAsync(It.IsAny<System.Func<HealthCheckRegistration, bool>?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("simulated probe failure"));
 
@@ -234,13 +243,15 @@ public class AdminOverviewServiceTests
         overview.Subsystems.Should().Contain(s => s.Key == "api" && s.Status == SubsystemStatus.Degraded);
         overview.Subsystems.Should().Contain(s => s.Key == "database" && s.Status == SubsystemStatus.Unknown);
         overview.Subsystems.Should().Contain(s => s.Key == "signalr" && s.Status == SubsystemStatus.Unknown);
-        overview.Subsystems.Should().Contain(s => s.Key == "backends" && s.Status == SubsystemStatus.Healthy);
+        overview.Subsystems.Should().Contain(s => s.Key == "backends" && s.Status == SubsystemStatus.Unhealthy);
 
         overview.Attention.Should().Contain(a => a.Key == "admin-overview-probe-failed"
             && a.Severity == AttentionSeverity.Error
             && a.Detail.Contains("simulated probe failure", StringComparison.Ordinal)
             && a.ActionDestinationId == "ops-status"
             && a.ActionRoute == null);
+        overview.Attention.Should().Contain(a => a.Key == $"printer-{offlinePrinterId}-unreachable"
+            && a.Severity == AttentionSeverity.Warning);
     }
 
     [Fact]

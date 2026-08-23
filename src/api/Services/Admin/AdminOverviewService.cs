@@ -334,9 +334,9 @@ public sealed class AdminOverviewService : IAdminOverviewService
             {
                 AppendAttentionForEntry(entryName, entry, items);
             }
-
-            AppendPrinterConnectivityAttention(printerConnectivity, items);
         }
+
+        AppendPrinterConnectivityAttention(printerConnectivity, items);
 
         // Sort: Error > Warning > Info, then stable by Title.
         items.Sort((a, b) =>
