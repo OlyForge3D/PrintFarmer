@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { slicerHubService, type SliceJobEvent } from '@/services/slicerHubService';
+import { sliceJobService } from '@/services/sliceJobService';
 
 export interface SliceJobProgressState {
   progressPercent: number;
@@ -56,6 +57,38 @@ export function useSliceJobProgress(jobId: string | null): SliceJobProgressState
 
     let cancelled = false;
 
+    // Reconciles local state with the job's current server-side status. A
+    // fast job (e.g. one that fails almost immediately) — or a job whose
+    // terminal event was broadcast while the connection was reconnecting —
+    // can reach a terminal state before/while we (re)subscribe. SignalR does
+    // not replay missed events to a late-joining group member, so without
+    // this catch-up fetch the UI would be stuck at "Job queued" forever
+    // (issue #1912). Only applied when no live event has updated state yet,
+    // so a subsequent real-time event always wins.
+    const reconcileStatus = async () => {
+      try {
+        const current = await sliceJobService.getJobStatus(jobId);
+        if (cancelled) return;
+        setState(prev => {
+          if (prev.status !== null) return prev;
+          return {
+            ...prev,
+            status: current.status,
+            progressPercent: current.progressPercent ?? prev.progressPercent,
+            progressMessage: current.progressMessage ?? prev.progressMessage,
+            estimatedPrintTimeSeconds: current.estimatedPrintTimeSeconds ?? prev.estimatedPrintTimeSeconds,
+            filamentUsedGrams: current.filamentUsedGrams ?? prev.filamentUsedGrams,
+            resultFileUrl: current.resultFileUrl ?? prev.resultFileUrl,
+            error: current.errorMessage ?? prev.error,
+          };
+        });
+      } catch {
+        // Best effort only — live SignalR events remain the primary source
+        // of truth and this reconciliation must never surface as a
+        // connection error.
+      }
+    };
+
     const setup = async () => {
       try {
         await slicerHubService.ensureConnected();
@@ -71,6 +104,7 @@ export function useSliceJobProgress(jobId: string | null): SliceJobProgressState
         if (cancelled) return;
 
         unsubRef.current = slicerHubService.onJobEvent(jobId, handleEvent);
+        await reconcileStatus();
       } catch {
         if (!cancelled) {
           setState(prev => ({ ...prev, isConnected: false }));
@@ -83,6 +117,7 @@ export function useSliceJobProgress(jobId: string | null): SliceJobProgressState
       try {
         await slicerHubService.subscribeToJob(jobId);
         setState(prev => ({ ...prev, isConnected: true }));
+        await reconcileStatus();
       } catch {
         setState(prev => ({ ...prev, isConnected: false }));
       }
