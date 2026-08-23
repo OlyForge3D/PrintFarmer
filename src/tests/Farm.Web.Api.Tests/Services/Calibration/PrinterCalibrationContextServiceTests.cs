@@ -671,6 +671,62 @@ public sealed class PrinterCalibrationContextServiceTests
     }
 
     [Fact]
+    public async Task GetCandidatesAsync_WithCuratedModelSharingUnknownModelNameUnderDifferentManufacturer_StillDerivesItsFacts()
+    {
+        // Regression for #1922 (round 2 review): PrinterModel only enforces uniqueness on
+        // (ManufacturerId, Name), not Name alone, so a curated model that merely happens to be
+        // named "Unknown Model" under a manufacturer OTHER than the reserved "Unknown" sentinel
+        // manufacturer must NOT be discarded -- only the (Unknown manufacturer, "Unknown Model")
+        // identity is the sentinel. Model the exact identity collision here to prove the fix
+        // matches by ManufacturerId + Name, not by Name in isolation.
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.MaxBuildVolumeX = null;
+        harness.Printer.MaxBuildVolumeY = null;
+        harness.Printer.MaxBuildVolumeZ = null;
+        harness.Printer.BedOriginX = null;
+        harness.Printer.BedOriginY = null;
+        harness.Printer.PrintablePolygonJson = null;
+        harness.Printer.CalibrationMotionType = null;
+        harness.Printer.CalibrationHasHeatedBed = null;
+        harness.Printer.CalibrationHasHeatedChamber = null;
+        harness.Printer.CalibrationHasEnclosure = null;
+        harness.Profiles = harness.Profiles with
+        {
+            Machine = harness.Profiles.Machine!.WithRawJson("""{"gcode_flavor":"klipper"}"""),
+        };
+        Manufacturer curatedManufacturer = new() { Id = Guid.NewGuid(), Name = "Acme Printers" };
+        _ = harness.Db.Manufacturers.Add(curatedManufacturer);
+        PrinterModel curatedModel = await harness.Db.PrinterModels.SingleAsync(
+            model => model.Id == harness.Printer.ModelId);
+        curatedModel.ManufacturerId = curatedManufacturer.Id;
+        curatedModel.Name = "Unknown Model";
+        curatedModel.MotionType = (int)CalibrationMotionType.Cartesian;
+        curatedModel.MaxX = 250;
+        curatedModel.MaxY = 250;
+        curatedModel.MaxZ = 250;
+        curatedModel.HasHeatedBed = true;
+        curatedModel.HasEnclosure = false;
+        curatedModel.HasHeatedChamber = false;
+        _ = harness.Db.PrinterModelToolheads.Add(new PrinterModelToolhead
+        {
+            Id = Guid.NewGuid(),
+            PrinterModelId = curatedModel.Id,
+            Name = "Curated Toolhead",
+            Index = harness.Printer.Toolheads.Single().Index,
+            IsPrimary = true,
+        });
+        _ = await harness.Db.SaveChangesAsync();
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.MissingInputs.Should().NotContain(
+            "buildVolume.x", "buildVolume.y", "buildVolume.z",
+            "motionType", "hasHeatedBed", "hasHeatedChamber", "hasEnclosure");
+    }
+
+    [Fact]
     public async Task GetContextAsync_WithExplicitNozzleDiameterOverridingProfile_PrefersOverrideButStillFlagsMismatch()
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
