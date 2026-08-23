@@ -3,6 +3,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Health;
@@ -294,7 +295,7 @@ public class HealthCheckDiscoveryTests
     }
 
     [Fact]
-    public async Task ComprehensiveHealthCheck_WhenCheckingExternalServices_DoesNotTrackPrinters()
+    public async Task ComprehensiveHealthCheck_WhenAllPrintersConnected_ExternalServicesHealthyAndDoesNotTrackPrinters()
     {
         await using SqliteConnection connection = new("DataSource=:memory:");
         await connection.OpenAsync();
@@ -345,16 +346,28 @@ public class HealthCheckDiscoveryTests
             .Setup(s => s.Get<ExternalServicesHealthSettings>())
             .Returns(new ExternalServicesHealthSettings
             {
-                PrintersToCheck = -1,
                 PercentFailedThreshold = 100
             });
 
         Mock<IHostEnvironment> hostEnvironment = new();
         _ = hostEnvironment.Setup(h => h.EnvironmentName).Returns("Testing");
 
+        Mock<IPrinterConnectionHealthProvider> connectionProvider = new();
+        _ = connectionProvider.Setup(p => p.GetConnectionHealth()).Returns(
+            new Dictionary<Guid, PrinterConnectionHealth>
+            {
+                [Guid.NewGuid()] = new()
+                {
+                    PrinterId = Guid.NewGuid(),
+                    PrinterName = "Online Printer",
+                    Backend = PrinterBackend.Moonraker,
+                    ConnectionState = PrinterConnectionState.Connected
+                }
+            });
+
         ComprehensiveHealthCheck healthCheck = new(
             dbContext,
-            new SuccessfulHttpClientFactory(),
+            new[] { connectionProvider.Object },
             _mockLogger.Object,
             settingsService.Object,
             hostEnvironment.Object);
@@ -363,6 +376,138 @@ public class HealthCheckDiscoveryTests
 
         _ = result.Status.Should().Be(HealthStatus.Healthy);
         _ = dbContext.ChangeTracker.Entries<Printer>().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ComprehensiveHealthCheck_WhenRegisteredPrinterIsOffline_ReportsExternalServicesDegraded()
+    {
+        // Regression test for #1870: an offline registered printer must be reflected in
+        // /api/admin/overview instead of being reported as healthy. Previously the external
+        // service probe was gated behind a disabled-by-default setting and hard-filtered to
+        // Moonraker HTTP calls only; it now aggregates live per-backend connection health.
+        await using SqliteConnection connection = new("DataSource=:memory:");
+        await connection.OpenAsync();
+
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using AppDbContext dbContext = new(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        dbContext.Manufacturers.Add(new Manufacturer { Id = Guid.NewGuid(), Name = "Regression Manufacturer" });
+        dbContext.FilamentTypes.Add(new FilamentType { Id = Guid.NewGuid(), Name = "PLA" });
+        await dbContext.SaveChangesAsync();
+        dbContext.ChangeTracker.Clear();
+
+        Mock<ISettingsService> settingsService = new();
+        _ = settingsService
+            .Setup(s => s.Get<ExternalServicesHealthSettings>())
+            .Returns(new ExternalServicesHealthSettings
+            {
+                PercentFailedThreshold = 100
+            });
+
+        Mock<IHostEnvironment> hostEnvironment = new();
+        _ = hostEnvironment.Setup(h => h.EnvironmentName).Returns("Testing");
+
+        Guid offlinePrinterId = Guid.NewGuid();
+        Mock<IPrinterConnectionHealthProvider> connectionProvider = new();
+        _ = connectionProvider.Setup(p => p.GetConnectionHealth()).Returns(
+            new Dictionary<Guid, PrinterConnectionHealth>
+            {
+                [Guid.NewGuid()] = new()
+                {
+                    PrinterId = Guid.NewGuid(),
+                    PrinterName = "Online Printer",
+                    Backend = PrinterBackend.Moonraker,
+                    ConnectionState = PrinterConnectionState.Connected
+                },
+                [offlinePrinterId] = new()
+                {
+                    PrinterId = offlinePrinterId,
+                    PrinterName = "Offline Printer",
+                    Backend = PrinterBackend.Moonraker,
+                    ConnectionState = PrinterConnectionState.Offline
+                }
+            });
+
+        ComprehensiveHealthCheck healthCheck = new(
+            dbContext,
+            new[] { connectionProvider.Object },
+            _mockLogger.Object,
+            settingsService.Object,
+            hostEnvironment.Object);
+
+        HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
+
+        _ = result.Status.Should().Be(HealthStatus.Degraded);
+        _ = result.Data.Should().ContainKey("ExternalServices");
+        Dictionary<string, object> externalServices = result.Data["ExternalServices"].Should()
+            .BeOfType<Dictionary<string, object>>().Subject;
+
+        _ = externalServices["CheckedCount"].Should().Be(2);
+        _ = externalServices["FailedCount"].Should().Be(1);
+        _ = externalServices.Should().ContainKey("FailedServicesDetails");
+    }
+
+    [Fact]
+    public async Task ComprehensiveHealthCheck_WhenConnectionProviderThrows_NeverReportsHealthy()
+    {
+        // Regression test for #1870 (reviewer follow-up): a provider that fails to report
+        // connection health must never leave ExternalServices silently "Healthy" just
+        // because zero printers ended up being counted. That would recreate the same class
+        // of bug the offline-printer fix addresses - the aggregate going green while a
+        // whole backend's real state is unknown.
+        await using SqliteConnection connection = new("DataSource=:memory:");
+        await connection.OpenAsync();
+
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using AppDbContext dbContext = new(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        dbContext.Manufacturers.Add(new Manufacturer { Id = Guid.NewGuid(), Name = "Regression Manufacturer" });
+        dbContext.FilamentTypes.Add(new FilamentType { Id = Guid.NewGuid(), Name = "PLA" });
+        await dbContext.SaveChangesAsync();
+        dbContext.ChangeTracker.Clear();
+
+        Mock<ISettingsService> settingsService = new();
+        _ = settingsService
+            .Setup(s => s.Get<ExternalServicesHealthSettings>())
+            .Returns(new ExternalServicesHealthSettings
+            {
+                PercentFailedThreshold = 100
+            });
+
+        Mock<IHostEnvironment> hostEnvironment = new();
+        _ = hostEnvironment.Setup(h => h.EnvironmentName).Returns("Testing");
+
+        Mock<IPrinterConnectionHealthProvider> connectionProvider = new();
+        _ = connectionProvider.Setup(p => p.GetConnectionHealth())
+            .Throws(new InvalidOperationException("simulated provider failure"));
+
+        ComprehensiveHealthCheck healthCheck = new(
+            dbContext,
+            new[] { connectionProvider.Object },
+            _mockLogger.Object,
+            settingsService.Object,
+            hostEnvironment.Object);
+
+        HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
+
+        // Never 500/throw, and never silently Healthy despite CheckedCount being 0.
+        _ = result.Status.Should().Be(HealthStatus.Degraded);
+        _ = result.Data.Should().ContainKey("ExternalServices");
+        Dictionary<string, object> externalServices = result.Data["ExternalServices"].Should()
+            .BeOfType<Dictionary<string, object>>().Subject;
+
+        _ = externalServices["Status"].Should().Be("Degraded");
+        _ = externalServices["CheckedCount"].Should().Be(0);
+        _ = externalServices["FailedCount"].Should().Be(0);
+        _ = externalServices.Should().ContainKey("ProviderErrors");
     }
 
     [Fact]
@@ -406,20 +551,16 @@ public class HealthCheckDiscoveryTests
             .Setup(s => s.Get<ExternalServicesHealthSettings>())
             .Returns(new ExternalServicesHealthSettings
             {
-                PrintersToCheck = 0,
                 PercentFailedThreshold = 100
             });
 
-        // Simulate a real deployment: NOT the "Testing" environment (e.g. E2E/Production),
-        // and TEST_USE_SHARED_SQLITE is unset, so any legacy skip-HTTP branching would not
-        // apply. An HttpClientFactory that fails the test if invoked proves the health
-        // check never makes an anonymous loopback call to the protected routes.
+        // Simulate a real deployment: NOT the "Testing" environment (e.g. E2E/Production).
         Mock<IHostEnvironment> hostEnvironment = new();
         _ = hostEnvironment.Setup(h => h.EnvironmentName).Returns("E2E");
 
         ComprehensiveHealthCheck healthCheck = new(
             dbContext,
-            new UnauthorizedIfCalledHttpClientFactory(),
+            Array.Empty<IPrinterConnectionHealthProvider>(),
             _mockLogger.Object,
             settingsService.Object,
             hostEnvironment.Object);
@@ -597,47 +738,5 @@ public class HealthCheckDiscoveryTests
     }
 
     #endregion
-
-    private sealed class SuccessfulHttpClientFactory : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name)
-        {
-            return new HttpClient(new SuccessfulHttpMessageHandler());
-        }
-    }
-
-    private sealed class SuccessfulHttpMessageHandler : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            HttpResponseMessage response = new(HttpStatusCode.OK)
-            {
-                Content = new StringContent("[]")
-            };
-
-            return Task.FromResult(response);
-        }
-    }
-
-    /// <summary>
-    /// HttpClientFactory used to prove the comprehensive health check never makes an
-    /// anonymous loopback HTTP call to protected catalog/filament-type routes. Any request
-    /// through this factory returns 401 Unauthorized, matching real [Authorize]-protected
-    /// controller behavior for an unauthenticated caller.
-    /// </summary>
-    private sealed class UnauthorizedIfCalledHttpClientFactory : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name)
-        {
-            return new HttpClient(new UnauthorizedHttpMessageHandler());
-        }
-    }
-
-    private sealed class UnauthorizedHttpMessageHandler : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized));
-        }
-    }
 }
+

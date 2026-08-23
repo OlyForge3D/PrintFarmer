@@ -10,6 +10,7 @@ import {
 } from '@/common/utils/mutationError';
 import { maintenanceService } from '@/services/maintenanceService';
 import { getPrinterDisplayState } from '@/common/utils/printerStateDisplay';
+import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
 import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectDto, type PrintJobObjectListDto, type TempTargets } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
@@ -757,7 +758,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 <span className="text-pf-text-primary">{statusLabel}</span>
               </div>
             </div>
-            <p className="text-xs text-pf-text-secondary">{printer.manufacturerName} {printer.modelName}</p>
+            <p className="text-xs text-pf-text-secondary">{formatPrinterModelSubtitle(printer.manufacturerName, printer.modelName)}</p>
             <p className="text-xs text-pf-text-secondary mt-1">Live printer controls and status</p>
           </div>
           <Button

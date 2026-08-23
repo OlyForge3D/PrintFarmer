@@ -203,10 +203,11 @@ public class SpoolmanBarcodeServiceTests
         // Stored gtin "0123456789012" (13-digit, not zero-padded to 14) is logically the same
         // product as the scanned UPC-12 below, but a real Spoolman server-side `gtin=` filter
         // does an EXACT STRING match: the normalized 14-digit search value
-        // ("00123456789012") does not equal the stored 13-digit value, so the filtered query
-        // legitimately returns zero rows. This handler enforces that exact-match semantics
-        // (instead of ignoring the query string) so the test genuinely exercises the
-        // unfiltered full-scan fallback, not just the client-side isMatch predicate.
+        // ("00123456789012") does not equal the stored 13-digit value. Resolution now queries
+        // every equivalent zero-pad literal (12/13/14-digit forms) via the `gtin=` filter, so
+        // this must resolve directly via the 13-digit literal candidate -- not the unfiltered
+        // full scan (which this handler still supports, as a defensive check that it is not
+        // needed here: it would return zero rows if reached).
         const string storedGtin = "0123456789012";
         using ServiceHarness harness = CreateService(req =>
         {
@@ -222,8 +223,10 @@ public class SpoolmanBarcodeServiceTests
                         : JsonResponse(Array.Empty<object>(), totalCount: "0");
                 }
 
-                // Unfiltered full scan: the fallback this test exercises.
-                return JsonResponse(filaments, totalCount: "1");
+                // Unfiltered full scan: must NOT be needed for this test -- returning zero rows
+                // here would surface as a test failure if resolution ever regressed to relying
+                // on it instead of the targeted literal-candidate queries.
+                return JsonResponse(Array.Empty<object>(), totalCount: "0");
             }
 
             return new HttpResponseMessage(HttpStatusCode.NotFound);
@@ -240,9 +243,9 @@ public class SpoolmanBarcodeServiceTests
     public async Task GetFilamentByBarcodeAsync_ScannedEan13ResolvesFilamentStoredAsUpc12()
     {
         // Mirror of the test above: stored gtin "123456789012" (12-digit) is logically the
-        // same product as the scanned EAN-13 below, but the normalized 14-digit search value
-        // does not exact-match the stored 12-digit value, so the filtered query returns zero
-        // rows and resolution must fall back to the unfiltered full scan.
+        // same product as the scanned EAN-13 below. Resolution now queries every equivalent
+        // zero-pad literal via the `gtin=` filter, so this must resolve directly via the
+        // 12-digit literal candidate -- not the unfiltered full scan.
         const string storedGtin = "123456789012";
         using ServiceHarness harness = CreateService(req =>
         {
@@ -258,8 +261,8 @@ public class SpoolmanBarcodeServiceTests
                         : JsonResponse(Array.Empty<object>(), totalCount: "0");
                 }
 
-                // Unfiltered full scan: the fallback this test exercises.
-                return JsonResponse(filaments, totalCount: "1");
+                // Unfiltered full scan: must NOT be needed for this test -- see comment above.
+                return JsonResponse(Array.Empty<object>(), totalCount: "0");
             }
 
             return new HttpResponseMessage(HttpStatusCode.NotFound);
@@ -295,6 +298,154 @@ public class SpoolmanBarcodeServiceTests
         SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("123456789012", CancellationToken.None);
 
         Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetFilamentByBarcodeAsync_StoredGtinWithSeparators_ResolvesViaFullScanFallback()
+    {
+        // A stored gtin formatted with separators (e.g. dashes) is not a plain zero-pad literal,
+        // so none of the exact-match literal candidates queried by
+        // CollectMatchesForEquivalentGtinLiteralsAsync can match it server-side. This is the one
+        // case that genuinely requires the unfiltered full-scan fallback (client-side isMatch
+        // normalizes both sides, stripping the separators).
+        const string storedGtin = "0123-4567-8901-2";
+        using ServiceHarness harness = CreateService(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
+            {
+                object[] filaments = [new { id = 30, name = "SeparatorFormatted", gtin = storedGtin, material = "PLA" }];
+                string? gtinParam = GetQueryParam(req, "gtin");
+
+                if (gtinParam is not null)
+                {
+                    // No literal candidate (plain digit strings) ever equals the separator-
+                    // formatted stored value under an exact string match.
+                    return JsonResponse(Array.Empty<object>(), totalCount: "0");
+                }
+
+                // Unfiltered full scan: the fallback this test exercises.
+                return JsonResponse(filaments, totalCount: "1");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("123456789012", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(30, result.Id);
+    }
+
+    [Fact]
+    public async Task GetFilamentByBarcodeAsync_MixedFormatDuplicateGtins_LowestIdWinsAcrossFormats()
+    {
+        // Regression for #1872: two filaments share the same logical GTIN but were written in
+        // different literal formats. The lowest-ID filament (5) stores the CANONICAL 14-digit
+        // form, which GetEquivalentGtinLiterals queries LAST (candidate order is 12/13/14-digit
+        // for this GTIN's significant-digit length) -- while the higher-ID filament (20) stores
+        // the UPC-12 form, queried FIRST. Placing the winner on the later-queried candidate
+        // proves resolution merges every literal candidate's results before the lowest-ID
+        // tie-break runs, rather than short-circuiting on whichever literal query returns a
+        // match first.
+        const string upc12Gtin = "123456789012";
+        const string canonicalGtin = "00123456789012";
+        using ServiceHarness harness = CreateService(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
+            {
+                string? gtinParam = GetQueryParam(req, "gtin");
+                return gtinParam switch
+                {
+                    upc12Gtin => JsonResponse(
+                        new object[] { new { id = 20, name = "Upc12Duplicate", gtin = upc12Gtin, material = "PLA" } },
+                        totalCount: "1"),
+                    canonicalGtin => JsonResponse(
+                        new object[] { new { id = 5, name = "CanonicalDuplicate", gtin = canonicalGtin, material = "PLA" } },
+                        totalCount: "1"),
+                    _ => JsonResponse(Array.Empty<object>(), totalCount: "0"),
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync(canonicalGtin, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(5, result.Id);
+    }
+
+    [Fact]
+    public async Task GetFilamentByBarcodeAsync_MixedFormatDuplicateGtins_LowestIdWinsRegardlessOfScanFormat()
+    {
+        // Mirror of the test above, scanning the UPC-12 form instead of the canonical form.
+        // Regardless of which equivalent literal is scanned, normalization must recognize both
+        // stored records as the same GTIN, merge both candidates, and the deterministic
+        // lowest-ID selection must hold -- id 5 (the later-queried canonical-form duplicate)
+        // still wins over id 20 (the first-queried UPC-12-form duplicate).
+        const string upc12Gtin = "123456789012";
+        const string canonicalGtin = "00123456789012";
+        using ServiceHarness harness = CreateService(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
+            {
+                string? gtinParam = GetQueryParam(req, "gtin");
+                return gtinParam switch
+                {
+                    upc12Gtin => JsonResponse(
+                        new object[] { new { id = 20, name = "Upc12Duplicate", gtin = upc12Gtin, material = "PLA" } },
+                        totalCount: "1"),
+                    canonicalGtin => JsonResponse(
+                        new object[] { new { id = 5, name = "CanonicalDuplicate", gtin = canonicalGtin, material = "PLA" } },
+                        totalCount: "1"),
+                    _ => JsonResponse(Array.Empty<object>(), totalCount: "0"),
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync(upc12Gtin, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(5, result.Id);
+    }
+
+    [Fact]
+    public async Task GetFilamentByBarcodeAsync_GtinFilterRejected_PerformsSingleFullScanNotOnePerLiteral()
+    {
+        // Regression: if Spoolman rejects/errors on the `gtin=` filter, resolution must stop
+        // after the first rejection and perform exactly ONE unfiltered full scan, not retry a
+        // full scan independently for each of the (up to four) equivalent literal candidates.
+        // Falling through to a full scan per candidate would multiply one barcode lookup into
+        // several full-table scans on a Spoolman instance that doesn't support the filter.
+        int filteredRequestCount = 0;
+        int fullScanRequestCount = 0;
+        using ServiceHarness harness = CreateService(req =>
+        {
+            if (req.RequestUri!.AbsolutePath == "/api/v1/filament")
+            {
+                string? gtinParam = GetQueryParam(req, "gtin");
+                if (gtinParam is not null)
+                {
+                    filteredRequestCount++;
+                    return new HttpResponseMessage(HttpStatusCode.BadRequest);
+                }
+
+                fullScanRequestCount++;
+                object[] filaments = [new { id = 5, name = "Match", gtin = "123456789012", material = "PLA" }];
+                return JsonResponse(filaments, totalCount: "1");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        SpoolmanFilamentDto? result = await harness.Service.GetFilamentByBarcodeAsync("00123456789012", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(5, result.Id);
+        Assert.Equal(1, filteredRequestCount);
+        Assert.Equal(1, fullScanRequestCount);
     }
 
     [Fact]

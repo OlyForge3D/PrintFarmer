@@ -120,9 +120,11 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         return model;
     }
 
+    private const string ValidAsciiStlContent = "solid test\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid test\n";
+
     private IFormFile CreateMockFormFile(
         string fileName = "test-model.stl",
-        string content = "solid test\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid test\n")
+        string content = ValidAsciiStlContent)
     {
         var memoryStream = new MemoryStream();
         _streamsToDispose.Add(memoryStream);
@@ -134,6 +136,25 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
             writer.Flush();
         }
         memoryStream.Position = 0;
+
+        var mock = new Mock<IFormFile>();
+        mock.Setup(_ => _.FileName).Returns(fileName);
+        mock.Setup(_ => _.Length).Returns(memoryStream.Length);
+        mock.Setup(_ => _.OpenReadStream()).Returns(memoryStream);
+        mock.Setup(_ => _.ContentDisposition).Returns($"form-data; name=\"file\"; filename=\"{fileName}\"");
+
+        return mock.Object;
+    }
+
+    /// <summary>
+    /// Byte-content overload, needed for binary STL fixtures (e.g. truncated triangle data):
+    /// the string-content overload above round-trips through UTF-8 text encoding, which would
+    /// corrupt arbitrary binary bytes.
+    /// </summary>
+    private IFormFile CreateMockFormFile(string fileName, byte[] content)
+    {
+        var memoryStream = new MemoryStream(content);
+        _streamsToDispose.Add(memoryStream);
 
         var mock = new Mock<IFormFile>();
         mock.Setup(_ => _.FileName).Returns(fileName);
@@ -529,13 +550,13 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         Guid clientUploadId = Guid.NewGuid();
 
         Model3DUploadResultDto initial = await service.UploadModelAsync(
-            CreateMockFormFile("idempotent.stl", "idempotent-content"),
+            CreateMockFormFile("idempotent.stl", ValidAsciiStlContent),
             thumbnailFile: null,
             userId,
             clientUploadId,
             CancellationToken.None);
         Model3DUploadResultDto retry = await service.UploadModelAsync(
-            CreateMockFormFile("idempotent.stl", "idempotent-content"),
+            CreateMockFormFile("idempotent.stl", ValidAsciiStlContent),
             thumbnailFile: null,
             userId,
             clientUploadId,
@@ -622,7 +643,10 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        IFormFile formFile = CreateMockFormFile("model.obj");
+        // Real geometry analysis now runs for OBJ (#1866), so this fixture must be valid OBJ
+        // syntax rather than the STL-shaped default content: "vertex" lines aren't recognized as
+        // OBJ "v" lines, so an OBJ file with no valid vertices would now be rejected at upload.
+        IFormFile formFile = CreateMockFormFile("model.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
 
         // Act
         Model3DUploadResultDto result = await service.UploadModelAsync(formFile, CancellationToken.None);
@@ -687,6 +711,70 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         uploadedModel!.Id.Should().NotBe(Guid.Empty);
     }
 
+    /// <summary>
+    /// #1866: a malformed STL (triangle-count mismatch — header declares more triangles than the
+    /// file actually contains) must be rejected at upload time with a clear validation error,
+    /// instead of being silently persisted with IsValid=false metadata.
+    /// </summary>
+    [Fact]
+    public async Task UploadModelAsync_WithTruncatedStlFile_ThrowsValidationException()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+
+        // Binary STL header declares 5 triangles but the file only contains one triangle's
+        // worth of data afterward: this is the "triangle-count mismatch" scenario from #1866.
+        byte[] content = new byte[84 + 50];
+        BitConverter.GetBytes(5u).CopyTo(content, 80);
+        IFormFile formFile = CreateMockFormFile("truncated.stl", content);
+
+        Func<Task> act = () => service.UploadModelAsync(formFile, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ArgumentException>())
+            .WithMessage("*failed validation*");
+    }
+
+    /// <summary>
+    /// #1866: a malformed STL with a truncated header (the file is smaller than the fixed
+    /// 84-byte STL header/triangle-count preamble, so it cannot even be classified as ASCII or
+    /// binary) must be rejected at upload time, not just triangle-count mismatches on an
+    /// otherwise-complete header.
+    /// </summary>
+    [Fact]
+    public async Task UploadModelAsync_WithTruncatedStlHeader_ThrowsValidationException()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+
+        // Only 10 bytes total: far short of the 80-byte header + 4-byte triangle count that a
+        // binary STL requires before any triangle data can even be located.
+        byte[] content = new byte[10];
+        IFormFile formFile = CreateMockFormFile("truncated-header.stl", content);
+
+        Func<Task> act = () => service.UploadModelAsync(formFile, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ArgumentException>())
+            .WithMessage("*failed validation*");
+    }
+
+    /// <summary>
+    /// #1866: an OBJ file with no readable vertex data (e.g. a plain-text file saved with a
+    /// ".obj" extension) must be rejected at upload time instead of silently accepted.
+    /// </summary>
+    [Fact]
+    public async Task UploadModelAsync_WithMalformedObjFile_ThrowsValidationException()
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+
+        IFormFile formFile = CreateMockFormFile("malformed.obj", "This is not a 3D model.\n");
+
+        Func<Task> act = () => service.UploadModelAsync(formFile, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ArgumentException>())
+            .WithMessage("*failed validation*");
+    }
+
     [Fact]
     public async Task UploadModelAsync_CreatesUniqueModelIds()
     {
@@ -732,8 +820,11 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
 
-        // Create a larger mock file (5MB)
-        string largeContent = string.Concat(Enumerable.Repeat("x", 5 * 1024 * 1024));
+        // Create a larger (~5MB) mock file. Must be valid ASCII STL, not arbitrary bytes: real
+        // geometry analysis now rejects structurally-invalid STL uploads (#1866), and 5MB of "x"
+        // repeated is neither valid ASCII STL nor a size-matching binary STL.
+        const string facet = "facet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\n";
+        string largeContent = "solid test\n" + string.Concat(Enumerable.Repeat(facet, 60_000)) + "endsolid test\n";
         IFormFile formFile = CreateMockFormFile("large-model.stl", largeContent);
 
         // Act

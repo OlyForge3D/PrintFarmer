@@ -15,6 +15,7 @@ import { useSlicer } from '@/hooks/useSlicer';
 import { apiClient } from '@/services/api';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
 import { isSafeHttpUrl } from '@/common/utils/validation';
+import { getErrorMessage } from '@/common/utils/apiErrors';
 
 export interface EditPrinterModalProps {
   printerId: string | null;
@@ -476,7 +477,11 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         toast.error(result.message || 'Connection failed', { duration: 8000 });
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Connection test failed';
+      // `apiClient` rejects with a plain `ApiError` (not an `Error` instance) built by the
+      // Axios response interceptor, so `err instanceof Error` never matches and the real
+      // server-provided message (e.g. "The requested server address is not allowed.") was
+      // silently dropped in favor of a generic fallback. See #1865.
+      const message = getErrorMessage(err, 'Connection test failed');
       toast.error(message, { duration: 8000 });
     } finally {
       setIsTesting(false);

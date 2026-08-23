@@ -64,13 +64,13 @@ public interface ISpoolmanService
     /// Returns the lowest-ID filament if duplicate matches exist.
     /// </summary>
     /// <remarks>
-    /// The lowest-ID tie-break applies to the matches actually found. Resolution first tries
-    /// Spoolman's server-side <c>gtin=</c> filter, which is an exact string match, and only
-    /// falls back to an unfiltered scan when that yields nothing. So if two filaments share a
-    /// logical GTIN but store it in different formats (e.g. one canonical 14-digit, one
-    /// UPC-12), and the filtered query matches the higher-ID one, the lower-ID equivalent is
-    /// never seen. PrintFarmer always writes the canonical 14-digit form, so mixed-format
-    /// duplicates only arise from data written outside PrintFarmer.
+    /// <c>gtin</c> is deliberately non-unique across filaments (multipacks and vendor parent
+    /// listings legitimately share one), and duplicates may be stored in different -- but
+    /// equivalent -- GTIN formats (UPC-12, EAN-13, GTIN-14) when written outside PrintFarmer's
+    /// own write path. Resolution normalizes and queries every valid zero-pad literal encoding
+    /// of the scanned barcode so mixed-format duplicates are recognized as the same product and
+    /// participate in the lowest-ID tie-break, falling back to an unfiltered full scan only for
+    /// stored values that aren't a plain zero-pad literal (e.g. formatted with separators).
     /// </remarks>
     Task<SpoolmanFilamentDto?> GetFilamentByBarcodeAsync(string barcode, CancellationToken ct);
 

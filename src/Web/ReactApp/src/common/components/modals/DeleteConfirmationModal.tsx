@@ -1,6 +1,7 @@
 import type { Printer } from '@/types/api';
 import { AlertIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
+import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
 import { Modal } from './Modal';
 
 interface PrinterDeleteProps {
@@ -68,7 +69,7 @@ export function DeleteConfirmationModal(props: DeleteConfirmationModalProps) {
             <ul className="text-sm text-pf-text-secondary space-y-1 max-h-32 overflow-y-auto">
               {printers.map((printer) => (
                 <li key={printer.id} className="truncate">
-                  • {printer.name} ({printer.manufacturerName} {printer.modelName})
+                  • {printer.name} ({formatPrinterModelSubtitle(printer.manufacturerName, printer.modelName)})
                 </li>
               ))}
             </ul>

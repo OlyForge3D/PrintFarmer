@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
 using Microsoft.Extensions.Logging;
@@ -46,7 +47,9 @@ public class WorkerCircuitBreakerTests
 
         // Assert
         Assert.Equal(WorkerCircuitState.Open, service.GetCircuitState(workerId));
-        _workerRepoMock.Verify(r => r.DisableWorkerAsync(workerId, It.IsAny<string>()), Times.Once);
+        _workerRepoMock.Verify(
+            r => r.DisableWorkerAsync(workerId, It.IsAny<string>(), WorkerDisableSource.CircuitBreaker),
+            Times.Once);
         _workerRepoMock.Verify(r => r.SaveChangesAsync(), Times.Once);
     }
 
@@ -65,7 +68,9 @@ public class WorkerCircuitBreakerTests
 
         // Assert
         Assert.Equal(WorkerCircuitState.Closed, service.GetCircuitState(workerId));
-        _workerRepoMock.Verify(r => r.DisableWorkerAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+        _workerRepoMock.Verify(
+            r => r.DisableWorkerAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<WorkerDisableSource>()),
+            Times.Never);
     }
 
     [Fact]
@@ -170,6 +175,8 @@ public class WorkerCircuitBreakerTests
         await service.RecordJobFailureAsync(Guid.Empty, _workerRepoMock.Object);
 
         // Assert
-        _workerRepoMock.Verify(r => r.DisableWorkerAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+        _workerRepoMock.Verify(
+            r => r.DisableWorkerAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<WorkerDisableSource>()),
+            Times.Never);
     }
 }

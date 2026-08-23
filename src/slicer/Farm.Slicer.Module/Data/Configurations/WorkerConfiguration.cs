@@ -28,6 +28,10 @@ public class WorkerConfiguration : IEntityTypeConfiguration<Worker>
         _ = builder.Property(w => w.CreatedAt).IsRequired();
         _ = builder.Property(w => w.UpdatedAt).IsRequired();
         _ = builder.Property(w => w.DisabledReason).HasMaxLength(1024);
+        _ = builder.Property(w => w.DisableSource)
+            .IsRequired()
+            .HasDefaultValue(WorkerDisableSource.None)
+            .HasConversion<int>();
 
         // Indexes
         _ = builder.HasIndex(w => w.ServiceId).IsUnique();

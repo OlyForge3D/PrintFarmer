@@ -193,6 +193,39 @@ describe('PrinterDetailsSidebar', () => {
     expect(shell).not.toHaveClass('lg:max-h-[calc(100dvh-5rem)]');
   });
 
+  it('renders the manufacturer and model in the subtitle when metadata is known', () => {
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={printer}
+        onClose={vi.fn()}
+        layout="content"
+      />
+    );
+
+    expect(screen.getByText('Prusa MK4')).toBeInTheDocument();
+  });
+
+  it('collapses the backend "Unknown" / "Unknown Model" sentinel pair into a single coherent subtitle', () => {
+    const unknownPrinter: Printer = {
+      ...printer,
+      manufacturerName: 'Unknown',
+      modelName: 'Unknown Model',
+    };
+
+    render(
+      <PrinterDetailsSidebar
+        printerId={unknownPrinter.id}
+        printer={unknownPrinter}
+        onClose={vi.fn()}
+        layout="content"
+      />
+    );
+
+    expect(screen.getByText('Unknown model')).toBeInTheDocument();
+    expect(screen.queryByText(/unknown.*unknown/i)).not.toBeInTheDocument();
+  });
+
   it('uses the dedicated success action contract for move-to', () => {
     render(
       <PrinterDetailsSidebar

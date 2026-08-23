@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { Printer, PrinterBackend, GcodeHarvestOperation } from '@/types/api';
 import { toPrinterBackend } from '@/common/utils/enumHelpers';
+import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
 // No MdiIcons used in this component
 import { CloseIcon, CheckCircleIcon } from '@/common/components/icons/MdiIcons';
 import { Input } from '@/common/components/ui/Input';
@@ -69,11 +70,7 @@ export function HarvestWizardStep1Selection({
   const uniqueModels = useMemo(() => {
     const models = new Set(
       onlinePrinters
-        .map(p => {
-          const model = p.modelName || 'Unknown';
-          const manufacturer = p.manufacturerName || 'Unknown';
-          return `${manufacturer} - ${model}`;
-        })
+        .map(p => formatPrinterModelSubtitle(p.manufacturerName, p.modelName))
         .filter(Boolean)
     );
     return Array.from(models).sort();
@@ -89,7 +86,7 @@ export function HarvestWizardStep1Selection({
 
       // Model filter
       if (selectedModel) {
-        const printerModel = `${p.manufacturerName || 'Unknown'} - ${p.modelName || 'Unknown'}`;
+        const printerModel = formatPrinterModelSubtitle(p.manufacturerName, p.modelName);
         if (printerModel !== selectedModel) {
           return false;
         }
@@ -338,7 +335,7 @@ export function HarvestWizardStep1Selection({
                   )}
                 </div>
                 <div className="text-sm text-pf-text-secondary mt-1">
-                  {printer.manufacturerName} {printer.modelName}
+                  {formatPrinterModelSubtitle(printer.manufacturerName, printer.modelName)}
                 </div>
                 <div className="text-xs text-pf-text-secondary mt-2 font-mono">
                   {backendToString(printer.backend)} • {printer.backendUrl}

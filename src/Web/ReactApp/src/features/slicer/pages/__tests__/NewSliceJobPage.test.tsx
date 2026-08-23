@@ -200,14 +200,18 @@ vi.mock('@/services/slicerService', () => ({
 }));
 
 // Mock slice job service
-vi.mock('@/services/sliceJobService', () => ({
-  sliceJobService: {
-    submitJob: vi.fn(() => Promise.resolve({ id: 'job-1', status: 'Queued' })),
-    parseOrcaNumeric: vi.fn(() => undefined),
-    getSpoolCostPerGram: vi.fn(() => Promise.resolve({ costPerGram: null, currency: '$', source: null })),
-    addSliceToQueue: vi.fn(() => Promise.resolve({ printJobId: 'pj-1', queuePosition: 1, message: 'Queued' })),
-  }
-}));
+vi.mock('@/services/sliceJobService', async () => {
+  const actual = await vi.importActual<typeof import('@/services/sliceJobService')>('@/services/sliceJobService');
+  return {
+    sliceJobService: {
+      submitJob: vi.fn(() => Promise.resolve({ id: 'job-1', status: 'Queued' })),
+      parseOrcaNumeric: vi.fn(() => undefined),
+      getSpoolCostPerGram: vi.fn(() => Promise.resolve({ costPerGram: null, currency: '$', source: null })),
+      addSliceToQueue: vi.fn(() => Promise.resolve({ printJobId: 'pj-1', queuePosition: 1, message: 'Queued' })),
+    },
+    formatQueuePositionSuffix: actual.formatQueuePositionSuffix,
+  };
+});
 
 // Force Advanced mode when needed so advanced-only sections render in tests.
 vi.mock('@/features/slicer/hooks/useSlicerMode', () => ({
@@ -451,6 +455,85 @@ describe('NewSliceJobPage', () => {
       await waitFor(() => {
         expect(screen.getByTestId('slicer-settings-panel')).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('Mobile settings overlay dismissal (issue #1867)', () => {
+    it('renders a "Hide settings" control that closes the settings overlay', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('printer-slicer-selector')).toBeInTheDocument();
+      });
+
+      // The settings panel starts open (default sidebarOpen state), so the
+      // overlay covers the whole viewport on narrow screens including the
+      // workspace toolbar's own hamburger toggle underneath it.
+      const closeButton = screen.getByRole('button', { name: /hide settings/i });
+      expect(closeButton).toBeInTheDocument();
+
+      const sidebar = screen.getByTestId('slicer-settings-sidebar');
+      expect(sidebar.className).toContain('absolute');
+
+      fireEvent.click(closeButton);
+
+      // Closing collapses the overlay back to `hidden` so it stops covering
+      // the workspace (and the "Add model" action) underneath it.
+      await waitFor(() => {
+        expect(sidebar.className).toContain('hidden');
+        expect(sidebar.className).not.toContain('absolute');
+      });
+    });
+  });
+
+  describe('Tablet-width workspace clipping (issue #1868)', () => {
+    // SCOPE NOTE (class-guard only, not a full layout test): jsdom — which
+    // backs this Vitest/RTL suite — does not run a real CSS box-model/flex
+    // layout engine, so it cannot itself reproduce the 1024x768 overflow this
+    // issue describes. The actual acceptance criteria (model viewer stays
+    // inside its `overflow-hidden` container; the Slice Plate action stays
+    // reachable/visible; the workspace reflows instead of clipping) were
+    // verified against a real Chromium layout via Playwright, using a
+    // standalone harness built from this page's exact class structure
+    // (global nav rail `lg:w-[248px]`, `lg:w-96` settings sidebar, this
+    // panel, toolbar, canvas area, status bar):
+    //   - Before the fix: panel measured ~1195px wide (wider than the
+    //     1024px viewport) and the Slice Plate button sat at x=1831 —
+    //     entirely off-screen.
+    //   - After adding `min-w-0`: panel measured exactly 354px, matching
+    //     the hand-computed available space (1024 − 248 nav rail − 32 page
+    //     padding − 384 sidebar − 6 gap = 354), and the Slice Plate button
+    //     was visible at x=991, fully within the viewport.
+    //   - Stress-testing with longer realistic status-bar content (longer
+    //     slice notes, a longer button label) confirmed the panel width
+    //     stays fixed at 354px (driven by available flex space, not
+    //     content) and the status bar text wraps rather than clipping.
+    // That harness was a throwaway artifact and isn't committed here.
+    // A committed, backend-independent Playwright equivalent for `/slicer`
+    // would need to mock printer/model/profile data deep enough to mount
+    // `SlicerWorkspaceBoundary` in a "model loaded" state, which is a
+    // meaningfully larger undertaking than this isolated CSS fix; see
+    // issue #1868 for follow-up if a dedicated fixture is added later.
+    // Until then, this test is deliberately scoped to guard the CSS
+    // contract this fix depends on: that this exact panel carries both
+    // `min-w-0` and `flex-1`. Removing either class regresses this test.
+    it('gives the 3D workspace panel min-w-0 so it shrinks instead of overflowing the row', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('printer-slicer-selector')).toBeInTheDocument();
+      });
+
+      // The settings sidebar is a fixed-width flex sibling (`lg:w-96`); this
+      // panel must carry `min-w-0` or, lacking one, its default
+      // `min-width: auto` lets its descendants' max-content width (toolbar
+      // buttons, transform panels, etc.) push the row wider than the
+      // viewport at the tablet (lg) breakpoint, clipping the model viewer
+      // and the Slice Plate action outside the form's `overflow-hidden`
+      // bounds.
+      const workspacePanel = screen.getByTestId('slicer-workspace-panel');
+      expect(workspacePanel.className).toContain('min-w-0');
+      expect(workspacePanel.className).toContain('flex-1');
     });
   });
 
@@ -1484,4 +1567,5 @@ describe('NewSliceJobPage', () => {
       expect(sliceJobService.submitJob).not.toHaveBeenCalled();
     });
   });
+
 });

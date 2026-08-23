@@ -593,6 +593,21 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 _logger.LogWarning("Model analysis failed for {ModelId}: {Message}", modelId, LogSanitizer.Sanitize(analysisEx.Message));
             }
 
+            // Reject STL/OBJ uploads that are structurally unreadable as a 3D model (#1866):
+            // a plain-text file saved with an ".stl"/".obj" extension previously slipped through
+            // as IsValid=false metadata and only broke later, in the model viewer. Analysis for
+            // other formats (3MF, and anything unsupported) remains best-effort metadata only,
+            // per #1814 — this gate is deliberately narrow to the two formats this issue covers.
+            if (analysis is { IsValid: false } && IsStlOrObjExtension(fileExtension))
+            {
+                string reason = analysis.ValidationErrors is { Count: > 0 } analysisErrors
+                    ? string.Join("; ", analysisErrors)
+                    : "The uploaded file could not be read as a valid 3D model.";
+                throw new ArgumentException(
+                    $"Model file '{LogSanitizer.Sanitize(originalName)}' failed validation: {reason}",
+                    nameof(modelFile));
+            }
+
             // Step 2b: Extract 3MF metadata (best-effort)
             ThreeMfMetadataDto? threeMfMetadata = null;
             try
@@ -819,6 +834,15 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             throw;
         }
     }
+
+    /// <summary>
+    /// Returns true when <paramref name="fileExtension"/> is one of the formats for which
+    /// structurally-invalid uploads are rejected outright (#1866). Deliberately excludes
+    /// ".3mf", whose best-effort/non-rejecting behavior is established by #1814.
+    /// </summary>
+    private static bool IsStlOrObjExtension(string fileExtension) =>
+        string.Equals(fileExtension, ".stl", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(fileExtension, ".obj", StringComparison.OrdinalIgnoreCase);
 
     private Model3DUploadResultDto CreateIdempotentRetryResult(Model3D existingModel, string clientUploadHash)
     {

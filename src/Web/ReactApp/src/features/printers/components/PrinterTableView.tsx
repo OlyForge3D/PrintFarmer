@@ -10,6 +10,7 @@ import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDis
 import { CloseIcon, DeleteIcon, EditIcon, HelpCircleIcon } from '@/common/components/icons/MdiIcons';
 import { CheckIcon, CheckCircleIcon, CircleIcon, AlertIcon, ToolsIcon } from '@/common/components/icons/MdiIcons';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
+import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button, ProgressBar } from '@/common/components/ui';
 import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
@@ -293,7 +294,7 @@ export function PrinterTableView({
                           {printer.name}
                         </div>
                         <div className="text-xs text-pf-text-secondary truncate">
-                          {printer.manufacturerName} {printer.modelName}
+                          {formatPrinterModelSubtitle(printer.manufacturerName, printer.modelName)}
                         </div>
                         <div className="text-xs text-pf-text-tertiary truncate">
                           {printer.ipAddress}

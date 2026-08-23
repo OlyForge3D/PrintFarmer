@@ -26,6 +26,15 @@ public static class SlicerModuleExtensions
 #pragma warning restore S2094
 
     /// <summary>
+    /// Marker service used to detect whether
+    /// <see cref="AddSlicerCalibrationProfileRepositories"/> has already registered its
+    /// repositories, preventing duplicate registrations when called more than once.
+    /// </summary>
+#pragma warning disable S2094 // Classes should not be empty — intentional DI marker type
+    private sealed class SlicerCalibrationProfileRepositoriesMarker;
+#pragma warning restore S2094
+
+    /// <summary>
     /// Registers all slicer-module owned services: <see cref="SlicerDbContext"/>,
     /// repositories, metrics, configuration POCOs, and hosted services.
     /// When <c>Slicer:Enabled</c> is <c>false</c>, nothing is registered
@@ -70,6 +79,82 @@ public static class SlicerModuleExtensions
         AddSlicerMetrics(services);
         AddSlicerConfiguration(services, configuration);
         AddSlicerHostedServices(services, configuration);
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers only the machine/process/filament profile repositories (and the
+    /// <see cref="SlicerDbContext"/> they depend on) without loading the rest of the slicer
+    /// module: no plugin discovery, no hosted services, no job orchestration.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Split and microservices hosts deliberately skip <see cref="AddSlicerModule"/>, so
+    /// <c>Farm.Web.Api.Services.Startup.MoonrakerEmulatorSeeder</c> — which runs on the
+    /// API host in every deployment topology, not just monolith — had no
+    /// <c>IMachineProfileRepository</c>/<c>IProcessProfileRepository</c>/
+    /// <c>IFilamentProfileRepository</c> registered when resolving them from its DI scope,
+    /// throwing and turning the daily-validation reset endpoint into an unconditional 500 (#1858).
+    /// </para>
+    /// <para>
+    /// This does not reuse the HTTP-hop pattern used by
+    /// <c>CalibrationProfileResolutionStartup</c>/<c>SlicerHostCapabilityClientStartup</c>
+    /// (routing to the slicer-host process) because the seeder only needs to read/write a small,
+    /// deterministic set of content-hash-keyed <b>system</b> profiles for an explicitly opt-in,
+    /// disabled-by-default validation feature
+    /// (<c>MoonrakerEmulatorSeed:Enabled</c>). The API and slicer-host containers already point at
+    /// the same physical database in every documented split/microservices deployment (same
+    /// <c>ConnectionStrings:Default</c>), and the API project already carries a compile-time
+    /// reference to this assembly for the slicer domain/data types it uses elsewhere — so opening
+    /// a second, narrowly-scoped <see cref="SlicerDbContext"/> connection here is both safe and far
+    /// simpler than standing up a new authenticated slicer-host endpoint for three rows of
+    /// fixture data.
+    /// </para>
+    /// <para>
+    /// No-ops when <see cref="IMachineProfileRepository"/> is already registered (monolith hosts,
+    /// where <see cref="AddSlicerModule"/> ran its full registration path) or when this method has
+    /// already run once. Deliberately does NOT gate on <see cref="AddSlicerModule"/>'s own marker:
+    /// that marker is added unconditionally, before <see cref="AddSlicerModule"/>'s split/
+    /// microservices early return, so on a "split"-mode host the marker would be present even
+    /// though the repositories were never registered — checking the marker here would silently
+    /// no-op on exactly the split-mode hosts this method exists to cover. Registers no hosted
+    /// services, plugin discovery, or anything beyond the three repositories and the DbContext
+    /// they need.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">Application configuration (reads DB_PROVIDER, ConnectionStrings:Default, etc.).</param>
+    /// <returns>The service collection for chaining.</returns>
+    public static IServiceCollection AddSlicerCalibrationProfileRepositories(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        // Do NOT gate on SlicerModuleMarker here: AddSlicerModule adds that marker
+        // unconditionally, before its own split/microservices early return (see above), so on a
+        // "split"-mode host (as opposed to "microservices", which Program.cs never calls
+        // AddSlicerModule for at all) the marker is present even though AddSlicerModule returned
+        // early WITHOUT registering these repositories. Gating on the marker would silently no-op
+        // this method on exactly the split-mode hosts it exists to cover. Instead, check whether
+        // the repositories themselves are already registered — true only when AddSlicerModule ran
+        // its full (monolith) registration path.
+        if (services.Any(sd => sd.ServiceType == typeof(IMachineProfileRepository)))
+        {
+            return services;
+        }
+
+        // Idempotency guard: skip if this method already registered its repositories.
+        if (services.Any(sd => sd.ServiceType == typeof(SlicerCalibrationProfileRepositoriesMarker)))
+        {
+            return services;
+        }
+
+        _ = services.AddSingleton<SlicerCalibrationProfileRepositoriesMarker>();
+
+        AddSlicerDatabase(services, configuration);
+        _ = services.AddScoped<IMachineProfileRepository, EfMachineProfileRepository>();
+        _ = services.AddScoped<IProcessProfileRepository, EfProcessProfileRepository>();
+        _ = services.AddScoped<IFilamentProfileRepository, EfFilamentProfileRepository>();
 
         return services;
     }

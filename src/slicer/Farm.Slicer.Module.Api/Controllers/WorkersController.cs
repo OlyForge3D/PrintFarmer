@@ -160,7 +160,8 @@ public class WorkersController(
             return NotFound();
         }
 
-        await _workerRepository.DisableWorkerAsync(id, request.Reason);
+        await _workerRepository.DisableWorkerAsync(id, request.Reason, WorkerDisableSource.Administrator);
+        await _workerRepository.SaveChangesAsync();
 
         _logger.LogWarning("Worker {WorkerId} disabled: {Reason}", id, LogSanitizer.Sanitize(request.Reason));
         return NoContent();
@@ -183,6 +184,7 @@ public class WorkersController(
         }
 
         await _workerRepository.EnableWorkerAsync(id);
+        await _workerRepository.SaveChangesAsync();
 
         _logger.LogInformation("Worker {WorkerId} enabled", id);
         return NoContent();
@@ -211,6 +213,7 @@ public class WorkersController(
         }
 
         await _workerRepository.UpdateTotalSlotsAsync(id, request.TotalSlots);
+        await _workerRepository.SaveChangesAsync();
 
         _logger.LogInformation("Worker {WorkerId} slots updated to {Slots}", id, request.TotalSlots);
         return NoContent();
@@ -244,7 +247,9 @@ public class WorkersController(
             releasedJobs++;
         }
 
-        // Reset the worker's active job counter
+        // Reset the worker's active job counter. ResetAsync persists, and because the worker and
+        // job repositories share this request's scoped SlicerDbContext that same save also
+        // flushes the job releases above — so no separate save is needed here.
         bool reset = await _workerRepository.ResetAsync(id);
         if (!reset)
         {

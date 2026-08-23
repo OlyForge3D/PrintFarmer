@@ -45,6 +45,34 @@ public class SlicersControllerUnitTests
     }
 
     [Fact]
+    public async Task RegisterAsync_WhenServiceRejectsInstanceIdConflict_Returns409ProblemDetails()
+    {
+        Mock<ISlicersService> mockService = new Mock<ISlicersService>();
+        _ = mockService.Setup(s => s.RegisterAsync(It.IsAny<RegisterSlicerDto>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(Farm.Slicer.Module.Services.SlicerInstanceIdConflictException.ForInstanceId("orcaslicer-worker-1"));
+
+        SlicersController controller = new SlicersController(mockService.Object, new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>().Object);
+        controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+
+        RegisterSlicerDto dto = new RegisterSlicerDto
+        {
+            Name = "attacker-worker",
+            SlicerType = 1,
+            Version = "0.1",
+            Host = "http://local",
+            MaxConcurrentJobs = 2,
+            InstanceId = "orcaslicer-worker-1"
+        };
+
+        IActionResult result = await controller.RegisterAsync(dto);
+
+        ObjectResult objectResult = result.Should().BeOfType<ObjectResult>().Subject;
+        _ = objectResult.StatusCode.Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status409Conflict);
+        ProblemDetails problem = objectResult.Value.Should().BeOfType<ProblemDetails>().Subject;
+        _ = problem.Extensions["code"].Should().Be(Farm.Slicer.Module.Services.SlicerInstanceIdConflictException.Code);
+    }
+
+    [Fact]
     public async Task ListAsync_ReturnsSeededServices()
     {
         Mock<ISlicersService> mockService = new Mock<ISlicersService>();
@@ -89,7 +117,7 @@ public class SlicersControllerUnitTests
     {
         Guid id = Guid.NewGuid();
         Mock<ISlicersService> mockService = new Mock<ISlicersService>();
-        _ = mockService.Setup(s => s.DeregisterAsync(id, It.IsAny<CancellationToken>()))
+        _ = mockService.Setup(s => s.DeregisterAsync(id, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         SlicersController controller = new SlicersController(mockService.Object, new Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>().Object);
@@ -98,7 +126,7 @@ public class SlicersControllerUnitTests
         IActionResult res = await controller.DeregisterAsync(id);
         _ = res.Should().BeOfType<NoContentResult>();
 
-        mockService.Verify(s => s.DeregisterAsync(id, It.IsAny<CancellationToken>()), Times.Once);
+        mockService.Verify(s => s.DeregisterAsync(id, false, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact(DisplayName = "GET /api/slicers/engines returns registered engines grouped by name (issue #578)")]

@@ -217,6 +217,11 @@ builder.Services.AddCalibrationProfileResolution(builder.Configuration);
 // host that owns the worker registry (issue #1848).
 builder.Services.AddSlicerHostCapabilityClient(builder.Configuration);
 
+// MoonrakerEmulatorSeeder runs on the API host in every deployment topology and needs the
+// machine/process/filament profile repositories. Split/microservices hosts skip AddSlicerModule,
+// so register just those repositories here (issue #1858).
+builder.Services.AddMoonrakerEmulatorSeederDependencies(builder.Configuration);
+
 builder.Services.AddEndpointsApiExplorer();
 
 // Native OpenAPI builds schemas from Http.Json metadata. MVC controller serialization is configured separately.

@@ -5,6 +5,7 @@ import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Modal } from '@/common/components/modals/Modal';
 import { PrinterImage } from '@/common/components/PrinterImage';
 import { sortPrintersByAvailability } from '@/utils/printerSort';
+import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
 
 interface PrinterItem {
     id: string;
@@ -124,6 +125,7 @@ export function PrinterSelectorModal({
                         const isSelected = multiSelect
                             ? localSelectedIds.includes(printer.id)
                             : printer.id === selectedPrinterId;
+                        const modelLabel = formatPrinterModelSubtitle(printer.manufacturerName, printer.modelName);
 
                         return (
                             <Button
@@ -151,12 +153,10 @@ export function PrinterSelectorModal({
                                         {printer.name}
                                     </h3>
 
-                                    {(printer.modelName || printer.nozzleDiameter) && (
+                                    {(printer.modelName || printer.manufacturerName || printer.nozzleDiameter) && (
                                         <p className="text-sm text-pf-text-secondary truncate text-left">
-                                            {printer.manufacturerName && `${printer.manufacturerName} • `}
-                                            {printer.modelName}
-                                            {printer.modelName && printer.nozzleDiameter && ' • '}
-                                            {printer.nozzleDiameter && `${printer.nozzleDiameter}mm nozzle`}
+                                            {modelLabel}
+                                            {printer.nozzleDiameter && ` • ${printer.nozzleDiameter}mm nozzle`}
                                         </p>
                                     )}
 

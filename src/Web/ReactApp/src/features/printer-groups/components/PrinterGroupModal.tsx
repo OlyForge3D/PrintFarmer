@@ -9,6 +9,7 @@ import { apiClient } from '@/services/api';
 import type { PrinterGroup, CreatePrinterGroupRequest, UpdatePrinterGroupRequest, PrinterGroupPrinter } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
 import { getPrinterBackendName } from '@/common/utils/enumHelpers';
+import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
 
 interface PrinterGroupModalProps {
   isOpen: boolean;
@@ -74,7 +75,7 @@ export function PrinterGroupModal({ isOpen, onClose, editGroup, assignedPrinters
       if (assignedIds.has(p.id)) continue;
       if (effectiveModelId && p.modelId !== effectiveModelId) continue;
       if (p.modelId && p.modelName) {
-        const label = p.manufacturerName ? `${p.manufacturerName} ${p.modelName}` : p.modelName;
+        const label = formatPrinterModelSubtitle(p.manufacturerName, p.modelName);
         models.set(p.modelId, label);
       }
     }
@@ -85,7 +86,7 @@ export function PrinterGroupModal({ isOpen, onClose, editGroup, assignedPrinters
   const modelName = useMemo(() => {
     if (!effectiveModelId) return undefined;
     const p = allPrinters.find((pr) => pr.modelId === effectiveModelId);
-    return p ? `${p.manufacturerName ?? ''} ${p.modelName ?? ''}`.trim() : undefined;
+    return p ? formatPrinterModelSubtitle(p.manufacturerName, p.modelName) : undefined;
   }, [effectiveModelId, allPrinters]);
 
   // Reset form when modal opens (React-recommended pattern for adjusting state on prop change)

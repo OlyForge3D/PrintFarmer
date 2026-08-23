@@ -2,7 +2,11 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { sliceJobService, SubmitSliceJobRequest } from '@/services/sliceJobService';
+import {
+  sliceJobService,
+  SubmitSliceJobRequest,
+  formatQueuePositionSuffix,
+} from '@/services/sliceJobService';
 import { slicerService, type SlicerEngineInfo } from '@/services/slicerService';
 import { 
   slicerProfilesService,
@@ -57,6 +61,7 @@ import { buildSlicerViewerModelUrl, getSlicerViewerFileType } from '@/features/s
 import { buildSlicePayloadModels, resolveModel3DId, modelTransformJson, diffProcessOverrides } from '@/features/slicer/utils/slicePayload';
 import { readOrcaBundle } from '@/features/slicer/utils/orcaBundleLoader';
 import { SlicerWorkspaceBoundary } from '@/features/slicer/components/viewer/SlicerWorkspaceBoundary';
+import { X } from 'lucide-react';
 import { STLPreviewModalBoundary } from '@/features/slicer/components/viewer/STLPreviewModalBoundary';
 
 // Removed MATERIAL_PRESETS constant - now using API-driven filament profiles
@@ -1745,7 +1750,9 @@ export const NewSliceJobPage: React.FC = () => {
   const submitMutation = useMutation({
     mutationFn: async (req: SubmitSliceJobRequest) => sliceJobService.submitJob(req),
     onSuccess: (res) => {
-      setMessage(`Job queued (id ${res.jobId.substring(0, 8)}) position ${res.queuePosition}`);
+      setMessage(
+        `Job queued (id ${res.jobId.substring(0, 8)})${formatQueuePositionSuffix(res.queuePosition)}`,
+      );
       setError(null);
       setSubmittedJobId(res.jobId);
       qc.invalidateQueries({ queryKey: ['slice-jobs-my'] });
@@ -2189,7 +2196,30 @@ export const NewSliceJobPage: React.FC = () => {
         {/* LEFT SIDEBAR: OrcaSlicer Menu — hidden on narrow viewports, toggled via hamburger.
              On lg+ screens: inline beside visualizer unless explicitly toggled off.
              On narrow screens: slides over as fixed-width panel when toggled open. */}
-        <div className={`${sidebarOpen ? 'absolute top-0 left-0 bottom-0 z-40 w-96 lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:w-96 space-y-1.5 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto bg-pf-bg-2 shadow-xl lg:shadow-none`}>
+        <div
+          data-testid="slicer-settings-sidebar"
+          className={`${sidebarOpen ? 'absolute top-0 left-0 bottom-0 z-40 w-96 lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:w-96 space-y-1.5 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto bg-pf-bg-2 shadow-xl lg:shadow-none`}
+        >
+
+          {/* Mobile-only close control: below lg this panel is an absolute overlay
+               that covers the full viewport, including the workspace toolbar's
+               hamburger toggle underneath it — so without a dedicated control here
+               narrow-viewport users have no way to dismiss it and reach Add Model
+               (issue #1867). Hidden at lg+, where the panel sits inline and never
+               blocks anything. `sticky` keeps it reachable even if the settings
+               list scrolls. */}
+          <div className="sticky top-0 z-10 flex justify-end bg-pf-bg-2 lg:hidden">
+            <Button
+              type="button"
+              variant="unstyled"
+              onClick={() => setSidebarOpen(false)}
+              aria-label="Hide settings"
+              title="Hide settings"
+              className="flex items-center justify-center p-2 m-1 rounded text-pf-text-muted hover:text-pf-text-primary hover:bg-pf-bg-1"
+            >
+              <X className="w-5 h-5" />
+            </Button>
+          </div>
 
           {/* SLICER ENGINE + VERSION — one panel, because a version only means
                anything relative to its engine (mirrors printer + machine profile).
@@ -2983,8 +3013,14 @@ export const NewSliceJobPage: React.FC = () => {
 
         </div>
 
-        {/* RIGHT SIDE: 3D Workspace */}
-        <div className="flex-1 flex flex-col min-h-0">
+        {/* RIGHT SIDE: 3D Workspace
+             `min-w-0` is required here: without it this flex-row item falls back to its
+             default `min-width: auto`, which is the max-content width of its descendants
+             (toolbar buttons, transform panels, etc). At the tablet (lg) breakpoint the
+             fixed-width left sidebar plus that unconstrained max-content width exceeds the
+             viewport, pushing the model viewer and the Slice Plate action past the
+             `overflow-hidden` form and off-screen (issue #1868). */}
+        <div data-testid="slicer-workspace-panel" className="min-w-0 flex-1 flex flex-col min-h-0">
           <div className="relative bg-pf-panel border border-pf-border rounded-lg flex-1 overflow-hidden flex flex-col min-h-0">
             {selectedPrinterId ? (
               <SlicerWorkspaceBoundary

@@ -4,6 +4,7 @@ import { Button, Alert } from '@/common/components/ui';
 import { AlertCircleIcon, SearchIcon } from '@/common/components/icons/MdiIcons';
 import { ChevronRight, Package } from 'lucide-react';
 import { apiClient } from '@/services/api';
+import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
 import type { PrinterModelDto, ManufacturerDto } from './types';
 
 interface PrinterModelSelectionStepProps {
@@ -189,7 +190,7 @@ export const PrinterModelSelectionStep: React.FC<PrinterModelSelectionStepProps>
         <div className="text-sm text-pf-text-secondary">
           {selectedModel ? (
             <span className="text-pf-accent font-medium">
-              Selected: {selectedModel.manufacturerName} {selectedModel.model.name}
+              Selected: {formatPrinterModelSubtitle(selectedModel.manufacturerName, selectedModel.model.name)}
             </span>
           ) : (
             'Select a printer model to continue'
