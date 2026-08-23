@@ -292,9 +292,9 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
   const canDisableMotorsNow = canDisableMotors({ isOnline, isEnabled, isPrinting, support });
-  const canMoveNow = canMove({ isOnline, isEnabled, isPrinting, support });
-  const canSetStepNow = canSetStep({ isOnline, support });
-  const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, support });
+  const canMoveNow = canMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
+  const canSetStepNow = canSetStep({ isOnline, isShutdown, support });
+  const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
   const canSetTemperaturesNow = canSetTemperatures({ isOnline, isEnabled, support });
   const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
@@ -574,9 +574,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       
       if (!result.success) {
         console.error(`Failed to move ${axis} by ${distance}:`, result.error);
+        toast.error(result.error || `Failed to move ${axis}`);
       }
     } catch (error) {
       console.error(`Error moving ${axis}:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to move ${axis}`));
     } finally {
       setMovementActionPending(false);
     }
@@ -604,9 +606,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       
       if (!result.success) {
         console.error(`Failed to home ${axes || 'all'}:`, result.error);
+        toast.error(result.error || 'Failed to home printer');
       }
     } catch (error) {
       console.error(`Error homing ${axes || 'all'}:`, error);
+      toast.error(mutationErrorMessage(error, 'Failed to home printer'));
     } finally {
       setMovementActionPending(false);
     }
@@ -626,9 +630,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       );
       if (!result.success) {
         console.error(`Failed to ${direction}:`, result.error);
+        toast.error(result.error || `Failed to ${direction}`);
       }
     } catch (error) {
       console.error(`Error ${direction}ing:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to ${direction}`));
     } finally {
       setMovementActionPending(false);
     }
