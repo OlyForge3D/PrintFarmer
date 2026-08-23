@@ -1365,6 +1365,10 @@ public sealed class PrinterCalibrationContextService(
                     : catalogFacts.MotionType;
         int? maxAcceleration = printer.MaxAcceleration ?? derivedFacts.MaxAcceleration ?? catalogFacts.MaxAcceleration;
         int? maxTravelSpeed = printer.MaxTravelSpeed ?? derivedFacts.MaxTravelSpeed;
+
+        // maxTravelAcceleration and hasEnclosure have no machine-profile-derived tier by design
+        // -- the machine profile DTO (ResolvedCalibrationProfiles.Machine) does not assert
+        // either fact, so these two intentionally resolve printer ?? catalog only (#1922).
         int? maxTravelAcceleration = printer.MaxTravelAcceleration ?? catalogFacts.MaxTravelAcceleration;
         bool? hasHeatedBed = printer.CalibrationHasHeatedBed ?? derivedFacts.HasHeatedBed ?? catalogFacts.HasHeatedBed;
         bool? hasHeatedChamber = printer.CalibrationHasHeatedChamber ?? derivedFacts.HasHeatedChamber ??

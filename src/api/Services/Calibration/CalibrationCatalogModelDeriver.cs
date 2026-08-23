@@ -16,16 +16,23 @@ namespace Farm.Web.Api.Services.Calibration;
 /// </summary>
 internal static class CalibrationCatalogModelDeriver
 {
+    /// <summary>
+    /// The reserved catalog model name every printer's non-nullable <c>ModelId</c> resolves to
+    /// by default when no real catalog association has been made (see <c>Printer.ModelId</c>'s
+    /// "No longer nullable - uses default Unknown Model" comment, and
+    /// <c>EfCatalogRepository.GetUnknownModelIdAsync</c>'s identical Name check). This row is
+    /// seeded with plausible generic placeholder values (a 200x200x200 build volume, a stock
+    /// toolhead, <c>hasHeatedBed: true</c>, etc.) so it renders sensibly elsewhere in the
+    /// product, but none of that was curated for any specific printer -- it must never be
+    /// surfaced as a derived calibration fact, or every un-cataloged printer would silently
+    /// inherit fabricated hardware data it was never verified against (#1922).
+    /// </summary>
+    internal const string UnknownModelName = "Unknown Model";
+
     public static DerivedCatalogFacts Derive(PrinterModel? model)
     {
-        if (model is null || !HasCuratedData(model))
+        if (model is null || model.Name == UnknownModelName)
         {
-            // A model with no curated geometry, motion, acceleration, or toolhead data (e.g. the
-            // generic catalog placeholder every printer's non-nullable ModelId resolves to by
-            // default -- see Printer.ModelId) asserts nothing meaningful. Surfacing its bare
-            // HasHeatedBed/HasEnclosure/HasHeatedChamber bool defaults as derived "facts" in that
-            // case would fabricate data nobody entered, contradicting #1922's requirement that
-            // missingInputs report only what is genuinely underivable.
             return DerivedCatalogFacts.Empty;
         }
 
@@ -71,21 +78,6 @@ internal static class CalibrationCatalogModelDeriver
             activeToolheadIndex,
             toolheadsByIndex);
     }
-
-    /// <summary>
-    /// A catalog model counts as curated -- and therefore eligible to contribute its
-    /// bool-valued facts (HasHeatedBed, HasHeatedChamber, HasEnclosure), which have no "unset"
-    /// representation of their own -- only once it asserts at least one piece of real hardware
-    /// data: motion type, build geometry, acceleration limits, or a linked toolhead.
-    /// </summary>
-    private static bool HasCuratedData(PrinterModel model) =>
-        model.MotionType is not null ||
-        model.MaxX is not null ||
-        model.MaxY is not null ||
-        model.MaxZ is not null ||
-        model.MaxAcceleration is not null ||
-        model.MaxTravelAcceleration is not null ||
-        model.Toolheads.Count > 0;
 
     private static CatalogToolheadFacts DeriveToolhead(PrinterModel model, PrinterModelToolhead toolhead)
     {

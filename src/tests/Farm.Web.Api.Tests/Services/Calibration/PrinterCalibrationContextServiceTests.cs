@@ -616,6 +616,61 @@ public sealed class PrinterCalibrationContextServiceTests
     }
 
     [Fact]
+    public async Task GetCandidatesAsync_WithGenericUnknownModelSeedRow_DoesNotLeakItsPlaceholderBoolDefaults()
+    {
+        // Regression for #1922: the real production "Unknown Model" catalog seed row
+        // (src/api/Data/seed/printer-models.yaml) is NOT a blank/empty PrinterModel -- it
+        // already asserts a 200x200x200 build volume, a "Stock Toolhead", and
+        // HasHeatedBed=true/HasEnclosure=false/HasHeatedChamber=false so it renders sensibly
+        // as a generic placeholder elsewhere in the product. None of that was curated for this
+        // specific printer, so it must never be surfaced as a derived calibration fact. Model
+        // this exact shape here (rather than a truly-empty PrinterModel) to prove the sentinel
+        // is identified by name, not by "any field happens to be unset".
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.MaxBuildVolumeX = null;
+        harness.Printer.MaxBuildVolumeY = null;
+        harness.Printer.MaxBuildVolumeZ = null;
+        harness.Printer.BedOriginX = null;
+        harness.Printer.BedOriginY = null;
+        harness.Printer.PrintablePolygonJson = null;
+        harness.Printer.CalibrationMotionType = null;
+        harness.Printer.CalibrationHasHeatedBed = null;
+        harness.Printer.CalibrationHasHeatedChamber = null;
+        harness.Printer.CalibrationHasEnclosure = null;
+        harness.Profiles = harness.Profiles with
+        {
+            Machine = harness.Profiles.Machine!.WithRawJson("""{"gcode_flavor":"klipper"}"""),
+        };
+        PrinterModel unknownModel = await harness.Db.PrinterModels.SingleAsync(
+            model => model.Id == harness.Printer.ModelId);
+        unknownModel.Name.Should().Be("Unknown Model");
+        unknownModel.MotionType = (int)CalibrationMotionType.Cartesian;
+        unknownModel.MaxX = 200;
+        unknownModel.MaxY = 200;
+        unknownModel.MaxZ = 200;
+        unknownModel.HasHeatedBed = true;
+        unknownModel.HasEnclosure = false;
+        unknownModel.HasHeatedChamber = false;
+        _ = harness.Db.PrinterModelToolheads.Add(new PrinterModelToolhead
+        {
+            Id = Guid.NewGuid(),
+            PrinterModelId = unknownModel.Id,
+            Name = "Stock Toolhead",
+            Index = harness.Printer.Toolheads.Single().Index,
+            IsPrimary = true,
+        });
+        _ = await harness.Db.SaveChangesAsync();
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.MissingInputs.Should().Contain(
+            "buildVolume.x", "buildVolume.y", "buildVolume.z",
+            "motionType", "hasHeatedBed", "hasHeatedChamber", "hasEnclosure");
+    }
+
+    [Fact]
     public async Task GetContextAsync_WithExplicitNozzleDiameterOverridingProfile_PrefersOverrideButStillFlagsMismatch()
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
