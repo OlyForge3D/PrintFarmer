@@ -9,6 +9,12 @@ namespace Farm.Web.Api.Tests.Services.Calibration.Generation;
 /// Golden determinism tests: for every supported method the whole pipeline must produce identical
 /// canonical specification, plan, G-code and manifest digests for identical inputs.
 /// </summary>
+/// <remarks>
+/// This suite compares PFD against itself, not against OrcaSlicer (see #1929 for real
+/// OrcaSlicer-pinned golden fixtures). When that comparison lands, a mismatch against an
+/// OrcaSlicer-derived reference may be an intentional design decision rather than a
+/// regression — check <c>docs/CALIBRATION_DIVERGENCES.md</c> before treating it as drift.
+/// </remarks>
 public sealed class CalibrationGoldenGenerationTests
 {
     private static readonly CalibrationMethod[] AllMethods =
