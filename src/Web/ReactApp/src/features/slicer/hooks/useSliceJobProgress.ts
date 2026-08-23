@@ -32,6 +32,15 @@ export function useSliceJobProgress(jobId: string | null): SliceJobProgressState
   const [state, setState] = useState<SliceJobProgressState>(INITIAL_STATE);
   const [prevJobId, setPrevJobId] = useState<string | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
+  // Tracks whether a live 'slicejobevent' has arrived since the most recent
+  // (re)subscription attempt for the current job. Reset before every
+  // subscribe/resubscribe so a live event always wins over the REST
+  // reconciliation fetch for that window, while still letting reconciliation
+  // run again on the next reconnect if the terminal event was missed while
+  // disconnected (issue #1912) — a guard keyed off `state.status` alone
+  // would stay permanently "satisfied" once any non-terminal event had ever
+  // arrived, even across a reconnect that missed the terminal one.
+  const hasLiveEventRef = useRef(false);
 
   // React-recommended "adjust state during render" pattern for prop changes
   if (jobId !== prevJobId) {
@@ -40,6 +49,7 @@ export function useSliceJobProgress(jobId: string | null): SliceJobProgressState
   }
 
   const handleEvent = useCallback((event: SliceJobEvent) => {
+    hasLiveEventRef.current = true;
     setState(prev => ({
       ...prev,
       status: event.status,
@@ -56,6 +66,10 @@ export function useSliceJobProgress(jobId: string | null): SliceJobProgressState
     if (!jobId) return;
 
     let cancelled = false;
+    // Fresh race window for this job: any live event received for a
+    // previous job (or before this effect ran) must not suppress
+    // reconciliation for this one.
+    hasLiveEventRef.current = false;
 
     // Reconciles local state with the job's current server-side status. A
     // fast job (e.g. one that fails almost immediately) — or a job whose
@@ -63,14 +77,15 @@ export function useSliceJobProgress(jobId: string | null): SliceJobProgressState
     // can reach a terminal state before/while we (re)subscribe. SignalR does
     // not replay missed events to a late-joining group member, so without
     // this catch-up fetch the UI would be stuck at "Job queued" forever
-    // (issue #1912). Only applied when no live event has updated state yet,
-    // so a subsequent real-time event always wins.
+    // (issue #1912). Only applied when no live event has arrived since the
+    // most recent (re)subscribe attempt, so a real-time event — past or
+    // still to come — always wins.
     const reconcileStatus = async () => {
       try {
         const current = await sliceJobService.getJobStatus(jobId);
-        if (cancelled) return;
+        if (cancelled || hasLiveEventRef.current) return;
         setState(prev => {
-          if (prev.status !== null) return prev;
+          if (hasLiveEventRef.current) return prev;
           return {
             ...prev,
             status: current.status,
@@ -114,6 +129,13 @@ export function useSliceJobProgress(jobId: string | null): SliceJobProgressState
 
     const resubscribe = async () => {
       if (cancelled || !jobId) return;
+      // A previous live event (e.g. a non-terminal "Processing" update)
+      // must not suppress reconciliation forever: the terminal event for
+      // *this* job may have been broadcast and missed entirely while the
+      // connection was down, so every reconnect gets its own fresh race
+      // window instead of inheriting "already satisfied" from before the
+      // drop (this is what left jobs stuck at issue #1912).
+      hasLiveEventRef.current = false;
       try {
         await slicerHubService.subscribeToJob(jobId);
         setState(prev => ({ ...prev, isConnected: true }));

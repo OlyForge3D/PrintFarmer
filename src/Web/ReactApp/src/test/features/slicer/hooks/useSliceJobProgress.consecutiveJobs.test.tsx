@@ -30,6 +30,11 @@ const hubTestState = vi.hoisted(() => {
     invoke: vi.fn(async () => undefined),
     onclose: vi.fn(),
     onreconnecting: vi.fn(),
+    // Captured so tests can simulate the real SignalR reconnect lifecycle:
+    // slicerHubService.start() passes this callback here, and firing it
+    // drives slicerHubService's own onreconnected handler, which in turn
+    // invokes every hook-registered onReconnected callback (i.e. this is
+    // how a real automatic-reconnect event is simulated end-to-end).
     onreconnected: vi.fn(),
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
@@ -114,6 +119,13 @@ function makeEvent(overrides: Partial<SliceJobEvent> = {}): SliceJobEvent {
 
 describe('useSliceJobProgress across consecutive jobs (issue #1912)', () => {
   beforeEach(async () => {
+    // Tear down the previous test's connection first so start() below
+    // actually rebuilds it (and re-registers onreconnected) rather than
+    // short-circuiting with "connection already exists" — otherwise the
+    // just-cleared mock.calls on `onreconnected` would never be
+    // repopulated, and tests that capture the reconnect callback would see
+    // it as unregistered.
+    await slicerHubService.stop();
     vi.clearAllMocks();
     hubTestState.handlers.clear();
     hubTestState.connection.state = 'Connected';
@@ -222,7 +234,10 @@ describe('useSliceJobProgress across consecutive jobs (issue #1912)', () => {
       status: 'Failed',
       progressPercent: 0,
       queuedAt: new Date().toISOString(),
-      errorMessage: 'Slicing failed before the client subscribed.',
+      // The public status endpoint only ever returns the generic message
+      // (SliceJobController.MapToPublicStatusResponse); it never echoes
+      // job-specific detail to non-admin callers.
+      errorMessage: 'Slicing failed.',
     });
 
     rerender({ jobId: 'job-2' });
@@ -235,6 +250,102 @@ describe('useSliceJobProgress across consecutive jobs (issue #1912)', () => {
     await waitFor(() => {
       expect(result.current.status).toBe('Failed');
     });
-    expect(result.current.error).toBe('Slicing failed before the client subscribed.');
+    expect(result.current.error).toBe('Slicing failed.');
+  });
+
+  it('recovers a job whose terminal event was missed while the connection was reconnecting', async () => {
+    // Distinct from the "never connected yet" race above: here the job was
+    // already being tracked live (status = 'Queued' from an earlier event),
+    // the connection drops, the job fails on the server while disconnected
+    // — so the 'slicejobevent' broadcast is never received — and only then
+    // does the client reconnect. A guard keyed off "has state.status ever
+    // been set" would stay permanently satisfied from the earlier 'Queued'
+    // event and never re-check the server, leaving the UI stuck exactly as
+    // in issue #1912. This proves reconciliation runs again on every
+    // reconnect, not just once per job.
+    const { result } = renderHook(() => useSliceJobProgress('job-2'));
+
+    await waitFor(() => {
+      expect(hubTestState.connection.on).toHaveBeenCalledWith('slicejobevent', expect.any(Function));
+    });
+
+    act(() => {
+      hubTestState.emit('slicejobevent', makeEvent({ jobId: 'job-2', status: 'Queued', errorMessage: undefined }));
+    });
+    expect(result.current.status).toBe('Queued');
+
+    // Simulate the connection dropping and SignalR's automatic reconnect
+    // firing. slicerHubService registers its own onreconnected handler with
+    // the underlying connection in start(); invoking it here drives the
+    // exact same path a real reconnect would (which then calls every
+    // hook-registered onReconnected callback, i.e. the hook's resubscribe).
+    const reconnectedHandler = hubTestState.connection.onreconnected.mock.calls[0]?.[0] as
+      | ((connectionId: string | undefined) => Promise<void>)
+      | undefined;
+    expect(reconnectedHandler).toBeDefined();
+
+    mockGetJobStatus.mockResolvedValue({
+      id: 'job-2',
+      status: 'Failed',
+      progressPercent: 0,
+      queuedAt: new Date().toISOString(),
+      errorMessage: 'Slicing failed.',
+    });
+
+    await act(async () => {
+      await reconnectedHandler!('new-connection-id');
+    });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe('Failed');
+    });
+    expect(result.current.error).toBe('Slicing failed.');
+  });
+
+  it('never lets a stale REST reconciliation response overwrite a live event that already arrived', async () => {
+    // The REST fetch and the live event race independently; the fix must
+    // guarantee the live event always wins even if the REST response
+    // resolves afterwards with older/different data.
+    let resolveGetJobStatus!: (value: {
+      id: string;
+      status: string;
+      progressPercent: number;
+      queuedAt: string;
+    }) => void;
+    mockGetJobStatus.mockImplementation(
+      () =>
+        new Promise(resolve => {
+          resolveGetJobStatus = resolve;
+        }),
+    );
+
+    const { result } = renderHook(() => useSliceJobProgress('job-2'));
+
+    await waitFor(() => {
+      expect(hubTestState.connection.on).toHaveBeenCalledWith('slicejobevent', expect.any(Function));
+    });
+    await waitFor(() => {
+      expect(mockGetJobStatus).toHaveBeenCalledWith('job-2');
+    });
+
+    // The live event arrives first, while the REST call is still pending.
+    act(() => {
+      hubTestState.emit('slicejobevent', makeEvent({ jobId: 'job-2', status: 'Failed' }));
+    });
+    expect(result.current.status).toBe('Failed');
+
+    // The REST response resolves afterwards with stale, non-terminal data —
+    // it must be ignored now that a live event has been observed.
+    act(() => {
+      resolveGetJobStatus({
+        id: 'job-2',
+        status: 'Queued',
+        progressPercent: 0,
+        queuedAt: new Date().toISOString(),
+      });
+    });
+
+    await Promise.resolve();
+    expect(result.current.status).toBe('Failed');
   });
 });
