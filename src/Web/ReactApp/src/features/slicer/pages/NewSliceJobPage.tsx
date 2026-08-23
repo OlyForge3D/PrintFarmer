@@ -207,6 +207,23 @@ function getProcessLayerHeight(profile: OrcaProcessProfile): number {
   return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
 }
 
+const MODELS_LIST_BASIC_QUERY_KEY = ['modelsListBasic'];
+
+async function fetchModelsListBasic(): Promise<ModelListItem[]> {
+  const response = await apiClient.get<unknown[]>('/3d-models');
+  return response.data.map(obj => {
+    const m = obj as { id: string; name?: string; fileName?: string; displayName?: string; originalFileName?: string; fileFormat?: number; uploadedAt?: string; uploadedAtUtc?: string };
+    const displayName = m.name || m.originalFileName || m.displayName || m.fileName || 'model';
+    return {
+      id: m.id,
+      fileName: m.fileName || displayName,
+      originalFileName: displayName,
+      fileFormat: m.fileFormat ?? 0,
+      uploadedAt: m.uploadedAt ?? m.uploadedAtUtc ?? ''
+    } as ModelListItem;
+  });
+}
+
 export const NewSliceJobPage: React.FC = () => {
   const STORAGE_KEYS = {
     printerId: 'sliceJob.selectedPrinterId',
@@ -1475,21 +1492,8 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Fetch models for picker
   const { data: models = [], isLoading: isLoadingModels } = useQuery<ModelListItem[], Error>({
-    queryKey: ['modelsListBasic'],
-    queryFn: async () => {
-      const response = await apiClient.get<unknown[]>('/3d-models');
-      return response.data.map(obj => {
-        const m = obj as { id: string; name?: string; fileName?: string; displayName?: string; originalFileName?: string; fileFormat?: number; uploadedAt?: string; uploadedAtUtc?: string };
-        const displayName = m.name || m.originalFileName || m.displayName || m.fileName || 'model';
-        return {
-          id: m.id,
-          fileName: m.fileName || displayName,
-          originalFileName: displayName,
-          fileFormat: m.fileFormat ?? 0,
-          uploadedAt: m.uploadedAt ?? m.uploadedAtUtc ?? ''
-        } as ModelListItem;
-      });
-    },
+    queryKey: MODELS_LIST_BASIC_QUERY_KEY,
+    queryFn: fetchModelsListBasic,
     staleTime: 20_000
   });
 
@@ -2066,6 +2070,7 @@ export const NewSliceJobPage: React.FC = () => {
     // model URLs are (see handleWorkspaceModelsReplace); absolute http(s)
     // URLs are used as-is.
     const resolvedUrl = url.startsWith('/') ? `${getApiBaseUrl()}${url.replace(/^\/api/, '')}` : url;
+    const toastId = toast.loading(`Fetching "${fileName}"…`);
 
     // When the URL points at a stored model by id (e.g.
     // "/3d-models/file/{id}") and the user didn't type a File Name,
@@ -2073,15 +2078,24 @@ export const NewSliceJobPage: React.FC = () => {
     // bare id, with no extension) as the file name. Detecting the viewer
     // file type from that extension-less name always defaults to STL (see
     // getSlicerViewerFileType), so a stored 3MF/PLY entered this way would
-    // be loaded with the wrong loader. Prefer the already-fetched model
-    // list's real file name for type detection when we can match the id.
+    // be loaded with the wrong loader. Prefer the model list's real file
+    // name for type detection when we can match the id — via
+    // `ensureQueryData` (not the `models` query result directly) so this
+    // resolves correctly even if the "modelsListBasic" query is still in
+    // flight (or hasn't been triggered yet) at submit time; it dedupes
+    // against/reuses that query's cache, and runs concurrently with the
+    // reachability check below rather than adding extra latency.
     const modelIdMatch = /\/3d-models\/file\/([^/?#]+)/.exec(resolvedUrl);
-    const matchedModel = modelIdMatch ? models?.find((m) => m.id === modelIdMatch[1]) : undefined;
-    const fileType = getSlicerViewerFileType(matchedModel?.originalFileName || matchedModel?.fileName || fileName);
-    const toastId = toast.loading(`Fetching "${fileName}"…`);
+    const matchedModelPromise = modelIdMatch
+      ? qc.ensureQueryData({ queryKey: MODELS_LIST_BASIC_QUERY_KEY, queryFn: fetchModelsListBasic, staleTime: 20_000 })
+        .then((list) => list.find((m) => m.id === modelIdMatch[1]))
+        .catch(() => undefined)
+      : Promise.resolve(undefined);
 
-    void loadModelArrayBuffer(resolvedUrl)
-      .then(() => {
+    void Promise.all([loadModelArrayBuffer(resolvedUrl), matchedModelPromise])
+      .then(([, matchedModel]) => {
+        const fileType = getSlicerViewerFileType(matchedModel?.originalFileName || matchedModel?.fileName || fileName);
+
         setSelectedModelId('');
         setModelFileUrl(resolvedUrl);
         setModelFileName(fileName);
@@ -2104,7 +2118,7 @@ export const NewSliceJobPage: React.FC = () => {
       .catch((err: unknown) => {
         toast.error(`Could not load model from URL: ${getErrorMessage(err, 'the file could not be reached')}`, { id: toastId });
       });
-  }, [models]);
+  }, [qc]);
 
   const handleWorkspaceModelSelect = useCallback((modelId: string | null) => {
     setSelectedBedModelId(modelId);

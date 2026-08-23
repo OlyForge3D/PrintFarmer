@@ -1401,6 +1401,51 @@ describe('NewSliceJobPage', () => {
         expect(models[0].fileType).toBe('3mf');
       });
     });
+
+    it('still resolves the correct file type when the model list query has not settled yet at submit time (race window)', async () => {
+      // Regression coverage for Bishop's second-round finding: fileType
+      // detection used to read the `models` query result captured at
+      // submit/render time, so submitting an id-based URL before that
+      // query resolved would fall back to the extension-less id and
+      // misdetect as 'stl'. handleUrlModelSubmit now resolves the match via
+      // `queryClient.ensureQueryData`, which awaits (and dedupes with) the
+      // in-flight query rather than reading a stale snapshot.
+      let resolveModelsList: (value: { data: unknown[] }) => void = () => {
+        throw new Error('resolveModelsList called before it was assigned');
+      };
+      const modelsListPromise = new Promise<{ data: unknown[] }>((resolve) => {
+        resolveModelsList = resolve;
+      });
+      vi.mocked(apiClient.get).mockImplementation(((url: string) => {
+        if (url === '/3d-models') {
+          return modelsListPromise;
+        }
+        return Promise.resolve({ data: new ArrayBuffer(0) });
+      }) as never);
+
+      const fetchSpy = vi.fn();
+      vi.stubGlobal('fetch', fetchSpy);
+
+      await renderAndOpenUrlTab();
+
+      fireEvent.change(screen.getByLabelText('File URL'), {
+        target: { value: '/api/3d-models/file/model-3d-1' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+      // The models list query is still pending here — resolve it only now,
+      // simulating it completing shortly after the URL was submitted.
+      act(() => {
+        resolveModelsList({ data: mockModelList });
+      });
+
+      await waitFor(() => {
+        const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
+        expect(models).toHaveLength(1);
+        expect(models[0].fileType).toBe('3mf');
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
   });
 
   describe('Bed Type', () => {
