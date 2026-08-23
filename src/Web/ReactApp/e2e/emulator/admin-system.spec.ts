@@ -41,8 +41,9 @@ test.describe('Admin System Dashboard — Emulator', () => {
     const hasSystemContent = /system|dashboard/i.test(bodyText);
     expect(hasSystemContent).toBeTruthy();
 
-    // Should have tab navigation
-    const tabs = page.locator('[role="tab"], button').filter({ hasText: /log|monitor|connect|health|service/i });
+    // Should have tab navigation. Scope to the tablist so the page-global
+    // header health button ("View system status — Healthy") is never matched.
+    const tabs = page.locator('[role="tablist"] [role="tab"]').filter({ hasText: /log|monitor|connect|health|service/i });
     expect(await tabs.count()).toBeGreaterThan(0);
 
     expect(criticalErrors()).toHaveLength(0);
@@ -125,7 +126,9 @@ test.describe('Admin System Dashboard — Emulator', () => {
     await page.waitForTimeout(1_000);
 
     const tabNames = ['logs', 'monitoring', 'connections', 'file-health', 'services'];
-    const tabs = page.locator('[role="tab"], button').filter({ hasText: /log|monitor|connect|health|service/i });
+    // Scope to the tablist so the page-global header health button
+    // ("View system status — Healthy") is never matched (see issue #1896).
+    const tabs = page.locator('[role="tablist"] [role="tab"]').filter({ hasText: /log|monitor|connect|health|service/i });
     const tabCount = await tabs.count();
 
     // Click each tab and verify content loads
