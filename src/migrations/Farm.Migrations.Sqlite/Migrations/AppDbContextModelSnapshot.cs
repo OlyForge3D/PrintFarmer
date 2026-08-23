@@ -6724,6 +6724,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<Guid>("ManufacturerId")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("MaxAcceleration")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("MaxBedTemp")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
@@ -6733,6 +6736,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(150);
+
+                    b.Property<int?>("MaxTravelAcceleration")
+                        .HasColumnType("INTEGER");
 
                     b.Property<double?>("MaxX")
                         .HasColumnType("REAL");

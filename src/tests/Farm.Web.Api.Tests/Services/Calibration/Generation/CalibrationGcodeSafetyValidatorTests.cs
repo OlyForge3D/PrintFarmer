@@ -6,6 +6,13 @@ namespace Farm.Web.Api.Tests.Services.Calibration.Generation;
 /// <summary>
 /// Adversarial tests for the reject-only static G-code safety validator.
 /// </summary>
+/// <remarks>
+/// The safety ceilings asserted here (temperature, pressure advance, retraction, volumetric
+/// flow) are an intentional PFD divergence from OrcaSlicer's own calibration wizard, which
+/// applies no equivalent static rejection pass. See
+/// <c>docs/CALIBRATION_DIVERGENCES.md</c> for the full rationale and code pointers, and for
+/// other known, deliberate PFD/OrcaSlicer calibration divergences.
+/// </remarks>
 public sealed class CalibrationGcodeSafetyValidatorTests
 {
     private static CalibrationGenerationPipeline.Result Run() =>

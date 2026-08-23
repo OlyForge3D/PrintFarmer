@@ -59,6 +59,18 @@ public class PrinterModel
 
     public int? MaxPrintSpeed { get; set; } = 150; // mm/s
 
+    /// <summary>
+    /// Default maximum print (XY) acceleration in mm/s². Nullable so "unknown" stays distinct
+    /// from a real zero. Used as a calibration hardware-resolution fallback (#1922).
+    /// </summary>
+    public int? MaxAcceleration { get; set; }
+
+    /// <summary>
+    /// Default maximum travel acceleration in mm/s². Nullable so "unknown" stays distinct from
+    /// a real zero. Used as a calibration hardware-resolution fallback (#1922).
+    /// </summary>
+    public int? MaxTravelAcceleration { get; set; }
+
     public ICollection<FilamentType> SupportedFilamentTypes { get; } = new List<FilamentType>();
 
     // Toolhead templates for multi-toolhead printers (contains nozzle diameter and max hotend temp)

@@ -6745,6 +6745,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("ManufacturerId")
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("MaxAcceleration")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("MaxBedTemp")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -6754,6 +6757,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(150);
+
+                    b.Property<int?>("MaxTravelAcceleration")
+                        .HasColumnType("integer");
 
                     b.Property<double?>("MaxX")
                         .HasColumnType("double precision");
