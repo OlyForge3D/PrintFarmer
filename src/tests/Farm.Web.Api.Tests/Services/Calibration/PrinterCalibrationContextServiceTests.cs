@@ -1265,6 +1265,13 @@ public sealed class PrinterCalibrationContextServiceTests
 
     private sealed class CalibrationHarness : IAsyncDisposable
     {
+        // Shared across every printer/model seeded by this harness so
+        // GetUnknownModelIdAsync's (ManufacturerId, Name) lookup -- matching
+        // EfCatalogRepository.GetUnknownModelIdAsync's production identity, not a bare Name
+        // match, per #1922 review -- resolves the same "Unknown Model" row tests already rely
+        // on as the default, un-cataloged placeholder.
+        private static readonly Guid UnknownManufacturerId = Guid.NewGuid();
+
         private readonly Mock<IPrinterStatusSnapshotReader> _statusReader = new();
         private readonly Mock<IBackendCapabilityFactory> _capabilityFactory = new();
         private readonly Mock<ICalibrationProfileResolver> _profileResolver = new();
@@ -1355,7 +1362,7 @@ public sealed class PrinterCalibrationContextServiceTests
             {
                 Id = printer.ModelId,
                 Name = "Unknown Model",
-                ManufacturerId = printer.ManufacturerId,
+                ManufacturerId = UnknownManufacturerId,
             });
             _ = await Db.SaveChangesAsync();
         }
@@ -1437,17 +1444,22 @@ public sealed class PrinterCalibrationContextServiceTests
             Printer printer = CreatePrinter(nowUtc);
             _ = db.Printers.Add(printer);
 
-            // Mirrors the real-world invariant (Printer.ModelId is non-nullable and always
-            // points at a real catalog row, defaulting to "Unknown Model" -- see
-            // EfCatalogRepository) that PrinterCalibrationContextService's Model.Toolheads
-            // Include chain (#1922) relies on: Model is a required FK
-            // (PrinterConfiguration.HasOne(p => p.Model)), so Include performs an inner join
-            // and would otherwise silently drop every printer whose ModelId does not resolve.
+            // Mirrors the real-world "Unknown" manufacturer + "Unknown Model" sentinel
+            // (EfCatalogRepository.GetUnknownModelIdAsync) that every printer's non-nullable
+            // ModelId resolves to by default. Model is a required FK
+            // (PrinterConfiguration.HasOne(p => p.Model)), so PrinterCalibrationContextService's
+            // Model.Toolheads Include chain (#1922) performs an inner join and would otherwise
+            // silently drop every printer whose ModelId does not resolve.
+            _ = db.Manufacturers.Add(new Manufacturer
+            {
+                Id = UnknownManufacturerId,
+                Name = "Unknown",
+            });
             _ = db.PrinterModels.Add(new PrinterModel
             {
                 Id = printer.ModelId,
                 Name = "Unknown Model",
-                ManufacturerId = printer.ManufacturerId,
+                ManufacturerId = UnknownManufacturerId,
             });
             _ = await db.SaveChangesAsync();
             return new CalibrationHarness(db, printer);

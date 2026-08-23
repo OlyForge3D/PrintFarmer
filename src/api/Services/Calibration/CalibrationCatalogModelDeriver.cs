@@ -25,13 +25,28 @@ internal static class CalibrationCatalogModelDeriver
     /// toolhead, <c>hasHeatedBed: true</c>, etc.) so it renders sensibly elsewhere in the
     /// product, but none of that was curated for any specific printer -- it must never be
     /// surfaced as a derived calibration fact, or every un-cataloged printer would silently
-    /// inherit fabricated hardware data it was never verified against (#1922).
+    /// inherit fabricated hardware data it was never verified against (#1922). Exposed so the
+    /// caller can resolve the sentinel's actual <see cref="PrinterModel.Id"/> (scoped to the
+    /// "Unknown" manufacturer, not by name alone -- <see cref="PrinterModel"/> only enforces
+    /// uniqueness on <c>(ManufacturerId, Name)</c>, so a different manufacturer could otherwise
+    /// legitimately curate a model that happens to share this name).
     /// </summary>
     internal const string UnknownModelName = "Unknown Model";
 
-    public static DerivedCatalogFacts Derive(PrinterModel? model)
+    /// <summary>
+    /// Derives calibration hardware facts from <paramref name="model"/>, unless it is the
+    /// reserved "Unknown Model" sentinel (identified by <paramref name="unknownModelId"/>), in
+    /// which case its facts are never surfaced (#1922).
+    /// </summary>
+    /// <param name="model">The printer's linked catalog model, if any.</param>
+    /// <param name="unknownModelId">
+    /// The resolved id of the reserved "Unknown Model" sentinel row (see
+    /// <see cref="UnknownModelName"/>), or <see langword="null"/> if that row could not be
+    /// resolved (e.g. an environment with no "Unknown" manufacturer seeded).
+    /// </param>
+    public static DerivedCatalogFacts Derive(PrinterModel? model, Guid? unknownModelId)
     {
-        if (model is null || model.Name == UnknownModelName)
+        if (model is null || (unknownModelId is not null && model.Id == unknownModelId))
         {
             return DerivedCatalogFacts.Empty;
         }

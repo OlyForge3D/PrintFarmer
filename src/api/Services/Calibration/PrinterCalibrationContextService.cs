@@ -59,6 +59,7 @@ public sealed class PrinterCalibrationContextService(
         CalibrationProfileAccessScope profileAccessScope,
         CancellationToken cancellationToken)
     {
+        Guid? unknownModelId = await GetUnknownModelIdAsync(cancellationToken);
         List<Printer> printers = await dbContext.Printers
             .AsNoTracking()
             .Where(printer => printer.IsEnabled)
@@ -80,6 +81,7 @@ public sealed class PrinterCalibrationContextService(
                 printer,
                 profileAccessScope,
                 resolveProfiles: false,
+                unknownModelId,
                 cancellationToken);
             candidates.Add(evaluation.Candidate);
         }
@@ -122,10 +124,12 @@ public sealed class PrinterCalibrationContextService(
         CalibrationEvaluation evaluation;
         try
         {
+            Guid? unknownModelId = await GetUnknownModelIdAsync(cancellationToken);
             evaluation = await EvaluateAsync(
                 printer,
                 profileAccessScope,
                 resolveProfiles: true,
+                unknownModelId,
                 cancellationToken);
         }
         catch (CalibrationProfileResolverUnavailableException exception)
@@ -252,10 +256,39 @@ public sealed class PrinterCalibrationContextService(
         return new(context);
     }
 
+    private async Task<Guid?> GetUnknownModelIdAsync(CancellationToken cancellationToken)
+    {
+        // Resolve the reserved "Unknown" manufacturer + "Unknown Model" catalog row -- the same
+        // sentinel every printer's non-nullable ModelId resolves to by default (see
+        // EfCatalogRepository.GetUnknownModelIdAsync for the identical, production-side
+        // identity). Matching Name alone would be insufficient: PrinterModel only enforces
+        // uniqueness on (ManufacturerId, Name), so an admin could otherwise curate a real model
+        // named "Unknown Model" under a different manufacturer and have its facts wrongly
+        // discarded (#1922).
+        Guid? unknownManufacturerId = await dbContext.Manufacturers
+            .AsNoTracking()
+            .Where(manufacturer => manufacturer.Name == "Unknown")
+            .Select(manufacturer => (Guid?)manufacturer.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (unknownManufacturerId is null)
+        {
+            return null;
+        }
+
+        return await dbContext.PrinterModels
+            .AsNoTracking()
+            .Where(model =>
+                model.ManufacturerId == unknownManufacturerId.Value &&
+                model.Name == CalibrationCatalogModelDeriver.UnknownModelName)
+            .Select(model => (Guid?)model.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     private async Task<CalibrationEvaluation> EvaluateAsync(
         Printer printer,
         CalibrationProfileAccessScope profileAccessScope,
         bool resolveProfiles,
+        Guid? unknownModelId,
         CancellationToken cancellationToken)
     {
         List<CalibrationRejectionReasonDto> reasons = [];
@@ -362,7 +395,7 @@ public sealed class PrinterCalibrationContextService(
         // #1922: the catalog model is a pure in-memory projection of an entity already loaded
         // via the query's Include chain, so it requires no additional resolver/database call
         // and can be computed unconditionally ahead of the (expensive) profile resolution.
-        DerivedCatalogFacts catalogFacts = CalibrationCatalogModelDeriver.Derive(printer.Model);
+        DerivedCatalogFacts catalogFacts = CalibrationCatalogModelDeriver.Derive(printer.Model, unknownModelId);
         int? activeToolheadIndex = printer.ActiveToolheadIndex ?? catalogFacts.ActiveToolheadIndex;
         bool isSingleToolhead = physicalToolheads.Count == 1;
 
