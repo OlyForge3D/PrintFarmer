@@ -24,7 +24,24 @@
     "src/**/calibration/derived/**",
     "src/calibration-derived/**"
   ],
-  "approvedSources": [],
+  "approvedSources": [
+    {
+      "id": "orcaslicer-v2.4.2",
+      "repositoryUrl": "https://github.com/OrcaSlicer/OrcaSlicer",
+      "tag": "v2.4.2",
+      "commitSha": "8500fcdccaa10b5099ac20d252af3a7c560046f1",
+      "licenseExpression": "AGPL-3.0-only",
+      "licenseEvidence": {
+        "path": "LICENSE.txt",
+        "blobDigest": "sha1:dba13ed2ddf783ee8118c6a581dbf75305f816a3"
+      },
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-20",
+        "decision": "approved"
+      }
+    }
+  ],
   "entries": [],
   "referenceRecords": [
     {
@@ -1769,6 +1786,36 @@
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-temperature-tower-orcaslicer-golden-fixture",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/Fixtures/orcaslicer-temperature-tower-v2.4.2.gcode",
+      "referenceUrls": [
+        "https://github.com/OrcaSlicer/OrcaSlicer/releases/tag/v2.4.2",
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1926",
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1929"
+      ],
+      "statement": "Independent, PrintFarmer-authored generated text; not copied or adapted OrcaSlicer source code. It reconstructs the ordered per-band M104/M109 nozzle-temperature setpoint sequence that OrcaSlicer's own temperature-tower calibration (approvedSources id orcaslicer-v2.4.2; see src/libslic3r/calib.cpp and src/slic3r/Utils/CalibUtils.cpp Calib_Temp_Tower at that pinned commit) is documented to emit for its default sweep. No OrcaSlicer binary or GUI execution path exists in this environment (verified: no vendored engine under src/Slicers/**, no headless slicing entry point), so this is not a byte-for-byte capture of a live OrcaSlicer slice; only the per-band temperature setpoint sequence is asserted, and full toolpath/geometry parity is an explicitly unverified gap flagged for reviewer awareness per issue #1926.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-20",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-temperature-tower-orcaslicer-golden-fixture-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationTemperatureTowerOrcaGoldenTests.cs",
+      "referenceUrls": [
+        "https://github.com/OrcaSlicer/OrcaSlicer/releases/tag/v2.4.2",
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1926",
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1929"
+      ],
+      "statement": "Independent PrintFarmer test implementation that loads the checked-in orcaslicer-temperature-tower-v2.4.2.gcode reference and fails if PrintFarmer's generated Temperature-method output diverges from it; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-20",
         "decision": "approved"
       }
     },
