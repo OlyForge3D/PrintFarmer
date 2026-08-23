@@ -222,7 +222,7 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
     }
 
     [Fact]
-    public async Task GetAsync_RecentlyProbedMoonrakerPrinter_ProbesLiveVersionInfoButDoesNotRewriteFirmwareIdentity()
+    public async Task GetAsync_RecentlyProbedMoonrakerPrinter_ProbesLiveVersionInfoAndReportsItButDoesNotRewriteRecordedFirmwareIdentity()
     {
         Printer printer = CreateNeverProbedMoonrakerPrinter();
         printer.FirmwareFamily = PrinterFirmwareFamily.Klipper;
@@ -260,10 +260,15 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
         _ = dto!.BackendVersion.Should().Be("v1.2.3");
         _ = dto.ApiVersion.Should().Be("v2");
 
-        // The firmware identity itself — the single authoritative fact the calibration gate also
-        // reads — is untouched: the cadence guard blocks the DB write, so the persisted (and
-        // reported) version stays the last recorded value, never the fresh probe's reading.
-        _ = dto.FirmwareVersion.Should().Be("v0.11.0");
+        // #1894: the displayed FirmwareVersion prefers the fresh live probe reading, exactly like
+        // BackendVersion/ApiVersion already did — a stale/recorded value must never win over a
+        // successful live probe. The persisted/recorded firmware identity — the single
+        // authoritative fact the calibration gate reads — is separately untouched: the cadence
+        // guard still blocks the DB write, so what's persisted (and reported via
+        // RecordedFirmwareIdentity) stays the last recorded value, never the fresh probe's reading.
+        _ = dto.FirmwareVersion.Should().Be("v99.99.99");
+        _ = dto.RecordedFirmwareIdentity.Should().NotBeNull();
+        _ = dto.RecordedFirmwareIdentity!.Version.Should().Be("v0.11.0");
         Printer? reread = await db.Printers.AsNoTracking().SingleAsync(p => p.Id == printer.Id);
         _ = reread.FirmwareVersion.Should().Be("v0.11.0");
     }

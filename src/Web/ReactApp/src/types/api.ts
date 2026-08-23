@@ -429,10 +429,15 @@ export interface PrinterVersionInfo {
   message?: string | null;
   /**
    * The persisted firmware identity backing `PrinterCalibrationContextService.ValidateFirmware`
-   * (issue #1656). Only populated for Moonraker/Klipper printers, whose `firmwareVersion` above is
-   * read-through from these same persisted columns. `null`/absent for non-Moonraker backends
-   * (PrusaLink, OctoPrint, SDCP), whose `firmwareVersion` remains a live-only reading never used by
-   * the calibration gate — the UI must not imply the two are the same fact for those backends.
+   * (issue #1656). Only populated for Moonraker/Klipper printers. For those printers,
+   * `firmwareVersion` above prefers a fresh live-probed reading and falls back to this same
+   * persisted value only when a live reading isn't available (issue #1894) — so `firmwareVersion`
+   * and `recordedFirmwareIdentity.version` can legitimately differ when the printer's live
+   * firmware has moved since the last recorded/persisted probe. Calibration eligibility always
+   * reads the persisted value here, never the live-preferred `firmwareVersion`. `null`/absent for
+   * non-Moonraker backends (PrusaLink, OctoPrint, SDCP), whose `firmwareVersion` remains a
+   * live-only reading never used by the calibration gate — the UI must not imply the two are the
+   * same fact for those backends.
    */
   recordedFirmwareIdentity?: CalibrationFirmwareIdentityDto | null;
 }
