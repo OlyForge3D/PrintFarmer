@@ -11,11 +11,13 @@ namespace Farm.Web.Api.Tests.Services.Calibration.Generation;
 /// specification, plan, G-code, and manifest digests.
 /// </summary>
 /// <remarks>
-/// This suite does NOT verify parity with OrcaSlicer's own output — it does not compare generated
-/// artifacts against anything OrcaSlicer itself produces. It only guarantees that PrintFarmer's own
-/// generation pipeline is reproducible across repeated calls. See
+/// This suite does NOT verify parity with OrcaSlicer's own output — it compares PrintFarmer's
+/// generation pipeline against itself, not against anything OrcaSlicer produces. See
 /// https://github.com/OlyForge3D/PrintFarmer/issues/1926 for the OrcaSlicer parity gap this suite
-/// does not close.
+/// does not close, and #1929 for real OrcaSlicer-pinned golden fixtures. When that comparison
+/// lands, a mismatch against an OrcaSlicer-derived reference may be an intentional design decision
+/// rather than a regression — check <c>docs/CALIBRATION_DIVERGENCES.md</c> before treating it as
+/// drift.
 /// </remarks>
 public sealed class CalibrationGenerationDeterminismTests
 {

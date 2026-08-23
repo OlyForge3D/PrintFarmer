@@ -106,6 +106,19 @@
       }
     },
     {
+      "id": "calibration-catalog-model-deriver",
+      "destinationPath": "src/api/Services/Calibration/CalibrationCatalogModelDeriver.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1922"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #1922 printer-catalog calibration fallback tier (PrinterModel/PrinterModelToolhead/component-definition field derivation); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-23",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-configuration-revision-tests",
       "destinationPath": "src/tests/Farm.Web.Api.Tests/Infrastructure/CalibrationConfigurationRevisionTests.cs",
       "referenceUrls": [
