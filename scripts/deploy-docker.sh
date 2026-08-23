@@ -6477,6 +6477,21 @@ prepare_external_storage_directories() {
 # opportunity to self-heal permissions at container start. Every per-job temp directory
 # creation then fails with UnauthorizedAccessException (issue #1908).
 #
+# IMPORTANT: unlike the models/gcode/profiles bind mounts, chmod 775 alone does NOT
+# reliably grant appuser (container UID/GID 1001) write access here. Docker bind mounts
+# are checked against the host filesystem's numeric UID/GID with no remapping, and this
+# directory is created/owned by whichever host user runs the deploy script -- there is no
+# guarantee that user's UID/GID is 1001 or that its primary group matches GID 1001, so the
+# "group" bits of 775 may never apply to the container process, leaving it with only the
+# "other" bits (r-x, no write). We therefore: (1) best-effort chown the directory to
+# 1001:1001 so ownership matches appuser exactly whenever the deploy script has the
+# privilege to do so (e.g. running as root/via sudo); and (2) unconditionally chmod 777
+# (rwxrwxrwx) so appuser can write via the "other" bits even when the chown attempt fails
+# (the common case of a non-root deploy user). This directory only ever holds transient
+# per-job slicer scratch files, not persistent data, so trading directory-level
+# confidentiality for guaranteed write access across arbitrary host UID/GID combinations
+# is an acceptable, deliberate choice here.
+#
 # This must run whenever ENABLE_ORCA_WORKER=yes, independent of USE_EXTERNAL_STORAGE.
 prepare_orcaslicer_worker_temp_directories() {
     if [ "${ENABLE_ORCA_WORKER:-no}" != "yes" ]; then
@@ -6520,22 +6535,46 @@ prepare_orcaslicer_worker_temp_directories() {
             print_info "Directory already exists: [$desc] $path"
         fi
 
-        # Fix permissions to 775 (rwxrwxr-x) so the container's non-root appuser
-        # (UID 1001) can write per-job temp directories even though the host directory
-        # is not owned by that UID.
-        if ! chmod 775 "$path" 2>/dev/null; then
-            print_warning "Could not set permissions on $path - may have restricted access"
-            ((paths_failed++))
+        # Best-effort: align ownership with the container's appuser (UID/GID 1001).
+        # This only succeeds when the deploy script is running as root (or via sudo);
+        # a non-root deploy user cannot chown to an arbitrary UID, so failure here is
+        # expected and silently ignored -- the chmod 777 below guarantees write access
+        # regardless of whether this succeeded.
+        chown 1001:1001 "$path" 2>/dev/null || true
+
+        # Guarantee appuser (UID/GID 1001) can write regardless of the host directory's
+        # actual owner/group: 777 grants write via the "other" bits even when neither the
+        # owning user nor group matches the container's UID/GID. See the function-level
+        # comment above for why 775 (the convention used elsewhere in this script) is not
+        # sufficient for this specific bind mount.
+        if ! chmod 777 "$path" 2>/dev/null; then
+            # A prior broken deploy (the exact bug this function fixes) can leave this
+            # directory already existing and owned by root:root, created by Docker
+            # itself the first time the bind mount was used. A non-root deploy user
+            # cannot chmod/chown a directory they don't own, so `chmod` above fails
+            # here for that upgrade-in-place case. Since this directory only ever
+            # holds transient per-job scratch files (nothing worth preserving across
+            # a broken deploy), recover by deleting and recreating it -- which only
+            # requires write access to the parent directory, which the deploy user
+            # does own -- rather than trying to chown/chmod something we don't own.
+            print_warning "Could not set permissions on $path (likely owned by another user from a prior broken deploy) - recreating it"
+            if ! rm -rf "$path" 2>/dev/null || ! mkdir -p "$path" 2>/dev/null || ! chmod 777 "$path" 2>/dev/null; then
+                print_warning "Could not recreate $path with correct permissions - may have restricted access"
+                ((paths_failed++))
+                continue
+            fi
+            chown 1001:1001 "$path" 2>/dev/null || true
+            print_success "  Recreated $path and set permissions to 777 (rwxrwxrwx) ✓"
             continue
         fi
 
-        print_success "  Permissions set to 775 (rwxrwxr-x) ✓"
+        print_success "  Permissions set to 777 (rwxrwxrwx) ✓"
     done
 
     if [ $paths_failed -gt 0 ]; then
         print_warning "Failed to prepare $paths_failed OrcaSlicer worker temp directories"
         print_warning "⚠️  Slice jobs may fail with UnauthorizedAccessException if permissions are not fixed."
-        print_info "Fix manually: mkdir -p <path> && chmod 775 <path>"
+        print_info "Fix manually: mkdir -p <path> && chmod 777 <path>"
         return 1
     fi
 
