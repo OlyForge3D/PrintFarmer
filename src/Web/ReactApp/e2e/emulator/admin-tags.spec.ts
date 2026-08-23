@@ -2,9 +2,24 @@ import { test, expect } from '../fixtures/emulator-setup';
 
 const TEST_TAG_NAME = `E2E Test Tag ${Date.now()}`;
 
-// The API normalizes tag names to PascalCase on creation (see TagService.ToPascalCase),
-// e.g. "E2E Test Tag 123" -> "E2eTestTag123". Assertions after creation must use the
-// normalized name returned by the API, not the raw input string.
+// The API normalizes tag names to PascalCase on creation (see TagService.ToPascalCase):
+// lowercase, split on space/dash/underscore, capitalize each word, concatenate with no
+// separator -- e.g. "E2E Test Tag 123" -> "E2eTestTag123". Mirrored here so the test
+// asserts the documented normalization contract itself, not merely "whatever the API
+// happened to echo back" (which would still pass even if normalization regressed).
+function toExpectedPascalCase(raw: string): string {
+  return raw
+    .toLowerCase()
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join('');
+}
+
+const EXPECTED_TAG_NAME = toExpectedPascalCase(TEST_TAG_NAME);
+
+// Assertions after creation must use the normalized name returned by the API, not the
+// raw input string.
 let createdTagName = TEST_TAG_NAME;
 
 /**
@@ -93,10 +108,14 @@ test.describe('Admin Tags — Emulator', () => {
     await saveButton.click();
 
     // The API normalizes the submitted name to PascalCase (e.g. "E2E Test Tag 123"
-    // -> "E2eTestTag123"); use the value it returns rather than the raw input.
+    // -> "E2eTestTag123"); assert the response matches the documented normalization
+    // contract (not just "whatever came back") before trusting it for later assertions.
     const createResponse = await createResponsePromise;
     expect(createResponse.ok()).toBe(true);
     const createdTag = await createResponse.json();
+    expect(typeof createdTag.name).toBe('string');
+    expect(createdTag.name.length).toBeGreaterThan(0);
+    expect(createdTag.name).toBe(EXPECTED_TAG_NAME);
     createdTagName = createdTag.name;
 
     await expect(dialog).toBeHidden();
