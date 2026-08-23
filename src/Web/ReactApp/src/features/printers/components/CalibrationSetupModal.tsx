@@ -6,6 +6,7 @@ import { Button, Alert, Input, Select, CollapsibleSection } from '@/common/compo
 import { apiClient } from '@/services/api';
 import { slicerProfilesService } from '@/services/slicerProfilesService';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
+import { calibrationCandidatesFleetQueryKey } from '@/features/printers/hooks/useCalibrationCandidatesFleet';
 import type {
   CalibrationContextDto,
   CalibrationExcludedRegionDto,
@@ -171,6 +172,9 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
   const applyResult = (rv: string | null | undefined) => {
     queryClient.invalidateQueries({ queryKey: calibrationContextQueryKey });
     queryClient.invalidateQueries({ queryKey: ['printers'] });
+    // Keep every card/row's onboarding prompt (issue #1923) in sync with the
+    // eligibility this save just changed, instead of waiting out its staleTime.
+    queryClient.invalidateQueries({ queryKey: calibrationCandidatesFleetQueryKey });
     if (rv) setLatestRowVersion(rv);
   };
 
@@ -197,6 +201,7 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
       // refetched for the gate to stop reporting the firmware inputs as missing.
       queryClient.invalidateQueries({ queryKey: calibrationContextQueryKey });
       queryClient.invalidateQueries({ queryKey: ['printers'] });
+      queryClient.invalidateQueries({ queryKey: calibrationCandidatesFleetQueryKey });
       toast.success(
         result.version
           ? `Firmware detected: ${result.family ?? 'Unknown'} ${result.version}`

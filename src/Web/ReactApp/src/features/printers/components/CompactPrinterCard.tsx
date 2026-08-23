@@ -15,6 +15,7 @@ import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesMo
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
+import { CalibrationSetupPrompt } from '@/features/printers/components/CalibrationSetupPrompt';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
 import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
@@ -260,6 +261,11 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
             recentEvents={recentEvents}
           />
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
+          <CalibrationSetupPrompt
+            printerId={printer.id}
+            printerName={printer.name}
+            rowVersion={printer.rowVersion}
+          />
           {printer.hasCatalogUpdate && (
             <span
               title="A catalog model update is available. Open printer details to apply."

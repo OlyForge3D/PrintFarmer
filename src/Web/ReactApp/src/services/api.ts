@@ -1061,6 +1061,21 @@ export class ApiClient {
   }
 
   /**
+   * Fetches the fleet-wide calibration-eligibility snapshot for every
+   * printer (issue #1923): powers list-level "needs calibration setup"
+   * affordances without an N+1 per-printer `calibration-context` fetch.
+   */
+  async getCalibrationCandidates(
+    signal?: AbortSignal
+  ): Promise<import("@/types/api").CalibrationCandidateDto[]> {
+    const response = await this.client.get<import("@/types/api").CalibrationCandidateDto[]>(
+      `/printers/calibration-candidates`,
+      { signal }
+    );
+    return response.data;
+  }
+
+  /**
    * Fetches the read-only calibration-eligibility context for a printer
    * (issue #1616): eligibility, missing inputs, and every profile-owned and
    * residual manual field currently persisted.
