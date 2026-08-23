@@ -43,8 +43,18 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
         }).then(resolve).catch(reject);
       });
     },
-    onSuccess: () => {
-      // Models query will be invalidated on modal close
+    onSuccess: async () => {
+      // Refresh the Files list as soon as this upload completes so the new
+      // model appears immediately, without waiting for the modal to be closed.
+      await queryClient.invalidateQueries({ queryKey: ['file-browser'] });
+
+      if (onUploadSuccess) {
+        try {
+          await onUploadSuccess();
+        } catch (error) {
+          console.error('Error calling onUploadSuccess:', error);
+        }
+      }
     },
     onError: (error: unknown) => {
       console.error('Upload error:', error);
@@ -133,8 +143,10 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
   const handleClose = async () => {
     setIsClosing(true);
     try {
-      // Invalidate file-browser queries to refresh the models list.
-      // useFileBrowser keys are ['file-browser', ...] — prefix match invalidates all.
+      // Successful uploads already invalidate/refresh file-browser queries in
+      // uploadMutation.onSuccess. This is a safety net for edge cases (e.g. closing
+      // before any upload starts) — useFileBrowser keys are ['file-browser', ...],
+      // so this prefix match invalidates all of them.
       await queryClient.invalidateQueries({ queryKey: ['file-browser'] });
       
       // Call onUploadSuccess callback if provided and wait for it to complete
