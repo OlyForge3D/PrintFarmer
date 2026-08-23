@@ -3579,14 +3579,29 @@ public class ProfilesService(
     }
 
     /// <inheritdoc />
-    public async Task<CustomProfilesListResponseDto> ListCustomProfilesAsync(Guid userId, CancellationToken ct)
+    public async Task<CustomProfilesListResponseDto> ListCustomProfilesAsync(Guid userId, CancellationToken ct, IReadOnlyList<string>? machineNames = null)
     {
+        // When machineNames is supplied, only process/filament profiles whose CompatiblePrinters
+        // intersects the set are applicable — mirrors the existing browse-filter rule (see
+        // GetBrowsableProfilesAsync above) where profiles without CompatiblePrinters are excluded
+        // once a machine filter is active. Machine profiles have no CompatiblePrinters concept
+        // (they represent the printer itself) so machineNames never filters them.
+        HashSet<string>? machineNameFilter = machineNames is { Count: > 0 }
+            ? new HashSet<string>(machineNames, StringComparer.OrdinalIgnoreCase)
+            : null;
+
         List<CustomProfileDto> profiles = [];
 
         // Get custom process profiles
         IReadOnlyList<ProcessProfile> processProfiles = await _processProfileRepo.GetByUserAsync(userId, ct);
         foreach (ProcessProfile p in processProfiles.Where(p => !p.IsSystem && p.CreatedByUserId == userId))
         {
+            string[]? compatiblePrinters = SplitCompatiblePrinters(p.CompatiblePrinters);
+            if (machineNameFilter != null && !IsApplicableToMachines(compatiblePrinters, machineNameFilter))
+            {
+                continue;
+            }
+
             profiles.Add(new CustomProfileDto
             {
                 Id = p.Id,
@@ -3596,7 +3611,8 @@ public class ProfilesService(
                 CreatedAt = p.CreatedAt,
                 UpdatedAt = p.UpdatedAt,
                 RawJson = p.RawJson,
-                PrinterModelId = p.PrinterModelId
+                PrinterModelId = p.PrinterModelId,
+                CompatiblePrinters = compatiblePrinters
             });
         }
 
@@ -3604,6 +3620,12 @@ public class ProfilesService(
         IReadOnlyList<FilamentProfile> filamentProfiles = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: userId, ct: ct);
         foreach (FilamentProfile p in filamentProfiles.Where(p => !p.IsSystem && p.CreatedByUserId == userId))
         {
+            string[]? compatiblePrinters = SplitCompatiblePrinters(p.CompatiblePrinters);
+            if (machineNameFilter != null && !IsApplicableToMachines(compatiblePrinters, machineNameFilter))
+            {
+                continue;
+            }
+
             profiles.Add(new CustomProfileDto
             {
                 Id = p.Id,
@@ -3614,11 +3636,12 @@ public class ProfilesService(
                 UpdatedAt = p.UpdatedAt,
                 RawJson = p.RawJson,
                 PrinterModelId = null,
-                CompatiblePrinters = SplitCompatiblePrinters(p.CompatiblePrinters)
+                CompatiblePrinters = compatiblePrinters
             });
         }
 
-        // Get custom machine profiles
+        // Get custom machine profiles. Never filtered by machineNames — a machine profile IS a
+        // printer, not something that can be "compatible with" one.
         IReadOnlyList<MachineProfile> machineProfiles = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: userId, ct: ct);
         foreach (MachineProfile p in machineProfiles.Where(p => !p.IsSystem && p.CreatedByUserId == userId))
         {
@@ -3643,6 +3666,16 @@ public class ProfilesService(
             FilamentProfileCount = profiles.Count(p => p.ProfileType == "filament"),
             MachineProfileCount = profiles.Count(p => p.ProfileType == "machine")
         };
+    }
+
+    /// <summary>
+    /// Determines whether a process/filament profile's <c>CompatiblePrinters</c> list intersects
+    /// the requested machine name filter. Profiles without a <c>CompatiblePrinters</c> list are
+    /// excluded once a machine filter is active, consistent with the existing browse-filter rule.
+    /// </summary>
+    private static bool IsApplicableToMachines(string[]? compatiblePrinters, HashSet<string> machineNameFilter)
+    {
+        return compatiblePrinters != null && compatiblePrinters.Any(machineNameFilter.Contains);
     }
 
     /// <inheritdoc />

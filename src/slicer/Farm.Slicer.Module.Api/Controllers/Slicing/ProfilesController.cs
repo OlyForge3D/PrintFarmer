@@ -1324,15 +1324,22 @@ public class ProfilesController(
     /// Lists all custom profiles owned by the current user.
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="machineNames">
+    /// Optional list of machine profile names to filter applicability by (e.g.
+    /// <c>?machineNames=A&amp;machineNames=B</c>). When supplied, custom process and filament
+    /// profiles are returned only if their recorded compatible-printers list contains one of the
+    /// given names; custom machine profiles are always returned unfiltered. Omitting this
+    /// parameter preserves the previous unfiltered behavior.
+    /// </param>
     [HttpGet("custom")]
     [ProducesResponseType(typeof(CustomProfilesListResponseDto), StatusCodes.Status200OK)]
-    public async Task<IActionResult> ListCustomProfilesAsync(CancellationToken ct)
+    public async Task<IActionResult> ListCustomProfilesAsync(CancellationToken ct, [FromQuery] IReadOnlyList<string>? machineNames = null)
     {
         try
         {
             Guid userId = GetCurrentUserId();
 
-            CustomProfilesListResponseDto result = await _profilesService.ListCustomProfilesAsync(userId, ct);
+            CustomProfilesListResponseDto result = await _profilesService.ListCustomProfilesAsync(userId, ct, machineNames);
             return Ok(result);
         }
         catch (Exception ex)
