@@ -185,7 +185,14 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   simpleMode = false,
 }) => {
   return (
-    <div className="flex items-center gap-0.5 px-2 py-1 bg-pf-bg-1 border-b border-pf-border shrink-0">
+    // flex-wrap (issue #1902): the pinned left/right groups and the tool
+    // region are each `shrink-0`/no-grow blocks, so when the toolbar's own
+    // available width is too small — a narrow viewport, or a normal desktop
+    // width with the settings drawer eating space — the browser drops whole
+    // groups to their own line instead of squeezing/overlapping them. This is
+    // a no-op whenever everything already fits on one line, so desktop
+    // behavior is unchanged.
+    <div className="flex flex-wrap items-center gap-0.5 px-2 py-1 bg-pf-bg-1 border-b border-pf-border shrink-0">
       {/* Hamburger toggle — pinned left, never scrolls off */}
       {onToggleSidebar && (
         <ToolbarButton
@@ -212,9 +219,10 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         <ToolbarDivider />
       </div>
 
-      {/* Scrollable tool region — flexes to fill, scrolls horizontally so tools
-          never run off the visible area at any width. Scrollbar hidden visually. */}
-      <div className="flex items-center gap-0.5 min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+      {/* Tool region — flexes to fill remaining width and wraps its own
+          buttons onto additional lines rather than clipping or relying on an
+          invisible horizontal scrollbar (issue #1902). */}
+      <div className="flex flex-wrap items-center gap-0.5 min-w-0 flex-1">
         {/* ── Group 1: Object Operations ── */}
         <ToolbarButton
           icon={<ArrangeIcon />}
