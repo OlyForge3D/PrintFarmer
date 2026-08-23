@@ -1372,6 +1372,35 @@ describe('NewSliceJobPage', () => {
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(toast.success).toHaveBeenCalled();
     });
+
+    it('detects the viewer file type from the stored model metadata for an internal URL with no File Name typed', async () => {
+      // Regression coverage: when the user leaves "File Name" blank,
+      // SearchablePickerModal falls back to the URL's last path segment
+      // (the bare model id, with no extension) as the file name. Detecting
+      // fileType from that extension-less name always defaults to 'stl'
+      // (see getSlicerViewerFileType), which would load a stored 3MF with
+      // the wrong loader. handleUrlModelSubmit must instead resolve the
+      // real file name from the already-fetched model list for id-based
+      // "/3d-models/file/{id}" URLs. model-3d-1 in mockModelList is a
+      // .3mf, so a wrong/default detection would produce 'stl' here.
+      const fetchSpy = vi.fn();
+      vi.stubGlobal('fetch', fetchSpy);
+
+      await renderAndOpenUrlTab();
+
+      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: new ArrayBuffer(0) } as never);
+
+      fireEvent.change(screen.getByLabelText('File URL'), {
+        target: { value: '/api/3d-models/file/model-3d-1' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+      await waitFor(() => {
+        const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
+        expect(models).toHaveLength(1);
+        expect(models[0].fileType).toBe('3mf');
+      });
+    });
   });
 
   describe('Bed Type', () => {

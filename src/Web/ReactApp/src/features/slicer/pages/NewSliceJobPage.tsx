@@ -2066,7 +2066,18 @@ export const NewSliceJobPage: React.FC = () => {
     // model URLs are (see handleWorkspaceModelsReplace); absolute http(s)
     // URLs are used as-is.
     const resolvedUrl = url.startsWith('/') ? `${getApiBaseUrl()}${url.replace(/^\/api/, '')}` : url;
-    const fileType = getSlicerViewerFileType(fileName);
+
+    // When the URL points at a stored model by id (e.g.
+    // "/3d-models/file/{id}") and the user didn't type a File Name,
+    // SearchablePickerModal falls back to the last URL path segment (the
+    // bare id, with no extension) as the file name. Detecting the viewer
+    // file type from that extension-less name always defaults to STL (see
+    // getSlicerViewerFileType), so a stored 3MF/PLY entered this way would
+    // be loaded with the wrong loader. Prefer the already-fetched model
+    // list's real file name for type detection when we can match the id.
+    const modelIdMatch = /\/3d-models\/file\/([^/?#]+)/.exec(resolvedUrl);
+    const matchedModel = modelIdMatch ? models?.find((m) => m.id === modelIdMatch[1]) : undefined;
+    const fileType = getSlicerViewerFileType(matchedModel?.originalFileName || matchedModel?.fileName || fileName);
     const toastId = toast.loading(`Fetching "${fileName}"…`);
 
     void loadModelArrayBuffer(resolvedUrl)
@@ -2093,7 +2104,7 @@ export const NewSliceJobPage: React.FC = () => {
       .catch((err: unknown) => {
         toast.error(`Could not load model from URL: ${getErrorMessage(err, 'the file could not be reached')}`, { id: toastId });
       });
-  }, []);
+  }, [models]);
 
   const handleWorkspaceModelSelect = useCallback((modelId: string | null) => {
     setSelectedBedModelId(modelId);
