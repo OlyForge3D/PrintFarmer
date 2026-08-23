@@ -275,7 +275,7 @@ public class SpoolmanController(
     /// <returns>The created spool.</returns>
     /// <response code="201">Returns the created spool.</response>
     /// <response code="400">If the barcode is empty.</response>
-    /// <response code="404">If no filament has a matching gtin (or legacy articleNumber).</response>
+    /// <response code="404">If no filament has a matching gtin.</response>
     /// <response code="500">If Spoolman import fails unexpectedly.</response>
     [RequirePermission("spoolman", "admin")]
     [HttpPost("spools/by-barcode")]
@@ -694,7 +694,7 @@ public class SpoolmanController(
 
     /// <summary>
     /// Resolves a scanned retail barcode to the filament whose normalized GTIN-14 gtin matches
-    /// it, falling back to an exact articleNumber match for legacy filaments.
+    /// it. articleNumber holds vendor SKUs and is never consulted.
     /// </summary>
     /// <param name="code">Barcode value from the query string.</param>
     /// <param name="ct">Cancellation token.</param>

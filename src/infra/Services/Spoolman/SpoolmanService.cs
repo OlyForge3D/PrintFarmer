@@ -448,39 +448,27 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
         const int pageSize = 500;
         string baseUrl = cfg.BaseUrl.TrimEnd('/');
+
+        // Resolution is by `gtin` only. `article_number` holds vendor SKUs, so matching a
+        // scanned barcode against it would be a category error (and would reintroduce the
+        // raw exact-match semantics that GTIN-14 normalization exists to eliminate).
         string? normalizedGtin = GtinNormalizer.Normalize(trimmedBarcode);
-
-        List<SpoolmanFilamentDto> matches = [];
-
-        if (normalizedGtin is not null)
+        if (normalizedGtin is null)
         {
-            // The server-side `gtin=` filter is an exact string match, so a duplicate whose
-            // `gtin` was populated outside PrintFarmer's own write path (e.g. directly in
-            // Spoolman, or via a future import) in a different -- but equivalent -- format
-            // (UPC-12 vs EAN-13 vs the canonical 14-digit form) would be invisible to a
-            // single filtered query even though it is the same logical product. Query every
-            // valid zero-pad literal encoding of the normalized value and merge the results
-            // by filament ID so all mixed-format duplicates participate in the lowest-ID
-            // tie-break below, not just the ones stored in canonical form.
-            matches = await CollectMatchesForEquivalentGtinLiteralsAsync(baseUrl, pageSize, normalizedGtin, ct);
+            return null;
         }
+
+        // The server-side `gtin=` filter is an exact string match, so a duplicate whose
+        // `gtin` was populated outside PrintFarmer's own write path (e.g. directly in
+        // Spoolman, or via a future import) in a different -- but equivalent -- format
+        // (UPC-12 vs EAN-13 vs the canonical 14-digit form) would be invisible to a
+        // single filtered query even though it is the same logical product. Query every
+        // valid zero-pad literal encoding of the normalized value and merge the results
+        // by filament ID so all mixed-format duplicates participate in the lowest-ID
+        // tie-break below, not just the ones stored in canonical form.
+        List<SpoolmanFilamentDto> matches = await CollectMatchesForEquivalentGtinLiteralsAsync(baseUrl, pageSize, normalizedGtin, ct);
 
         if (matches.Count == 0)
-        {
-            // Legacy fallback: filaments written before `gtin` existed store the scanned
-            // barcode verbatim in article_number. Compare with the raw (unnormalized) value
-            // so records that were never backfilled still resolve.
-            matches = await CollectBarcodeMatchesAsync(
-                baseUrl,
-                pageSize,
-                articleNumberFilter: trimmedBarcode,
-                gtinFilter: null,
-                isMatch: filament => string.Equals(filament.ArticleNumber, trimmedBarcode, StringComparison.Ordinal),
-                debugFilterName: "article_number",
-                ct);
-        }
-
-        if (matches.Count == 0 && normalizedGtin is not null)
         {
             // Belt-and-braces: a stored `gtin` formatted with separators (dashes/spaces) or in
             // some other digit-preserving-but-non-literal form won't match any of the exact
@@ -491,7 +479,6 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             matches = await CollectBarcodeMatchesAsync(
                 baseUrl,
                 pageSize,
-                articleNumberFilter: null,
                 gtinFilter: null,
                 isMatch: filament => string.Equals(GtinNormalizer.Normalize(filament.Gtin), normalizedGtin, StringComparison.Ordinal),
                 debugFilterName: "gtin (full scan)",
@@ -524,21 +511,23 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     private async Task<List<SpoolmanFilamentDto>> CollectBarcodeMatchesAsync(
         string baseUrl,
         int pageSize,
-        string? articleNumberFilter,
         string? gtinFilter,
         Func<SpoolmanFilamentDto, bool> isMatch,
         string debugFilterName,
         CancellationToken ct)
     {
         var matches = new List<SpoolmanFilamentDto>();
-        bool useFilter = true;
+
+        // Only meaningful when a filter is actually applied: the retry below exists to recover
+        // from a server that rejects the filter query param. With no filter there is nothing to
+        // drop, so retrying would reissue an identical request against an already-failing page.
+        bool useFilter = gtinFilter is not null;
         int offset = 0;
 
         while (true)
         {
             SpoolmanPagedResult<SpoolmanFilamentDto>? page = await FetchBarcodeFilamentPageAsync(
                 baseUrl,
-                useFilter ? articleNumberFilter : null,
                 useFilter ? gtinFilter : null,
                 pageSize,
                 offset,
@@ -617,7 +606,6 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return await CollectBarcodeMatchesAsync(
                     baseUrl,
                     pageSize,
-                    articleNumberFilter: null,
                     gtinFilter: null,
                     isMatch: isMatch,
                     debugFilterName: "gtin (full scan, filter unsupported)",
@@ -652,7 +640,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
         while (true)
         {
-            SpoolmanPagedResult<SpoolmanFilamentDto>? page = await FetchBarcodeFilamentPageAsync(baseUrl, null, gtinLiteral, pageSize, offset, ct);
+            SpoolmanPagedResult<SpoolmanFilamentDto>? page = await FetchBarcodeFilamentPageAsync(baseUrl, gtinLiteral, pageSize, offset, ct);
             if (page is null)
             {
                 return null;
@@ -761,7 +749,6 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
     private async Task<SpoolmanPagedResult<SpoolmanFilamentDto>?> FetchBarcodeFilamentPageAsync(
         string baseUrl,
-        string? articleNumber,
         string? gtin,
         int limit,
         int offset,
@@ -772,11 +759,6 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             $"limit={limit}",
             $"offset={offset}",
         ];
-
-        if (!string.IsNullOrWhiteSpace(articleNumber))
-        {
-            parts.Add($"article_number={Uri.EscapeDataString(articleNumber)}");
-        }
 
         if (!string.IsNullOrWhiteSpace(gtin))
         {

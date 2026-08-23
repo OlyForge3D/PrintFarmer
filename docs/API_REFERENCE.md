@@ -43,6 +43,48 @@ Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields
 
 (Extend with additional DTO details as needed.)
 
+## Spoolman Barcode Resolution
+
+- `GET /api/spoolman/filaments/by-barcode?code=` resolves a scanned retail barcode
+  to a filament. The scanned value is normalized to a canonical 14-digit GTIN
+  (GTIN-8/12/13/14 are zero-pad equivalent) and matched against the filament
+  `gtin` field only. A value that fails length or GS1 mod-10 check-digit
+  validation is rejected without querying Spoolman.
+- `articleNumber` is a vendor article number / SKU and is **never** consulted for
+  barcode resolution. Matching scanned barcodes against a SKU field risks
+  collisions with numeric SKUs, and its exact-string semantics would break
+  UPC-12 ↔ EAN-13 equivalence.
+- `gtin` is intentionally non-unique — multipacks and vendor parent listings
+  legitimately share one. Resolution queries every valid zero-pad literal
+  encoding of the scanned barcode (GTIN-8/12/13/14) via the server-side `gtin=`
+  filter and merges the results by filament ID, so mixed-format duplicates of
+  the same logical GTIN (e.g. one filament stored as UPC-12, another as
+  EAN-13) all participate in the lowest-ID tie-break, not just whichever
+  format happens to match a single exact-string query. An unfiltered full
+  scan is used only as a fallback: either when no literal query matched
+  anything (to catch a stored value formatted with separators or otherwise
+  not a plain zero-pad literal), or immediately if Spoolman rejects/errors on
+  the `gtin=` filter itself.
+
+> **Operator note.** Barcode resolution requires a Spoolman instance exposing the
+> `gtin` field, which the bundled PrintFarmer Spoolman image provides. If you
+> point PrintFarmer at an upstream Spoolman without `gtin`, barcode scans will
+> not resolve. PrintFarmer versions **before** the GTIN migration wrote scanned
+> barcodes into `article_number`; those legacy mappings — along with any barcode
+> typed into `article_number` by hand — must be backfilled into `gtin` to remain
+> scannable, as `article_number` is no longer consulted. Current PrintFarmer
+> writes target `gtin` only.
+>
+> Run `scripts/backfill-spoolman-gtin.py` to migrate legacy mappings. It is
+> dry-run by default, only ever *adds* a `gtin`, never modifies or clears
+> `article_number`, and skips values that are genuine vendor SKUs rather than
+> barcodes:
+>
+> ```bash
+> python3 scripts/backfill-spoolman-gtin.py --spoolman-url http://localhost:7912
+> python3 scripts/backfill-spoolman-gtin.py --spoolman-url http://localhost:7912 --apply
+> ```
+
 ## Spoolman Barcode Diagnostics
 
 - `GET /api/spoolman/barcodes/scan-logs?limit=` returns recent barcode scan

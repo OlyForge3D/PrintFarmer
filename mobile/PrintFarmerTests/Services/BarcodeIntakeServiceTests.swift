@@ -236,20 +236,20 @@ final class BarcodeIntakeServiceTests: XCTestCase {
         XCTAssertNil(filament?.gtin)
     }
 
-    func testResolveFilamentDecodesLegacyArticleNumberWithoutGtin() async throws {
+    func testResolveFilamentDecodesArticleNumberWithoutGtin() async throws {
         mockAPIClient.stubResponse(
             json: """
             {
               "id": 703,
-              "name": "Legacy PLA",
-              "articleNumber": "012345678905"
+              "name": "SKU-only PLA",
+              "articleNumber": "PLA-GB-1000"
             }
             """
         )
 
         let filament = try await service.resolveFilament(barcode: "012345678905")
 
-        XCTAssertEqual(filament?.articleNumber, "012345678905")
+        XCTAssertEqual(filament?.articleNumber, "PLA-GB-1000")
         XCTAssertNil(filament?.gtin)
     }
 

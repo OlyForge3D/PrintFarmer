@@ -165,3 +165,7 @@ layout_diff.txt
 /decisions/
 /memory/
 /.impeccable/
+
+# Python
+__pycache__/
+*.py[cod]

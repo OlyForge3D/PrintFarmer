@@ -59,8 +59,8 @@ public interface ISpoolmanService
 
     /// <summary>
     /// Gets the filament whose normalized GTIN-14 <c>gtin</c> matches the scanned barcode
-    /// (after normalizing both sides), falling back to an exact <c>articleNumber</c> match for
-    /// legacy filaments that have not yet been assigned a <c>gtin</c>.
+    /// (after normalizing both sides). <c>articleNumber</c> holds vendor SKUs and is never
+    /// consulted. Returns <c>null</c> if the barcode fails GTIN normalization.
     /// Returns the lowest-ID filament if duplicate matches exist.
     /// </summary>
     /// <remarks>
@@ -68,9 +68,12 @@ public interface ISpoolmanService
     /// listings legitimately share one), and duplicates may be stored in different -- but
     /// equivalent -- GTIN formats (UPC-12, EAN-13, GTIN-14) when written outside PrintFarmer's
     /// own write path. Resolution normalizes and queries every valid zero-pad literal encoding
-    /// of the scanned barcode so mixed-format duplicates are recognized as the same product and
-    /// participate in the lowest-ID tie-break, falling back to an unfiltered full scan only for
-    /// stored values that aren't a plain zero-pad literal (e.g. formatted with separators).
+    /// of the scanned barcode, merging results by filament ID so mixed-format duplicates are
+    /// recognized as the same product and participate in the lowest-ID tie-break. An unfiltered
+    /// full scan is used instead in two cases: (1) as a belt-and-braces pass when no literal
+    /// query matched anything, to catch a stored value that isn't a plain zero-pad literal (e.g.
+    /// formatted with separators); or (2) immediately, if the server rejects/errors on the
+    /// <c>gtin=</c> filter itself, rather than retrying that failure once per literal candidate.
     /// </remarks>
     Task<SpoolmanFilamentDto?> GetFilamentByBarcodeAsync(string barcode, CancellationToken ct);
 
