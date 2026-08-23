@@ -83,18 +83,21 @@ export function canDisableMotors(args: { isOnline: boolean; isEnabled?: boolean;
   return isEnabled && args.isOnline && args.support.supportsControlOperations && !args.isPrinting;
 }
 
-export function canMove(args: { isOnline: boolean; isEnabled?: boolean; isPrinting: boolean; support: PrinterSupport }): boolean {
+export function canMove(args: { isOnline: boolean; isEnabled?: boolean; isPrinting: boolean; isShutdown?: boolean; support: PrinterSupport }): boolean {
   const isEnabled = args.isEnabled ?? true;
-  return isEnabled && args.isOnline && args.support.supportsMovement && !args.isPrinting;
+  const isShutdown = args.isShutdown ?? false;
+  return isEnabled && args.isOnline && args.support.supportsMovement && !args.isPrinting && !isShutdown;
 }
 
-export function canSetStep(args: { isOnline: boolean; support: PrinterSupport }): boolean {
-  return args.isOnline && args.support.supportsMovement;
+export function canSetStep(args: { isOnline: boolean; isShutdown?: boolean; support: PrinterSupport }): boolean {
+  const isShutdown = args.isShutdown ?? false;
+  return args.isOnline && args.support.supportsMovement && !isShutdown;
 }
 
-export function canUseManualMove(args: { isOnline: boolean; isEnabled?: boolean; isPrinting: boolean; support: PrinterSupport }): boolean {
+export function canUseManualMove(args: { isOnline: boolean; isEnabled?: boolean; isPrinting: boolean; isShutdown?: boolean; support: PrinterSupport }): boolean {
   const isEnabled = args.isEnabled ?? true;
-  return isEnabled && args.isOnline && args.support.supportsMovement && !args.isPrinting;
+  const isShutdown = args.isShutdown ?? false;
+  return isEnabled && args.isOnline && args.support.supportsMovement && !args.isPrinting && !isShutdown;
 }
 
 export function canSetTemperatures(args: { isOnline: boolean; isEnabled?: boolean; support: PrinterSupport }): boolean {

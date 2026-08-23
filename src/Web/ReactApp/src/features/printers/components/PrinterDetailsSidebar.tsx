@@ -44,7 +44,7 @@ import {
   DEFAULT_EXTRUDE_SPEED_MMS,
 } from '@/features/printers/constants/temperaturePresets';
 import { getHomeButtonStyle } from '@/features/printers/utils/homeButtonStyle';
-import { getStatusHeaderClassName, getStatusIndicatorColor } from '@/features/printers/utils/statusColors';
+import { getStatusHeaderClassName, getStatusIndicatorColor, isPrinterStateShutdown } from '@/features/printers/utils/statusColors';
 // This component's scrollable content follows PRINTER_DETAIL_SECTION_ORDER
 // (see printerDetailSectionOrder.ts): Statistics, Version, Control, Objects,
 // Move, Temperature, Materials/MMU, Spool. DetailedPrinterCard mirrors this
@@ -435,7 +435,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   });
   const isPrinting = rawState.toLowerCase().includes('printing');
   const isPaused = rawState.toLowerCase().includes('paused');
-  const isShutdown = rawState.toLowerCase().includes('shutdown') || rawState.toLowerCase().includes('error');
+  const isShutdown = isPrinterStateShutdown(rawState);
   const headerClassName = getStatusHeaderClassName({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
   const statusIndicatorClassName = getStatusIndicatorColor({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
 
@@ -443,9 +443,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
   const canDisableMotorsNow = canDisableMotors({ isOnline, isEnabled, isPrinting, support });
-  const canMoveNow = canMove({ isOnline, isEnabled, isPrinting, support });
-  const canSetStepNow = canSetStep({ isOnline, support });
-  const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, support });
+  const canMoveNow = canMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
+  const canSetStepNow = canSetStep({ isOnline, isShutdown, support });
+  const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
   const canSetTemperaturesNow = canSetTemperatures({ isOnline, isEnabled, support });
   const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support });
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
@@ -525,9 +525,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           : apiClient.homePrinter(printer.id));
       if (!result.success) {
         console.error('Failed to home:', result.error);
+        toast.error(result.error || 'Failed to home printer');
       }
     } catch (error) {
       console.error('Error homing:', error);
+      toast.error(mutationErrorMessage(error, 'Failed to home printer'));
     } finally {
       setMovementActionPending(false);
     }
@@ -545,9 +547,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       const result = await apiClient.movePrinter(printer.id, move);
       if (!result.success) {
         console.error(`Failed to move ${axis}:`, result.error);
+        toast.error(result.error || `Failed to move ${axis}`);
       }
     } catch (error) {
       console.error(`Error moving ${axis}:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to move ${axis}`));
     } finally {
       setMovementActionPending(false);
     }
@@ -628,9 +632,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       );
       if (!result.success) {
         console.error(`Failed to ${direction}:`, result.error);
+        toast.error(result.error || `Failed to ${direction}`);
       }
     } catch (error) {
       console.error(`Error ${direction}ing:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to ${direction}`));
     } finally {
       setMovementActionPending(false);
     }

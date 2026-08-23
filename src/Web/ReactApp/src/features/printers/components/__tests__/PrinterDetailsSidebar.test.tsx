@@ -10,10 +10,22 @@ const mockSetQueryData = vi.fn();
 const mockRefetch = vi.fn();
 const mockPrintJobObjectsRefetch = vi.fn();
 const mockExcludePrintJobObject = vi.fn();
+const mockHomePrinter = vi.fn();
+const mockHomeXY = vi.fn();
+const mockHomeZ = vi.fn();
+const mockMovePrinter = vi.fn();
+const mockToastError = vi.fn();
 let capturedStatisticsQueryOptions: UseQueryOptions<PrinterStatistics> | undefined;
 let mockStatisticsData: PrinterStatistics | undefined;
 let mockPrintJobObjectsData: PrintJobObjectListDto | undefined;
 let mockVersionData: Record<string, unknown> | undefined;
+
+vi.mock('sonner', () => ({
+  toast: {
+    error: (...args: unknown[]) => mockToastError(...args),
+    success: vi.fn(),
+  },
+}));
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (options: UseQueryOptions<PrinterStatistics>) => {
@@ -79,6 +91,10 @@ vi.mock('@/common/hooks/useApi', () => ({
 vi.mock('@/services/api', () => ({
   apiClient: {
     excludePrintJobObject: (printerId: string, name: string) => mockExcludePrintJobObject(printerId, name),
+    homePrinter: (printerId: string) => mockHomePrinter(printerId),
+    homeXY: (printerId: string) => mockHomeXY(printerId),
+    homeZ: (printerId: string) => mockHomeZ(printerId),
+    movePrinter: (printerId: string, move: unknown) => mockMovePrinter(printerId, move),
   },
 }));
 
@@ -158,6 +174,11 @@ describe('PrinterDetailsSidebar', () => {
     mockSetQueryData.mockClear();
     mockExcludePrintJobObject.mockReset();
     mockExcludePrintJobObject.mockResolvedValue({ success: true, message: 'Object skipped' });
+    mockHomePrinter.mockReset();
+    mockHomeXY.mockReset();
+    mockHomeZ.mockReset();
+    mockMovePrinter.mockReset();
+    mockToastError.mockReset();
   });
 
   it('bounds content layout on desktop and lets the inner region scroll', () => {
@@ -442,6 +463,64 @@ describe('PrinterDetailsSidebar', () => {
 
     await waitFor(() => {
       expect(mockExcludePrintJobObject).toHaveBeenCalledWith(printer.id, 'cube');
+    });
+  });
+
+  describe('Move controls while Klippy is shutdown (#1909)', () => {
+    it('disables Home and jog controls when the printer reports a shutdown state', () => {
+      render(
+        <PrinterDetailsSidebar
+          printerId={printer.id}
+          printer={{ ...printer, backend: PrinterBackend.Moonraker, state: 'Shutdown' }}
+          backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker })}
+          onClose={vi.fn()}
+          layout="panel"
+        />
+      );
+
+      expect(screen.getByTitle('Home all axes')).toBeDisabled();
+      expect(screen.getByTitle('Home X/Y')).toBeDisabled();
+      expect(screen.getByTitle('Home Z')).toBeDisabled();
+      expect(screen.getByTitle('Move to entered coordinates')).toBeDisabled();
+    });
+
+    it('keeps Home and jog controls enabled when the printer is idle and online', () => {
+      render(
+        <PrinterDetailsSidebar
+          printerId={printer.id}
+          printer={{ ...printer, backend: PrinterBackend.Moonraker, state: 'Idle' }}
+          backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker })}
+          onClose={vi.fn()}
+          layout="panel"
+        />
+      );
+
+      expect(screen.getByTitle('Home all axes')).toBeEnabled();
+      expect(screen.getByTitle('Home X/Y')).toBeEnabled();
+      expect(screen.getByTitle('Home Z')).toBeEnabled();
+    });
+
+    it('shows a visible error toast when Home fails (e.g. HTTP 503 while Klippy is reconciling)', async () => {
+      mockHomePrinter.mockRejectedValue(new Error('reconciliation is required'));
+
+      render(
+        <PrinterDetailsSidebar
+          printerId={printer.id}
+          printer={{ ...printer, backend: PrinterBackend.Moonraker, state: 'Idle' }}
+          backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker })}
+          onClose={vi.fn()}
+          layout="panel"
+        />
+      );
+
+      fireEvent.click(screen.getByTitle('Home all axes'));
+
+      await waitFor(() => {
+        expect(mockHomePrinter).toHaveBeenCalledWith(printer.id);
+      });
+      await waitFor(() => {
+        expect(mockToastError).toHaveBeenCalled();
+      });
     });
   });
 });
