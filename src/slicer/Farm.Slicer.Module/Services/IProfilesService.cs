@@ -191,7 +191,17 @@ public interface IProfilesService
     /// <summary>Lists all custom profiles owned by a specific user.</summary>
     /// <param name="userId">ID of the user.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<CustomProfilesListResponseDto> ListCustomProfilesAsync(Guid userId, CancellationToken ct);
+    /// <param name="machineNames">
+    /// Optional list of machine profile names to filter applicability by. When supplied,
+    /// custom process and filament profiles are included only when their stored
+    /// <c>CompatiblePrinters</c> list contains one of the given machine names (case-insensitive);
+    /// process/filament profiles with no <c>CompatiblePrinters</c> recorded are excluded, matching
+    /// the applicability rule already used when browsing built-in profiles for a selected machine.
+    /// Custom machine profiles are never filtered by this parameter — they represent the machine
+    /// itself rather than something that can be compatible with one. When null or empty, no
+    /// filtering is applied and all of the user's custom profiles are returned (existing behavior).
+    /// </param>
+    Task<CustomProfilesListResponseDto> ListCustomProfilesAsync(Guid userId, CancellationToken ct, IReadOnlyList<string>? machineNames = null);
 
     /// <summary>Updates a custom profile's properties.</summary>
     /// <param name="profileId">ID of the profile to update.</param>
