@@ -293,6 +293,19 @@ public class CalibrationCandidateDto
     public IReadOnlyList<string> MissingInputs { get; init; } = [];
 
     public IReadOnlyList<CalibrationRejectionReasonDto> RejectionReasons { get; init; } = [];
+
+    /// <summary>
+    /// Residual manual-setup fields (issue #1616) that are never sourced from a slicer
+    /// profile. Exposed on the base candidate DTO — not just <see cref="CalibrationContextDto"/>
+    /// — so fleet-wide callers (e.g. the printers list's calibration-setup onboarding
+    /// prompt, issue #1923) can distinguish "never started" from "partially set up"
+    /// without a per-printer round trip to the full calibration-context endpoint.
+    /// </summary>
+    public bool? SupportsPressureAdvance { get; init; }
+
+    public bool? SupportsFirmwareRetraction { get; init; }
+
+    public DateTime? CalibrationHardwareVerifiedAtUtc { get; init; }
 }
 
 public sealed class CalibrationContextDto : CalibrationCandidateDto
@@ -343,6 +356,9 @@ public sealed class CalibrationContextDto : CalibrationCandidateDto
         Eligible = candidate.Eligible;
         MissingInputs = candidate.MissingInputs;
         RejectionReasons = candidate.RejectionReasons;
+        SupportsPressureAdvance = candidate.SupportsPressureAdvance;
+        SupportsFirmwareRetraction = candidate.SupportsFirmwareRetraction;
+        CalibrationHardwareVerifiedAtUtc = candidate.CalibrationHardwareVerifiedAtUtc;
     }
 
     public string SchemaVersion { get; init; } = CalibrationContractConstants.SchemaVersion;
@@ -352,18 +368,6 @@ public sealed class CalibrationContextDto : CalibrationCandidateDto
     public DateTime CapturedAtUtc { get; init; }
 
     public string CapturedBySubject { get; init; } = string.Empty;
-
-    public bool? SupportsPressureAdvance { get; init; }
-
-    public bool? SupportsFirmwareRetraction { get; init; }
-
-    /// <summary>
-    /// UTC timestamp of the last operator-confirmed hardware/safety sign-off
-    /// (issue #1616). Echoed here so callers reading the eligibility context
-    /// can display the current sign-off state without a second round trip to
-    /// the calibration-setup write endpoint's own response.
-    /// </summary>
-    public DateTime? CalibrationHardwareVerifiedAtUtc { get; init; }
 
     public PrinterConfigurationSnapshotDto Snapshot { get; init; } = new();
 }

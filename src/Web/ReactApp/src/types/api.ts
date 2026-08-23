@@ -1600,10 +1600,11 @@ export interface FirmwareDetectionResultDto {
 /**
  * Fleet-wide calibration eligibility snapshot for one printer, as returned by
  * `GET /api/printers/calibration-candidates` (issue #1923). A leaner sibling
- * of `CalibrationContextDto` — it omits the per-printer-only audit/snapshot
- * fields (e.g. `calibrationHardwareVerifiedAtUtc`) that require a single
- * printer id + slicer type round trip, but carries enough of the same
- * eligibility signal to drive list-level UI without an N+1 fetch.
+ * of `CalibrationContextDto` — it omits per-printer-only audit/snapshot
+ * fields, but carries the manual-setup fields
+ * (`supportsPressureAdvance`, `supportsFirmwareRetraction`,
+ * `calibrationHardwareVerifiedAtUtc`) needed to distinguish "never set up"
+ * from "partially set up" without an N+1 fetch.
  */
 export interface CalibrationCandidateDto {
   id: string;
@@ -1616,6 +1617,9 @@ export interface CalibrationCandidateDto {
   firmware: CalibrationFirmwareIdentityDto;
   slicer?: CalibrationSlicerIdentityDto | null;
   toolheads: CalibrationToolheadDto[];
+  supportsPressureAdvance?: boolean | null;
+  supportsFirmwareRetraction?: boolean | null;
+  calibrationHardwareVerifiedAtUtc?: string | null;
 }
 
 /**

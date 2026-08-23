@@ -105,4 +105,27 @@ describe('getCalibrationSetupStage (#1923)', () => {
     });
     expect(getCalibrationSetupStage(candidate)).toBe('partial');
   });
+
+  // Regression coverage for a review finding on #1923: the fleet/list endpoint
+  // previously omitted these 3 fields from its base DTO, so a printer whose
+  // only progress was recorded here was misclassified as "not-started" even
+  // though it had been touched. See CalibrationCandidateDto in
+  // src/infra/Calibration/CalibrationContracts.cs.
+  it('returns "partial" when pressure advance support has been recorded', () => {
+    const candidate = makeCandidate({ eligible: false, supportsPressureAdvance: true });
+    expect(getCalibrationSetupStage(candidate)).toBe('partial');
+  });
+
+  it('returns "partial" when firmware retraction support has been recorded', () => {
+    const candidate = makeCandidate({ eligible: false, supportsFirmwareRetraction: false });
+    expect(getCalibrationSetupStage(candidate)).toBe('partial');
+  });
+
+  it('returns "partial" when calibration hardware has been verified', () => {
+    const candidate = makeCandidate({
+      eligible: false,
+      calibrationHardwareVerifiedAtUtc: '2024-01-01T00:00:00Z',
+    });
+    expect(getCalibrationSetupStage(candidate)).toBe('partial');
+  });
 });

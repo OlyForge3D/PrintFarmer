@@ -26,6 +26,9 @@ export function getCalibrationSetupStage(
     candidate.activeToolheadIndex != null ||
     (candidate.excludedRegions?.length ?? 0) > 0 ||
     candidate.firmware?.verified === true ||
+    candidate.supportsPressureAdvance != null ||
+    candidate.supportsFirmwareRetraction != null ||
+    candidate.calibrationHardwareVerifiedAtUtc != null ||
     !!candidate.slicer?.machineProfileId ||
     !!candidate.slicer?.processProfileId ||
     !!candidate.slicer?.filamentProfileId ||

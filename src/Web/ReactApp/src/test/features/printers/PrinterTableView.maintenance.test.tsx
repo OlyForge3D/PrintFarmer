@@ -7,6 +7,7 @@ import { PrinterBackend, type AutoDispatchStatus, type Printer } from '@/types/a
 const { useAllAutoDispatchStatusesMock } = vi.hoisted(() => ({
   useAllAutoDispatchStatusesMock: vi.fn(),
 }));
+const calibrationSetupPromptRenderMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({ hasPermission: () => true }),
@@ -21,7 +22,10 @@ vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
 }));
 
 vi.mock('@/features/printers/components/CalibrationSetupPrompt', () => ({
-  CalibrationSetupPrompt: () => null,
+  CalibrationSetupPrompt: (props: Record<string, unknown>) => {
+    calibrationSetupPromptRenderMock(props);
+    return null;
+  },
 }));
 
 describe('PrinterTableView - maintenance button', () => {
@@ -104,5 +108,25 @@ describe('PrinterTableView - maintenance button', () => {
 
     expect(screen.getByText('Unknown model')).toBeInTheDocument();
     expect(screen.queryByText(/unknown.*unknown/i)).not.toBeInTheDocument();
+  });
+
+  it('wires CalibrationSetupPrompt with each row\'s printer id, name, and rowVersion (#1923) so the onboarding affordance opens setup for the correct printer', () => {
+    render(
+      <PrinterTableView
+        printers={[{ ...basePrinter, id: 'printer-77', name: 'Printer Seventy-Seven', rowVersion: 'rv-9' }]}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onBulkSetMaintenance={vi.fn()}
+        onOpenMaintenance={vi.fn()}
+      />
+    );
+
+    expect(calibrationSetupPromptRenderMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        printerId: 'printer-77',
+        printerName: 'Printer Seventy-Seven',
+        rowVersion: 'rv-9',
+      }),
+    );
   });
 });

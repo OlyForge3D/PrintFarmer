@@ -234,9 +234,6 @@ public sealed class PrinterCalibrationContextService(
             SnapshotSha256 = snapshotSha256,
             CapturedAtUtc = capturedAtUtc,
             CapturedBySubject = capturedBySubject,
-            SupportsPressureAdvance = printer.SupportsPressureAdvance,
-            SupportsFirmwareRetraction = printer.SupportsFirmwareRetraction,
-            CalibrationHardwareVerifiedAtUtc = printer.CalibrationHardwareVerifiedAtUtc,
             Snapshot = snapshot,
         };
         return new(context);
@@ -501,6 +498,9 @@ public sealed class PrinterCalibrationContextService(
                 .OrderBy(reason => reason.Code, StringComparer.Ordinal)
                 .ThenBy(reason => reason.Field, StringComparer.Ordinal)
                 .ToArray(),
+            SupportsPressureAdvance = printer.SupportsPressureAdvance,
+            SupportsFirmwareRetraction = printer.SupportsFirmwareRetraction,
+            CalibrationHardwareVerifiedAtUtc = printer.CalibrationHardwareVerifiedAtUtc,
         };
 
         return new(
