@@ -136,6 +136,46 @@ describe('ModelUploadModal', () => {
       }, { timeout: 2000 });
     });
 
+    it('should invalidate file-browser queries and call onUploadSuccess as soon as the upload completes, without closing the modal', async () => {
+      const mockFile = new File(['test content'], 'test.stl', { type: 'model/stl' });
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+      vi.mocked(slicerService.uploadModel).mockResolvedValue({
+        id: 'test-id',
+        url: 'test-url'
+      });
+
+      renderModal();
+
+      const fileInput = document.querySelector('#model-file-upload') as HTMLInputElement;
+      Object.defineProperty(fileInput, 'files', {
+        value: [mockFile],
+        writable: false
+      });
+      fireEvent.change(fileInput);
+
+      await waitFor(() => {
+        expect(screen.getByText('test.stl')).toBeInTheDocument();
+      });
+
+      const uploadButton = screen.getByRole('button', { name: /upload 1 file/i });
+      await act(async () => {
+        fireEvent.click(uploadButton);
+      });
+
+      // The Files list must refresh immediately once the upload succeeds — the
+      // modal is still open and the user has not clicked Close.
+      await waitFor(() => {
+        expect(screen.getByText('✓ Done')).toBeInTheDocument();
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['file-browser'] });
+        expect(mockOnUploadSuccess).toHaveBeenCalled();
+      }, { timeout: 2000 });
+
+      expect(mockOnClose).not.toHaveBeenCalled();
+
+      invalidateSpy.mockRestore();
+    });
+
     it('should wait for query invalidation and callback before closing modal', async () => {
       const mockFile = new File(['test content'], 'test.stl', { type: 'model/stl' });
       
