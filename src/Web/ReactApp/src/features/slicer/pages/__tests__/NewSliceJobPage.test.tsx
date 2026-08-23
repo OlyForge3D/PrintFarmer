@@ -13,6 +13,7 @@ import { slicerProfilesService } from '../../../../services/slicerProfilesServic
 import { slicerRegistry } from '../../../../services/slicerRegistry';
 import { slicerService } from '@/services/slicerService';
 import { sliceJobService } from '@/services/sliceJobService';
+import { toast } from 'sonner';
 
 // Mutable slicer-mode ref so individual describes can opt into Advanced mode.
 // Hoisted because vi.mock factories run before module-body initialization.
@@ -222,6 +223,15 @@ vi.mock('@/features/slicer/hooks/useSlicerMode', () => ({
     setMode: vi.fn(),
   }),
   SLICER_MODE_STORAGE_KEY: 'pf.slicerMode',
+}));
+
+// Mock sonner toast (used by the "Use URL" reachability check, issue #1910)
+vi.mock('sonner', () => ({
+  toast: {
+    loading: vi.fn(() => 'toast-id'),
+    success: vi.fn(),
+    error: vi.fn(),
+  },
 }));
 
 // Mock asset service
@@ -1237,6 +1247,204 @@ describe('NewSliceJobPage', () => {
         expect(new Set(ids).size).toBe(2);
         expect(ids).toContain(firstInstanceId);
       });
+    });
+  });
+
+  describe('Enter URL (issue #1910)', () => {
+    // Regression tests: the "Use URL" action used to close the dialog
+    // without validating input, sending a request, or adding anything to the
+    // plate — a silent no-op. See NewSliceJobPage's handleUrlModelSubmit and
+    // SearchablePickerModal's isValidModelSourceUrl/handleUrlConfirm.
+    async function renderAndOpenUrlTab() {
+      renderWithProviders(<NewSliceJobPage />);
+      await waitFor(() => {
+        expect(screen.getByTestId('printer-select')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+      await waitFor(() => {
+        expect(screen.getByTestId('slicer-workspace')).toBeInTheDocument();
+      });
+      act(() => {
+        fireEvent.click(screen.getByRole('button', { name: /add model/i }));
+      });
+      const urlTabButton = await screen.findByRole('button', { name: 'Enter URL' });
+      act(() => {
+        fireEvent.click(urlTabButton);
+      });
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('rejects malformed input with an inline error and neither sends a request nor adds a model', async () => {
+      const fetchSpy = vi.fn();
+      vi.stubGlobal('fetch', fetchSpy);
+
+      await renderAndOpenUrlTab();
+
+      fireEvent.change(screen.getByLabelText('File URL'), { target: { value: 'not a url' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toHaveTextContent(/enter a valid/i);
+      });
+      // Dialog stays open — the URL input is still present, unlike the
+      // pre-fix behaviour where the dialog closed regardless of input.
+      expect(screen.getByLabelText('File URL')).toBeInTheDocument();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? []).toHaveLength(0);
+    });
+
+    it('adds the model to the plate and shows a success toast for a reachable URL', async () => {
+      const fetchSpy = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+      });
+      vi.stubGlobal('fetch', fetchSpy);
+
+      await renderAndOpenUrlTab();
+
+      fireEvent.change(screen.getByLabelText('File URL'), {
+        target: { value: 'https://example.com/model.stl' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalledWith('https://example.com/model.stl', expect.anything());
+      });
+      await waitFor(() => {
+        const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
+        expect(models).toHaveLength(1);
+        expect(models[0].url).toBe('https://example.com/model.stl');
+      });
+      expect(toast.success).toHaveBeenCalled();
+    });
+
+    it('shows an error toast and adds nothing to the plate for an unreachable URL', async () => {
+      const fetchSpy = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+      vi.stubGlobal('fetch', fetchSpy);
+
+      await renderAndOpenUrlTab();
+
+      fireEvent.change(screen.getByLabelText('File URL'), {
+        target: { value: 'https://example.com/missing.stl' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalled();
+      });
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalled();
+      });
+      expect(slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? []).toHaveLength(0);
+    });
+
+    it('uses the authenticated apiClient (not a bare fetch) for an internal /api/3d-models/file/ URL, so it succeeds instead of 401ing', async () => {
+      // Regression coverage: /api/3d-models/file/{id} is one of the API's
+      // authenticated file endpoints (see AuthenticatedModelSource / #1711).
+      // A bare, unauthenticated fetch to it always 401s even though the
+      // viewer can load it fine via the bearer-token-attached apiClient.
+      const fetchSpy = vi.fn();
+      vi.stubGlobal('fetch', fetchSpy);
+
+      await renderAndOpenUrlTab();
+
+      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: new ArrayBuffer(0) } as never);
+
+      fireEvent.change(screen.getByLabelText('File URL'), {
+        target: { value: '/api/3d-models/file/model-3d-1' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+      await waitFor(() => {
+        expect(apiClient.get).toHaveBeenCalledWith(
+          '/api/3d-models/file/model-3d-1',
+          expect.objectContaining({ responseType: 'arraybuffer' }),
+        );
+      });
+      await waitFor(() => {
+        const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
+        expect(models).toHaveLength(1);
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(toast.success).toHaveBeenCalled();
+    });
+
+    it('detects the viewer file type from the stored model metadata for an internal URL with no File Name typed', async () => {
+      // Regression coverage: when the user leaves "File Name" blank,
+      // SearchablePickerModal falls back to the URL's last path segment
+      // (the bare model id, with no extension) as the file name. Detecting
+      // fileType from that extension-less name always defaults to 'stl'
+      // (see getSlicerViewerFileType), which would load a stored 3MF with
+      // the wrong loader. handleUrlModelSubmit must instead resolve the
+      // real file name from the already-fetched model list for id-based
+      // "/3d-models/file/{id}" URLs. model-3d-1 in mockModelList is a
+      // .3mf, so a wrong/default detection would produce 'stl' here.
+      const fetchSpy = vi.fn();
+      vi.stubGlobal('fetch', fetchSpy);
+
+      await renderAndOpenUrlTab();
+
+      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: new ArrayBuffer(0) } as never);
+
+      fireEvent.change(screen.getByLabelText('File URL'), {
+        target: { value: '/api/3d-models/file/model-3d-1' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+      await waitFor(() => {
+        const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
+        expect(models).toHaveLength(1);
+        expect(models[0].fileType).toBe('3mf');
+      });
+    });
+
+    it('still resolves the correct file type when the model list query has not settled yet at submit time (race window)', async () => {
+      // Regression coverage for Bishop's second-round finding: fileType
+      // detection used to read the `models` query result captured at
+      // submit/render time, so submitting an id-based URL before that
+      // query resolved would fall back to the extension-less id and
+      // misdetect as 'stl'. handleUrlModelSubmit now resolves the match via
+      // `queryClient.ensureQueryData`, which awaits (and dedupes with) the
+      // in-flight query rather than reading a stale snapshot.
+      let resolveModelsList: (value: { data: unknown[] }) => void = () => {
+        throw new Error('resolveModelsList called before it was assigned');
+      };
+      const modelsListPromise = new Promise<{ data: unknown[] }>((resolve) => {
+        resolveModelsList = resolve;
+      });
+      vi.mocked(apiClient.get).mockImplementation(((url: string) => {
+        if (url === '/3d-models') {
+          return modelsListPromise;
+        }
+        return Promise.resolve({ data: new ArrayBuffer(0) });
+      }) as never);
+
+      const fetchSpy = vi.fn();
+      vi.stubGlobal('fetch', fetchSpy);
+
+      await renderAndOpenUrlTab();
+
+      fireEvent.change(screen.getByLabelText('File URL'), {
+        target: { value: '/api/3d-models/file/model-3d-1' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+      // The models list query is still pending here — resolve it only now,
+      // simulating it completing shortly after the URL was submitted.
+      act(() => {
+        resolveModelsList({ data: mockModelList });
+      });
+
+      await waitFor(() => {
+        const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
+        expect(models).toHaveLength(1);
+        expect(models[0].fileType).toBe('3mf');
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
   });
 

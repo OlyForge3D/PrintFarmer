@@ -26,6 +26,29 @@ interface SearchablePickerModalProps<T> {
 const DEBOUNCE_MS = 300;
 
 /**
+ * Validates a user-entered model source URL before it is handed off for
+ * import. Accepts absolute `http(s)://` URLs (external files) and
+ * server-relative paths starting with `/` (e.g. `/api/3d-models/file/...`).
+ * Anything else — empty input, missing scheme, unsupported protocols
+ * (`ftp:`, `file:`, ...), or input containing whitespace — is rejected so
+ * the dialog can surface a validation error instead of silently accepting
+ * garbage input. See issue #1910.
+ */
+function isValidModelSourceUrl(input: string): boolean {
+  const trimmed = input.trim();
+  if (!trimmed || /\s/.test(trimmed)) return false;
+
+  if (trimmed.startsWith('/')) return true;
+
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Generic, reusable modal picker with search, grid layout, keyboard navigation,
  * and optional thumbnails. Designed to scale to hundreds or thousands of items.
  */
@@ -112,6 +135,7 @@ function SearchablePickerContent<T>({
   const [activeTab, setActiveTab] = useState<'library' | 'url'>('library');
   const [urlInput, setUrlInput] = useState('');
   const [fileNameInput, setFileNameInput] = useState('');
+  const [urlError, setUrlError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedTerm, setDebouncedTerm] = useState('');
   const [focusedId, setFocusedId] = useState<string | undefined>(selectedId);
@@ -205,9 +229,17 @@ function SearchablePickerContent<T>({
   );
 
   const handleUrlConfirm = useCallback(() => {
-    if (!urlInput.trim() || !onUrlSubmit) return;
-    const name = fileNameInput.trim() || urlInput.split('/').pop() || 'model.stl';
-    onUrlSubmit(urlInput.trim(), name);
+    const trimmedUrl = urlInput.trim();
+    if (!trimmedUrl || !onUrlSubmit) return;
+
+    if (!isValidModelSourceUrl(trimmedUrl)) {
+      setUrlError('Enter a valid http(s):// URL, or a server path starting with "/".');
+      return;
+    }
+
+    setUrlError(null);
+    const name = fileNameInput.trim() || trimmedUrl.split('/').pop() || 'model.stl';
+    onUrlSubmit(trimmedUrl, name);
     onClose();
   }, [urlInput, fileNameInput, onUrlSubmit, onClose]);
 
@@ -374,9 +406,19 @@ function SearchablePickerContent<T>({
                 id="url-input"
                 type="url"
                 value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
+                onChange={(e) => {
+                  setUrlInput(e.target.value);
+                  if (urlError) setUrlError(null);
+                }}
                 placeholder="https://example.com/model.stl or /api/3d-models/file/..."
+                aria-invalid={urlError ? true : undefined}
+                aria-describedby={urlError ? 'url-input-error' : undefined}
               />
+              {urlError && (
+                <p id="url-input-error" role="alert" className="mt-1 text-xs text-pf-error">
+                  {urlError}
+                </p>
+              )}
             </div>
             <div>
               <label htmlFor="filename-input" className="block text-sm font-medium text-pf-text-primary mb-1">
