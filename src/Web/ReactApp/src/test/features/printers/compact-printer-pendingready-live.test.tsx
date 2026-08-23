@@ -86,6 +86,10 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
   FailureDetectionMonitoringBadge: () => null,
 }));
 
+vi.mock('@/features/printers/components/CalibrationSetupPrompt', () => ({
+  CalibrationSetupPrompt: () => null,
+}));
+
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({
   PrinterCameraPreview: () => <div data-testid="camera-preview" />,
 }));
