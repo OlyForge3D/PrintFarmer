@@ -403,7 +403,7 @@ export function useConfirmBedClear() {
       const jobETag = requireStatusEtag(status.nextJobETag, 'Job ETag');
       if (!jobId) throw new Error('The exact calibration job is unavailable.');
       const result =
-        await apiClient.acknowledgeCalibrationBedClearAndStart({
+        await apiClient.acknowledgeBedClearAndStart({
           jobId,
           printerId: status.printerId,
           jobETag,

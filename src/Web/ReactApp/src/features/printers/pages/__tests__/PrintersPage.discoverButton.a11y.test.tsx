@@ -133,11 +133,6 @@ vi.mock('@/features/printers/hooks/useQueueSummariesFleet', () => ({
   useQueueSummaryFromFleet: vi.fn(() => ({ data: undefined, isPending: false, isError: false, error: null })),
 }));
 
-vi.mock('@/features/printers/hooks/useCalibrationCandidatesFleet', () => ({
-  useFleetCalibrationCandidates: vi.fn(() => ({ data: [], isLoading: false, isError: false })),
-  useCalibrationCandidateFromFleet: vi.fn(() => ({ data: undefined, isPending: false, isError: false, error: null })),
-}));
-
 vi.mock('@/features/printers/hooks/useDiscoveryAvailability', () => ({
   // True — the button under test is gated on `hasPermission(...) && discoveryAvailable`.
   useDiscoveryAvailable: vi.fn(() => true),

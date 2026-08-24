@@ -9,7 +9,6 @@ const usePrinterDetailsMock = vi.hoisted(() =>
 );
 const useSpoolmanConfiguredMock = vi.hoisted(() => vi.fn(() => ({ ready: true })));
 const printerHistoryModalMock = vi.hoisted(() => vi.fn(() => null));
-const calibrationSetupPromptRenderMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/common/hooks/useApi', () => ({
   usePrinterDetails: usePrinterDetailsMock,
@@ -81,12 +80,6 @@ vi.mock('@/features/printers/components/PrintProgressBar', () => ({ PrintProgres
 vi.mock('@/features/printers/components/EstimatedCompletionBadge', () => ({ EstimatedCompletionBadge: () => null }));
 vi.mock('@/features/printers/components/FailureDetectionBadge', () => ({ FailureDetectionBadge: () => null }));
 vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => ({ FailureDetectionMonitoringBadge: () => null }));
-vi.mock('@/features/printers/components/CalibrationSetupPrompt', () => ({
-  CalibrationSetupPrompt: (props: Record<string, unknown>) => {
-    calibrationSetupPromptRenderMock(props);
-    return null;
-  },
-}));
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({ FailureDetectionMonitoringSummary: () => null }));
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({ OfflineTroubleshootingGuide: () => null }));
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({ PrinterCameraPreview: () => <div data-testid="camera-preview" /> }));
@@ -248,25 +241,5 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     // those sections lives in DetailedPrinterCard.inlineDetails.test.tsx.
     expect(screen.getByText('Statistics')).toBeInTheDocument();
     expect(screen.getByText('Version')).toBeInTheDocument();
-  });
-});
-
-describe('DetailedPrinterCard calibration setup wiring (#1923)', () => {
-  beforeEach(() => {
-    calibrationSetupPromptRenderMock.mockClear();
-  });
-
-  it('wires CalibrationSetupPrompt with this printer\'s id, name, and rowVersion so the onboarding affordance opens setup for the correct printer', () => {
-    const printer = makePrinter({ id: 'printer-99', name: 'Printer Ninety-Nine', rowVersion: 'rv-3' });
-
-    render(<DetailedPrinterCard printer={printer} />);
-
-    expect(calibrationSetupPromptRenderMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        printerId: 'printer-99',
-        printerName: 'Printer Ninety-Nine',
-        rowVersion: 'rv-3',
-      }),
-    );
   });
 });

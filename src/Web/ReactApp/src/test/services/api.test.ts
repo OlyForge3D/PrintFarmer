@@ -715,7 +715,7 @@ describe("ApiClient", () => {
         ).client.post = mockPost;
 
         const result =
-          await apiClient.acknowledgeCalibrationBedClearAndStart({
+          await apiClient.acknowledgeBedClearAndStart({
             jobId: "job-1",
             printerId: "printer-1",
             jobETag: "job-etag",

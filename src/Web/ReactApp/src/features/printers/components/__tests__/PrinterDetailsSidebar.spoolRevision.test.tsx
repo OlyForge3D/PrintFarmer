@@ -52,7 +52,6 @@ vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
 
 vi.mock('@/features/printers/components/PrinterHistoryModal', () => ({ PrinterHistoryModal: () => null }));
 vi.mock('@/features/printers/components/PrinterFilesModal', () => ({ PrinterFilesModal: () => null }));
-vi.mock('@/features/printers/components/CalibrationSetupModal', () => ({ CalibrationSetupModal: () => null }));
 vi.mock('@/features/filament-coverage/components/FilamentCoverageBreakdown', () => ({ FilamentCoverageBreakdown: () => null }));
 vi.mock('@/features/fallback-groups/components/FallbackGroupsPanel', () => ({ FallbackGroupsPanel: () => null }));
 vi.mock('@/features/printers/components/MaterialLoadout', () => ({ MaterialLoadout: () => null }));
