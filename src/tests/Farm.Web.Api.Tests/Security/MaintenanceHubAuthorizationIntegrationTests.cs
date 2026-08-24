@@ -136,6 +136,53 @@ public sealed class MaintenanceHubAuthorizationIntegrationTests : IAsyncLifetime
             "a caller with no maintenance:admin permission and no PrinterGroupAccess to this printer must never receive its maintenance events, including the controller-driven completion event");
     }
 
+    [Fact]
+    public async Task NewlyGeneratedAlert_ExcludedUser_NeverReceivesAlertCreatedEvent_ButAdminAndGroupMemberDo()
+    {
+        // Regression coverage for the reviewer-flagged gap: the "alertcreated" broadcast (raised
+        // by MaintenanceAlertEngine.EvaluatePrinterMaintenanceAsync when it generates a brand new
+        // alert, as opposed to the "alertstatuschanged"/"maintenancecompleted" events covered
+        // above) had never been exercised end-to-end. This seeds a genuinely overdue maintenance
+        // schedule so the production engine generates a real alert and broadcasts "alertcreated".
+        (Guid printerId, _, Guid includedUserId, Guid excludedUserId) = await SeedAsync();
+        await SeedOverdueMaintenanceScheduleAsync(printerId);
+
+        await using HubConnection excludedConnection = CreateConnection(excludedUserId, roles: "operator");
+        await using HubConnection includedConnection = CreateConnection(includedUserId, roles: "operator");
+        await using HubConnection adminConnection = CreateConnection(Guid.NewGuid(), roles: "farm_admin");
+
+        var excludedReceived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var includedReceived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var adminReceived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        excludedConnection.On<object>("alertcreated", _ => excludedReceived.TrySetResult(true));
+        includedConnection.On<object>("alertcreated", _ => includedReceived.TrySetResult(true));
+        adminConnection.On<object>("alertcreated", _ => adminReceived.TrySetResult(true));
+
+        await excludedConnection.StartAsync();
+        await includedConnection.StartAsync();
+        await adminConnection.StartAsync();
+
+        await includedConnection.InvokeAsync("SubscribeToPrinterAsync", printerId.ToString());
+
+        // Act: run the real production evaluation pass, which discovers the overdue task and
+        // broadcasts "alertcreated" for the newly generated alert.
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            IMaintenanceAlertService engine = scope.ServiceProvider.GetRequiredService<IMaintenanceAlertService>();
+            int generated = await engine.EvaluatePrinterMaintenanceAsync(printerId);
+            generated.Should().Be(1, "the seeded schedule is overdue and must generate exactly one new alert");
+        }
+
+        (await includedReceived.Task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeTrue(
+            "the included user subscribed to the printer's maintenance group and must still see newly created alerts");
+        (await adminReceived.Task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeTrue(
+            "a maintenance:admin/farm_admin caller must still see newly created alerts");
+
+        await Task.WhenAny(excludedReceived.Task, Task.Delay(TimeSpan.FromSeconds(2)));
+        excludedReceived.Task.IsCompleted.Should().BeFalse(
+            "a caller with no maintenance:admin permission and no PrinterGroupAccess to this printer must never receive its alertcreated events");
+    }
+
     private HubConnection CreateConnection(Guid userId, string roles)
     {
         return new HubConnectionBuilder()
@@ -246,7 +293,70 @@ public sealed class MaintenanceHubAuthorizationIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// Wraps every outgoing SignalR HTTP request (negotiate + long-polling send/receive) with the
+    /// Seeds a genuinely overdue maintenance schedule for <paramref name="printerId"/> so a real
+    /// call to <see cref="IMaintenanceAlertService.EvaluatePrinterMaintenanceAsync"/> generates a
+    /// brand new <see cref="MaintenanceAlert"/> and broadcasts "alertcreated" - the one event type
+    /// not otherwise covered by <see cref="SeedAsync"/> (which pre-seeds an already-Active alert
+    /// for the status-transition tests instead).
+    /// </summary>
+    private async Task SeedOverdueMaintenanceScheduleAsync(Guid printerId)
+    {
+        DateTime now = DateTime.UtcNow;
+        Guid taskId = Guid.NewGuid();
+        Guid planId = Guid.NewGuid();
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        db.PrinterStatisticsSet.Add(new PrinterStatistics
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printerId,
+            TotalPrintHours = 1000,
+            LastSyncTime = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        db.MaintenanceTasks.Add(new MaintenanceTask
+        {
+            Id = taskId,
+            TaskName = "Lubricate rails",
+            Category = "Motion System",
+            IntervalHours = 10,
+            Priority = 2,
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        db.MaintenancePlans.Add(new MaintenancePlan
+        {
+            Id = planId,
+            Name = $"Maint-ACL plan {Guid.NewGuid():N}",
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        db.PlanTasks.Add(new PlanTask
+        {
+            Id = Guid.NewGuid(),
+            MaintenancePlanId = planId,
+            MaintenanceTaskId = taskId,
+        });
+        db.PrinterMaintenanceSchedules.Add(new PrinterMaintenanceSchedule
+        {
+            Id = Guid.NewGuid(),
+            MaintenancePlanId = planId,
+            PrinterId = printerId,
+            IsActive = true,
+            DeployedAt = now.AddDays(-30),
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>    /// Wraps every outgoing SignalR HTTP request (negotiate + long-polling send/receive) with the
     /// header shape <see cref="TestInfrastructure.TestAuthHandler"/> expects, so each real HTTP
     /// round-trip authenticates as the given user/roles - mirroring how a real browser would carry
     /// its auth on every request, without needing a real JWT/cookie for this scenario.
