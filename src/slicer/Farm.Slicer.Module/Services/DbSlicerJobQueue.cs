@@ -278,6 +278,8 @@ public class DbSlicerJobQueue(
             MachineProfileSha256 = sj.MachineProfileSha256,
             ProcessProfileSha256 = sj.ProcessProfileSha256,
             FilamentProfileSha256 = sj.FilamentProfileSha256,
+            CalibrationMethod = sj.CalibrationMethod,
+            CalibrationParamsJson = sj.CalibrationParamsJson,
         };
 
         return dsj;
@@ -329,6 +331,8 @@ public class DbSlicerJobQueue(
             MachineProfileSha256 = dj.MachineProfileSha256 ?? dj.NativeProfiles?.MachineSha256,
             ProcessProfileSha256 = dj.ProcessProfileSha256 ?? dj.NativeProfiles?.ProcessSha256,
             FilamentProfileSha256 = dj.FilamentProfileSha256 ?? dj.NativeProfiles?.FilamentSha256,
+            CalibrationMethod = dj.CalibrationMethod,
+            CalibrationParamsJson = dj.CalibrationParamsJson,
         };
     }
 }

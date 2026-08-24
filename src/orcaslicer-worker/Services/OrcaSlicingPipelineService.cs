@@ -4,8 +4,10 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure.Logging;
+using Farm.OrcaSlicer.Worker.Services.Calibration;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
@@ -34,6 +36,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private readonly Uri _apiBaseUri;
     private readonly long _maxModelDownloadBytes;
     private readonly TimeSpan _modelDownloadTimeout;
+    private readonly CalibrationResourceResolver _calibrationResourceResolver;
 
     internal Uri ApiBaseUri => _apiBaseUri;
 
@@ -101,6 +104,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         {
             _ = Directory.CreateDirectory(_workingDirectory);
         }
+
+        _calibrationResourceResolver = new CalibrationResourceResolver(configuration["Worker:CalibrationResourcesPath"]);
     }
 
     private static long ReadPositiveSetting(
@@ -142,7 +147,16 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
             // Download model file(s)
             List<string> modelFilePaths;
-            if (job.ModelFileUrls is { Count: > 0 })
+            if (!string.IsNullOrWhiteSpace(job.CalibrationMethod))
+            {
+                // Calibration jobs (issue #1938) resolve their model from the worker's own bundled
+                // OrcaSlicer resources instead of downloading a client-uploaded model.
+                await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 10, "Preparing calibration model", cancellationToken);
+                string preparedModelPath = PrepareCalibrationModel(job, jobWorkDir);
+                modelFilePaths = [preparedModelPath];
+                job.InputFileSizeBytes = new FileInfo(preparedModelPath).Length;
+            }
+            else if (job.ModelFileUrls is { Count: > 0 })
             {
                 await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 5, $"Downloading {job.ModelFileUrls.Count} model files", cancellationToken);
                 modelFilePaths = await FetchMultipleModelsAsync(
@@ -246,6 +260,83 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         {
             result.Metadata["ModelCount"] = modelCount.ToString(CultureInfo.InvariantCulture);
         }
+    }
+
+    /// <summary>
+    /// Resolves and prepares the local calibration model for <paramref name="job"/> (issue #1938),
+    /// applying per-object flow-ratio overrides for the flow-rate methods. The temperature tower
+    /// method needs no per-model changes here; its per-band configuration is injected into the
+    /// process profile in <see cref="RunOrcaSlicerAsync"/>.
+    /// </summary>
+    internal string PrepareCalibrationModel(DistributedSlicingJob job, string workDir)
+    {
+        if (!CalibrationMethods.TryParse(job.CalibrationMethod, out CalibrationMethod method))
+        {
+            throw new InvalidOperationException(
+                $"Worker cannot resolve unsupported calibration method '{job.CalibrationMethod}'.");
+        }
+
+        string sourcePath = _calibrationResourceResolver.ResolveModelPath(method);
+        if (!File.Exists(sourcePath))
+        {
+            throw new InvalidOperationException(
+                $"Calibration resource file not found at '{sourcePath}' for method '{job.CalibrationMethod}'. " +
+                "Confirm the OrcaSlicer installation ships resources/calib and Worker:CalibrationResourcesPath/ORCA_CALIB_PATH is correct.");
+        }
+
+        if (method is CalibrationMethod.FlowRatePass1 or CalibrationMethod.FlowRatePass2)
+        {
+            return FlowRateCalibrationConfigurator.ApplyPerObjectFlowRatios(sourcePath, workDir, _logger);
+        }
+
+        string destinationPath = Path.Combine(workDir, Path.GetFileName(sourcePath));
+        File.Copy(sourcePath, destinationPath, overwrite: true);
+        return destinationPath;
+    }
+
+    /// <summary>
+    /// Injects the temperature tower's per-band <c>layer_change_gcode</c> hook (issue #1938) into
+    /// the process profile on disk and recomputes <see cref="DistributedSlicingJob.ProcessProfileSha256"/>
+    /// so the recorded digest matches the mutated content.
+    /// </summary>
+    internal static async Task ApplyTemperatureTowerGcodeAsync(
+        DistributedSlicingJob job,
+        string processJsonPath,
+        CancellationToken cancellationToken)
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, CalibrationMethod.TemperatureTower);
+        string layerChangeGcode = TemperatureTowerGcodeBuilder.BuildLayerChangeGcode(
+            parameters.StartTemperatureC,
+            parameters.TemperatureStepC,
+            parameters.BandHeightMm,
+            parameters.BandCount);
+
+        string processJsonContent = await File.ReadAllTextAsync(processJsonPath, cancellationToken);
+        string updatedProcessJsonContent = InjectLayerChangeGcode(processJsonContent, layerChangeGcode);
+        await File.WriteAllTextAsync(processJsonPath, updatedProcessJsonContent, cancellationToken);
+        job.ProcessProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedProcessJsonContent);
+    }
+
+    /// <summary>
+    /// Sets (or appends to any existing) <c>layer_change_gcode</c> key on a process profile JSON
+    /// document. Appending rather than clobbering preserves any custom gcode the selected process
+    /// profile already carries.
+    /// </summary>
+    internal static string InjectLayerChangeGcode(string processJson, string layerChangeGcode)
+    {
+        JsonNode rootNode = JsonNode.Parse(processJson)
+            ?? throw new InvalidOperationException("Process profile JSON is empty.");
+        if (rootNode is not JsonObject rootObject)
+        {
+            throw new InvalidOperationException("Process profile JSON root must be an object.");
+        }
+
+        string? existingGcode = rootObject["layer_change_gcode"]?.GetValue<string>();
+        rootObject["layer_change_gcode"] = string.IsNullOrWhiteSpace(existingGcode)
+            ? layerChangeGcode
+            : existingGcode.TrimEnd() + "\n" + layerChangeGcode;
+
+        return rootObject.ToJsonString();
     }
 
     internal async Task<string> FetchStlFileAsync(
@@ -1206,6 +1297,15 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string machineJson = profilePaths["machine"];
         string processJson = profilePaths["process"];
         string filamentJson = profilePaths["filament"];
+
+        // Temperature tower calibration (issue #1938): inject the per-band layer_change_gcode
+        // hook here, before the profile is handed to OrcaSlicer, so the gate check below and the
+        // slice itself both see the final, calibration-aware process profile.
+        if (CalibrationMethods.TryParse(job.CalibrationMethod, out CalibrationMethod calibrationMethod)
+            && calibrationMethod == CalibrationMethod.TemperatureTower)
+        {
+            await ApplyTemperatureTowerGcodeAsync(job, processJson, cancellationToken);
+        }
 
         await WarnIfProcessCannotSatisfyGateAsync(job, machineJson, processJson, cancellationToken);
 

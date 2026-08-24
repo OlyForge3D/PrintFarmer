@@ -164,6 +164,8 @@ public abstract class HttpJobPollerService(
                     ModelFileTransforms = jobStatus.ModelFileTransforms,
                     LeaseToken = jobStatus.LeaseToken,
                     LeaseFence = jobStatus.LeaseFence,
+                    CalibrationMethod = jobStatus.CalibrationMethod,
+                    CalibrationParamsJson = jobStatus.CalibrationParamsJson,
                     NativeProfiles = NativeSlicerProfiles.FromJob(
                         jobStatus.MachineProfileJson,
                         jobStatus.ProcessProfileJson,

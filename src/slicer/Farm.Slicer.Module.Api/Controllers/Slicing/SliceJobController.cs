@@ -115,6 +115,22 @@ public partial class SliceJobController(
                 "Priority must be between 0 (Low) and 3 (Critical).");
         }
 
+        // Calibration mode (issue #1938): the method name is validated at the API boundary, before
+        // the job ever reaches the queue/worker, so an unknown/unsupported method fails with a
+        // clear, actionable error rather than a generic slice failure surfacing later.
+        CalibrationMethod? calibrationMethod = null;
+        if (request.Calibration is not null)
+        {
+            if (!CalibrationMethods.TryParse(request.Calibration.Method, out CalibrationMethod parsedMethod))
+            {
+                string message = $"Unsupported calibration method '{request.Calibration.Method}'. " +
+                    $"Supported methods: {string.Join(", ", CalibrationMethods.SupportedWireNames)}.";
+                return SlicerApiProblems.InvalidRequest(this, "unsupported_calibration_method", message);
+            }
+
+            calibrationMethod = parsedMethod;
+        }
+
         if (_printerAccess is not null &&
             !await _printerAccess.IsEnabledAsync(request.PrinterId, ct))
         {
@@ -198,8 +214,10 @@ public partial class SliceJobController(
             Id = Guid.NewGuid(),
             UserId = userId,
             PrinterId = request.PrinterId,
-            ModelFileUrl = modelFileUrl,
-            ModelFileName = request.ModelFileName,
+            ModelFileUrl = calibrationMethod is { } cm1 ? $"calibration:{CalibrationMethods.ToWireName(cm1)}" : modelFileUrl,
+            ModelFileName = calibrationMethod is { } cm2
+                ? CalibrationMethods.DefaultModelFileName(cm2)
+                : request.ModelFileName,
             SlicerEngine = (int)request.SlicerEngine,
             SlicerEngineName = request.SlicerEngine.ToString(),
             SlicerProfileJson = EmbedExtruderFilamentNames(request.SlicerProfileJson, request.ExtruderFilamentProfileNames),
@@ -216,6 +234,13 @@ public partial class SliceJobController(
             IdempotencyScopeId = request.CalibrationProjectId ?? Guid.Empty,
             CalibrationAttemptId = request.CalibrationAttemptId,
             CalibrationOrchestrationId = request.CalibrationOrchestrationId,
+
+            // Calibration mode (issue #1938): deliberately independent of the three fields above —
+            // this is an ordinary slice job, not a printer/toolhead calibration saga entry.
+            CalibrationMethod = calibrationMethod is { } cm3 ? CalibrationMethods.ToWireName(cm3) : null,
+            CalibrationParamsJson = request.Calibration?.Params is { Count: > 0 }
+                ? JsonSerializer.Serialize(request.Calibration.Params)
+                : null,
             OperationId = request.OperationId,
             CorrelationId = request.CorrelationId,
             Checksum = request.Checksum,
@@ -262,7 +287,11 @@ public partial class SliceJobController(
             job.RequiredCapabilitiesJson = JsonSerializer.Serialize(new[] { engineName.ToLowerInvariant() });
         }
 
-        IActionResult? modelFailure = await BindStoredModelAsync(job, request, userId, ct);
+        // Calibration jobs resolve their model from the worker's own bundled OrcaSlicer resources
+        // (issue #1938), so they carry no client-supplied model reference to bind.
+        IActionResult? modelFailure = calibrationMethod is null
+            ? await BindStoredModelAsync(job, request, userId, ct)
+            : null;
         if (modelFailure is not null)
         {
             return modelFailure;
@@ -1280,6 +1309,8 @@ public partial class SliceJobController(
             LeaseExpiresAtUtc = job.LeaseExpiresAt,
             RequiredCapabilitiesJson = job.RequiredCapabilitiesJson,
             Priority = job.Priority,
+            CalibrationMethod = job.CalibrationMethod,
+            CalibrationParamsJson = job.CalibrationParamsJson,
         };
     }
 

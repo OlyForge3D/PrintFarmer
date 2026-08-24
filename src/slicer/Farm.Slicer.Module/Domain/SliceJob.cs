@@ -234,6 +234,28 @@ public class SliceJob
     /// <summary>Soft reference to the durable calibration orchestration saga row.</summary>
     public Guid? CalibrationOrchestrationId { get; set; }
 
+    /// <summary>
+    /// Calibration method requested for this slice (a <see cref="Models.CalibrationMethod"/> wire
+    /// name, e.g. <c>"flow_rate_pass_1"</c>), or <see langword="null"/> for an ordinary slice
+    /// (issue #1938).
+    /// </summary>
+    /// <remarks>
+    /// Deliberately distinct from <see cref="CalibrationProjectId"/>/<see cref="CalibrationAttemptId"/>/
+    /// <see cref="CalibrationOrchestrationId"/>, which belong to the unrelated printer/toolhead
+    /// calibration saga. A calibration-mode job never sets those three fields, so it remains an
+    /// ordinary slice job as far as <c>SlicePrintBridgeController.IsCalibrationSlice()</c> is
+    /// concerned, and send-to-printer keeps working for it.
+    /// </remarks>
+    [MaxLength(64)]
+    public string? CalibrationMethod { get; set; }
+
+    /// <summary>
+    /// JSON-serialized numeric parameters for <see cref="CalibrationMethod"/> (for example the
+    /// temperature tower's start temperature, per-band step and band height), or
+    /// <see langword="null"/> to use the method's defaults.
+    /// </summary>
+    public string? CalibrationParamsJson { get; set; }
+
     /// <summary>Idempotency operation identifier supplied by the submitting caller.</summary>
     public Guid? OperationId { get; set; }
 

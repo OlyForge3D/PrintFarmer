@@ -57,6 +57,8 @@ public class SliceJobConfiguration : IEntityTypeConfiguration<SliceJob>
         _ = builder.Property(j => j.SlicerDistribution).HasMaxLength(64);
         _ = builder.Property(j => j.SlicerVersion).HasMaxLength(64);
         _ = builder.Property(j => j.SlicerContainerDigest).HasMaxLength(128);
+        _ = builder.Property(j => j.CalibrationMethod).HasMaxLength(64);
+        _ = builder.Property(j => j.CalibrationParamsJson).HasColumnType("TEXT");
 
         // Indexes for efficient querying
         _ = builder.HasIndex(j => j.UserId);
