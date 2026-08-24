@@ -163,12 +163,13 @@
     },
     {
       "id": "calibration-context-service",
-      "destinationPath": "src/api/Services/Calibration/PrinterCalibrationContextService.cs",
+      "destinationPath": "src/api/Services/Calibration/CalibrationContextResolver.cs",
       "referenceUrls": [
         "https://github.com/OlyForge3D/PrintFarmer/issues/896",
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1943",
         "https://github.com/SoftFever/OrcaSlicer/wiki/Calibration"
       ],
-      "statement": "Independent PrintFarmer implementation of the issue #896 eligibility and immutable context builder; the upstream OrcaSlicer wiki was used only as behavioral reference and no external source code was copied or adapted.",
+      "statement": "Independent PrintFarmer implementation of the issue #896 immutable calibration context builder, slimmed by issue #1943 to remove the fleet-wide eligibility projection; the upstream OrcaSlicer wiki was used only as behavioral reference and no external source code was copied or adapted.",
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-07-25",
@@ -177,11 +178,12 @@
     },
     {
       "id": "calibration-context-service-tests",
-      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/PrinterCalibrationContextServiceTests.cs",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/CalibrationContextResolverTests.cs",
       "referenceUrls": [
-        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896",
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1943"
       ],
-      "statement": "Independent PrintFarmer test implementation of the issue #896 eligibility, safety, redaction, freshness, and snapshot contracts; no external calibration source code was copied or adapted.",
+      "statement": "Independent PrintFarmer test implementation of the issue #896 context-resolution, redaction, freshness, and snapshot contracts, restored by issue #1943 after the fleet-wide eligibility projection and its tests were removed; no external calibration source code was copied or adapted.",
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-07-25",
@@ -1230,32 +1232,6 @@
       }
     },
     {
-      "id": "calibration-printer-context-controller",
-      "destinationPath": "src/api/Controllers/PrinterCalibrationController.cs",
-      "referenceUrls": [
-        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
-      ],
-      "statement": "Independent PrintFarmer implementation of the issue #896 authenticated calibration candidate and context endpoints; no external calibration source code was copied or adapted.",
-      "review": {
-        "reviewer": "Copilot App",
-        "reviewDate": "2026-07-25",
-        "decision": "approved"
-      }
-    },
-    {
-      "id": "calibration-printer-context-controller-tests",
-      "destinationPath": "src/tests/Farm.Web.Api.Tests/Controllers/PrinterCalibrationControllerTests.cs",
-      "referenceUrls": [
-        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
-      ],
-      "statement": "Independent PrintFarmer test implementation of the issue #896 HTTP, authorization, redaction, topology, and error contracts; no external calibration source code was copied or adapted.",
-      "review": {
-        "reviewer": "Copilot App",
-        "reviewDate": "2026-07-25",
-        "decision": "approved"
-      }
-    },
-    {
       "id": "calibration-printer-context-postgresql",
       "destinationPath": "src/migrations/Farm.Migrations.PostgreSQL/Migrations/20260730231346_InitialV2.cs",
       "referenceUrls": [
@@ -1812,19 +1788,6 @@
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-07-25",
-        "decision": "approved"
-      }
-    },
-    {
-      "id": "calibration-split-deployment-resolution-tests",
-      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/SplitDeploymentCalibrationResolutionTests.cs",
-      "referenceUrls": [
-        "https://github.com/OlyForge3D/PrintFarmer/pull/1444"
-      ],
-      "statement": "Independent PrintFarmer end-to-end test implementation of the split-deployment calibration resolution hop through the real adapter and endpoint; no external calibration source code was copied or adapted.",
-      "review": {
-        "reviewer": "Copilot App",
-        "reviewDate": "2026-08-11",
         "decision": "approved"
       }
     },
