@@ -1053,7 +1053,7 @@
       "referenceUrls": [
         "https://github.com/OlyForge3D/PrintFarmer/issues/1938"
       ],
-      "statement": "Independent PrintFarmer implementation of the issue #1938 resolution of OrcaSlicer's bundled calibration models (resources/calib/**) already vendored in this repository; this file only locates and loads those already-approved resources by relative path and copies no OrcaSlicer source code.",
+      "statement": "Independent PrintFarmer implementation of the issue #1938 resolution of OrcaSlicer's bundled calibration models under resources/calib/**; these models ship inside the OrcaSlicer installation itself (resolved at runtime via the ORCA_CALIB_PATH environment variable, falling back to the container-standard OrcaSlicer AppImage extraction path), not this git repository, mirroring the existing OrcaProfilesService runtime-resolved-path pattern. This file only locates those already-approved OrcaSlicer resources by relative path at runtime; it copies no OrcaSlicer source code.",
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-08-23",
