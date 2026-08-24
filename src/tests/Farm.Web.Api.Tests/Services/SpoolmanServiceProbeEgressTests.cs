@@ -47,34 +47,34 @@ public class SpoolmanServiceProbeEgressTests
     }
 
     [Fact]
-    public async Task ProbeAsync_UpstreamRedirectsToInternalAddress_RedirectTargetIsNeverContacted()
+    public async Task ProbeAsync_UpstreamRedirectsToInternalAddress_ProductionHandlerDoesNotFollowRedirect()
     {
-        const string redirectTarget = "http://192.0.2.99/internal-secret";
-        int redirectTargetHits = 0;
+        // A stub HttpMessageHandler subclass never auto-follows a 3xx response regardless of
+        // AllowAutoRedirect — that setting is only honored by HttpClientHandler /
+        // SocketsHttpHandler — so a test built on a stub handler would pass even without the
+        // fix. This test instead uses two real loopback HTTP listeners and the exact
+        // HttpClientHandler configuration (AllowAutoRedirect = false) that
+        // ServiceCollectionExtensions wires onto the production SpoolmanService HttpClient: one
+        // listener serves the initial 302, the other is the redirect target and must receive
+        // zero connections if the fix holds.
+        using RecordingLoopbackServer targetServer = RecordingLoopbackServer.Start(_ => (HttpStatusCode.OK, null));
+        using RecordingLoopbackServer redirectServer = RecordingLoopbackServer.Start(_ => (HttpStatusCode.Found, targetServer.BaseUrl + "/internal-secret"));
 
-        SpyHttpMessageHandler handler = new(req =>
-        {
-            if (req.RequestUri!.ToString().StartsWith(redirectTarget, StringComparison.OrdinalIgnoreCase))
-            {
-                redirectTargetHits++;
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent("{}", Encoding.UTF8, "application/json")
-                };
-            }
-
-            HttpResponseMessage redirect = new(HttpStatusCode.Found);
-            redirect.Headers.Location = new Uri(redirectTarget);
-            return redirect;
-        });
-
+        using HttpClientHandler handler = new() { AllowAutoRedirect = false };
         using HttpClient http = new(handler);
-        SpoolmanService svc = CreateService(http, TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        // Note: TestHelpers.PermissiveEgressGuard() pins to a fixed documentation address
+        // (203.0.113.100), which is fine for tests using a stubbed transport but would break a
+        // real network round-trip here. AllowAnyDestinationGuard() below allows the request
+        // without rewriting the address, preserving the real loopback URI being tested against.
+        SpoolmanService svc = CreateService(http, AllowAnyDestinationGuard());
 
-        SpoolmanProbeResult result = await svc.ProbeAsync("http://spoolman.local", CancellationToken.None);
+        SpoolmanProbeResult result = await svc.ProbeAsync(redirectServer.BaseUrl, CancellationToken.None);
 
         result.Success.Should().BeFalse("a 302 response is not itself a successful probe");
-        redirectTargetHits.Should().Be(0, "the probe must not follow a redirect to a different (potentially internal) address");
+        redirectServer.RequestCount.Should().BeGreaterThan(0, "the redirecting server itself must have been contacted");
+        targetServer.RequestCount.Should().Be(
+            0,
+            "AllowAutoRedirect=false must prevent the client from ever following the redirect to the (potentially internal) target server");
     }
 
     [Fact]
@@ -122,60 +122,28 @@ public class SpoolmanServiceProbeEgressTests
     [Fact]
     public async Task ProbeAsync_RealEgressGuard_LoopbackListener_ReceivesZeroConnections()
     {
-        // Integration-style test using the production EgressGuard (no mock) against a real
-        // local HTTP listener, proving loopback destinations never receive a connection.
-        using System.Net.Sockets.TcpListener probe = new(IPAddress.Loopback, 0);
-        probe.Start();
-        int port = ((IPEndPoint)probe.LocalEndpoint).Port;
-        probe.Stop();
+        // Integration-style test using the production EgressGuard (no mock) and a
+        // network-capable handler (wrapping the same AllowAutoRedirect=false HttpClientHandler
+        // configuration used in production) against a real local HTTP listener. Using a spy
+        // handler here would make the assertion vacuous — the listener could never be reached
+        // regardless of whether the guard actually ran — because the spy is a transport dead
+        // end. RecordingHandler still lets a request through to the real network if the guard
+        // is ever bypassed, so "zero connections" and "handler never invoked" are both
+        // genuinely tied to the guard denying the destination.
+        using RecordingLoopbackServer listener = RecordingLoopbackServer.Start(_ => (HttpStatusCode.OK, null));
 
-        using HttpListener listener = new();
-        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
-        listener.Start();
-        int connectionsReceived = 0;
-        CancellationTokenSource listenerCts = new();
-        Task listenerTask = Task.Run(async () =>
-        {
-            try
-            {
-                while (!listenerCts.IsCancellationRequested)
-                {
-                    HttpListenerContext ctx = await listener.GetContextAsync();
-                    Interlocked.Increment(ref connectionsReceived);
-                    ctx.Response.StatusCode = 200;
-                    ctx.Response.Close();
-                }
-            }
-            catch (Exception) when (listenerCts.IsCancellationRequested || listenerCts.Token.IsCancellationRequested)
-            {
-            }
-            catch (ObjectDisposedException)
-            {
-            }
-        });
+        IConfiguration configuration = new ConfigurationBuilder().Build();
+        EgressGuard realGuard = new(configuration, NullLogger<EgressGuard>.Instance);
 
-        try
-        {
-            IConfiguration configuration = new ConfigurationBuilder().Build();
-            EgressGuard realGuard = new(configuration, NullLogger<EgressGuard>.Instance);
+        using RecordingHandler handler = new();
+        using HttpClient http = new(handler);
+        SpoolmanService svc = CreateService(http, realGuard);
 
-            SpyHttpMessageHandler handler = new();
-            using HttpClient http = new(handler);
-            SpoolmanService svc = CreateService(http, realGuard);
+        SpoolmanProbeResult result = await svc.ProbeAsync(listener.BaseUrl, CancellationToken.None);
 
-            SpoolmanProbeResult result = await svc.ProbeAsync($"http://127.0.0.1:{port}", CancellationToken.None);
-
-            result.Success.Should().BeFalse();
-            handler.CallCount.Should().Be(0, "the real EgressGuard denies loopback destinations, so no request should reach the transport");
-        }
-        finally
-        {
-            listenerCts.Cancel();
-            listener.Stop();
-            listener.Close();
-        }
-
-        connectionsReceived.Should().Be(0, "a loopback probe target must receive zero connections when the egress guard denies it");
+        result.Success.Should().BeFalse();
+        handler.CallCount.Should().Be(0, "the real EgressGuard denies loopback destinations, so no request should reach the transport");
+        listener.RequestCount.Should().Be(0, "a loopback probe target must receive zero connections when the egress guard denies it");
     }
 
     private static SpoolmanService CreateService(HttpClient http, IEgressGuard egressGuard)
@@ -183,6 +151,22 @@ public class SpoolmanServiceProbeEgressTests
         Mock<ISettingsService> settings = new();
         Mock<ILogger<SpoolmanService>> logger = new();
         return new SpoolmanService(http, settings.Object, logger.Object, egressGuard);
+    }
+
+    /// <summary>
+    /// An <see cref="IEgressGuard"/> stub that allows every destination without rewriting its
+    /// address (unlike <c>TestHelpers.PermissiveEgressGuard()</c>, which pins to a fixed
+    /// documentation address suitable only for tests using a stubbed transport). Used by tests
+    /// that make a real network round-trip against a local loopback listener, where the request
+    /// must actually reach the address under test.
+    /// </summary>
+    private static IEgressGuard AllowAnyDestinationGuard()
+    {
+        Mock<IEgressGuard> mock = new(MockBehavior.Strict);
+        _ = mock
+            .Setup(g => g.CheckAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string url, CancellationToken _) => EgressCheckResult.Allow(new Uri(url), null));
+        return mock.Object;
     }
 
     /// <summary>
@@ -200,6 +184,98 @@ public class SpoolmanServiceProbeEgressTests
         {
             CallCount++;
             return Task.FromResult(_responder(request));
+        }
+    }
+
+    /// <summary>
+    /// Wraps the exact <see cref="HttpClientHandler"/> configuration production uses
+    /// (<c>AllowAutoRedirect = false</c>) so that, unlike <see cref="SpyHttpMessageHandler"/>, a
+    /// call that unexpectedly reaches the transport actually attempts a real network connection
+    /// rather than silently no-oping. This keeps "handler never invoked" assertions genuinely
+    /// tied to the egress guard denying the destination rather than to a stub that could never
+    /// have connected regardless.
+    /// </summary>
+    private sealed class RecordingHandler() : DelegatingHandler(new HttpClientHandler { AllowAutoRedirect = false })
+    {
+        public int CallCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return base.SendAsync(request, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// A minimal real HTTP server bound to loopback, used to prove behavior over an actual
+    /// network round-trip (rather than a stubbed <see cref="HttpMessageHandler"/>) — required to
+    /// meaningfully test redirect-following, since a stub handler never auto-follows redirects
+    /// regardless of the fix under test.
+    /// </summary>
+    private sealed class RecordingLoopbackServer : IDisposable
+    {
+        private readonly HttpListener _listener;
+        private readonly CancellationTokenSource _cts = new();
+        private readonly Func<HttpListenerRequest, (HttpStatusCode Status, string? Location)> _responder;
+        private int _requestCount;
+
+        private RecordingLoopbackServer(HttpListener listener, string baseUrl, Func<HttpListenerRequest, (HttpStatusCode Status, string? Location)> responder)
+        {
+            _listener = listener;
+            BaseUrl = baseUrl;
+            _responder = responder;
+            _ = AcceptLoopAsync();
+        }
+
+        public string BaseUrl { get; }
+
+        public int RequestCount => _requestCount;
+
+        public static RecordingLoopbackServer Start(Func<HttpListenerRequest, (HttpStatusCode Status, string? Location)> responder)
+        {
+            using System.Net.Sockets.TcpListener probe = new(IPAddress.Loopback, 0);
+            probe.Start();
+            int port = ((IPEndPoint)probe.LocalEndpoint).Port;
+            probe.Stop();
+
+            string baseUrl = $"http://127.0.0.1:{port}";
+            HttpListener listener = new();
+            listener.Prefixes.Add(baseUrl + "/");
+            listener.Start();
+            return new RecordingLoopbackServer(listener, baseUrl, responder);
+        }
+
+        private async Task AcceptLoopAsync()
+        {
+            while (!_cts.IsCancellationRequested)
+            {
+                HttpListenerContext context;
+                try
+                {
+                    context = await _listener.GetContextAsync();
+                }
+                catch (Exception) when (_cts.IsCancellationRequested || !_listener.IsListening)
+                {
+                    return;
+                }
+
+                Interlocked.Increment(ref _requestCount);
+                (HttpStatusCode status, string? location) = _responder(context.Request);
+                context.Response.StatusCode = (int)status;
+                if (location is not null)
+                {
+                    context.Response.RedirectLocation = location;
+                }
+
+                context.Response.Close();
+            }
+        }
+
+        public void Dispose()
+        {
+            _cts.Cancel();
+            _listener.Close();
+            _cts.Dispose();
         }
     }
 }
