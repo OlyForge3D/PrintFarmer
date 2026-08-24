@@ -82,12 +82,18 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                     logger.LogWarning(
                         "Spoolman probe blocked by egress guard for {Url}: {Reason}",
                         LogSanitizer.Sanitize(candidateBaseUrl),
-                        egressCheck.DenyReason);
+                        LogSanitizer.Sanitize(egressCheck.DenyReason));
+
+                    // Do not echo egressCheck.DenyReason to the caller: it can reveal internal
+                    // network topology (e.g. "resolves to a loopback/link-local address"),
+                    // which would let an attacker probe the guard as an oracle. The detailed
+                    // reason is logged above for operators only; callers get a generic message,
+                    // matching the convention used by PrintersController's connectivity test.
                     return new SpoolmanProbeResult(
                         false,
                         NormalizedUrl: normalized,
                         EndpointTried: path,
-                        Message: egressCheck.DenyReason ?? "Destination is not allowed",
+                        Message: "The requested server address is not allowed.",
                         ErrorCategory: "egress_denied");
                 }
 
