@@ -463,21 +463,22 @@ public enum SliceFailureReason
 public static class SliceFailureHints
 {
     /// <summary>
-    /// Names the existing "Auto-orient plate" control (the compass button on the slicer
-    /// workspace's plate controls — <c>PlateBedOverlay</c>, where the string is both the button's
-    /// <c>aria-label</c> and its tooltip). That button is what resolves the most common cause of
-    /// <see cref="SliceFailureReason.SlicingEngineRejectedModel"/> (a model authored on its side,
-    /// which the engine then cannot slice standing up) — verified in issue #1811 against the real
-    /// OrcaSlicer 2.4.2 CLI, where every affected model sliced cleanly after auto-orienting.
-    /// Deliberately phrased as a likely cause, not a diagnosis: -100 is a generic engine catch-all,
-    /// so a confident "reorient your model" would misdirect callers whose job failed for an
-    /// unrelated reason.
+    /// Names the existing "Auto-Orient" and "Lay Flat (F)" controls (the model tool rail buttons in
+    /// the slicer workspace's <c>SlicerToolbar</c>, where the strings are the buttons' <c>title</c>
+    /// tooltips). Those buttons act on the selected model — not the plate — and resolve the most
+    /// common cause of <see cref="SliceFailureReason.SlicingEngineRejectedModel"/> (a model authored
+    /// on its side, which the engine then cannot slice standing up) — verified in issue #1811
+    /// against the real OrcaSlicer 2.4.2 CLI, where every affected model sliced cleanly after
+    /// auto-orienting. Deliberately phrased as a likely cause, not a diagnosis: -100 is a generic
+    /// engine catch-all, so a confident "reorient your model" would misdirect callers whose job
+    /// failed for an unrelated reason. See issue #1962: an earlier revision named a plate-level
+    /// "Auto-orient plate" control that never shipped and wrongly blamed a plate lock.
     /// </summary>
     public const string SlicingEngineRejectedModel =
         "The slicing engine could not slice this model. This most often happens when a model sits " +
-        "in an orientation the engine cannot handle — try the \"Auto-orient plate\" button on the " +
-        "plate controls in the slicer workspace (unlock the plate first if it is locked), then " +
-        "slice again. If it still fails, ask a farm admin to check the job's error detail.";
+        "in an orientation the engine cannot handle — select the model and try the \"Auto-Orient\" " +
+        "or \"Lay Flat\" button in the model tools in the slicer workspace, then slice again. If it " +
+        "still fails, ask a farm admin to check the job's error detail.";
 
     /// <summary>Guidance for <see cref="SliceFailureReason.NoPrintableObjects"/>.</summary>
     public const string NoPrintableObjects =
