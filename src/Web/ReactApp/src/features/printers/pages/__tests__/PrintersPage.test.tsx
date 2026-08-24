@@ -185,11 +185,6 @@ vi.mock('@/features/printers/hooks/useQueueSummariesFleet', () => ({
   useQueueSummaryFromFleet: vi.fn(() => ({ data: undefined, isPending: false, isError: false, error: null })),
 }));
 
-vi.mock('@/features/printers/hooks/useCalibrationCandidatesFleet', () => ({
-  useFleetCalibrationCandidates: vi.fn(() => ({ data: [], isLoading: false, isError: false })),
-  useCalibrationCandidateFromFleet: vi.fn(() => ({ data: undefined, isPending: false, isError: false, error: null })),
-}));
-
 vi.mock('@/features/printers/hooks/useDiscoveryAvailability', () => ({
   useDiscoveryAvailable: vi.fn(() => false),
   useNetworkDiscoverySettings: vi.fn(() => ({ data: undefined, isLoading: false, isError: false })),

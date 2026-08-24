@@ -58,7 +58,6 @@ import type { PrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
-import { CalibrationSetupPrompt } from '@/features/printers/components/CalibrationSetupPrompt';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
 import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
@@ -671,11 +670,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             recentEvents={recentEvents}
           />
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
-          <CalibrationSetupPrompt
-            printerId={printer.id}
-            printerName={printer.name}
-            rowVersion={printer.rowVersion}
-          />
         </div>
       </div>
 

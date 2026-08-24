@@ -40,7 +40,6 @@ import { HelpButton } from '@/common/components/HelpButton';
 import { useFleetFilamentCoverage } from '@/features/filament-coverage/hooks';
 import { useFleetPrinterTags } from '@/features/printers/hooks/usePrinterTagsFleet';
 import { useFleetQueueSummaries } from '@/features/printers/hooks/useQueueSummariesFleet';
-import { useFleetCalibrationCandidates } from '@/features/printers/hooks/useCalibrationCandidatesFleet';
 import { useDiscoveryAvailable } from '@/features/printers/hooks/useDiscoveryAvailability';
 import { FailureDetectionPollingProvider } from '@/features/printers/hooks/useFailureDetectionPolling';
 import type { DetailedPrinterCardProps } from '@/features/printers/components/DetailedPrinterCard';
@@ -79,10 +78,6 @@ export function PrintersPage() {
   // 1 and 9).
   useFleetPrinterTags();
   useFleetQueueSummaries();
-  // Prime the calibration-eligibility fleet cache so every card/row's
-  // onboarding "needs calibration setup" prompt (issue #1923) shares one
-  // request instead of one getCalibrationContext call per printer.
-  useFleetCalibrationCandidates();
   const queryClient = useQueryClient();
   
   const {
