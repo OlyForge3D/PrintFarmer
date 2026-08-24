@@ -139,7 +139,9 @@ test.describe('Printer Details — Moonraker', () => {
 
     const modal = page.getByRole('dialog', { name: 'Edit Printer' });
     await expect(modal).toBeVisible();
-    await expect(modal.getByLabel('Name')).toHaveValue(printerName);
+    // The toolhead "Name" field shares the same accessible label, so target the
+    // printer-name input by its unique id rather than the ambiguous label text.
+    await expect(modal.locator('#edit-printer-name')).toHaveValue(printerName);
 
     // Close without saving so the shared seeded printer is left untouched.
     await page.keyboard.press('Escape');
