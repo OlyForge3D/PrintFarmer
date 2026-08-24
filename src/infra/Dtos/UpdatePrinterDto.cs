@@ -91,7 +91,7 @@ public record UpdatePrinterDto(
     int? MaxTravelAcceleration = null,
     bool? CalibrationHasHeatedBed = null,
     bool? CalibrationHasEnclosure = null,
-    bool? CalibrationHasHeatedChamber = null,
+    bool? HasHeatedChamber = null,
     int? MaxChamberTemp = null,
     int? ActiveToolheadIndex = null,
     bool? SupportsPressureAdvance = null,

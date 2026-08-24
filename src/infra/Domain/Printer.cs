@@ -335,11 +335,11 @@ public class Printer : IRevisionedEntity
     public bool? CalibrationHasEnclosure { get; set; }
 
     /// <summary>
-    /// Explicit heated-chamber value for calibration. This is separate from legacy catalog
-    /// defaults (unlike bed/enclosure, there was never a distinct general-purpose column for
-    /// this fact, so this single nullable column also backs dispatch capability advertisement).
+    /// Whether the printer has a heated chamber. Unlike bed/enclosure, there was never a
+    /// distinct general-purpose column for this fact, so this single nullable column backs
+    /// both dispatch capability advertisement and calibration eligibility.
     /// </summary>
-    public bool? CalibrationHasHeatedChamber { get; set; }
+    public bool? HasHeatedChamber { get; set; }
 
     /// <summary>Maximum chamber temperature in degrees Celsius.</summary>
     public int? MaxChamberTemp { get; set; }
