@@ -14,7 +14,6 @@ import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button, ProgressBar } from '@/common/components/ui';
 import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
-import { CalibrationSetupPrompt } from '@/features/printers/components/CalibrationSetupPrompt';
 
 interface PrinterTableViewProps {
   printers: Printer[];
@@ -300,12 +299,6 @@ export function PrinterTableView({
                         <div className="text-xs text-pf-text-tertiary truncate">
                           {printer.ipAddress}
                         </div>
-                        <CalibrationSetupPrompt
-                          printerId={printer.id}
-                          printerName={printer.name}
-                          rowVersion={printer.rowVersion}
-                          className="mt-1"
-                        />
                       </div>
                     </div>
                   </td>

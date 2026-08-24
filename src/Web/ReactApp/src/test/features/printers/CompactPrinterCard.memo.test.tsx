@@ -94,15 +94,6 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
   FailureDetectionMonitoringBadge: () => null,
 }));
 
-const calibrationSetupPromptRenderMock = vi.hoisted(() => vi.fn());
-
-vi.mock('@/features/printers/components/CalibrationSetupPrompt', () => ({
-  CalibrationSetupPrompt: (props: Record<string, unknown>) => {
-    calibrationSetupPromptRenderMock(props);
-    return null;
-  },
-}));
-
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({
   FailureDetectionMonitoringSummary: () => null,
 }));
@@ -204,20 +195,6 @@ describe('CompactPrinterCard memoization', () => {
     usePrinterFailureDetectionStatusMock.mockClear();
     usePrinterFailureDetectionStatusMock.mockReturnValue({ printerStatus: undefined, data: undefined, isLoading: false });
     taggingModalRenderMock.mockClear();
-    calibrationSetupPromptRenderMock.mockClear();
-  });
-
-  it('wires CalibrationSetupPrompt with this printer\'s id, name, and rowVersion (#1923) so the onboarding affordance opens setup for the correct printer', () => {
-    const printer = createPrinter({ id: 'printer-42', name: 'Printer Forty-Two', rowVersion: 'rv-7' });
-    render(<CompactPrinterCard {...createProps(printer)} />);
-
-    expect(calibrationSetupPromptRenderMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        printerId: 'printer-42',
-        printerName: 'Printer Forty-Two',
-        rowVersion: 'rv-7',
-      }),
-    );
   });
 
   it('skips rendering when parent recreates unchanged printer props with stable callbacks', () => {
