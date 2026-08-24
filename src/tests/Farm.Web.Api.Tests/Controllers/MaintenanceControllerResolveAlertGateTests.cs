@@ -43,6 +43,8 @@ public sealed class MaintenanceControllerResolveAlertGateTests
         var clients = new Mock<IHubClients>();
         clients.SetupGet(c => c.All).Returns(clientProxy.Object);
         clients.Setup(c => c.Group(AuthorizedHubGroups.Farm)).Returns(clientProxy.Object);
+        // Issue #1966: broadcasts now target [Farm, MaintenancePrinter(id)] instead of Farm alone.
+        clients.Setup(c => c.Groups(It.IsAny<IReadOnlyList<string>>())).Returns(clientProxy.Object);
         _maintenanceHub.SetupGet(h => h.Clients).Returns(clients.Object);
 
         _logRepository

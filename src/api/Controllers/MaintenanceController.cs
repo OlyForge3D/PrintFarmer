@@ -157,15 +157,21 @@ public class MaintenanceController(
             // Reload to get updated state
             alert = await _alertRepository.GetByIdAsync(id, ct);
 
-            // Broadcast status change
-            await _maintenanceHub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync("alertstatuschanged", new
-            {
-                id = alert!.Id,
-                printerId = alert.PrinterId,
-                status = alert.Status.ToString(),
-                acknowledgedAt = alert.AcknowledgedAt,
-                acknowledgedBy = alert.AcknowledgedBy
-            }, ct);
+            // Broadcast status change to the farm-wide admin group plus this printer's
+            // maintenance group, so a non-admin PrinterGroup-authorized subscriber also sees it
+            // (issue #1966).
+            await _maintenanceHub.Clients.Groups(
+                [
+                    Farm.Infrastructure.Security.AuthorizedHubGroups.Farm,
+                    Farm.Infrastructure.Security.AuthorizedHubGroups.MaintenancePrinter(alert!.PrinterId)
+                ]).SendAsync("alertstatuschanged", new
+                {
+                    id = alert.Id,
+                    printerId = alert.PrinterId,
+                    status = alert.Status.ToString(),
+                    acknowledgedAt = alert.AcknowledgedAt,
+                    acknowledgedBy = alert.AcknowledgedBy
+                }, ct);
 
             return Ok(alert);
         }
@@ -302,16 +308,22 @@ public class MaintenanceController(
             // Reload to get updated state
             alert = await _alertRepository.GetByIdAsync(id, ct);
 
-            // Broadcast status change
-            await _maintenanceHub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync("alertstatuschanged", new
-            {
-                id = alert!.Id,
-                printerId = alert.PrinterId,
-                status = alert.Status.ToString(),
-                dismissedAt = alert.DismissedAt,
-                dismissedBy = alert.DismissedBy,
-                dismissalReason = alert.DismissalReason
-            }, ct);
+            // Broadcast status change to the farm-wide admin group plus this printer's
+            // maintenance group, so a non-admin PrinterGroup-authorized subscriber also sees it
+            // (issue #1966).
+            await _maintenanceHub.Clients.Groups(
+                [
+                    Farm.Infrastructure.Security.AuthorizedHubGroups.Farm,
+                    Farm.Infrastructure.Security.AuthorizedHubGroups.MaintenancePrinter(alert!.PrinterId)
+                ]).SendAsync("alertstatuschanged", new
+                {
+                    id = alert.Id,
+                    printerId = alert.PrinterId,
+                    status = alert.Status.ToString(),
+                    dismissedAt = alert.DismissedAt,
+                    dismissedBy = alert.DismissedBy,
+                    dismissalReason = alert.DismissalReason
+                }, ct);
 
             return Ok(alert);
         }
@@ -745,15 +757,21 @@ public class MaintenanceController(
 
             MaintenanceLog createdLog = await _logRepository.AddAsync(log, ct);
 
-            // Broadcast maintenance completed
-            await _maintenanceHub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync("maintenancecompleted", new
-            {
-                logId = createdLog.Id,
-                printerId = createdLog.PrinterId,
-                taskId = createdLog.MaintenanceTaskId,
-                performedAt = createdLog.PerformedAt,
-                performedBy = createdLog.PerformedBy
-            }, ct);
+            // Broadcast maintenance completed to the farm-wide admin group plus this printer's
+            // maintenance group, so a non-admin PrinterGroup-authorized subscriber also sees it
+            // (issue #1966).
+            await _maintenanceHub.Clients.Groups(
+                [
+                    Farm.Infrastructure.Security.AuthorizedHubGroups.Farm,
+                    Farm.Infrastructure.Security.AuthorizedHubGroups.MaintenancePrinter(createdLog.PrinterId)
+                ]).SendAsync("maintenancecompleted", new
+                {
+                    logId = createdLog.Id,
+                    printerId = createdLog.PrinterId,
+                    taskId = createdLog.MaintenanceTaskId,
+                    performedAt = createdLog.PerformedAt,
+                    performedBy = createdLog.PerformedBy
+                }, ct);
 
             _webhookService.Enqueue("maintenance.completed", new
             {
