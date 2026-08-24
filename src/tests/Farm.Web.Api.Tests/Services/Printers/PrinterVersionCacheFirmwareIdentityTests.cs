@@ -36,6 +36,18 @@ namespace Farm.Web.Api.Tests.Services.Printers;
 /// </summary>
 public sealed class PrinterVersionCacheFirmwareIdentityTests
 {
+    // Mirrors the real-world "Unknown" manufacturer + "Unknown Model" sentinel
+    // (EfCatalogRepository.GetUnknownModelIdAsync) that every printer's non-nullable ModelId
+    // resolves to by default. Model is a required FK (PrinterConfiguration.HasOne(p => p.Model)),
+    // so PrinterCalibrationContextService.GetCandidatesAsync's Model.Toolheads Include chain
+    // (#1922/#1931) performs an inner join and would otherwise silently drop every printer whose
+    // ModelId does not resolve to a real catalog row -- exactly the regression this file hit when
+    // PR #1931 added that Include without every printer fixture here also seeding the row its
+    // ModelId already implicitly promised to reference (see PrinterCalibrationContextServiceTests
+    // CalibrationHarness.CreateAsync for the identical seeding pattern).
+    private static readonly Guid UnknownManufacturerId = Guid.NewGuid();
+    private static readonly Guid UnknownModelId = Guid.NewGuid();
+
     private static AppDbContext NewDb(string dbName) =>
         new(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(dbName).Options);
 
@@ -47,6 +59,7 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
         BackendPort = 7125,
         Backend = (int)PrinterBackend.Moonraker,
         IsEnabled = true,
+        ModelId = UnknownModelId,
         FirmwareFamily = PrinterFirmwareFamily.Unknown,
         GcodeDialect = PrinterGcodeDialect.Unknown,
         FirmwareDetectionSource = FirmwareDetectionSource.Unknown,
@@ -56,6 +69,24 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
         FirmwareDetectedAtUtc = null,
         FirmwareIdentityVerified = false,
     };
+
+    /// <summary>
+    /// Seeds the reserved "Unknown" manufacturer + "Unknown Model" catalog row that
+    /// <see cref="CreateNeverProbedMoonrakerPrinter"/>'s <c>ModelId</c> references, so
+    /// <see cref="PrinterCalibrationContextService.GetCandidatesAsync"/>'s required-FK Include
+    /// chain resolves the printer instead of inner-joining it out of the result set.
+    /// </summary>
+    private static async Task SeedUnknownCatalogModelAsync(AppDbContext db, CancellationToken cancellationToken = default)
+    {
+        _ = db.Manufacturers.Add(new Manufacturer { Id = UnknownManufacturerId, Name = "Unknown" });
+        _ = db.PrinterModels.Add(new PrinterModel
+        {
+            Id = UnknownModelId,
+            Name = "Unknown Model",
+            ManufacturerId = UnknownManufacturerId,
+        });
+        _ = await db.SaveChangesAsync(cancellationToken);
+    }
 
     private static PrintersService CreatePrintersService(AppDbContext db, IBackendClientFactory backendFactory)
     {
@@ -155,6 +186,7 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
 
         await using (AppDbContext seedDb = NewDb(dbName))
         {
+            await SeedUnknownCatalogModelAsync(seedDb);
             _ = seedDb.Printers.Add(printer);
             _ = await seedDb.SaveChangesAsync();
         }
@@ -362,6 +394,7 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
 
         await using (AppDbContext seedDb = NewDb(dbName))
         {
+            await SeedUnknownCatalogModelAsync(seedDb);
             _ = seedDb.Printers.Add(printer);
             _ = await seedDb.SaveChangesAsync();
         }
@@ -427,6 +460,7 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
         string dbName = $"firmware-identity-{Guid.NewGuid()}";
         await using (AppDbContext seedDb = NewDb(dbName))
         {
+            await SeedUnknownCatalogModelAsync(seedDb);
             _ = seedDb.Printers.Add(printer);
             _ = await seedDb.SaveChangesAsync();
         }
