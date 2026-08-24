@@ -1444,9 +1444,8 @@ export interface PrinterDetails {
 // ---------------------------------------------------------------------------
 // Calibration firmware identity (issue #1616): read-only firmware facts
 // echoed on the printer record. The calibration-setup write/read DTOs that
-// used to live in this section were removed in #1941 — see
-// PUT /api/printers/{id}/calibration-setup, which remains server-side for
-// #1942 to retire.
+// used to live in this section were removed in #1941. The corresponding
+// PUT /api/printers/{id}/calibration-setup server endpoint was removed in #1942.
 // ---------------------------------------------------------------------------
 
 export interface CalibrationFirmwareIdentityDto {
