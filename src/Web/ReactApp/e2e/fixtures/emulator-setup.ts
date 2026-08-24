@@ -205,6 +205,13 @@ export const test = base.extend<EmulatorFixtures>({
     await page.evaluate((t: string) => {
       localStorage.setItem('auth-token', t);
       localStorage.setItem('printerViewMode', 'detailed');
+      // Suppress every onboarding tour reachable from the pages these
+      // fixtures navigate to. `/dashboard` renders `PrinterDashboard`,
+      // whose `usePageTour({ tourId: 'dashboard' })` auto-starts its tour
+      // ~500ms after mount (see usePageTour.ts) if this flag isn't set —
+      // that delayed overlay previously intercepted pointer events on the
+      // header's account menu at narrow viewports (issue #1956).
+      localStorage.setItem('pf-tour-seen-dashboard', 'true');
       localStorage.setItem('pf-tour-seen-printers', 'true');
     }, token!);
 
