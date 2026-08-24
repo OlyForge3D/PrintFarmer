@@ -171,7 +171,7 @@ public sealed record CalibrationFirmwareIdentityDto(
 /// Slicer identity for calibration, including which stored slicer profiles are bound to the
 /// printer. The three profile ids are exposed on the read side so an operator surface can show
 /// and preselect the current binding; without them a client could write a binding through
-/// <c>PUT /api/printers/{id}/calibration-setup</c> but never read back what is bound.
+/// <c>PUT /api/printers/{id}</c> but never read back what is bound.
 /// </summary>
 public sealed record CalibrationSlicerIdentityDto(
     string? Engine,
