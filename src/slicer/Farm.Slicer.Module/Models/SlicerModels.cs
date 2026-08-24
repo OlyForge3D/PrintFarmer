@@ -465,14 +465,17 @@ public static class SliceFailureHints
     /// <summary>
     /// Names the existing "Auto-Orient" and "Lay Flat (F)" controls (the model tool rail buttons in
     /// the slicer workspace's <c>SlicerToolbar</c>, where the strings are the buttons' <c>title</c>
-    /// tooltips). Those buttons act on the selected model — not the plate — and resolve the most
-    /// common cause of <see cref="SliceFailureReason.SlicingEngineRejectedModel"/> (a model authored
-    /// on its side, which the engine then cannot slice standing up) — verified in issue #1811
-    /// against the real OrcaSlicer 2.4.2 CLI, where every affected model sliced cleanly after
-    /// auto-orienting. Deliberately phrased as a likely cause, not a diagnosis: -100 is a generic
-    /// engine catch-all, so a confident "reorient your model" would misdirect callers whose job
-    /// failed for an unrelated reason. See issue #1962: an earlier revision named a plate-level
-    /// "Auto-orient plate" control that never shipped and wrongly blamed a plate lock.
+    /// tooltips). Those buttons act on the selected model, always show regardless of how many plates
+    /// exist, and resolve the most common cause of
+    /// <see cref="SliceFailureReason.SlicingEngineRejectedModel"/> (a model authored on its side,
+    /// which the engine then cannot slice standing up) — verified in issue #1811 against the real
+    /// OrcaSlicer 2.4.2 CLI, where every affected model sliced cleanly after auto-orienting.
+    /// Deliberately phrased as a likely cause, not a diagnosis: -100 is a generic engine catch-all,
+    /// so a confident "reorient your model" would misdirect callers whose job failed for an
+    /// unrelated reason. See issue #1962: an earlier revision instead named a plate-level
+    /// "Auto-orient plate" control (<c>PlateBedOverlay</c>) that only renders once a second plate is
+    /// added, so a single-plate job like the one that reproduced #1962 never sees it, and wrongly
+    /// blamed a plate lock that had nothing to do with the failure.
     /// </summary>
     public const string SlicingEngineRejectedModel =
         "The slicing engine could not slice this model. This most often happens when a model sits " +

@@ -57,10 +57,11 @@ vi.mock('@/common/hooks/useViewModePreference', () => ({
 
 /**
  * The exact hint the backend sends for a `SlicingEngineRejectedModel` failure (issue #1811,
- * reworded for #1962). It names the "Auto-Orient" and "Lay Flat" model-tool-rail buttons —
- * the controls that actually resolved every affected model when issue #1811 was reproduced
- * against the real OrcaSlicer CLI. An earlier revision instead named a plate-level
- * "Auto-orient plate" control that never shipped in `SlicerToolbar` (#1962).
+ * reworded for #1962). It names the "Auto-Orient" and "Lay Flat" model-tool-rail buttons in
+ * `SlicerToolbar` — the always-visible controls that actually resolved every affected model
+ * when issue #1811 was reproduced against the real OrcaSlicer CLI. An earlier revision instead
+ * named a different, plate-level "Auto-orient plate" control (`PlateBedOverlay`) that only
+ * renders once a second plate exists, so a single-plate job never saw it (#1962).
  */
 const ENGINE_REJECTED_HINT =
   'The slicing engine could not slice this model. This most often happens when a model sits in ' +
@@ -113,15 +114,18 @@ describe('SliceJobsPanel slice failure notice (#1811)', () => {
 
   it('names controls that actually exist in the rendered slicer toolbar (#1962)', async () => {
     // Ties the hint text to the real rendered button labels so the two cannot silently drift
-    // apart again: this failed for #1962 because the hint named a "Auto-orient plate" control
-    // that no toolbar button ever rendered.
+    // apart again: this failed for #1962 because the hint named an "Auto-orient plate" control
+    // that only exists on a different, plate-level overlay (and only once a second plate is
+    // added), not the always-visible model tool rail buttons the hint actually means.
     render(<SlicerToolbar hasSelection />);
     const autoOrientButton = screen.getByTitle('Auto-Orient');
     const layFlatButton = screen.getByTitle('Lay Flat (F)');
+    // Strip the trailing "(F)" keyboard-shortcut hint from the rendered title so the comparison
+    // is against the button's actual label text, not a second hardcoded literal.
+    const layFlatBaseLabel = layFlatButton.getAttribute('title')!.replace(/\s*\(.*\)$/, '');
 
     expect(ENGINE_REJECTED_HINT).toContain(autoOrientButton.getAttribute('title')!);
-    expect(ENGINE_REJECTED_HINT).toContain('Lay Flat');
-    expect(layFlatButton).toBeInTheDocument();
+    expect(ENGINE_REJECTED_HINT).toContain(layFlatBaseLabel);
     expect(ENGINE_REJECTED_HINT).not.toContain('Auto-orient plate');
     expect(ENGINE_REJECTED_HINT).not.toContain('plate controls');
     expect(ENGINE_REJECTED_HINT).not.toContain('unlock the plate');
