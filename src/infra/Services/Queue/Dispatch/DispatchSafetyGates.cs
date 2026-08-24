@@ -531,10 +531,10 @@ public static class DispatchSafetyGates
             _ = caps.Add("enclosure");
         }
 
-        if (printer.CalibrationHasHeatedChamber == true)
+        if (printer.HasHeatedChamber == true)
         {
-            // Reuses the calibration-owned column: chamber never had a separate
-            // general-purpose column like bed/enclosure (issue #1617).
+            // Reuses the same column for both dispatch and calibration: chamber never had a
+            // separate general-purpose column like bed/enclosure (issue #1617, rolled back #1947).
             _ = caps.Add("heated_chamber");
         }
 

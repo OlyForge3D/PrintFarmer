@@ -662,7 +662,7 @@ public sealed class MoonrakerEmulatorSeeder(
         printer.CalibrationHasHeatedBed = true;
         printer.MaxBedTemp = 120;
         printer.CalibrationHasEnclosure = false;
-        printer.CalibrationHasHeatedChamber = false;
+        printer.HasHeatedChamber = false;
         printer.ActiveToolheadIndex = 0;
         printer.SupportsPressureAdvance = true;
         printer.SupportsFirmwareRetraction = true;

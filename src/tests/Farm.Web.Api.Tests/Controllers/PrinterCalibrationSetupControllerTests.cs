@@ -737,7 +737,7 @@ public sealed class PrinterCalibrationSetupControllerTests : IAsyncLifetime
                 CalibrationHasHeatedBed = true,
                 MaxBedTemp = 120,
                 CalibrationHasEnclosure = false,
-                CalibrationHasHeatedChamber = false,
+                HasHeatedChamber = false,
                 ActiveToolheadIndex = 0,
                 SupportsPressureAdvance = true,
                 SupportsFirmwareRetraction = true,
