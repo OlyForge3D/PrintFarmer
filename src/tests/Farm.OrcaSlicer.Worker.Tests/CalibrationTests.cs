@@ -1,8 +1,12 @@
 ﻿using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
+using Farm.OrcaSlicer.Worker.Services;
 using Farm.OrcaSlicer.Worker.Services.Calibration;
 using Farm.Slicer.Module.Models;
+using Farm.Slicer.Worker.Core;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -119,6 +123,42 @@ public class CalibrationTests : IDisposable
         {
             gcode.Should().Contain(temperature.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
+    }
+
+    [Fact]
+    public void BuildLayerChangeGcode_NineBands_EachThresholdMapsToTheCorrectTemperature()
+    {
+        // The weaker "value appears somewhere" assertion above cannot catch a swapped band
+        // mapping (e.g. band 3's threshold paired with band 6's temperature) -- the acceptance
+        // criterion is that the temperature tower "emits the correct temperature change per
+        // band", not merely that all nine temperatures appear. This parses the emitted
+        // {if}/{elsif}/{else} chain in order and asserts each (threshold, temperature) pair
+        // matches the expected band exactly, plus the fallback {else} temperature.
+        string gcode = TemperatureTowerGcodeBuilder.BuildLayerChangeGcode(
+            startTemperatureC: 230,
+            temperatureStepC: 5,
+            bandHeightMm: 10,
+            bandCount: 9);
+
+        var conditionalPairs = System.Text.RegularExpressions.Regex
+            .Matches(gcode, @"\{(?:if|elsif) layer_z >= (?<threshold>[\d.]+)\}(?<temperature>[\d.]+)")
+            .Select(m => (
+                Threshold: double.Parse(m.Groups["threshold"].Value, System.Globalization.CultureInfo.InvariantCulture),
+                Temperature: double.Parse(m.Groups["temperature"].Value, System.Globalization.CultureInfo.InvariantCulture)))
+            .ToList();
+
+        // Bands 8 down to 1, tallest (highest threshold) first: band N sits at z >= N*10 and
+        // prints at 230 - N*5.
+        List<(double Threshold, double Temperature)> expectedPairs =
+            Enumerable.Range(1, 8).Reverse()
+                .Select(band => ((double)(band * 10), 230.0 - (band * 5)))
+                .ToList();
+        conditionalPairs.Should().Equal(expectedPairs);
+
+        var elseMatch = System.Text.RegularExpressions.Regex.Match(gcode, @"\{else\}(?<temperature>[\d.]+)\{endif\}");
+        elseMatch.Success.Should().BeTrue();
+        double.Parse(elseMatch.Groups["temperature"].Value, System.Globalization.CultureInfo.InvariantCulture)
+            .Should().Be(230); // band 0, no threshold
     }
 
     [Fact]
@@ -327,6 +367,141 @@ public class CalibrationTests : IDisposable
             .Which.Message.Should().NotContain(_tempDir, "the exception message must not disclose internal worker filesystem paths");
     }
 
+    #endregion
+
+    #region OrcaSlicingPipelineService — calibration pipeline wiring
+
+    [Theory]
+    [InlineData(CalibrationMethod.FlowRatePass1, "flowrate-test-pass1.3mf")]
+    [InlineData(CalibrationMethod.FlowRatePass2, "flowrate-test-pass2.3mf")]
+    public void PrepareCalibrationModel_FlowRateMethod_ResolvesResourceAndAppliesFlowRatios(
+        CalibrationMethod method,
+        string resourceFileName)
+    {
+        // Regression coverage for the actual worker pipeline wiring (issue #1938): a unit test on
+        // FlowRateCalibrationConfigurator alone cannot catch a regression in how
+        // OrcaSlicingPipelineService resolves the calibration method, locates the bundled
+        // resource, and routes flow-rate methods through the per-object configurator.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources");
+        string flowRatePath = Path.Combine(calibResourcesRoot, "filament_flow", resourceFileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(flowRatePath)!);
+        CreateSynthetic3mfAt(flowRatePath, [("1", "flowrate_90"), ("2", "flowrate_110")]);
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(method),
+        };
+
+        string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
+
+        File.Exists(preparedPath).Should().BeTrue();
+        using ZipArchive archive = ZipFile.OpenRead(preparedPath);
+        archive.GetEntry("Metadata/Slic3r_PE_model.config").Should().NotBeNull(
+            "the flow-rate path must produce a 3MF with per-object flow_ratio overrides, not a plain copy");
+    }
+
+    [Fact]
+    public void PrepareCalibrationModel_TemperatureTowerMethod_CopiesResourceUnmodified()
+    {
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-tt");
+        string towerPath = Path.Combine(calibResourcesRoot, "temperature_tower", "temperature_tower.drc");
+        Directory.CreateDirectory(Path.GetDirectoryName(towerPath)!);
+        File.WriteAllText(towerPath, "fake-tower-resource");
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.TemperatureTower),
+        };
+
+        string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
+
+        File.Exists(preparedPath).Should().BeTrue();
+        File.ReadAllText(preparedPath).Should().Be("fake-tower-resource");
+    }
+
+    [Fact]
+    public void PrepareCalibrationModel_MissingResourceFile_ThrowsWithoutLeakingPath()
+    {
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-missing");
+        Directory.CreateDirectory(calibResourcesRoot);
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.TemperatureTower),
+        };
+
+        Action act = () => pipeline.PrepareCalibrationModel(job, workDir);
+
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().NotContain(calibResourcesRoot, "the exception message must not disclose internal worker filesystem paths");
+    }
+
+    [Fact]
+    public async Task ApplyTemperatureTowerGcodeAsync_InjectsLayerChangeGcodeAndRecomputesDigest()
+    {
+        // Regression coverage for the pipeline's process-profile injection wiring: a unit test on
+        // TemperatureTowerGcodeBuilder alone does not prove the gcode actually reaches the process
+        // profile on disk, or that the recorded digest is recomputed to match.
+        string processJsonPath = Path.Combine(_tempDir, $"process-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(processJsonPath, """{"name": "Test Process"}""");
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.TemperatureTower),
+            CalibrationParamsJson = """{"start_temperature": 220, "temperature_step": 10, "band_height_mm": 20, "band_count": 3}""",
+        };
+
+        await OrcaSlicingPipelineService.ApplyTemperatureTowerGcodeAsync(job, processJsonPath, CancellationToken.None);
+
+        string updatedContent = await File.ReadAllTextAsync(processJsonPath);
+        using JsonDocument doc = JsonDocument.Parse(updatedContent);
+        string layerChangeGcode = doc.RootElement.GetProperty("layer_change_gcode").GetString()!;
+        layerChangeGcode.Should().Contain("M104 S");
+        layerChangeGcode.Should().Contain("layer_z >= 40"); // band 2 threshold: 2 * 20mm
+        job.ProcessProfileSha256.Should().NotBeNullOrEmpty();
+        job.ProcessProfileSha256.Should().Be(
+            NativeSlicerProfiles.ComputeSha256(updatedContent),
+            "the recorded digest must match the mutated process profile content, not the original");
+    }
+
+    private static OrcaSlicingPipelineService CreatePipeline(string calibResourcesRoot)
+    {
+        IConfiguration configuration =
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Worker:WorkingDirectory"] = Path.Combine(Path.GetTempPath(), $"orca-worker-{Guid.NewGuid():N}"),
+                    ["SlicerApi:BaseUrl"] = "http://localhost",
+                    ["Worker:CalibrationResourcesPath"] = calibResourcesRoot,
+                })
+                .Build();
+        return new OrcaSlicingPipelineService(
+            new HttpClient(),
+            new NullProgressReporter(),
+            NullLogger<OrcaSlicingPipelineService>.Instance,
+            configuration,
+            new WorkerStateService());
+    }
+
+    private void CreateSynthetic3mfAt(string path, (string Id, string Name)[] objects)
+    {
+        using FileStream fs = File.Create(path);
+        using var archive = new ZipArchive(fs, ZipArchiveMode.Create);
+        ZipArchiveEntry entry = archive.CreateEntry("3D/3dmodel.model");
+        using Stream stream = entry.Open();
+        using var writer = new StreamWriter(stream, Encoding.UTF8);
+        writer.Write(BuildModelXml(objects));
+    }
+
+    #endregion
+
     private static string BuildModelXml(params (string Id, string Name)[] objects)
     {
         var sb = new StringBuilder();
@@ -366,5 +541,24 @@ public class CalibrationTests : IDisposable
         return reader.ReadToEnd();
     }
 
-    #endregion
+    private sealed class NullProgressReporter : IProgressReporter
+    {
+        public Task ReportProgressAsync(
+            Guid jobId,
+            Guid claimToken,
+            int progress,
+            string message,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task ReportCompletionAsync(
+            DistributedSlicingJob job,
+            SlicingResult result,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task ReportFailureAsync(
+            Guid jobId,
+            Guid claimToken,
+            string errorMessage,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
 }
