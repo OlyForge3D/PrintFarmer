@@ -1,8 +1,11 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.Webhooks;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Services.Maintenance;
 
@@ -13,6 +16,7 @@ namespace Farm.Web.Api.Services.Maintenance;
 public sealed class MaintenanceResolutionNotifier(
     IHubContext<MaintenanceHub> maintenanceHub,
     IWebhookService webhookService,
+    IOptionsMonitor<MaintenanceAlertSettings> settingsMonitor,
     ILogger<MaintenanceResolutionNotifier> logger) : IMaintenanceResolutionNotifier
 {
     /// <inheritdoc />
@@ -24,31 +28,39 @@ public sealed class MaintenanceResolutionNotifier(
         ArgumentNullException.ThrowIfNull(alert);
         ArgumentNullException.ThrowIfNull(log);
 
-        await SendSignalRAsync(
-            "alertstatuschanged",
-            new
-            {
-                id = alert.Id,
-                printerId = alert.PrinterId,
-                status = alert.Status.ToString(),
-                resolvedAt = alert.ResolvedAt,
-                resolvedBy = alert.ResolvedBy
-            },
-            alert.Id,
-            cancellationToken);
+        // Scoped and gated the same way as MaintenanceAlertEngine (issue #1966): honour the
+        // operator's EnableSignalRNotifications toggle, and target only the farm-wide admin
+        // group plus the resolved alert's own printer maintenance group instead of Clients.All.
+        if (settingsMonitor.CurrentValue.EnableSignalRNotifications)
+        {
+            await SendSignalRAsync(
+                "alertstatuschanged",
+                new
+                {
+                    id = alert.Id,
+                    printerId = alert.PrinterId,
+                    status = alert.Status.ToString(),
+                    resolvedAt = alert.ResolvedAt,
+                    resolvedBy = alert.ResolvedBy
+                },
+                alert.Id,
+                alert.PrinterId,
+                cancellationToken);
 
-        await SendSignalRAsync(
-            "maintenancecompleted",
-            new
-            {
-                logId = log.Id,
-                printerId = log.PrinterId,
-                deploymentId = log.PrinterMaintenanceScheduleId,
-                performedAt = log.PerformedAt,
-                performedBy = log.PerformedBy
-            },
-            alert.Id,
-            cancellationToken);
+            await SendSignalRAsync(
+                "maintenancecompleted",
+                new
+                {
+                    logId = log.Id,
+                    printerId = log.PrinterId,
+                    deploymentId = log.PrinterMaintenanceScheduleId,
+                    performedAt = log.PerformedAt,
+                    performedBy = log.PerformedBy
+                },
+                alert.Id,
+                alert.PrinterId,
+                cancellationToken);
+        }
 
         try
         {
@@ -73,11 +85,16 @@ public sealed class MaintenanceResolutionNotifier(
         string eventName,
         object payload,
         Guid alertId,
+        Guid printerId,
         CancellationToken cancellationToken)
     {
         try
         {
-            await maintenanceHub.Clients.All.SendAsync(
+            await maintenanceHub.Clients.Groups(
+                [
+                    AuthorizedHubGroups.Farm,
+                    AuthorizedHubGroups.MaintenancePrinter(printerId)
+                ]).SendAsync(
                 eventName,
                 payload,
                 cancellationToken);

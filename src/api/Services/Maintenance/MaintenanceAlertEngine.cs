@@ -371,7 +371,16 @@ public class MaintenanceAlertEngine(
         {
             try
             {
-                await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync(
+                // Scoped to the printer's maintenance group plus the farm-wide admin group
+                // (issue #1966): a maintenance:admin caller sees every alert, and a caller who
+                // explicitly subscribed to this printer via MaintenanceHub.SubscribeToPrinterAsync
+                // sees alerts for that printer only. Clients.Groups sends once to the union, so a
+                // connection in both groups (e.g. an admin who also subscribed) is not double-sent.
+                await _hubContext.Clients.Groups(
+                    [
+                        Farm.Infrastructure.Security.AuthorizedHubGroups.Farm,
+                        Farm.Infrastructure.Security.AuthorizedHubGroups.MaintenancePrinter(alert.PrinterId)
+                    ]).SendAsync(
                     MaintenanceHubEvents.AlertCreated,
                     new
                     {
@@ -515,7 +524,13 @@ public class MaintenanceAlertEngine(
         {
             try
             {
-                await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync(
+                // See BroadcastAlertCreatedAsync: farm-wide admin group plus this printer's
+                // maintenance group, sent once via Clients.Groups to avoid double delivery.
+                await _hubContext.Clients.Groups(
+                    [
+                        Farm.Infrastructure.Security.AuthorizedHubGroups.Farm,
+                        Farm.Infrastructure.Security.AuthorizedHubGroups.MaintenancePrinter(alert.PrinterId)
+                    ]).SendAsync(
                     MaintenanceHubEvents.AlertStatusChanged,
                     new
                     {
