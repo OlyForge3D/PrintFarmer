@@ -1761,6 +1761,19 @@ public class PrintersController(
             return precondition;
         }
 
+        // Validate toolhead metrology bounds up front so a rejected write never partially
+        // mutates the printer (see CalibrationPrinterUpdateMapper.ValidateToolheadMetrology).
+        if (dto.Toolheads?.Length > 0)
+        {
+            foreach (UpdateToolheadDto toolheadDto in dto.Toolheads)
+            {
+                if (Services.Calibration.CalibrationPrinterUpdateMapper.ValidateToolheadMetrology(toolheadDto) is { } problem)
+                {
+                    return BadRequest(problem);
+                }
+            }
+        }
+
         // Capture decrypted credentials BEFORE any modifications to avoid phantom changes
         // from PopulateCredential's decrypt → EncryptSensitiveFieldsOnTrackedEntities's re-encrypt cycle
         string? originalApiKey = p.ApiKey;

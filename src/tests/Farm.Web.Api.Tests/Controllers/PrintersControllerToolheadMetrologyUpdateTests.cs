@@ -126,6 +126,44 @@ public class PrintersControllerToolheadMetrologyUpdateTests : IAsyncLifetime
         persisted.ExtruderGearRatio.Should().Be("3:1");
     }
 
+    [Theory]
+    [InlineData(200.0, null, null, null, "offsetX")]
+    [InlineData(null, null, null, 300.0, "maxVolumetricFlow")]
+    [InlineData(null, null, null, null, "extruderGearRatio")]
+    public async Task UpdatePrinter_WhenToolheadMetrologyOutOfBounds_RejectsWithoutMutating(
+        double? invalidOffsetX,
+        double? invalidOffsetY,
+        double? invalidOffsetZ,
+        double? invalidMaxVolumetricFlow,
+        string expectedField)
+    {
+        (Guid printerId, Guid toolheadId) = await SeedPrinterWithToolheadAsync();
+
+        var toolheadUpdate = new UpdateToolheadDto(
+            Id: toolheadId,
+            OffsetX: invalidOffsetX,
+            OffsetY: invalidOffsetY,
+            OffsetZ: invalidOffsetZ,
+            MaxVolumetricFlow: invalidMaxVolumetricFlow,
+            ExtruderGearRatio: expectedField == "extruderGearRatio" ? "not-a-ratio" : null);
+        var dto = new UpdatePrinterDto(Toolheads: [toolheadUpdate]);
+
+        HttpResponseMessage response = await PutPrinterAsync(printerId, dto);
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("invalid_toolhead_metrology");
+        body.Should().Contain(expectedField);
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Toolhead persisted = await db.Toolheads.SingleAsync(t => t.Id == toolheadId);
+
+        persisted.OffsetX.Should().BeNull();
+        persisted.MaxVolumetricFlow.Should().BeNull();
+        persisted.ExtruderGearRatio.Should().BeNull();
+    }
+
     private async Task<HttpResponseMessage> PutPrinterAsync(
         Guid printerId,
         UpdatePrinterDto dto)

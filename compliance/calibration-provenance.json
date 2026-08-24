@@ -1465,19 +1465,6 @@
       }
     },
     {
-      "id": "calibration-setup-contracts",
-      "destinationPath": "src/infra/Calibration/CalibrationSetupContracts.cs",
-      "referenceUrls": [
-        "https://github.com/OlyForge3D/PrintFarmer/issues/1616"
-      ],
-      "statement": "Independent PrintFarmer implementation of the issue #1616 calibration-setup request/response contracts and toolhead metrology validation rules; no external calibration source code was copied or adapted.",
-      "review": {
-        "reviewer": "Copilot App",
-        "reviewDate": "2026-08-16",
-        "decision": "approved"
-      }
-    },
-    {
       "id": "calibration-slicer-compatibility-policy",
       "destinationPath": "src/infra/Calibration/CalibrationSlicerCompatibilityPolicy.cs",
       "referenceUrls": [
