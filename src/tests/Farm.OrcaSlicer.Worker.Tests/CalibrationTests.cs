@@ -463,8 +463,17 @@ public class CalibrationTests : IDisposable
         string updatedContent = await File.ReadAllTextAsync(processJsonPath);
         using JsonDocument doc = JsonDocument.Parse(updatedContent);
         string layerChangeGcode = doc.RootElement.GetProperty("layer_change_gcode").GetString()!;
-        layerChangeGcode.Should().Contain("M104 S");
-        layerChangeGcode.Should().Contain("layer_z >= 40"); // band 2 threshold: 2 * 20mm
+        string expectedGcode = TemperatureTowerGcodeBuilder.BuildLayerChangeGcode(
+            startTemperatureC: 220,
+            temperatureStepC: 10,
+            bandHeightMm: 20,
+            bandCount: 3);
+        layerChangeGcode.Should().Be(
+            expectedGcode,
+            "the pipeline must inject the exact gcode computed from the job's CalibrationParamsJson, " +
+            "not a default/fallback template — a bug that ignores the client-supplied band_height_mm/" +
+            "band_count/temperature_step would otherwise go undetected because the default 9-band " +
+            "template also happens to contain a 'layer_z >= 40' threshold");
         job.ProcessProfileSha256.Should().NotBeNullOrEmpty();
         job.ProcessProfileSha256.Should().Be(
             NativeSlicerProfiles.ComputeSha256(updatedContent),
