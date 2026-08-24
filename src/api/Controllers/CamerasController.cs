@@ -7,6 +7,8 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
+using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Startup;
@@ -31,6 +33,7 @@ public class CamerasController(
     IStartupStatus startupStatus,
     ILogger<CamerasController> logger,
     IHttpClientFactory httpClientFactory,
+    IEgressGuard egressGuard,
     IQueueResourceAuthorizationService? queueResourceAuthorization = null) : ControllerBase
 {
     private readonly ICameraService _cameraService = cameraService ?? throw new ArgumentNullException(nameof(cameraService));
@@ -38,6 +41,7 @@ public class CamerasController(
     private readonly IStartupStatus _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
     private readonly ILogger<CamerasController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+    private readonly IEgressGuard _egressGuard = egressGuard ?? throw new ArgumentNullException(nameof(egressGuard));
     private readonly IQueueResourceAuthorizationService? _queueResourceAuthorization = queueResourceAuthorization;
 
     /// <summary>
@@ -556,10 +560,37 @@ public class CamerasController(
                 StatusCodes.Status502BadGateway);
         }
 
+        EgressCheckResult egressCheck = await _egressGuard.CheckAsync(targetUri.ToString(), ct);
+        if (!egressCheck.IsAllowed)
+        {
+            _logger.LogWarning(
+                "Camera {CameraId} target denied by egress guard: {Reason}",
+                id,
+                LogSanitizer.Sanitize(egressCheck.DenyReason));
+            return CameraProblem(
+                "camera_target_invalid",
+                "The configured camera target is invalid.",
+                StatusCodes.Status502BadGateway);
+        }
+
+        // Reuse the exact address the egress guard just vetted for the real connection instead
+        // of letting the hostname be re-resolved independently — otherwise a DNS-rebinding
+        // attacker could swap the record between the check above and the connection below.
+        Uri connectUri = egressCheck.ResolvedAddress is not null
+            ? EgressGuard.CreatePinnedUri(targetUri, egressCheck.ResolvedAddress)
+            : targetUri;
+
         try
         {
             HttpClient client = _httpClientFactory.CreateClient("VettedEgress");
-            using var request = new HttpRequestMessage(HttpMethod.Get, targetUri);
+            using var request = new HttpRequestMessage(HttpMethod.Get, connectUri);
+            if (connectUri != targetUri)
+            {
+                request.Headers.Host = targetUri.IsDefaultPort
+                    ? targetUri.Host
+                    : $"{targetUri.Host}:{targetUri.Port}";
+            }
+
             HttpResponseMessage response = await client.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,

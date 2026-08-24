@@ -4117,10 +4117,34 @@ public class PrintersController(
             return CameraProxyProblem("camera_target_invalid", "The configured camera target is invalid.");
         }
 
+        EgressCheckResult egressCheck = await _egressGuard.CheckAsync(targetUri.ToString(), ct);
+        if (!egressCheck.IsAllowed)
+        {
+            _logger.LogWarning(
+                "Camera target for printer {PrinterId} denied by egress guard: {Reason}",
+                id,
+                LogSanitizer.Sanitize(egressCheck.DenyReason));
+            return CameraProxyProblem("camera_target_invalid", "The configured camera target is invalid.");
+        }
+
+        // Reuse the exact address the egress guard just vetted for the real connection instead
+        // of letting the hostname be re-resolved independently — otherwise a DNS-rebinding
+        // attacker could swap the record between the check above and the connection below.
+        Uri connectUri = egressCheck.ResolvedAddress is not null
+            ? EgressGuard.CreatePinnedUri(targetUri, egressCheck.ResolvedAddress)
+            : targetUri;
+
         try
         {
             HttpClient client = _httpClientFactory.CreateClient("VettedEgress");
-            using var request = new HttpRequestMessage(HttpMethod.Get, targetUri);
+            using var request = new HttpRequestMessage(HttpMethod.Get, connectUri);
+            if (connectUri != targetUri)
+            {
+                request.Headers.Host = targetUri.IsDefaultPort
+                    ? targetUri.Host
+                    : $"{targetUri.Host}:{targetUri.Port}";
+            }
+
             HttpResponseMessage response = await client.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
