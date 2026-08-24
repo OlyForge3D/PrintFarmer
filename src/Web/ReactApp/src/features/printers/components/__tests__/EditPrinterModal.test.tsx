@@ -139,6 +139,50 @@ describe('EditPrinterModal', () => {
     expect(await screen.findByDisplayValue('http://qp4-1.local')).toBeInTheDocument();
   });
 
+  it('exposes a unique id for the printer-name input when a toolhead shares the "Name" label', async () => {
+    mockUsePrinterDetails.mockReturnValue({
+      data: {
+        rowVersion: 'printer-v1',
+        name: 'qp4-1',
+        serverUrl: 'http://qp4-1.local',
+        originalServerUrl: 'http://qp4-1.local',
+        notes: '',
+        manufacturerId: 'manufacturer-1',
+        modelId: 'model-1',
+        backend: 'Moonraker',
+        apiKey: '',
+        username: '',
+        password: '',
+        capabilities: {},
+        backendPort: 7125,
+        frontendPort: 80,
+        obicoEnabled: false,
+        toolheads: [
+          { id: 'th-0', index: 0, name: 'Toolhead 1', isPrimary: true },
+        ],
+      },
+    });
+
+    const { container } = render(
+      <EditPrinterModal
+        printerId="printer-1"
+        isOpen
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+
+    // The primary toolhead auto-expands, so its own "Name" field (id
+    // `toolhead-name-0`) renders alongside the printer's "Name" field —
+    // both labels start with "Name", so a substring lookup like Playwright's
+    // default `getByLabel('Name')` is ambiguous. The printer-name input must
+    // remain uniquely addressable by its own id regardless of how many
+    // toolhead "Name" fields exist.
+    await screen.findByDisplayValue('http://qp4-1.local');
+    expect(screen.getAllByLabelText('Name', { exact: false })).toHaveLength(2);
+    expect(container.querySelector<HTMLInputElement>('#edit-printer-name')?.value).toBe('qp4-1');
+  });
+
   it('reveals the stored PrusaLink password when the eye button is activated', async () => {
     const user = userEvent.setup();
     mockUsePrinterDetails.mockReturnValue({
