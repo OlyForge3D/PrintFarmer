@@ -601,7 +601,7 @@ public sealed class PrinterCalibrationContextService(
             printer.MaxAcceleration is null ||
             printer.MaxTravelSpeed is null ||
             printer.CalibrationHasHeatedBed is null ||
-            printer.CalibrationHasHeatedChamber is null ||
+            printer.HasHeatedChamber is null ||
             printer.CalibrationSlicerEngine is null ||
             printer.CalibrationSlicerDistribution is null ||
             printer.CalibrationSlicerVersion is null ||
@@ -1404,7 +1404,7 @@ public sealed class PrinterCalibrationContextService(
         // either fact, so these two intentionally resolve printer ?? catalog only (#1922).
         int? maxTravelAcceleration = printer.MaxTravelAcceleration ?? catalogFacts.MaxTravelAcceleration;
         bool? hasHeatedBed = printer.CalibrationHasHeatedBed ?? derivedFacts.HasHeatedBed ?? catalogFacts.HasHeatedBed;
-        bool? hasHeatedChamber = printer.CalibrationHasHeatedChamber ?? derivedFacts.HasHeatedChamber ??
+        bool? hasHeatedChamber = printer.HasHeatedChamber ?? derivedFacts.HasHeatedChamber ??
             catalogFacts.HasHeatedChamber;
         bool? hasEnclosure = printer.CalibrationHasEnclosure ?? catalogFacts.HasEnclosure;
 

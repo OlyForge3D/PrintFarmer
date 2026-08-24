@@ -31,7 +31,7 @@ internal static class CalibrationPrinterUpdateMapper
         changed |= Set(update.MaxTravelAcceleration, printer.MaxTravelAcceleration, value => printer.MaxTravelAcceleration = value);
         changed |= Set(update.CalibrationHasHeatedBed, printer.CalibrationHasHeatedBed, value => printer.CalibrationHasHeatedBed = value);
         changed |= Set(update.CalibrationHasEnclosure, printer.CalibrationHasEnclosure, value => printer.CalibrationHasEnclosure = value);
-        changed |= Set(update.CalibrationHasHeatedChamber, printer.CalibrationHasHeatedChamber, value => printer.CalibrationHasHeatedChamber = value);
+        changed |= Set(update.HasHeatedChamber, printer.HasHeatedChamber, value => printer.HasHeatedChamber = value);
         changed |= Set(update.MaxChamberTemp, printer.MaxChamberTemp, value => printer.MaxChamberTemp = value);
         changed |= Set(update.ActiveToolheadIndex, printer.ActiveToolheadIndex, value => printer.ActiveToolheadIndex = value);
         changed |= Set(update.SupportsPressureAdvance, printer.SupportsPressureAdvance, value => printer.SupportsPressureAdvance = value);

@@ -379,7 +379,7 @@ public sealed class PrinterCalibrationContextServiceTests
         harness.Printer.MaxAcceleration = null;
         harness.Printer.MaxTravelSpeed = null;
         harness.Printer.CalibrationHasHeatedBed = null;
-        harness.Printer.CalibrationHasHeatedChamber = null;
+        harness.Printer.HasHeatedChamber = null;
         harness.Printer.CalibrationSlicerEngine = null;
         harness.Printer.CalibrationSlicerDistribution = null;
         harness.Printer.CalibrationSlicerVersion = null;
@@ -437,7 +437,7 @@ public sealed class PrinterCalibrationContextServiceTests
         harness.Printer.MaxAcceleration = null;
         harness.Printer.MaxTravelAcceleration = null;
         harness.Printer.CalibrationHasHeatedBed = null;
-        harness.Printer.CalibrationHasHeatedChamber = null;
+        harness.Printer.HasHeatedChamber = null;
         harness.Printer.CalibrationHasEnclosure = null;
         harness.Printer.ActiveToolheadIndex = null;
         Toolhead toolhead = harness.Printer.Toolheads.Single();
@@ -594,7 +594,7 @@ public sealed class PrinterCalibrationContextServiceTests
         harness.Printer.MaxAcceleration = null;
         harness.Printer.MaxTravelAcceleration = null;
         harness.Printer.CalibrationHasHeatedBed = null;
-        harness.Printer.CalibrationHasHeatedChamber = null;
+        harness.Printer.HasHeatedChamber = null;
         harness.Printer.CalibrationHasEnclosure = null;
         harness.Printer.MaxPrintSpeed = null;
         _ = await harness.Db.SaveChangesAsync();
@@ -635,7 +635,7 @@ public sealed class PrinterCalibrationContextServiceTests
         harness.Printer.PrintablePolygonJson = null;
         harness.Printer.CalibrationMotionType = null;
         harness.Printer.CalibrationHasHeatedBed = null;
-        harness.Printer.CalibrationHasHeatedChamber = null;
+        harness.Printer.HasHeatedChamber = null;
         harness.Printer.CalibrationHasEnclosure = null;
         harness.Profiles = harness.Profiles with
         {
@@ -688,7 +688,7 @@ public sealed class PrinterCalibrationContextServiceTests
         harness.Printer.PrintablePolygonJson = null;
         harness.Printer.CalibrationMotionType = null;
         harness.Printer.CalibrationHasHeatedBed = null;
-        harness.Printer.CalibrationHasHeatedChamber = null;
+        harness.Printer.HasHeatedChamber = null;
         harness.Printer.CalibrationHasEnclosure = null;
         harness.Profiles = harness.Profiles with
         {
@@ -818,7 +818,7 @@ public sealed class PrinterCalibrationContextServiceTests
     public async Task GetCandidatesAsync_WithHasHeatedChamberDerivedFromProfile_UsesHeatedChamberNamingConsistently()
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
-        harness.Printer.CalibrationHasHeatedChamber = null;
+        harness.Printer.HasHeatedChamber = null;
         harness.Printer.MaxChamberTemp = null;
         _ = await harness.Db.SaveChangesAsync();
         harness.Profiles = harness.Profiles with
@@ -839,21 +839,22 @@ public sealed class PrinterCalibrationContextServiceTests
     }
 
     [Fact]
-    public void Printer_HasHeatedChamber_IsRenamedToCalibrationHasHeatedChamberChannel()
+    public void Printer_HasHeatedChamber_IsNotRenamedToCalibrationHasHeatedChamberChannel()
     {
-        // Pins issue #1617's rename: Printer must expose the Calibration*-prefixed channel
-        // for the heated-chamber fact and must not resurrect the old unprefixed name.
-        _ = typeof(Printer).GetProperty(nameof(Printer.CalibrationHasHeatedChamber))
-            .Should().NotBeNull("the renamed calibration channel must exist on Printer");
-        _ = typeof(Printer).GetProperty("HasHeatedChamber")
-            .Should().BeNull("the unprefixed HasHeatedChamber property must not exist on Printer");
+        // Pins the rollback of issue #1617's rename (issue #1947): HasHeatedChamber backs a
+        // general dispatch-safety property, not a calibration-only channel, so it must not be
+        // Calibration*-prefixed.
+        _ = typeof(Printer).GetProperty(nameof(Printer.HasHeatedChamber))
+            .Should().NotBeNull("the unprefixed HasHeatedChamber property must exist on Printer");
+        _ = typeof(Printer).GetProperty("CalibrationHasHeatedChamber")
+            .Should().BeNull("the renamed calibration channel must not exist on Printer");
     }
 
     [Fact]
-    public void Printer_CalibrationHasHeatedChamber_IsNullableBool()
+    public void Printer_HasHeatedChamber_IsNullableBool()
     {
         System.Reflection.PropertyInfo? property =
-            typeof(Printer).GetProperty(nameof(Printer.CalibrationHasHeatedChamber));
+            typeof(Printer).GetProperty(nameof(Printer.HasHeatedChamber));
         _ = property.Should().NotBeNull();
         _ = property!.PropertyType.Should().Be(typeof(bool?));
     }
@@ -1665,7 +1666,7 @@ public sealed class PrinterCalibrationContextServiceTests
                 CalibrationHasHeatedBed = true,
                 MaxBedTemp = 120,
                 CalibrationHasEnclosure = false,
-                CalibrationHasHeatedChamber = false,
+                HasHeatedChamber = false,
                 ActiveToolheadIndex = 0,
                 SupportsPressureAdvance = true,
                 SupportsFirmwareRetraction = true,
