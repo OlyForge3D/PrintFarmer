@@ -1061,43 +1061,6 @@ export class ApiClient {
   }
 
   /**
-   * Fetches the read-only calibration-eligibility context for a printer
-   * (issue #1616): eligibility, missing inputs, and every profile-owned and
-   * residual manual field currently persisted.
-   */
-  async getCalibrationContext(
-    id: string,
-    slicerType = "OrcaSlicer"
-  ): Promise<import("@/types/api").CalibrationContextDto> {
-    const response = await this.client.get<import("@/types/api").CalibrationContextDto>(
-      `/printers/${id}/calibration-context`,
-      { params: { slicerType } }
-    );
-    return response.data;
-  }
-
-  /**
-   * Sets or edits the residual calibration-eligibility fields that remain
-   * manual after profile-owned sourcing (issue #1616, PR-3): per-toolhead
-   * metrology, the hardware sign-off timestamp, excludedRegions (explicit
-   * `[]` is honored), activeToolheadIndex, capability flags, and the
-   * confirm-only firmware-identity-verified flag. Additive and distinct
-   * from `updatePrinter` — never touches firmware family/version/dialect.
-   */
-  async updateCalibrationSetup(
-    id: string,
-    request: import("@/types/api").CalibrationSetupRequestDto,
-    reviewedRowVersion: string
-  ): Promise<import("@/types/api").CalibrationSetupResultDto> {
-    const response = await this.client.put<import("@/types/api").CalibrationSetupResultDto>(
-      `/printers/${id}/calibration-setup`,
-      request,
-      { headers: { "If-Match": this.reviewedEtag(reviewedRowVersion, "The reviewed printer") } }
-    );
-    return response.data;
-  }
-
-  /**
    * Re-probes the printer's firmware identity on demand and persists the detected
    * facts to the columns the calibration gate reads.
    *
@@ -5479,7 +5442,7 @@ export class ApiClient {
     return response.data;
   }
 
-  async acknowledgeCalibrationBedClearAndStart(input: {
+  async acknowledgeBedClearAndStart(input: {
     jobId: string;
     printerId: string;
     jobETag: string;
