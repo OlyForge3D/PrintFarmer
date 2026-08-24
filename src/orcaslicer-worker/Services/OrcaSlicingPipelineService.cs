@@ -279,8 +279,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string sourcePath = _calibrationResourceResolver.ResolveModelPath(method);
         if (!File.Exists(sourcePath))
         {
+            // Log the resolved path server-side only; the exception message (which can surface to
+            // callers via job failure reason) intentionally omits the internal filesystem layout.
+            _logger.LogError(
+                "Calibration resource file not found at '{SourcePath}' for method '{Method}'.",
+                sourcePath,
+                job.CalibrationMethod);
             throw new InvalidOperationException(
-                $"Calibration resource file not found at '{sourcePath}' for method '{job.CalibrationMethod}'. " +
+                $"Calibration resource for method '{job.CalibrationMethod}' is not available on this worker. " +
                 "Confirm the OrcaSlicer installation ships resources/calib and Worker:CalibrationResourcesPath/ORCA_CALIB_PATH is correct.");
         }
 

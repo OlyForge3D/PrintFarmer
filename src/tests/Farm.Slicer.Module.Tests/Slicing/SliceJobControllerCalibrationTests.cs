@@ -86,6 +86,40 @@ public sealed class SliceJobControllerCalibrationTests
             Times.Once);
     }
 
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public async Task SubmitAsync_CalibrationModeWithLegacySagaId_ReturnsInvalidRequest(
+        bool setProjectId,
+        bool setAttemptId,
+        bool setOrchestrationId)
+    {
+        // A client must never be able to combine calibration mode (issue #1938) with the unrelated
+        // printer/toolhead calibration-projects saga's identifiers: that would let a calibration
+        // slice masquerade as (or accidentally trip) SlicePrintBridgeController.IsCalibrationSlice,
+        // which inspects exactly these three fields and refuses to bridge such jobs to a printer.
+        SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out _);
+
+        var request = new SubmitSliceJobRequest
+        {
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            Priority = 1,
+            Calibration = new CalibrationRequest { Method = "flow_rate_pass_1" },
+            CalibrationProjectId = setProjectId ? Guid.NewGuid() : null,
+            CalibrationAttemptId = setAttemptId ? Guid.NewGuid() : null,
+            CalibrationOrchestrationId = setOrchestrationId ? Guid.NewGuid() : null,
+        };
+
+        IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
+
+        var objectResult = result.Should().BeOfType<ObjectResult>().Subject;
+        _ = objectResult.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        var problem = objectResult.Value.Should().BeOfType<ProblemDetails>().Subject;
+        _ = problem.Extensions["code"].Should().Be("calibration_mode_conflicts_with_saga_ids");
+        repository.Verify(instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private static SliceJobController CreateController(
         out Mock<ISliceJobRepository> repository,
         out Mock<ISliceJobEventService> events)

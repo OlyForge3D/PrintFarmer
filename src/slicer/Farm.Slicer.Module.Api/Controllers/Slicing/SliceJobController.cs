@@ -129,6 +129,22 @@ public partial class SliceJobController(
             }
 
             calibrationMethod = parsedMethod;
+
+            // Calibration mode is deliberately independent of, and mutually exclusive with, the
+            // unrelated printer/toolhead calibration-projects saga (issue #1940 epic). A calibration-
+            // mode request must never also carry saga identifiers — otherwise a client could smuggle
+            // a slice job into that saga's send-to-printer refusal path
+            // (SlicePrintBridgeController.IsCalibrationSlice) while still resolving as calibration
+            // mode here, or vice versa. Reject the request outright rather than silently dropping one.
+            if (request.CalibrationProjectId is not null ||
+                request.CalibrationAttemptId is not null ||
+                request.CalibrationOrchestrationId is not null)
+            {
+                const string conflictMessage = "A calibration-mode request (calibration.method) cannot also specify " +
+                    "calibrationProjectId, calibrationAttemptId, or calibrationOrchestrationId; " +
+                    "those belong to the separate printer/toolhead calibration-projects saga.";
+                return SlicerApiProblems.InvalidRequest(this, "calibration_mode_conflicts_with_saga_ids", conflictMessage);
+            }
         }
 
         if (_printerAccess is not null &&

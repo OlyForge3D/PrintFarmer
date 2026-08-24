@@ -165,6 +165,31 @@ public class CalibrationTests : IDisposable
         parameters.StartTemperatureC.Should().Be(230);
     }
 
+    [Theory]
+    [InlineData("""{"band_count": 100000}""")] // absurdly large: would blow up gcode-template generation
+    [InlineData("""{"band_count": 0}""")] // below the minimum of 1
+    [InlineData("""{"band_count": -5}""")]
+    public void CalibrationParameters_Parse_OutOfRangeBandCount_FallsBackToDefault(string json)
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.TemperatureTower);
+
+        parameters.BandCount.Should().Be(9, "an adversarial or malformed band_count must never reach the gcode builder");
+    }
+
+    [Theory]
+    [InlineData("""{"start_temperature": 99999}""")]
+    [InlineData("""{"start_temperature": -1}""")]
+    [InlineData("""{"start_temperature": "NaN"}""")]
+    public void CalibrationParameters_Parse_OutOfRangeOrNonFiniteTemperature_FallsBackToDefault(string json)
+    {
+        // "NaN" as a JSON string fails Dictionary<string,double> deserialization entirely and
+        // falls back to defaults via the malformed-JSON path; numeric out-of-range values fall
+        // back via the bounds check. Either way the result must be the safe default.
+        CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.TemperatureTower);
+
+        parameters.StartTemperatureC.Should().Be(230);
+    }
+
     #endregion
 
     #region FlowRateCalibrationConfigurator — pure parsing
@@ -264,18 +289,42 @@ public class CalibrationTests : IDisposable
     }
 
     [Fact]
-    public void ApplyPerObjectFlowRatios_NoParseableNames_CopiesModelWithoutOverrides()
+    public void ApplyPerObjectFlowRatios_NoParseableNames_ThrowsRatherThanSlicingWithoutOverrides()
     {
+        // A calibration slice that "succeeds" without per-object overrides would silently produce
+        // identical G-code for every block — the acceptance criterion is explicit that the nine
+        // blocks must differ, so this must fail loudly instead of degrading silently.
         string source3mf = CreateSynthetic3mf([("1", "Body")]);
 
-        string resultPath = FlowRateCalibrationConfigurator.ApplyPerObjectFlowRatios(
+        Action act = () => FlowRateCalibrationConfigurator.ApplyPerObjectFlowRatios(
             source3mf,
             _tempDir,
             NullLogger.Instance);
 
-        File.Exists(resultPath).Should().BeTrue();
-        using ZipArchive archive = ZipFile.OpenRead(resultPath);
-        archive.GetEntry("Metadata/Slic3r_PE_model.config").Should().BeNull();
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*flow-rate*")
+            .Which.Message.Should().NotContain(_tempDir, "the exception message must not disclose internal worker filesystem paths");
+    }
+
+    [Fact]
+    public void ApplyPerObjectFlowRatios_MissingModelEntry_Throws()
+    {
+        string sourceDir = Path.Combine(_tempDir, "source-no-model");
+        Directory.CreateDirectory(sourceDir);
+        string path = Path.Join(sourceDir, $"empty-{Guid.NewGuid():N}.3mf");
+        using (FileStream fs = File.Create(path))
+        using (_ = new ZipArchive(fs, ZipArchiveMode.Create))
+        {
+            // Intentionally no entries: this 3MF has no 3D/3dmodel.model.
+        }
+
+        Action act = () => FlowRateCalibrationConfigurator.ApplyPerObjectFlowRatios(
+            path,
+            _tempDir,
+            NullLogger.Instance);
+
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().NotContain(_tempDir, "the exception message must not disclose internal worker filesystem paths");
     }
 
     private static string BuildModelXml(params (string Id, string Name)[] objects)

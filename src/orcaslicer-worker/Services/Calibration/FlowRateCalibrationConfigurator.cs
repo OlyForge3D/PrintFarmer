@@ -152,14 +152,18 @@ public static partial class FlowRateCalibrationConfigurator
     }
 
     /// <summary>
-    /// Copies <paramref name="source3mfPath"/> into <paramref name="destinationDirectory"/> and,
-    /// when its object names carry recognizable flow-rate values, injects the corresponding
-    /// per-object <c>flow_ratio</c> overrides into the copy's
-    /// <c>Metadata/Slic3r_PE_model.config</c>. Parsing failures are logged and treated as
-    /// "no overrides available" rather than failing the slice — the calibration model still
-    /// slices with whatever flow ratio the active filament profile specifies, it just loses the
-    /// per-band differentiation.
+    /// Copies <paramref name="source3mfPath"/> into <paramref name="destinationDirectory"/> and
+    /// injects the per-object <c>flow_ratio</c> overrides — parsed from each object's
+    /// flow-rate-encoded name — into the copy's <c>Metadata/Slic3r_PE_model.config</c>.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the resource is missing its model entry, carries no parseable per-object
+    /// flow-rate names, or otherwise cannot be parsed/rewritten. A flow-rate calibration slice
+    /// that "succeeds" without per-object overrides would silently produce identical G-code for
+    /// every block, defeating the entire point of the calibration (issue #1938's acceptance
+    /// criteria requires the nine blocks to differ) — so this fails the job instead of degrading
+    /// silently.
+    /// </exception>
     public static string ApplyPerObjectFlowRatios(string source3mfPath, string destinationDirectory, ILogger logger)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(source3mfPath);
@@ -175,10 +179,14 @@ public static partial class FlowRateCalibrationConfigurator
             ZipArchiveEntry? modelEntry = archive.GetEntry("3D/3dmodel.model");
             if (modelEntry is null)
             {
-                logger.LogWarning(
-                    "Calibration project '{Path}' has no 3D/3dmodel.model entry; slicing without per-object flow-ratio overrides.",
+                // Log the path server-side only; the thrown message (which can surface as a job
+                // failure reason) intentionally omits the internal filesystem layout.
+                logger.LogError(
+                    "Calibration project '{Path}' has no 3D/3dmodel.model entry.",
                     source3mfPath);
-                return destinationPath;
+                throw new InvalidOperationException(
+                    "Calibration resource is not a valid 3MF project (missing 3D/3dmodel.model); " +
+                    "cannot apply per-object flow-ratio overrides.");
             }
 
             string modelXml = ReadEntryText(modelEntry);
@@ -186,10 +194,12 @@ public static partial class FlowRateCalibrationConfigurator
             IReadOnlyDictionary<int, double> flowRatios = ParseObjectFlowRatios(objects);
             if (flowRatios.Count == 0)
             {
-                logger.LogWarning(
-                    "No object in calibration project '{Path}' has a parseable flow-rate name; slicing without per-object flow-ratio overrides.",
+                logger.LogError(
+                    "No object in calibration project '{Path}' has a parseable flow-rate name.",
                     source3mfPath);
-                return destinationPath;
+                throw new InvalidOperationException(
+                    "Calibration resource has no object whose name carries a recognizable flow-rate " +
+                    "value (expected names like 'flowrate_95'); cannot apply per-object overrides.");
             }
 
             ZipArchiveEntry? configEntry = archive.GetEntry("Metadata/Slic3r_PE_model.config");
@@ -202,10 +212,14 @@ public static partial class FlowRateCalibrationConfigurator
         }
         catch (Exception ex) when (ex is InvalidDataException or IOException or System.Xml.XmlException)
         {
-            logger.LogWarning(
+            logger.LogError(
                 ex,
-                "Failed to apply per-object flow-ratio overrides to calibration project '{Path}'; slicing without them.",
+                "Failed to apply per-object flow-ratio overrides to calibration project '{Path}'.",
                 source3mfPath);
+            throw new InvalidOperationException(
+                "Failed to parse or rewrite the calibration resource's 3MF model/metadata; " +
+                "cannot apply per-object flow-ratio overrides.",
+                ex);
         }
 
         return destinationPath;
