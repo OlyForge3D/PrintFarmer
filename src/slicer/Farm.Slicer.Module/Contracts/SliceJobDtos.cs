@@ -107,6 +107,36 @@ public class SubmitSliceJobRequest
     /// Format per entry: JSON string with rotation/scale/position arrays.
     /// </summary>
     public List<string?>? ModelFileTransforms { get; set; }
+
+    /// <summary>
+    /// Optional calibration mode (issue #1938). When set, the worker resolves the calibration
+    /// model from its own bundled OrcaSlicer resources instead of downloading
+    /// <see cref="ModelFileUrl"/>/<see cref="Model3DId"/>, so those fields may be omitted. This is
+    /// an ordinary slice job — it never sets <see cref="CalibrationProjectId"/>,
+    /// <see cref="CalibrationAttemptId"/> or <see cref="CalibrationOrchestrationId"/>, and remains
+    /// eligible for send-to-printer like any other slice.
+    /// </summary>
+    public CalibrationRequest? Calibration { get; set; }
+}
+
+/// <summary>
+/// Client-supplied calibration mode request (issue #1938).
+/// </summary>
+public class CalibrationRequest
+{
+    /// <summary>
+    /// The calibration method wire name (see <see cref="Models.CalibrationMethods"/>), e.g.
+    /// <c>"flow_rate_pass_1"</c>, <c>"flow_rate_pass_2"</c> or <c>"temperature_tower"</c>.
+    /// </summary>
+    [Required]
+    public string Method { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional numeric parameters for the method (for example the temperature tower's start
+    /// temperature, per-band step and band height in millimeters). Unspecified keys fall back to
+    /// the method's defaults.
+    /// </summary>
+    public Dictionary<string, double>? Params { get; set; }
 }
 
 /// <summary>
@@ -284,6 +314,16 @@ public sealed class WorkerSliceJobResponse
     public string? RequiredCapabilitiesJson { get; set; }
 
     public int Priority { get; set; }
+
+    /// <summary>
+    /// Calibration method wire name (issue #1938), or <see langword="null"/> for an ordinary
+    /// slice. When set, the worker resolves the model from its own bundled OrcaSlicer resources
+    /// instead of downloading <see cref="ModelFileUrl"/>.
+    /// </summary>
+    public string? CalibrationMethod { get; set; }
+
+    /// <summary>JSON-serialized numeric parameters for <see cref="CalibrationMethod"/>.</summary>
+    public string? CalibrationParamsJson { get; set; }
 }
 
 /// <summary>

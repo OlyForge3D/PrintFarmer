@@ -634,7 +634,14 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("CalibrationAttemptId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CalibrationMethod")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("CalibrationOrchestrationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CalibrationParamsJson")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("CalibrationProjectId")

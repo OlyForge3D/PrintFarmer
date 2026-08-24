@@ -640,8 +640,15 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<Guid?>("CalibrationAttemptId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("CalibrationMethod")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<Guid?>("CalibrationOrchestrationId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("CalibrationParamsJson")
+                        .HasColumnType("TEXT");
 
                     b.Property<Guid?>("CalibrationProjectId")
                         .HasColumnType("uuid");

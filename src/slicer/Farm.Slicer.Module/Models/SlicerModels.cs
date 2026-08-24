@@ -227,6 +227,15 @@ public class DistributedSlicingJob : SlicingJobDto
     /// </summary>
     public List<string?>? ModelFileTransforms { get; set; }
 
+    /// <summary>
+    /// Calibration method wire name (issue #1938, see <see cref="CalibrationMethods"/>), or
+    /// <see langword="null"/> for an ordinary slice.
+    /// </summary>
+    public string? CalibrationMethod { get; set; }
+
+    /// <summary>JSON-serialized numeric parameters for <see cref="CalibrationMethod"/>.</summary>
+    public string? CalibrationParamsJson { get; set; }
+
     // Message envelope fields for idempotency
     public Guid CorrelationId { get; set; } = Guid.NewGuid();
 
