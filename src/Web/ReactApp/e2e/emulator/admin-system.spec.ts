@@ -43,61 +43,27 @@ test.describe('Admin System Dashboard — Emulator', () => {
 
     // Should have tab navigation. Scope to the tablist so the page-global
     // header health button ("View system status — Healthy") is never matched.
-    const tabs = page.locator('[role="tablist"] [role="tab"]').filter({ hasText: /log|monitor|connect|health|service/i });
+    // The Operations dashboard now exposes only the Status and Workers
+    // sub-tabs (see SettingsShell / adminDestinations); the historical Logs,
+    // Monitoring, Connections, and File Health tabs no longer exist.
+    const tabs = page.locator('[role="tablist"] [role="tab"]').filter({ hasText: /status|workers/i });
     expect(await tabs.count()).toBeGreaterThan(0);
 
     expect(criticalErrors()).toHaveLength(0);
   });
 
-  test('logs tab displays log content', async ({ page }) => {
+  test('status tab displays system status content', async ({ page }) => {
     await page.goto('/admin/manage?tab=operations&sub=status');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_500);
 
-    // Should display log viewer or log entries
+    // Should display system status cards (CPU, memory, disk, services, etc.)
     const content = page.locator('main, [role="main"], #root');
     await expect(content.first()).toBeVisible();
 
     const bodyText = await page.locator('body').textContent() ?? '';
     expect(bodyText.length).toBeGreaterThan(100);
-
-    expect(criticalErrors()).toHaveLength(0);
-  });
-
-  test('monitoring tab shows metrics', async ({ page }) => {
-    await page.goto('/admin/manage?tab=operations&sub=status');
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1_500);
-
-    const content = page.locator('main, [role="main"], #root');
-    await expect(content.first()).toBeVisible();
-
-    expect(criticalErrors()).toHaveLength(0);
-  });
-
-  test('connections tab shows connection health', async ({ page }) => {
-    await page.goto('/admin/manage?tab=operations&sub=status');
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1_500);
-
-    const content = page.locator('main, [role="main"], #root');
-    await expect(content.first()).toBeVisible();
-
-    // Should show connection-related content
-    const bodyText = await page.locator('body').textContent() ?? '';
-    const hasConnectionContent = /connect|health|status|online|offline/i.test(bodyText);
-    expect(hasConnectionContent).toBeTruthy();
-
-    expect(criticalErrors()).toHaveLength(0);
-  });
-
-  test('file health tab loads', async ({ page }) => {
-    await page.goto('/admin/manage?tab=operations&sub=status');
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1_500);
-
-    const content = page.locator('main, [role="main"], #root');
-    await expect(content.first()).toBeVisible();
+    expect(/cpu|memory|disk|database|services/i.test(bodyText)).toBeTruthy();
 
     expect(criticalErrors()).toHaveLength(0);
   });
@@ -125,10 +91,10 @@ test.describe('Admin System Dashboard — Emulator', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_000);
 
-    const tabNames = ['logs', 'monitoring', 'connections', 'file-health', 'services'];
+    const tabNames = ['status', 'workers'];
     // Scope to the tablist so the page-global header health button
     // ("View system status — Healthy") is never matched (see issue #1896).
-    const tabs = page.locator('[role="tablist"] [role="tab"]').filter({ hasText: /log|monitor|connect|health|service/i });
+    const tabs = page.locator('[role="tablist"] [role="tab"]').filter({ hasText: /status|workers/i });
     const tabCount = await tabs.count();
 
     // Click each tab and verify content loads
