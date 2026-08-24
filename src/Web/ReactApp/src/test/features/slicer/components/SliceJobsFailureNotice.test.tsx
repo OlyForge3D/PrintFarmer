@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { SliceJobsPanel } from '@/features/slicer/components/SliceJobsPanel';
+import { SlicerToolbar } from '@/features/slicer/components/viewer/SlicerToolbar';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -55,15 +56,18 @@ vi.mock('@/common/hooks/useViewModePreference', () => ({
 }));
 
 /**
- * The exact hint the backend sends for a `SlicingEngineRejectedModel` failure. It names the
- * "Auto-orient plate" control because that is what actually resolved every affected model when
- * issue #1811 was reproduced against the real OrcaSlicer CLI.
+ * The exact hint the backend sends for a `SlicingEngineRejectedModel` failure (issue #1811,
+ * reworded for #1962). It names the "Auto-Orient" and "Lay Flat" model-tool-rail buttons in
+ * `SlicerToolbar` — the always-visible controls that actually resolved every affected model
+ * when issue #1811 was reproduced against the real OrcaSlicer CLI. An earlier revision instead
+ * named a different, plate-level "Auto-orient plate" control (`PlateBedOverlay`) that only
+ * renders once a second plate exists, so a single-plate job never saw it (#1962).
  */
 const ENGINE_REJECTED_HINT =
   'The slicing engine could not slice this model. This most often happens when a model sits in ' +
-  'an orientation the engine cannot handle — try the "Auto-orient plate" button on the plate ' +
-  'controls in the slicer workspace (unlock the plate first if it is locked), then slice again. ' +
-  "If it still fails, ask a farm admin to check the job's error detail.";
+  'an orientation the engine cannot handle — select the model and try the "Auto-Orient" or "Lay ' +
+  'Flat" button in the model tools in the slicer workspace, then slice again. If it still fails, ' +
+  "ask a farm admin to check the job's error detail.";
 
 function renderPanel() {
   const queryClient = new QueryClient({
@@ -104,8 +108,27 @@ describe('SliceJobsPanel slice failure notice (#1811)', () => {
     renderPanel();
 
     const notice = await screen.findByRole('status');
-    expect(notice.textContent).toContain('Auto-orient plate');
+    expect(notice.textContent).toContain('Auto-Orient');
     expect(notice.textContent).toContain('most often');
+  });
+
+  it('names controls that actually exist in the rendered slicer toolbar (#1962)', async () => {
+    // Ties the hint text to the real rendered button labels so the two cannot silently drift
+    // apart again: this failed for #1962 because the hint named an "Auto-orient plate" control
+    // that only exists on a different, plate-level overlay (and only once a second plate is
+    // added), not the always-visible model tool rail buttons the hint actually means.
+    render(<SlicerToolbar hasSelection />);
+    const autoOrientButton = screen.getByTitle('Auto-Orient');
+    const layFlatButton = screen.getByTitle('Lay Flat (F)');
+    // Strip the trailing "(F)" keyboard-shortcut hint from the rendered title so the comparison
+    // is against the button's actual label text, not a second hardcoded literal.
+    const layFlatBaseLabel = layFlatButton.getAttribute('title')!.replace(/\s*\(.*\)$/, '');
+
+    expect(ENGINE_REJECTED_HINT).toContain(autoOrientButton.getAttribute('title')!);
+    expect(ENGINE_REJECTED_HINT).toContain(layFlatBaseLabel);
+    expect(ENGINE_REJECTED_HINT).not.toContain('Auto-orient plate');
+    expect(ENGINE_REJECTED_HINT).not.toContain('plate controls');
+    expect(ENGINE_REJECTED_HINT).not.toContain('unlock the plate');
   });
 
   it('shows no notice for a failed job the worker could not classify', async () => {

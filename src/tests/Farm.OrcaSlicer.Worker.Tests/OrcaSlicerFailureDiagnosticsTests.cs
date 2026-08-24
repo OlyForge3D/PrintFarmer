@@ -92,7 +92,7 @@ public sealed class OrcaSlicerFailureDiagnosticsTests
         string? hint = SliceFailureHints.For(diagnosis.Reason);
         _ = hint.Should().NotBeNull();
         _ = hint.Should().Contain(
-            "Auto-orient plate",
+            "Auto-Orient",
             "the hint must name the control that actually fixes this, not offer generic advice");
         _ = hint.Should().Contain(
             "most often",

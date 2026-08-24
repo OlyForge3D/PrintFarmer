@@ -121,7 +121,7 @@ public sealed class SliceJobFailureReasonRoundTripTests : IAsyncLifetime
             SliceFailureHints.SlicingEngineRejectedModel,
             "the hint must be the fixed constant, never anything derived from the job");
         _ = status.FailureHint.Should().Contain(
-            "Auto-orient plate",
+            "Auto-Orient",
             "the operator must be pointed at the control that actually resolves this");
     }
 

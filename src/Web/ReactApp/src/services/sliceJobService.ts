@@ -161,7 +161,7 @@ export enum SliceFailureReason {
   /**
    * The slicing engine rejected the model itself. A generic catch-all on the
    * engine's side; a common trigger is an orientation it cannot slice, which
-   * the workspace's "Auto-orient plate" control resolves.
+   * the workspace's "Auto-Orient" or "Lay Flat" model tool resolves.
    */
   SlicingEngineRejectedModel = 'SlicingEngineRejectedModel',
   /** Nothing printable was found on the plate. */
