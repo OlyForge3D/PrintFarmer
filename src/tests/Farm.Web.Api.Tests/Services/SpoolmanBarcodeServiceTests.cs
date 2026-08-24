@@ -607,7 +607,7 @@ public class SpoolmanBarcodeServiceTests
         Mock<ILogger<SpoolmanService>> logger = new();
         FakeHttpMessageHandler handler = new(responder);
         HttpClient http = new(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService service = new(http, settings.Object, logger.Object);
+        SpoolmanService service = new(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
         return new ServiceHarness(service, http, handler);
     }
 

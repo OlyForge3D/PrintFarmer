@@ -773,10 +773,16 @@ public static class ServiceCollectionExtensions
         // - SDCP HTTP client (10s timeout)
         // This keeps backend-specific HTTP client configuration encapsulated in plugins
 
-        // Spoolman Integration (not backend-specific, registered centrally)
+        // Spoolman Integration (not backend-specific, registered centrally). The primary
+        // handler disables auto-redirect so a redirect response from a caller-supplied
+        // probe target (POST /api/spoolman/test) cannot be used to bounce the connection
+        // to an internal address the egress guard already denied for the original URI.
         _ = services.AddHttpClient<ISpoolmanService, Farm.Infrastructure.Services.Spoolman.SpoolmanService>("SpoolmanService", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            AllowAutoRedirect = false
         });
 
         // Source-aware spool resolution plus filament coverage / runout prediction (issue #709).
