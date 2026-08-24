@@ -144,19 +144,12 @@ After deployment, access PrintFarmer at:
 
 ## Calibration Profile Resolution (split deployments)
 
-`GET /api/printers/calibration-candidates` lists enabled printers from API-owned status, firmware,
-adapter, geometry, slicer identity, and hardware metadata. It does not contact the profile store, so
-operators can still choose a printer while `slicer-host` is unavailable. Candidate entries set
-`profilesEvaluated: false`; their eligibility is preliminary and does not assert profile visibility,
-compatibility, or safety.
-
-After selection,
-`GET /api/printers/{id}/calibration-context?slicerType=OrcaSlicer` resolves that printer's exact
-machine, process, and filament profile identifiers in one bounded request. In a split deployment the
-profile store lives behind `slicer-host`, so both the API and slicer host must be configured for this
-request. A successful context sets `profilesEvaluated: true` and is the authoritative eligibility
-result required before calibration project creation or mutation.
-Configure the selected-context hop as follows:
+Calibration project creation and attempt handling (`/api/calibration-projects`,
+`/api/calibration-projects/{projectId}/attempts`) resolve the printer's exact machine, process, and
+filament profile identifiers in one bounded internal request to `slicer-host`. In a split deployment
+the profile store lives behind `slicer-host`, so both the API and slicer host must be configured for
+this request.
+Configure the profile-resolution hop as follows:
 
 | Service | Setting | Value |
 | --- | --- | --- |
@@ -168,9 +161,8 @@ Configure the selected-context hop as follows:
 
 Optional bounds (`SlicerHost__ResolveTimeoutSeconds`, `SlicerHost__HealthTimeoutSeconds`,
 `SlicerHost__MaxResponseBytes`) have safe defaults; an out-of-range or malformed value fails the API
-startup rather than degrading silently. Leaving `SlicerHost__BaseUrl` unset keeps selected-context
-resolution fail-closed with `503 profile_service_unavailable`, while candidate listing remains
-available and `calibrationContextEnabled` stays `false`.
+startup rather than degrading silently. Leaving `SlicerHost__BaseUrl` unset keeps profile resolution
+fail-closed with `503 profile_service_unavailable`, and `calibrationContextEnabled` stays `false`.
 
 ### Rollout
 
@@ -192,25 +184,21 @@ available and `calibrationContextEnabled` stays `false`.
    # Public capability document must now report the context feature as operational.
    curl -fsS http://<host>:5245/api/system/capabilities | jq '.deploymentMode, .calibrationContextEnabled'
    # Expect: "split" and true
-
-   # Authenticated discovery (JWT must carry calibration:read).
-   curl -fsS -H "Authorization: Bearer <session-jwt>" \
-     http://<host>:5245/api/printers/calibration-candidates | jq 'length'
    ```
    The capability document never contains the slicer-host address, and neither service logs the
    forwarded token.
 
 ### Caller permissions
 
-Candidate and context requests require an authenticated JWT carrying `calibration:read` (or the
-`farm_admin` role). A Desktop API-key exchange token satisfies this **only when its key was
-explicitly created with the `CalibrationRead` scope and its owner independently holds
-`calibration:read`** — the exchange then emits the mapped permission claim alongside the scope
-claim (see `docs/SLICER_CONFIGURATION.md`). The slicer host enforces `calibration:read` identically
-for normal login/session tokens and Desktop exchange tokens. Keys created before those scopes
-existed, and any key without `CalibrationRead`, carry no permission claims and cannot read
-calibration candidates; those clients must use a normal login/session token or be reissued a
-calibration-scoped key.
+Calibration project creation and attempt requests require an authenticated JWT carrying
+`calibration:read`/`calibration:create` (or the `farm_admin` role). A Desktop API-key exchange token
+satisfies this **only when its key was explicitly created with the matching calibration scope and
+its owner independently holds the corresponding permission** — the exchange then emits the mapped
+permission claim alongside the scope claim (see `docs/SLICER_CONFIGURATION.md`). The slicer host
+enforces `calibration:read` identically for normal login/session tokens and Desktop exchange tokens.
+Keys created before those scopes existed, and any key without the calibration scope, carry no
+permission claims and cannot resolve profiles; those clients must use a normal login/session token or
+be reissued a calibration-scoped key.
 
 ### Environment correction
 
