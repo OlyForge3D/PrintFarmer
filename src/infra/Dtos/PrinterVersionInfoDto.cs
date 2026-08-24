@@ -18,7 +18,7 @@ namespace Farm.Infrastructure;
 /// <param name="Message">An optional human-readable message, e.g. describing a probe failure.</param>
 /// <param name="RecordedFirmwareIdentity">
 /// The recorded/persisted firmware identity from the printer's <c>Firmware*</c> columns — the
-/// same authoritative fact <c>PrinterCalibrationContextService.ValidateFirmware</c> reads.
+/// same authoritative fact <c>CalibrationContextResolver.ValidateFirmware</c> reads.
 /// Non-null only for backends whose live firmware reading is read-through-persisted (currently
 /// Moonraker/Klipper, #1656) AND only once
 /// <see cref="CalibrationFirmwareIdentityDto.HasRecordedIdentity"/> is true for the printer

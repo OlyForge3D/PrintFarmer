@@ -375,15 +375,8 @@ public sealed class CalibrationProfilePatchExporterTests
         return new CalibrationProfilePatchExporter(service);
     }
 
-    private sealed class StubPrinterCalibrationContextService : IPrinterCalibrationContextService
+    private sealed class StubPrinterCalibrationContextService : ICalibrationContextResolver
     {
-        public Task<CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>>>
-            GetCandidatesAsync(
-                CalibrationProfileAccessScope profileAccessScope,
-                CancellationToken cancellationToken) =>
-            Task.FromResult(
-                new CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>>([]));
-
         public Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
             Guid printerId,
             long? configurationRevision,

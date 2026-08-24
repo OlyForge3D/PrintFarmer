@@ -428,7 +428,7 @@ export interface PrinterVersionInfo {
   retrievedAtUtc: string;
   message?: string | null;
   /**
-   * The persisted firmware identity backing `PrinterCalibrationContextService.ValidateFirmware`
+   * The persisted firmware identity backing `CalibrationContextResolver.ValidateFirmware`
    * (issue #1656). Only populated for Moonraker/Klipper printers. For those printers,
    * `firmwareVersion` above prefers a fresh live-probed reading and falls back to this same
    * persisted value only when a live reading isn't available (issue #1894) — so `firmwareVersion`

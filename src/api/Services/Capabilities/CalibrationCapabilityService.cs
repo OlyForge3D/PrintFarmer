@@ -51,8 +51,6 @@ public sealed class CalibrationCapabilityService(
             ["systemCapabilities"] = "/api/system/capabilities",
             ["calibrationCapabilities"] = "/api/calibration/capabilities",
             ["printers"] = "/api/printers",
-            ["calibrationCandidates"] = "/api/printers/calibration-candidates",
-            ["calibrationContext"] = "/api/printers/{id}/calibration-context?slicerType=OrcaSlicer",
             ["calibrationProjects"] = "/api/calibration-projects",
             ["calibrationGenerateJob"] =
                 "/api/calibration-projects/{projectId}/attempts/{attemptId}/generate-job",

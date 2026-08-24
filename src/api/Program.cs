@@ -266,8 +266,8 @@ builder.Services.AddSingleton(
             .Get<string[]>()));
 builder.Services.AddScoped<ICalibrationCapabilityService, CalibrationCapabilityService>();
 builder.Services.AddScoped<
-    Farm.Web.Api.Services.Calibration.IPrinterCalibrationContextService,
-    Farm.Web.Api.Services.Calibration.PrinterCalibrationContextService>();
+    Farm.Web.Api.Services.Calibration.ICalibrationContextResolver,
+    Farm.Web.Api.Services.Calibration.CalibrationContextResolver>();
 builder.Services.AddOptions<Farm.Web.Api.Services.Calibration.CalibrationBlobStorageOptions>()
     .Bind(builder.Configuration.GetSection(
         Farm.Web.Api.Services.Calibration.CalibrationBlobStorageOptions.SectionName))

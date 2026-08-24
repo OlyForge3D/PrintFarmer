@@ -609,7 +609,7 @@ public sealed class MoonrakerEmulatorSeeder(
     }
 
     /// <summary>
-    /// Populates every calibration-eligibility column <c>PrinterCalibrationContextService</c>
+    /// Populates every calibration-eligibility column <c>CalibrationContextResolver</c>
     /// requires (firmware identity, slicer identity, hardware/motion specs, and a physical
     /// toolhead) so seeded emulator printers report <c>eligible: true</c> instead of the ~40
     /// missing-input rejections filed as #1851. The eligibility gate itself is never touched —

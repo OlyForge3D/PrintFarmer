@@ -215,7 +215,7 @@ public interface ICalibrationProjectService
 /// </summary>
 public sealed class CalibrationProjectService(
     AppDbContext dbContext,
-    IPrinterCalibrationContextService printerContextService,
+    ICalibrationContextResolver printerContextService,
     ICalibrationBlobStore blobStore,
     TimeProvider timeProvider,
     ILogger<CalibrationProjectService> logger)
@@ -229,7 +229,7 @@ public sealed class CalibrationProjectService(
     };
 
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-    private readonly IPrinterCalibrationContextService _printerContextService =
+    private readonly ICalibrationContextResolver _printerContextService =
         printerContextService ?? throw new ArgumentNullException(nameof(printerContextService));
 
     private readonly ICalibrationBlobStore _blobStore = blobStore ?? throw new ArgumentNullException(nameof(blobStore));
@@ -318,11 +318,6 @@ public sealed class CalibrationProjectService(
         }
 
         CalibrationContextDto context = contextResult.Value;
-        if (!IsExplicitlyEligible(context))
-        {
-            return Validation<CalibrationProjectDto>("printer_not_calibration_eligible");
-        }
-
         if (ValidateSelectedToolhead(request, context) is string toolheadCode)
         {
             return Validation<CalibrationProjectDto>(toolheadCode);
@@ -1044,11 +1039,6 @@ public sealed class CalibrationProjectService(
         if (contextResult.Value is null)
         {
             return ContextFailure<CalibrationAttemptDto>(contextResult);
-        }
-
-        if (!IsExplicitlyEligible(contextResult.Value))
-        {
-            return Validation<CalibrationAttemptDto>("printer_not_calibration_eligible");
         }
 
         for (int appendAttempt = 0; appendAttempt < MaximumAppendAttempts; appendAttempt++)
@@ -3175,13 +3165,6 @@ public sealed class CalibrationProjectService(
 
         return null;
     }
-
-    private static bool IsExplicitlyEligible(CalibrationContextDto context) =>
-        context.Eligible &&
-        string.Equals(context.Firmware.Family, nameof(PrinterFirmwareFamily.Klipper), StringComparison.Ordinal) &&
-        string.Equals(context.Firmware.GcodeDialect, nameof(PrinterGcodeDialect.Klipper), StringComparison.Ordinal) &&
-        string.Equals(context.Slicer.Engine, CalibrationContractConstants.SlicerEngine, StringComparison.Ordinal) &&
-        string.Equals(context.Slicer.Distribution, CalibrationContractConstants.SlicerDistribution, StringComparison.Ordinal);
 
     // Strict complete-or-missing selection: both absent is allowed by the existing create contract
     // (SelectedToolheadId/SelectedToolheadIndex are nullable), but any partial, mismatched, or

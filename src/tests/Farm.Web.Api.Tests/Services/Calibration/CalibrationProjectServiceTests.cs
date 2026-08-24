@@ -906,13 +906,8 @@ public sealed class CalibrationProjectServiceTests
         return attemptId;
     }
 
-    private sealed class TestPrinterContextService(Guid printerId) : IPrinterCalibrationContextService
+    private sealed class TestPrinterContextService(Guid printerId) : ICalibrationContextResolver
     {
-        public Task<CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>>> GetCandidatesAsync(
-            CalibrationProfileAccessScope profileAccessScope,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>>([]));
-
         public Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
             Guid requestedPrinterId,
             long? configurationRevision,
