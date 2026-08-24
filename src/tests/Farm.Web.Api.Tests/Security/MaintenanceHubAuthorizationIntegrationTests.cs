@@ -1,4 +1,5 @@
 ﻿using System.Net.Http;
+using System.Net.Http.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
@@ -81,6 +82,58 @@ public sealed class MaintenanceHubAuthorizationIntegrationTests : IAsyncLifetime
         await Task.WhenAny(excludedReceived.Task, Task.Delay(TimeSpan.FromSeconds(2)));
         excludedReceived.Task.IsCompleted.Should().BeFalse(
             "a caller with no maintenance:admin permission and no PrinterGroupAccess to this printer must never receive its maintenance events");
+    }
+
+    [Fact]
+    public async Task ManualMaintenanceLog_ExcludedUser_NeverReceivesCompletedEvent_ButAdminAndGroupMemberDo()
+    {
+        // Regression coverage for the reviewer-flagged gap: MaintenanceController's own
+        // "maintenancecompleted" broadcast (a controller-driven path, not the alert-engine path
+        // covered above) previously targeted the farm-only group. This exercises the real HTTP
+        // controller endpoint end-to-end, not just the engine/notifier services directly.
+        (Guid printerId, Guid alertId, Guid includedUserId, Guid excludedUserId) = await SeedAsync();
+
+        await using HubConnection excludedConnection = CreateConnection(excludedUserId, roles: "operator");
+        await using HubConnection includedConnection = CreateConnection(includedUserId, roles: "operator");
+        await using HubConnection adminConnection = CreateConnection(Guid.NewGuid(), roles: "farm_admin");
+
+        var excludedReceived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var includedReceived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var adminReceived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        excludedConnection.On<object>("maintenancecompleted", _ => excludedReceived.TrySetResult(true));
+        includedConnection.On<object>("maintenancecompleted", _ => includedReceived.TrySetResult(true));
+        adminConnection.On<object>("maintenancecompleted", _ => adminReceived.TrySetResult(true));
+
+        await excludedConnection.StartAsync();
+        await includedConnection.StartAsync();
+        await adminConnection.StartAsync();
+
+        await includedConnection.InvokeAsync("SubscribeToPrinterAsync", printerId.ToString());
+
+        // Act: create a manual maintenance log via the real HTTP controller endpoint, authenticated
+        // as a farm_admin caller (the controller requires maintenance:admin for every action).
+        using HttpClient client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Id", Guid.NewGuid().ToString());
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "farm_admin");
+        HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/maintenance/logs",
+            new
+            {
+                printerId,
+                taskName = "Manual lubrication",
+                performedBy = "integration-test"
+            });
+        response.IsSuccessStatusCode.Should().BeTrue(
+            $"the manual maintenance log endpoint must succeed for a farm_admin caller (got {response.StatusCode})");
+
+        (await includedReceived.Task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeTrue(
+            "the included user subscribed to the printer's maintenance group and must still see the controller-driven completion event");
+        (await adminReceived.Task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeTrue(
+            "a maintenance:admin/farm_admin caller must still see the controller-driven completion event");
+
+        await Task.WhenAny(excludedReceived.Task, Task.Delay(TimeSpan.FromSeconds(2)));
+        excludedReceived.Task.IsCompleted.Should().BeFalse(
+            "a caller with no maintenance:admin permission and no PrinterGroupAccess to this printer must never receive its maintenance events, including the controller-driven completion event");
     }
 
     private HubConnection CreateConnection(Guid userId, string roles)

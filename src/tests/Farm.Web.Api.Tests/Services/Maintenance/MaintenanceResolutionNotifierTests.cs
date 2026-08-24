@@ -18,9 +18,11 @@ public sealed class MaintenanceResolutionNotifierTests
     [Fact]
     public async Task NotifyCreatedAsync_WebhookThrows_DoesNotPropagate()
     {
+        Guid printerId = Guid.NewGuid();
         Mock<IClientProxy> client = CreateClientProxy();
         MaintenanceResolutionNotifier notifier = CreateNotifier(
             client,
+            printerId,
             out Mock<IWebhookService> webhook);
         webhook
             .Setup(service => service.Enqueue(
@@ -29,8 +31,8 @@ public sealed class MaintenanceResolutionNotifierTests
             .Throws(new InvalidOperationException("queue unavailable"));
 
         Func<Task> act = () => notifier.NotifyCreatedAsync(
-            Alert(),
-            Log(),
+            Alert(printerId),
+            Log(printerId),
             CancellationToken.None);
 
         await act.Should().NotThrowAsync();
@@ -50,6 +52,7 @@ public sealed class MaintenanceResolutionNotifierTests
     [Fact]
     public async Task NotifyCreatedAsync_SignalRThrows_StillQueuesWebhook()
     {
+        Guid printerId = Guid.NewGuid();
         Mock<IClientProxy> client = CreateClientProxy();
         client
             .Setup(proxy => proxy.SendCoreAsync(
@@ -59,11 +62,12 @@ public sealed class MaintenanceResolutionNotifierTests
             .ThrowsAsync(new InvalidOperationException("hub unavailable"));
         MaintenanceResolutionNotifier notifier = CreateNotifier(
             client,
+            printerId,
             out Mock<IWebhookService> webhook);
 
         Func<Task> act = () => notifier.NotifyCreatedAsync(
-            Alert(),
-            Log(),
+            Alert(printerId),
+            Log(printerId),
             CancellationToken.None);
 
         await act.Should().NotThrowAsync();
@@ -77,6 +81,7 @@ public sealed class MaintenanceResolutionNotifierTests
     [Fact]
     public async Task NotifyCreatedAsync_SignalRNotificationsDisabled_SkipsHubSendsButStillQueuesWebhook()
     {
+        Guid printerId = Guid.NewGuid();
         var clients = new Mock<IHubClients>(MockBehavior.Strict);
         var hub = new Mock<IHubContext<MaintenanceHub>>(MockBehavior.Strict);
         hub.SetupGet(context => context.Clients).Returns(clients.Object);
@@ -92,8 +97,8 @@ public sealed class MaintenanceResolutionNotifierTests
             NullLogger<MaintenanceResolutionNotifier>.Instance);
 
         Func<Task> act = () => notifier.NotifyCreatedAsync(
-            Alert(),
-            Log(),
+            Alert(printerId),
+            Log(printerId),
             CancellationToken.None);
 
         // clients.Groups(...) is never set up (Strict mock), so any hub send would throw here.
@@ -119,15 +124,17 @@ public sealed class MaintenanceResolutionNotifierTests
 
     private static MaintenanceResolutionNotifier CreateNotifier(
         Mock<IClientProxy> client,
+        Guid printerId,
         out Mock<IWebhookService> webhook,
         bool enableSignalRNotifications = true)
     {
+        string[] expectedGroups = [AuthorizedHubGroups.Farm, AuthorizedHubGroups.MaintenancePrinter(printerId)];
         var clients = new Mock<IHubClients>(MockBehavior.Strict);
         clients
             .Setup(hubClients => hubClients.Groups(
                 It.Is<IReadOnlyList<string>>(groups =>
-                    groups.Contains(AuthorizedHubGroups.Farm) &&
-                    groups.Count == 2)))
+                    groups.Count == expectedGroups.Length &&
+                    groups.SequenceEqual(expectedGroups))))
             .Returns(client.Object);
         var hub = new Mock<IHubContext<MaintenanceHub>>(MockBehavior.Strict);
         hub.SetupGet(context => context.Clients).Returns(clients.Object);
@@ -143,19 +150,19 @@ public sealed class MaintenanceResolutionNotifierTests
             NullLogger<MaintenanceResolutionNotifier>.Instance);
     }
 
-    private static MaintenanceAlert Alert() => new()
+    private static MaintenanceAlert Alert(Guid printerId) => new()
     {
         Id = Guid.NewGuid(),
-        PrinterId = Guid.NewGuid(),
+        PrinterId = printerId,
         Status = MaintenanceAlertStatus.Resolved,
         ResolvedAt = DateTime.UtcNow,
         ResolvedBy = "operator"
     };
 
-    private static MaintenanceLog Log() => new()
+    private static MaintenanceLog Log(Guid printerId) => new()
     {
         Id = Guid.NewGuid(),
-        PrinterId = Guid.NewGuid(),
+        PrinterId = printerId,
         TaskName = "Lubricate rails",
         PerformedAt = DateTime.UtcNow,
         PerformedBy = "operator"
