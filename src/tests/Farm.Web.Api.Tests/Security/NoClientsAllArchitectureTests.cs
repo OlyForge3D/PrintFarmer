@@ -32,16 +32,22 @@ public sealed class NoClientsAllArchitectureTests
 
     private static string FindRepoRoot()
     {
+        // Look for .git specifically (a directory in a normal clone, or a "gitdir: ..." pointer
+        // file in a worktree checkout) rather than farm-web.sln: farm-web.sln lives at
+        // <repo-root>/src/farm-web.sln, so checking for it directly would stop one level too
+        // early and misidentify src/ itself as the repo root, producing a doubled "src/src/api"
+        // path on any CI runner whose working directory starts inside src/.
         DirectoryInfo? dir = new(Directory.GetCurrentDirectory());
         while (dir != null)
         {
-            if (File.Exists(Path.Join(dir.FullName, "farm-web.sln")) || Directory.Exists(Path.Join(dir.FullName, ".git")))
+            string gitPath = Path.Join(dir.FullName, ".git");
+            if (File.Exists(gitPath) || Directory.Exists(gitPath))
             {
                 return dir.FullName;
             }
             dir = dir.Parent;
         }
-        throw new InvalidOperationException("Repository root (farm-web.sln or .git) not found from current directory.");
+        throw new InvalidOperationException("Repository root (.git) not found from current directory.");
     }
 
     [Fact(DisplayName = "Presubmit: no SignalR hub or hub-context consumer in src/api calls Clients.All")]

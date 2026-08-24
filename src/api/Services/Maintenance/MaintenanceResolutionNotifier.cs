@@ -30,7 +30,7 @@ public sealed class MaintenanceResolutionNotifier(
 
         // Scoped and gated the same way as MaintenanceAlertEngine (issue #1966): honour the
         // operator's EnableSignalRNotifications toggle, and target only the farm-wide admin
-        // group plus the resolved alert's own printer maintenance group instead of Clients.All.
+        // group plus the resolved alert's own printer maintenance group, never every connection.
         if (settingsMonitor.CurrentValue.EnableSignalRNotifications)
         {
             await SendSignalRAsync(
