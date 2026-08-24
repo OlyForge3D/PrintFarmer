@@ -1022,6 +1022,58 @@
       }
     },
     {
+      "id": "calibration-orcaslicer-worker-flow-rate-configurator",
+      "destinationPath": "src/orcaslicer-worker/Services/Calibration/FlowRateCalibrationConfigurator.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1938"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #1938 flow-rate pass 1/2 per-object override application; the object-naming convention (flowrate_xxx) documented by OrcaSlicer's bundled calibration models was used only as a behavioral/format reference and no external source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-27",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-orcaslicer-worker-parameters",
+      "destinationPath": "src/orcaslicer-worker/Services/Calibration/CalibrationParameters.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1938"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #1938 calibration request parameter contract (method name and JSON params); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-27",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-orcaslicer-worker-resource-resolver",
+      "destinationPath": "src/orcaslicer-worker/Services/Calibration/CalibrationResourceResolver.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1938"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #1938 resolution of OrcaSlicer's bundled calibration models (resources/calib/**) already vendored in this repository; this file only locates and loads those already-approved resources by relative path and copies no OrcaSlicer source code.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-27",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-orcaslicer-worker-temperature-tower-gcode-builder",
+      "destinationPath": "src/orcaslicer-worker/Services/Calibration/TemperatureTowerGcodeBuilder.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1938"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #1938 temperature-tower layer_change_gcode band builder (per-band M104 setpoints on a conditional {if}/{elsif}/{else} ladder); OrcaSlicer's documented banding behavior was used only as a behavioral reference and no external source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-27",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-persistence-authorization-tests",
       "destinationPath": "src/tests/Farm.Web.Api.Tests/Security/CalibrationPersistenceAuthorizationTests.cs",
       "referenceUrls": [
