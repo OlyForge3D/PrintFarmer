@@ -6099,9 +6099,6 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<bool?>("CalibrationHasHeatedBed")
                         .HasColumnType("INTEGER");
 
-                    b.Property<bool?>("CalibrationHasHeatedChamber")
-                        .HasColumnType("INTEGER");
-
                     b.Property<Guid?>("CalibrationMachineProfileId")
                         .HasColumnType("TEXT");
 
@@ -6184,6 +6181,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("HasHeatedBed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool?>("HasHeatedChamber")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool?>("HasMmu")

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -15,17 +15,18 @@ namespace Farm.Web.Api.Tests.Controllers;
 
 /// <summary>
 /// Integration test verifying PUT /api/printers/{id} persists the canonical
-/// UpdatePrinterDto.CalibrationHasHeatedChamber field (issue #1617's
-/// Printer.HasHeatedChamber -&gt; Printer.CalibrationHasHeatedChamber rename). The deprecated
-/// UpdatePrinterDto.HasHeatedChamber legacy alias was removed in issue #1640.
+/// UpdatePrinterDto.HasHeatedChamber field. Issue #1947 rolled back issue
+/// #1617's Printer.HasHeatedChamber -&gt; Printer.CalibrationHasHeatedChamber
+/// rename, because the field is read by DispatchSafetyGates for general
+/// dispatch-safety, not calibration-specific logic.
 /// </summary>
 [Trait("Category", "Integration")]
-public class PrintersControllerCalibrationHasHeatedChamberBackCompatTests : IAsyncLifetime
+public class PrintersControllerHasHeatedChamberTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
 
-    public PrintersControllerCalibrationHasHeatedChamberBackCompatTests()
+    public PrintersControllerHasHeatedChamberTests()
     {
         _factory = new CustomWebApplicationFactory();
     }
@@ -68,7 +69,7 @@ public class PrintersControllerCalibrationHasHeatedChamberBackCompatTests : IAsy
             ServerUrl = $"http://printer-{suffix}.local",
             ManufacturerId = manufacturer.Id,
             ModelId = model.Id,
-            CalibrationHasHeatedChamber = null,
+            HasHeatedChamber = null,
         };
         db.Printers.Add(printer);
         await db.SaveChangesAsync();
@@ -77,24 +78,24 @@ public class PrintersControllerCalibrationHasHeatedChamberBackCompatTests : IAsy
     }
 
     [Fact]
-    public async Task UpdatePrinter_WhenCanonicalCalibrationHasHeatedChamberFieldSupplied_PersistsToCalibrationHasHeatedChamber()
+    public async Task UpdatePrinter_WhenHasHeatedChamberFieldSupplied_PersistsToHasHeatedChamber()
     {
         Guid id = await SeedPrinterAsync();
-        var dto = new UpdatePrinterDto(CalibrationHasHeatedChamber: true);
+        var dto = new UpdatePrinterDto(HasHeatedChamber: true);
 
         HttpResponseMessage response = await PutPrinterAsync(id, dto);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        bool? persisted = await GetPersistedCalibrationHasHeatedChamberAsync(id);
-        persisted.Should().BeTrue(because: "the new canonical field must be accepted and persisted");
+        bool? persisted = await GetPersistedHasHeatedChamberAsync(id);
+        persisted.Should().BeTrue(because: "the general dispatch-safety field must be accepted and persisted");
     }
 
-    private async Task<bool?> GetPersistedCalibrationHasHeatedChamberAsync(Guid printerId)
+    private async Task<bool?> GetPersistedHasHeatedChamberAsync(Guid printerId)
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Printer printer = await db.Printers.SingleAsync(p => p.Id == printerId);
-        return printer.CalibrationHasHeatedChamber;
+        return printer.HasHeatedChamber;
     }
 
     private async Task<HttpResponseMessage> PutPrinterAsync(
