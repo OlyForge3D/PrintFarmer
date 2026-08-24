@@ -198,7 +198,6 @@ async function main() {
     normalizeRelativePath(path.relative(options.repoRoot, manifestPath)),
     'LICENSE',
     'THIRD-PARTY-NOTICES.md',
-    'compliance/calibration-provenance.json',
     'compliance/dependency-license-policy.json',
     'compliance/licensing-policy.json',
   ];

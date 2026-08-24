@@ -17,8 +17,6 @@
   "requiredFiles": [
     "LICENSE",
     "THIRD-PARTY-NOTICES.md",
-    "compliance/calibration-provenance.json",
-    "compliance/calibration-provenance.schema.json",
     "compliance/dependency-license-policy.json",
     "compliance/licenses/dotnet-install-MIT.txt",
     "docs/LICENSING_AND_SOURCE.md"

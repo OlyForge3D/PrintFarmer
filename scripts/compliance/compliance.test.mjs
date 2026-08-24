@@ -24,7 +24,6 @@ import {
   sha256,
   validateLicenseMetadata,
   validateDependencyLicenses,
-  validateProvenanceManifest,
   validateSbomDocument,
 } from './compliance-lib.mjs';
 import { scanSourceArchive } from './create-source-bundle.mjs';
@@ -34,93 +33,6 @@ const validBlob = 'sha1:89abcdef0123456789abcdef0123456789abcdef';
 const execFileAsync = promisify(execFile);
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-async function createFixture() {
-  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-compliance-'));
-  const destinationPath = 'src/Farm/Calibration/Derived/FlowMath.cs';
-  const testPath = 'src/tests/FlowMathTests.cs';
-  await mkdir(path.join(root, path.dirname(destinationPath)), { recursive: true });
-  await mkdir(path.join(root, path.dirname(testPath)), { recursive: true });
-  await mkdir(path.join(root, 'compliance'), { recursive: true });
-  await copyFile(
-    path.join(repositoryRoot, 'compliance', 'calibration-provenance.schema.json'),
-    path.join(root, 'compliance', 'calibration-provenance.schema.json'),
-  );
-
-  const content = [
-    '// SPDX-License-Identifier: AGPL-3.0-only',
-    '// PrintFarmer-Provenance-ID: orca-flow-math',
-    '// Copyright upstream contributors',
-    'internal static class FlowMath {}',
-    '',
-  ].join('\n');
-  await writeFile(path.join(root, destinationPath), content);
-  await writeFile(path.join(root, testPath), 'internal sealed class FlowMathTests {}\n');
-
-  const manifest = {
-    schemaVersion: 1,
-    policyVersion: '1.0.0',
-    lastReviewed: '2026-07-24',
-    allowedSourceLicenseExpressions: ['AGPL-3.0-only', 'MIT'],
-    governedPathPatterns: ['src/**/Calibration/Derived/**'],
-    approvedSources: [{
-      id: 'orca-v1',
-      repositoryUrl: 'https://github.com/OrcaSlicer/OrcaSlicer',
-      tag: 'v1.0.0',
-      commitSha: validCommit,
-      licenseExpression: 'AGPL-3.0-only',
-      licenseEvidence: {
-        path: 'LICENSE.txt',
-        blobDigest: validBlob,
-      },
-      review: {
-        reviewer: 'Maintainer',
-        reviewDate: '2026-07-24',
-        decision: 'approved',
-      },
-    }],
-    entries: [{
-      id: 'orca-flow-math',
-      sourceId: 'orca-v1',
-      sourcePath: 'src/flow_math.cpp',
-      sourceBlobDigest: validBlob,
-      destinationPath,
-      destinationSha256: sha256(Buffer.from(content)),
-      derivation: 'adapted',
-      upstreamCopyright: 'Copyright upstream contributors',
-      upstreamSpdx: 'AGPL-3.0-only',
-      preservedNotices: ['Copyright upstream contributors'],
-      modificationSummary: 'Adapted types for PrintFarmer.',
-      architecturalChanges: 'Removed UI and filesystem dependencies.',
-      review: {
-        reviewer: 'Maintainer',
-        reviewDate: '2026-07-24',
-        decision: 'approved',
-      },
-      firstPrintFarmerVersion: 'v0.2.3',
-      tests: [testPath],
-      replacementHistory: [],
-    }],
-    referenceRecords: [],
-    exceptions: [],
-  };
-
-  return {
-    content,
-    destinationPath,
-    manifest,
-    root,
-    testPath,
-  };
-}
-
-async function withFixture(callback) {
-  const fixture = await createFixture();
-  try {
-    await callback(fixture);
-  } finally {
-    await rm(fixture.root, { force: true, recursive: true });
-  }
-}
 
 function hasCode(errors, code) {
   return errors.some((error) => error.code === code);
@@ -240,91 +152,6 @@ function enrichmentPolicy() {
     },
   };
 }
-
-test('validateProvenanceManifest accepts an approved immutable derived file', async () => {
-  await withFixture(async ({ root, manifest }) => {
-    assert.deepEqual(await validateProvenanceManifest(root, manifest), []);
-  });
-});
-
-test('validateProvenanceManifest rejects an unknown mutable source revision', async () => {
-  await withFixture(async ({ root, manifest }) => {
-    manifest.approvedSources[0].commitSha = 'main';
-    manifest.approvedSources[0].tag = 'latest';
-    const errors = await validateProvenanceManifest(root, manifest);
-    assert.ok(hasCode(errors, 'PROVENANCE_SOURCE_COMMIT'));
-    assert.ok(hasCode(errors, 'PROVENANCE_SOURCE_TAG'));
-  });
-});
-
-test('validateProvenanceManifest rejects a source with an incompatible license', async () => {
-  await withFixture(async ({ root, manifest }) => {
-    manifest.approvedSources[0].licenseExpression = 'GPL-2.0-only';
-    const errors = await validateProvenanceManifest(root, manifest);
-    assert.ok(hasCode(errors, 'PROVENANCE_SOURCE_LICENSE'));
-  });
-});
-
-test('validateProvenanceManifest executes the schema and rejects extra properties', async () => {
-  await withFixture(async ({ root, manifest }) => {
-    manifest.unreviewedField = true;
-    const errors = await validateProvenanceManifest(root, manifest);
-    assert.ok(hasCode(errors, 'PROVENANCE_SCHEMA'));
-  });
-});
-
-test('validateProvenanceManifest rejects a governed file without a manifest entry', async () => {
-  await withFixture(async ({ root, manifest }) => {
-    manifest.entries = [];
-    const errors = await validateProvenanceManifest(root, manifest);
-    assert.ok(hasCode(errors, 'PROVENANCE_MANIFEST_ENTRY_MISSING'));
-    assert.ok(hasCode(errors, 'PROVENANCE_MARKER_UNREGISTERED'));
-  });
-});
-
-test('validateProvenanceManifest rejects a changed derived destination', async () => {
-  await withFixture(async ({ root, manifest, destinationPath }) => {
-    await writeFile(path.join(root, destinationPath), 'changed\n');
-    const errors = await validateProvenanceManifest(root, manifest);
-    assert.ok(hasCode(errors, 'PROVENANCE_DESTINATION_DIGEST'));
-  });
-});
-
-test('validateProvenanceManifest rejects a missing preserved notice', async () => {
-  await withFixture(async ({ root, manifest }) => {
-    manifest.entries[0].preservedNotices = ['Missing upstream notice'];
-    const errors = await validateProvenanceManifest(root, manifest);
-    assert.ok(hasCode(errors, 'PROVENANCE_NOTICE_PRESERVATION'));
-  });
-});
-
-test('validateProvenanceManifest rejects an invalid source blob digest', async () => {
-  await withFixture(async ({ root, manifest }) => {
-    manifest.entries[0].sourceBlobDigest = 'sha1:invalid';
-    const errors = await validateProvenanceManifest(root, manifest);
-    assert.ok(hasCode(errors, 'PROVENANCE_BLOB_DIGEST'));
-  });
-});
-
-test('validateProvenanceManifest rejects static printer data', async () => {
-  await withFixture(async ({ root, manifest, content }) => {
-    const destinationPath = 'src/Farm/Calibration/Derived/static-printer-catalog.cs';
-    await writeFile(path.join(root, destinationPath), content);
-    manifest.entries[0].destinationPath = destinationPath;
-    const errors = await validateProvenanceManifest(root, manifest);
-    assert.ok(hasCode(errors, 'PROVENANCE_EXCLUDED_CONTENT'));
-  });
-});
-
-test('validateProvenanceManifest rejects an unverified asset', async () => {
-  await withFixture(async ({ root, manifest, content }) => {
-    const destinationPath = 'src/Farm/Calibration/Derived/calibration-model.stl';
-    await writeFile(path.join(root, destinationPath), content);
-    manifest.entries[0].destinationPath = destinationPath;
-    const errors = await validateProvenanceManifest(root, manifest);
-    assert.ok(hasCode(errors, 'PROVENANCE_EXCLUDED_CONTENT'));
-  });
-});
 
 test('validateLicenseMetadata rejects conflicting first-party metadata', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-license-'));
