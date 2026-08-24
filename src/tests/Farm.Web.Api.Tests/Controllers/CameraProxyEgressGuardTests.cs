@@ -63,9 +63,11 @@ public sealed class CameraProxyEgressGuardTests
     public async Task CamerasController_LinkLocalTarget_ReturnsBadGateway_AndNeverConnects()
     {
         // 169.254.169.254 is the well-known cloud instance-metadata address. No listener is
-        // started here at all: a real connection attempt to this address in a CI sandbox could
-        // hang or behave unpredictably, so the assertion relies solely on the egress guard
-        // denying the target before any connection is attempted.
+        // started here (a real connection attempt to this address in a CI sandbox could hang or
+        // behave unpredictably); instead the "VettedEgress" HttpClient's primary handler is
+        // replaced with one that fails the test if invoked at all, giving a deterministic,
+        // network-free proof that the controller never even reaches the fetch step for a denied
+        // target - not merely that the response code looks right.
         Guid cameraId = Guid.NewGuid();
         const string target = "http://169.254.169.254/latest/meta-data/";
 
@@ -82,7 +84,8 @@ public sealed class CameraProxyEgressGuardTests
                 SnapshotUrl = target,
             });
 
-        using var factory = new CameraProxyFactory(cameras, allowedNetworkRanges: null);
+        var poisonedEgressHandler = new NeverInvokedHandler();
+        using var factory = new CameraProxyFactory(cameras, allowedNetworkRanges: null, poisonedEgressHandler);
         using HttpClient client = factory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(15);
 
@@ -91,6 +94,9 @@ public sealed class CameraProxyEgressGuardTests
         response.StatusCode.Should().Be(HttpStatusCode.BadGateway);
         string body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("camera_target_invalid");
+        poisonedEgressHandler.InvocationCount.Should().Be(
+            0,
+            "the egress guard must deny the link-local target before the VettedEgress client ever sends a request");
     }
 
     [Fact]
@@ -102,9 +108,15 @@ public sealed class CameraProxyEgressGuardTests
         // link-local, or multicast), so the *default* EgressGuard configuration must allow it.
         // EgressGuard intentionally does not block RFC1918/private ranges (printers/cameras live
         // on the LAN) - this test proves that default behavior, not an allowlist escape hatch.
+        //
+        // xUnit 2.x has no native dynamic (runtime) skip, and this repo does not otherwise depend
+        // on Xunit.SkippableFact, so a genuinely LAN-less sandbox fails LOUDLY here rather than
+        // silently reporting a pass that proved nothing: every environment this suite actually
+        // runs in (CI runners, dev machines) has a non-loopback interface.
         if (!LoopbackHttpListener.TryGetOutboundLanAddress(out IPAddress? lanAddress))
         {
-            return; // no routable non-loopback interface in this sandbox; nothing to prove here.
+            throw new InvalidOperationException(
+                "no routable non-loopback network interface is available; this proof cannot run here");
         }
 
         using var listener = new LoopbackHttpListener(lanAddress, respondSuccessfully: true);
@@ -216,6 +228,9 @@ public sealed class CameraProxyEgressGuardTests
     [Fact]
     public async Task PrintersController_LinkLocalTarget_ReturnsBadGateway_AndNeverConnects()
     {
+        // See CamerasController_LinkLocalTarget_ReturnsBadGateway_AndNeverConnects for rationale:
+        // no real listener/connection to 169.254.169.254 is attempted; instead the "VettedEgress"
+        // client's primary handler is replaced with one that fails the test if it is ever invoked.
         Guid printerId = Guid.NewGuid();
         const string target = "http://169.254.169.254/latest/meta-data/";
 
@@ -224,7 +239,8 @@ public sealed class CameraProxyEgressGuardTests
             .Setup(s => s.GetCameraUrlsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((target, target));
 
-        using var factory = new PrinterCameraProxyFactory(printers, allowedNetworkRanges: null);
+        var poisonedEgressHandler = new NeverInvokedHandler();
+        using var factory = new PrinterCameraProxyFactory(printers, allowedNetworkRanges: null, poisonedEgressHandler);
         using HttpClient client = factory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(15);
 
@@ -233,6 +249,9 @@ public sealed class CameraProxyEgressGuardTests
         response.StatusCode.Should().Be(HttpStatusCode.BadGateway);
         string body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("camera_target_invalid");
+        poisonedEgressHandler.InvocationCount.Should().Be(
+            0,
+            "the egress guard must deny the link-local target before the VettedEgress client ever sends a request");
     }
 
     [Fact]
@@ -241,9 +260,12 @@ public sealed class CameraProxyEgressGuardTests
         // See CamerasController_PrivateLanTarget_ProxiesSuccessfully_WithDefaultGuardConfig for
         // rationale: proves the DEFAULT guard configuration (no allowlist) still proxies a
         // legitimate LAN target, since EgressGuard intentionally does not block RFC1918 ranges.
+        // No true dynamic skip exists in xUnit 2.x without a new dependency, so a LAN-less
+        // sandbox fails loudly instead of silently reporting an unproven pass.
         if (!LoopbackHttpListener.TryGetOutboundLanAddress(out IPAddress? lanAddress))
         {
-            return; // no routable non-loopback interface in this sandbox; nothing to prove here.
+            throw new InvalidOperationException(
+                "no routable non-loopback network interface is available; this proof cannot run here");
         }
 
         using var listener = new LoopbackHttpListener(lanAddress, respondSuccessfully: true);
@@ -303,7 +325,10 @@ public sealed class CameraProxyEgressGuardTests
 
     // --- Test infrastructure -------------------------------------------------------------------
 
-    private sealed class CameraProxyFactory(Mock<ICameraService> cameras, string? allowedNetworkRanges)
+    private sealed class CameraProxyFactory(
+        Mock<ICameraService> cameras,
+        string? allowedNetworkRanges,
+        NeverInvokedHandler? poisonedEgressHandler = null)
         : CustomWebApplicationFactory(BuildConfig(allowedNetworkRanges))
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -313,11 +338,19 @@ public sealed class CameraProxyEgressGuardTests
             {
                 services.RemoveAll<ICameraService>();
                 services.AddSingleton(cameras.Object);
+                if (poisonedEgressHandler is not null)
+                {
+                    services.AddHttpClient("VettedEgress")
+                        .ConfigurePrimaryHttpMessageHandler(() => poisonedEgressHandler);
+                }
             });
         }
     }
 
-    private sealed class PrinterCameraProxyFactory(Mock<IPrintersService> printers, string? allowedNetworkRanges)
+    private sealed class PrinterCameraProxyFactory(
+        Mock<IPrintersService> printers,
+        string? allowedNetworkRanges,
+        NeverInvokedHandler? poisonedEgressHandler = null)
         : CustomWebApplicationFactory(BuildConfig(allowedNetworkRanges))
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -327,6 +360,11 @@ public sealed class CameraProxyEgressGuardTests
             {
                 services.RemoveAll<IPrintersService>();
                 services.AddSingleton(printers.Object);
+                if (poisonedEgressHandler is not null)
+                {
+                    services.AddHttpClient("VettedEgress")
+                        .ConfigurePrimaryHttpMessageHandler(() => poisonedEgressHandler);
+                }
             });
         }
     }
@@ -344,6 +382,27 @@ public sealed class CameraProxyEgressGuardTests
         }
 
         return config;
+    }
+
+    /// <summary>
+    /// A "VettedEgress" primary HTTP handler that fails the test if it is ever invoked. Used for
+    /// deny-path targets (e.g. link-local/cloud-metadata) where starting a real listener is
+    /// unsafe or unreliable in a CI sandbox: this gives a deterministic, network-free proof that
+    /// the controller denies the target before it ever asks the HttpClientFactory-managed
+    /// "VettedEgress" client to send a request, which is exactly the point at which the actual
+    /// outbound connection would otherwise be opened.
+    /// </summary>
+    private sealed class NeverInvokedHandler : HttpMessageHandler
+    {
+        private int _invocationCount;
+
+        public int InvocationCount => Volatile.Read(ref _invocationCount);
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Interlocked.Increment(ref _invocationCount);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }
     }
 
     /// <summary>
