@@ -287,13 +287,8 @@ public sealed class CalibrationProjectServiceToolheadSelectionTests
             ExperienceMode = source.ExperienceMode,
         };
 
-    private sealed class ToolheadContextService(Guid printerId) : IPrinterCalibrationContextService
+    private sealed class ToolheadContextService(Guid printerId) : ICalibrationContextResolver
     {
-        public Task<CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>>> GetCandidatesAsync(
-            CalibrationProfileAccessScope profileAccessScope,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>>([]));
-
         public Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
             Guid requestedPrinterId,
             long? configurationRevision,

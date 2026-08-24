@@ -11,12 +11,26 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.Calibration;
 
-public interface IPrinterCalibrationContextService
-{
-    Task<CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>>> GetCandidatesAsync(
-        CalibrationProfileAccessScope profileAccessScope,
-        CancellationToken cancellationToken);
+public sealed record CalibrationServiceResult<T>(
+    T? Value,
+    string? ErrorCode = null,
+    long? CurrentConfigurationRevision = null)
+    where T : class;
 
+/// <summary>
+/// Resolves the per-printer calibration context (hardware facts, resolved profiles, and the
+/// configuration snapshot) that <see cref="CalibrationProjectService"/> needs to create
+/// projects and attempts. The fleet-wide eligibility projection formerly exposed here
+/// (<c>GetCandidatesAsync</c>, backing <c>PrinterCalibrationController</c>) was removed in
+/// #1943: nothing called it once the eligibility gate was gone, and no React consumer ever
+/// called it either (#1940 step 1). <see cref="GetContextAsync"/> itself still computes <see
+/// cref="CalibrationCandidateDto.Eligible"/> and <see
+/// cref="CalibrationCandidateDto.RejectionReasons"/> as a side effect of deriving the
+/// underlying hardware/profile facts -- separating that bookkeeping out is not part of this
+/// change -- but nothing in the solution reads those fields to gate behavior anymore.
+/// </summary>
+public interface ICalibrationContextResolver
+{
     Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
         Guid printerId,
         long? configurationRevision,
@@ -25,13 +39,7 @@ public interface IPrinterCalibrationContextService
         CancellationToken cancellationToken);
 }
 
-public sealed record CalibrationServiceResult<T>(
-    T? Value,
-    string? ErrorCode = null,
-    long? CurrentConfigurationRevision = null)
-    where T : class;
-
-public sealed class PrinterCalibrationContextService(
+public sealed class CalibrationContextResolver(
     AppDbContext dbContext,
     IPrinterStatusSnapshotReader statusReader,
     IBackendCapabilityFactory capabilityFactory,
@@ -39,7 +47,7 @@ public sealed class PrinterCalibrationContextService(
     TimeProvider timeProvider,
     ICalibrationProfileResolver? profileResolver = null,
     CalibrationSlicerCompatibilityPolicy? compatibilityPolicy = null)
-    : IPrinterCalibrationContextService
+    : ICalibrationContextResolver
 {
     private const double NumericTolerance = 0.001;
     private readonly int _statusStaleAfterSeconds =
@@ -54,40 +62,6 @@ public sealed class PrinterCalibrationContextService(
     private readonly TimeProvider _timeProvider = timeProvider;
     private readonly CalibrationSlicerCompatibilityPolicy _compatibilityPolicy =
         compatibilityPolicy ?? CalibrationSlicerCompatibilityPolicy.Default;
-
-    public async Task<CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>>> GetCandidatesAsync(
-        CalibrationProfileAccessScope profileAccessScope,
-        CancellationToken cancellationToken)
-    {
-        Guid? unknownModelId = await GetUnknownModelIdAsync(cancellationToken);
-        List<Printer> printers = await dbContext.Printers
-            .AsNoTracking()
-            .Where(printer => printer.IsEnabled)
-            .Include(printer => printer.Location)
-            .Include(printer => printer.Toolheads)
-            .Include(printer => printer.Model).ThenInclude(model => model!.Toolheads).ThenInclude(t => t.HotendModel)
-            .Include(printer => printer.Model).ThenInclude(model => model!.Toolheads).ThenInclude(t => t.ExtruderModel)
-            .Include(printer => printer.Model).ThenInclude(model => model!.Toolheads).ThenInclude(t => t.NozzleModel!)
-                .ThenInclude(n => n!.NozzleMaterial)
-            .AsSplitQuery()
-            .OrderBy(printer => printer.Name)
-            .ThenBy(printer => printer.Id)
-            .ToListAsync(cancellationToken);
-
-        List<CalibrationCandidateDto> candidates = new(printers.Count);
-        foreach (Printer printer in printers)
-        {
-            CalibrationEvaluation evaluation = await EvaluateAsync(
-                printer,
-                profileAccessScope,
-                resolveProfiles: false,
-                unknownModelId,
-                cancellationToken);
-            candidates.Add(evaluation.Candidate);
-        }
-
-        return new(candidates);
-    }
 
     public async Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
         Guid printerId,
@@ -128,7 +102,6 @@ public sealed class PrinterCalibrationContextService(
             evaluation = await EvaluateAsync(
                 printer,
                 profileAccessScope,
-                resolveProfiles: true,
                 unknownModelId,
                 cancellationToken);
         }
@@ -284,7 +257,6 @@ public sealed class PrinterCalibrationContextService(
     private async Task<CalibrationEvaluation> EvaluateAsync(
         Printer printer,
         CalibrationProfileAccessScope profileAccessScope,
-        bool resolveProfiles,
         Guid? unknownModelId,
         CancellationToken cancellationToken)
     {
@@ -399,39 +371,12 @@ public sealed class PrinterCalibrationContextService(
         ResolvedCalibrationProfiles? resolved = null;
         if (profileSelection is not null)
         {
-            if (resolveProfiles)
-            {
-                // GetContextAsync's caller preserves the existing contract of propagating
-                // CalibrationProfileResolverUnavailableException uncaught.
-                resolved = await ResolveProfilesAsync(
-                    profileSelection,
-                    profileAccessScope,
-                    cancellationToken);
-            }
-            else if (NeedsMachineProfileDerivation(printer, physicalToolheads, activeToolheadIndex))
-            {
-                // The candidates path must still resolve profiles once when (and only when)
-                // AC-2-derivable fields are missing, so eligibility reflects sourced values.
-                // A resolver failure here degrades to a typed rejection rather than throwing,
-                // preserving GetCandidatesAsync's existing zero-resolver-call test guarantees
-                // for fully-populated printers.
-                try
-                {
-                    resolved = await ResolveProfilesAsync(
-                        profileSelection,
-                        profileAccessScope,
-                        cancellationToken);
-                }
-                catch (CalibrationProfileResolverUnavailableException ex)
-                {
-                    Reject(
-                        reasons,
-                        missingInputs,
-                        ex.ErrorCode,
-                        "machineProfile",
-                        "The calibration profile resolver is unavailable.");
-                }
-            }
+            // The caller (GetContextAsync) preserves the existing contract of propagating
+            // CalibrationProfileResolverUnavailableException uncaught.
+            resolved = await ResolveProfilesAsync(
+                profileSelection,
+                profileAccessScope,
+                cancellationToken);
         }
 
         DerivedMachineFacts derivedFacts =
@@ -491,7 +436,7 @@ public sealed class PrinterCalibrationContextService(
             missingInputs);
 
         CalibrationProfileEvaluation profileEvaluation =
-            resolveProfiles && profileSelection is not null && resolved is not null
+            profileSelection is not null && resolved is not null
             ? EvaluateProfiles(
                 printer,
                 resolved,
@@ -549,7 +494,7 @@ public sealed class PrinterCalibrationContextService(
             MaxChamberTemperature = printer.MaxChamberTemp,
             Firmware = CalibrationFirmwareIdentityDto.FromPrinter(printer, effectiveGcodeDialect),
             Slicer = slicerIdentity,
-            ProfilesEvaluated = resolveProfiles,
+            ProfilesEvaluated = true,
             Eligible = reasons.Count == 0,
             MissingInputs = missingInputs.Order(StringComparer.Ordinal).ToArray(),
             RejectionReasons = reasons
@@ -567,62 +512,6 @@ public sealed class PrinterCalibrationContextService(
             profileEvaluation.BaselineSettings,
             profileEvaluation.RawEffectiveSettings,
             profileEvaluation.FilamentProducts);
-    }
-
-    /// <summary>
-    /// Pure check (no resolver calls) for whether any AC-2-derivable field is missing its
-    /// explicit value after accounting for the catalog fallback tier (#1922), in which case the
-    /// candidates path must resolve the machine profile once to source it. firmware.gcodeDialect
-    /// is intentionally excluded: it is sourced from firmware detection only, never from the
-    /// profile (#1613 §4.5/§4.5.1).
-    /// </summary>
-    private static bool NeedsMachineProfileDerivation(
-        Printer printer,
-        List<Toolhead> physicalToolheads,
-        int? activeToolheadIndex)
-    {
-        // #1922: this decides only whether GetCandidatesAsync's bulk listing needs to pay for a
-        // machine-profile resolution. The catalog model must NOT factor into that decision: the
-        // fallback order is printer ?? machineProfile ?? catalogModel, so machine-profile ranks
-        // strictly above the catalog. Skipping profile derivation whenever the (lower-priority)
-        // catalog happens to cover a field would let a stale/default catalog value silently win
-        // over a genuine profile-derived value. Only the printer row's own completeness may
-        // justify skipping the profile lookup.
-        bool printerMotionTypeUnknown = printer.CalibrationMotionType is null or
-            Farm.Infrastructure.Domain.CalibrationMotionType.Unknown;
-
-        if (printer.MaxBuildVolumeX is null ||
-            printer.MaxBuildVolumeY is null ||
-            printer.MaxBuildVolumeZ is null ||
-            printer.BedOriginX is null ||
-            printer.BedOriginY is null ||
-            printer.PrintablePolygonJson is null ||
-            printerMotionTypeUnknown ||
-            printer.MaxAcceleration is null ||
-            printer.MaxTravelSpeed is null ||
-            printer.CalibrationHasHeatedBed is null ||
-            printer.HasHeatedChamber is null ||
-            printer.CalibrationSlicerEngine is null ||
-            printer.CalibrationSlicerDistribution is null ||
-            printer.CalibrationSlicerVersion is null ||
-            printer.CalibrationProfileFormat is null)
-        {
-            return true;
-        }
-
-        Toolhead? activeToolhead = activeToolheadIndex.HasValue
-            ? physicalToolheads.FirstOrDefault(
-                toolhead => toolhead.Index == activeToolheadIndex.Value)
-            : null;
-        if (activeToolhead is null)
-        {
-            return false;
-        }
-
-        return activeToolhead.NozzleDiameter is null ||
-            activeToolhead.NozzleType is null ||
-            activeToolhead.NozzleMaxTemperature is null ||
-            activeToolhead.HotendMaxTemperature is null;
     }
 
     private static CalibrationProfileSelection? ValidateProfileSelection(

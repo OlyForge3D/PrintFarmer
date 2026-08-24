@@ -207,7 +207,7 @@ public sealed class MoonrakerEmulatorSeederTests
         Assert.Equal(4, printersService.Invocations.Count);
 
         // #1851: every seeded printer must carry the calibration-eligibility data that
-        // production's PrinterCalibrationContextService requires, not just base identity.
+        // production's CalibrationContextResolver requires, not just base identity.
         Assert.All(added, printer =>
         {
             Assert.Equal(PrinterFirmwareFamily.Klipper, printer.FirmwareFamily);

@@ -160,7 +160,7 @@ public sealed class PrinterVersionCache(
     /// <summary>
     /// Read-through path for Moonraker/Klipper printers (#1656, #1894): the persisted
     /// <c>Printer.Firmware*</c> columns are the single authoritative store for calibration
-    /// eligibility, so <c>PrinterCalibrationContextService.ValidateFirmware</c> — and the
+    /// eligibility, so <c>CalibrationContextResolver.ValidateFirmware</c> — and the
     /// <see cref="PrinterVersionInfoDto.RecordedFirmwareIdentity"/> field this method returns —
     /// always reflect exactly what is persisted, never a live-only reading the calibration gate
     /// hasn't accepted. Displayed <c>FirmwareVersion</c> is different: it prefers the freshly

@@ -478,7 +478,7 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
 
     private static CalibrationProjectService CreateService(
         AppDbContext context,
-        IPrinterCalibrationContextService printerContext) =>
+        ICalibrationContextResolver printerContext) =>
         new(
             context,
             printerContext,
@@ -658,13 +658,8 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
         }
     }
 
-    private class StaticPrinterContextService(Guid printerId) : IPrinterCalibrationContextService
+    private class StaticPrinterContextService(Guid printerId) : ICalibrationContextResolver
     {
-        public Task<CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>>> GetCandidatesAsync(
-            CalibrationProfileAccessScope profileAccessScope,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>>([]));
-
         public virtual Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
             Guid requestedPrinterId,
             long? configurationRevision,

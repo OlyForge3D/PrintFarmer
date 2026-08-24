@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Farm.Web.Api.Services.Calibration;
 using FluentAssertions;
 
@@ -31,7 +31,7 @@ public sealed class CalibrationProfileServiceBoundaryTests
     [Fact]
     public void FarmWebApiAssembly_DoesNotReferenceOrcaSlicerWorkerOrWorkerSharedAssemblies()
     {
-        Assembly apiAssembly = typeof(PrinterCalibrationContextService).Assembly;
+        Assembly apiAssembly = typeof(CalibrationContextResolver).Assembly;
 
         IEnumerable<string> referencedAssemblyNames = apiAssembly
             .GetReferencedAssemblies()
@@ -47,7 +47,7 @@ public sealed class CalibrationProfileServiceBoundaryTests
     [Fact]
     public void FarmWebApiAssembly_HasNoLoadableSlicerProfilesServiceOrProfileCacheDbType()
     {
-        Assembly apiAssembly = typeof(PrinterCalibrationContextService).Assembly;
+        Assembly apiAssembly = typeof(CalibrationContextResolver).Assembly;
 
         IEnumerable<Type> loadedTypes = apiAssembly.GetTypes();
 
