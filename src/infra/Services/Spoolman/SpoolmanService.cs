@@ -18,7 +18,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Spoolman;
 
-public class SpoolmanService(HttpClient http, ISettingsService settingsService, ILogger<SpoolmanService> logger) : ISpoolmanService
+public class SpoolmanService(HttpClient http, ISettingsService settingsService, ILogger<SpoolmanService> logger, IEgressGuard egressGuard) : ISpoolmanService
 {
     /// <summary>
     /// Density applied when a caller creates a filament without one. Spoolman requires
@@ -36,6 +36,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     private readonly HttpClient http = http;
     private readonly ISettingsService settingsService = settingsService;
     private readonly ILogger<SpoolmanService> logger = logger;
+    private readonly IEgressGuard egressGuard = egressGuard;
 
     public SpoolmanConfigDto? GetConfig()
     {
@@ -67,9 +68,52 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
         foreach (string path in probePaths)
         {
+            // Vet the fully-constructed, path-bearing URI that is actually about to be
+            // requested — not just the caller-supplied base URL. Vetting only the base and
+            // then requesting a different concatenated string would leave a gap for an
+            // attacker-controlled path segment (or a base/path combination that resolves
+            // differently than the base alone) to slip past the guard.
+            string requestUrl = normalized + path;
             try
             {
-                using HttpRequestMessage req = new(HttpMethod.Get, normalized + path);
+                EgressCheckResult egressCheck = await egressGuard.CheckAsync(requestUrl, ct);
+                if (!egressCheck.IsAllowed)
+                {
+                    logger.LogWarning(
+                        "Spoolman probe blocked by egress guard for {Url}: {Reason}",
+                        LogSanitizer.Sanitize(candidateBaseUrl),
+                        LogSanitizer.Sanitize(egressCheck.DenyReason));
+
+                    // Do not echo egressCheck.DenyReason to the caller: it can reveal internal
+                    // network topology (e.g. "resolves to a loopback/link-local address"),
+                    // which would let an attacker probe the guard as an oracle. The detailed
+                    // reason is logged above for operators only; callers get a generic message,
+                    // matching the convention used by PrintersController's connectivity test.
+                    return new SpoolmanProbeResult(
+                        false,
+                        NormalizedUrl: normalized,
+                        EndpointTried: path,
+                        Message: "The requested server address is not allowed.",
+                        ErrorCategory: "egress_denied");
+                }
+
+                // Reuse the exact address the egress guard just vetted rather than letting
+                // the outbound connection re-resolve the hostname independently — otherwise a
+                // DNS-rebinding attacker could swap the record between the check above and
+                // this connection. The original hostname is preserved via the Host header for
+                // virtual-hosting/TLS SNI correctness.
+                Uri requestUri = egressCheck.ResolvedAddress is not null && egressCheck.Uri is not null
+                    ? EgressGuard.CreatePinnedUri(egressCheck.Uri, egressCheck.ResolvedAddress)
+                    : new Uri(requestUrl);
+
+                using HttpRequestMessage req = new(HttpMethod.Get, requestUri);
+                if (egressCheck.Uri is not null)
+                {
+                    req.Headers.Host = egressCheck.Uri.IsDefaultPort
+                        ? egressCheck.Uri.Host
+                        : $"{egressCheck.Uri.Host}:{egressCheck.Uri.Port}";
+                }
+
                 using HttpResponseMessage resp = await http.SendAsync(req, ct);
                 if (resp.IsSuccessStatusCode)
                 {
