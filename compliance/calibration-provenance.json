@@ -411,6 +411,32 @@
       }
     },
     {
+      "id": "calibration-orchestration-saga-service",
+      "destinationPath": "src/api/Services/Calibration/CalibrationOrchestrationSagaService.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1984"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #1984 filament-calibration saga/step-machine driving the created -> cloning-profile -> slicing -> awaiting-slice -> sending-to-printer -> awaiting-print -> awaiting-measurement -> applying-measurement -> advancing -> completed flow against the existing CalibrationOrchestration row; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-orchestration-saga-service-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/CalibrationOrchestrationSagaServiceTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1984"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering the issue #1984 filament-calibration saga step sequence, including failure/retry/terminal-failure paths at each step; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-25",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-persistence-authorization-tests",
       "destinationPath": "src/tests/Farm.Web.Api.Tests/Security/CalibrationPersistenceAuthorizationTests.cs",
       "referenceUrls": [
@@ -852,6 +878,19 @@
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-08-16",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-saga-gateways",
+      "destinationPath": "src/api/Services/Calibration/CalibrationSagaGateways.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1984"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #1984 internal HTTP gateway layer that lets the calibration saga integrate with the existing SliceJobController and SlicePrintBridgeController without duplicating their logic; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-25",
         "decision": "approved"
       }
     },
