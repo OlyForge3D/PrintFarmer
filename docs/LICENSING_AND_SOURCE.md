@@ -249,19 +249,28 @@ Automated validation does not fetch contributor-selected external URLs with
 privileged credentials. External identifiers are treated as evidence records
 and must use approved public source policy.
 
-## Calibration source provenance
+## Source provenance and the Governed/ folder convention
 
-Production source-derived Printer Calibration content is governed by
+Production source-derived content is governed by
 [`compliance/calibration-provenance.json`](../compliance/calibration-provenance.json)
 and its
 [`schema`](../compliance/calibration-provenance.schema.json). The production
 manifest starts empty and fail-closed because no unverified upstream content is
 approved by this licensing change.
 
-Before adding source-derived calibration code, add a manifest record that
-includes:
+Governance is scoped to a single canonical folder convention,
+`src/**/Governed/**`, rather than any directory merely *named* after a feature
+area (e.g. `Calibration`). A file's location alone does not make it governed:
+code that lives in a `Calibration` folder but is 100% self-authored is not
+governed and needs no manifest entry. Only source-derived or upstream-ported
+code belongs under a `Governed/` folder within its project area (for example
+`src/orcaslicer-worker/Services/Governed/`), and only files under that
+convention are checked against the manifest.
 
-- a permitted destination under the governed calibration paths;
+Before adding source-derived code, place the destination file under the
+project area's `Governed/` folder and add a manifest record that includes:
+
+- a permitted destination under a `Governed/` folder;
 - an immutable upstream repository, commit, and blob identity;
 - the destination file SHA-256;
 - upstream license and notice evidence;
