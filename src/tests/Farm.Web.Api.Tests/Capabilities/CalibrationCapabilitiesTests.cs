@@ -5,7 +5,6 @@ using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Security;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
-using Farm.Web.Api.Services.Calibration.Generation;
 using Farm.Web.Api.Services.Capabilities;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
@@ -61,7 +60,7 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         _ = root.GetProperty("calibration").GetProperty("commandsImplemented")
             .GetBoolean().Should().BeTrue();
         _ = root.GetProperty("calibration").GetProperty("generationImplemented")
-            .GetBoolean().Should().BeTrue();
+            .GetBoolean().Should().BeFalse();
         _ = root.GetProperty("calibration").GetProperty("queueIntegrationImplemented")
             .GetBoolean().Should().BeTrue();
         _ = root.GetProperty("calibration").GetProperty("eventStreamImplemented")
@@ -271,15 +270,22 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
                 .EnumerateArray()
                 .Where(reason =>
                     reason.GetProperty("code").GetString() ==
-                    CalibrationGenerationProblemCodes.SlicerVersionUnsupported)
+                    "slicer_version_unsupported")
                 .ToArray();
-            _ = versionReasons.Should().Contain(reason =>
+            _ = versionReasons.Should().ContainSingle(reason =>
                 reason.GetProperty("feature").GetString() == "slicing");
-            _ = versionReasons.Should().Contain(reason =>
-                reason.GetProperty("feature").GetString() == "calibrationGeneration");
             _ = versionReasons.Should().OnlyContain(reason =>
                 reason.GetProperty("message").GetString() ==
                 $"Observed upstream OrcaSlicer version(s) 2.2.0; configured supported version(s): {CalibrationContractConstants.SlicerVersion}.");
+
+            // Calibration generation was removed (#1979): it now always reports a fixed
+            // "feature_removed" reason, independent of the slicer-version outcome above.
+            _ = document.RootElement.GetProperty("unavailableReasons").EnumerateArray()
+                .Should().Contain(reason =>
+                    reason.GetProperty("feature").GetString() == "calibrationGeneration" &&
+                    reason.GetProperty("code").GetString() == "feature_removed" &&
+                    reason.GetProperty("message").GetString() ==
+                        "Calibration generation was removed from this deployment (#1979).");
         }
     }
 
@@ -369,13 +375,15 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         _ = capabilities.UnavailableReasons.Select(reason => reason.Code)
             .Should().Contain("profile_service_unavailable");
 
-        // Issue #1849: the subsystems these flags describe (calibration commands/generation,
-        // queue integration, event streaming) are always compiled in and registered, so they
+        // Issue #1849: the subsystems these flags describe (calibration commands, queue
+        // integration, event streaming) are always compiled in and registered, so they
         // must never be misreported as unimplemented just because the profile store happens to
         // be unreachable in this deployment. Only "operational" should reflect that.
+        // Calibration generation itself was removed (#1979), so GenerationImplemented is now
+        // always false regardless of profile-store reachability.
         _ = capabilities.Calibration.ContextImplemented.Should().BeTrue();
         _ = capabilities.Calibration.CommandsImplemented.Should().BeTrue();
-        _ = capabilities.Calibration.GenerationImplemented.Should().BeTrue();
+        _ = capabilities.Calibration.GenerationImplemented.Should().BeFalse();
         _ = capabilities.Calibration.QueueIntegrationImplemented.Should().BeTrue();
         _ = capabilities.Calibration.EventStreamImplemented.Should().BeTrue();
     }

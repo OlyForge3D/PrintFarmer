@@ -7,12 +7,11 @@ namespace Farm.Slicer.Module.Api.Services;
 /// Reads the pinned upstream slicer build identity out of a registered worker attestation.
 /// </summary>
 /// <remarks>
-/// Deliberately kept in step with, but independent of,
-/// <c>Farm.Web.Api.Services.Calibration.Generation.CalibrationSlicerAttestation</c>. The main API
-/// project cannot be referenced from here, and that file is tracked by
-/// <c>compliance/calibration-provenance.json</c>, so this is a narrow duplicate rather than a shared
-/// dependency (issue #1848). The attestation is only accepted when the worker publishes both digests;
-/// a worker that reports a version but no reproducible build identity is treated as unverifiable.
+/// Independent of the main API project, which cannot be referenced from here; this file is tracked
+/// by <c>compliance/calibration-provenance.json</c> (issue #1848). It was originally kept in step
+/// with an equivalent attestation reader in the calibration generation saga, which was removed by
+/// #1979. The attestation is only accepted when the worker publishes both digests; a worker that
+/// reports a version but no reproducible build identity is treated as unverifiable.
 /// </remarks>
 internal static class WorkerCompatibilitySlicerAttestation
 {

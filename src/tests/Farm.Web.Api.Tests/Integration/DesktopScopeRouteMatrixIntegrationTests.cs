@@ -333,18 +333,10 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
         Guid projectId = Guid.NewGuid();
 
         await AssertRouteIsAuthorizationGatedAsync(HttpMethod.Post, $"/api/calibration-projects/{projectId}/generated-profiles");
-        await AssertRouteIsAuthorizationGatedAsync(HttpMethod.Post, $"/api/calibration-projects/{projectId}/attempts/{Guid.NewGuid()}/generate-job");
 
         using HttpResponseMessage generate = await client.PostAsJsonAsync(
             $"/api/calibration-projects/{projectId}/generated-profiles", new { });
         ShouldClearAuthorization(generate, "calibration:generate was granted");
-
-        using HttpResponseMessage generateJob = await client.PostAsJsonAsync(
-            $"/api/calibration-projects/{projectId}/attempts/{Guid.NewGuid()}/generate-job", new { });
-        generateJob.StatusCode.Should().NotBe(
-            HttpStatusCode.Forbidden,
-            "calibration:generate and slicing:submit are both granted");
-        generateJob.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
 
         using HttpResponseMessage publish = await client.PostAsJsonAsync(
             $"/api/calibration-generated-profiles/{Guid.NewGuid()}/publish", new { });

@@ -25,7 +25,6 @@ using Farm.Web.Api.Infrastructure.OpenApi;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Calibration.Generation;
 using Farm.Web.Api.Services.Capabilities;
 using Farm.Web.Api.Startup;
 using FluentValidation;
@@ -212,11 +211,6 @@ if (slicerModuleEnabled)
 // returns profile_service_unavailable).
 builder.Services.AddCalibrationProfileResolution(builder.Configuration);
 
-// Split/microservices deployments similarly have no local IDbContextFactory<SlicerDbContext> for
-// the calibration generation capability probe, so route worker-compatibility lookups to the slicer
-// host that owns the worker registry (issue #1848).
-builder.Services.AddSlicerHostCapabilityClient(builder.Configuration);
-
 // MoonrakerEmulatorSeeder runs on the API host in every deployment topology and needs the
 // machine/process/filament profile repositories. Split/microservices hosts skip AddSlicerModule,
 // so register just those repositories here (issue #1858).
@@ -286,10 +280,6 @@ builder.Services.AddScoped<
 builder.Services.AddHostedService<
     Farm.Web.Api.Services.Calibration.CalibrationPhotoDeleteReconciliationService>();
 
-// Deterministic calibration generation core: specification/model/plan/G-code/annotation/safety and
-// profile patch export. Registration alone does not advertise generation as operational.
-builder.Services.AddCalibrationGeneration();
-
 // Artifact -> GcodeFile promotion: scoped promoter plus the reconciler that resolves the unknown
 // outcomes a crash or a transient outage can leave between the slicer and core contexts.
 builder.Services.AddSingleton<Farm.Web.Api.Services.Gcode.GcodePromotionReconcilerState>();
@@ -298,15 +288,6 @@ builder.Services.AddScoped<
     Farm.Web.Api.Services.Gcode.GcodeArtifactPromoter>();
 builder.Services.AddHostedService<
     Farm.Web.Api.Services.Gcode.GcodePromotionReconciliationService>();
-
-// Durable calibration generation saga: attempt -> specification -> plan -> canonical slice job ->
-// verified artifact -> promoted G-code, plus the recovery loop that resumes interrupted runs.
-builder.Services.AddSingleton<CalibrationGenerationRecoveryState>();
-builder.Services.AddScoped<
-    ICalibrationGenerationCapabilityProbe,
-    CalibrationGenerationCapabilityProbe>();
-builder.Services.AddScoped<ICalibrationGenerationSaga, CalibrationGenerationSaga>();
-builder.Services.AddHostedService<CalibrationGenerationRecoveryService>();
 
 // Register background services for distributed slicing
 builder.Services.AddPrintFarmerBackgroundServices(builder.Configuration);

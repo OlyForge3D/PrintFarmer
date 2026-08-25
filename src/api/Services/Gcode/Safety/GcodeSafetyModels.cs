@@ -264,8 +264,8 @@ public sealed record GcodeSafetyRequest(
 /// The validator never rewrites, repairs or normalizes g-code. It parses the program statefully and
 /// either returns a clean report or the ordered reasons the program must be rejected. Provenance and
 /// digest matching against calibration manifests, specifications, and plans is intentionally out of
-/// scope here — that is calibration-generator-specific and lives in
-/// <c>Farm.Web.Api.Services.Calibration.Generation</c>.
+/// scope here — that was calibration-generator-specific and lived in the calibration generation saga
+/// removed by #1979.
 /// </remarks>
 public interface IGcodeSafetyValidator
 {
