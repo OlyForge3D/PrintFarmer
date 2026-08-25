@@ -1092,6 +1092,7 @@ public class ProfilesController(
     /// Import selected profiles from OrcaSlicer worker for a specific printer model.
     /// Used by the Profile Import Wizard.
     /// </summary>
+    /// <param name="httpClient">HTTP client used to communicate with the OrcaSlicer worker.</param>
     /// <param name="modelId">The printer model ID from the catalog.</param>
     /// <param name="request">Selective import request with selected profiles.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -1102,6 +1103,7 @@ public class ProfilesController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> ImportSelectedProfilesForModelAsync(
+        [FromServices] HttpClient httpClient,
         Guid modelId,
         [FromBody] SelectiveProfileImportRequest? request,
         CancellationToken ct)
@@ -1128,7 +1130,7 @@ public class ProfilesController(
                 "Importing selected profiles for model {ModelName} (manufacturer: {Manufacturer})",
                 LogSanitizer.Sanitize(model.Name), LogSanitizer.Sanitize(request.ManufacturerName));
 
-            SelectiveProfileImportResultDto result = await _profilesService.ImportSelectedProfilesForModelAsync(modelId, request, ct);
+            SelectiveProfileImportResultDto result = await _profilesService.ImportSelectedProfilesForModelAsync(httpClient, modelId, request, ct);
 
             if (!string.IsNullOrEmpty(result.Error) &&
                 result.Error.Contains("worker", StringComparison.OrdinalIgnoreCase) &&
@@ -1148,6 +1150,76 @@ public class ProfilesController(
         {
             _logger.LogError(ex, "Error importing profiles for model {ModelId}", modelId);
             return StatusCode(StatusCodes.Status500InternalServerError, "Profile import failed");
+        }
+    }
+
+    /// <summary>
+    /// Resolves a single catalog profile's identity for a printer model, auto-importing it from
+    /// the OrcaSlicer worker catalog if it has never been imported into PrintFarmer's database
+    /// (#2004). Unlike <see cref="ImportSelectedProfilesForModelAsync"/>, this does not require
+    /// admin authority: it is additionally gated only by <see cref="PrintFarmerPermissions.Calibration.Update"/>,
+    /// which the desktop client's calibration scopes already satisfy — so calibration is no longer
+    /// blocked on a prior admin import for a printer model that has never been imported before.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for worker communication.</param>
+    /// <param name="modelId">The printer model ID from the catalog.</param>
+    /// <param name="request">The profile type and name to resolve.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("resolve-for-model/{modelId:guid}")]
+    [RequirePermission(PrintFarmerPermissions.Calibration.Update)]
+    [ProducesResponseType(typeof(ResolveProfileForModelResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ResolveProfileForModelAsync(
+        [FromServices] HttpClient httpClient,
+        Guid modelId,
+        [FromBody] ResolveProfileForModelRequest? request,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ProfileName))
+        {
+            return BadRequest("ProfileName is required");
+        }
+
+        try
+        {
+            CatalogModelInfo? model = await _catalogService.GetModelByIdAsync(modelId, ct);
+            if (model == null)
+            {
+                return NotFound($"Printer model with ID {modelId} not found");
+            }
+
+            ResolveProfileForModelResultDto result = await _profilesService.ResolveOrImportProfileForModelAsync(
+                httpClient, modelId, request.ProfileType, request.ProfileName, ct);
+
+            if (!string.IsNullOrEmpty(result.Error))
+            {
+                if (result.Error.Contains("worker", StringComparison.OrdinalIgnoreCase) &&
+                    result.Error.Contains("communicate", StringComparison.OrdinalIgnoreCase))
+                {
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, result.Error);
+                }
+
+                return BadRequest(result.Error);
+            }
+
+            return Ok(result);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", LogSanitizer.Sanitize(ex.Message));
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error resolving profile for model {ModelId}", modelId);
+            return StatusCode(StatusCodes.Status500InternalServerError, "Profile resolution failed");
         }
     }
 

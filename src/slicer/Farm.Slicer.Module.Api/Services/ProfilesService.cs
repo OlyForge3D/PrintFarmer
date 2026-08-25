@@ -996,6 +996,11 @@ public class ProfilesService(
             RawJson = sanitizedRaw,
             SettingsJson = settingsJson,
             SlicerVersion = orcaVersion,
+
+            // Persist the catalog's compatible-machine list so later name-based resolution
+            // (ResolveOrImportProfileForModelAsync) can disambiguate same-named filaments by
+            // model instead of treating every freshly imported row as model-agnostic (#2004).
+            CompatiblePrinters = NormalizeCompatiblePrintersList((IReadOnlyList<string>?)filamentProfile.CompatiblePrinters),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -1047,6 +1052,10 @@ public class ProfilesService(
             Hash = profileHash,
             RawJson = profileJson,
             SlicerVersion = orcaVersion,
+
+            // See PersistFilamentProfileAsync — persist the catalog's compatible-machine list too,
+            // as an additional disambiguation signal alongside PrinterModelId (#2004).
+            CompatiblePrinters = NormalizeCompatiblePrintersList((IReadOnlyList<string>?)processProfile.CompatiblePrinters),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -1220,6 +1229,7 @@ public class ProfilesService(
 
     /// <inheritdoc />
     public async Task<SelectiveProfileImportResultDto> ImportSelectedProfilesForModelAsync(
+        HttpClient httpClient,
         Guid printerModelId,
         SelectiveProfileImportRequest request,
         CancellationToken ct)
@@ -1265,9 +1275,6 @@ public class ProfilesService(
 
                 return result;
             }
-
-            // Use IHttpClientFactory if available, otherwise create new HttpClient
-            using HttpClient httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
 
             IReadOnlyList<MachineProfileDto> aliasMachines = await GetMachineProfilesForCatalogModelAsync(httpClient, orcaAliases, ct);
             if (aliasMachines.Count == 0)
@@ -1460,6 +1467,263 @@ public class ProfilesService(
         {
             _logger.LogError(ex, "[ImportSelectedProfilesForModel] Import failed");
             result.Error = "Import failed";
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Looks up an already-imported OrcaSlicer profile of the given type by name (case-insensitive),
+    /// disambiguating same-named candidates against <paramref name="printerModelId"/> using the same
+    /// compatibility rules <see cref="SliceJobController.SelectCompatibleProfile{T}"/> applies (#2004
+    /// review finding: <c>Name</c> alone is not a unique key for <see cref="ProcessProfile"/> or
+    /// <see cref="FilamentProfile"/> — OrcaSlicer ships same-named profiles scoped to different
+    /// printer models via <c>PrinterModelId</c>/<c>CompatiblePrinters</c>). Returns <see langword="null"/>
+    /// both when no candidate matches by name and when multiple same-named candidates exist and none
+    /// can be confidently tied to <paramref name="printerModelId"/> — the caller treats either case as
+    /// "not yet imported for this model" and falls through to worker-backed resolution rather than
+    /// risking a false match.
+    /// </summary>
+    private async Task<Guid?> FindExistingProfileIdByNameAsync(ProfileResolutionType profileType, string profileName, Guid printerModelId, CancellationToken ct)
+    {
+        switch (profileType)
+        {
+            case ProfileResolutionType.Machine:
+            {
+                IReadOnlyList<MachineProfile> machines = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+                List<MachineProfile> candidates = machines
+                    .Where(m => string.Equals(m.Name, profileName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                return SelectCompatibleMachineCandidate(candidates, printerModelId)?.Id;
+            }
+
+            case ProfileResolutionType.Process:
+            {
+                IReadOnlyList<ProcessProfile> processes = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+                List<ProcessProfile> candidates = processes
+                    .Where(p => string.Equals(p.Name, profileName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                IReadOnlyList<string> modelMachineNames = await GetMachineNamesForModelAsync(printerModelId, ct);
+                return SelectCompatibleProfileCandidate(
+                    candidates, printerModelId, modelMachineNames, p => p.PrinterModelId, p => p.CompatiblePrinters)?.Id;
+            }
+
+            case ProfileResolutionType.Filament:
+            {
+                IReadOnlyList<FilamentProfile> filaments = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+                List<FilamentProfile> candidates = filaments
+                    .Where(f => string.Equals(f.Name, profileName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                IReadOnlyList<string> modelMachineNames = await GetMachineNamesForModelAsync(printerModelId, ct);
+                return SelectCompatibleProfileCandidate(
+                    candidates, printerModelId, modelMachineNames, _ => null, f => f.CompatiblePrinters)?.Id;
+            }
+
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// Machine profile names imported for <paramref name="printerModelId"/>, used to disambiguate
+    /// same-named process/filament candidates via their <c>CompatiblePrinters</c> lists (which store
+    /// machine profile names, not catalog model names/aliases).
+    /// </summary>
+    private async Task<IReadOnlyList<string>> GetMachineNamesForModelAsync(Guid printerModelId, CancellationToken ct)
+    {
+        IReadOnlyList<MachineProfile> machines = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+        return machines
+            .Where(m => m.PrinterModelId == printerModelId)
+            .Select(m => m.Name)
+            .ToList();
+    }
+
+    private static MachineProfile? SelectCompatibleMachineCandidate(List<MachineProfile> candidates, Guid printerModelId)
+    {
+        if (candidates.Count <= 1)
+        {
+            return candidates.Count == 1 ? candidates[0] : null;
+        }
+
+        List<MachineProfile> byModel = candidates.Where(m => m.PrinterModelId == printerModelId).ToList();
+        if (byModel.Count > 0)
+        {
+            // More than one row explicitly scoped to this exact model with the same name would be a
+            // data-integrity problem, not something safe to guess at — treat as ambiguous rather than
+            // silently picking one.
+            return byModel.Count == 1 ? byModel[0] : null;
+        }
+
+        // No candidate is explicitly scoped to this model; a single candidate with no model scoping
+        // at all is model-agnostic by construction and safe to use. Multiple such candidates (or none)
+        // are ambiguous.
+        List<MachineProfile> modelAgnostic = candidates.Where(m => m.PrinterModelId is null).ToList();
+        return modelAgnostic.Count == 1 ? modelAgnostic[0] : null;
+    }
+
+    private static T? SelectCompatibleProfileCandidate<T>(
+        List<T> candidates,
+        Guid printerModelId,
+        IReadOnlyList<string> modelMachineNames,
+        Func<T, Guid?> printerModelIdSelector,
+        Func<T, string?> compatiblePrintersSelector)
+        where T : class
+    {
+        if (candidates.Count <= 1)
+        {
+            return candidates.Count == 1 ? candidates[0] : null;
+        }
+
+        if (modelMachineNames.Count > 0)
+        {
+            List<T> byCompatiblePrinters = candidates.Where(c =>
+            {
+                string? compatiblePrinters = compatiblePrintersSelector(c);
+                return !string.IsNullOrWhiteSpace(compatiblePrinters) &&
+                    compatiblePrinters.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Any(cp => modelMachineNames.Any(n => string.Equals(cp.Trim(), n, StringComparison.OrdinalIgnoreCase)));
+            }).ToList();
+            if (byCompatiblePrinters.Count > 0)
+            {
+                // Two same-named profiles both declaring compatibility with this model's machines
+                // (e.g. same-named filaments differing only by Material, which OrcaSlicer legally
+                // allows — see ProfilesServiceRealRepositorySeedTests
+                // .SeedSystemProfiles_BundleHasSameFilamentNameInTwoMaterials_ImportsBoth) cannot be
+                // told apart from name + CompatiblePrinters alone. Treat as ambiguous rather than
+                // guessing which one the caller meant.
+                return byCompatiblePrinters.Count == 1 ? byCompatiblePrinters[0] : null;
+            }
+        }
+
+        List<T> byModel = candidates.Where(c => printerModelIdSelector(c) == printerModelId).ToList();
+        if (byModel.Count > 0)
+        {
+            return byModel.Count == 1 ? byModel[0] : null;
+        }
+
+        // No candidate declares itself compatible/scoped to this model. A single candidate with no
+        // scoping at all (no CompatiblePrinters, no PrinterModelId) is model-agnostic by construction
+        // and safe to use. Multiple such candidates, or none, are ambiguous — return null so the
+        // caller treats it as "not yet imported for this model" rather than guessing.
+        List<T> modelAgnostic = candidates.Where(c =>
+            string.IsNullOrWhiteSpace(compatiblePrintersSelector(c)) &&
+            printerModelIdSelector(c) is null).ToList();
+        return modelAgnostic.Count == 1 ? modelAgnostic[0] : null;
+    }
+
+    /// <inheritdoc />
+    public async Task<ResolveProfileForModelResultDto> ResolveOrImportProfileForModelAsync(
+        HttpClient httpClient,
+        Guid printerModelId,
+        ProfileResolutionType profileType,
+        string profileName,
+        CancellationToken ct)
+    {
+        ResolveProfileForModelResultDto result = new()
+        {
+            PrinterModelId = printerModelId,
+            ProfileType = profileType,
+            ProfileName = profileName
+        };
+
+        if (string.IsNullOrWhiteSpace(profileName))
+        {
+            result.Error = "ProfileName is required";
+            return result;
+        }
+
+        try
+        {
+            // Already-imported case: no worker call, no admin action needed — this is the common
+            // path once a model has been used at least once (#2004).
+            Guid? existingId = await FindExistingProfileIdByNameAsync(profileType, profileName, printerModelId, ct);
+            if (existingId.HasValue)
+            {
+                result.ProfileId = existingId;
+                result.Imported = false;
+                return result;
+            }
+
+            PrinterModelDto? catalogModel = await _catalogService.GetModelByIdAsync(printerModelId, ct);
+            if (catalogModel is null)
+            {
+                result.Error = $"Printer model with ID {printerModelId} not found in catalog";
+                return result;
+            }
+
+            ManufacturerDto? manufacturer = await _catalogService.GetManufacturerByIdAsync(catalogModel.ManufacturerId, ct);
+            if (manufacturer is null)
+            {
+                result.Error = $"Manufacturer for printer model '{catalogModel.Name}' not found in catalog";
+                return result;
+            }
+
+            SelectiveProfileImportRequest importRequest = new()
+            {
+                ManufacturerName = manufacturer.Name
+            };
+
+            switch (profileType)
+            {
+                case ProfileResolutionType.Machine:
+                    importRequest.SelectedMachineProfiles.Add(profileName);
+                    break;
+                case ProfileResolutionType.Process:
+                    importRequest.SelectedProcessProfiles.Add(profileName);
+                    break;
+                case ProfileResolutionType.Filament:
+                    importRequest.SelectedFilamentProfiles.Add(profileName);
+                    break;
+            }
+
+            SelectiveProfileImportResultDto importResult = await ImportSelectedProfilesForModelAsync(httpClient, printerModelId, importRequest, ct);
+
+            if (!string.IsNullOrEmpty(importResult.Error))
+            {
+                result.Error = importResult.Error;
+                return result;
+            }
+
+            if (importResult.TotalImported == 0)
+            {
+                // A concurrent caller may have imported (or be importing) the same profile between
+                // our initial lookup and this point — Persist*ProfileAsync's duplicate check would
+                // then report Skipped rather than Imported for what is actually a successful,
+                // already-visible row. Re-check the DB before declaring failure so a genuine race
+                // resolves as success rather than a false "not found or incompatible" error (#2004
+                // review finding).
+                Guid? wonByConcurrentImport = await FindExistingProfileIdByNameAsync(profileType, profileName, printerModelId, ct);
+                if (wonByConcurrentImport.HasValue)
+                {
+                    result.ProfileId = wonByConcurrentImport;
+                    result.Imported = false;
+                    return result;
+                }
+
+                result.Error = $"Profile '{profileName}' was not found or is not compatible with printer model '{catalogModel.Name}'";
+                return result;
+            }
+
+            Guid? importedId = await FindExistingProfileIdByNameAsync(profileType, profileName, printerModelId, ct);
+            if (!importedId.HasValue)
+            {
+                result.Error = $"Profile '{profileName}' was imported but could not be located afterward";
+                return result;
+            }
+
+            result.ProfileId = importedId;
+            result.Imported = true;
+            return result;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "[ResolveOrImportProfileForModel] Worker communication failed");
+            result.Error = "Failed to communicate with OrcaSlicer worker";
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[ResolveOrImportProfileForModel] Resolution failed");
+            result.Error = "Profile resolution failed";
             return result;
         }
     }
