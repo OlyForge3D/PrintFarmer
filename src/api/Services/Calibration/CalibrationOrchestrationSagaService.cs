@@ -167,8 +167,12 @@ public sealed class CalibrationOrchestrationSagaService(
 
         // A quick, unlocked existence/visibility check up front lets a caller for an unknown or
         // invisible orchestration fail fast (404) without ever contending on the per-orchestration
-        // lock below.
-        if (await FindVisibleOrchestrationAsync(orchestrationId, actor, cancellationToken) is null)
+        // lock below. This MUST be AsNoTracking: AppDbContext is scoped per HTTP request, so this
+        // check and the locked reload below run on the SAME DbContext instance. A tracking query
+        // here would populate the change tracker, and EF Core's identity resolution would then
+        // make the locked reload return that same in-memory instance instead of re-querying the
+        // database - silently reintroducing the stale-snapshot race the lock exists to close.
+        if (await FindVisibleOrchestrationAsync(orchestrationId, actor, cancellationToken, asNoTracking: true) is null)
         {
             return CalibrationApiResult<CalibrationOrchestrationDto>.Failure(
                 StatusCodes.Status404NotFound,
@@ -220,7 +224,11 @@ public sealed class CalibrationOrchestrationSagaService(
         if (orchestration.Status == CalibrationOrchestrationStatus.Failed)
         {
             // A terminal failure never blocks starting a new calibration attempt - it only means
-            // this particular orchestration checkpoint stops advancing on its own.
+            // this particular orchestration checkpoint stops advancing on its own. Also drop the
+            // lock entry: GetAdvanceLock() re-adds a fresh semaphore on every call, so without
+            // this an already-terminal orchestration that keeps getting polled would leak one
+            // dictionary entry per poll instead of staying cleaned up.
+            _ = AdvanceLocks.TryRemove(orchestrationId, out _);
             return CalibrationApiResult<CalibrationOrchestrationDto>.Failure(
                 StatusCodes.Status409Conflict,
                 "calibration_orchestration_terminally_failed");
@@ -229,6 +237,7 @@ public sealed class CalibrationOrchestrationSagaService(
         if (orchestration.Status == CalibrationOrchestrationStatus.Completed ||
             orchestration.CurrentStep == CalibrationSagaSteps.Completed)
         {
+            _ = AdvanceLocks.TryRemove(orchestrationId, out _);
             return CalibrationApiResult<CalibrationOrchestrationDto>.Success(MapOrchestration(orchestration));
         }
 
@@ -391,10 +400,16 @@ public sealed class CalibrationOrchestrationSagaService(
 
         if (result.Success)
         {
+            // Preserve (do not reset) the retry count here: a resubmission triggered by a prior
+            // "awaiting-slice" failure is not genuine forward progress past the failure-prone
+            // slicing/awaiting-slice pair - only reaching "sending-to-printer" is. Resetting to 0
+            // on every successful resubmission would let a submit-succeeds/status-fails cycle
+            // retry forever without ever exhausting the retry budget.
             return StepOutcome.Advance(
                 CalibrationSagaSteps.AwaitingSlice,
                 "step:slicing-submitted",
-                sliceJobId: result.SliceJobId);
+                sliceJobId: result.SliceJobId,
+                retryCount: orchestration.RetryCount);
         }
 
         return StepOutcome.Retryable(
@@ -579,10 +594,23 @@ public sealed class CalibrationOrchestrationSagaService(
         return actor.IsFarmAdmin ? query : query.Where(project => project.OwnerUserId == actor.UserId);
     }
 
+    /// <param name="asNoTracking">
+    /// When true, the query is executed with <c>AsNoTracking</c> and never populates the
+    /// DbContext's change tracker. This matters for the unlocked pre-lock existence/visibility
+    /// check in <see cref="AdvanceAsync"/>: because <see cref="AppDbContext"/> is scoped per
+    /// HTTP request, that check runs on the SAME DbContext instance the locked reload later uses.
+    /// EF Core's identity resolution means a *tracking* query for an already-tracked key returns
+    /// the in-memory instance without re-querying the database - so if the pre-lock check were
+    /// allowed to track the entity, the "reload inside the lock" would silently return that same
+    /// stale snapshot instead of actually re-reading the latest committed state, defeating the
+    /// lock. Keeping the pre-lock check untracked ensures the locked reload is always a real,
+    /// fresh database read.
+    /// </param>
     private async Task<CalibrationOrchestration?> FindVisibleOrchestrationAsync(
         Guid orchestrationId,
         CalibrationActor actor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool asNoTracking = false)
     {
         IQueryable<CalibrationOrchestration> query = _dbContext.CalibrationOrchestrations
             .Join(
@@ -590,6 +618,11 @@ public sealed class CalibrationOrchestrationSagaService(
                 orchestration => orchestration.ProjectId,
                 project => project.Id,
                 (orchestration, _) => orchestration);
+        if (asNoTracking)
+        {
+            query = query.AsNoTracking();
+        }
+
         return await query.SingleOrDefaultAsync(
             orchestration => orchestration.Id == orchestrationId,
             cancellationToken);
@@ -632,8 +665,9 @@ public sealed class CalibrationOrchestrationSagaService(
             string nextStep,
             string eventType,
             Guid? sliceJobId = null,
-            bool completed = false) =>
-            new(true, nextStep, eventType, sliceJobId, null, null, 0, false, false, completed);
+            bool completed = false,
+            int? retryCount = null) =>
+            new(true, nextStep, eventType, sliceJobId, null, null, retryCount ?? 0, false, false, completed);
 
         /// <summary>A transient failure that stays on the same step and retries, or fails terminally past budget.</summary>
         public static StepOutcome Retryable(int currentRetryCount, string retryStep, string errorCode, string? detail)

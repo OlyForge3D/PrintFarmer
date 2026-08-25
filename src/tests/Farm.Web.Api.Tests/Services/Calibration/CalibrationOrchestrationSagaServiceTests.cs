@@ -381,14 +381,15 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         _ = await AdvanceAsync(saga, orchestrationId, actor); // -> slicing
         _ = await AdvanceAsync(saga, orchestrationId, actor); // -> awaiting-slice
 
-        // A failed slice job reverts to "slicing" so it can be resubmitted. Make the resubmission
-        // also fail, so the retry budget is exhausted by real, repeated failures rather than an
-        // endless resubmit-then-fail-poll cycle (a successful resubmission legitimately resets the
-        // retry counter, since it represents a fresh slice job).
-        sliceGateway.SubmitBehavior = _ => SliceSubmissionResult.Failed("slice_submission_failed");
-
+        // A failed slice job reverts to "slicing" so it can be resubmitted, and each resubmission
+        // here succeeds (a new slice job is always accepted) - but the retry count is preserved
+        // (not reset) across a resubmission, so repeated real job failures still exhaust the
+        // budget even though submission itself never fails. Each cycle is one "awaiting-slice"
+        // failure (which increments the retry count) followed by one "slicing" resubmission
+        // (which preserves it), so exhausting a budget of N retries takes 2N+1 calls: the retry
+        // count only actually increments on the "awaiting-slice" half of each cycle.
         CalibrationApiResult<CalibrationOrchestrationDto> result = null!;
-        for (int i = 0; i < CalibrationOrchestrationSagaService.MaximumStepRetries + 1; i++)
+        for (int i = 0; i < (2 * CalibrationOrchestrationSagaService.MaximumStepRetries) + 1; i++)
         {
             result = await AdvanceAsync(saga, orchestrationId, actor);
         }
