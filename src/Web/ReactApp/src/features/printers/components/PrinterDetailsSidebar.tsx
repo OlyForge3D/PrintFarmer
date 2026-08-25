@@ -861,7 +861,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 <dd className="text-[11px] text-pf-text-secondary">
                   {printerVersionQuery.data.recordedFirmwareIdentity
                     ? 'Recorded firmware identity'
-                    : 'Live reading only — no recorded identity'}
+                    : 'No recorded firmware identity'}
                 </dd>
               </div>
               <div>

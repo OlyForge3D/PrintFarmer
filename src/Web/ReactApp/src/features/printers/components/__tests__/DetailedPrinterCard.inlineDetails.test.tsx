@@ -236,12 +236,12 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     expect(screen.getByText('7.8.9')).toBeInTheDocument();
   });
 
-  it('labels the firmware reading as live-only when no recorded identity is returned (#1656)', () => {
+  it('labels the firmware reading as unrecorded when no recorded identity is returned (#1656)', () => {
     render(<DetailedPrinterCard printer={makePrinter()} />);
 
     fireEvent.click(screen.getByText('Version'));
 
-    expect(screen.getByText('Live reading only — no recorded identity')).toBeInTheDocument();
+    expect(screen.getByText('No recorded firmware identity')).toBeInTheDocument();
     expect(screen.queryByText('Recorded firmware identity')).not.toBeInTheDocument();
   });
 
@@ -281,7 +281,7 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     fireEvent.click(screen.getByText('Version'));
 
     expect(screen.getByText('Recorded firmware identity')).toBeInTheDocument();
-    expect(screen.queryByText('Live reading only — no recorded identity')).not.toBeInTheDocument();
+    expect(screen.queryByText('No recorded firmware identity')).not.toBeInTheDocument();
   });
 
   // Regression coverage for #1651: after a transient Klippy fault clears, the explicit

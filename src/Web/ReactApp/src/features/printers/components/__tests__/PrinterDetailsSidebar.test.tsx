@@ -326,7 +326,7 @@ describe('PrinterDetailsSidebar', () => {
     expect(within(lastSyncRow!).getByText('—')).toBeInTheDocument();
   });
 
-  it('labels the firmware reading as live-only (not used for calibration) when no recorded identity is returned (#1656)', () => {
+  it('labels the firmware reading as unrecorded when no recorded identity is returned (#1656)', () => {
     mockVersionData = {
       firmwareVersion: '1.2.3',
       backendVersion: '4.5.6',
@@ -344,7 +344,7 @@ describe('PrinterDetailsSidebar', () => {
       />
     );
 
-    expect(screen.getByText('Live reading only — no recorded identity')).toBeInTheDocument();
+    expect(screen.getByText('No recorded firmware identity')).toBeInTheDocument();
     expect(screen.queryByText('Recorded firmware identity')).not.toBeInTheDocument();
   });
 
@@ -377,7 +377,7 @@ describe('PrinterDetailsSidebar', () => {
     );
 
     expect(screen.getByText('Recorded firmware identity')).toBeInTheDocument();
-    expect(screen.queryByText('Live reading only — no recorded identity')).not.toBeInTheDocument();
+    expect(screen.queryByText('No recorded firmware identity')).not.toBeInTheDocument();
   });
 
   it('hides object skip controls when backend capability is false', () => {
