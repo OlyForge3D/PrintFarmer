@@ -5404,15 +5404,19 @@ public class PrintersController(
     /// Re-probes this printer's firmware identity on demand and persists the detected facts.
     /// </summary>
     /// <remarks>
-    /// The persisted firmware columns the calibration gate reads are written during onboarding, as a
-    /// side effect of a discovery scan posting back a matching <c>ServerUrl</c>, and — for
-    /// Moonraker/Klipper printers only — as a side effect of the live <c>GET /printers/{id}/version</c>
-    /// read-through path on a cache miss (see <c>PrinterVersionCache.GetMoonrakerVersionAsync</c>). All
-    /// three writers share the same <c>Discovery:FirmwareReprobeIntervalHours</c> cadence throttle (via
-    /// <c>IPrintersService.IsFirmwareReprobeDue</c>), so none of them can write more often than that
-    /// allows. A printer whose backend is not Moonraker/Klipper, or one registered before firmware
-    /// detection existed and never matched by a discovery scan since, therefore has no passive way
-    /// back to a calibratable state — this endpoint is the operator-initiated way back for those cases.
+    /// This endpoint only supports Moonraker/Klipper printers — it rejects any other backend with a
+    /// 409 (see <c>FirmwareDetectionFailure.BackendNotSupported</c> below) — so it is the operator-
+    /// initiated way back specifically for a Moonraker/Klipper printer whose persisted firmware
+    /// columns were never (re)populated by one of the passive writers: the printer's own creation
+    /// DTO at onboarding (an ungated, one-time write of whatever firmware facts the caller supplied,
+    /// e.g. discovery), a later discovery scan posting back a matching <c>ServerUrl</c>, or — for
+    /// Moonraker/Klipper printers specifically — the live <c>GET /printers/{id}/version</c> read-through
+    /// path on a cache miss (see <c>PrinterVersionCache.GetMoonrakerVersionAsync</c>). The latter two
+    /// share the same <c>Discovery:FirmwareReprobeIntervalHours</c> cadence throttle (via
+    /// <c>IPrintersService.IsFirmwareReprobeDue</c>) since both route through
+    /// <c>RefreshDetectedFirmwareIdentityAsync</c>; onboarding is a one-time write and is not subject
+    /// to that cadence at all. This endpoint itself is deliberately not throttled, since it is an
+    /// explicit operator action.
     ///
     /// Note that the live <c>GET /printers/{id}/version</c> reading is still a different value from what
     /// this endpoint persists: for non-Moonraker backends (PrusaLink, OctoPrint, SDCP) it never writes
