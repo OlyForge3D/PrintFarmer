@@ -1,0 +1,338 @@
+diff --git a/src/api/Services/Calibration/Generation/CalibrationGenerationProblemCodes.cs b/src/api/Services/Calibration/Generation/CalibrationGenerationProblemCodes.cs
+index 20f10928e..936ec6518 100644
+--- a/src/api/Services/Calibration/Generation/CalibrationGenerationProblemCodes.cs
++++ b/src/api/Services/Calibration/Generation/CalibrationGenerationProblemCodes.cs
+@@ -49,6 +49,13 @@ public static class CalibrationGenerationProblemCodes
+     /// <summary>A required authoritative identifier is absent.</summary>
+     public const string ContextIdentityMissing = "context_identity_missing";
+ 
++    /// <summary>
++    /// The attempt has no printer-configuration compatibility-pinning snapshot because filament
++    /// calibration attempts created after D4 (#1987) never populate one. This is a known interim
++    /// limitation (issue #1990) pending #1984 (D7), not a missing or corrupted record.
++    /// </summary>
++    public const string CompatibilitySnapshotUnavailable = "compatibility_snapshot_unavailable";
++
+     /// <summary>The idempotency operation identifier is absent.</summary>
+     public const string OperationIdMissing = "operation_id_missing";
+ 
+diff --git a/src/api/Services/Calibration/Generation/CalibrationGenerationSaga.cs b/src/api/Services/Calibration/Generation/CalibrationGenerationSaga.cs
+index ef3f3be1e..0b179d295 100644
+--- a/src/api/Services/Calibration/Generation/CalibrationGenerationSaga.cs
++++ b/src/api/Services/Calibration/Generation/CalibrationGenerationSaga.cs
+@@ -534,6 +534,30 @@ public sealed class CalibrationGenerationSaga(
+             return CalibrationApiResult<CalibrationOrchestrationStatusDto>.Success(Project(orchestration));
+         }
+ 
++        // #1990: D4 (#1987) stopped populating a printer-configuration snapshot for every new
++        // attempt and never regained a replacement path for the compatibility-pinning data this
++        // saga requires. Fail explicitly here instead of letting the lookup below - which is
++        // guaranteed to find nothing for an attempt with no snapshot FK - surface as
++        // ContextIdentityMissing, which reads like a lost/corrupted record rather than a known,
++        // temporary limitation. This is an interim short-circuit pending #1984 (D7), not a fix
++        // for the underlying gap. Historical (pre-D4) attempts may still carry a real snapshot FK
++        // and are unaffected.
++        if (attempt.PrinterConfigurationSnapshotId is null)
++        {
++            await FailTerminallyAsync(
++                project,
++                orchestration,
++                CalibrationGenerationProblemCodes.CompatibilitySnapshotUnavailable,
++                [
++                    new(
++                        CalibrationGenerationProblemCodes.CompatibilitySnapshotUnavailable,
++                        "attempt.printerConfigurationSnapshotId",
++                        "Filament calibration generation is temporarily unavailable pending #1984; see issue #1990."),
++                ],
++                cancellationToken);
++            return CalibrationApiResult<CalibrationOrchestrationStatusDto>.Success(Project(orchestration));
++        }
++
+         PrinterConfigurationSnapshot? snapshot = await _dbContext.PrinterConfigurationSnapshots
+             .AsNoTracking()
+             .FirstOrDefaultAsync(
+diff --git a/src/infra/Services/Queue/CalibrationQueueCanonicalizer.cs b/src/infra/Services/Queue/CalibrationQueueCanonicalizer.cs
+index 45edc08d0..8e44cef27 100644
+--- a/src/infra/Services/Queue/CalibrationQueueCanonicalizer.cs
++++ b/src/infra/Services/Queue/CalibrationQueueCanonicalizer.cs
+@@ -204,6 +204,22 @@ public sealed class CalibrationQueueCanonicalizer(AppDbContext db)
+             .AsNoTracking()
+             .SingleOrDefaultAsync(candidate => candidate.Id == orchestrationId, ct)
+             ?? throw Missing("calibration orchestration");
++
++        // #1990: D4 (#1987) stopped populating a printer-configuration snapshot for every new
++        // attempt and never regained a replacement path for the compatibility-pinning data this
++        // canonicalizer requires. Fail explicitly here instead of letting the lookup below - which
++        // is guaranteed to find nothing for an attempt with no snapshot FK - surface as a generic
++        // "not found", which reads like data corruption rather than a known, temporary limitation.
++        // This is an interim short-circuit pending #1984 (D7), not a fix for the underlying gap.
++        if (attempt.PrinterConfigurationSnapshotId is null)
++        {
++            throw Incompatible(
++                "Filament calibration dispatch requires a printer-configuration compatibility " +
++                "snapshot, which is not currently populated for this attempt. This is a known " +
++                "interim limitation (see issue #1990) pending #1984; the attempt cannot be queued " +
++                "until that support lands.");
++        }
++
+         PrinterConfigurationSnapshot snapshot = await _db.PrinterConfigurationSnapshots
+             .AsNoTracking()
+             .SingleOrDefaultAsync(
+diff --git a/src/infra/Services/Queue/Dispatch/DispatchClaimService.cs b/src/infra/Services/Queue/Dispatch/DispatchClaimService.cs
+index c82d804ad..153231e4a 100644
+--- a/src/infra/Services/Queue/Dispatch/DispatchClaimService.cs
++++ b/src/infra/Services/Queue/Dispatch/DispatchClaimService.cs
+@@ -1605,6 +1605,20 @@ public sealed class DispatchClaimService(
+         CalibrationAttempt? attempt = await db.CalibrationAttempts
+             .AsNoTracking()
+             .SingleOrDefaultAsync(candidate => candidate.Id == job.CalibrationAttemptId, ct);
++
++        // #1990: D4 (#1987) stopped populating a printer-configuration snapshot for every new
++        // attempt and never regained a replacement path for the compatibility-pinning data this
++        // gate requires. Fail explicitly here instead of letting the (guaranteed-empty) snapshot
++        // lookup below fold into the generic "record is missing" branch, which reads like data
++        // corruption rather than a known, temporary limitation. Interim short-circuit pending
++        // #1984 (D7), not a fix for the underlying gap.
++        if (attempt is not null && attempt.PrinterConfigurationSnapshotId is null)
++        {
++            return DispatchClaimResult.Fail(
++                "calibration_dispatch_unavailable",
++                "Filament calibration dispatch is temporarily unavailable pending #1984; see issue #1990.");
++        }
++
+         PrinterConfigurationSnapshot? snapshot = await db.PrinterConfigurationSnapshots
+             .AsNoTracking()
+             .SingleOrDefaultAsync(candidate => candidate.Id == job.CalibrationConfigSnapshotId, ct);
+diff --git a/src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationGenerationSagaTests.cs b/src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationGenerationSagaTests.cs
+index 722ba299e..fc3eb37f0 100644
+--- a/src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationGenerationSagaTests.cs
++++ b/src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationGenerationSagaTests.cs
+@@ -312,6 +312,41 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
+         _ = (await _harness.CountSliceJobsAsync(fixture.OrchestrationId)).Should().Be(0);
+     }
+ 
++    [Fact(DisplayName =
++        "An attempt with no printer-configuration snapshot fails explicitly with a known-limitation " +
++        "code (#1990), not a dead lookup masquerading as a missing record")]
++    public async Task ResumeAsync_WithoutSnapshotId_FailsWithCompatibilitySnapshotUnavailable()
++    {
++        CalibrationGenerationFixture fixture = await _harness.SeedAttemptAsync();
++        _ = await _harness.AddAttestedWorkerAsync();
++        _ = await _harness.CreateSaga().CreateOrResumeAsync(
++            fixture.ProjectId,
++            fixture.AttemptId,
++            "generate-no-snapshot",
++            fixture.Request(),
++            fixture.Owner,
++            CancellationToken.None);
++
++        // Simulate the D4 regression (#1990): CreateAttemptAsync unconditionally sets
++        // PrinterConfigurationSnapshotId = null for every new attempt today. Use raw SQL
++        // rather than an EF-tracked update: CalibrationAttempt rows are immutable once
++        // persisted (AppDbContext.EnsureCalibrationHistoryIsImmutable), which is exactly
++        // the invariant a real D4-created attempt never violates — it is born this way.
++        await using (Farm.Infrastructure.Data.AppDbContext core = _harness.CreateCoreContext())
++        {
++            _ = await core.Database.ExecuteSqlInterpolatedAsync(
++                $"UPDATE CalibrationAttempts SET PrinterConfigurationSnapshotId = NULL WHERE Id = {fixture.AttemptId}");
++        }
++
++        _ = await _harness.CreateSaga().ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
++
++        CalibrationOrchestration orchestration = await _harness.GetOrchestrationAsync(fixture.OrchestrationId);
++        _ = orchestration.Status.Should().Be(CalibrationOrchestrationStatus.Failed);
++        _ = orchestration.LastErrorCode.Should()
++            .Be(CalibrationGenerationProblemCodes.CompatibilitySnapshotUnavailable);
++        _ = (await _harness.CountSliceJobsAsync(fixture.OrchestrationId)).Should().Be(0);
++    }
++
+     [Fact(DisplayName = "The submitted slice job carries the full calibration and profile lineage")]
+     public async Task ResumeAsync_SubmitsSliceJobWithCompleteLineage()
+     {
+diff --git a/src/tests/Farm.Web.Api.Tests/Dispatch/CalibrationAcceptanceMatrixTests.cs b/src/tests/Farm.Web.Api.Tests/Dispatch/CalibrationAcceptanceMatrixTests.cs
+index 4369ef6a1..f2ef324c4 100644
+--- a/src/tests/Farm.Web.Api.Tests/Dispatch/CalibrationAcceptanceMatrixTests.cs
++++ b/src/tests/Farm.Web.Api.Tests/Dispatch/CalibrationAcceptanceMatrixTests.cs
+@@ -1321,6 +1321,40 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
+             "claim must fail when SpecificationSha256 and other profile hashes are null");
+     }
+ 
++    [Fact]
++    public async Task G3_ClaimPolicy_AttemptWithoutSnapshotId_RejectsWithDispatchUnavailable()
++    {
++        // Regression test for issue #1990: PR #1987 (D4) made CalibrationProjectService
++        // unconditionally null the CalibrationAttempt.PrinterConfigurationSnapshotId FK,
++        // with no replacement path. Before the #1990 fix, this fell through to a dead DB
++        // lookup on a nonexistent snapshot id and surfaced as the generic
++        // "calibration_record_invalid" code. Simulate the regression directly on an
++        // otherwise fully-valid, seeded calibration job by nulling out the attempt's
++        // snapshot id after seeding, and assert the claim now fails fast with the
++        // distinct, documented "calibration_dispatch_unavailable" code (see #1990, #1984).
++        await using AppDbContext seedCtx = CreateContext();
++        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx, setAck: true);
++
++        PrintJob seededJob = await seedCtx.PrintJobs.SingleAsync(j => j.Id == jobId);
++
++        // Use raw SQL rather than an EF-tracked update: CalibrationAttempt rows are immutable
++        // once persisted (AppDbContext.EnsureCalibrationHistoryIsImmutable), which is exactly
++        // the invariant a real D4-created attempt never violates — it is born this way.
++        _ = await seedCtx.Database.ExecuteSqlInterpolatedAsync(
++            $"UPDATE CalibrationAttempts SET PrinterConfigurationSnapshotId = NULL WHERE Id = {seededJob.CalibrationAttemptId}");
++
++        await using AppDbContext claimCtx = CreateContext();
++        var claimSvc = CreateClaimService(claimCtx, MakeOnlineIdleReader(printerId));
++
++        var result = await claimSvc.AcquireClaimAsync(
++            new DispatchClaimRequest(jobId, printerId, "actor", "BedClear", "valid-ack-key", null, null));
++
++        result.Success.Should().BeFalse();
++        result.ErrorCode.Should().Be("calibration_dispatch_unavailable",
++            "a calibration attempt with no compatibility-pinning snapshot (issue #1990) must fail fast " +
++            "with a distinct, documented code rather than a generic dead-lookup rejection");
++    }
++
+     [Fact]
+     public async Task G3_ClaimPolicy_FullValidJob_WithAck_Succeeds()
+     {
+diff --git a/src/tests/Farm.Web.Api.Tests/Dispatch/CalibrationQueueCanonicalizerTests.cs b/src/tests/Farm.Web.Api.Tests/Dispatch/CalibrationQueueCanonicalizerTests.cs
+new file mode 100644
+index 000000000..3fe106016
+--- /dev/null
++++ b/src/tests/Farm.Web.Api.Tests/Dispatch/CalibrationQueueCanonicalizerTests.cs
+@@ -0,0 +1,136 @@
++﻿// <copyright file="CalibrationQueueCanonicalizerTests.cs" company="OlyForge3D">
++// Copyright (c) OlyForge3D. All rights reserved.
++// </copyright>
++
++using Farm.Infrastructure.Data;
++using Farm.Infrastructure.Domain;
++using Farm.Infrastructure.Services.Queue;
++using FluentAssertions;
++using Microsoft.Data.Sqlite;
++using Microsoft.EntityFrameworkCore;
++using Xunit;
++
++namespace Farm.Web.Api.Tests.Dispatch;
++
++/// <summary>
++/// Regression coverage for issue #1990: PR #1987 (D4) started unconditionally nulling
++/// <see cref="CalibrationAttempt.PrinterConfigurationSnapshotId"/> for every new attempt with no
++/// replacement path. Before the #1990 fix, <see cref="CalibrationQueueCanonicalizer.BuildAsync"/>
++/// fell through to a dead lookup on a nonexistent snapshot id and surfaced a generic "not found"
++/// exception that read like data corruption. This asserts the explicit, documented short-circuit
++/// added for #1990 instead.
++/// </summary>
++[Trait("Category", "DbHeavy")]
++public sealed class CalibrationQueueCanonicalizerTests : IAsyncDisposable
++{
++    private readonly SqliteConnection _keepAlive;
++    private readonly string _connectionString;
++    private static int _dbCounter;
++
++    public CalibrationQueueCanonicalizerTests()
++    {
++        int id = System.Threading.Interlocked.Increment(ref _dbCounter);
++        _connectionString = $"Data Source=file:canonicalizer_{id}?mode=memory&cache=shared;Foreign Keys=False";
++        _keepAlive = new SqliteConnection(_connectionString);
++        _keepAlive.Open();
++    }
++
++    public async ValueTask DisposeAsync()
++    {
++        await _keepAlive.DisposeAsync();
++    }
++
++    private AppDbContext CreateContext()
++    {
++        DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
++            .UseSqlite(_connectionString)
++            .Options;
++        var ctx = new AppDbContext(opts);
++        ctx.Database.ExecuteSqlRaw("PRAGMA foreign_keys = OFF;");
++        return ctx;
++    }
++
++    [Fact]
++    public async Task BuildAsync_AttemptWithoutSnapshotId_ThrowsIncompatible_NotDeadLookup()
++    {
++        await using AppDbContext seedCtx = CreateContext();
++        await seedCtx.Database.EnsureCreatedAsync();
++
++        Guid projectId = Guid.NewGuid();
++        Guid attemptId = Guid.NewGuid();
++        Guid orchestrationId = Guid.NewGuid();
++
++        seedCtx.CalibrationProjects.Add(new CalibrationProject
++        {
++            Id = projectId,
++            OwnerUserId = Guid.NewGuid(),
++            Name = "Canonicalizer regression project",
++            PrinterId = Guid.NewGuid(),
++
++            // Regression trigger: D4 (#1987) no longer populates this for new attempts.
++            CurrentPrinterConfigurationSnapshotId = null,
++            FilamentProvider = "local",
++            FilamentProductId = "pla",
++            FilamentProductName = "PLA",
++            FilamentMaterial = "PLA",
++        });
++        seedCtx.CalibrationAttempts.Add(new CalibrationAttempt
++        {
++            Id = attemptId,
++            ProjectId = projectId,
++            SpecificationSha256 = new string('a', 64),
++
++            // Regression trigger: no compatibility-pinning snapshot for this attempt (#1990).
++            PrinterConfigurationSnapshotId = null,
++        });
++        seedCtx.CalibrationOrchestrations.Add(new CalibrationOrchestration
++        {
++            Id = orchestrationId,
++            ProjectId = projectId,
++            AttemptId = attemptId,
++            SpecificationSha256 = new string('a', 64),
++        });
++        await seedCtx.SaveChangesAsync();
++
++        await using AppDbContext buildCtx = CreateContext();
++        var canonicalizer = new CalibrationQueueCanonicalizer(buildCtx);
++
++        var request = new Farm.Infrastructure.QueuePrintJobDto
++        {
++            JobKind = JobKind.FilamentCalibration,
++        };
++        var gcode = new GcodeFile
++        {
++            Id = Guid.NewGuid(),
++            Name = "canon.gcode",
++            FileName = "canon.gcode",
++            FileHash = new string('b', 64),
++            FileSizeBytes = 1,
++            FilePath = "/canon",
++        };
++        var classification = new QueueJobClassification(
++            JobKind: JobKind.FilamentCalibration,
++            CalibrationProjectId: projectId,
++            CalibrationAttemptId: attemptId,
++            CalibrationOrchestrationId: orchestrationId,
++            SourceArtifactId: Guid.NewGuid(),
++            SliceJobId: Guid.NewGuid(),
++            GcodeContentSha256: new string('b', 64),
++            SpecificationSha256: new string('a', 64),
++            MachineProfileSha256: new string('c', 64),
++            ProcessProfileSha256: new string('d', 64),
++            FilamentProfileSha256: new string('e', 64),
++            RequiredFirmwareFamily: null,
++            RequiredGcodeDialect: null,
++            RequiredSlicerEngine: null,
++            RequiredSlicerDistribution: null,
++            RequiredSlicerVersion: null,
++            RequiredSlicerContainerDigest: null);
++
++        Func<Task> act = () => canonicalizer.BuildAsync(
++            request, gcode, classification, actorUserId: null, CancellationToken.None);
++
++        (await act.Should().ThrowAsync<CalibrationQueueIncompatibleException>())
++            .WithMessage("*known interim limitation*#1990*");
++    }
++}

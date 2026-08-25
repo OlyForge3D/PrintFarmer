@@ -205,6 +205,17 @@ public sealed class CalibrationQueueCanonicalizer(AppDbContext db)
             .SingleOrDefaultAsync(candidate => candidate.Id == orchestrationId, ct)
             ?? throw Missing("calibration orchestration");
 
+        // Authorization must be evaluated before any check below that could otherwise reveal,
+        // to a caller who does not own this project, that a given attempt exists and is in a
+        // particular (e.g. #1990-affected) state. Keep this ahead of the null-snapshot guard and
+        // the snapshot lookup so a non-owner always sees the same unauthorized outcome regardless
+        // of the attempt's internal state.
+        if (actorUserId.HasValue && project.OwnerUserId != actorUserId.Value)
+        {
+            throw new UnauthorizedAccessException(
+                "The calibration project is owned by a different user.");
+        }
+
         // #1990: D4 (#1987) stopped populating a printer-configuration snapshot for every new
         // attempt and never regained a replacement path for the compatibility-pinning data this
         // canonicalizer requires. Fail explicitly here instead of letting the lookup below - which
@@ -226,12 +237,6 @@ public sealed class CalibrationQueueCanonicalizer(AppDbContext db)
                 candidate => candidate.Id == attempt.PrinterConfigurationSnapshotId,
                 ct)
             ?? throw Missing("printer configuration snapshot");
-
-        if (actorUserId.HasValue && project.OwnerUserId != actorUserId.Value)
-        {
-            throw new UnauthorizedAccessException(
-                "The calibration project is owned by a different user.");
-        }
 
         if (attempt.ProjectId != project.Id ||
             orchestration.ProjectId != project.Id ||
