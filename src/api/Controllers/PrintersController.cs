@@ -5404,15 +5404,24 @@ public class PrintersController(
     /// Re-probes this printer's firmware identity on demand and persists the detected facts.
     /// </summary>
     /// <remarks>
-    /// The persisted firmware columns the calibration gate reads are written only during onboarding
-    /// or as a side effect of a discovery scan posting back a matching <c>ServerUrl</c> (throttled to
-    /// <c>Discovery:FirmwareReprobeIntervalHours</c>). A printer registered before firmware detection
-    /// existed therefore has no way back to a calibratable state. This endpoint is that way back.
+    /// The persisted firmware columns the calibration gate reads are written during onboarding, as a
+    /// side effect of a discovery scan posting back a matching <c>ServerUrl</c>, and — for
+    /// Moonraker/Klipper printers only — as a side effect of the live <c>GET /printers/{id}/version</c>
+    /// read-through path on a cache miss (see <c>PrinterVersionCache.GetMoonrakerVersionAsync</c>). All
+    /// three writers share the same <c>Discovery:FirmwareReprobeIntervalHours</c> cadence throttle (via
+    /// <c>IPrintersService.IsFirmwareReprobeDue</c>), so none of them can write more often than that
+    /// allows. A printer whose backend is not Moonraker/Klipper, or one registered before firmware
+    /// detection existed and never matched by a discovery scan since, therefore has no passive way
+    /// back to a calibratable state — this endpoint is the operator-initiated way back for those cases.
     ///
-    /// Note that the live <c>GET /printers/{id}/version</c> reading is a different value entirely: it
-    /// reports firmware straight from the backend through an in-memory cache and never populates
-    /// these columns, which is why a printer can display a firmware version in the UI while
-    /// calibration still reports the firmware inputs as missing.
+    /// Note that the live <c>GET /printers/{id}/version</c> reading is still a different value from what
+    /// this endpoint persists: for non-Moonraker backends (PrusaLink, OctoPrint, SDCP) it never writes
+    /// these columns at all, which is why a printer can display a firmware version in the UI while
+    /// calibration still reports the firmware inputs as missing. For Moonraker/Klipper printers, per
+    /// the read-through path above, the version endpoint's live probe writes the same columns using
+    /// known Klipper constants for family/dialect/detection-source/confidence rather than a freshly
+    /// derived onboarding scan — so a Moonraker/Klipper printer can passively regain a calibratable
+    /// state just by being polled, without an operator ever calling this endpoint.
     ///
     /// Detection never marks the identity verified — that stays a human confirm-only action.
     /// </remarks>
