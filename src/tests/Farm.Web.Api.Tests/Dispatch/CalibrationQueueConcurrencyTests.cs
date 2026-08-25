@@ -1028,8 +1028,14 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
 
         await using AppDbContext claimCtx = CreateContext();
         var claimSvc = CreateClaimService(claimCtx, MakeOnlineIdleReader(printerId));
-        await claimSvc.AcquireClaimAsync(
+        DispatchClaimResult claimResult = await claimSvc.AcquireClaimAsync(
             new DispatchClaimRequest(jobId1, printerId, "actor", "BedClear", "claim-key-1", null, null));
+
+        // The claim must actually succeed — otherwise the sequence assertions below could be
+        // satisfied entirely by the ack's own outbox writes, silently defeating this test's
+        // "multiple writes including the claim" intent.
+        claimResult.Success.Should().BeTrue(
+            "the claim must succeed for this test to exercise a second, claim-originated outbox write");
 
         // Assert: multiple outbox writes across this flow (ack + PersistAcknowledgementAsync's
         // manual event + claim) must all have distinct, monotonically increasing Sequence
@@ -1045,6 +1051,15 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         sequences.Should().OnlyHaveUniqueItems("outbox sequences must be unique — no duplicate ordering");
         sequences.Should().BeInAscendingOrder("outbox events must have strictly ascending sequences");
         sequences.Should().AllSatisfy(s => s.Should().BeGreaterThan(0, "sequence must be non-zero from allocator"));
+
+        // Explicitly confirm the claim itself produced a JobDispatchStarted outbox event —
+        // without this, the count/ordering assertions above could pass even if the claim
+        // silently stopped emitting its event, since the ack path already writes two events
+        // of its own (BackendStartCommand ack + PersistAcknowledgementAsync's manual event).
+        int claimEventCount = await verifyCtx.QueueDispatchOutbox
+            .CountAsync(e => e.AggregateId == jobId1
+                && e.EventType == "PrintFarmer.Queue.JobDispatchStarted.v1");
+        claimEventCount.Should().Be(1, "a successful claim must write exactly one JobDispatchStarted outbox event");
     }
 
     // =========================================================================

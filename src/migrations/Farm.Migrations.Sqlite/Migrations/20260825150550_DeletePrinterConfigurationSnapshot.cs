@@ -5,7 +5,27 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace Farm.Migrations.Sqlite.Migrations
 {
-    /// <inheritdoc />
+    /// <summary>
+    /// Drops the <c>PrinterConfigurationSnapshots</c> table and both FK columns that
+    /// referenced it (#1989 / D3b).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⚠️ OPERATOR WARNING — IRREVERSIBLE DATA LOSS: this migration's <see cref="Down"/>
+    /// recreates the table/columns as empty schema shells only. It cannot restore any rows
+    /// that existed before <see cref="Up"/> ran. Rolling this migration back does not undo
+    /// the data loss.
+    /// </para>
+    /// <para>
+    /// Any <c>CalibrationProject</c>/<c>CalibrationAttempt</c> row created before Path D's
+    /// snapshot-linkage removal (#1981/D4) may have carried a non-null snapshot FK pointing
+    /// at real historical printer-configuration data. That historical linkage — and the
+    /// snapshot rows it pointed at — is permanently discarded by this migration. Operators
+    /// who need to preserve that history for audit purposes must export the
+    /// <c>PrinterConfigurationSnapshots</c> table (and the FK values on the two referencing
+    /// tables) before applying this migration to production.
+    /// </para>
+    /// </remarks>
     public partial class DeletePrinterConfigurationSnapshot : Migration
     {
         /// <inheritdoc />
