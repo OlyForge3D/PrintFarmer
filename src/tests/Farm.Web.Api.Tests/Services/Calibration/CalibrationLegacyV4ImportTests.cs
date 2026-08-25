@@ -1,4 +1,5 @@
-﻿using System.Security.Cryptography;
+﻿using System.Linq;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -74,8 +75,18 @@ public sealed class CalibrationLegacyV4ImportTests
         _ = imported.PrinterId.Should().Be(store.PrinterId);
         _ = imported.FilamentProvider.Should().Be("catalog");
         _ = imported.FilamentProductId.Should().Be("sku-pla-blue");
+        _ = imported.FilamentProductName.Should().Be("PLA Blue");
         _ = imported.FilamentMaterial.Should().Be("PLA");
+        _ = imported.ExperienceMode.Should().Be(CalibrationExperienceMode.Coach);
         _ = imported.Revision.Should().Be(1);
+
+        using JsonDocument snapshot = JsonDocument.Parse(imported.FilamentSnapshotJson);
+        _ = snapshot.RootElement.GetProperty("sku").GetString().Should().Be("sku-pla-blue");
+        using JsonDocument orderedSteps = JsonDocument.Parse(imported.OrderedStepsJson);
+        _ = orderedSteps.RootElement.EnumerateArray().Select(step => step.GetString())
+            .Should().ContainSingle().Which.Should().Be("flow");
+        using JsonDocument currentSelections = JsonDocument.Parse(imported.CurrentSelectionsJson);
+        _ = currentSelections.RootElement.ValueKind.Should().Be(JsonValueKind.Object);
     }
 
     [Fact]
