@@ -332,6 +332,7 @@ test('production manifest no longer governs self-authored Calibration paths, onl
     path.join(repositoryRoot, 'compliance', 'calibration-provenance.json'),
   );
   assert.deepEqual(manifest.governedPathPatterns, ['src/**/Governed/**']);
+  assert.deepEqual(manifest.entries, []);
   assert.deepEqual(manifest.referenceRecords, []);
 
   const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-governed-scope-'));
@@ -353,19 +354,17 @@ test('production manifest no longer governs self-authored Calibration paths, onl
     const errors = await validateProvenanceManifest(root, manifest);
     const missingEntryPaths = errors
       .filter((error) => error.code === 'PROVENANCE_MANIFEST_ENTRY_MISSING')
-      .map((error) => error.path);
+      .map((error) => error.path)
+      .sort();
 
-    assert.ok(
-      !missingEntryPaths.includes(selfAuthoredCalibrationPath),
-      'src/api/Services/Calibration must no longer be governed',
-    );
-    assert.ok(
-      missingEntryPaths.includes(apiGovernedPath),
-      'src/api/Services/Governed must remain governed',
-    );
-    assert.ok(
-      missingEntryPaths.includes(workerGovernedPath),
-      'src/orcaslicer-worker/Services/Governed must remain governed',
+    // Assert the exact set of governed-but-unlisted files, not just that the
+    // Governed/ paths are present: this also guards against a future PR
+    // silently re-adding manifest.entries (which would otherwise satisfy the
+    // Calibration and Governed assertions below without failing here).
+    assert.deepEqual(
+      missingEntryPaths,
+      [apiGovernedPath, workerGovernedPath].sort(),
+      'only files under a Governed/ folder should be reported as governed without a manifest entry',
     );
   } finally {
     await rm(root, { force: true, recursive: true });

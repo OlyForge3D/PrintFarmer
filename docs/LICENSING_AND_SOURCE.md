@@ -288,6 +288,28 @@ Static printer catalogs, calibration models, screenshots, icons, fixtures,
 data tables, mutable revisions, and unknown-license assets are excluded. Do not
 use the manifest to claim provenance for generated or unverified assets.
 
+### This is a location allowlist, not content scanning — code review is the backstop
+
+`governedPathPatterns` is a positive location match: automated validation only
+inspects files whose path already sits under a `Governed/` folder. It does not
+scan the rest of `src/` for upstream-derived code, and it never did — the prior
+broad `src/**/calibration/**` wildcard had the identical blind spot for any
+file whose path did not contain a directory literally named `calibration`.
+Narrowing to `Governed/**` changes *where* that blind spot's boundary sits, it
+does not introduce a new class of gap.
+
+The only path-independent backstop is the `PrintFarmer-Provenance-ID` marker
+check (`PROVENANCE_MARKER_UNREGISTERED` in `compliance-lib.mjs`), which flags
+an unregistered marker comment anywhere in `src/`. It catches a manifest
+entry that was deleted or never added for marked code; it does **not** detect
+unmarked derived code that was never labeled in the first place.
+
+**Reviewers must treat placement as a manual compliance control:** when
+reviewing a change that ports, adapts, or copies source from an external
+project (OrcaSlicer or otherwise), confirm the destination is under the
+correct project area's `Governed/` folder and that a matching `entries` record
+was added — CI will not catch a derived file left outside `Governed/`.
+
 ## Contributor and CI commands
 
 Restore .NET dependencies before the full dependency license check so NuGet
