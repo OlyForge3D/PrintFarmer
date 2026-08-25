@@ -142,7 +142,9 @@ internal static class CalibrationGenerationPipeline
         CalibrationSafetyCheckpoint checkpoint,
         string? gcodeOverride = null,
         long? currentRevision = null) =>
-        new CalibrationGcodeSafetyValidator().Validate(new CalibrationGcodeSafetyRequest(
+        new CalibrationGcodeProgramValidator(
+            new Farm.Web.Api.Services.Gcode.Safety.GcodeSafetyValidator())
+            .Validate(new CalibrationGcodeSafetyRequest(
             run.Specification!,
             run.Plan!,
             run.Annotated!.Manifest,

@@ -20,7 +20,7 @@ mismatch isn't listed here, treat it as a genuine bug or drift, not an intention
 
 **Method(s)**: all — enforced pipeline-wide as a final, reject-only checkpoint.
 
-**What differs**: `CalibrationGcodeSafetyValidator` statically interprets every emitted
+**What differs**: `GcodeSafetyValidator` statically interprets every emitted
 calibration program and rejects it outright if any commanded nozzle/bed/chamber temperature,
 acceleration, feed rate, retraction distance, pressure advance value, or volumetric flow rate
 exceeds an authoritative ceiling (drawn from the printer's own profile limits, plus a small set
@@ -38,11 +38,13 @@ completed, promoted, queued or started."*
 
 **Where in code**:
 
-- `src/api/Services/Calibration/Generation/CalibrationGcodeSafetyValidator.cs` —
+- `src/api/Services/Gcode/Safety/GcodeSafetyValidator.cs` (general, calibration-independent
+  checks) —
   `ApplyNozzleTemperature`, `ApplyBedTemperature`, `ApplyChamberTemperature`,
   `ApplyAcceleration`, `ApplyVelocityLimit`, `ApplyMove` (feed rate, retraction, volumetric flow),
   `ApplyPressureAdvance`.
-- Tested by `src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationGcodeSafetyValidatorTests.cs`.
+- Tested by `src/tests/Farm.Web.Api.Tests/Services/Gcode/Safety/GcodeSafetyValidatorTests.cs`
+  and `src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationGcodeProgramValidatorTests.cs`.
 - A related but separate mechanism proactively *clamps* (rather than rejects) the printed feed
   rate to the volumetric-flow ceiling during specification compilation, specifically so a wide
   nozzle's calibration program is resolved safely instead of being rejected later by the
@@ -68,10 +70,11 @@ calibration method itself would otherwise request.
 
 **Where in code**:
 
-- `src/api/Services/Calibration/Generation/CalibrationGcodeSafetyValidator.cs` —
+- `src/api/Services/Gcode/Safety/GcodeSafetyValidator.cs` —
   `ApplyPressureAdvance` (pressure-advance ceiling), `ApplyMove` (retraction ceiling), and the
   `AbsolutePressureAdvanceCeiling` / `AbsoluteRetractionCeiling` constants.
-- Tested by `CalibrationGcodeSafetyValidatorTests.cs` in the same directory.
+- Tested by `src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationGcodeProgramValidatorTests.cs`
+  in the calibration test suite.
 
 ## 3. Custom G-code hooks and post-processing scripts are neutralized in vendor profiles
 
@@ -120,11 +123,17 @@ rejected outright rather than executed against real hardware.
 
 **Where in code**:
 
-- `src/api/Services/Calibration/Generation/CalibrationGcodeSafetyValidator.cs` — the command
-  allowlist check and `TUNING_TOWER` rejection in the G-code interpretation loop.
-- Tested by `CalibrationGcodeSafetyValidatorTests.cs`
+- `src/api/Services/Gcode/Safety/GcodeSafetyValidator.cs` — the general command allowlist
+  check and `TUNING_TOWER` rejection in the G-code interpretation loop. The allowlist itself
+  is optional and calibration-specific: `CalibrationGcodeProgramValidator` is the only caller
+  that passes one (`KlipperCalibrationCommands.Allowlist`); the send-to-printer path leaves it
+  unset so ordinary slicer g-code is not constrained to a calibration vocabulary.
+- Tested by `src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationGcodeProgramValidatorTests.cs`
   (`Validate_WithInjectedTuningTower_RejectsExplicitly`,
-  `Validate_WithNonAllowlistedCommand_Rejects`).
+  `Validate_WithNonAllowlistedCommand_Rejects`) and
+  `src/tests/Farm.Web.Api.Tests/Services/Gcode/Safety/GcodeSafetyValidatorTests.cs`
+  (`Validate_WithAllowlistAndDisallowedCommand_Rejects`,
+  `Validate_WithNoAllowlist_AcceptsArbitrarySlicerCommands`).
 
 ## Adding a new entry
 
