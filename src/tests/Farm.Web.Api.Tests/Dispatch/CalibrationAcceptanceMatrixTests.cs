@@ -251,11 +251,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             AttemptId = calibrationAttemptId,
             SpecificationSha256 = new string('b', 64),
             SliceJobId = sourceSliceJobId,
-            FinalArtifactId = sourceArtifactId,
             GcodeFileId = gcode.Id,
-            GcodeSha256 = new string('a', 64),
-            ManifestSha256 = new string('9', 64),
-            SlicerContainerDigest = "sha256:test",
         });
 
         var ds = new PrinterDispatchState { PrinterId = printer.Id };

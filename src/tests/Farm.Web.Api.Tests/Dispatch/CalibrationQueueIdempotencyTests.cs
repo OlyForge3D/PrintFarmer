@@ -231,11 +231,7 @@ public class CalibrationQueueIdempotencyTests
             AttemptId = attemptId,
             SpecificationSha256 = new string('2', 64),
             SliceJobId = sliceJobId,
-            FinalArtifactId = sourceArtifactId,
             GcodeFileId = gcode.Id,
-            GcodeSha256 = new string('1', 64),
-            ManifestSha256 = new string('9', 64),
-            SlicerContainerDigest = "sha256:test",
         };
 
         db.GcodeFiles.Add(gcode);

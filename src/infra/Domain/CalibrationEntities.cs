@@ -377,8 +377,6 @@ public sealed class CalibrationOrchestration
 
     public Guid? SliceJobId { get; set; }
 
-    public Guid? SourceArtifactId { get; set; }
-
     public Guid? GcodeFileId { get; set; }
 
     public Guid? PrintJobId { get; set; }
@@ -402,37 +400,6 @@ public sealed class CalibrationOrchestration
 
     /// <summary>SHA-256 of the recompiled canonical specification this run is pinned to.</summary>
     public string? SpecificationSha256 { get; set; }
-
-    /// <summary>SHA-256 of the compiled upstream-Orca plan manifest.</summary>
-    public string? PlanManifestSha256 { get; set; }
-
-    /// <summary>SHA-256 of the final annotated calibration G-code.</summary>
-    /// <remarks>
-    /// Still authoritatively consulted by <see cref="Farm.Infrastructure.Services.Queue.CalibrationQueueCanonicalizer"/>
-    /// when a promoted G-code file is queued for dispatch, independent of how the file was produced.
-    /// </remarks>
-    public string? GcodeSha256 { get; set; }
-
-    /// <summary>SHA-256 of the canonical calibration manifest describing the final G-code.</summary>
-    public string? ManifestSha256 { get; set; }
-
-    /// <summary>Version of the trusted generator that produced the specification, plan and program.</summary>
-    public string? GeneratorVersion { get; set; }
-
-    /// <summary>Pinned slicer container digest the accepted worker attested.</summary>
-    public string? SlicerContainerDigest { get; set; }
-
-    /// <summary>Pinned slicer binary digest the accepted worker attested.</summary>
-    public string? SlicerBinarySha256 { get; set; }
-
-    /// <summary>Worker that claimed and executed the submitted slice job.</summary>
-    public Guid? WorkerId { get; set; }
-
-    /// <summary>Server-composed final artifact that was safety validated and promoted.</summary>
-    public Guid? FinalArtifactId { get; set; }
-
-    /// <summary>Idempotency operation key used for the artifact promotion hop.</summary>
-    public string? PromotionOperationId { get; set; }
 
     /// <summary>UTC timestamp at which the current step started, used for stuck-step reconciliation.</summary>
     public DateTime? StepStartedAtUtc { get; set; }

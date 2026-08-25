@@ -954,21 +954,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
-                    b.Property<Guid?>("FinalArtifactId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<Guid?>("GcodeFileId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("GcodeSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
                     b.Property<string>("GenerationRequestSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("GeneratorVersion")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
@@ -986,10 +975,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
-                    b.Property<string>("ManifestSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
                     b.Property<Guid?>("Model3DId")
                         .HasColumnType("uniqueidentifier");
 
@@ -1001,19 +986,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
-                    b.Property<string>("PlanManifestSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
                     b.Property<Guid?>("PrintJobId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("PromotionOperationId")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
 
                     b.Property<int>("RetryCount")
                         .HasColumnType("int");
@@ -1023,17 +1000,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("bigint");
 
                     b.Property<Guid?>("SliceJobId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("SlicerBinarySha256")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("SlicerContainerDigest")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<Guid?>("SourceArtifactId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("SpecificationSha256")
@@ -1048,9 +1014,6 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("WorkerId")
-                        .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 

@@ -195,13 +195,6 @@ public sealed class CalibrationOrchestrationConfiguration : IEntityTypeConfigura
         _ = builder.Property(orchestration => orchestration.Revision).IsConcurrencyToken().ValueGeneratedNever();
         _ = builder.Property(orchestration => orchestration.GenerationRequestSha256).HasMaxLength(64);
         _ = builder.Property(orchestration => orchestration.SpecificationSha256).HasMaxLength(64);
-        _ = builder.Property(orchestration => orchestration.PlanManifestSha256).HasMaxLength(64);
-        _ = builder.Property(orchestration => orchestration.GcodeSha256).HasMaxLength(64);
-        _ = builder.Property(orchestration => orchestration.ManifestSha256).HasMaxLength(64);
-        _ = builder.Property(orchestration => orchestration.GeneratorVersion).HasMaxLength(64);
-        _ = builder.Property(orchestration => orchestration.SlicerContainerDigest).HasMaxLength(128);
-        _ = builder.Property(orchestration => orchestration.SlicerBinarySha256).HasMaxLength(128);
-        _ = builder.Property(orchestration => orchestration.PromotionOperationId).HasMaxLength(128);
         _ = builder.Property(orchestration => orchestration.LeaseOwner).HasMaxLength(128);
         _ = builder.HasIndex(orchestration => orchestration.AttemptId).IsUnique();
         _ = builder.HasIndex(orchestration => new { orchestration.Status, orchestration.NextRetryAtUtc });
