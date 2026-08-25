@@ -102,7 +102,6 @@ caller-specific permissions:
   "calibrationSyncEnabled": true,
   "calibrationPhotosEnabled": true,
   "calibrationProfileHistoryEnabled": true,
-  "calibrationGenerationEnabled": false,
   "calibrationSlicingEnabled": false,
   "calibrationArtifactPromotionEnabled": false,
   "calibrationQueueEnabled": false,
@@ -121,7 +120,6 @@ caller-specific permissions:
   "calibration": {
     "contextImplemented": true,
     "commandsImplemented": true,
-    "generationImplemented": true,
     "queueIntegrationImplemented": true,
     "eventStreamImplemented": true,
     "operational": true
@@ -131,7 +129,6 @@ caller-specific permissions:
     "calibrationCapabilities": "/api/calibration/capabilities",
     "printers": "/api/printers",
     "calibrationProjects": "/api/calibration-projects",
-    "calibrationGenerateJob": "/api/calibration-projects/{projectId}/attempts/{attemptId}/generate-job",
     "calibrationOrchestration": "/api/calibration-orchestrations/{id}",
     "calibrationSync": "/api/calibration-sync/changes",
     "calibrationImports": "/api/calibration-imports/legacy-v4",
@@ -181,8 +178,8 @@ resolver cannot complete the single profile-triple request. Persistence, synchro
 photos, and immutable generated-profile history are implemented independently.
 `calibrationSlicingEnabled` is computed, never constant: it additionally
 requires a healthy worker that attests its pinned OrcaSlicer binary digest and
-container digest, plus a resolvable stored-model path. Generation, promotion,
-queue, and event-streaming feature flags remain false. Routes are canonical
+container digest, plus a resolvable stored-model path. Promotion, queue, and
+event-streaming feature flags remain false. Routes are canonical
 same-origin paths and never disclose internal service addresses.
 
 ### Canonical slice contract
@@ -589,33 +586,12 @@ scope deliberately does not invent slicer queue semantics.
 
 #### `calibrationGenerationEnabled`
 
-The flag is true only when **every** production hop was resolved and answered a
-real probe in this process: the deterministic generation core, authorized stored
-model resolution, the canonical slice submission path, readable and writable
-artifacts, a registered online worker that attests an upstream OrcaSlicer version
-listed in `Calibration:SupportedSlicerVersions` with both a container digest and
-a binary digest, an operational promotion hop, a responsive durable orchestration
-store and a healthy recovery loop. The allow-list defaults to the build's current
-upstream version, accepts at most 32 numeric `major.minor.patch` entries, and can
-be supplied through normal configuration providers without recompiling.
-
-A registered type, a configuration switch or a test double is never accepted as
-evidence. Configuration changes only the compatibility policy; the worker,
-heartbeat, upstream-distribution attestation, and exact digest requirements stay
-mandatory. Generated artifacts continue recording the observed slicer version,
-container digest, and binary SHA-256 as exact provenance.
-
-When the flag is false, `unavailableReasons` carries a
-`calibrationGeneration` entry with the stable code of the first missing hop.
-`slicer_version_unsupported` is distinct from `pinned_worker_unavailable`: its
-message names both `observedVersions` and `supportedVersions`, while
-`pinned_worker_unavailable` means no otherwise eligible worker supplied the
-required identity and digest attestation. A split deployment stays false with
-`split_routing_unavailable` until real HTTP routing adapters for the model,
-artifact and promotion hops are present and probe healthy.
-
-`effectiveCapabilities.canGenerate` additionally requires the caller to hold both
-`calibration:generate` and `slicing:submit`.
+This flag has been removed from the platform capabilities contract (issue
+#1983). Deterministic G-code generation from a calibration attempt is
+generator-specific machinery being decommissioned separately (issue #1979);
+it is no longer part of the capability document thin clients (web or
+PrintFarmer Desktop) use to drive server-orchestrated filament calibration.
+`effectiveCapabilities.canGenerate` has likewise been removed.
 
 ### Calibration persistence and synchronization
 

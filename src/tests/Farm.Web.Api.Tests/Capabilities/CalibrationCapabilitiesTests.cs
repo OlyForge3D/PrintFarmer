@@ -5,7 +5,6 @@ using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Security;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
-using Farm.Web.Api.Services.Calibration.Generation;
 using Farm.Web.Api.Services.Capabilities;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
@@ -60,8 +59,6 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             .GetBoolean().Should().BeTrue();
         _ = root.GetProperty("calibration").GetProperty("commandsImplemented")
             .GetBoolean().Should().BeTrue();
-        _ = root.GetProperty("calibration").GetProperty("generationImplemented")
-            .GetBoolean().Should().BeTrue();
         _ = root.GetProperty("calibration").GetProperty("queueIntegrationImplemented")
             .GetBoolean().Should().BeTrue();
         _ = root.GetProperty("calibration").GetProperty("eventStreamImplemented")
@@ -95,7 +92,6 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
 
         foreach (string flag in new[]
                  {
-                     "calibrationGenerationEnabled",
                      "calibrationSlicingEnabled",
                      "calibrationQueueEnabled",
                      "calibrationJobBoundBedClearEnabled",
@@ -104,6 +100,12 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         {
             _ = root.GetProperty(flag).GetBoolean().Should().BeFalse();
         }
+
+        _ = root.TryGetProperty("calibrationGenerationEnabled", out _).Should().BeFalse(
+            "generation eligibility is generator-specific machinery, not a filament-calibration client capability");
+        _ = root.TryGetProperty("supportedExportFormats", out _).Should().BeFalse(
+            "export-format capability described generator output, which no longer exists");
+        _ = root.GetProperty("calibration").TryGetProperty("generationImplemented", out _).Should().BeFalse();
 
         // Promotion runs entirely inside this monolith host: artifacts are routable in process, the
         // library storage is writable, the durable checkpoint store answers and the reconciler is wired.
@@ -270,13 +272,10 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
                 .GetProperty("unavailableReasons")
                 .EnumerateArray()
                 .Where(reason =>
-                    reason.GetProperty("code").GetString() ==
-                    CalibrationGenerationProblemCodes.SlicerVersionUnsupported)
+                    reason.GetProperty("code").GetString() == "slicer_version_unsupported")
                 .ToArray();
-            _ = versionReasons.Should().Contain(reason =>
+            _ = versionReasons.Should().ContainSingle(reason =>
                 reason.GetProperty("feature").GetString() == "slicing");
-            _ = versionReasons.Should().Contain(reason =>
-                reason.GetProperty("feature").GetString() == "calibrationGeneration");
             _ = versionReasons.Should().OnlyContain(reason =>
                 reason.GetProperty("message").GetString() ==
                 $"Observed upstream OrcaSlicer version(s) 2.2.0; configured supported version(s): {CalibrationContractConstants.SlicerVersion}.");
@@ -369,13 +368,12 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         _ = capabilities.UnavailableReasons.Select(reason => reason.Code)
             .Should().Contain("profile_service_unavailable");
 
-        // Issue #1849: the subsystems these flags describe (calibration commands/generation,
+        // Issue #1849: the subsystems these flags describe (calibration commands,
         // queue integration, event streaming) are always compiled in and registered, so they
         // must never be misreported as unimplemented just because the profile store happens to
         // be unreachable in this deployment. Only "operational" should reflect that.
         _ = capabilities.Calibration.ContextImplemented.Should().BeTrue();
         _ = capabilities.Calibration.CommandsImplemented.Should().BeTrue();
-        _ = capabilities.Calibration.GenerationImplemented.Should().BeTrue();
         _ = capabilities.Calibration.QueueIntegrationImplemented.Should().BeTrue();
         _ = capabilities.Calibration.EventStreamImplemented.Should().BeTrue();
     }
