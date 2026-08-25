@@ -1,84 +1,22 @@
 ﻿using System.Globalization;
-using Farm.Infrastructure.PrinterCalibration;
+using System.Security.Cryptography;
+using System.Text;
 
-namespace Farm.Web.Api.Services.Calibration.Generation;
+namespace Farm.Web.Api.Services.Gcode.Safety;
 
-/// <summary>The lifecycle point a static safety validation is being performed for.</summary>
-public enum CalibrationSafetyCheckpoint
-{
-    /// <summary>Unknown. Never a valid value.</summary>
-    Unspecified = 0,
-
-    /// <summary>Before a worker artifact is accepted as complete.</summary>
-    BeforeArtifactCompletion = 1,
-
-    /// <summary>Before an artifact is promoted into the G-code library.</summary>
-    BeforePromotion = 2,
-
-    /// <summary>Before a print job is queued.</summary>
-    BeforeQueueing = 3,
-
-    /// <summary>Before a print job is started.</summary>
-    BeforeStart = 4,
-}
-
-/// <summary>Everything the static validator needs, with no ambient state.</summary>
-/// <param name="Specification">The compiled specification the G-code must match.</param>
-/// <param name="Plan">The compiled plan the G-code must match.</param>
-/// <param name="Manifest">The manifest that must describe the G-code.</param>
-/// <param name="Gcode">The final annotated G-code.</param>
-/// <param name="Checkpoint">The lifecycle point being validated.</param>
-/// <param name="CurrentPrinterConfigurationRevision">The printer revision observed now.</param>
-/// <param name="ObservedAtUtc">The evaluation time used for freshness.</param>
-public sealed record CalibrationGcodeSafetyRequest(
-    CalibrationSpecification Specification,
-    OrcaCalibrationPlan Plan,
-    CalibrationGcodeManifest Manifest,
-    string Gcode,
-    CalibrationSafetyCheckpoint Checkpoint,
-    long CurrentPrinterConfigurationRevision,
-    DateTime ObservedAtUtc);
-
-/// <summary>A successful static validation record.</summary>
-/// <param name="Checkpoint">The lifecycle point that was validated.</param>
-/// <param name="GcodeSha256">The digest of the validated G-code.</param>
-/// <param name="CommandCount">The number of interpreted commands.</param>
-/// <param name="ValidatedAtUtc">When the validation ran.</param>
-public sealed record CalibrationGcodeSafetyReport(
-    CalibrationSafetyCheckpoint Checkpoint,
-    string GcodeSha256,
-    int CommandCount,
-    DateTime ValidatedAtUtc);
-
-/// <summary>
-/// Reject-only static validation of emitted calibration G-code.
-/// </summary>
+/// <summary>Default <see cref="IGcodeSafetyValidator"/>.</summary>
 /// <remarks>
-/// The validator never rewrites, repairs or normalizes G-code. It parses the program statefully and
-/// either returns a clean report or the ordered reasons the program must not be completed, promoted,
-/// queued or started. It is safe and intended to run at every one of those lifecycle points.
+/// This is the general, calibration-independent g-code safety interpreter extracted from the
+/// calibration-only validator originally added by PR #947. It performs no provenance/manifest/digest
+/// matching — only physical safety checks against an authoritative <see cref="GcodeSafetyLimits"/>
+/// envelope, plus redaction and structural scanning that is harmless to run against any g-code.
 /// </remarks>
-public interface ICalibrationGcodeSafetyValidator
+public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
 {
-    /// <summary>Validates emitted G-code against its specification, plan and manifest.</summary>
-    /// <param name="request">The complete validation request.</param>
-    /// <returns>The clean report, or the ordered rejection reasons.</returns>
-    CalibrationGenerationResult<CalibrationGcodeSafetyReport> Validate(
-        CalibrationGcodeSafetyRequest request);
-}
-
-/// <summary>Default <see cref="ICalibrationGcodeSafetyValidator"/>.</summary>
-public sealed class CalibrationGcodeSafetyValidator(
-    CalibrationSlicerCompatibilityPolicy? compatibilityPolicy = null)
-    : ICalibrationGcodeSafetyValidator
-{
-    private readonly CalibrationSlicerCompatibilityPolicy _compatibilityPolicy =
-        compatibilityPolicy ?? CalibrationSlicerCompatibilityPolicy.Default;
-
-    /// <summary>Absolute pressure advance ceiling accepted in any emitted program.</summary>
+    /// <summary>Absolute pressure advance ceiling accepted in any validated program.</summary>
     public const decimal AbsolutePressureAdvanceCeiling = 2.0m;
 
-    /// <summary>Absolute retraction ceiling, in millimetres, accepted in any emitted program.</summary>
+    /// <summary>Absolute retraction ceiling, in millimetres, accepted in any validated program.</summary>
     public const decimal AbsoluteRetractionCeiling = 10.0m;
 
     /// <summary>Volumetric flow tolerance, in mm³/s, applied before a move is rejected.</summary>
@@ -86,6 +24,18 @@ public sealed class CalibrationGcodeSafetyValidator(
 
     /// <summary>Coordinate tolerance, in millimetres, applied before a move is rejected.</summary>
     public const decimal CoordinateTolerance = 0.01m;
+
+    /// <summary>The forbidden firmware tuning tower macro.</summary>
+    public const string TuningTower = "TUNING_TOWER";
+
+    /// <summary>Marks a safe transition between calibration segments.</summary>
+    private const string SegmentTransitionMarker = ";PF_SEG_TRANSITION";
+
+    /// <summary>Marks the start of a calibration segment.</summary>
+    private const string SegmentBeginMarker = ";PF_SEG_BEGIN";
+
+    /// <summary>Marks the end of a calibration segment.</summary>
+    private const string SegmentEndMarker = ";PF_SEG_END";
 
     private static readonly string[] HostCommandMarkers =
     [
@@ -111,180 +61,41 @@ public sealed class CalibrationGcodeSafetyValidator(
     ];
 
     /// <inheritdoc/>
-    public CalibrationGenerationResult<CalibrationGcodeSafetyReport> Validate(
-        CalibrationGcodeSafetyRequest request)
+    public GcodeSafetyResult<GcodeSafetyReport> Validate(GcodeSafetyRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (string.IsNullOrEmpty(request.Gcode))
         {
-            return CalibrationGenerationResults.Failure<CalibrationGcodeSafetyReport>(
-                CalibrationGenerationProblemCodes.GcodeMalformed,
+            return GcodeSafetyResult<GcodeSafetyReport>.Failure(
+                GcodeSafetyProblemCodes.Malformed,
                 "gcode",
-                "The calibration program is empty.");
+                "The g-code program is empty.");
         }
 
-        List<CalibrationGenerationProblem> problems = [];
-        CalibrationSpecificationDocument document = request.Specification.Document;
-
-        ValidateProvenance(request, document, problems);
-        CalibrationInterpreterState state = Interpret(request, document, problems);
+        List<GcodeSafetyProblem> problems = [];
+        InterpreterState state = Interpret(request, problems);
         ValidateEnvelope(state, problems);
 
-        return problems.Count > 0
-            ? CalibrationGenerationResults.Failure<CalibrationGcodeSafetyReport>(problems)
-            : CalibrationGenerationResults.Success(new CalibrationGcodeSafetyReport(
-                request.Checkpoint,
-                request.Manifest.GcodeSha256,
-                state.CommandCount,
-                DateTime.SpecifyKind(request.ObservedAtUtc, DateTimeKind.Utc)));
+        if (problems.Count > 0)
+        {
+            return GcodeSafetyResult<GcodeSafetyReport>.Failure(problems);
+        }
+
+        string sha256 = Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(request.Gcode)))
+            .ToLowerInvariant();
+        return GcodeSafetyResult<GcodeSafetyReport>.Success(new GcodeSafetyReport(
+            request.Checkpoint,
+            sha256,
+            state.CommandCount,
+            DateTime.UtcNow));
     }
 
-    private void ValidateProvenance(
-        CalibrationGcodeSafetyRequest request,
-        CalibrationSpecificationDocument document,
-        List<CalibrationGenerationProblem> problems)
+    private static InterpreterState Interpret(
+        GcodeSafetyRequest request,
+        List<GcodeSafetyProblem> problems)
     {
-        CalibrationSupportedTupleValidator.Validate(
-            document.Compatibility,
-            problems,
-            _compatibilityPolicy);
-
-        if (!string.Equals(
-            request.Manifest.FirmwareFamily,
-            CalibrationSupportedTuple.FirmwareFamily,
-            StringComparison.Ordinal))
-        {
-            problems.Add(new(
-                CalibrationGenerationProblemCodes.FirmwareFamilyUnsupported,
-                "manifest.firmwareFamily",
-                "The manifest declares an unsupported firmware family."));
-        }
-
-        if (!string.Equals(
-            request.Manifest.GcodeDialect,
-            CalibrationSupportedTuple.GcodeDialect,
-            StringComparison.Ordinal))
-        {
-            problems.Add(new(
-                CalibrationGenerationProblemCodes.GcodeDialectUnsupported,
-                "manifest.gcodeDialect",
-                "The manifest declares an unsupported G-code dialect."));
-        }
-
-        string computed = CalibrationCanonicalJson.ComputeTextSha256(request.Gcode);
-        if (!CalibrationCanonicalJson.DigestsMatch(computed, request.Manifest.GcodeSha256))
-        {
-            problems.Add(new(
-                CalibrationGenerationProblemCodes.GcodeHashMismatch,
-                "manifest.gcodeSha256",
-                "The manifest digest does not match the supplied G-code."));
-        }
-
-        if (!CalibrationCanonicalJson.DigestsMatch(
-            request.Manifest.SpecificationSha256,
-            request.Specification.Sha256))
-        {
-            problems.Add(new(
-                CalibrationGenerationProblemCodes.SpecificationHashMismatch,
-                "manifest.specificationSha256",
-                "The manifest references a different specification."));
-        }
-
-        if (!CalibrationCanonicalJson.DigestsMatch(
-            request.Manifest.PlanManifestSha256,
-            request.Plan.ManifestSha256))
-        {
-            problems.Add(new(
-                CalibrationGenerationProblemCodes.ManifestMismatch,
-                "manifest.planManifestSha256",
-                "The manifest references a different plan."));
-        }
-
-        // The annotated program records baseline provenance digests, so they are what the manifest
-        // must agree with; the effective documents are the worker's contract, not the program's.
-        CompareDigest(
-            request.Manifest.MachineProfileSha256,
-            request.Plan.MachineProfile.SourceSha256,
-            "manifest.machineProfileSha256",
-            problems);
-        CompareDigest(
-            request.Manifest.ProcessProfileSha256,
-            request.Plan.ProcessProfile.SourceSha256,
-            "manifest.processProfileSha256",
-            problems);
-        CompareDigest(
-            request.Manifest.FilamentProfileSha256,
-            request.Plan.FilamentProfile.SourceSha256,
-            "manifest.filamentProfileSha256",
-            problems);
-
-        if (!CalibrationCanonicalJson.DigestsMatch(
-            request.Manifest.PrinterConfigurationSnapshotSha256,
-            document.PrinterConfigurationSnapshotSha256))
-        {
-            problems.Add(new(
-                CalibrationGenerationProblemCodes.SnapshotHashMismatch,
-                "manifest.printerConfigurationSnapshotSha256",
-                "The manifest references a different printer configuration snapshot."));
-        }
-
-        if (document.PrinterConfigurationRevision != request.CurrentPrinterConfigurationRevision)
-        {
-            problems.Add(new(
-                CalibrationGenerationProblemCodes.PrinterConfigurationStale,
-                "specification.printerConfigurationRevision",
-                "The printer configuration changed after this program was generated."));
-        }
-
-        if (!string.Equals(
-            request.Manifest.SlicerVersion,
-            document.Compatibility.SlicerVersion,
-            StringComparison.Ordinal))
-        {
-            problems.Add(new(
-                CalibrationGenerationProblemCodes.SlicerVersionUnsupported,
-                "manifest.slicerVersion",
-                "The manifest slicer version does not match the exact version recorded by the specification."));
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Manifest.SlicerContainerDigest))
-        {
-            problems.Add(new(
-                CalibrationGenerationProblemCodes.SlicerContainerDigestMissing,
-                "manifest.slicerContainerDigest",
-                "The manifest does not record the pinned slicer container digest."));
-        }
-
-        if (request.Checkpoint == CalibrationSafetyCheckpoint.Unspecified)
-        {
-            problems.Add(new(
-                CalibrationGenerationProblemCodes.ManifestMismatch,
-                "request.checkpoint",
-                "A static safety validation must declare its lifecycle checkpoint."));
-        }
-    }
-
-    private static void CompareDigest(
-        string manifestDigest,
-        string planDigest,
-        string field,
-        List<CalibrationGenerationProblem> problems)
-    {
-        if (!CalibrationCanonicalJson.DigestsMatch(manifestDigest, planDigest))
-        {
-            problems.Add(new(
-                CalibrationGenerationProblemCodes.ProfileHashMismatch,
-                field,
-                "The manifest references a different exact profile than the plan."));
-        }
-    }
-
-    private static CalibrationInterpreterState Interpret(
-        CalibrationGcodeSafetyRequest request,
-        CalibrationSpecificationDocument document,
-        List<CalibrationGenerationProblem> problems)
-    {
-        CalibrationInterpreterState state = new(document);
+        InterpreterState state = new(request.Limits);
         int lineNumber = 0;
 
         foreach (string rawLine in request.Gcode.Split('\n'))
@@ -304,23 +115,23 @@ public sealed class CalibrationGcodeSafetyValidator(
             }
 
             string command = ReadCommand(line);
-            if (line.Contains(KlipperCalibrationCommands.TuningTower, StringComparison.OrdinalIgnoreCase))
+            if (line.Contains(TuningTower, StringComparison.OrdinalIgnoreCase))
             {
                 Add(
                     problems,
-                    CalibrationGenerationProblemCodes.GcodeTuningTowerForbidden,
+                    GcodeSafetyProblemCodes.TuningTowerForbidden,
                     Field(lineNumber),
-                    "Calibration G-code must never drive a firmware tuning tower.");
+                    "G-code must never drive a firmware tuning tower.");
                 continue;
             }
 
-            if (!KlipperCalibrationCommands.IsAllowed(command))
+            if (request.AllowedCommands is not null && !request.AllowedCommands.Contains(command))
             {
                 Add(
                     problems,
-                    CalibrationGenerationProblemCodes.GcodeCommandNotAllowlisted,
+                    GcodeSafetyProblemCodes.CommandNotAllowlisted,
                     Field(lineNumber),
-                    "Calibration G-code contains a command outside the trusted allowlist.");
+                    "G-code contains a command outside the trusted allowlist.");
                 continue;
             }
 
@@ -332,11 +143,11 @@ public sealed class CalibrationGcodeSafetyValidator(
     }
 
     private static void Execute(
-        CalibrationInterpreterState state,
+        InterpreterState state,
         string command,
         string line,
         int lineNumber,
-        List<CalibrationGenerationProblem> problems)
+        List<GcodeSafetyProblem> problems)
     {
         switch (command)
         {
@@ -404,10 +215,10 @@ public sealed class CalibrationGcodeSafetyValidator(
     }
 
     private static void ApplyNozzleTemperature(
-        CalibrationInterpreterState state,
+        InterpreterState state,
         string line,
         int lineNumber,
-        List<CalibrationGenerationProblem> problems)
+        List<GcodeSafetyProblem> problems)
     {
         if (!TryReadParameter(line, 'S', out decimal value))
         {
@@ -415,24 +226,30 @@ public sealed class CalibrationGcodeSafetyValidator(
         }
 
         state.NozzleTemperature = value;
-        int ceiling = state.Document.Toolhead.NozzleMaxTemperatureCelsius ??
-            state.Document.Toolhead.HotendMaxTemperatureCelsius ??
+        if (state.Limits.Toolhead.NozzleMaxTemperatureCelsius is null &&
+            state.Limits.Toolhead.HotendMaxTemperatureCelsius is null)
+        {
+            return;
+        }
+
+        int ceiling = state.Limits.Toolhead.NozzleMaxTemperatureCelsius ??
+            state.Limits.Toolhead.HotendMaxTemperatureCelsius ??
             0;
         if (value > ceiling)
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeTemperatureAboveLimit,
+                GcodeSafetyProblemCodes.TemperatureAboveLimit,
                 Field(lineNumber),
                 "A commanded nozzle temperature exceeds the authoritative ceiling.");
         }
     }
 
     private static void ApplyBedTemperature(
-        CalibrationInterpreterState state,
+        InterpreterState state,
         string line,
         int lineNumber,
-        List<CalibrationGenerationProblem> problems)
+        List<GcodeSafetyProblem> problems)
     {
         if (!TryReadParameter(line, 'S', out decimal value))
         {
@@ -440,91 +257,103 @@ public sealed class CalibrationGcodeSafetyValidator(
         }
 
         state.BedTemperature = value;
-        if (value > (state.Document.Limits.MaxBedTemperatureCelsius ?? 0))
+        if (state.Limits.Machine.MaxBedTemperatureCelsius is not { } ceiling)
+        {
+            return;
+        }
+
+        if (value > ceiling)
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeTemperatureAboveLimit,
+                GcodeSafetyProblemCodes.TemperatureAboveLimit,
                 Field(lineNumber),
                 "A commanded bed temperature exceeds the authoritative ceiling.");
         }
     }
 
     private static void ApplyChamberTemperature(
-        CalibrationInterpreterState state,
+        InterpreterState state,
         string line,
         int lineNumber,
-        List<CalibrationGenerationProblem> problems)
+        List<GcodeSafetyProblem> problems)
     {
         if (!TryReadParameter(line, 'S', out decimal value))
         {
             return;
         }
 
-        if (state.Document.Limits.HasHeatedChamber != true ||
-            value > (state.Document.Limits.MaxChamberTemperatureCelsius ?? 0))
+        if (state.Limits.Machine.HasHeatedChamber != true ||
+            value > (state.Limits.Machine.MaxChamberTemperatureCelsius ?? 0))
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeTemperatureAboveLimit,
+                GcodeSafetyProblemCodes.TemperatureAboveLimit,
                 Field(lineNumber),
                 "A commanded chamber temperature is unsupported or above the authoritative ceiling.");
         }
     }
 
     private static void ApplyAcceleration(
-        CalibrationInterpreterState state,
+        InterpreterState state,
         string line,
         int lineNumber,
-        List<CalibrationGenerationProblem> problems)
+        List<GcodeSafetyProblem> problems)
     {
         if (!TryReadParameter(line, 'S', out decimal value))
         {
             return;
         }
 
-        if (value > (state.Document.Limits.MaxAcceleration ?? 0))
+        if (state.Limits.Machine.MaxAcceleration is not { } ceiling)
+        {
+            return;
+        }
+
+        if (value > ceiling)
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeAccelerationAboveLimit,
+                GcodeSafetyProblemCodes.AccelerationAboveLimit,
                 Field(lineNumber),
                 "A commanded acceleration exceeds the authoritative ceiling.");
         }
     }
 
     private static void ApplyVelocityLimit(
-        CalibrationInterpreterState state,
+        InterpreterState state,
         string line,
         int lineNumber,
-        List<CalibrationGenerationProblem> problems)
+        List<GcodeSafetyProblem> problems)
     {
         if (TryReadNamedParameter(line, "VELOCITY=", out decimal velocity) &&
-            velocity > (state.Document.Limits.MaxTravelSpeedMillimetersPerSecond ?? 0))
+            state.Limits.Machine.MaxTravelSpeedMillimetersPerSecond is { } speedCeiling &&
+            velocity > speedCeiling)
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeSpeedAboveLimit,
+                GcodeSafetyProblemCodes.SpeedAboveLimit,
                 Field(lineNumber),
                 "A commanded velocity limit exceeds the authoritative ceiling.");
         }
 
         if (TryReadNamedParameter(line, "ACCEL=", out decimal acceleration) &&
-            acceleration > (state.Document.Limits.MaxAcceleration ?? 0))
+            state.Limits.Machine.MaxAcceleration is { } accelCeiling &&
+            acceleration > accelCeiling)
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeAccelerationAboveLimit,
+                GcodeSafetyProblemCodes.AccelerationAboveLimit,
                 Field(lineNumber),
                 "A commanded acceleration limit exceeds the authoritative ceiling.");
         }
     }
 
     private static void ApplyPressureAdvance(
-        CalibrationInterpreterState state,
+        InterpreterState state,
         string line,
         int lineNumber,
-        List<CalibrationGenerationProblem> problems)
+        List<GcodeSafetyProblem> problems)
     {
         if (!TryReadNamedParameter(line, "ADVANCE=", out decimal value))
         {
@@ -534,22 +363,22 @@ public sealed class CalibrationGcodeSafetyValidator(
         state.PressureAdvance = value;
         decimal ceiling = Math.Min(
             AbsolutePressureAdvanceCeiling,
-            state.Document.Toolhead.IsDirectDrive == true ? 0.5m : 2.0m);
+            state.Limits.Toolhead.IsDirectDrive == true ? 0.5m : 2.0m);
         if (value < 0m || value > ceiling)
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodePressureAdvanceOutOfRange,
+                GcodeSafetyProblemCodes.PressureAdvanceOutOfRange,
                 Field(lineNumber),
                 "A commanded pressure advance value is outside the safe range.");
         }
     }
 
     private static void ApplyMove(
-        CalibrationInterpreterState state,
+        InterpreterState state,
         string line,
         int lineNumber,
-        List<CalibrationGenerationProblem> problems)
+        List<GcodeSafetyProblem> problems)
     {
         decimal previousX = state.X;
         decimal previousY = state.Y;
@@ -604,14 +433,14 @@ public sealed class CalibrationGcodeSafetyValidator(
         if (hasF)
         {
             decimal speed = feedRate / 60m;
-            int ceiling = extrusion > 0m
-                ? state.Document.Limits.MaxPrintSpeedMillimetersPerSecond ?? 0
-                : state.Document.Limits.MaxTravelSpeedMillimetersPerSecond ?? 0;
-            if (speed > ceiling)
+            int? ceiling = extrusion > 0m
+                ? state.Limits.Machine.MaxPrintSpeedMillimetersPerSecond
+                : state.Limits.Machine.MaxTravelSpeedMillimetersPerSecond;
+            if (ceiling is { } value && speed > value)
             {
                 Add(
                     problems,
-                    CalibrationGenerationProblemCodes.GcodeSpeedAboveLimit,
+                    GcodeSafetyProblemCodes.SpeedAboveLimit,
                     Field(lineNumber),
                     "A commanded feed rate exceeds the authoritative speed ceiling.");
             }
@@ -625,12 +454,12 @@ public sealed class CalibrationGcodeSafetyValidator(
             state.TransitionRetracted = true;
             decimal ceiling = Math.Min(
                 AbsoluteRetractionCeiling,
-                state.Document.Toolhead.IsDirectDrive == true ? 3.0m : 10.0m);
+                state.Limits.Toolhead.IsDirectDrive == true ? 3.0m : 10.0m);
             if (retraction > ceiling)
             {
                 Add(
                     problems,
-                    CalibrationGenerationProblemCodes.GcodeRetractionAboveLimit,
+                    GcodeSafetyProblemCodes.RetractionAboveLimit,
                     Field(lineNumber),
                     "A commanded retraction exceeds the safe range.");
             }
@@ -643,18 +472,18 @@ public sealed class CalibrationGcodeSafetyValidator(
             {
                 Add(
                     problems,
-                    CalibrationGenerationProblemCodes.GcodeUnsafeInitialization,
+                    GcodeSafetyProblemCodes.UnsafeInitialization,
                     Field(lineNumber),
-                    "Calibration G-code extrudes before the printer is homed.");
+                    "G-code extrudes before the printer is homed.");
             }
 
             if (state.NozzleTemperature <= 0m)
             {
                 Add(
                     problems,
-                    CalibrationGenerationProblemCodes.GcodeUnsafeInitialization,
+                    GcodeSafetyProblemCodes.UnsafeInitialization,
                     Field(lineNumber),
-                    "Calibration G-code extrudes before a nozzle temperature is commanded.");
+                    "G-code extrudes before a nozzle temperature is commanded.");
             }
 
             ValidateVolumetricFlow(state, previousX, previousY, extrusion, lineNumber, problems);
@@ -665,24 +494,30 @@ public sealed class CalibrationGcodeSafetyValidator(
             ValidatePosition(state, lineNumber, problems);
         }
 
-        if (hasZ && state.Z > (state.Document.Bed.SizeZMillimeters ?? decimal.MaxValue))
+        if (hasZ && state.Z > (state.Limits.Bed.SizeZMillimeters ?? decimal.MaxValue))
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeMotionOutsideBuildVolume,
+                GcodeSafetyProblemCodes.MotionOutsideBuildVolume,
                 Field(lineNumber),
                 "A commanded Z height exceeds the authoritative build volume.");
         }
     }
 
     private static void ValidateVolumetricFlow(
-        CalibrationInterpreterState state,
+        InterpreterState state,
         decimal previousX,
         decimal previousY,
         decimal extrusion,
         int lineNumber,
-        List<CalibrationGenerationProblem> problems)
+        List<GcodeSafetyProblem> problems)
     {
+        if (state.Limits.Print.FilamentDiameterMillimeters is not { } filamentDiameter ||
+            state.Limits.Print.MaxVolumetricFlow is not { } maxVolumetricFlow)
+        {
+            return;
+        }
+
         decimal deltaX = state.X - previousX;
         decimal deltaY = state.Y - previousY;
         decimal distance = Math.Abs(deltaX) + Math.Abs(deltaY);
@@ -691,28 +526,28 @@ public sealed class CalibrationGcodeSafetyValidator(
             return;
         }
 
-        decimal radius = state.Document.Print.FilamentDiameterMillimeters / 2m;
+        decimal radius = filamentDiameter / 2m;
         decimal filamentArea = 3.1415926535897932384626433833m * radius * radius;
         decimal volume = extrusion * filamentArea;
         decimal speed = state.FeedRate / 60m;
         decimal flow = volume / distance * speed;
-        decimal ceiling = state.Document.Print.MaxVolumetricFlow + VolumetricFlowTolerance;
+        decimal ceiling = maxVolumetricFlow + VolumetricFlowTolerance;
         if (flow > ceiling)
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeVolumetricFlowAboveLimit,
+                GcodeSafetyProblemCodes.VolumetricFlowAboveLimit,
                 Field(lineNumber),
                 "A commanded move exceeds the authoritative volumetric flow ceiling.");
         }
     }
 
     private static void ValidatePosition(
-        CalibrationInterpreterState state,
+        InterpreterState state,
         int lineNumber,
-        List<CalibrationGenerationProblem> problems)
+        List<GcodeSafetyProblem> problems)
     {
-        CalibrationBedGeometry bed = state.Document.Bed;
+        GcodeSafetyBedLimits bed = state.Limits.Bed;
         decimal originX = bed.OriginXMillimeters ?? 0m;
         decimal originY = bed.OriginYMillimeters ?? 0m;
         if (bed.SizeXMillimeters is { } sizeX && bed.SizeYMillimeters is { } sizeY &&
@@ -723,18 +558,18 @@ public sealed class CalibrationGcodeSafetyValidator(
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeMotionOutsideBuildVolume,
+                GcodeSafetyProblemCodes.MotionOutsideBuildVolume,
                 Field(lineNumber),
                 "A commanded move falls outside the authoritative build volume.");
             return;
         }
 
         if (bed.PrintablePolygon.Count >= 3 &&
-            !CalibrationGeometry.ContainsPoint(bed.PrintablePolygon, state.X, state.Y))
+            !GcodeSafetyGeometry.ContainsPoint(bed.PrintablePolygon, state.X, state.Y))
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeMotionOutsidePrintablePolygon,
+                GcodeSafetyProblemCodes.MotionOutsidePrintablePolygon,
                 Field(lineNumber),
                 "A commanded move falls outside the authoritative printable polygon.");
             return;
@@ -742,39 +577,39 @@ public sealed class CalibrationGcodeSafetyValidator(
 
         if (bed.ExcludedRegions.Any(region =>
                 region.Polygon.Count >= 3 &&
-                CalibrationGeometry.ContainsPoint(region.Polygon, state.X, state.Y)))
+                GcodeSafetyGeometry.ContainsPoint(region.Polygon, state.X, state.Y)))
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeMotionInsideExcludedRegion,
+                GcodeSafetyProblemCodes.MotionInsideExcludedRegion,
                 Field(lineNumber),
                 "A commanded move enters an authoritative excluded region.");
         }
     }
 
     private static void TrackMarker(
-        CalibrationInterpreterState state,
+        InterpreterState state,
         string line,
         int lineNumber,
-        List<CalibrationGenerationProblem> problems)
+        List<GcodeSafetyProblem> problems)
     {
-        if (line.StartsWith(CalibrationGcodeMarkers.SegmentTransition, StringComparison.Ordinal))
+        if (line.StartsWith(SegmentTransitionMarker, StringComparison.Ordinal))
         {
             state.SawTransition = true;
             state.TransitionRetracted = false;
             return;
         }
 
-        if (line.StartsWith(CalibrationGcodeMarkers.SegmentBegin, StringComparison.Ordinal))
+        if (line.StartsWith(SegmentBeginMarker, StringComparison.Ordinal))
         {
             state.SegmentDepth++;
             if (state.SegmentsSeen > 0 && (!state.SawTransition || !state.TransitionRetracted))
             {
                 Add(
                     problems,
-                    CalibrationGenerationProblemCodes.GcodeUnsafeSegmentTransition,
+                    GcodeSafetyProblemCodes.UnsafeSegmentTransition,
                     Field(lineNumber),
-                    "A calibration segment starts without a retracting safe transition.");
+                    "A segment starts without a retracting safe transition.");
             }
 
             state.SegmentsSeen++;
@@ -782,56 +617,54 @@ public sealed class CalibrationGcodeSafetyValidator(
             return;
         }
 
-        if (line.StartsWith(CalibrationGcodeMarkers.SegmentEnd, StringComparison.Ordinal))
+        if (line.StartsWith(SegmentEndMarker, StringComparison.Ordinal))
         {
             state.SegmentDepth--;
         }
     }
 
-    private static void ValidateEnvelope(
-        CalibrationInterpreterState state,
-        List<CalibrationGenerationProblem> problems)
+    private static void ValidateEnvelope(InterpreterState state, List<GcodeSafetyProblem> problems)
     {
         if (!state.Homed)
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeUnsafeInitialization,
+                GcodeSafetyProblemCodes.UnsafeInitialization,
                 "gcode.initialization",
-                "Calibration G-code never homes the printer.");
+                "G-code never homes the printer.");
         }
 
         if (!state.HeatersOff || !state.MotorsOff)
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeMissingFinalReset,
+                GcodeSafetyProblemCodes.MissingFinalReset,
                 "gcode.finalization",
-                "Calibration G-code does not end with a safe heater and motor reset.");
+                "G-code does not end with a safe heater and motor reset.");
         }
 
         if (state.SegmentDepth != 0)
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeUnsafeSegmentTransition,
+                GcodeSafetyProblemCodes.UnsafeSegmentTransition,
                 "gcode.segments",
-                "Calibration G-code contains an unbalanced segment marker.");
+                "G-code contains an unbalanced segment marker.");
         }
     }
 
     private static void ScanRedaction(
         string line,
         int lineNumber,
-        List<CalibrationGenerationProblem> problems)
+        List<GcodeSafetyProblem> problems)
     {
         if (HostCommandMarkers.Any(marker => line.Contains(marker, StringComparison.OrdinalIgnoreCase)))
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeContainsHostCommand,
+                GcodeSafetyProblemCodes.ContainsHostCommand,
                 Field(lineNumber),
-                "Calibration G-code contains a shell, host or network command.");
+                "G-code contains a shell, host or network command.");
             return;
         }
 
@@ -839,9 +672,9 @@ public sealed class CalibrationGcodeSafetyValidator(
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeContainsCredential,
+                GcodeSafetyProblemCodes.ContainsCredential,
                 Field(lineNumber),
-                "Calibration G-code contains a credential-bearing token.");
+                "G-code contains a credential-bearing token.");
             return;
         }
 
@@ -849,9 +682,9 @@ public sealed class CalibrationGcodeSafetyValidator(
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeContainsPrivateUrl,
+                GcodeSafetyProblemCodes.ContainsPrivateUrl,
                 Field(lineNumber),
-                "Calibration G-code contains a URL.");
+                "G-code contains a URL.");
             return;
         }
 
@@ -859,9 +692,9 @@ public sealed class CalibrationGcodeSafetyValidator(
         {
             Add(
                 problems,
-                CalibrationGenerationProblemCodes.GcodeContainsFilesystemPath,
+                GcodeSafetyProblemCodes.ContainsFilesystemPath,
                 Field(lineNumber),
-                "Calibration G-code contains an absolute filesystem path.");
+                "G-code contains an absolute filesystem path.");
         }
     }
 
@@ -954,21 +787,21 @@ public sealed class CalibrationGcodeSafetyValidator(
         string.Create(CultureInfo.InvariantCulture, $"gcode.line[{lineNumber}]");
 
     private static void Add(
-        List<CalibrationGenerationProblem> problems,
+        List<GcodeSafetyProblem> problems,
         string code,
         string field,
         string message)
     {
-        // One reason per code keeps a rejected 64-segment program from producing thousands of rows.
+        // One reason per code keeps a rejected large program from producing thousands of rows.
         if (!problems.Any(problem => string.Equals(problem.Code, code, StringComparison.Ordinal)))
         {
             problems.Add(new(code, field, message));
         }
     }
 
-    private sealed class CalibrationInterpreterState(CalibrationSpecificationDocument document)
+    private sealed class InterpreterState(GcodeSafetyLimits limits)
     {
-        public CalibrationSpecificationDocument Document { get; } = document;
+        public GcodeSafetyLimits Limits { get; } = limits;
 
         public bool AbsolutePositioning { get; set; } = true;
 

@@ -36,8 +36,8 @@ public static class CalibrationGenerationServiceCollectionExtensions
             KlipperCalibrationGcodeGenerator>();
         services.TryAddScoped<ICalibrationGcodeAnnotator, CalibrationGcodeAnnotator>();
         services.TryAddScoped<
-            ICalibrationGcodeSafetyValidator,
-            CalibrationGcodeSafetyValidator>();
+            ICalibrationGcodeProgramValidator,
+            CalibrationGcodeProgramValidator>();
         services.TryAddScoped<
             ICalibrationProfilePatchExporter,
             CalibrationProfilePatchExporter>();

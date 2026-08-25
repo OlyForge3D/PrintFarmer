@@ -14,6 +14,7 @@ using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Services.Gcode;
+using Farm.Web.Api.Services.Gcode.Safety;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -38,6 +39,7 @@ namespace Farm.Web.Api.Controllers;
 public class SlicePrintBridgeController(
     IPrintersService printersService,
     ILogger<SlicePrintBridgeController> logger,
+    IGcodeSafetyValidator gcodeSafetyValidator,
     ISliceJobRepository? jobRepository = null,
     IArtifactsService? artifactsService = null,
     IJobQueueService? jobQueueService = null,
@@ -128,7 +130,7 @@ public class SlicePrintBridgeController(
         }
 
         // 4. Validate the target printer exists after the resource-scope check above.
-        var printer = await printersService.FindByIdAsync(request.PrinterId, ct);
+        var printer = await printersService.FindByIdWithIncludesAsync(request.PrinterId, ct);
         if (printer is null)
         {
             return NotFound(new { error = "Printer not found.", printerId = request.PrinterId });
@@ -147,11 +149,35 @@ public class SlicePrintBridgeController(
         string fullPath = pathResult.Value.FullPath;
         string fileName = pathResult.Value.Artifact.FileName;
 
+        // 6. Run the general g-code safety pass before this program is ever streamed to a
+        // physical printer. This is not calibration-scoped: any command is allowed
+        // (AllowedCommands: null), and the machine envelope is sourced from the printer/
+        // toolhead domain fields, never from Printer.Calibration* columns.
+        string gcodeText = await System.IO.File.ReadAllTextAsync(fullPath, ct);
+        GcodeSafetyResult<GcodeSafetyReport> safetyResult = gcodeSafetyValidator.Validate(
+            new GcodeSafetyRequest(
+                BuildSafetyLimits(printer),
+                gcodeText,
+                GcodeSafetyCheckpoint.BeforeSendToPrinter));
+
+        if (!safetyResult.IsValid)
+        {
+            logger.LogWarning(
+                "Gcode safety validation rejected artifact {ArtifactId} for job {JobId} before send-to-printer: {Problems}",
+                gcodeArtifact.Id, id, string.Join("; ", safetyResult.Problems.Select(p => $"{p.Code}: {p.Message}")));
+            return BadRequest(new
+            {
+                error = "Gcode failed safety validation and was not sent to the printer.",
+                jobId = id,
+                problems = safetyResult.Problems,
+            });
+        }
+
         logger.LogInformation(
             "Sending gcode {FileName} from slice job {JobId} to printer {PrinterId} (startPrint={StartPrint})",
             fileName, id, request.PrinterId, request.StartPrint);
 
-        // 6. Upload to printer (and optionally start print)
+        // 7. Upload to printer (and optionally start print)
         await using FileStream fileStream = new(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
 
         if (request.StartPrint)
@@ -160,6 +186,47 @@ public class SlicePrintBridgeController(
         }
 
         return await UploadOnlyAsync(id, request.PrinterId, fileName, fileStream, ct);
+    }
+
+    /// <summary>
+    /// Builds the authoritative g-code safety envelope for <paramref name="printer"/> from its
+    /// own domain fields and primary toolhead. Deliberately does not read any
+    /// <c>Printer.Calibration*</c> column: those are calibration-scoped ceilings slated for
+    /// removal and must never gate the general send-to-printer safety pass.
+    /// </summary>
+    private static GcodeSafetyLimits BuildSafetyLimits(Farm.Infrastructure.Domain.Printer printer)
+    {
+        Farm.Infrastructure.Domain.Toolhead? toolhead =
+            printer.Toolheads?.FirstOrDefault(t => t.IsPrimary) ??
+            printer.Toolheads?.FirstOrDefault();
+
+        var toolheadLimits = new GcodeSafetyToolheadLimits(
+            toolhead?.NozzleMaxTemperature,
+            toolhead?.HotendMaxTemperature ?? toolhead?.HotendModel?.MaxTemp,
+            toolhead?.IsDirectDrive);
+
+        var bedLimits = new GcodeSafetyBedLimits(
+            printer.MaxBuildVolumeX is { } sizeX ? (decimal)sizeX : null,
+            printer.MaxBuildVolumeY is { } sizeY ? (decimal)sizeY : null,
+            printer.MaxBuildVolumeZ is { } sizeZ ? (decimal)sizeZ : null,
+            printer.BedOriginX is { } originX ? (decimal)originX : null,
+            printer.BedOriginY is { } originY ? (decimal)originY : null,
+            [],
+            []);
+
+        var machineLimits = new GcodeSafetyMachineLimits(
+            printer.MaxBedTemp,
+            printer.HasHeatedChamber,
+            printer.MaxChamberTemp,
+            printer.MaxPrintSpeed,
+            printer.MaxTravelSpeed,
+            printer.MaxAcceleration);
+
+        return new GcodeSafetyLimits(
+            toolheadLimits,
+            bedLimits,
+            machineLimits,
+            GcodeSafetyPrintLimits.Empty);
     }
 
     /// <summary>

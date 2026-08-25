@@ -46,7 +46,7 @@ public sealed class CalibrationGenerationSaga(
     IOrcaCalibrationPlanCompiler planCompiler,
     IKlipperCalibrationGcodeGenerator gcodeGenerator,
     ICalibrationGcodeAnnotator annotator,
-    ICalibrationGcodeSafetyValidator safetyValidator,
+    ICalibrationGcodeProgramValidator safetyValidator,
     ICalibrationGenerationCapabilityProbe capabilityProbe,
     IGcodeArtifactPromoter promoter,
     IStoragePathService storagePaths,
@@ -99,7 +99,7 @@ public sealed class CalibrationGenerationSaga(
     private readonly ICalibrationGcodeAnnotator _annotator =
         annotator ?? throw new ArgumentNullException(nameof(annotator));
 
-    private readonly ICalibrationGcodeSafetyValidator _safetyValidator =
+    private readonly ICalibrationGcodeProgramValidator _safetyValidator =
         safetyValidator ?? throw new ArgumentNullException(nameof(safetyValidator));
 
     private readonly ICalibrationGenerationCapabilityProbe _capabilityProbe =
