@@ -460,7 +460,12 @@ export function ThreeMFViewer({
         />
         {selected && parseError ? (
           <Html center>
-            <div className="max-w-xs rounded-lg border border-pf-warning/40 bg-pf-bg-1/95 px-3 py-2 text-xs text-pf-text-primary shadow-lg backdrop-blur-sm">
+            {/* Issue #1974: an explicit `w-*` (not just `max-w-*`) keeps this box a
+                real pixel width regardless of drei's nested absolute-positioned
+                wrappers, which otherwise shrink-to-fit toward zero and wrap the
+                text one word per line on narrow viewports. See the matching note
+                on the model-load error fallback in SlicerBedVisualization.tsx. */}
+            <div className="w-64 max-w-[80vw] rounded-lg border border-pf-warning/40 bg-pf-bg-1/95 px-3 py-2 text-xs text-pf-text-primary shadow-lg backdrop-blur-sm">
               Native 3MF parsing failed. Showing the STL fallback instead.
             </div>
           </Html>

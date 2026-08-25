@@ -13,7 +13,7 @@ import { FacePaintOverlay } from './FacePaintOverlay';
 import { ColorPaintOverlay } from './ColorPaintOverlay';
 import { CutPlaneOverlay } from './CutPlaneOverlay';
 import { PlateBedOverlay } from './PlateBedOverlay';
-import { ModelViewerErrorBoundary } from './ModelViewerErrorBoundary';
+import { ModelViewerErrorBoundary, ModelLoadFailedAlert } from './ModelViewerErrorBoundary';
 import { ThreeMFViewer } from '@/features/slicer/components/ThreeMFViewer';
 import { AuthenticatedModelSource } from '@/common/components/AuthenticatedModelSource';
 import {
@@ -2248,12 +2248,7 @@ function BedScene({
                       onError={() => onModelLoadError?.(model.id)}
                       fallback={(
                         <Html center>
-                          <div
-                            className="max-w-xs rounded-lg border border-pf-border bg-pf-bg-1/95 px-4 py-3 text-center text-sm text-pf-text-primary shadow-lg backdrop-blur-sm"
-                            role="alert"
-                          >
-                            Failed to load this 3D model. Select another model or retry with a refreshed source.
-                          </div>
+                          <ModelLoadFailedAlert />
                         </Html>
                       )}
                     >
