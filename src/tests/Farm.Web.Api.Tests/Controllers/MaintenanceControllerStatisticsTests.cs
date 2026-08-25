@@ -173,6 +173,51 @@ public class MaintenanceControllerStatisticsTests
     }
 
     [Fact]
+    public async Task GetPrinterStatisticsAsync_ExistingPrinterWithoutStats_PrusaLinkLiveTotals_FilamentInMillimeters()
+    {
+        // PrusaLinkApiClient sums the raw PrusaLink history "filament.tool0.length" field without any
+        // unit conversion, so PrusaLink's TotalFilamentUsed is in millimeters just like Moonraker's -
+        // it must NOT be treated as "unknown backend" and silently zeroed out.
+        Guid printerId = Guid.NewGuid();
+        var printer = new Printer
+        {
+            Id = printerId,
+            Name = "PrusaLink Ready",
+            ServerUrl = "http://printer.local",
+            Backend = (int)PrinterBackend.PrusaLink
+        };
+
+        _statisticsRepository
+            .Setup(r => r.GetByPrinterIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrinterStatistics?)null);
+        _printersService
+            .Setup(s => s.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printer);
+        _printersService
+            .Setup(s => s.GetHistoryTotalsAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryTotals
+            {
+                JobTotals = new JobTotals
+                {
+                    TotalJobs = 3,
+                    TotalTime = 300,
+                    TotalPrintTime = 300,
+                    TotalFilamentUsed = 1000 // millimeters, per PrusaLinkApiClient
+                }
+            });
+
+        MaintenanceController controller = CreateController();
+
+        ActionResult<PrinterStatistics> result = await controller.GetPrinterStatisticsAsync(printerId, CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        PrinterStatistics stats = Assert.IsType<PrinterStatistics>(ok.Value);
+        Assert.Equal(3, stats.TotalJobsCompleted);
+        Assert.Equal(1.0, stats.TotalFilamentUsedMeters, precision: 10);
+        Assert.Equal(1000 * 0.00237, stats.TotalFilamentUsedGrams, precision: 10);
+    }
+
+    [Fact]
     public async Task GetPrinterStatisticsAsync_ExistingPrinterWithoutStats_LiveHistoryThrowsUnexpectedException_Returns500()
     {
         // An unexpected exception (not one of the recognized transient/upstream failure types) is a

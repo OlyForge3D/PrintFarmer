@@ -1052,10 +1052,12 @@ public class MaintenanceController(
     /// Overlays live backend history totals onto a non-persisted statistics snapshot.
     /// Mirrors the unit conversions used by <c>PrintStatsSyncHostedService</c>: backend total print
     /// time is always in seconds (converted to hours), but filament-used units are NOT consistent
-    /// across backends. Moonraker reports millimeters; OctoPrint's history adapter already converts
-    /// to meters (see <c>OctoPrintClient</c>). Filament totals are therefore only converted for the
-    /// backends whose units are known here; other backends keep the zero-valued filament fallback to
-    /// avoid silently reporting a value off by a unit-conversion factor.
+    /// across backends. Moonraker and PrusaLink report millimeters (<c>PrusaLinkApiClient</c> sums
+    /// the raw <c>filament.tool0.length</c> value without conversion); OctoPrint's history adapter
+    /// already converts to meters (see <c>OctoPrintClient</c>). Filament totals are therefore only
+    /// converted for the backends whose units are known here; other backends (e.g. SDCP, which does
+    /// not report filament usage in history at all) keep the zero-valued filament fallback to avoid
+    /// silently reporting a value off by a unit-conversion factor.
     /// </summary>
     private static void ApplyLiveHistoryTotals(PrinterStatistics snapshot, JobTotals? jobTotals, PrinterBackend backend)
     {
@@ -1070,7 +1072,9 @@ public class MaintenanceController(
         switch (backend)
         {
             case PrinterBackend.Moonraker:
-                // Moonraker reports total_filament_used in millimeters.
+            case PrinterBackend.PrusaLink:
+                // Moonraker reports total_filament_used in millimeters; PrusaLinkApiClient sums the
+                // raw PrusaLink "length" field (also millimeters) without converting it.
                 double filamentMm = jobTotals.TotalFilamentUsed;
                 snapshot.TotalFilamentUsedMeters = filamentMm / 1000.0;
                 snapshot.TotalFilamentUsedGrams = filamentMm * 0.00237;
