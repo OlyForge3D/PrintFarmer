@@ -1220,6 +1220,7 @@ public class ProfilesService(
 
     /// <inheritdoc />
     public async Task<SelectiveProfileImportResultDto> ImportSelectedProfilesForModelAsync(
+        HttpClient httpClient,
         Guid printerModelId,
         SelectiveProfileImportRequest request,
         CancellationToken ct)
@@ -1265,9 +1266,6 @@ public class ProfilesService(
 
                 return result;
             }
-
-            // Use IHttpClientFactory if available, otherwise create new HttpClient
-            using HttpClient httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
 
             IReadOnlyList<MachineProfileDto> aliasMachines = await GetMachineProfilesForCatalogModelAsync(httpClient, orcaAliases, ct);
             if (aliasMachines.Count == 0)
@@ -1460,6 +1458,135 @@ public class ProfilesService(
         {
             _logger.LogError(ex, "[ImportSelectedProfilesForModel] Import failed");
             result.Error = "Import failed";
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Looks up an already-imported OrcaSlicer profile of the given type by name (case-insensitive),
+    /// mirroring the lookup pattern used by <c>SliceJobController.ResolveNamedProfilesAsync</c>.
+    /// </summary>
+    private async Task<Guid?> FindExistingProfileIdByNameAsync(ProfileResolutionType profileType, string profileName, CancellationToken ct)
+    {
+        switch (profileType)
+        {
+            case ProfileResolutionType.Machine:
+                IReadOnlyList<MachineProfile> machines = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+                return machines.FirstOrDefault(m => string.Equals(m.Name, profileName, StringComparison.OrdinalIgnoreCase))?.Id;
+
+            case ProfileResolutionType.Process:
+                IReadOnlyList<ProcessProfile> processes = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+                return processes.FirstOrDefault(p => string.Equals(p.Name, profileName, StringComparison.OrdinalIgnoreCase))?.Id;
+
+            case ProfileResolutionType.Filament:
+                IReadOnlyList<FilamentProfile> filaments = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+                return filaments.FirstOrDefault(f => string.Equals(f.Name, profileName, StringComparison.OrdinalIgnoreCase))?.Id;
+
+            default:
+                return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<ResolveProfileForModelResultDto> ResolveOrImportProfileForModelAsync(
+        HttpClient httpClient,
+        Guid printerModelId,
+        ProfileResolutionType profileType,
+        string profileName,
+        CancellationToken ct)
+    {
+        ResolveProfileForModelResultDto result = new()
+        {
+            PrinterModelId = printerModelId,
+            ProfileType = profileType,
+            ProfileName = profileName
+        };
+
+        if (string.IsNullOrWhiteSpace(profileName))
+        {
+            result.Error = "ProfileName is required";
+            return result;
+        }
+
+        try
+        {
+            // Already-imported case: no worker call, no admin action needed — this is the common
+            // path once a model has been used at least once (#2004).
+            Guid? existingId = await FindExistingProfileIdByNameAsync(profileType, profileName, ct);
+            if (existingId.HasValue)
+            {
+                result.ProfileId = existingId;
+                result.Imported = false;
+                return result;
+            }
+
+            PrinterModelDto? catalogModel = await _catalogService.GetModelByIdAsync(printerModelId, ct);
+            if (catalogModel is null)
+            {
+                result.Error = $"Printer model with ID {printerModelId} not found in catalog";
+                return result;
+            }
+
+            ManufacturerDto? manufacturer = await _catalogService.GetManufacturerByIdAsync(catalogModel.ManufacturerId, ct);
+            if (manufacturer is null)
+            {
+                result.Error = $"Manufacturer for printer model '{catalogModel.Name}' not found in catalog";
+                return result;
+            }
+
+            SelectiveProfileImportRequest importRequest = new()
+            {
+                ManufacturerName = manufacturer.Name
+            };
+
+            switch (profileType)
+            {
+                case ProfileResolutionType.Machine:
+                    importRequest.SelectedMachineProfiles.Add(profileName);
+                    break;
+                case ProfileResolutionType.Process:
+                    importRequest.SelectedProcessProfiles.Add(profileName);
+                    break;
+                case ProfileResolutionType.Filament:
+                    importRequest.SelectedFilamentProfiles.Add(profileName);
+                    break;
+            }
+
+            SelectiveProfileImportResultDto importResult = await ImportSelectedProfilesForModelAsync(httpClient, printerModelId, importRequest, ct);
+
+            if (!string.IsNullOrEmpty(importResult.Error))
+            {
+                result.Error = importResult.Error;
+                return result;
+            }
+
+            if (importResult.TotalImported == 0)
+            {
+                result.Error = $"Profile '{profileName}' was not found or is not compatible with printer model '{catalogModel.Name}'";
+                return result;
+            }
+
+            Guid? importedId = await FindExistingProfileIdByNameAsync(profileType, profileName, ct);
+            if (!importedId.HasValue)
+            {
+                result.Error = $"Profile '{profileName}' was imported but could not be located afterward";
+                return result;
+            }
+
+            result.ProfileId = importedId;
+            result.Imported = true;
+            return result;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "[ResolveOrImportProfileForModel] Worker communication failed");
+            result.Error = "Failed to communicate with OrcaSlicer worker";
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[ResolveOrImportProfileForModel] Resolution failed");
+            result.Error = "Profile resolution failed";
             return result;
         }
     }

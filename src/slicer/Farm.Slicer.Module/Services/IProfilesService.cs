@@ -144,12 +144,33 @@ public interface IProfilesService
     Task<BulkImportFromWorkerResultDto> BulkImportFromWorkerAsync(Guid printerId, BulkImportFromWorkerRequest request, CancellationToken ct);
 
     /// <summary>Imports selected profiles from the OrcaSlicer worker for a specific printer model.</summary>
+    /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="printerModelId">The catalog PrinterModel ID.</param>
     /// <param name="request">Request containing selected profile names for each type.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<SelectiveProfileImportResultDto> ImportSelectedProfilesForModelAsync(
+        HttpClient httpClient,
         Guid printerModelId,
         SelectiveProfileImportRequest request,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Resolves a catalog profile's identity for a printer model, auto-importing it from the
+    /// OrcaSlicer worker catalog if it has never been imported into PrintFarmer's database (#2004).
+    /// Unlike <see cref="ImportSelectedProfilesForModelAsync"/>, this does not require admin
+    /// authority: a caller holding only calibration scopes can obtain a usable profile Guid for a
+    /// catalog model without any prior admin action.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for worker communication.</param>
+    /// <param name="printerModelId">The catalog PrinterModel ID.</param>
+    /// <param name="profileType">The kind of profile to resolve.</param>
+    /// <param name="profileName">The profile name as reported by the catalog read endpoints.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<ResolveProfileForModelResultDto> ResolveOrImportProfileForModelAsync(
+        HttpClient httpClient,
+        Guid printerModelId,
+        ProfileResolutionType profileType,
+        string profileName,
         CancellationToken ct);
 
     /// <summary>Creates a new process profile.</summary>
