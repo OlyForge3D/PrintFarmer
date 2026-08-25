@@ -13,7 +13,7 @@ namespace Farm.Web.Api.Tests.Services.Calibration.Generation;
 /// <c>docs/CALIBRATION_DIVERGENCES.md</c> for the full rationale and code pointers, and for
 /// other known, deliberate PFD/OrcaSlicer calibration divergences.
 /// </remarks>
-public sealed class CalibrationGcodeSafetyValidatorTests
+public sealed class CalibrationGcodeProgramValidatorTests
 {
     private static CalibrationGenerationPipeline.Result Run() =>
         CalibrationGenerationPipeline.Run(CalibrationMethod.Temperature, 0.4m, directDrive: true);
@@ -404,7 +404,7 @@ public sealed class CalibrationGcodeSafetyValidatorTests
         };
 
         CalibrationGenerationResult<CalibrationGcodeSafetyReport> result =
-            new CalibrationGcodeSafetyValidator().Validate(new CalibrationGcodeSafetyRequest(
+            new CalibrationGcodeProgramValidator(new Farm.Web.Api.Services.Gcode.Safety.GcodeSafetyValidator()).Validate(new CalibrationGcodeSafetyRequest(
                 run.Specification!,
                 run.Plan!,
                 tampered,
@@ -426,7 +426,7 @@ public sealed class CalibrationGcodeSafetyValidatorTests
         };
 
         CalibrationGenerationResult<CalibrationGcodeSafetyReport> result =
-            new CalibrationGcodeSafetyValidator().Validate(new CalibrationGcodeSafetyRequest(
+            new CalibrationGcodeProgramValidator(new Farm.Web.Api.Services.Gcode.Safety.GcodeSafetyValidator()).Validate(new CalibrationGcodeSafetyRequest(
                 run.Specification!,
                 run.Plan!,
                 tampered,
@@ -448,7 +448,7 @@ public sealed class CalibrationGcodeSafetyValidatorTests
         };
 
         CalibrationGenerationResult<CalibrationGcodeSafetyReport> result =
-            new CalibrationGcodeSafetyValidator().Validate(new CalibrationGcodeSafetyRequest(
+            new CalibrationGcodeProgramValidator(new Farm.Web.Api.Services.Gcode.Safety.GcodeSafetyValidator()).Validate(new CalibrationGcodeSafetyRequest(
                 run.Specification!,
                 run.Plan!,
                 tampered,
@@ -470,7 +470,7 @@ public sealed class CalibrationGcodeSafetyValidatorTests
         };
 
         CalibrationGenerationResult<CalibrationGcodeSafetyReport> result =
-            new CalibrationGcodeSafetyValidator().Validate(new CalibrationGcodeSafetyRequest(
+            new CalibrationGcodeProgramValidator(new Farm.Web.Api.Services.Gcode.Safety.GcodeSafetyValidator()).Validate(new CalibrationGcodeSafetyRequest(
                 run.Specification!,
                 run.Plan!,
                 tampered,

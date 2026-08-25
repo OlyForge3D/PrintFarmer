@@ -153,7 +153,9 @@ internal sealed class CalibrationGenerationHarness : IDisposable
             resolved.PlanCompiler ?? new OrcaCalibrationPlanCompiler(compatibilityPolicy),
             new KlipperCalibrationGcodeGenerator(compatibilityPolicy),
             new CalibrationGcodeAnnotator(),
-            new CalibrationGcodeSafetyValidator(compatibilityPolicy),
+            new CalibrationGcodeProgramValidator(
+                new Farm.Web.Api.Services.Gcode.Safety.GcodeSafetyValidator(),
+                compatibilityPolicy),
             BuildProbe(resolved, core, slicerFactory, promoter, modelStorage, sliceJobs, artifacts, artifactsRepository),
             promoter,
             storagePaths,
