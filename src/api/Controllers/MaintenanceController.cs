@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
@@ -964,7 +965,9 @@ public class MaintenanceController(
 
     /// <summary>
     /// Gets cumulative statistics for a specific printer.
-    /// Existing printers without accrued statistics return an empty, non-persisted snapshot.
+    /// Existing printers without an accrued maintenance-statistics row fall back to the printer
+    /// backend's own live history totals (e.g. Moonraker's <c>/server/history/totals</c>) so the
+    /// card reflects real print history instead of an unconditional zero snapshot (issue #1994).
     /// </summary>
     [HttpGet("printers/{printerId:guid}/statistics")]
     [ProducesResponseType(typeof(PrinterStatistics), 200)]
@@ -982,7 +985,7 @@ public class MaintenanceController(
                     return NotFound($"Printer not found: {printerId}");
                 }
 
-                return Ok(new PrinterStatistics
+                PrinterStatistics liveSnapshot = new()
                 {
                     Id = printerId,
                     PrinterId = printerId,
@@ -997,7 +1000,27 @@ public class MaintenanceController(
                     LastSyncTime = default,
                     CreatedAt = default,
                     UpdatedAt = default
-                });
+                };
+
+                // No accrued row exists yet, most likely because the periodic PrintStatsSyncHostedService
+                // has not run for this printer yet. Rather than return a hardcoded zero snapshot while the
+                // backend already has real print history, query the backend's live history totals
+                // directly (the same call backing GET /api/printers/{id}/history/totals) and use them
+                // for this response.
+                try
+                {
+                    HistoryTotals liveTotals = await _printersService.GetHistoryTotalsAsync(printerId, ct);
+                    ApplyLiveHistoryTotals(liveSnapshot, liveTotals.JobTotals);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "[MaintenanceController] Failed to fetch live history totals for printer {PrinterId}; returning zero-valued fallback statistics",
+                        printerId);
+                }
+
+                return Ok(liveSnapshot);
             }
 
             return Ok(stats);
@@ -1007,6 +1030,27 @@ public class MaintenanceController(
             _logger.LogError(ex, "[MaintenanceController] Error getting statistics for printer {PrinterId}", printerId);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Overlays live backend history totals onto a non-persisted statistics snapshot.
+    /// Mirrors the unit conversions used by <c>PrintStatsSyncHostedService</c>: backend total print
+    /// time is in seconds (converted to hours) and filament usage is in millimeters (converted to
+    /// meters, and approximated to grams assuming 1.75mm PLA).
+    /// </summary>
+    private static void ApplyLiveHistoryTotals(PrinterStatistics snapshot, JobTotals? jobTotals)
+    {
+        if (jobTotals is null)
+        {
+            return;
+        }
+
+        snapshot.TotalPrintHours = jobTotals.TotalPrintTime / 3600.0;
+        snapshot.TotalJobsCompleted = (int)jobTotals.TotalJobs;
+
+        double filamentMm = jobTotals.TotalFilamentUsed;
+        snapshot.TotalFilamentUsedMeters = filamentMm / 1000.0;
+        snapshot.TotalFilamentUsedGrams = filamentMm * 0.00237;
     }
 
     #endregion
