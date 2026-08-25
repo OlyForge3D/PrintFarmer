@@ -238,7 +238,7 @@ public sealed class CalibrationAttempt
 
     public string SpecificationSha256 { get; set; } = string.Empty;
 
-    public Guid PrinterConfigurationSnapshotId { get; set; }
+    public Guid? PrinterConfigurationSnapshotId { get; set; }
 
     public string ProfileSnapshotIdsJson { get; set; } = "[]";
 

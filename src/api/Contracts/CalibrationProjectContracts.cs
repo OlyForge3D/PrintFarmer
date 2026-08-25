@@ -156,7 +156,7 @@ public sealed record CalibrationAttemptDto(
     JsonElement Input,
     JsonElement Specification,
     string SpecificationSha256,
-    Guid PrinterConfigurationSnapshotId,
+    Guid? PrinterConfigurationSnapshotId,
     JsonElement ProfileSnapshotIds,
     JsonElement? ActualSpoolSnapshot,
     string DerivedStatus,

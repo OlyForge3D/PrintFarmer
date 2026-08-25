@@ -38,8 +38,51 @@ public sealed class CalibrationProjectServiceTests
         _ = replay.Value!.Id.Should().Be(first.Value!.Id);
         _ = (await db.CalibrationProjects.CountAsync()).Should().Be(1);
         _ = (await db.CalibrationChanges.CountAsync()).Should().Be(1);
-        string snapshot = (await db.PrinterConfigurationSnapshots.SingleAsync()).SanitizedSnapshotJson;
-        _ = snapshot.Should().NotContain("serverUrl");
+        _ = (await db.CalibrationProjects.SingleAsync()).CurrentPrinterConfigurationSnapshotId.Should().BeNull();
+        _ = (await db.PrinterConfigurationSnapshots.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CreateProjectAsync_NoPrinterConfigurationContext_SucceedsWithoutSnapshot()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateServiceWithThrowingContext(db);
+
+        CalibrationApiResult<CalibrationProjectDto> result = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "no-context-project"),
+            actor,
+            CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status201Created);
+        _ = result.Value!.CurrentPrinterConfigurationSnapshotId.Should().BeNull();
+        _ = (await db.CalibrationProjects.CountAsync()).Should().Be(1);
+        _ = (await db.PrinterConfigurationSnapshots.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CreateAttemptAsync_NoPrinterConfigurationContext_SucceedsWithoutSnapshot()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateServiceWithThrowingContext(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "no-context-attempt-project"),
+            actor,
+            CancellationToken.None);
+
+        CalibrationApiResult<CalibrationAttemptDto> result = await service.CreateAttemptAsync(
+            project.Value!.Id,
+            CreateAttemptRequest("no-context-attempt"),
+            actor,
+            CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status201Created);
+        _ = result.Value!.PrinterConfigurationSnapshotId.Should().BeNull();
+        _ = (await db.CalibrationAttempts.CountAsync()).Should().Be(1);
+        _ = (await db.PrinterConfigurationSnapshots.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -461,7 +504,7 @@ public sealed class CalibrationProjectServiceTests
             InputJson = "{}",
             SpecificationJson = "{}",
             SpecificationSha256 = "0".PadLeft(64, '0'),
-            PrinterConfigurationSnapshotId = (await db.PrinterConfigurationSnapshots.SingleAsync()).Id,
+            PrinterConfigurationSnapshotId = null,
             ProfileSnapshotIdsJson = "[]",
             AttemptRequestId = "attempt-1",
             CreatedAtUtc = DateTime.UtcNow,
@@ -803,6 +846,16 @@ public sealed class CalibrationProjectServiceTests
             TimeProvider.System,
             NullLogger<CalibrationProjectService>.Instance);
 
+    // Proves CreateProjectAsync/CreateAttemptAsync no longer call GetContextAsync (#1981): any
+    // invocation fails the test outright instead of silently returning a fabricated context.
+    private static CalibrationProjectService CreateServiceWithThrowingContext(AppDbContext db) =>
+        new(
+            db,
+            new ThrowingPrinterContextService(),
+            new TestCalibrationBlobStore(),
+            TimeProvider.System,
+            NullLogger<CalibrationProjectService>.Instance);
+
     private static CalibrationProjectCreateRequest CreateProjectRequest(Guid printerId, string requestId) =>
         new()
         {
@@ -881,10 +934,6 @@ public sealed class CalibrationProjectServiceTests
         long sequence)
     {
         Guid attemptId = Guid.NewGuid();
-        PrinterConfigurationSnapshot snapshot = await db.PrinterConfigurationSnapshots
-            .Where(candidate => candidate.ProjectId == projectId)
-            .OrderBy(candidate => candidate.CapturedAtUtc)
-            .FirstAsync();
         _ = db.CalibrationAttempts.Add(new CalibrationAttempt
         {
             Id = attemptId,
@@ -896,7 +945,7 @@ public sealed class CalibrationProjectServiceTests
             InputJson = "{}",
             SpecificationJson = "{}",
             SpecificationSha256 = new string('0', 64),
-            PrinterConfigurationSnapshotId = snapshot.Id,
+            PrinterConfigurationSnapshotId = null,
             ProfileSnapshotIdsJson = "[]",
             AttemptRequestId = $"attempt-{attemptId:N}",
             CreatedAtUtc = DateTime.UtcNow,
@@ -952,6 +1001,20 @@ public sealed class CalibrationProjectServiceTests
             };
             return Task.FromResult(new CalibrationServiceResult<CalibrationContextDto>(context));
         }
+    }
+
+    // Throws immediately if invoked, so any test using this stub fails loudly if
+    // CreateProjectAsync/CreateAttemptAsync ever resume calling GetContextAsync (#1981).
+    private sealed class ThrowingPrinterContextService : ICalibrationContextResolver
+    {
+        public Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
+            Guid requestedPrinterId,
+            long? configurationRevision,
+            string capturedBySubject,
+            CalibrationProfileAccessScope profileAccessScope,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException(
+                "GetContextAsync must not be called by CreateProjectAsync/CreateAttemptAsync (#1981).");
     }
 
     private sealed class TestCalibrationBlobStore : ICalibrationBlobStore
