@@ -17,7 +17,6 @@ using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Artifacts;
 
-[Collection(IntegrationTestCollection.Name)]
 public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory = factory;

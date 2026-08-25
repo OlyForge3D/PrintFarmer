@@ -19,7 +19,6 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// Fast executing (~5-6 seconds for 18 tests) - suitable for CI/CD pipelines
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
 public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

@@ -55,11 +55,18 @@ public sealed class ArtifactsMetrics : IDisposable
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ArtifactsMetrics"/> class.
-    /// Resets shared state for test isolation.
     /// </summary>
+    /// <remarks>
+    /// Does NOT reset the shared static counters/thresholds. This type is registered as a
+    /// DI singleton and constructed once per host (including once per test
+    /// <c>CustomWebApplicationFactory</c>), so an unconditional reset here previously
+    /// zeroed process-wide state every time *any* concurrently-running test spun up a
+    /// new host — corrupting other tests (e.g. <c>ArtifactsThresholdTests</c>) that rely
+    /// on the counters holding stable values. Call <see cref="ResetForTests"/> explicitly
+    /// where a clean slate is actually required (test setup).
+    /// </remarks>
     public ArtifactsMetrics()
     {
-        ResetForTests();
     }
 
     /// <summary>

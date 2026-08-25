@@ -30,7 +30,6 @@ namespace Farm.Slicer.Module.Tests.SlicerHost;
 /// <see cref="WebApplicationFactory{TEntryPoint}"/>, exactly like
 /// <c>StandaloneSlicerHostModelDownloadSecurityTests</c>.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public class SlicerHostTokenRevocationTests(SlicerHostTokenRevocationApplicationFactory factory)
     : IClassFixture<SlicerHostTokenRevocationApplicationFactory>
 {

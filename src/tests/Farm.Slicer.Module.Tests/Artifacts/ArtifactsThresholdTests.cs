@@ -10,24 +10,22 @@ using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Artifacts;
 
-[Collection(IntegrationTestCollection.Name)]
 public class ArtifactsThresholdTests
 {
     [Fact(DisplayName = "Warning threshold event fires when exceeded")]
     public void Warning_Threshold_Event_Fires_When_Exceeded()
     {
         // Arrange
+        ArtifactsMetrics.ResetForTests();
         using ArtifactsMetrics metrics = new ArtifactsMetrics();
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
 
         SlicerStorageThresholdEventArgs? capturedEvent = null;
         metrics.ThresholdExceeded += (sender, e) => capturedEvent = e;
 
-        // Act - Upload enough to exceed warning
+        // Act - Upload enough to exceed warning.
+        // ThresholdExceeded fires synchronously inside RecordUpload, so no wait is needed.
         metrics.RecordUpload(1200);
-
-        // Give event time to fire
-        Thread.Sleep(50);
 
         // Assert
         _ = capturedEvent.Should().NotBeNull();
@@ -40,17 +38,16 @@ public class ArtifactsThresholdTests
     public void Critical_Threshold_Event_Fires_When_Exceeded()
     {
         // Arrange
+        ArtifactsMetrics.ResetForTests();
         using ArtifactsMetrics metrics = new ArtifactsMetrics();
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
 
         List<SlicerStorageThresholdEventArgs> events = new List<SlicerStorageThresholdEventArgs>();
         metrics.ThresholdExceeded += (sender, e) => events.Add(e);
 
-        // Act - Upload enough to exceed critical
+        // Act - Upload enough to exceed critical.
+        // ThresholdExceeded fires synchronously inside RecordUpload, so no wait is needed.
         metrics.RecordUpload(5500);
-
-        // Give event time to fire
-        Thread.Sleep(50);
 
         // Assert
         _ = events.Should().ContainSingle(e => e.Level == SlicerStorageThresholdLevel.Critical);
@@ -63,19 +60,21 @@ public class ArtifactsThresholdTests
     public void Multiple_Uploads_Trigger_Warning_Only_Once()
     {
         // Arrange
+        ArtifactsMetrics.ResetForTests();
         using ArtifactsMetrics metrics = new ArtifactsMetrics();
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
 
         int eventCount = 0;
         metrics.ThresholdExceeded += (sender, e) => Interlocked.Increment(ref eventCount);
 
-        // Act - Multiple uploads that stay in warning range
+        // Act - Multiple uploads that stay in warning range.
+        // ThresholdExceeded fires synchronously inside RecordUpload, so no waits are
+        // needed between calls; back-to-back calls also avoid widening the window in
+        // which a concurrently-starting test host could mutate the shared static
+        // threshold state via ConfigureSlicerMetrics.
         metrics.RecordUpload(800);
-        Thread.Sleep(20);
         metrics.RecordUpload(300); // Total: 1100, crosses warning
-        Thread.Sleep(20);
         metrics.RecordUpload(500); // Total: 1600, still warning
-        Thread.Sleep(20);
 
         // Assert - Only one event should fire (when first crossing warning)
         _ = eventCount.Should().Be(1);
@@ -85,6 +84,7 @@ public class ArtifactsThresholdTests
     public void Threshold_State_Gauge_Reflects_Current_State()
     {
         // Arrange
+        ArtifactsMetrics.ResetForTests();
         using ArtifactsMetrics metrics = new ArtifactsMetrics();
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
 
@@ -114,15 +114,13 @@ public class ArtifactsThresholdTests
         meterListener.RecordObservableInstruments();
         int initialState = stateValues.LastOrDefault();
 
-        // Upload to warning level
+        // Upload to warning level. RecordUpload updates the observable state synchronously.
         metrics.RecordUpload(1500);
-        Thread.Sleep(50);
         meterListener.RecordObservableInstruments();
         int warningState = stateValues.LastOrDefault();
 
         // Upload to critical level
         metrics.RecordUpload(4000);
-        Thread.Sleep(50);
         meterListener.RecordObservableInstruments();
         int criticalState = stateValues.LastOrDefault();
 
@@ -138,6 +136,7 @@ public class ArtifactsThresholdTests
     public void No_Events_When_Thresholds_Not_Configured()
     {
         // Arrange
+        ArtifactsMetrics.ResetForTests();
         using ArtifactsMetrics metrics = new ArtifactsMetrics();
         // Don't call SetThresholds
 
@@ -146,7 +145,6 @@ public class ArtifactsThresholdTests
 
         // Act
         metrics.RecordUpload(10000);
-        Thread.Sleep(50);
 
         // Assert
         _ = eventCount.Should().Be(0);

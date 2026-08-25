@@ -16,7 +16,6 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// End-to-end integration test for slice job completion flow:
 /// Submit -> Claim -> Upload artifact -> Complete -> Verify status & URL.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public class SliceJobCompletionIntegrationTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory = factory;

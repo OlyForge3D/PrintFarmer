@@ -16,7 +16,6 @@ namespace Farm.Slicer.Module.Tests.SlicerServices;
 /// and that the dispatcher can select the worker for a capability-constrained job.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
 public class WorkerRegistrationDispatcherIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

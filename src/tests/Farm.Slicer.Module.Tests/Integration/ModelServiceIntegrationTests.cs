@@ -25,26 +25,45 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// Fast executing (~6-7 seconds for 20+ tests) - suitable for CI/CD pipelines
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class ModelServiceIntegrationTests : IAsyncLifetime
+public class ModelServiceIntegrationTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private readonly List<MemoryStream> _streamsToDispose = [];
 
-    public ModelServiceIntegrationTests()
+    // Tracks whether the shared factory's database schema/root folders have already been
+    // established for this class. Tests within one class always run sequentially in xUnit
+    // (even under CollectionPerClass parallelism), so this static flag is safe without
+    // extra locking.
+    private static bool s_schemaInitialized;
+
+    public ModelServiceIntegrationTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        if (!s_schemaInitialized)
+        {
+            // First test in the class: pay for the full schema drop/recreate + seed once.
+            await _factory.ResetDatabaseAsync();
+            s_schemaInitialized = true;
+            return;
+        }
+
+        // Subsequent tests: schema and root folders are already in place, so just clear
+        // the rows this test class writes. This avoids repeating the costly
+        // EnsureDeletedAsync/EnsureCreatedAsync schema rebuild on every single test, which
+        // was the dominant remaining cost driver for this class (~4s/test x 35 tests).
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        _ = await context.Set<Model3D>().ExecuteDeleteAsync();
     }
 
     public async Task DisposeAsync()
     {
-        _factory?.Dispose();
-
+        // _factory is shared across all tests in this class via IClassFixture and is
+        // disposed by xUnit once the class finishes, not per-test.
         foreach (MemoryStream stream in _streamsToDispose)
         {
             stream.Dispose();

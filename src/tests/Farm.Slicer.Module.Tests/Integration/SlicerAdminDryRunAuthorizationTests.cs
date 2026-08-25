@@ -16,7 +16,6 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// </summary>
 [Trait("Category", "Integration")]
 [Trait("Category", "Regression")]
-[Collection(IntegrationTestCollection.Name)]
 public class SlicerAdminDryRunAuthorizationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory = new();

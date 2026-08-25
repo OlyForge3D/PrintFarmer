@@ -23,7 +23,6 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// <c>LayoutDegradation</c> to an integer that names no real
 /// <see cref="LayoutDegradationReason"/> member.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public class SliceJobCompletionLayoutDegradationValidationTests(CustomWebApplicationFactory factory)
     : IClassFixture<CustomWebApplicationFactory>
 {
