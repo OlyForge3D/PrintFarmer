@@ -360,20 +360,6 @@
       }
     },
     {
-      "id": "slicer-worker-gcode-safety-validator",
-      "destinationPath": "src/api/Services/Gcode/Safety/GcodeSafetyValidator.cs",
-      "referenceUrls": [
-        "https://github.com/OlyForge3D/PrintFarmer/issues/899",
-        "https://github.com/OlyForge3D/PrintFarmer/issues/1982"
-      ],
-      "statement": "Independent PrintFarmer implementation of the general, calibration-independent g-code safety pass extracted from the original calibration-only validator (issue #899) for issue #1982; no external source code was copied or adapted.",
-      "review": {
-        "reviewer": "Copilot App",
-        "reviewDate": "2026-07-25",
-        "decision": "approved"
-      }
-    },
-    {
       "id": "calibration-generation-gcode-safety-validator-tests",
       "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationGcodeProgramValidatorTests.cs",
       "referenceUrls": [
@@ -1897,6 +1883,20 @@
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-08-22",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "slicer-worker-gcode-safety-validator",
+      "destinationPath": "src/api/Services/Gcode/Safety/GcodeSafetyValidator.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899",
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1982"
+      ],
+      "statement": "Independent PrintFarmer implementation of the general, calibration-independent g-code safety pass extracted from the original calibration-only validator (issue #899) for issue #1982; no external source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
         "decision": "approved"
       }
     }
