@@ -51,9 +51,6 @@ public sealed class CalibrationCapabilityService(
             ["calibrationCapabilities"] = "/api/calibration/capabilities",
             ["printers"] = "/api/printers",
             ["calibrationProjects"] = "/api/calibration-projects",
-            ["calibrationGenerateJob"] =
-                "/api/calibration-projects/{projectId}/attempts/{attemptId}/generate-job",
-            ["calibrationOrchestration"] = "/api/calibration-orchestrations/{id}",
             ["calibrationSync"] = "/api/calibration-sync/changes",
             ["calibrationImports"] = "/api/calibration-imports/legacy-v4",
             ["sliceJobs"] = "/api/slice",
