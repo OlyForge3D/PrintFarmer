@@ -274,9 +274,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // separately deployed slicer and storage services; no cross-context FK is modeled.
     public DbSet<CalibrationProject> CalibrationProjects => Set<CalibrationProject>();
 
-    public DbSet<PrinterConfigurationSnapshot> PrinterConfigurationSnapshots =>
-        Set<PrinterConfigurationSnapshot>();
-
     public DbSet<CalibrationDraft> CalibrationDrafts => Set<CalibrationDraft>();
 
     public DbSet<CalibrationAttempt> CalibrationAttempts => Set<CalibrationAttempt>();
@@ -735,7 +732,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     private void EnsureCalibrationHistoryIsImmutable()
     {
         ChangeTracker.DetectChanges();
-        EnsureImmutable<PrinterConfigurationSnapshot>();
         EnsureImmutable<CalibrationAttempt>();
         EnsureImmutable<CalibrationAttemptEvent>();
         EnsureImmutable<CalibrationObservation>();

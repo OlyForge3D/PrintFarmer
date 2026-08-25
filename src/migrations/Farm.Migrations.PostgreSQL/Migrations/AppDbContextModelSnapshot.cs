@@ -506,9 +506,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid?>("ParentAttemptId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("PrinterConfigurationSnapshotId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("ProfileSnapshotIdsJson")
                         .IsRequired()
                         .HasColumnType("text");
@@ -529,8 +526,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("character varying(64)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("PrinterConfigurationSnapshotId");
 
                     b.HasIndex("ProjectId", "AttemptRequestId")
                         .IsUnique();
@@ -1181,9 +1176,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
-
-                    b.Property<Guid?>("CurrentPrinterConfigurationSnapshotId")
-                        .HasColumnType("uuid");
 
                     b.Property<string>("CurrentSelectionsJson")
                         .IsRequired()
@@ -6138,128 +6130,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("Printers");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterConfigurationSnapshot", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("AttemptId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("Backend")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("BackendApiVersion")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("BackendVersion")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<DateTime>("CapturedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("CapturedBySubject")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.Property<string>("ExactFilamentProfileJson")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ExactMachineProfileJson")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ExactProcessProfileJson")
-                        .HasColumnType("text");
-
-                    b.Property<Guid?>("FilamentProfileId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("FilamentProfileSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<int>("FirmwareDetectionSource")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("FirmwareFamily")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("FirmwareVersion")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<int>("GcodeDialect")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid?>("MachineProfileId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("MachineProfileSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<long>("PrinterConfigurationRevision")
-                        .HasColumnType("bigint");
-
-                    b.Property<Guid>("PrinterId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("ProcessProfileId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ProcessProfileSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("SanitizedSnapshotJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("SchemaVersion")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<string>("SlicerContainerDigest")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.Property<string>("SlicerDistribution")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("SlicerEngine")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("SlicerVersion")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("SnapshotSha256")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AttemptId");
-
-                    b.HasIndex("ProjectId", "SnapshotSha256")
-                        .IsUnique();
-
-                    b.ToTable("PrinterConfigurationSnapshots");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterDispatchState", b =>
                 {
                     b.Property<Guid>("PrinterId")
@@ -8392,11 +8262,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationAttempt", b =>
                 {
-                    b.HasOne("Farm.Infrastructure.Domain.PrinterConfigurationSnapshot", null)
-                        .WithMany()
-                        .HasForeignKey("PrinterConfigurationSnapshotId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("Farm.Infrastructure.Domain.CalibrationProject", null)
                         .WithMany()
                         .HasForeignKey("ProjectId")
@@ -9365,15 +9230,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("Model");
 
                     b.Navigation("PrinterGroup");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterConfigurationSnapshot", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.CalibrationProject", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterDispatchState", b =>

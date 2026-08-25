@@ -1,5 +1,4 @@
 ﻿using System.Security.Cryptography;
-using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoDispatch;
@@ -1605,96 +1604,26 @@ public sealed class DispatchClaimService(
         CalibrationAttempt? attempt = await db.CalibrationAttempts
             .AsNoTracking()
             .SingleOrDefaultAsync(candidate => candidate.Id == job.CalibrationAttemptId, ct);
-
-        // #1990: D4 (#1987) stopped populating a printer-configuration snapshot for every new
-        // attempt and never regained a replacement path for the compatibility-pinning data this
-        // gate requires. Fail explicitly here instead of letting the (guaranteed-empty) snapshot
-        // lookup below fold into the generic "record is missing" branch, which reads like data
-        // corruption rather than a known, temporary limitation. Interim short-circuit pending
-        // #1984 (D7), not a fix for the underlying gap.
-        if (attempt is not null && attempt.PrinterConfigurationSnapshotId is null)
-        {
-            return DispatchClaimResult.Fail(
-                "calibration_dispatch_unavailable",
-                "Filament calibration dispatch is temporarily unavailable pending #1984; see issue #1990.");
-        }
-
-        PrinterConfigurationSnapshot? snapshot = await db.PrinterConfigurationSnapshots
-            .AsNoTracking()
-            .SingleOrDefaultAsync(candidate => candidate.Id == job.CalibrationConfigSnapshotId, ct);
         CalibrationOrchestration? orchestration = await db.CalibrationOrchestrations
             .AsNoTracking()
             .SingleOrDefaultAsync(candidate => candidate.Id == job.CalibrationOrchestrationId, ct);
-        if (project is null || attempt is null || snapshot is null || orchestration is null)
+        if (project is null || attempt is null || orchestration is null)
         {
             return DispatchClaimResult.Fail(
                 "calibration_record_invalid",
-                "An authoritative calibration project, attempt, snapshot, or orchestration record is missing.");
+                "An authoritative calibration project, attempt, or orchestration record is missing.");
         }
 
-        bool mismatch =
-            project.PrinterId != printer.Id ||
-            (project.LocalSpoolId ?? project.SpoolmanSpoolId) != job.PinnedSpoolId ||
-            project.CurrentPrinterConfigurationSnapshotId != snapshot.Id ||
-            project.SelectedToolheadId != job.PinnedToolheadId ||
-            project.SelectedToolheadIndex != job.PinnedToolheadIndex ||
-            !string.Equals(project.FilamentSku, job.PinnedFilamentSku, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(project.FilamentProductName, job.FilamentName, StringComparison.Ordinal) ||
-            !string.Equals(project.FilamentVendor, job.FilamentVendor, StringComparison.Ordinal) ||
-            !string.Equals(project.FilamentColor, job.FilamentColor, StringComparison.Ordinal) ||
-            !string.Equals(
-                ComputeSha256(project.FilamentSnapshotJson),
-                job.FilamentSnapshotSha256,
-                StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(project.FilamentMaterial, job.RequiredMaterialType, StringComparison.OrdinalIgnoreCase) ||
-            attempt.ProjectId != project.Id ||
-            attempt.PrinterConfigurationSnapshotId != snapshot.Id ||
-            !string.Equals(attempt.SpecificationSha256, job.SpecificationSha256, StringComparison.OrdinalIgnoreCase) ||
-            snapshot.ProjectId != project.Id ||
-            snapshot.PrinterId != printer.Id ||
-            snapshot.PrinterConfigurationRevision != job.PinnedPrinterConfigRevision ||
-            snapshot.FirmwareFamily != job.RequiredFirmwareFamily ||
-            snapshot.GcodeDialect != job.RequiredGcodeDialect ||
-            !string.Equals(snapshot.SlicerEngine, job.RequiredSlicerEngine, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(snapshot.SlicerDistribution, job.RequiredSlicerDistribution, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(snapshot.SlicerVersion, job.RequiredSlicerVersion, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(snapshot.SlicerContainerDigest, job.RequiredSlicerContainerDigest, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(snapshot.SnapshotSha256, job.PrinterConfigSnapshotSha256, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(snapshot.MachineProfileSha256, job.MachineProfileSha256, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(snapshot.ProcessProfileSha256, job.ProcessProfileSha256, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(snapshot.FilamentProfileSha256, job.FilamentProfileSha256, StringComparison.OrdinalIgnoreCase) ||
-            orchestration.ProjectId != project.Id ||
-            orchestration.AttemptId != attempt.Id ||
-            !string.Equals(orchestration.SpecificationSha256, job.SpecificationSha256, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(orchestration.ManifestSha256, job.CalibrationManifestSha256, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(orchestration.SlicerContainerDigest, job.RequiredSlicerContainerDigest, StringComparison.OrdinalIgnoreCase) ||
-            orchestration.GcodeFileId != job.GcodeFileId ||
-            orchestration.SliceJobId != job.SliceJobId ||
-            orchestration.FinalArtifactId != job.SourceArtifactId ||
-            !string.Equals(orchestration.GcodeSha256, job.GcodeContentSha256, StringComparison.OrdinalIgnoreCase) ||
-            job.GcodeFile is null ||
-            job.GcodeFile.PrinterModelId != job.PinnedPrinterModelId ||
-            job.GcodeFile.FileSizeBytes != job.PinnedGcodeFileSizeBytes ||
-            !string.Equals(job.GcodeFile.SourceModelSha256, job.SourceModelSha256, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(job.GcodeFile.CalibrationManifestSha256, job.CalibrationManifestSha256, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(job.GcodeFile.SlicerEngineName, job.RequiredSlicerEngine, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(job.GcodeFile.SlicerDistribution, job.RequiredSlicerDistribution, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(job.GcodeFile.PinnedSlicerVersion, job.RequiredSlicerVersion, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(job.GcodeFile.SlicerContainerDigest, job.RequiredSlicerContainerDigest, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(job.GcodeFile.SpecificationSha256, job.SpecificationSha256, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(job.GcodeFile.MachineProfileSha256, job.MachineProfileSha256, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(job.GcodeFile.ProcessProfileSha256, job.ProcessProfileSha256, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(job.GcodeFile.FilamentProfileSha256, job.FilamentProfileSha256, StringComparison.OrdinalIgnoreCase);
-        return mismatch
-            ? DispatchClaimResult.Fail(
-                "calibration_record_mismatch",
-                "Authoritative calibration records no longer match the immutable queue inputs.")
-            : null;
+        // #1989 (D3b): the PrinterConfigurationSnapshot entity every field-by-field comparison in
+        // this gate depended on (printer/toolhead/slicer/profile-digest pinning) has been deleted.
+        // No production code path has populated a snapshot for any attempt since D4 (#1987) - see
+        // #1990 - so this gate already failed 100% of the time for new work; this makes that
+        // failure explicit instead of relying on a lookup against a table that no longer exists.
+        // Interim short-circuit pending #1984 (D7), not a fix for the underlying gap.
+        return DispatchClaimResult.Fail(
+            "calibration_dispatch_unavailable",
+            "Filament calibration dispatch is temporarily unavailable pending #1984; see issue #1990.");
     }
-
-    private static string ComputeSha256(string value) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
-            .ToLowerInvariant();
 
     private static DispatchClaimResult? EvaluateTelemetryGates(
         PrinterStatusSnapshot? snapshot,

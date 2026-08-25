@@ -76,8 +76,11 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = promoted.SlicerDistribution.Should().Be("upstream");
         _ = promoted.PinnedSlicerVersion.Should().Be("2.3.1");
         _ = promoted.SlicerContainerDigest.Should().Be("sha256:pinned-container");
-        _ = promoted.FirmwareFamily.Should().Be("Klipper");
-        _ = promoted.GcodeDialect.Should().Be("Klipper");
+        // FirmwareFamily/GcodeDialect were previously enriched from the printer-configuration
+        // snapshot; that entity was deleted in #1989 (D3b) and no replacement populates these
+        // fields, so they are always null now (see GcodeArtifactPromoter.LoadCalibrationContextAsync).
+        _ = promoted.FirmwareFamily.Should().BeNull();
+        _ = promoted.GcodeDialect.Should().BeNull();
         _ = promoted.IsImmutable.Should().BeTrue();
         _ = promoted.PromotedAtUtc.Should().NotBeNull();
     }
@@ -1359,7 +1362,6 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             Guid owner = ownerId ?? Guid.NewGuid();
             Guid projectId = Guid.NewGuid();
             Guid attemptId = Guid.NewGuid();
-            Guid snapshotId = Guid.NewGuid();
             Guid orchestrationId = Guid.NewGuid();
             Guid jobId = Guid.NewGuid();
             Guid artifactId = Guid.NewGuid();
@@ -1375,9 +1377,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 owner,
                 projectId,
                 attemptId,
-                snapshotId,
-                specificationSha256,
-                machineProfileSha256);
+                specificationSha256);
 
             string relativePath = $"{artifactId}.gcode";
             await File.WriteAllBytesAsync(Path.Join(ArtifactRoot, relativePath), bytes);
@@ -1683,9 +1683,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             Guid ownerId,
             Guid projectId,
             Guid attemptId,
-            Guid snapshotId,
-            string specificationSha256,
-            string machineProfileSha256)
+            string specificationSha256)
         {
             await using AppDbContext core = CreateCoreContext();
             Guid manufacturerId = Guid.NewGuid();
@@ -1727,28 +1725,6 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 CreatedBySubject = "seed",
                 UpdatedBySubject = "seed",
             });
-            _ = core.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
-            {
-                Id = snapshotId,
-                ProjectId = projectId,
-                AttemptId = attemptId,
-                PrinterId = printerId,
-                SchemaVersion = "1.0",
-                SanitizedSnapshotJson = "{}",
-                SnapshotSha256 =
-                    Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"snapshot-{snapshotId}"))),
-                PrinterConfigurationRevision = 1,
-                FirmwareFamily = PrinterFirmwareFamily.Klipper,
-                GcodeDialect = PrinterGcodeDialect.Klipper,
-                FirmwareDetectionSource = FirmwareDetectionSource.Printer,
-                SlicerEngine = "OrcaSlicer",
-                SlicerDistribution = "upstream",
-                SlicerVersion = "2.3.1",
-                SlicerContainerDigest = "sha256:pinned-container",
-                MachineProfileSha256 = machineProfileSha256,
-                CapturedAtUtc = nowUtc,
-                CapturedBySubject = "seed",
-            });
             _ = core.CalibrationAttempts.Add(new CalibrationAttempt
             {
                 Id = attemptId,
@@ -1758,7 +1734,6 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 Method = "flow-coarse",
                 DefinitionVersion = "1.0",
                 SpecificationSha256 = specificationSha256,
-                PrinterConfigurationSnapshotId = snapshotId,
                 AttemptRequestId = $"attempt-{attemptId:N}",
                 CreatedAtUtc = nowUtc,
                 CreatedBySubject = "seed",

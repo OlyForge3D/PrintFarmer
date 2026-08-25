@@ -38,8 +38,6 @@ public sealed class CalibrationProjectServiceTests
         _ = replay.Value!.Id.Should().Be(first.Value!.Id);
         _ = (await db.CalibrationProjects.CountAsync()).Should().Be(1);
         _ = (await db.CalibrationChanges.CountAsync()).Should().Be(1);
-        _ = (await db.CalibrationProjects.SingleAsync()).CurrentPrinterConfigurationSnapshotId.Should().BeNull();
-        _ = (await db.PrinterConfigurationSnapshots.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -56,9 +54,7 @@ public sealed class CalibrationProjectServiceTests
             CancellationToken.None);
 
         _ = result.StatusCode.Should().Be(StatusCodes.Status201Created);
-        _ = result.Value!.CurrentPrinterConfigurationSnapshotId.Should().BeNull();
         _ = (await db.CalibrationProjects.CountAsync()).Should().Be(1);
-        _ = (await db.PrinterConfigurationSnapshots.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -80,9 +76,7 @@ public sealed class CalibrationProjectServiceTests
             CancellationToken.None);
 
         _ = result.StatusCode.Should().Be(StatusCodes.Status201Created);
-        _ = result.Value!.PrinterConfigurationSnapshotId.Should().BeNull();
         _ = (await db.CalibrationAttempts.CountAsync()).Should().Be(1);
-        _ = (await db.PrinterConfigurationSnapshots.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -714,7 +708,6 @@ public sealed class CalibrationProjectServiceTests
             InputJson = "{}",
             SpecificationJson = "{}",
             SpecificationSha256 = new string('0', 64),
-            PrinterConfigurationSnapshotId = null,
             ProfileSnapshotIdsJson = "[]",
             AttemptRequestId = $"attempt-{attemptId:N}",
             CreatedAtUtc = DateTime.UtcNow,

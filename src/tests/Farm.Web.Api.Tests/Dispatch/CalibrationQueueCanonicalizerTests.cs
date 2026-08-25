@@ -14,11 +14,12 @@ namespace Farm.Web.Api.Tests.Dispatch;
 
 /// <summary>
 /// Regression coverage for issue #1990: PR #1987 (D4) started unconditionally nulling
-/// <see cref="CalibrationAttempt.PrinterConfigurationSnapshotId"/> for every new attempt with no
-/// replacement path. Before the #1990 fix, <see cref="CalibrationQueueCanonicalizer.BuildAsync"/>
+/// the (now-deleted) <c>CalibrationAttempt.PrinterConfigurationSnapshotId</c> FK for every new
+/// attempt with no replacement path. Before the #1990 fix, <see cref="CalibrationQueueCanonicalizer.BuildAsync"/>
 /// fell through to a dead lookup on a nonexistent snapshot id and surfaced a generic "not found"
 /// exception that read like data corruption. This asserts the explicit, documented short-circuit
-/// added for #1990 instead.
+/// added for #1990 — which #1989 (D3b) made unconditional after deleting the
+/// <c>PrinterConfigurationSnapshot</c> entity/table entirely.
 /// </summary>
 [Trait("Category", "DbHeavy")]
 public sealed class CalibrationQueueCanonicalizerTests : IAsyncDisposable
@@ -66,9 +67,6 @@ public sealed class CalibrationQueueCanonicalizerTests : IAsyncDisposable
             OwnerUserId = Guid.NewGuid(),
             Name = "Canonicalizer regression project",
             PrinterId = Guid.NewGuid(),
-
-            // Regression trigger: D4 (#1987) no longer populates this for new attempts.
-            CurrentPrinterConfigurationSnapshotId = null,
             FilamentProvider = "local",
             FilamentProductId = "pla",
             FilamentProductName = "PLA",
@@ -79,9 +77,6 @@ public sealed class CalibrationQueueCanonicalizerTests : IAsyncDisposable
             Id = attemptId,
             ProjectId = projectId,
             SpecificationSha256 = new string('a', 64),
-
-            // Regression trigger: no compatibility-pinning snapshot for this attempt (#1990).
-            PrinterConfigurationSnapshotId = null,
         });
         seedCtx.CalibrationOrchestrations.Add(new CalibrationOrchestration
         {

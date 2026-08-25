@@ -61,8 +61,6 @@ public sealed class CalibrationProject
 
     public Guid PrinterId { get; set; }
 
-    public Guid? CurrentPrinterConfigurationSnapshotId { get; set; }
-
     public Guid? SelectedToolheadId { get; set; }
 
     public int? SelectedToolheadIndex { get; set; }
@@ -118,73 +116,6 @@ public sealed class CalibrationProject
     public DateTime? DeletedAtUtc { get; set; }
 }
 
-/// <summary>
-/// Immutable, credential-free snapshot of the explicit printer and profile
-/// context used by a project or attempt.
-/// </summary>
-public sealed class PrinterConfigurationSnapshot
-{
-    public Guid Id { get; set; }
-
-    public Guid ProjectId { get; set; }
-
-    public Guid? AttemptId { get; set; }
-
-    public Guid PrinterId { get; set; }
-
-    public string SchemaVersion { get; set; } = string.Empty;
-
-    public string SanitizedSnapshotJson { get; set; } = "{}";
-
-    public string SnapshotSha256 { get; set; } = string.Empty;
-
-    public long PrinterConfigurationRevision { get; set; }
-
-    public PrinterFirmwareFamily FirmwareFamily { get; set; }
-
-    public PrinterGcodeDialect GcodeDialect { get; set; }
-
-    public FirmwareDetectionSource FirmwareDetectionSource { get; set; }
-
-    public string? FirmwareVersion { get; set; }
-
-    public int Backend { get; set; }
-
-    public string? BackendVersion { get; set; }
-
-    public string? BackendApiVersion { get; set; }
-
-    public string SlicerEngine { get; set; } = string.Empty;
-
-    public string SlicerDistribution { get; set; } = string.Empty;
-
-    public string? SlicerVersion { get; set; }
-
-    public string? SlicerContainerDigest { get; set; }
-
-    public Guid? MachineProfileId { get; set; }
-
-    public string? ExactMachineProfileJson { get; set; }
-
-    public string? MachineProfileSha256 { get; set; }
-
-    public Guid? ProcessProfileId { get; set; }
-
-    public string? ExactProcessProfileJson { get; set; }
-
-    public string? ProcessProfileSha256 { get; set; }
-
-    public Guid? FilamentProfileId { get; set; }
-
-    public string? ExactFilamentProfileJson { get; set; }
-
-    public string? FilamentProfileSha256 { get; set; }
-
-    public DateTime CapturedAtUtc { get; set; }
-
-    public string CapturedBySubject { get; set; } = string.Empty;
-}
-
 /// <summary>Editable, device-lineage-specific work in progress for a calibration step.</summary>
 public sealed class CalibrationDraft
 {
@@ -237,8 +168,6 @@ public sealed class CalibrationAttempt
     public string SpecificationJson { get; set; } = "{}";
 
     public string SpecificationSha256 { get; set; } = string.Empty;
-
-    public Guid? PrinterConfigurationSnapshotId { get; set; }
 
     public string ProfileSnapshotIdsJson { get; set; } = "[]";
 

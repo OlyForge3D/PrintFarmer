@@ -290,7 +290,6 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
                 OwnerUserId = Guid.NewGuid(),
                 Name = "Test calibration",
                 PrinterId = printer.Id,
-                CurrentPrinterConfigurationSnapshotId = calibrationSnapshotId,
                 SelectedToolheadId = toolhead.Id,
                 SelectedToolheadIndex = toolhead.Index,
                 FilamentProvider = "local",
@@ -301,32 +300,11 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
                 LocalSpoolId = spool.Id,
                 FilamentSnapshotJson = """{"material":"PLA"}""",
             });
-            db.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
-            {
-                Id = calibrationSnapshotId,
-                ProjectId = calibrationProjectId,
-                AttemptId = calibrationAttemptId,
-                PrinterId = printer.Id,
-                SchemaVersion = "1",
-                SnapshotSha256 = new string('6', 64),
-                PrinterConfigurationRevision = 1,
-                FirmwareFamily = PrinterFirmwareFamily.Klipper,
-                GcodeDialect = PrinterGcodeDialect.Klipper,
-                SanitizedSnapshotJson = "{}",
-                SlicerEngine = "OrcaSlicer",
-                SlicerDistribution = "upstream",
-                SlicerVersion = "2.3.0",
-                SlicerContainerDigest = "sha256:test",
-                MachineProfileSha256 = new string('m', 64),
-                ProcessProfileSha256 = new string('p', 64),
-                FilamentProfileSha256 = new string('f', 64),
-            });
             db.CalibrationAttempts.Add(new CalibrationAttempt
             {
                 Id = calibrationAttemptId,
                 ProjectId = calibrationProjectId,
                 SpecificationSha256 = new string('s', 64),
-                PrinterConfigurationSnapshotId = calibrationSnapshotId,
             });
             db.CalibrationOrchestrations.Add(new CalibrationOrchestration
             {
@@ -468,9 +446,14 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     [Fact]
     public async Task AcknowledgeAsync_WritesAckAndBackendStartCommand_NotInlineClaim()
     {
+        // This test exercises generic ack-persistence mechanics (ack + durable
+        // BackendStartCommand written, no inline claim), not calibration-specific
+        // gating, so it must use a Standard job: post-#1989/D3b, the calibration
+        // compatibility gate in BedClearAcknowledgementService.AcknowledgeAsync now
+        // unconditionally fails for FilamentCalibration jobs (see #1990).
         // Arrange
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx);
+        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx, jobKind: JobKind.Standard);
 
         PrinterDispatchState? ds = await seedCtx.PrinterDispatchStates
             .FirstOrDefaultAsync(s => s.PrinterId == printerId);
@@ -902,9 +885,13 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     [Fact]
     public async Task BedClearAck_Replay_NoSecondBackendStartCommand()
     {
+        // This test exercises the generic ack-replay dedup mechanics, not calibration
+        // gating, so it must use a Standard job: post-#1989/D3b, the calibration
+        // compatibility gate now unconditionally fails FilamentCalibration acks
+        // (BedClearAcknowledgementService.AcknowledgeAsync; see #1990).
         // Arrange
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx);
+        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx, jobKind: JobKind.Standard);
 
         PrinterDispatchState? ds = await seedCtx.PrinterDispatchStates
             .FirstOrDefaultAsync(s => s.PrinterId == printerId);
@@ -942,12 +929,17 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     }
 
     // =========================================================================
-    // Test 9: Calibration claim succeeds with all required fields and persisted ack
+    // Test 9: Calibration claim fails closed even with a valid persisted ack
     // =========================================================================
 
     [Fact]
-    public async Task ClaimService_CalibrationWithPersistedAck_Succeeds()
+    public async Task ClaimService_CalibrationWithPersistedAck_FailsClosed()
     {
+        // Post-#1989/D3b: PrinterConfigurationSnapshot was deleted, so
+        // DispatchClaimService.AcquireClaimAsync's calibration compatibility gate
+        // now unconditionally fails every FilamentCalibration claim — even one with
+        // a fully valid, pre-persisted ack and fresh telemetry — instead of querying
+        // the deleted table (see #1990, the tracked interim limitation).
         // Arrange: full calibration job with all required fields and persisted ack.
         await using AppDbContext seedCtx = CreateContext();
         (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx);
@@ -969,27 +961,27 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         // Act
         DispatchClaimResult result = await claimSvc.AcquireClaimAsync(request);
 
-        // Assert — claim succeeds: all checks pass.
-        result.Success.Should().BeTrue(
-            $"calibration with valid ack, fresh telemetry, and all required fields must succeed: " +
-            $"{result.ErrorCode} {result.ErrorDetail}");
-        result.Attempt.Should().NotBeNull();
+        // Assert — claim fails closed: the calibration gate rejects unconditionally.
+        result.Success.Should().BeFalse(
+            "the calibration compatibility gate now unconditionally fails all " +
+            "FilamentCalibration claims since PrinterConfigurationSnapshot was deleted");
+        result.ErrorCode.Should().Be("calibration_dispatch_unavailable");
 
-        // Job must now be Starting.
+        // Job must remain Assigned — the claim was never acquired.
         await using AppDbContext verifyCtx = CreateContext();
         PrintJob? job = await verifyCtx.PrintJobs.FindAsync(jobId);
-        job!.Status.Should().Be(PrintJobStatus.Starting);
+        job!.Status.Should().Be(PrintJobStatus.Assigned);
 
-        // Ack must be consumed (cleared from dispatch state).
+        // Ack must NOT be consumed — the claim failed before it could be applied.
         PrinterDispatchState? verifyDs = await verifyCtx.PrinterDispatchStates
             .FirstOrDefaultAsync(s => s.PrinterId == printerId);
-        verifyDs!.AcknowledgedJobId.Should().BeNull("ack must be consumed on successful claim");
+        verifyDs!.AcknowledgedJobId.Should().Be(jobId, "a failed claim must not consume the ack");
 
-        // Outbox event (JobDispatchStarted.v1) must be written.
+        // No JobDispatchStarted outbox event must be written.
         int outboxCount = await verifyCtx.QueueDispatchOutbox
             .CountAsync(e => e.AggregateId == jobId
                 && e.EventType == "PrintFarmer.Queue.JobDispatchStarted.v1");
-        outboxCount.Should().Be(1, "one JobDispatchStarted outbox event must be written on claim");
+        outboxCount.Should().Be(0, "no JobDispatchStarted outbox event can be written when the claim fails");
     }
 
     // =========================================================================
@@ -999,10 +991,15 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     [Fact]
     public async Task OutboxEvent_SequenceIsMonotonicallyIncreasing_AcrossMultipleWrites()
     {
-        // Arrange: calibration job with valid ack; the DB-backed allocator writes two
+        // This test exercises generic DB-backed sequence allocation across two
+        // outbox writes (ack, then claim), not calibration gating, so it must use a
+        // Standard job: post-#1989/D3b, a FilamentCalibration claim now unconditionally
+        // fails closed (see #1990), which would leave only the ack's single outbox
+        // event and defeat the "monotonically increasing across multiple writes" intent.
+        // Arrange: Standard job with valid ack; the DB-backed allocator writes two
         // outbox events that must have distinct, ascending sequences.
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId1, _) = await SeedAsync(seedCtx);
+        (Guid printerId, Guid jobId1, _) = await SeedAsync(seedCtx, jobKind: JobKind.Standard);
 
         // Write first outbox event via ack (BackendStartCommand).
         await using AppDbContext ackCtx = CreateContext();
@@ -1031,20 +1028,38 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
 
         await using AppDbContext claimCtx = CreateContext();
         var claimSvc = CreateClaimService(claimCtx, MakeOnlineIdleReader(printerId));
-        await claimSvc.AcquireClaimAsync(
+        DispatchClaimResult claimResult = await claimSvc.AcquireClaimAsync(
             new DispatchClaimRequest(jobId1, printerId, "actor", "BedClear", "claim-key-1", null, null));
 
-        // Assert: both outbox events have distinct, monotonically increasing Sequence values.
+        // The claim must actually succeed — otherwise the sequence assertions below could be
+        // satisfied entirely by the ack's own outbox writes, silently defeating this test's
+        // "multiple writes including the claim" intent.
+        claimResult.Success.Should().BeTrue(
+            "the claim must succeed for this test to exercise a second, claim-originated outbox write");
+
+        // Assert: multiple outbox writes across this flow (ack + PersistAcknowledgementAsync's
+        // manual event + claim) must all have distinct, monotonically increasing Sequence
+        // values. The exact count is an implementation detail of how many writes the ack/claim
+        // helpers perform; what this test guards is the allocator's ordering guarantee.
         await using AppDbContext verifyCtx = CreateContext();
         List<long> sequences = await verifyCtx.QueueDispatchOutbox
             .OrderBy(e => e.Sequence)
             .Select(e => e.Sequence)
             .ToListAsync();
 
-        sequences.Should().HaveCountGreaterThan(0);
+        sequences.Should().HaveCountGreaterThan(1, "this flow must perform multiple outbox writes");
         sequences.Should().OnlyHaveUniqueItems("outbox sequences must be unique — no duplicate ordering");
         sequences.Should().BeInAscendingOrder("outbox events must have strictly ascending sequences");
         sequences.Should().AllSatisfy(s => s.Should().BeGreaterThan(0, "sequence must be non-zero from allocator"));
+
+        // Explicitly confirm the claim itself produced a JobDispatchStarted outbox event —
+        // without this, the count/ordering assertions above could pass even if the claim
+        // silently stopped emitting its event, since the ack path already writes two events
+        // of its own (BackendStartCommand ack + PersistAcknowledgementAsync's manual event).
+        int claimEventCount = await verifyCtx.QueueDispatchOutbox
+            .CountAsync(e => e.AggregateId == jobId1
+                && e.EventType == "PrintFarmer.Queue.JobDispatchStarted.v1");
+        claimEventCount.Should().Be(1, "a successful claim must write exactly one JobDispatchStarted outbox event");
     }
 
     // =========================================================================
