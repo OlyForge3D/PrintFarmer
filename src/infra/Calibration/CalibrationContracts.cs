@@ -98,11 +98,10 @@ public sealed record CalibrationFirmwareIdentityDto(
     /// <c>CalibrationContextResolver.ValidateFirmware</c> treats as an outright-missing
     /// firmware identity (as opposed to merely "not Klipper", which is a different rejection):
     /// an unset family, or a missing version string. A caller that shows "Recorded" identity in
-    /// the UI (#1656, PR #1660 review round 5/Hicks finding) must gate on this — not on mere
+    /// the UI (#1656, PR #1660 review round 5/Hicks finding) must use this — not mere
     /// non-nullness of a <see cref="CalibrationFirmwareIdentityDto"/> instance — so it can never
-    /// present a firmware identity as "recorded" for a printer the calibration gate still
-    /// considers to have none at all (e.g. a never-probed printer whose very first live probe
-    /// attempt also fails).
+    /// present a firmware identity as "recorded" when the calibration context resolver still
+    /// considers it missing (e.g. a never-probed printer whose first live probe also fails).
     /// </summary>
     public static bool HasRecordedIdentity(Printer printer)
     {
@@ -123,11 +122,9 @@ public sealed record CalibrationFirmwareIdentityDto(
         HasRecordedIdentity(printer) ? FromPrinter(printer) : null;
 
     /// <summary>
-    /// Overload for callers (the calibration eligibility gate) that have already computed the
-    /// effective g-code dialect as part of their own validation flow — passing it in avoids
-    /// computing it twice while guaranteeing both callers use the exact same fallback rule
-    /// (below), so the displayed dialect can never disagree with what the calibration gate
-    /// validated.
+    /// Overload for callers that have already computed the effective g-code dialect while
+    /// building a calibration context. Passing it in avoids computing it twice while
+    /// guaranteeing both callers use the same fallback rule.
     /// </summary>
     public static CalibrationFirmwareIdentityDto FromPrinter(Printer printer, PrinterGcodeDialect effectiveGcodeDialect)
     {
@@ -155,9 +152,9 @@ public sealed record CalibrationFirmwareIdentityDto(
     /// <c>firmware.gcodeDialect</c> is sourced from firmware detection only, never from the
     /// resolved machine profile (#1613 §4.5/§4.5.1): when the explicit dialect column is unset,
     /// fall back to the dialect implied by the detected firmware family. Mirrors the fallback
-    /// the calibration gate's firmware validation applies, so a printer whose firmware family is
-    /// known but whose dialect column was never separately populated (e.g. via manual-add
-    /// onboarding hints) shows the same effective dialect everywhere.
+    /// applied by the calibration context resolver's firmware validation, so a printer whose
+    /// firmware family is known but whose dialect column was never separately populated (e.g. via
+    /// manual-add onboarding hints) shows the same effective dialect everywhere.
     /// </summary>
     private static PrinterGcodeDialect EffectiveGcodeDialect(Printer printer) =>
         printer.GcodeDialect != PrinterGcodeDialect.Unknown

@@ -260,7 +260,7 @@ public class Printer : IRevisionedEntity
     /// <summary>
     /// General heated-bed capability, retained for dispatch capability advertisement and
     /// model/template application (see <c>DispatchSafetyGates</c>, <c>PrintersService</c>).
-    /// Deprecated for calibration eligibility purposes: the calibration read path uses
+    /// Deprecated for calibration context purposes: the calibration read path uses
     /// <see cref="CalibrationHasHeatedBed"/> exclusively (issue #1614/PR-1).
     /// </summary>
     public bool HasHeatedBed { get; set; } = true;
@@ -268,7 +268,7 @@ public class Printer : IRevisionedEntity
     /// <summary>
     /// General enclosure capability, retained for dispatch capability advertisement and
     /// model/template application (see <c>DispatchSafetyGates</c>, <c>PrintersService</c>).
-    /// Deprecated for calibration eligibility purposes: the calibration read path uses
+    /// Deprecated for calibration context purposes: the calibration read path uses
     /// <see cref="CalibrationHasEnclosure"/> exclusively (issue #1614/PR-1).
     /// </summary>
     public bool HasEnclosure { get; set; }
@@ -337,7 +337,7 @@ public class Printer : IRevisionedEntity
     /// <summary>
     /// Whether the printer has a heated chamber. Unlike bed/enclosure, there was never a
     /// distinct general-purpose column for this fact, so this single nullable column backs
-    /// both dispatch capability advertisement and calibration eligibility.
+    /// both dispatch capability advertisement and calibration context generation.
     /// </summary>
     public bool? HasHeatedChamber { get; set; }
 

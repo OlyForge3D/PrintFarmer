@@ -206,7 +206,7 @@ public sealed class MoonrakerEmulatorSeederTests
             job => Assert.Equal(PrintJobStatus.Paused, job.Status));
         Assert.Equal(4, printersService.Invocations.Count);
 
-        // #1851: every seeded printer must carry the calibration-eligibility data that
+        // #1851: every seeded printer must carry the calibration generation data that
         // production's CalibrationContextResolver requires, not just base identity.
         Assert.All(added, printer =>
         {

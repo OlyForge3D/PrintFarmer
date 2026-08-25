@@ -160,10 +160,10 @@ public sealed class PrinterVersionCache(
     /// <summary>
     /// Read-through path for Moonraker/Klipper printers (#1656, #1894): the persisted
     /// <c>Printer.Firmware*</c> columns are the single authoritative store for calibration
-    /// eligibility, so <c>CalibrationContextResolver.ValidateFirmware</c> — and the
+    /// context generation, so <c>CalibrationContextResolver.ValidateFirmware</c> — and the
     /// <see cref="PrinterVersionInfoDto.RecordedFirmwareIdentity"/> field this method returns —
-    /// always reflect exactly what is persisted, never a live-only reading the calibration gate
-    /// hasn't accepted. Displayed <c>FirmwareVersion</c> is different: it prefers the freshly
+    /// always reflect exactly what is persisted, never a live-only reading. Displayed
+    /// <c>FirmwareVersion</c> is different: it prefers the freshly
     /// live-probed value (like <c>BackendVersion</c>/<c>ApiVersion</c> already did), falling back
     /// to the persisted value only when the live probe didn't yield one (probe failure, or the
     /// firmware field came back null/blank) — see #1894, where the endpoint kept reporting stale
@@ -298,9 +298,9 @@ public sealed class PrinterVersionCache(
             // very first live probe attempt fails still has FirmwareFamily == Unknown and
             // FirmwareVersion == null — FromPrinter(printer) unconditionally would still build a
             // non-null CalibrationFirmwareIdentityDto (with Family="Unknown", Version=null),
-            // which the UI renders as "Recorded — used for calibration eligibility" even though
-            // the calibration gate reports firmware.family and firmware.version as missing for
-            // that same printer. FromPrinterIfRecorded suppresses the recorded identity entirely
+            // which the UI would present as a recorded identity even though firmware.family and
+            // firmware.version are missing for that same printer. FromPrinterIfRecorded
+            // suppresses the recorded identity entirely
             // until it is semantically complete, so the two read paths can never disagree about
             // whether an identity has been recorded at all.
             RecordedFirmwareIdentity: CalibrationFirmwareIdentityDto.FromPrinterIfRecorded(printer));
@@ -308,10 +308,11 @@ public sealed class PrinterVersionCache(
 
     /// <summary>
     /// Thin-probe path for non-Moonraker backends (PrusaLink, OctoPrint, SDCP, #1656 constraint
-    /// #2): <see cref="MoonrakerOnboardingResolver"/> is Moonraker-specific and the calibration
-    /// gate only ever accepts Klipper-family firmware, so these backends can never satisfy it
-    /// regardless of the value shown here. Behavior is unchanged from before #1656: probe on
-    /// every cache miss, no DB persistence attempt, no recorded identity to report.
+    /// #2): <see cref="MoonrakerOnboardingResolver"/> is Moonraker-specific, and calibration
+    /// context resolution requires Klipper-family firmware. These backends therefore cannot
+    /// provide a recorded identity regardless of the value shown here. Behavior is unchanged
+    /// from before #1656: probe on every cache miss, no DB persistence attempt, no recorded
+    /// identity to report.
     /// </summary>
     private static async Task<PrinterVersionInfoDto> GetThinProbeVersionAsync(
         Printer printer,

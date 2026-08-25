@@ -8,7 +8,7 @@ namespace Farm.Slicer.Module.Tests.Services;
 /// Unit tests for <see cref="MachineProfileDerivedFieldsExtractor"/>'s documented fail-safe
 /// contract (#1615 PR-2, carried over from #1614 AC-2): malformed, absent, or
 /// unexpectedly-shaped machine-profile JSON must degrade to "still missing" (null/empty derived
-/// facts) rather than throwing, since this feeds the calibration eligibility decision path via
+/// facts) rather than throwing, since this feeds calibration context derivation via
 /// <see cref="CalibrationProfileResolver"/>.
 /// </summary>
 public sealed class MachineProfileDerivedFieldsExtractorTests

@@ -21,7 +21,7 @@ internal static class CalibrationPrinterUpdateMapper
     /// (<see cref="UpdateToolheadDto.OffsetX"/>/<see cref="UpdateToolheadDto.OffsetY"/>/
     /// <see cref="UpdateToolheadDto.OffsetZ"/>, <see cref="UpdateToolheadDto.MaxVolumetricFlow"/>,
     /// <see cref="UpdateToolheadDto.ExtruderGearRatio"/>). These values feed calibration
-    /// eligibility and, downstream, slicer/G-code generation, so physically nonsensical
+    /// context resolution and, downstream, slicer/G-code generation, so physically nonsensical
     /// input (e.g. a nozzle offset of 1e300mm or a negative max volumetric flow) must be
     /// rejected with 400 rather than silently persisted. Previously enforced only by the
     /// now-removed calibration-setup endpoint (#1942); applied here so the general

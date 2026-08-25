@@ -368,14 +368,14 @@ public sealed class CalibrationProfilePatchExporterTests
 
         CalibrationProjectService service = new(
             db,
-            new StubPrinterCalibrationContextService(),
+            new StubCalibrationContextResolver(),
             new StubCalibrationBlobStore(),
             TimeProvider.System,
             NullLogger<CalibrationProjectService>.Instance);
         return new CalibrationProfilePatchExporter(service);
     }
 
-    private sealed class StubPrinterCalibrationContextService : ICalibrationContextResolver
+    private sealed class StubCalibrationContextResolver : ICalibrationContextResolver
     {
         public Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
             Guid printerId,
