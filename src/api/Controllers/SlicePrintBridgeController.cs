@@ -314,6 +314,12 @@ public class SlicePrintBridgeController(
                     "PrintablePolygonJson is configured but contains a null point.");
             }
 
+            if (!double.IsFinite(point.X) || !double.IsFinite(point.Y))
+            {
+                throw new InvalidSafetyGeometryException(
+                    "PrintablePolygonJson is configured but contains a non-finite coordinate.");
+            }
+
             result.Add(new GcodeSafetyPoint((decimal)point.X, (decimal)point.Y));
         }
 
@@ -377,6 +383,12 @@ public class SlicePrintBridgeController(
                 {
                     throw new InvalidSafetyGeometryException(
                         "ExcludedRegionsJson is configured but a region's polygon contains a null point.");
+                }
+
+                if (!double.IsFinite(point.X) || !double.IsFinite(point.Y))
+                {
+                    throw new InvalidSafetyGeometryException(
+                        "ExcludedRegionsJson is configured but a region's polygon contains a non-finite coordinate.");
                 }
 
                 polygon.Add(new GcodeSafetyPoint((decimal)point.X, (decimal)point.Y));
