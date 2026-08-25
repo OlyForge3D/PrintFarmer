@@ -234,7 +234,6 @@ public sealed class CalibrationProjectServiceToolheadSelectionTests
     private static CalibrationProjectService CreateService(AppDbContext db, Guid printerId) =>
         new(
             db,
-            new ToolheadContextService(printerId),
             new NoopCalibrationBlobStore(),
             TimeProvider.System,
             NullLogger<CalibrationProjectService>.Instance);
@@ -289,92 +288,6 @@ public sealed class CalibrationProjectServiceToolheadSelectionTests
             CurrentSelections = source.CurrentSelections,
             ExperienceMode = source.ExperienceMode,
         };
-
-    private sealed class ToolheadContextService(Guid printerId) : ICalibrationContextResolver
-    {
-        public Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
-            Guid requestedPrinterId,
-            long? configurationRevision,
-            string capturedBySubject,
-            CalibrationProfileAccessScope profileAccessScope,
-            CancellationToken cancellationToken)
-        {
-            if (requestedPrinterId != printerId || configurationRevision != 1)
-            {
-                return Task.FromResult(new CalibrationServiceResult<CalibrationContextDto>(
-                    null,
-                    "printer_configuration_changed",
-                    1));
-            }
-
-            CalibrationCandidateDto candidate = new()
-            {
-                Id = printerId,
-                Eligible = true,
-                ConfigurationRevision = 1,
-                Firmware = new("Klipper", "Klipper", "Printer", "v1", null, null, DateTime.UtcNow, true),
-                Slicer = new(
-                    CalibrationContractConstants.SlicerEngine,
-                    CalibrationContractConstants.SlicerDistribution,
-                    CalibrationContractConstants.SlicerVersion,
-                    CalibrationContractConstants.ProfileFormat),
-            };
-            IReadOnlyList<CalibrationToolheadDto> toolheads =
-            [
-                new(
-                    ToolheadAId,
-                    ToolheadAIndex,
-                    "T0",
-                    true,
-                    new(null, null, null),
-                    NozzleDiameter: 0.4,
-                    NozzleType: null,
-                    NozzleMaterial: null,
-                    NozzleMaxTemperature: null,
-                    NozzleIsHardened: null,
-                    HotendMaxTemperature: null,
-                    MaxVolumetricFlow: null,
-                    DriveType: null,
-                    IsDirectDrive: null,
-                    ExtruderGearRatio: null,
-                    SupportedMaterials: null),
-                new(
-                    ToolheadBId,
-                    ToolheadBIndex,
-                    "T1",
-                    false,
-                    new(null, null, null),
-                    NozzleDiameter: 0.6,
-                    NozzleType: null,
-                    NozzleMaterial: null,
-                    NozzleMaxTemperature: null,
-                    NozzleIsHardened: null,
-                    HotendMaxTemperature: null,
-                    MaxVolumetricFlow: null,
-                    DriveType: null,
-                    IsDirectDrive: null,
-                    ExtruderGearRatio: null,
-                    SupportedMaterials: null),
-            ];
-            CalibrationContextDto context = new(candidate)
-            {
-                CapturedAtUtc = DateTime.UtcNow,
-                CapturedBySubject = capturedBySubject,
-                Snapshot = new()
-                {
-                    PrinterId = printerId,
-                    ConfigurationRevision = 1,
-                    CapturedAtUtc = DateTime.UtcNow,
-                    CapturedBySubject = capturedBySubject,
-                    Firmware = candidate.Firmware,
-                    Slicer = candidate.Slicer,
-                    Toolheads = toolheads,
-                    SnapshotSha256 = new string('b', 64),
-                },
-            };
-            return Task.FromResult(new CalibrationServiceResult<CalibrationContextDto>(context));
-        }
-    }
 
     private sealed class NoopCalibrationBlobStore : ICalibrationBlobStore
     {

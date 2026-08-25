@@ -5880,30 +5880,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<DateTime?>("CalibrationConfigurationUpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid?>("CalibrationFilamentProfileId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CalibrationHardwareVerifiedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<bool?>("CalibrationHasEnclosure")
                         .HasColumnType("boolean");
 
                     b.Property<bool?>("CalibrationHasHeatedBed")
                         .HasColumnType("boolean");
-
-                    b.Property<Guid?>("CalibrationMachineProfileId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int?>("CalibrationMotionType")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid?>("CalibrationProcessProfileId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("CalibrationProfileFormat")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("CalibrationSlicerDistribution")
                         .HasMaxLength(64)

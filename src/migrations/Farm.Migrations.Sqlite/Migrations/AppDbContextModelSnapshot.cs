@@ -5859,30 +5859,11 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<DateTime?>("CalibrationConfigurationUpdatedAtUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("CalibrationFilamentProfileId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("CalibrationHardwareVerifiedAtUtc")
-                        .HasColumnType("TEXT");
-
                     b.Property<bool?>("CalibrationHasEnclosure")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool?>("CalibrationHasHeatedBed")
                         .HasColumnType("INTEGER");
-
-                    b.Property<Guid?>("CalibrationMachineProfileId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("CalibrationMotionType")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<Guid?>("CalibrationProcessProfileId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CalibrationProfileFormat")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("CalibrationSlicerDistribution")
                         .HasMaxLength(64)

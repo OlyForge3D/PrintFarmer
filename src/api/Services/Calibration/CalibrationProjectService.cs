@@ -192,7 +192,6 @@ public interface ICalibrationProjectService
 /// </summary>
 public sealed class CalibrationProjectService(
     AppDbContext dbContext,
-    ICalibrationContextResolver printerContextService,
     ICalibrationBlobStore blobStore,
     TimeProvider timeProvider,
     ILogger<CalibrationProjectService> logger)

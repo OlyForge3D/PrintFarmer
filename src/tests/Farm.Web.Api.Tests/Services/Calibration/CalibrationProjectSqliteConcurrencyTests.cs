@@ -415,14 +415,8 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
     }
 
     private static CalibrationProjectService CreateService(AppDbContext context, Guid printerId) =>
-        CreateService(context, new StaticPrinterContextService(printerId));
-
-    private static CalibrationProjectService CreateService(
-        AppDbContext context,
-        ICalibrationContextResolver printerContext) =>
         new(
             context,
-            printerContext,
             new TestCalibrationBlobStore(),
             TimeProvider.System,
             NullLogger<CalibrationProjectService>.Instance);
@@ -574,59 +568,6 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
         {
             File.Delete(DatabasePath);
             return ValueTask.CompletedTask;
-        }
-    }
-
-    private class StaticPrinterContextService(Guid printerId) : ICalibrationContextResolver
-    {
-        public virtual Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
-            Guid requestedPrinterId,
-            long? configurationRevision,
-            string capturedBySubject,
-            CalibrationProfileAccessScope profileAccessScope,
-            CancellationToken cancellationToken)
-        {
-            if (requestedPrinterId != printerId || configurationRevision != 1)
-            {
-                return Task.FromResult(new CalibrationServiceResult<CalibrationContextDto>(
-                    null,
-                    "printer_configuration_changed",
-                    1));
-            }
-
-            return Task.FromResult(new CalibrationServiceResult<CalibrationContextDto>(
-                CreateContext(printerId, capturedBySubject)));
-        }
-
-        private static CalibrationContextDto CreateContext(Guid printerId, string subject)
-        {
-            CalibrationCandidateDto candidate = new()
-            {
-                Id = printerId,
-                Eligible = true,
-                ConfigurationRevision = 1,
-                Firmware = new("Klipper", "Klipper", "Printer", "v1", null, null, DateTime.UtcNow, true),
-                Slicer = new(
-                    CalibrationContractConstants.SlicerEngine,
-                    CalibrationContractConstants.SlicerDistribution,
-                    CalibrationContractConstants.SlicerVersion,
-                    CalibrationContractConstants.ProfileFormat),
-            };
-            return new CalibrationContextDto(candidate)
-            {
-                CapturedAtUtc = DateTime.UtcNow,
-                CapturedBySubject = subject,
-                Snapshot = new()
-                {
-                    PrinterId = printerId,
-                    ConfigurationRevision = 1,
-                    CapturedAtUtc = DateTime.UtcNow,
-                    CapturedBySubject = subject,
-                    Firmware = candidate.Firmware,
-                    Slicer = candidate.Slicer,
-                    SnapshotSha256 = new string('a', 64),
-                },
-            };
         }
     }
 

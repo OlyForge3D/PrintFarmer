@@ -952,7 +952,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             nameof(Printer.BedOriginY) or
             nameof(Printer.PrintablePolygonJson) or
             nameof(Printer.ExcludedRegionsJson) or
-            nameof(Printer.CalibrationMotionType) or
             nameof(Printer.MaxTravelSpeed) or
             nameof(Printer.MaxAcceleration) or
             nameof(Printer.MaxTravelAcceleration) or
@@ -963,14 +962,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             nameof(Printer.ActiveToolheadIndex) or
             nameof(Printer.SupportsPressureAdvance) or
             nameof(Printer.SupportsFirmwareRetraction) or
-            nameof(Printer.CalibrationHardwareVerifiedAtUtc) or
             nameof(Printer.CalibrationSlicerEngine) or
             nameof(Printer.CalibrationSlicerDistribution) or
-            nameof(Printer.CalibrationSlicerVersion) or
-            nameof(Printer.CalibrationProfileFormat) or
-            nameof(Printer.CalibrationMachineProfileId) or
-            nameof(Printer.CalibrationProcessProfileId) or
-            nameof(Printer.CalibrationFilamentProfileId);
+            nameof(Printer.CalibrationSlicerVersion);
 
     private static bool IsCalibrationRelevantToolheadProperty(string propertyName) =>
         propertyName is

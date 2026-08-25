@@ -151,7 +151,9 @@ internal sealed class CalibrationGenerationHarness : IDisposable
             resolved.PlanCompiler ?? new OrcaCalibrationPlanCompiler(compatibilityPolicy),
             new KlipperCalibrationGcodeGenerator(compatibilityPolicy),
             new CalibrationGcodeAnnotator(),
-            new CalibrationGcodeSafetyValidator(compatibilityPolicy),
+            new CalibrationGcodeProgramValidator(
+                new Farm.Web.Api.Services.Gcode.Safety.GcodeSafetyValidator(),
+                compatibilityPolicy),
             BuildProbe(resolved, core, slicerFactory, promoter, modelStorage, sliceJobs, artifacts, artifactsRepository),
             promoter,
             storagePaths,
@@ -436,7 +438,6 @@ internal sealed class CalibrationGenerationHarness : IDisposable
     private static ICalibrationProjectService CreateProjectService(AppDbContext core) =>
         new CalibrationProjectService(
             core,
-            new Mock<ICalibrationContextResolver>(MockBehavior.Loose).Object,
             new Mock<ICalibrationBlobStore>(MockBehavior.Loose).Object,
             TimeProvider.System,
             NullLogger<CalibrationProjectService>.Instance);

@@ -14,6 +14,7 @@ using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Services.Gcode;
+using Farm.Web.Api.Services.Gcode.Safety;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -38,6 +39,7 @@ namespace Farm.Web.Api.Controllers;
 public class SlicePrintBridgeController(
     IPrintersService printersService,
     ILogger<SlicePrintBridgeController> logger,
+    IGcodeSafetyValidator gcodeSafetyValidator,
     ISliceJobRepository? jobRepository = null,
     IArtifactsService? artifactsService = null,
     IJobQueueService? jobQueueService = null,
@@ -128,7 +130,7 @@ public class SlicePrintBridgeController(
         }
 
         // 4. Validate the target printer exists after the resource-scope check above.
-        var printer = await printersService.FindByIdAsync(request.PrinterId, ct);
+        var printer = await printersService.FindByIdWithIncludesAsync(request.PrinterId, ct);
         if (printer is null)
         {
             return NotFound(new { error = "Printer not found.", printerId = request.PrinterId });
@@ -147,19 +149,285 @@ public class SlicePrintBridgeController(
         string fullPath = pathResult.Value.FullPath;
         string fileName = pathResult.Value.Artifact.FileName;
 
+        // 6. Read the artifact once, then validate and upload from that exact byte content.
+        // Reading once (instead of validating the file, then reopening it for upload) closes
+        // a time-of-check/time-of-use gap: a file swapped on disk between validation and
+        // upload could otherwise reach the printer without ever being validated.
+        byte[] gcodeBytes = await System.IO.File.ReadAllBytesAsync(fullPath, ct);
+
+        // File.ReadAllTextAsync (used previously) strips a leading UTF-8 byte-order-mark via
+        // StreamReader's BOM detection. Decoding the raw bytes directly does not: a BOM byte
+        // sequence decodes to a literal U+FEFF character, which would prepend the first g-code
+        // command and let it silently evade the safety interpreter's line parsing. Trim it so
+        // validation behaves identically to a BOM-stripped read.
+        string gcodeText = System.Text.Encoding.UTF8.GetString(gcodeBytes).TrimStart('\uFEFF');
+
+        // 7. Run the general g-code safety pass before this program is ever streamed to a
+        // physical printer. This is not calibration-scoped: any command is allowed
+        // (AllowedCommands: null), and the machine envelope is sourced from the printer/
+        // toolhead domain fields, never from Printer.Calibration* columns.
+        GcodeSafetyLimits safetyLimits;
+        try
+        {
+            safetyLimits = BuildSafetyLimits(printer);
+        }
+        catch (InvalidSafetyGeometryException ex)
+        {
+            logger.LogError(
+                ex,
+                "Printer {PrinterId} has invalid printable-polygon/excluded-region configuration; refusing to send gcode without a trustworthy safety envelope",
+                printer.Id);
+            return BadRequest(new
+            {
+                error = "Printer geometry configuration (printable polygon or excluded regions) is invalid and cannot be safely enforced.",
+                printerId = printer.Id,
+                detail = ex.Message,
+            });
+        }
+
+        GcodeSafetyResult<GcodeSafetyReport> safetyResult = gcodeSafetyValidator.Validate(
+            new GcodeSafetyRequest(
+                safetyLimits,
+                gcodeText,
+                GcodeSafetyCheckpoint.BeforeSendToPrinter));
+
+        if (!safetyResult.IsValid)
+        {
+            logger.LogWarning(
+                "Gcode safety validation rejected artifact {ArtifactId} for job {JobId} before send-to-printer: {Problems}",
+                gcodeArtifact.Id, id, string.Join("; ", safetyResult.Problems.Select(p => $"{p.Code}: {p.Message}")));
+            return BadRequest(new
+            {
+                error = "Gcode failed safety validation and was not sent to the printer.",
+                jobId = id,
+                problems = safetyResult.Problems,
+            });
+        }
+
         logger.LogInformation(
             "Sending gcode {FileName} from slice job {JobId} to printer {PrinterId} (startPrint={StartPrint})",
             fileName, id, request.PrinterId, request.StartPrint);
 
-        // 6. Upload to printer (and optionally start print)
-        await using FileStream fileStream = new(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        // 8. Upload to printer (and optionally start print) using the same bytes that were
+        // validated above, not a fresh read of the file on disk.
+        await using MemoryStream uploadStream = new(gcodeBytes, writable: false);
 
         if (request.StartPrint)
         {
-            return await UploadAndStartPrintAsync(id, request.PrinterId, fileName, fileStream, ct);
+            return await UploadAndStartPrintAsync(id, request.PrinterId, fileName, uploadStream, ct);
         }
 
-        return await UploadOnlyAsync(id, request.PrinterId, fileName, fileStream, ct);
+        return await UploadOnlyAsync(id, request.PrinterId, fileName, uploadStream, ct);
+    }
+
+    /// <summary>
+    /// Builds the authoritative g-code safety envelope for <paramref name="printer"/> from its
+    /// own domain fields and primary toolhead. Deliberately does not read any
+    /// <c>Printer.Calibration*</c> column: those are calibration-scoped ceilings slated for
+    /// removal and must never gate the general send-to-printer safety pass.
+    /// </summary>
+    /// <exception cref="InvalidSafetyGeometryException">
+    /// The printer has a configured (non-null) <c>PrintablePolygonJson</c> or
+    /// <c>ExcludedRegionsJson</c> value that is malformed or geometrically invalid. Callers must
+    /// treat this as a request failure, not fall back to an unguarded envelope.
+    /// </exception>
+    private static GcodeSafetyLimits BuildSafetyLimits(Farm.Infrastructure.Domain.Printer printer)
+    {
+        Farm.Infrastructure.Domain.Toolhead? toolhead =
+            printer.Toolheads?.FirstOrDefault(t => t.IsPrimary) ??
+            printer.Toolheads?.FirstOrDefault();
+
+        var toolheadLimits = new GcodeSafetyToolheadLimits(
+            toolhead?.NozzleMaxTemperature,
+            toolhead?.HotendMaxTemperature ?? toolhead?.HotendModel?.MaxTemp,
+            toolhead?.IsDirectDrive);
+
+        var bedLimits = new GcodeSafetyBedLimits(
+            ToFiniteDecimalOrThrow(printer.MaxBuildVolumeX, nameof(printer.MaxBuildVolumeX)),
+            ToFiniteDecimalOrThrow(printer.MaxBuildVolumeY, nameof(printer.MaxBuildVolumeY)),
+            ToFiniteDecimalOrThrow(printer.MaxBuildVolumeZ, nameof(printer.MaxBuildVolumeZ)),
+            ToFiniteDecimalOrThrow(printer.BedOriginX, nameof(printer.BedOriginX)),
+            ToFiniteDecimalOrThrow(printer.BedOriginY, nameof(printer.BedOriginY)),
+            ParsePrintablePolygon(printer.PrintablePolygonJson),
+            ParseExcludedRegions(printer.ExcludedRegionsJson));
+
+        var machineLimits = new GcodeSafetyMachineLimits(
+            printer.MaxBedTemp,
+            printer.HasHeatedChamber,
+            printer.MaxChamberTemp,
+            printer.MaxPrintSpeed,
+            printer.MaxTravelSpeed,
+            printer.MaxAcceleration);
+
+        // Filament diameter is not attached to the printer/toolhead configuration - it lives on
+        // whichever spool is currently loaded (Spoolman), which would require a live external
+        // lookup from this hot request path. Volumetric-flow checking is therefore left disabled
+        // here (GcodeSafetyPrintLimits.Empty), same as it is unavailable to the general validator
+        // whenever a caller cannot resolve it; this does not affect any other check.
+        return new GcodeSafetyLimits(
+            toolheadLimits,
+            bedLimits,
+            machineLimits,
+            GcodeSafetyPrintLimits.Empty);
+    }
+
+    /// <summary>
+    /// Converts a nullable printer/bed dimension to <see cref="decimal"/>, treating a
+    /// non-finite value (<see cref="double.PositiveInfinity"/>, <see cref="double.NegativeInfinity"/>,
+    /// or <see cref="double.NaN"/>) as configured-but-invalid data rather than letting an unguarded
+    /// cast throw <see cref="OverflowException"/>. A stored printer dimension should never be
+    /// non-finite, but this guards the same class of bug already fixed for polygon coordinates:
+    /// the cast must fail closed (<see cref="InvalidSafetyGeometryException"/>, caught -> 400),
+    /// not fail open with an unhandled exception (500).
+    /// </summary>
+    private static decimal? ToFiniteDecimalOrThrow(double? value, string fieldName)
+    {
+        if (value is not { } v)
+        {
+            return null;
+        }
+
+        if (!double.IsFinite(v))
+        {
+            throw new InvalidSafetyGeometryException($"Printer field '{fieldName}' is not a finite value.");
+        }
+
+        return (decimal)v;
+    }
+
+    private sealed record SafetyPolygonPointDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("x"), System.Text.Json.Serialization.JsonRequired] double X,
+        [property: System.Text.Json.Serialization.JsonPropertyName("y"), System.Text.Json.Serialization.JsonRequired] double Y);
+
+    private sealed record SafetyExcludedRegionDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name,
+        [property: System.Text.Json.Serialization.JsonPropertyName("polygon"), System.Text.Json.Serialization.JsonRequired]
+        IReadOnlyList<SafetyPolygonPointDto> Polygon);
+
+    /// <summary>
+    /// Parses <see cref="Farm.Infrastructure.Domain.Printer.PrintablePolygonJson"/> into safety-pass
+    /// points. Absent (<see langword="null"/>/blank) JSON means "no printable polygon configured"
+    /// and safely returns an empty list (the polygon check is then skipped). Configured-but-invalid
+    /// JSON — malformed, missing x/y, or fewer than three points — throws
+    /// <see cref="InvalidSafetyGeometryException"/> so the caller fails the request closed instead
+    /// of silently disabling the guard.
+    /// </summary>
+    private static List<GcodeSafetyPoint> ParsePrintablePolygon(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        List<SafetyPolygonPointDto>? points;
+        try
+        {
+            points = System.Text.Json.JsonSerializer.Deserialize<List<SafetyPolygonPointDto>>(json);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            throw new InvalidSafetyGeometryException($"PrintablePolygonJson is not valid JSON: {ex.Message}");
+        }
+
+        List<GcodeSafetyPoint> result = [];
+        foreach (SafetyPolygonPointDto? point in points ?? [])
+        {
+            if (point is null)
+            {
+                throw new InvalidSafetyGeometryException(
+                    "PrintablePolygonJson is configured but contains a null point.");
+            }
+
+            if (!double.IsFinite(point.X) || !double.IsFinite(point.Y))
+            {
+                throw new InvalidSafetyGeometryException(
+                    "PrintablePolygonJson is configured but contains a non-finite coordinate.");
+            }
+
+            result.Add(new GcodeSafetyPoint((decimal)point.X, (decimal)point.Y));
+        }
+
+        if (result.Count < 3)
+        {
+            throw new InvalidSafetyGeometryException(
+                "PrintablePolygonJson is configured but does not describe a valid polygon (at least three points are required).");
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Parses <see cref="Farm.Infrastructure.Domain.Printer.ExcludedRegionsJson"/> into safety-pass
+    /// regions. Same "absent is fine, configured-but-invalid fails closed" rationale as
+    /// <see cref="ParsePrintablePolygon"/>. An empty list of regions (<c>[]</c>) is valid — it means
+    /// no excluded regions are configured — but any individual region must have at least three
+    /// polygon points.
+    /// </summary>
+    private static List<GcodeSafetyExcludedRegion> ParseExcludedRegions(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        List<SafetyExcludedRegionDto>? regions;
+        try
+        {
+            regions = System.Text.Json.JsonSerializer.Deserialize<List<SafetyExcludedRegionDto>>(json);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            throw new InvalidSafetyGeometryException($"ExcludedRegionsJson is not valid JSON: {ex.Message}");
+        }
+
+        if (regions is null)
+        {
+            return [];
+        }
+
+        var result = new List<GcodeSafetyExcludedRegion>(regions.Count);
+        foreach (SafetyExcludedRegionDto? region in regions)
+        {
+            if (region is null)
+            {
+                throw new InvalidSafetyGeometryException(
+                    "ExcludedRegionsJson is configured but contains a null region.");
+            }
+
+            if (region.Polygon is null)
+            {
+                throw new InvalidSafetyGeometryException(
+                    "ExcludedRegionsJson is configured but a region has a null polygon.");
+            }
+
+            var polygon = new List<GcodeSafetyPoint>(region.Polygon.Count);
+            foreach (SafetyPolygonPointDto? point in region.Polygon)
+            {
+                if (point is null)
+                {
+                    throw new InvalidSafetyGeometryException(
+                        "ExcludedRegionsJson is configured but a region's polygon contains a null point.");
+                }
+
+                if (!double.IsFinite(point.X) || !double.IsFinite(point.Y))
+                {
+                    throw new InvalidSafetyGeometryException(
+                        "ExcludedRegionsJson is configured but a region's polygon contains a non-finite coordinate.");
+                }
+
+                polygon.Add(new GcodeSafetyPoint((decimal)point.X, (decimal)point.Y));
+            }
+
+            if (polygon.Count < 3)
+            {
+                throw new InvalidSafetyGeometryException(
+                    "ExcludedRegionsJson is configured but contains a region with fewer than three polygon points.");
+            }
+
+            result.Add(new GcodeSafetyExcludedRegion(region.Name ?? string.Empty, polygon));
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -565,4 +833,29 @@ public class SlicePrintBridgeController(
                 "Calibration slice output must be promoted as an immutable G-code artifact and " +
                 "created through POST /api/job-queue. Direct send and generic slice import are not allowed.",
         });
+}
+
+/// <summary>
+/// Thrown by <see cref="SlicePrintBridgeController"/> when a printer's configured (non-null)
+/// printable-polygon or excluded-region JSON is present but invalid — malformed JSON, missing
+/// required coordinates, or fewer than three points in a polygon. Unlike an unconfigured
+/// (<see langword="null"/>) field, which means "no geometry guard was ever set up" and safely
+/// skips that check, a configured-but-broken value is a data-integrity problem on an
+/// authoritative safety envelope and must fail closed rather than silently disable the guard.
+/// </summary>
+public sealed class InvalidSafetyGeometryException : Exception
+{
+    public InvalidSafetyGeometryException()
+    {
+    }
+
+    public InvalidSafetyGeometryException(string message)
+        : base(message)
+    {
+    }
+
+    public InvalidSafetyGeometryException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
 }

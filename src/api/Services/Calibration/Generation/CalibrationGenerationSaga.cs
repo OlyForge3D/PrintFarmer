@@ -46,7 +46,7 @@ public sealed class CalibrationGenerationSaga(
     IOrcaCalibrationPlanCompiler planCompiler,
     IKlipperCalibrationGcodeGenerator gcodeGenerator,
     ICalibrationGcodeAnnotator annotator,
-    ICalibrationGcodeSafetyValidator safetyValidator,
+    ICalibrationGcodeProgramValidator safetyValidator,
     ICalibrationGenerationCapabilityProbe capabilityProbe,
     IGcodeArtifactPromoter promoter,
     IStoragePathService storagePaths,
@@ -517,10 +517,6 @@ public sealed class CalibrationGenerationSaga(
         // resolution, plan compilation, slicing, promotion) is unreachable until the
         // filament-calibration saga (D7) replaces this snapshot-based context.
         await FailTerminallyAsync(
-            project,
-            orchestration,
-            CalibrationGenerationProblemCodes.ContextIdentityMissing,
-            [
                 new(
                     CalibrationGenerationProblemCodes.ContextIdentityMissing,
                     "attempt.printerConfigurationSnapshotId",

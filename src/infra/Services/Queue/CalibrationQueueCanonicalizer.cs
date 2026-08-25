@@ -1,4 +1,4 @@
-﻿// <copyright file="CalibrationQueueCanonicalizer.cs" company="PlaceholderCompany">
+// <copyright file="CalibrationQueueCanonicalizer.cs" company="PlaceholderCompany">
 // SPDX-License-Identifier: AGPL-3.0-only
 // </copyright>
 

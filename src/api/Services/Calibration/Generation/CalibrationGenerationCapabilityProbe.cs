@@ -391,7 +391,7 @@ public sealed class CalibrationGenerationCapabilityProbe(
         _serviceProvider.GetService<IOrcaCalibrationPlanCompiler>() is not null &&
         _serviceProvider.GetService<IKlipperCalibrationGcodeGenerator>() is not null &&
         _serviceProvider.GetService<ICalibrationGcodeAnnotator>() is not null &&
-        _serviceProvider.GetService<ICalibrationGcodeSafetyValidator>() is not null;
+        _serviceProvider.GetService<ICalibrationGcodeProgramValidator>() is not null;
 
     private async Task<bool> IsModelStorageRoutableAsync(CancellationToken cancellationToken)
     {
