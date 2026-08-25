@@ -154,15 +154,40 @@ public class SlicePrintBridgeController(
         // a time-of-check/time-of-use gap: a file swapped on disk between validation and
         // upload could otherwise reach the printer without ever being validated.
         byte[] gcodeBytes = await System.IO.File.ReadAllBytesAsync(fullPath, ct);
-        string gcodeText = System.Text.Encoding.UTF8.GetString(gcodeBytes);
+
+        // File.ReadAllTextAsync (used previously) strips a leading UTF-8 byte-order-mark via
+        // StreamReader's BOM detection. Decoding the raw bytes directly does not: a BOM byte
+        // sequence decodes to a literal U+FEFF character, which would prepend the first g-code
+        // command and let it silently evade the safety interpreter's line parsing. Trim it so
+        // validation behaves identically to a BOM-stripped read.
+        string gcodeText = System.Text.Encoding.UTF8.GetString(gcodeBytes).TrimStart('\uFEFF');
 
         // 7. Run the general g-code safety pass before this program is ever streamed to a
         // physical printer. This is not calibration-scoped: any command is allowed
         // (AllowedCommands: null), and the machine envelope is sourced from the printer/
         // toolhead domain fields, never from Printer.Calibration* columns.
+        GcodeSafetyLimits safetyLimits;
+        try
+        {
+            safetyLimits = BuildSafetyLimits(printer);
+        }
+        catch (InvalidSafetyGeometryException ex)
+        {
+            logger.LogError(
+                ex,
+                "Printer {PrinterId} has invalid printable-polygon/excluded-region configuration; refusing to send gcode without a trustworthy safety envelope",
+                printer.Id);
+            return BadRequest(new
+            {
+                error = "Printer geometry configuration (printable polygon or excluded regions) is invalid and cannot be safely enforced.",
+                printerId = printer.Id,
+                detail = ex.Message,
+            });
+        }
+
         GcodeSafetyResult<GcodeSafetyReport> safetyResult = gcodeSafetyValidator.Validate(
             new GcodeSafetyRequest(
-                BuildSafetyLimits(printer),
+                safetyLimits,
                 gcodeText,
                 GcodeSafetyCheckpoint.BeforeSendToPrinter));
 
@@ -201,7 +226,12 @@ public class SlicePrintBridgeController(
     /// <c>Printer.Calibration*</c> column: those are calibration-scoped ceilings slated for
     /// removal and must never gate the general send-to-printer safety pass.
     /// </summary>
-    private GcodeSafetyLimits BuildSafetyLimits(Farm.Infrastructure.Domain.Printer printer)
+    /// <exception cref="InvalidSafetyGeometryException">
+    /// The printer has a configured (non-null) <c>PrintablePolygonJson</c> or
+    /// <c>ExcludedRegionsJson</c> value that is malformed or geometrically invalid. Callers must
+    /// treat this as a request failure, not fall back to an unguarded envelope.
+    /// </exception>
+    private static GcodeSafetyLimits BuildSafetyLimits(Farm.Infrastructure.Domain.Printer printer)
     {
         Farm.Infrastructure.Domain.Toolhead? toolhead =
             printer.Toolheads?.FirstOrDefault(t => t.IsPrimary) ??
@@ -218,8 +248,8 @@ public class SlicePrintBridgeController(
             printer.MaxBuildVolumeZ is { } sizeZ ? (decimal)sizeZ : null,
             printer.BedOriginX is { } originX ? (decimal)originX : null,
             printer.BedOriginY is { } originY ? (decimal)originY : null,
-            ParsePrintablePolygon(printer.PrintablePolygonJson, printer.Id),
-            ParseExcludedRegions(printer.ExcludedRegionsJson, printer.Id));
+            ParsePrintablePolygon(printer.PrintablePolygonJson),
+            ParseExcludedRegions(printer.ExcludedRegionsJson));
 
         var machineLimits = new GcodeSafetyMachineLimits(
             printer.MaxBedTemp,
@@ -242,71 +272,92 @@ public class SlicePrintBridgeController(
     }
 
     private sealed record SafetyPolygonPointDto(
-        [property: System.Text.Json.Serialization.JsonPropertyName("x")] double X,
-        [property: System.Text.Json.Serialization.JsonPropertyName("y")] double Y);
+        [property: System.Text.Json.Serialization.JsonPropertyName("x"), System.Text.Json.Serialization.JsonRequired] double X,
+        [property: System.Text.Json.Serialization.JsonPropertyName("y"), System.Text.Json.Serialization.JsonRequired] double Y);
 
     private sealed record SafetyExcludedRegionDto(
         [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name,
-        [property: System.Text.Json.Serialization.JsonPropertyName("polygon")]
-        IReadOnlyList<SafetyPolygonPointDto>? Polygon);
+        [property: System.Text.Json.Serialization.JsonPropertyName("polygon"), System.Text.Json.Serialization.JsonRequired]
+        IReadOnlyList<SafetyPolygonPointDto> Polygon);
 
     /// <summary>
     /// Parses <see cref="Farm.Infrastructure.Domain.Printer.PrintablePolygonJson"/> into safety-pass
-    /// points. Malformed or absent JSON is treated as "no printable polygon configured" (the
-    /// polygon check is then skipped, same as when a printer has never configured one) rather than
-    /// failing the request, since a printer geometry-data problem is not itself a g-code injection
-    /// or thermal risk and the rest of the safety pass still runs.
+    /// points. Absent (<see langword="null"/>/blank) JSON means "no printable polygon configured"
+    /// and safely returns an empty list (the polygon check is then skipped). Configured-but-invalid
+    /// JSON — malformed, missing x/y, or fewer than three points — throws
+    /// <see cref="InvalidSafetyGeometryException"/> so the caller fails the request closed instead
+    /// of silently disabling the guard.
     /// </summary>
-    private List<GcodeSafetyPoint> ParsePrintablePolygon(string? json, Guid printerId)
+    private static List<GcodeSafetyPoint> ParsePrintablePolygon(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
         {
             return [];
         }
 
+        List<SafetyPolygonPointDto>? points;
         try
         {
-            List<SafetyPolygonPointDto>? points = System.Text.Json.JsonSerializer.Deserialize<List<SafetyPolygonPointDto>>(json);
-            return points?.Select(p => new GcodeSafetyPoint((decimal)p.X, (decimal)p.Y)).ToList() ?? [];
+            points = System.Text.Json.JsonSerializer.Deserialize<List<SafetyPolygonPointDto>>(json);
         }
         catch (System.Text.Json.JsonException ex)
         {
-            logger.LogWarning(
-                ex,
-                "Printer {PrinterId} has malformed PrintablePolygonJson; skipping the printable-polygon safety check.",
-                printerId);
-            return [];
+            throw new InvalidSafetyGeometryException($"PrintablePolygonJson is not valid JSON: {ex.Message}");
         }
+
+        List<GcodeSafetyPoint> result = points?.Select(p => new GcodeSafetyPoint((decimal)p.X, (decimal)p.Y)).ToList() ?? [];
+        if (result.Count < 3)
+        {
+            throw new InvalidSafetyGeometryException(
+                "PrintablePolygonJson is configured but does not describe a valid polygon (at least three points are required).");
+        }
+
+        return result;
     }
 
     /// <summary>
     /// Parses <see cref="Farm.Infrastructure.Domain.Printer.ExcludedRegionsJson"/> into safety-pass
-    /// regions. Same fail-open-on-malformed-data rationale as <see cref="ParsePrintablePolygon"/>.
+    /// regions. Same "absent is fine, configured-but-invalid fails closed" rationale as
+    /// <see cref="ParsePrintablePolygon"/>. An empty list of regions (<c>[]</c>) is valid — it means
+    /// no excluded regions are configured — but any individual region must have at least three
+    /// polygon points.
     /// </summary>
-    private List<GcodeSafetyExcludedRegion> ParseExcludedRegions(string? json, Guid printerId)
+    private static List<GcodeSafetyExcludedRegion> ParseExcludedRegions(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
         {
             return [];
         }
 
+        List<SafetyExcludedRegionDto>? regions;
         try
         {
-            List<SafetyExcludedRegionDto>? regions = System.Text.Json.JsonSerializer.Deserialize<List<SafetyExcludedRegionDto>>(json);
-            return regions?
-                .Select(r => new GcodeSafetyExcludedRegion(
-                    r.Name ?? string.Empty,
-                    r.Polygon?.Select(p => new GcodeSafetyPoint((decimal)p.X, (decimal)p.Y)).ToList() ?? []))
-                .ToList() ?? [];
+            regions = System.Text.Json.JsonSerializer.Deserialize<List<SafetyExcludedRegionDto>>(json);
         }
         catch (System.Text.Json.JsonException ex)
         {
-            logger.LogWarning(
-                ex,
-                "Printer {PrinterId} has malformed ExcludedRegionsJson; skipping the excluded-region safety check.",
-                printerId);
+            throw new InvalidSafetyGeometryException($"ExcludedRegionsJson is not valid JSON: {ex.Message}");
+        }
+
+        if (regions is null)
+        {
             return [];
         }
+
+        var result = new List<GcodeSafetyExcludedRegion>(regions.Count);
+        foreach (SafetyExcludedRegionDto region in regions)
+        {
+            List<GcodeSafetyPoint> polygon = region.Polygon.Select(p => new GcodeSafetyPoint((decimal)p.X, (decimal)p.Y)).ToList();
+            if (polygon.Count < 3)
+            {
+                throw new InvalidSafetyGeometryException(
+                    "ExcludedRegionsJson is configured but contains a region with fewer than three polygon points.");
+            }
+
+            result.Add(new GcodeSafetyExcludedRegion(region.Name ?? string.Empty, polygon));
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -712,4 +763,29 @@ public class SlicePrintBridgeController(
                 "Calibration slice output must be promoted as an immutable G-code artifact and " +
                 "created through POST /api/job-queue. Direct send and generic slice import are not allowed.",
         });
+}
+
+/// <summary>
+/// Thrown by <see cref="SlicePrintBridgeController"/> when a printer's configured (non-null)
+/// printable-polygon or excluded-region JSON is present but invalid — malformed JSON, missing
+/// required coordinates, or fewer than three points in a polygon. Unlike an unconfigured
+/// (<see langword="null"/>) field, which means "no geometry guard was ever set up" and safely
+/// skips that check, a configured-but-broken value is a data-integrity problem on an
+/// authoritative safety envelope and must fail closed rather than silently disable the guard.
+/// </summary>
+public sealed class InvalidSafetyGeometryException : Exception
+{
+    public InvalidSafetyGeometryException()
+    {
+    }
+
+    public InvalidSafetyGeometryException(string message)
+        : base(message)
+    {
+    }
+
+    public InvalidSafetyGeometryException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
 }
