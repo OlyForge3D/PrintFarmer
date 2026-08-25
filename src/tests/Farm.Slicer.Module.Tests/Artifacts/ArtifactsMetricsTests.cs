@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Settings;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Metrics;
+using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,7 +18,14 @@ using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Artifacts;
 
-[Collection(IntegrationTestCollection.Name)]
+// Shares ArtifactsMetricsSerialCollection with ArtifactsThresholdTests so ArtifactsMetrics.ResetForTests()
+// can never interleave with the gauge/counter measurement windows below. xUnit runs
+// DisableParallelization = true collections strictly after every parallel-capable collection in
+// the assembly has finished, one collection at a time (see the collection definition), so while
+// this class's tests execute there is no other test anywhere in the suite concurrently uploading
+// artifacts either - the shared static counters are exclusively owned by this collection at that
+// point, and the assertions below can safely assert exact totals.
+[Collection(ArtifactsMetricsSerialCollection.Name)]
 public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory = factory;
@@ -139,7 +147,10 @@ public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClass
         meterListener.RecordObservableInstruments();
         await Task.Delay(100);
 
-        // Assert
+        // Assert - ArtifactsMetricsSerialCollection guarantees no other collection in the
+        // assembly runs concurrently with this one (xUnit runs DisableParallelization = true
+        // collections in isolation, after all parallel collections finish), so the delta is
+        // exact, not merely a lower bound.
         long finalGaugeValue = gaugeValues.Last();
         int expectedIncrease = content1.Length + content2.Length;
 
@@ -191,7 +202,9 @@ public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClass
 
         await Task.Delay(100);
 
-        // Assert
+        // Assert - exact equality is safe here: ArtifactsMetricsSerialCollection guarantees no
+        // other collection in the assembly runs concurrently with this one (see the collection
+        // definition), so nothing else can be recording uploads on this counter right now.
         _ = counterTotal.Should().Be(5, "counter should increment for each upload");
 
         meterListener.Dispose();

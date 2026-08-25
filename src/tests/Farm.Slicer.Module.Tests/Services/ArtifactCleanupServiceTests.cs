@@ -14,7 +14,6 @@ using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Services;
 
-[Collection(IntegrationTestCollection.Name)]
 public class ArtifactCleanupServiceTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory = factory;

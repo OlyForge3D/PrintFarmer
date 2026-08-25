@@ -17,7 +17,6 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// Verifies that a claim is atomic and that every worker mutation is bound to the claiming worker,
 /// the claimed job, an unexpired lease and the current fencing token.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public sealed class SliceJobLeaseFencingTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory = new();

@@ -18,7 +18,6 @@ namespace Farm.Slicer.Module.Tests.Artifacts;
 /// <summary>
 /// Unit tests for GET /api/artifacts/{id}/metadata.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public class ArtifactsMetadataEndpointTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory = factory;

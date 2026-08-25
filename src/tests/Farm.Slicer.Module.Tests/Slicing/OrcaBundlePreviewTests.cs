@@ -13,7 +13,6 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// <summary>
 /// Integration tests for OrcaSlicer bundle preview endpoint.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public class OrcaBundlePreviewTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

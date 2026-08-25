@@ -18,7 +18,6 @@ namespace Farm.Slicer.Module.Tests.Controllers;
 /// <c>SaveChangesAsync</c>. <see cref="WorkersController.DeleteAsync"/> previously never
 /// called it, so the worker silently reappeared on the next fetch.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public sealed class WorkersControllerDeleteTests
 {
     [Fact(DisplayName = "Deleting a worker actually removes it from the database")]

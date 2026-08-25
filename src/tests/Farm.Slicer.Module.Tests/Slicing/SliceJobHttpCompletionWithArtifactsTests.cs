@@ -18,7 +18,6 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// Tests HTTP-based completion flow with multiple artifact types (G-code, log, thumbnail).
 /// Validates worker authentication integration and artifact aggregation.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

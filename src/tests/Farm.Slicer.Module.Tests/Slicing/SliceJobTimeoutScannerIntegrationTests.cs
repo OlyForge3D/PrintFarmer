@@ -11,7 +11,6 @@ using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Slicing;
 
-[Collection(IntegrationTestCollection.Name)]
 public class SliceJobTimeoutScannerIntegrationTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory = factory;

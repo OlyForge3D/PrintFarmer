@@ -24,7 +24,6 @@ namespace Farm.Slicer.Module.Tests.Security;
 /// </summary>
 [Trait("Category", "Integration")]
 [Trait("Category", "Regression")]
-[Collection(IntegrationTestCollection.Name)]
 public class RoleToPermissionMigrationSlicerModuleTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory = new();

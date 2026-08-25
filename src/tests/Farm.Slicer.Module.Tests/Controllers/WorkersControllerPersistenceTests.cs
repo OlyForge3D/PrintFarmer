@@ -25,7 +25,6 @@ namespace Farm.Slicer.Module.Tests.Controllers;
 /// Each test clears the change tracker before asserting, so a tracked-but-unsaved mutation
 /// cannot satisfy it.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public sealed class WorkersControllerPersistenceTests
 {
     [Fact(DisplayName = "Disabling a worker actually persists the ban")]

@@ -20,7 +20,6 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// filenames, or OrcaSlicer stderr) when <see cref="Farm.Infrastructure.Security.PrintFarmerPermissions.IsFarmAdmin"/>
 /// is true for the requesting principal.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public sealed class SliceJobErrorDetailVisibilityTests : IAsyncLifetime
 {
     private const string RealErrorDetail =

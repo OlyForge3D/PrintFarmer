@@ -13,7 +13,6 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// End-to-end integration test exercising the full slice pipeline via HTTP:
 /// Register worker → Submit job → Verify queued → Claim → Report progress → Upload artifact → Complete → Verify completed → Verify artifact accessible.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory = new();

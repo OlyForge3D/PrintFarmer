@@ -13,7 +13,6 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// runtime. This test enumerates the literal route templates the worker actually sends and
 /// asserts each one resolves to a real registered ASP.NET Core action.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public sealed class WorkerRouteContractTests
 {
     /// <summary>

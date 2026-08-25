@@ -32,7 +32,6 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// change cannot satisfy "tell the user why" by widening <c>ErrorDetail</c>.
 /// </para>
 /// </remarks>
-[Collection(IntegrationTestCollection.Name)]
 public sealed class SliceJobFailureReasonRoundTripTests : IAsyncLifetime
 {
     /// <summary>
