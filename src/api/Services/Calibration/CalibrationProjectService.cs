@@ -304,11 +304,6 @@ public sealed class CalibrationProjectService(
             LifecycleStatus = CalibrationProjectLifecycleStatus.Active,
             ExperienceMode = ParseExperienceMode(request.ExperienceMode),
             PrinterId = request.PrinterId,
-
-            // No printer-configuration snapshot is resolved for context-free filament
-            // calibration; snapshot creation is optional/best-effort and is simply skipped
-            // when no context is available (#1981).
-            CurrentPrinterConfigurationSnapshotId = null,
             SelectedToolheadId = request.SelectedToolheadId,
             SelectedToolheadIndex = request.SelectedToolheadIndex,
             FilamentProvider = request.FilamentProvider.Trim(),
@@ -999,8 +994,10 @@ public sealed class CalibrationProjectService(
         }
 
         // Path D (#1981): filament calibration is context-free, so no printer configuration
-        // context is resolved and no PrinterConfigurationSnapshot is created here. The snapshot
-        // linkage is optional/best-effort, not a hard dependency.
+        // context is resolved here. The PrinterConfigurationSnapshot entity that used to carry
+        // that optional/best-effort linkage was deleted entirely in #1989 (D3b); any pre-D4
+        // attempt that still carried a snapshot FK had that historical linkage discarded along
+        // with the table.
         for (int appendAttempt = 0; appendAttempt < MaximumAppendAttempts; appendAttempt++)
         {
             long nextSequence = (await _dbContext.CalibrationAttempts
@@ -1023,7 +1020,6 @@ public sealed class CalibrationProjectService(
                 InputJson = Json(request.Input),
                 SpecificationJson = Json(request.Specification),
                 SpecificationSha256 = ComputeCanonicalHash(request.Specification),
-                PrinterConfigurationSnapshotId = null,
                 ProfileSnapshotIdsJson = Json(request.ProfileSnapshotIds),
                 ActualSpoolSnapshotJson = request.ActualSpoolSnapshot.HasValue
                     ? Json(request.ActualSpoolSnapshot.Value)
@@ -2825,7 +2821,6 @@ public sealed class CalibrationProjectService(
             project.LifecycleStatus.ToString(),
             project.ExperienceMode.ToString(),
             project.PrinterId,
-            project.CurrentPrinterConfigurationSnapshotId,
             project.SelectedToolheadId,
             project.SelectedToolheadIndex,
             new(
@@ -2877,7 +2872,6 @@ public sealed class CalibrationProjectService(
             Parse(attempt.InputJson),
             Parse(attempt.SpecificationJson),
             attempt.SpecificationSha256,
-            attempt.PrinterConfigurationSnapshotId,
             Parse(attempt.ProfileSnapshotIdsJson),
             attempt.ActualSpoolSnapshotJson is null ? null : Parse(attempt.ActualSpoolSnapshotJson),
             status,

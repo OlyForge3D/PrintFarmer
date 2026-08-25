@@ -1055,24 +1055,14 @@ public sealed class GcodeArtifactPromoter(
         CalibrationAttempt? attempt = await _dbContext.CalibrationAttempts
             .AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.Id == checkpoint.CalibrationAttemptId.Value, cancellationToken);
-        if (attempt is null)
-        {
-            return CalibrationLineageContext.Empty;
-        }
 
-        PrinterConfigurationSnapshot? snapshot = await _dbContext.PrinterConfigurationSnapshots
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                candidate => candidate.Id == attempt.PrinterConfigurationSnapshotId,
-                cancellationToken);
-        return new CalibrationLineageContext(
-            attempt.SpecificationSha256,
-            snapshot?.FirmwareFamily.ToString(),
-            snapshot?.GcodeDialect.ToString(),
-            snapshot?.MachineProfileSha256,
-            snapshot?.ProcessProfileSha256,
-            snapshot?.FilamentProfileSha256,
-            snapshot?.SlicerContainerDigest);
+        // The printer-configuration snapshot this lineage context previously enriched itself
+        // with (firmware family, G-code dialect, machine/process/filament profile digests,
+        // slicer container digest) was deleted in #1989 (D3b); no production code path has
+        // populated one since D4 (#1981), so those fields are always null going forward.
+        return attempt is null
+            ? CalibrationLineageContext.Empty
+            : CalibrationLineageContext.Empty with { SpecificationSha256 = attempt.SpecificationSha256 };
     }
 
     private static string ComputeRequestSha256(GcodeArtifactPromotionRequest request, string contentSha256)
