@@ -29,7 +29,7 @@ namespace Farm.Web.Api.Tests.Services.Printers;
 /// Regression tests for #1656: firmware identity must have exactly one authoritative store.
 /// <see cref="PrinterVersionCache"/> (backing <c>GET /api/printers/{id}/version</c> and the UI)
 /// and <see cref="CalibrationContextResolver.ValidateFirmware"/> (the calibration context builder,
-/// formerly gated by the now-removed <c>IsExplicitlyEligible</c> check, #1943)
+/// retained when #1943 removed the fleet-wide projection)
 /// previously read from two unreconciled stores — a live, never-persisted cache vs. the
 /// persisted <c>Printer.Firmware*</c> columns — so a printer could show a firmware version in
 /// the UI while calibration reported it entirely missing. These tests exercise both read paths
@@ -390,11 +390,10 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
         // their never-probed defaults (FirmwareFamily == Unknown, FirmwareVersion == null) AND
         // whose very first live probe attempt also fails. FromPrinter(printer) unconditionally
         // would still build a non-null CalibrationFirmwareIdentityDto (Family="Unknown",
-        // Version=null), which the UI would render as "Recorded — used for calibration
-        // eligibility" even though the calibration gate — reading the exact same row — reports
-        // firmware.family and firmware.version as entirely missing. RecordedFirmwareIdentity
-        // must stay null here so the UI can never disagree with the calibration gate about
-        // whether a firmware identity has been recorded at all.
+        // Version=null), which the UI would present as a recorded identity even though
+        // firmware.family and firmware.version are entirely missing. RecordedFirmwareIdentity
+        // must stay null here so the UI accurately reports whether a firmware identity has been
+        // recorded at all.
         string dbName = $"firmware-identity-{Guid.NewGuid()}";
         Printer printer = CreateNeverProbedMoonrakerPrinter();
 

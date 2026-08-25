@@ -344,11 +344,11 @@ describe('PrinterDetailsSidebar', () => {
       />
     );
 
-    expect(screen.getByText('Live reading only — not used for calibration eligibility')).toBeInTheDocument();
-    expect(screen.queryByText('Recorded — used for calibration eligibility')).not.toBeInTheDocument();
+    expect(screen.getByText('Live reading only — not persisted')).toBeInTheDocument();
+    expect(screen.queryByText('Recorded configuration identity')).not.toBeInTheDocument();
   });
 
-  it('labels the firmware reading as the recorded/calibration-eligible identity when the version endpoint returns one (#1656)', () => {
+  it('labels the firmware reading as recorded when the version endpoint returns an identity (#1656)', () => {
     mockVersionData = {
       firmwareVersion: '1.2.3',
       backendVersion: '4.5.6',
@@ -376,8 +376,8 @@ describe('PrinterDetailsSidebar', () => {
       />
     );
 
-    expect(screen.getByText('Recorded — used for calibration eligibility')).toBeInTheDocument();
-    expect(screen.queryByText('Live reading only — not used for calibration eligibility')).not.toBeInTheDocument();
+    expect(screen.getByText('Recorded configuration identity')).toBeInTheDocument();
+    expect(screen.queryByText('Live reading only — not persisted')).not.toBeInTheDocument();
   });
 
   it('hides object skip controls when backend capability is false', () => {

@@ -54,7 +54,7 @@ public sealed class CalibrationProfileServiceBoundaryTests
         _ = loadedTypes.Should().NotContain(type =>
             type.FullName == "Farm.Slicer.Worker.Core.ISlicerProfilesService" ||
             type.FullName == "Farm.OrcaSlicer.Worker.Services.ProfileCacheDb",
-            "the calibration eligibility pipeline must not gain a direct type dependency on " +
+            "the calibration context pipeline must not gain a direct type dependency on " +
             "ISlicerProfilesService or ProfileCacheDb");
     }
 }

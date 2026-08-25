@@ -268,7 +268,7 @@ public sealed class MoonrakerEmulatorSeeder(
                 modelId,
                 profileTrioCache,
                 cancellationToken);
-            ApplyCalibrationEligibilityDefaults(unitOfWork, printer, trio, isNewPrinter: existing is null);
+            ApplyCalibrationGenerationDefaults(unitOfWork, printer, trio, isNewPrinter: existing is null);
         }
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -382,7 +382,7 @@ public sealed class MoonrakerEmulatorSeeder(
 
     /// <summary>
     /// Identifiers of the shared machine/process/filament profile trio backing calibration
-    /// eligibility for a given catalog printer model.
+    /// generation for a given catalog printer model.
     /// </summary>
     private readonly record struct CalibrationProfileTrio(
         Guid MachineProfileId,
@@ -392,7 +392,7 @@ public sealed class MoonrakerEmulatorSeeder(
 
     /// <summary>
     /// Finds or creates the OrcaSlicer machine/process/filament profile trio that lets the
-    /// daily-validation emulator printers demonstrate calibration eligibility end-to-end
+    /// daily-validation emulator printers demonstrate calibration generation end-to-end
     /// (#1851). All seeded printers share a single catalog model (Voron 2.4 300), so one
     /// content-hash-keyed trio per model is enough; profiles are looked up by hash first so
     /// repeated seed/reset passes stay idempotent and never grow duplicate rows.
@@ -609,16 +609,13 @@ public sealed class MoonrakerEmulatorSeeder(
     }
 
     /// <summary>
-    /// Populates every calibration-eligibility column <c>CalibrationContextResolver</c>
-    /// requires (firmware identity, slicer identity, hardware/motion specs, and a physical
-    /// toolhead) so seeded emulator printers report <c>eligible: true</c> instead of the ~40
-    /// missing-input rejections filed as #1851. The eligibility gate itself is never touched —
-    /// this only supplies the data it already requires.
+    /// Populates the firmware, slicer, hardware, motion, and toolhead data required to build
+    /// a complete calibration generation context for seeded emulator printers.
     /// </summary>
     /// <param name="unitOfWork">
     /// Provides the printer repository used to append a toolhead for an already-tracked printer.
     /// </param>
-    /// <param name="printer">The printer to populate calibration-eligibility fields on.</param>
+    /// <param name="printer">The printer to populate calibration generation fields on.</param>
     /// <param name="trio">The resolved machine/process/filament calibration profile trio.</param>
     /// <param name="isNewPrinter">
     /// <see langword="true"/> for a printer not yet tracked by EF Core (safe to append a child
@@ -627,7 +624,7 @@ public sealed class MoonrakerEmulatorSeeder(
     /// <c>IPrintersRepository.AddToolheads</c> to avoid marking the parent row Modified
     /// and tripping optimistic-concurrency RowVersion checks.
     /// </param>
-    private static void ApplyCalibrationEligibilityDefaults(
+    private static void ApplyCalibrationGenerationDefaults(
         IUnitOfWork unitOfWork,
         Printer printer,
         CalibrationProfileTrio trio,
@@ -680,9 +677,8 @@ public sealed class MoonrakerEmulatorSeeder(
         // fixture printers are exclusively created and managed by this seeder and never gain
         // toolheads through any other code path, so "no physical toolhead yet" and "exactly one
         // physical toolhead" are equivalent here — this only prevents re-adding T0 on a repeat
-        // seed/reset pass, it is not a general-purpose toolhead-count enforcement for arbitrary
-        // printers (which is intentionally out of scope for a seeder; the eligibility gate itself
-        // is the correct place to reject printers with unsupported extra toolheads).
+        // seed/reset pass; it is not general-purpose toolhead-count enforcement for arbitrary
+        // printers, which is intentionally out of scope for this seeder.
         if (!printer.Toolheads.Any(toolhead => toolhead.ToolheadType == ToolheadType.Physical))
         {
             Toolhead toolhead = new()

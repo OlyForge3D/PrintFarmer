@@ -11,13 +11,10 @@ using Moq;
 
 namespace Farm.Web.Api.Tests.Services.Calibration;
 
-// Retains the GetContextAsync-focused coverage that used to live in
-// PrinterCalibrationContextServiceTests.cs. #1943 removed the fleet-wide eligibility
-// projection (GetCandidatesAsync, 77 rejection codes) and its dedicated test file, but
-// GetContextAsync itself was relocated -- not deleted -- into CalibrationContextResolver
-// because CalibrationProjectService still depends on it for non-eligibility data (build
-// volume, toolheads, firmware/slicer identity, snapshot hashing). This file preserves that
-// still-live behavior's regression coverage under the new type name.
+// Retains the GetContextAsync-focused coverage from the removed fleet-wide eligibility
+// projection. GetContextAsync itself was relocated -- not deleted -- into
+// CalibrationContextResolver because CalibrationProjectService still depends on its build
+// volume, toolhead, firmware/slicer identity, and snapshot-hashing data.
 public sealed class CalibrationContextResolverTests
 {
     private static readonly CalibrationProfileAccessScope ProfileAccess =

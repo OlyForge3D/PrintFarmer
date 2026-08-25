@@ -123,11 +123,9 @@ public sealed record CalibrationFirmwareIdentityDto(
         HasRecordedIdentity(printer) ? FromPrinter(printer) : null;
 
     /// <summary>
-    /// Overload for callers (the calibration eligibility gate) that have already computed the
-    /// effective g-code dialect as part of their own validation flow — passing it in avoids
-    /// computing it twice while guaranteeing both callers use the exact same fallback rule
-    /// (below), so the displayed dialect can never disagree with what the calibration gate
-    /// validated.
+    /// Overload for callers that have already computed the effective g-code dialect while
+    /// building a calibration context. Passing it in avoids computing it twice while
+    /// guaranteeing both callers use the same fallback rule.
     /// </summary>
     public static CalibrationFirmwareIdentityDto FromPrinter(Printer printer, PrinterGcodeDialect effectiveGcodeDialect)
     {
