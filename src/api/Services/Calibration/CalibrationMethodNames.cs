@@ -186,3 +186,103 @@ public static class CalibrationMethodNames
             "Unknown calibration method."),
     };
 }
+
+/// <summary>
+/// Canonical, server-authoritative per-method step sequences (D8). Every recognized
+/// <see cref="CalibrationMethod"/> currently advances through the same fixed wizard
+/// steps; the sequence is keyed per method (rather than a single global constant) so a
+/// future method can diverge without an API shape change.
+/// </summary>
+public static class CalibrationMethodSteps
+{
+    /// <summary>Operator configures the run (filament, printer, parameters).</summary>
+    public const string Setup = "setup";
+
+    /// <summary>The calibration test object is sliced and printed.</summary>
+    public const string Print = "print";
+
+    /// <summary>The operator captures or enters a measurement.</summary>
+    public const string Measure = "measure";
+
+    /// <summary>The operator reviews and selects the accepted result.</summary>
+    public const string Select = "select";
+
+    private static readonly IReadOnlyList<string> DefaultSequence = [Setup, Print, Measure, Select];
+
+    /// <summary>Gets the canonical, ordered step sequence for a calibration method.</summary>
+    /// <param name="method">The method.</param>
+    /// <returns>The ordered step ids the method must advance through.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The method is not declared.</exception>
+    public static IReadOnlyList<string> GetSequence(CalibrationMethod method) => method switch
+    {
+        CalibrationMethod.Temperature or
+        CalibrationMethod.FlowRatioCoarse or
+        CalibrationMethod.FlowRatioFine or
+        CalibrationMethod.FlowRatioHighRange or
+        CalibrationMethod.PressureAdvanceTower or
+        CalibrationMethod.PressureAdvanceLine or
+        CalibrationMethod.PressureAdvancePattern or
+        CalibrationMethod.FlowVerification or
+        CalibrationMethod.Retraction or
+        CalibrationMethod.MaximumVolumetricSpeed or
+        CalibrationMethod.Shrinkage or
+        CalibrationMethod.FinalVerification => DefaultSequence,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(method),
+            method,
+            "Unknown calibration method."),
+    };
+
+    /// <summary>Gets the zero-based index of a step id within a method's canonical sequence.</summary>
+    /// <param name="method">The method.</param>
+    /// <param name="stepId">The candidate step id.</param>
+    /// <returns>The zero-based index, or -1 when the step id is not part of the method's sequence.</returns>
+    public static int IndexOf(CalibrationMethod method, string stepId)
+    {
+        IReadOnlyList<string> sequence = GetSequence(method);
+        for (int index = 0; index < sequence.Count; index++)
+        {
+            if (string.Equals(sequence[index], stepId, StringComparison.Ordinal))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+}
+
+/// <summary>Inclusive plausible value range for one semantic calibration measurement kind.</summary>
+/// <param name="MeasurementKey">The property name expected under an observation's <c>measurements</c> payload.</param>
+/// <param name="Minimum">The inclusive minimum plausible value.</param>
+/// <param name="Maximum">The inclusive maximum plausible value.</param>
+public sealed record CalibrationMeasurementRange(string MeasurementKey, decimal Minimum, decimal Maximum);
+
+/// <summary>
+/// Canonical per-kind plausible measurement ranges (D8), used to reject physically
+/// implausible submitted values server-side. Keyed by the stable calibration kind
+/// (<see cref="CalibrationMethodNames.ToKind(CalibrationMethod)"/>) rather than by method,
+/// since every method sharing a kind measures the same physical quantity.
+/// </summary>
+public static class CalibrationMeasurementRanges
+{
+    /// <summary>Plausible nozzle/bed temperature range in degrees Celsius.</summary>
+    public static readonly CalibrationMeasurementRange Temperature = new("temperature_c", 150m, 320m);
+
+    /// <summary>Plausible flow ratio (extrusion multiplier) range.</summary>
+    public static readonly CalibrationMeasurementRange FlowRatio = new("flow_ratio", 0.5m, 1.5m);
+
+    /// <summary>Plausible pressure advance (linear advance) coefficient range.</summary>
+    public static readonly CalibrationMeasurementRange PressureAdvance = new("pressure_advance", 0.0m, 2.0m);
+
+    /// <summary>Gets the canonical measurement range for a calibration kind, if one is defined.</summary>
+    /// <param name="kind">The stable calibration kind, e.g. from <see cref="CalibrationMethodNames.ToKind(CalibrationMethod)"/>.</param>
+    /// <returns>The range, or <see langword="null"/> when the kind has no defined semantic range.</returns>
+    public static CalibrationMeasurementRange? ForKind(string kind) => kind switch
+    {
+        "temperature" => Temperature,
+        "flow" => FlowRatio,
+        "pressure_advance" => PressureAdvance,
+        _ => null,
+    };
+}
