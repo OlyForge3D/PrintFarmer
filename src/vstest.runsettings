@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Bounds the documented full-solution `dotnet test ./farm-web.sln` run so it can never hang
+  indefinitely (issue #2013). On a macOS QA host, `Farm.Web.Api.Tests` finished with known
+  environment-shaped failures and then `Farm.Slicer.Module.Tests` remained hung for 4+ hours
+  with no output until manually killed. That specific hang was not reproducible on Windows
+  (the same suite completes cleanly there in a few minutes), so this is a defensive bound
+  rather than a fix for a pinned root cause: whatever stalls a testhost locally, the run must
+  fail loudly and fast instead of hanging silently.
+
+  See docs/TESTING_PATTERNS.md (Bounded Test Execution) and .github/skills/testing/SKILL.md
+  for the full documented dotnet test invocation, including the companion "blame hang" flags
+  that bound an individual testhost: if no test start/finish activity is observed for that
+  long, VSTest's blame collector kills the offending testhost (and any child processes) and
+  writes a sequence file plus a dump identifying exactly which test was in flight, so a
+  future hang is diagnosable instead of silent. TestSessionTimeout below bounds the whole
+  invocation across every project in the solution.
+-->
+<RunSettings>
+  <RunConfiguration>
+    <!-- 40 minutes for the entire solution. Normal full-suite duration observed in CI and on
+         Windows is well under half this; a real hang or runaway environment issue still fails
+         the run in minutes instead of hours. -->
+    <TestSessionTimeout>2400000</TestSessionTimeout>
+  </RunConfiguration>
+</RunSettings>

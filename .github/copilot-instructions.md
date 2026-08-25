@@ -41,9 +41,19 @@ Backend:
 cd src
 dotnet restore ./farm-web.sln
 dotnet build ./farm-web.sln -c Debug
-dotnet test ./farm-web.sln -c Debug 2>&1 | tee /tmp/printfarmer-dotnet-test.log
+dotnet test ./farm-web.sln -c Debug --settings ./vstest.runsettings --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini 2>&1 | tee /tmp/printfarmer-dotnet-test.log
 dotnet format ./farm-web.sln --verify-no-changes
 ```
+
+The full-solution `dotnet test` run is bounded by `src/vstest.runsettings`
+(overall session timeout) plus `--blame-hang-timeout` (per-testhost hang
+detection with a diagnostic dump) so a stalled test project fails loudly in
+minutes instead of hanging indefinitely — see issue #2013 and
+`docs/TESTING_PATTERNS.md#bounded-test-execution`. Some `Farm.Web.Api.Tests`
+failures on a local macOS host are environment-only (unsupported artifact
+leases, unprovisioned PostgreSQL/SQL Server env vars, a SQLite collation
+quirk); do not try to force those to pass locally, see the same doc section
+for the rationale.
 
 Frontend:
 
