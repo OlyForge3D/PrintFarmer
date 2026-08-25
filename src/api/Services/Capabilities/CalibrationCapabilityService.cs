@@ -11,7 +11,6 @@ using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
 using Farm.Web.Api.Services.Calibration;
-using Farm.Web.Api.Services.Calibration.Generation;
 using Farm.Web.Api.Services.Gcode;
 using Microsoft.EntityFrameworkCore;
 
@@ -135,28 +134,26 @@ public sealed class CalibrationCapabilityService(
             workerHealth.PinnedIdentityCount > 0 &&
             modelStorageResolvable;
 
-        // Generation is only advertised when every production hop of the durable saga was actually
-        // probed in this process. A configuration switch, a registered type or a test double is never
-        // accepted as evidence, and a split host stays false until real routing adapters answer.
-        CalibrationGenerationCapabilityDto? generationCapability =
-            await GetGenerationCapabilityAsync(cancellationToken);
-        bool calibrationGenerationOperational = generationCapability?.Operational == true;
+        // Calibration generation (the deterministic core, durable saga and generate-job route) was
+        // removed in #1979; the feature no longer exists in this process, so it is unconditionally
+        // unavailable rather than probed.
+        const bool calibrationGenerationOperational = false;
 
         // The calibration command/gcode generation pipeline, calibration queue integration
         // (JobQueueService), exact-job bed-clear acknowledgement (BedClearAcknowledgementService)
         // and dispatch claiming/safety gating (DispatchClaimService/DispatchSafetyGates) are all
         // unconditionally registered in ServiceCollectionExtensions and ship in every deployment:
-        // there is no configuration toggle that compiles them out. These four booleans therefore
+        // there is no configuration toggle that compiles them out. These booleans therefore
         // reflect that build-time fact, matching the existing ContextImplemented precedent. Only
-        // "Operational" below depends on runtime evidence.
+        // "Operational" below depends on runtime evidence. Generation itself was removed (#1979),
+        // so its "Implemented" flag stays false rather than reflecting a build-time guarantee.
         const bool calibrationCommandsImplemented = true;
-        const bool calibrationGenerationImplemented = true;
+        const bool calibrationGenerationImplemented = false;
         const bool calibrationQueueIntegrationImplemented = true;
         const bool calibrationEventStreamImplemented = true;
         bool calibrationOperational =
             calibrationContextOperational &&
             calibrationCommandsImplemented &&
-            calibrationGenerationImplemented &&
             calibrationQueueIntegrationImplemented &&
             calibrationEventStreamImplemented;
 
@@ -167,8 +164,7 @@ public sealed class CalibrationCapabilityService(
                 slicingOperational,
                 workerHealth,
                 calibrationContextOperational,
-                promotionCapability,
-                generationCapability);
+                promotionCapability);
 
         IReadOnlyList<string>? effectivePermissions = null;
         EffectiveCalibrationCapabilitiesDto? effectiveCapabilities = null;
@@ -454,8 +450,7 @@ public sealed class CalibrationCapabilityService(
         bool slicingOperational,
         WorkerHealthSnapshot workerHealth,
         bool calibrationContextOperational,
-        GcodePromotionCapabilityDto? promotionCapability,
-        CalibrationGenerationCapabilityDto? generationCapability)
+        GcodePromotionCapabilityDto? promotionCapability)
     {
         List<CapabilityUnavailableReasonDto> reasons = [];
         if (!calibrationContextOperational)
@@ -508,7 +503,7 @@ public sealed class CalibrationCapabilityService(
             {
                 Feature = "slicing",
                 Code = unsupportedVersion
-                    ? CalibrationGenerationProblemCodes.SlicerVersionUnsupported
+                    ? "slicer_version_unsupported"
                     : workerHealth.HealthyCount == 0
                         ? "compatible_worker_unavailable"
                     : "slicing_path_unavailable",
@@ -532,22 +527,12 @@ public sealed class CalibrationCapabilityService(
             });
         }
 
-        if (generationCapability?.Operational != true)
+        reasons.Add(new()
         {
-            string message =
-                generationCapability?.UnavailableCode ==
-                CalibrationGenerationProblemCodes.SlicerVersionUnsupported
-                    ? BuildUnsupportedVersionMessage(
-                        generationCapability.ObservedWorkerVersions,
-                        generationCapability.SupportedSlicerVersions)
-                    : "Calibration generation requires the deterministic core, authorized model storage, the canonical slice path, an allow-listed attested worker, operational promotion, a durable orchestration store and a healthy recovery loop.";
-            reasons.Add(new()
-            {
-                Feature = "calibrationGeneration",
-                Code = generationCapability?.UnavailableCode ?? "generation_dependency_unavailable",
-                Message = message,
-            });
-        }
+            Feature = "calibrationGeneration",
+            Code = "feature_removed",
+            Message = "Calibration generation was removed from this deployment (#1979).",
+        });
 
         return reasons;
     }
@@ -556,37 +541,6 @@ public sealed class CalibrationCapabilityService(
         IReadOnlyList<string> observedVersions,
         IReadOnlyList<string> supportedVersions) =>
         $"Observed upstream OrcaSlicer version(s) {string.Join(", ", observedVersions)}; configured supported version(s): {string.Join(", ", supportedVersions)}.";
-
-    /// <summary>
-    /// Asks the generation probe whether every production hop of the durable saga is usable here.
-    /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>
-    /// The generation capability, or <see langword="null"/> when no probe is registered at all — which
-    /// is the split-host case where the generation path does not exist in this process.
-    /// </returns>
-    private async Task<CalibrationGenerationCapabilityDto?> GetGenerationCapabilityAsync(
-        CancellationToken cancellationToken)
-    {
-        ICalibrationGenerationCapabilityProbe? probe =
-            _serviceProvider.GetService<ICalibrationGenerationCapabilityProbe>();
-        if (probe is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            return await probe.GetCapabilityAsync(cancellationToken);
-        }
-        catch (Exception exception) when (exception is DbException or InvalidOperationException)
-        {
-            _logger.LogWarning(
-                "Capability discovery could not evaluate calibration generation ({ExceptionType})",
-                exception.GetType().Name);
-            return null;
-        }
-    }
 
     /// <summary>
     /// Asks the promoter whether every promotion hop is usable in this deployment.
