@@ -300,6 +300,71 @@ test_model_thumbnail_replacement_routing() {
     pass_test
 }
 
+test_slice_print_bridge_routing() {
+    start_test "slice print bridge routing"
+
+    local split_config="$REPO_ROOT/deploy/nginx/nginx-proxy-split.conf"
+    assert_file_exists "$split_config" || return 1
+
+    # Regression test for issue #2020: SlicePrintBridgeController
+    # (POST /api/slice/{id}/send-to-printer and /add-to-queue) lives in the
+    # main API -- it needs IPrintersService/IJobQueueService, which are
+    # main-API-only -- but the generic "location /api/slice" prefix block
+    # forwards the entire /api/slice/* namespace to slicer-host, which has no
+    # matching routes for these two endpoints. Regex carve-outs must route
+    # them to api_backend instead, in both the HTTP and HTTPS server blocks.
+    local send_to_printer_count
+    send_to_printer_count=$(grep -c 'location ~ \^/api/slice/\[\^/\]+/send-to-printer\$ {' "$split_config")
+    assert_equals "2" "$send_to_printer_count" \
+        "Split proxy should carve out send-to-printer to the main API over HTTP and HTTPS (issue #2020)" || return 1
+
+    local add_to_queue_count
+    add_to_queue_count=$(grep -c 'location ~ \^/api/slice/\[\^/\]+/add-to-queue\$ {' "$split_config")
+    assert_equals "2" "$add_to_queue_count" \
+        "Split proxy should carve out add-to-queue to the main API over HTTP and HTTPS (issue #2020)" || return 1
+
+    local send_to_printer_routed_to_api
+    send_to_printer_routed_to_api=$(awk '
+        /location ~ \^\/api\/slice\/\[\^\/\]\+\/send-to-printer\$ \{/ { in_route = 1; next }
+        in_route && /proxy_pass http:\/\/api_backend;/ { routed++; in_route = 0 }
+        in_route && /^        }/ { in_route = 0 }
+        END { print routed + 0 }
+    ' "$split_config")
+    assert_equals "2" "$send_to_printer_routed_to_api" "Both send-to-printer carve-outs should target the main API" || return 1
+
+    local add_to_queue_routed_to_api
+    add_to_queue_routed_to_api=$(awk '
+        /location ~ \^\/api\/slice\/\[\^\/\]\+\/add-to-queue\$ \{/ { in_route = 1; next }
+        in_route && /proxy_pass http:\/\/api_backend;/ { routed++; in_route = 0 }
+        in_route && /^        }/ { in_route = 0 }
+        END { print routed + 0 }
+    ' "$split_config")
+    assert_equals "2" "$add_to_queue_routed_to_api" "Both add-to-queue carve-outs should target the main API" || return 1
+
+    # The generic /api/slice location must still exist and still route
+    # everything else (e.g. slicer-host's own SliceJobController routes) to
+    # slicer-host.
+    local generic_slice_count
+    generic_slice_count=$(grep -c 'location /api/slice {' "$split_config")
+    assert_equals "2" "$generic_slice_count" "Split proxy should still have a generic /api/slice route over HTTP and HTTPS" || return 1
+
+    local generic_slice_routed_to_slicer
+    generic_slice_routed_to_slicer=$(awk '
+        /location \/api\/slice \{/ { in_route = 1; next }
+        in_route && /proxy_pass \$slicer_upstream\$request_uri;/ { routed++; in_route = 0 }
+        in_route && /^        }/ { in_route = 0 }
+        END { print routed + 0 }
+    ' "$split_config")
+    assert_equals "2" "$generic_slice_routed_to_slicer" "Both generic /api/slice routes should still target slicer-host" || return 1
+
+    assert_not_contains \
+        "$(cat "$REPO_ROOT/deploy/nginx/nginx-proxy.conf")" \
+        "slicer-host" \
+        "Monolith proxy should not route anything to slicer-host" || return 1
+
+    pass_test
+}
+
 # Test OrcaSlicer worker variations
 test_orcaslicer_worker_variations() {
     start_test "OrcaSlicer worker variations"
@@ -1944,6 +2009,7 @@ run_all_tests() {
     test_telemetry_stack_configuration
     test_orcaslicer_worker_config
     test_model_thumbnail_replacement_routing
+    test_slice_print_bridge_routing
     test_orcaslicer_worker_variations
     test_prusaslicer_worker_disabled
     test_database_provider_config
