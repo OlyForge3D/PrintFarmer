@@ -11,14 +11,21 @@ namespace Farm.Slicer.Module.Tests.TestInfrastructure;
 // zeroing that static state. If that reset races with ArtifactsMetricsTests reading/asserting on
 // the same static gauge (e.g. Storage_Gauge_Reflects_Cumulative_Size measures a before/after delta
 // across two uploads), the reset can land in the middle of the measurement window and corrupt the
-// result in either direction - a plain ">=" tolerance (see ArtifactsMetricsTests) cannot absorb a
-// concurrent reset, only concurrent *additional* uploads from other, unrelated test classes.
+// result in either direction.
 //
-// This collection therefore serializes ONLY these two classes against each other so a
-// ResetForTests() call can never interleave with an ArtifactsMetricsTests assertion window, while
-// still letting both run in parallel with the rest of the suite (see IntegrationTestCollection.cs -
-// do not add other classes here; this is intentionally narrow, not a return to the old
-// project-wide mega-collection).
+// xUnit runs a [CollectionDefinition(DisableParallelization = true)] collection only after every
+// parallel-capable collection in the assembly has already finished, one disabled collection at a
+// time (confirmed against xUnit's assembly-runner scheduling: parallel collections run first and
+// to completion; disabled collections then run serially, isolated from everything else). Putting
+// both classes in this collection therefore guarantees not just that a ResetForTests() call can
+// never interleave with an ArtifactsMetricsTests assertion window, but that NO other test in the
+// suite is running (and therefore no other test can be uploading artifacts / touching these
+// statics) while either class executes - so the exact-equality assertions in both classes remain
+// valid, not just tolerant of noise.
+//
+// This collection is intentionally narrow (see IntegrationTestCollection.cs - do not add other
+// classes here or reintroduce a project-wide mega-collection): only these two classes actually
+// touch ArtifactsMetrics' static state in ways that require this isolation.
 [CollectionDefinition(Name, DisableParallelization = true)]
 public class ArtifactsMetricsSerialCollection
 {

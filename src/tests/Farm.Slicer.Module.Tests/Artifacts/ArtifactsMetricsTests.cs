@@ -19,11 +19,12 @@ using Xunit;
 namespace Farm.Slicer.Module.Tests.Artifacts;
 
 // Shares ArtifactsMetricsSerialCollection with ArtifactsThresholdTests so ArtifactsMetrics.ResetForTests()
-// can never interleave with the gauge/counter measurement windows below. Uploads from OTHER,
-// unrelated test classes can still run concurrently with these tests (they only ever add to the
-// shared static counters, never reset them), so the assertions below tolerate that noise with
-// ">=" / "Contains" checks rather than requiring exact totals. See the collection definition for
-// the full rationale.
+// can never interleave with the gauge/counter measurement windows below. xUnit runs
+// DisableParallelization = true collections strictly after every parallel-capable collection in
+// the assembly has finished, one collection at a time (see the collection definition), so while
+// this class's tests execute there is no other test anywhere in the suite concurrently uploading
+// artifacts either - the shared static counters are exclusively owned by this collection at that
+// point, and the assertions below can safely assert exact totals.
 [Collection(ArtifactsMetricsSerialCollection.Name)]
 public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
@@ -146,16 +147,15 @@ public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClass
         meterListener.RecordObservableInstruments();
         await Task.Delay(100);
 
-        // Assert - use ">=" rather than exact equality: unrelated test classes running
-        // concurrently (bounded parallelism, see IntegrationTestCollection.cs) may also upload
-        // artifacts and monotonically add to this process-wide static gauge. ResetForTests()
-        // calls (the only thing that could make the delta come out too LOW) are excluded via
-        // ArtifactsMetricsSerialCollection, so ">=" is a real, non-flaky assertion here.
+        // Assert - ArtifactsMetricsSerialCollection guarantees no other collection in the
+        // assembly runs concurrently with this one (xUnit runs DisableParallelization = true
+        // collections in isolation, after all parallel collections finish), so the delta is
+        // exact, not merely a lower bound.
         long finalGaugeValue = gaugeValues.Last();
         int expectedIncrease = content1.Length + content2.Length;
 
-        _ = (finalGaugeValue - initialGaugeValue).Should().BeGreaterThanOrEqualTo(expectedIncrease,
-            "gauge should reflect at least the cumulative size of both uploads");
+        _ = (finalGaugeValue - initialGaugeValue).Should().Be(expectedIncrease,
+            "gauge should reflect cumulative size of both uploads");
 
         meterListener.Dispose();
     }
@@ -202,12 +202,10 @@ public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClass
 
         await Task.Delay(100);
 
-        // Assert - use ">=" rather than exact equality: unrelated test classes running
-        // concurrently may also record uploads on this process-wide static counter, which the
-        // MeterListener above captures regardless of which class caused them. Those additions
-        // can only push the total up, never down, so ">=" remains a real, non-flaky assertion
-        // that this test's own 5 uploads were recorded.
-        _ = counterTotal.Should().BeGreaterThanOrEqualTo(5, "counter should increment for each upload");
+        // Assert - exact equality is safe here: ArtifactsMetricsSerialCollection guarantees no
+        // other collection in the assembly runs concurrently with this one (see the collection
+        // definition), so nothing else can be recording uploads on this counter right now.
+        _ = counterTotal.Should().Be(5, "counter should increment for each upload");
 
         meterListener.Dispose();
     }
