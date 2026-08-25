@@ -305,7 +305,18 @@ public class SlicePrintBridgeController(
             throw new InvalidSafetyGeometryException($"PrintablePolygonJson is not valid JSON: {ex.Message}");
         }
 
-        List<GcodeSafetyPoint> result = points?.Select(p => new GcodeSafetyPoint((decimal)p.X, (decimal)p.Y)).ToList() ?? [];
+        List<GcodeSafetyPoint> result = [];
+        foreach (SafetyPolygonPointDto? point in points ?? [])
+        {
+            if (point is null)
+            {
+                throw new InvalidSafetyGeometryException(
+                    "PrintablePolygonJson is configured but contains a null point.");
+            }
+
+            result.Add(new GcodeSafetyPoint((decimal)point.X, (decimal)point.Y));
+        }
+
         if (result.Count < 3)
         {
             throw new InvalidSafetyGeometryException(
@@ -345,9 +356,32 @@ public class SlicePrintBridgeController(
         }
 
         var result = new List<GcodeSafetyExcludedRegion>(regions.Count);
-        foreach (SafetyExcludedRegionDto region in regions)
+        foreach (SafetyExcludedRegionDto? region in regions)
         {
-            List<GcodeSafetyPoint> polygon = region.Polygon.Select(p => new GcodeSafetyPoint((decimal)p.X, (decimal)p.Y)).ToList();
+            if (region is null)
+            {
+                throw new InvalidSafetyGeometryException(
+                    "ExcludedRegionsJson is configured but contains a null region.");
+            }
+
+            if (region.Polygon is null)
+            {
+                throw new InvalidSafetyGeometryException(
+                    "ExcludedRegionsJson is configured but a region has a null polygon.");
+            }
+
+            var polygon = new List<GcodeSafetyPoint>(region.Polygon.Count);
+            foreach (SafetyPolygonPointDto? point in region.Polygon)
+            {
+                if (point is null)
+                {
+                    throw new InvalidSafetyGeometryException(
+                        "ExcludedRegionsJson is configured but a region's polygon contains a null point.");
+                }
+
+                polygon.Add(new GcodeSafetyPoint((decimal)point.X, (decimal)point.Y));
+            }
+
             if (polygon.Count < 3)
             {
                 throw new InvalidSafetyGeometryException(

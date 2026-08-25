@@ -685,6 +685,102 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
             Times.Never);
     }
 
+    [Fact]
+    [Trait("Category", "SlicePrintBridge")]
+    public async Task SendToPrinter_ExcludedRegionWithNullPolygon_Returns400AndDoesNotUpload()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        Artifact gcode = CreateArtifact(jobId, "gcode", "model.gcode");
+        string filePath = CreateTempGcodeFile("model.gcode");
+
+        SetupCompletedJobWithGcode(jobId, gcode);
+        SetupArtifactPath(gcode, filePath);
+
+        _printersMock
+            .Setup(p => p.FindByIdWithIncludesAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Printer
+            {
+                Id = printerId,
+                Name = "Test Printer",
+                // "polygon" is present (satisfies [JsonRequired]) but its value is a JSON null,
+                // which JsonRequired alone does not reject. Must still fail closed rather than
+                // throwing an unhandled NullReferenceException.
+                ExcludedRegionsJson = "[{\"name\":\"clip\",\"polygon\":null}]",
+            });
+
+        var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
+
+        IActionResult result = await _controller.SendToPrinterAsync(jobId, request, CancellationToken.None);
+
+        var badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;
+        badRequest.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+
+        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Never);
+        _printersMock.Verify(
+            p => p.UploadGcodeAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "SlicePrintBridge")]
+    public async Task SendToPrinter_GcodeWithLeadingBom_StripsBomBeforeValidationButUploadsRawBytes()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        Artifact gcode = CreateArtifact(jobId, "gcode", "model.gcode");
+        string filePath = Path.Join(_tempDir, "model.gcode");
+
+        // Write the file WITH a leading UTF-8 BOM followed immediately by a command, so that if
+        // the BOM were not stripped before validation, the interpreter would see "\uFEFFG28"
+        // instead of "G28" as the first line.
+        byte[] utf8Bom = [0xEF, 0xBB, 0xBF];
+        byte[] body = System.Text.Encoding.UTF8.GetBytes("G28\nG1 X10 Y10 Z0.2 F1500\n");
+        File.WriteAllBytes(filePath, [.. utf8Bom, .. body]);
+
+        SetupCompletedJobWithGcode(jobId, gcode);
+        SetupPrinterExists(printerId);
+        SetupArtifactPath(gcode, filePath);
+
+        string? capturedGcodeText = null;
+        _safetyValidatorMock
+            .Setup(v => v.Validate(It.IsAny<GcodeSafetyRequest>()))
+            .Callback<GcodeSafetyRequest>(r => capturedGcodeText = r.Gcode)
+            .Returns(GcodeSafetyResult<GcodeSafetyReport>.Success(new GcodeSafetyReport(
+                GcodeSafetyCheckpoint.BeforeSendToPrinter, "test-sha256", 2, DateTime.UtcNow)));
+
+        byte[]? capturedUploadBytes = null;
+        _printersMock
+            .Setup(p => p.UploadGcodeAsync(printerId, gcode.FileName, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, string, Stream, CancellationToken>((_, _, stream, _) =>
+            {
+                using var buffer = new MemoryStream();
+                stream.CopyTo(buffer);
+                capturedUploadBytes = buffer.ToArray();
+            })
+            .ReturnsAsync(true);
+
+        var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
+
+        IActionResult result = await _controller.SendToPrinterAsync(jobId, request, CancellationToken.None);
+
+        _ = result.Should().BeOfType<OkObjectResult>();
+
+        // The text handed to the safety validator must have the BOM stripped so command matching
+        // (e.g. "G28" at position 0) is not corrupted by a leading U+FEFF character.
+        capturedGcodeText.Should().NotBeNull();
+        capturedGcodeText.Should().NotStartWith("\uFEFF");
+        capturedGcodeText.Should().StartWith("G28");
+
+        // The bytes actually uploaded must be byte-for-byte identical to the file on disk
+        // (BOM included) - stripping is a validation-only concern and must never alter what is
+        // sent to the printer.
+        capturedUploadBytes.Should().NotBeNull();
+        byte[] expectedBytes = await File.ReadAllBytesAsync(filePath);
+        capturedUploadBytes.Should().Equal(expectedBytes);
+    }
+
     // =========================================================================
     // Upload fails (502)
     // =========================================================================
