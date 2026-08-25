@@ -563,6 +563,41 @@ describe('NewSliceJobPage', () => {
     });
   });
 
+  describe('320px viewport overflow (issue #2001)', () => {
+    // SCOPE NOTE (class-guard only, same rationale as the #1868 test above):
+    // jsdom does not run a real CSS box-model/layout engine, so it cannot
+    // itself reproduce a pixel-overflow bug at a specific viewport width.
+    // Root cause: below the `lg` breakpoint this sidebar renders as an
+    // absolutely-positioned overlay with a *fixed* `w-96` (384px) width,
+    // while its ancestor `<form>` has `overflow-hidden` and no horizontal
+    // scroll affordance. At a 320px viewport (the reproduction width in
+    // #2001) that overflowed the viewport by 64px with the excess clipped
+    // and unreachable. The fix swaps the narrow-viewport branch to
+    // `w-full` so the overlay fills whatever width is actually available
+    // instead of a fixed px value — verified against a real Chromium
+    // 320x700 viewport via Playwright with the seeded "Moonraker Offline"
+    // printer selected (so the printer/machine-profile/filament controls
+    // all render). This test guards the CSS contract that fix depends on:
+    // that the open-state sidebar carries `w-full`, not a bare fixed
+    // width class, on narrow viewports.
+    it('gives the open settings overlay w-full instead of a fixed width', async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('printer-slicer-selector')).toBeInTheDocument();
+      });
+
+      const sidebar = screen.getByTestId('slicer-settings-sidebar');
+      // Sidebar starts open (default sidebarOpen state).
+      expect(sidebar.className).toContain('absolute');
+      expect(sidebar.className).toContain('w-full');
+      // Guard against regressing back to a fixed narrow-viewport width —
+      // `lg:w-96` (the desktop inline-sidebar width) must remain, but a
+      // bare `w-96` outside the `lg:` prefix must not reappear.
+      expect(sidebar.className).not.toMatch(/(?<!lg:)\bw-96\b/);
+    });
+  });
+
   describe('Slicer Dropdown', () => {
     it('should show slicer types not worker names', async () => {
       renderWithProviders(<NewSliceJobPage />);

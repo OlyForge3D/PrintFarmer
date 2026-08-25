@@ -2293,7 +2293,7 @@ export const NewSliceJobPage: React.FC = () => {
              On narrow screens: slides over as fixed-width panel when toggled open. */}
         <div
           data-testid="slicer-settings-sidebar"
-          className={`${sidebarOpen ? 'absolute top-0 left-0 bottom-0 z-40 w-96 lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:w-96 space-y-1.5 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto bg-pf-bg-2 shadow-xl lg:shadow-none`}
+          className={`${sidebarOpen ? 'absolute top-0 left-0 bottom-0 z-40 w-full lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:w-96 space-y-1.5 shrink-0 lg:h-full lg:min-h-0 min-h-0 overflow-y-auto bg-pf-bg-2 shadow-xl lg:shadow-none`}
         >
 
           {/* Mobile-only close control: below lg this panel is an absolute overlay
