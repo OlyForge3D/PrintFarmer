@@ -153,6 +153,22 @@ const mockModelList = [
   },
 ];
 
+// A stored library model whose id is a real GUID (unlike the plain-string
+// fixtures above), so it exercises resolveModel3DId's GUID validation the
+// same way the real API's ids do. Used by the "Enter URL" regression tests
+// for issue #1973 (URL-backed models sending a synthetic, non-GUID
+// model3DId).
+const mockLibraryModelGuid = '11111111-1111-1111-1111-111111111111';
+const mockModelListWithGuid = [
+  ...mockModelList,
+  {
+    id: mockLibraryModelGuid,
+    fileName: 'library-model.3mf',
+    originalFileName: 'library-model.3mf',
+    uploadedAt: '2026-06-02T00:00:00Z',
+  },
+];
+
 const mockSlicers = [
   { id: '1', name: 'orcaslicer-worker-1', slicerType: 'OrcaSlicer', version: '2.3.1' },
   { id: '2', name: 'prusaslicer-worker-1', slicerType: 'PrusaSlicer', version: '2.7.0' }
@@ -1445,6 +1461,186 @@ describe('NewSliceJobPage', () => {
         expect(models[0].fileType).toBe('3mf');
       });
       expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    describe('model3DId regression coverage (issue #1973)', () => {
+      // Issue #1973: the Slice Job page sent a synthetic `url-<timestamp>`
+      // string as `model3DId` for URL-loaded models, which the API rejects
+      // because it binds to `Guid?`. These tests drive the real "Enter URL"
+      // submit flow end-to-end (through onSlice -> submitJob) to prove the
+      // fix holds at the integration boundary between handleUrlModelSubmit
+      // (which attaches libraryModelId) and resolveModel3DId (which decides
+      // what reaches the wire) — not just at either layer in isolation.
+      async function reachSubmittableStateViaUrl() {
+        vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
+          { name: 'Prusa MK4S 0.4 nozzle', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'MK4S' },
+        ] as OrcaMachineProfile[]);
+        vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue([
+          {
+            name: '0.20mm Standard @MK4S',
+            quality: 'Standard',
+            layerHeight: 0.2,
+            infillPercentage: 15,
+            printSpeed: 60,
+            supports: false,
+            compatiblePrinters: ['Prusa MK4S 0.4 nozzle'],
+          },
+        ] as OrcaProcessProfile[]);
+
+        renderWithProviders(<NewSliceJobPage />);
+        await waitFor(() => {
+          expect(screen.getByTestId('printer-select')).toBeInTheDocument();
+        });
+        fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+        await waitFor(() => {
+          expect(screen.getByTestId('slicer-workspace')).toBeInTheDocument();
+        });
+        act(() => {
+          fireEvent.click(screen.getByRole('button', { name: /add model/i }));
+        });
+        const urlTabButton = await screen.findByRole('button', { name: 'Enter URL' });
+        act(() => {
+          fireEvent.click(urlTabButton);
+        });
+      }
+
+      const latestOnSlice = () =>
+        (slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as { onSlice?: (ids?: string[]) => void } | undefined)?.onSlice;
+
+      async function waitForProcessProfile() {
+        await waitFor(() => {
+          const processSelect = Array.from(document.querySelectorAll('select'))
+            .find((s) => s.value.startsWith('system:'));
+          expect(processSelect?.value).toBe('system:0.20mm Standard @MK4S');
+        });
+      }
+
+      it('sends the persisted library model GUID as model3DId when the URL matches an authenticated internal model', async () => {
+        vi.mocked(apiClient.get).mockImplementation(((url: string) => {
+          if (url === '/3d-models') {
+            return Promise.resolve({ data: mockModelListWithGuid });
+          }
+          return Promise.resolve({ data: new ArrayBuffer(0) });
+        }) as never);
+
+        await reachSubmittableStateViaUrl();
+
+        fireEvent.change(screen.getByLabelText('File URL'), {
+          target: { value: `/api/3d-models/file/${mockLibraryModelGuid}` },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+        await waitFor(() => {
+          const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
+          expect(models).toHaveLength(1);
+          expect(models[0].libraryModelId).toBe(mockLibraryModelGuid);
+        });
+
+        await waitForProcessProfile();
+        await waitFor(() => {
+          expect(latestOnSlice()).toBeTypeOf('function');
+        });
+        await act(async () => { latestOnSlice()!(); });
+
+        await waitFor(() => {
+          expect(sliceJobService.submitJob).toHaveBeenCalled();
+        }, { timeout: 3000 });
+
+        const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)?.[0] as { model3DId?: string };
+        expect(request.model3DId).toBe(mockLibraryModelGuid);
+      });
+
+      it('omits model3DId (never a synthetic string) when the URL does not match any persisted library model', async () => {
+        vi.mocked(apiClient.get).mockImplementation(((url: string) => {
+          if (url === '/3d-models') {
+            return Promise.resolve({ data: mockModelListWithGuid });
+          }
+          return Promise.resolve({ data: new ArrayBuffer(0) });
+        }) as never);
+        const fetchSpy = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+        });
+        vi.stubGlobal('fetch', fetchSpy);
+
+        await reachSubmittableStateViaUrl();
+
+        fireEvent.change(screen.getByLabelText('File URL'), {
+          target: { value: 'https://example.com/model.stl' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+        await waitFor(() => {
+          const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
+          expect(models).toHaveLength(1);
+          expect(models[0].libraryModelId).toBeUndefined();
+        });
+
+        await waitForProcessProfile();
+        await waitFor(() => {
+          expect(latestOnSlice()).toBeTypeOf('function');
+        });
+        await act(async () => { latestOnSlice()!(); });
+
+        await waitFor(() => {
+          expect(sliceJobService.submitJob).toHaveBeenCalled();
+        }, { timeout: 3000 });
+
+        const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)?.[0] as { model3DId?: string };
+        expect(request.model3DId).toBeUndefined();
+      });
+
+      it('does not attach an unrelated stored model GUID as model3DId for a cross-origin URL that merely resembles the internal file-serving path', async () => {
+        // Security regression coverage (Vasquez's review of #1973): an
+        // absolute, cross-origin URL like
+        // "https://evil.example/3d-models/file/<real-guid>" must never be
+        // treated as a match against the current user's own model list —
+        // otherwise a job whose fetched geometry comes from an
+        // attacker-controlled origin would carry a legitimate, unrelated
+        // model's GUID as model3DId. isAuthenticatedModelUrl gates the
+        // lookup on the API's own origin, so this must resolve exactly like
+        // any other unmatched external URL: libraryModelId stays unset and
+        // model3DId is omitted.
+        vi.mocked(apiClient.get).mockImplementation(((url: string) => {
+          if (url === '/3d-models') {
+            return Promise.resolve({ data: mockModelListWithGuid });
+          }
+          return Promise.resolve({ data: new ArrayBuffer(0) });
+        }) as never);
+        const fetchSpy = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+        });
+        vi.stubGlobal('fetch', fetchSpy);
+
+        await reachSubmittableStateViaUrl();
+
+        fireEvent.change(screen.getByLabelText('File URL'), {
+          target: { value: `https://evil.example/3d-models/file/${mockLibraryModelGuid}` },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+        await waitFor(() => {
+          const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
+          expect(models).toHaveLength(1);
+          expect(models[0].libraryModelId).toBeUndefined();
+        });
+
+        await waitForProcessProfile();
+        await waitFor(() => {
+          expect(latestOnSlice()).toBeTypeOf('function');
+        });
+        await act(async () => { latestOnSlice()!(); });
+
+        await waitFor(() => {
+          expect(sliceJobService.submitJob).toHaveBeenCalled();
+        }, { timeout: 3000 });
+
+        const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)?.[0] as { model3DId?: string };
+        expect(request.model3DId).toBeUndefined();
+      });
     });
   });
 

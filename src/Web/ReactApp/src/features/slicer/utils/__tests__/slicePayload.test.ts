@@ -4,6 +4,7 @@ import {
   modelTransformJson,
   buildSlicePayloadModels,
   resolveModel3DId,
+  isValidModelGuid,
   diffProcessOverrides,
 } from '../slicePayload';
 import type { LoadedModel } from '@/features/slicer/components/viewer/SlicerBedVisualization';
@@ -75,7 +76,25 @@ describe('slicePayload', () => {
     });
   });
 
+  describe('isValidModelGuid', () => {
+    it('accepts well-formed GUIDs, case-insensitively', () => {
+      expect(isValidModelGuid('3fa85f64-5717-4562-b3fc-2c963f66afa6')).toBe(true);
+      expect(isValidModelGuid('3FA85F64-5717-4562-B3FC-2C963F66AFA6')).toBe(true);
+    });
+
+    it('rejects non-GUID strings, undefined and null', () => {
+      expect(isValidModelGuid('url-1787623543833')).toBe(false);
+      expect(isValidModelGuid('model-a-1')).toBe(false);
+      expect(isValidModelGuid('')).toBe(false);
+      expect(isValidModelGuid(undefined)).toBe(false);
+      expect(isValidModelGuid(null)).toBe(false);
+    });
+  });
+
   describe('resolveModel3DId', () => {
+    const GUID_A = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
+    const GUID_B = 'a1b2c3d4-e5f6-4789-a012-b3c4d5e6f789';
+
     // Regression test for issue #1709: "Slice Plate" threw
     // `TypeError: Cannot read properties of undefined (reading 'length')`
     // because the caller read `payload.modelFileUrls.length`, and
@@ -84,22 +103,22 @@ describe('slicePayload', () => {
     // case (e.g. right after a model load failure leaves exactly one
     // still-URL-bearing model on the active plate).
     it('does not throw and resolves the primary id for a single sliceable model', () => {
-      const payload = buildSlicePayloadModels([model({ id: 'only' })]);
+      const payload = buildSlicePayloadModels([model({ id: GUID_A })]);
       expect(payload.modelFileUrls).toBeUndefined();
 
       expect(() => resolveModel3DId(payload, undefined)).not.toThrow();
-      expect(resolveModel3DId(payload, undefined)).toBe('only');
+      expect(resolveModel3DId(payload, undefined)).toBe(GUID_A);
     });
 
     it('falls back to the selected model id when the active plate has no sliceable model', () => {
       const payload = buildSlicePayloadModels([]);
-      expect(resolveModel3DId(payload, 'selected-fallback')).toBe('selected-fallback');
+      expect(resolveModel3DId(payload, GUID_A)).toBe(GUID_A);
       expect(resolveModel3DId(payload, undefined)).toBeUndefined();
     });
 
     it('is undefined for a multi-model plate (model3DId only applies to a single model)', () => {
-      const payload = buildSlicePayloadModels([model({ id: 'a' }), model({ id: 'b' })]);
-      expect(resolveModel3DId(payload, 'a')).toBeUndefined();
+      const payload = buildSlicePayloadModels([model({ id: GUID_A }), model({ id: GUID_B })]);
+      expect(resolveModel3DId(payload, GUID_A)).toBeUndefined();
     });
 
     // Regression test for issue #1771: bed-model instance ids are no longer
@@ -108,9 +127,27 @@ describe('slicePayload', () => {
     // instance's `libraryModelId` over its opaque `id`.
     it('prefers libraryModelId over the instance id when both are present', () => {
       const payload = buildSlicePayloadModels([
-        model({ id: 'model-a-1', libraryModelId: 'model-a' }),
+        model({ id: `${GUID_A}-1`, libraryModelId: GUID_A }),
       ]);
-      expect(resolveModel3DId(payload, undefined)).toBe('model-a');
+      expect(resolveModel3DId(payload, undefined)).toBe(GUID_A);
+    });
+
+    // Regression test for issue #1973: a model loaded directly from a URL has
+    // no `libraryModelId` and only a synthetic `url-<timestamp>` instance id.
+    // Previously that non-GUID id was sent as `model3DId`, and the API
+    // rejected it: "The JSON value could not be converted to
+    // System.Nullable`1[System.Guid]. Path: $.model3DId".
+    it('omits model3DId for a URL-loaded model with no library source', () => {
+      const payload = buildSlicePayloadModels([model({ id: `url-${Date.now()}` })]);
+      expect(resolveModel3DId(payload, undefined)).toBeUndefined();
+      expect(resolveModel3DId(payload, '')).toBeUndefined();
+    });
+
+    // A cut/split piece also has no `libraryModelId` and only a synthetic
+    // `<id>-cut-<n>-<timestamp>` instance id — same underlying bug as #1973.
+    it('omits model3DId for a cut-piece model with no library source', () => {
+      const payload = buildSlicePayloadModels([model({ id: `${GUID_A}-cut-0-${Date.now()}` })]);
+      expect(resolveModel3DId(payload, undefined)).toBeUndefined();
     });
   });
 

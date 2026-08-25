@@ -1,6 +1,7 @@
 /* eslint-disable local/pf-no-unguarded-console */
 // Get hash for a G-code file (returns string)
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
+import { extractValidationErrorMessage } from "@/common/utils/apiErrors";
 import {
   ApiError,
   PrintJobStatusDto,
@@ -677,10 +678,17 @@ export class ApiClient {
               ? bodyRecord.detail
               : undefined;
 
+        // ASP.NET Core model-binding failures (e.g. a malformed request body
+        // field, such as a non-GUID string sent for a `Guid?` property) return
+        // a `ValidationProblemDetails`-shaped `errors` dictionary with no
+        // top-level `message`/`detail` — surface that detail instead of
+        // falling through to the generic axios error message (issue #1973).
+        const validationMessage = extractValidationErrorMessage(responseData);
+
         const apiError: ApiError = {
-          message: bodyMessage ?? (detailMessage || error.message),
+          message: bodyMessage ?? (detailMessage || validationMessage || error.message),
           statusCode: error.response?.status || 500,
-          details: detailMessage,
+          details: detailMessage ?? validationMessage,
           data: responseData,
           isAxiosError: axios.isAxiosError(error),
         };

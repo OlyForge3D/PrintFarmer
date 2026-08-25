@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isApiError, getRevisionConflict, getErrorMessage } from '../apiErrors';
+import { isApiError, getRevisionConflict, getErrorMessage, extractValidationErrorMessage } from '../apiErrors';
 import type { ApiError } from '@/types/api';
 
 function makeApiError(overrides: Partial<ApiError> = {}): ApiError {
@@ -91,5 +91,49 @@ describe('getErrorMessage', () => {
   it('returns the fallback when an ApiError has an empty message', () => {
     const error = makeApiError({ message: '' });
     expect(getErrorMessage(error, 'fallback')).toBe('fallback');
+  });
+});
+
+describe('extractValidationErrorMessage', () => {
+  // Regression test for issue #1973: a malformed slice-job request body (a
+  // non-GUID string for `model3DId`) fails ASP.NET Core model binding before
+  // any controller action runs, so the API returns a bare
+  // ValidationProblemDetails `errors` map with no top-level `message`/`detail`.
+  it('joins messages from a ValidationProblemDetails "errors" map', () => {
+    const data = {
+      title: 'One or more validation errors occurred.',
+      status: 400,
+      errors: {
+        '$.model3DId': [
+          "The JSON value could not be converted to System.Nullable`1[System.Guid]. Path: $.model3DId | LineNumber: 0 | BytePositionInLine: 42.",
+        ],
+      },
+      traceId: '00-abc-def-00',
+    };
+    expect(extractValidationErrorMessage(data)).toBe(
+      "The JSON value could not be converted to System.Nullable`1[System.Guid]. Path: $.model3DId | LineNumber: 0 | BytePositionInLine: 42.",
+    );
+  });
+
+  it('joins multiple field errors with a space', () => {
+    const data = {
+      errors: {
+        Name: ['Name is required.'],
+        Email: ['Email is invalid.'],
+      },
+    };
+    expect(extractValidationErrorMessage(data)).toBe('Name is required. Email is invalid.');
+  });
+
+  it('returns undefined when there is no "errors" map', () => {
+    expect(extractValidationErrorMessage({ message: 'plain error' })).toBeUndefined();
+    expect(extractValidationErrorMessage({ errors: 'not-an-object' })).toBeUndefined();
+    expect(extractValidationErrorMessage({ errors: { field: [] } })).toBeUndefined();
+  });
+
+  it('returns undefined for null, undefined, and non-object values', () => {
+    expect(extractValidationErrorMessage(null)).toBeUndefined();
+    expect(extractValidationErrorMessage(undefined)).toBeUndefined();
+    expect(extractValidationErrorMessage('a string')).toBeUndefined();
   });
 });
