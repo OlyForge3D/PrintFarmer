@@ -584,15 +584,6 @@ once. Cancellation is accepted only while the run does not yet own work in anoth
 bounded context; afterwards it is `409 cancellation_not_permitted`, because this
 scope deliberately does not invent slicer queue semantics.
 
-#### `calibrationGenerationEnabled`
-
-This flag has been removed from the platform capabilities contract (issue
-#1983). Deterministic G-code generation from a calibration attempt is
-generator-specific machinery being decommissioned separately (issue #1979);
-it is no longer part of the capability document thin clients (web or
-PrintFarmer Desktop) use to drive server-orchestrated filament calibration.
-`effectiveCapabilities.canGenerate` has likewise been removed.
-
 ### Calibration persistence and synchronization
 
 All calibration persistence routes require a PrintFarmer JWT, the corresponding

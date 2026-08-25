@@ -371,10 +371,8 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
         capabilities.GetProperty("canCreate").GetBoolean().Should().BeFalse();
         capabilities.GetProperty("canDelete").GetBoolean().Should().BeFalse();
         capabilities.GetProperty("canSubmitSlicing").GetBoolean().Should().BeFalse();
-
-        // canGenerate additionally depends on the runtime slicer dependency, so it stays false here
-        // regardless of permissions - the permission gate never relaxes the dependency gate.
-        capabilities.GetProperty("canGenerate").GetBoolean().Should().BeFalse();
+        capabilities.TryGetProperty("canGenerate", out _).Should().BeFalse(
+            "canGenerate described generator-specific eligibility and was removed from the contract");
     }
 
     #endregion

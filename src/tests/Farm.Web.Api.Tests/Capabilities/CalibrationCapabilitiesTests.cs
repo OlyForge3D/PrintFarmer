@@ -122,6 +122,8 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             .Should().Be("/api/calibration-projects");
         _ = root.GetProperty("routes").GetProperty("calibrationSync").GetString()
             .Should().Be("/api/calibration-sync/changes");
+        _ = root.GetProperty("routes").TryGetProperty("calibrationGenerateJob", out _).Should().BeFalse(
+            "the generate-job route described generator-specific machinery and is no longer advertised");
         _ = root.GetProperty("limits").GetProperty("photoUploadMaxBytes").GetInt64()
             .Should().BeGreaterThan(0);
         _ = root.GetProperty("acceptedMimeTypes").GetProperty("photo").EnumerateArray()
@@ -228,6 +230,8 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             .GetBoolean().Should().BeFalse();
         _ = root.GetProperty("effectiveCapabilities").GetProperty("canUpdate")
             .GetBoolean().Should().BeFalse();
+        _ = root.GetProperty("effectiveCapabilities").TryGetProperty("canGenerate", out _).Should().BeFalse(
+            "canGenerate described generator-specific eligibility and was removed from the contract");
     }
 
     [Fact]
