@@ -582,6 +582,46 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
 
     [Fact]
     [Trait("Category", "SlicePrintBridge")]
+    public async Task SendToPrinter_PrinterWithNonFiniteBuildVolume_Returns400AndDoesNotUpload()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        Artifact gcode = CreateArtifact(jobId, "gcode", "model.gcode");
+        string filePath = CreateTempGcodeFile("model.gcode");
+
+        SetupCompletedJobWithGcode(jobId, gcode);
+        SetupArtifactPath(gcode, filePath);
+
+        _printersMock
+            .Setup(p => p.FindByIdWithIncludesAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Printer
+            {
+                Id = printerId,
+                Name = "Test Printer",
+                // A build-volume dimension should never be non-finite, but nothing in the domain
+                // model or DTOs prevents it from being persisted (double.PositiveInfinity/NaN
+                // deserialize fine from a numeric literal like 1e309). Casting that straight to
+                // decimal throws an unhandled OverflowException; the safety-limits builder must
+                // fail closed instead.
+                MaxBuildVolumeX = double.PositiveInfinity,
+            });
+
+        var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
+
+        IActionResult result = await _controller.SendToPrinterAsync(jobId, request, CancellationToken.None);
+
+        var badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;
+        badRequest.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+
+        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Never);
+        _printersMock.Verify(
+            p => p.UploadGcodeAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "SlicePrintBridge")]
     public async Task SendToPrinter_MalformedPrintablePolygonJson_Returns400AndDoesNotUpload()
     {
         Guid jobId = Guid.NewGuid();

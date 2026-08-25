@@ -243,11 +243,11 @@ public class SlicePrintBridgeController(
             toolhead?.IsDirectDrive);
 
         var bedLimits = new GcodeSafetyBedLimits(
-            printer.MaxBuildVolumeX is { } sizeX ? (decimal)sizeX : null,
-            printer.MaxBuildVolumeY is { } sizeY ? (decimal)sizeY : null,
-            printer.MaxBuildVolumeZ is { } sizeZ ? (decimal)sizeZ : null,
-            printer.BedOriginX is { } originX ? (decimal)originX : null,
-            printer.BedOriginY is { } originY ? (decimal)originY : null,
+            ToFiniteDecimalOrThrow(printer.MaxBuildVolumeX, nameof(printer.MaxBuildVolumeX)),
+            ToFiniteDecimalOrThrow(printer.MaxBuildVolumeY, nameof(printer.MaxBuildVolumeY)),
+            ToFiniteDecimalOrThrow(printer.MaxBuildVolumeZ, nameof(printer.MaxBuildVolumeZ)),
+            ToFiniteDecimalOrThrow(printer.BedOriginX, nameof(printer.BedOriginX)),
+            ToFiniteDecimalOrThrow(printer.BedOriginY, nameof(printer.BedOriginY)),
             ParsePrintablePolygon(printer.PrintablePolygonJson),
             ParseExcludedRegions(printer.ExcludedRegionsJson));
 
@@ -269,6 +269,30 @@ public class SlicePrintBridgeController(
             bedLimits,
             machineLimits,
             GcodeSafetyPrintLimits.Empty);
+    }
+
+    /// <summary>
+    /// Converts a nullable printer/bed dimension to <see cref="decimal"/>, treating a
+    /// non-finite value (<see cref="double.PositiveInfinity"/>, <see cref="double.NegativeInfinity"/>,
+    /// or <see cref="double.NaN"/>) as configured-but-invalid data rather than letting an unguarded
+    /// cast throw <see cref="OverflowException"/>. A stored printer dimension should never be
+    /// non-finite, but this guards the same class of bug already fixed for polygon coordinates:
+    /// the cast must fail closed (<see cref="InvalidSafetyGeometryException"/>, caught -> 400),
+    /// not fail open with an unhandled exception (500).
+    /// </summary>
+    private static decimal? ToFiniteDecimalOrThrow(double? value, string fieldName)
+    {
+        if (value is not { } v)
+        {
+            return null;
+        }
+
+        if (!double.IsFinite(v))
+        {
+            throw new InvalidSafetyGeometryException($"Printer field '{fieldName}' is not a finite value.");
+        }
+
+        return (decimal)v;
     }
 
     private sealed record SafetyPolygonPointDto(
