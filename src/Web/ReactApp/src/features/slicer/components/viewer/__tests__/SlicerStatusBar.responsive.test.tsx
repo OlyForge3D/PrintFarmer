@@ -70,6 +70,38 @@ describe('SlicerStatusBar narrow-width layout (issue #1974)', () => {
     expect(sliceButton).toHaveClass('shrink-0');
   });
 
+  it('keeps the slice-count info block, failed-plate note, and slice button all shrink-protected when they render together', () => {
+    // SlicerWorkspace always plumbs slicesRemaining/slicesTotal through to
+    // SlicerStatusBar alongside sliceNote whenever both are available (e.g. a
+    // multi-plate job with one plate mid-slice and another that failed to
+    // load), so the right-hand group can render all three children — the
+    // note, the "N / M left" info block, and the Slice button — at once. Only
+    // asserting two of the three in isolation would miss a regression where
+    // the info block's own `shrink-0` (a separate className from the
+    // button's) was dropped and it got squeezed back into a narrow column.
+    render(
+      <SlicerStatusBar
+        objectCount={2}
+        bedWidth={256}
+        bedDepth={256}
+        bedHeight={256}
+        canSlice={false}
+        slicesRemaining={1}
+        slicesTotal={3}
+        sliceNote="A model on this plate failed to load. Retry or remove them before slicing."
+      />,
+    );
+
+    const note = screen.getByTestId('slice-note');
+    const infoBlock = screen.getByText('1 / 3 left').closest('div');
+    const sliceButton = screen.getByRole('button', { name: 'Slice' });
+
+    expect(note).toHaveClass('w-full');
+    expect(infoBlock).toHaveClass('shrink-0');
+    expect(sliceButton).toHaveClass('shrink-0');
+    expect(sliceButton).toBeDisabled();
+  });
+
   it('renders the failed-plate note and disabled slice button together without overlap (desktop-unaffected content contract)', () => {
     const onSlice = vi.fn();
     render(
