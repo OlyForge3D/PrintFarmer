@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace Farm.Slicer.Module.Api.Services;
 
 /// <summary>
-/// Answers worker/version compatibility for the main API's calibration generation capability probe
+/// Answers worker/version compatibility for the main API's slicer-worker compatibility check
 /// (issue #1848), reading this process's own <see cref="SlicerDbContext"/>.
 /// </summary>
 public interface ISlicerHostWorkerCompatibilityService

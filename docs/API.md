@@ -136,6 +136,8 @@ caller-specific permissions:
     "sliceJobs": "/api/slice",
     "sliceJob": "/api/slice/{id}",
     "jobArtifact": "/api/artifacts/job/{jobId}",
+    "gcodePromotions": "/api/gcode-promotions",
+    "gcodePromotion": "/api/gcode-promotions/{operationId}",
     "printerHub": "/hubs/printers",
     "slicerRegistryHub": "/hubs/slicer-registry",
     "slicerProgressHub": "/hubs/slicers"
