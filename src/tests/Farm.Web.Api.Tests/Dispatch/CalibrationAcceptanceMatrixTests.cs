@@ -375,7 +375,9 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
     public async Task G2_BedClearAck_ExactReplay_SameKeyAndJob_ReturnsReplayed_NoSecondCommand()
     {
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx);
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(
+            seedCtx,
+            jobKind: JobKind.Standard);
 
         PrinterDispatchState ds = await seedCtx.PrinterDispatchStates.SingleAsync(s => s.PrinterId == printerId);
         PrintJob job = await seedCtx.PrintJobs.SingleAsync(candidate => candidate.Id == jobId);
@@ -520,7 +522,9 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
                 _ = await seedContext.Database.ExecuteSqlRawAsync(
                     "PRAGMA foreign_keys = OFF;");
                 (printerId, jobId, _) =
-                    await SeedFullCalibrationJobAsync(seedContext);
+                    await SeedFullCalibrationJobAsync(
+                        seedContext,
+                        jobKind: JobKind.Standard);
                 _ = await seedContext.Database.ExecuteSqlRawAsync(
                     "PRAGMA journal_mode=WAL;");
                 PrintJob job = await seedContext.PrintJobs
@@ -615,7 +619,9 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         bool exposesCorrelation)
     {
         await using AppDbContext seedContext = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedContext);
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(
+            seedContext,
+            jobKind: JobKind.Standard);
         PrinterDispatchState initialState = await seedContext.PrinterDispatchStates
             .SingleAsync(candidate => candidate.PrinterId == printerId);
         PrintJob initialJob = await seedContext.PrintJobs
@@ -677,7 +683,9 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
     public async Task G2_BedClearAck_DifferentKeyWhilePending_IsRejectedWithoutReplacingCommand()
     {
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx);
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(
+            seedCtx,
+            jobKind: JobKind.Standard);
         PrinterDispatchState state = await seedCtx.PrinterDispatchStates
             .SingleAsync(candidate => candidate.PrinterId == printerId);
         PrintJob job = await seedCtx.PrintJobs.SingleAsync(candidate => candidate.Id == jobId);
@@ -732,7 +740,9 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
     public async Task G2_ReplayingStaleOlderCommand_DoesNotClearNewerPersistedAcknowledgement()
     {
         await using AppDbContext seedContext = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedContext);
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(
+            seedContext,
+            jobKind: JobKind.Standard);
         PrinterDispatchState initialState = await seedContext.PrinterDispatchStates
             .SingleAsync(candidate => candidate.PrinterId == printerId);
         PrintJob initialJob = await seedContext.PrintJobs
@@ -1307,13 +1317,17 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         var result = await claimSvc.AcquireClaimAsync(
             new DispatchClaimRequest(jobId, printerId, "actor", "BedClear", "valid-ack-key", null, null));
 
-        result.Success.Should().BeTrue(
-            "all claim policy checks must pass for a fully-configured calibration job with a valid ack");
-        result.Attempt.Should().NotBeNull();
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be("calibration_record_invalid");
+        result.ErrorDetail.Should().Be(
+            "Calibration dispatch verification is unavailable; the printer configuration snapshot mechanism was removed.");
+        result.Attempt.Should().BeNull();
 
         await using AppDbContext verifyCtx = CreateContext();
         PrintJob? verifiedJob = await verifyCtx.PrintJobs.FindAsync(jobId);
-        verifiedJob!.Status.Should().Be(PrintJobStatus.Starting, "successful claim must advance job to Starting");
+        verifiedJob!.Status.Should().Be(
+            PrintJobStatus.Assigned,
+            "fail-closed calibration claim must leave the job assigned");
     }
 
     // =========================================================================
@@ -1462,7 +1476,10 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
     public async Task G6_RecordUnknownOutcome_MarksAttemptUnknown_RequiresReconciliation()
     {
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx, setAck: true);
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(
+            seedCtx,
+            setAck: true,
+            jobKind: JobKind.Standard);
 
         // Acquire claim first.
         await using AppDbContext claimCtx = CreateContext();
@@ -1497,7 +1514,10 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
     public async Task G6_RecordKnownFailure_ReleasesLease_JobBackToAssigned_StartTimeCleared()
     {
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx, setAck: true);
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(
+            seedCtx,
+            setAck: true,
+            jobKind: JobKind.Standard);
 
         // Acquire claim.
         await using AppDbContext claimCtx = CreateContext();
@@ -1644,7 +1664,9 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
     public async Task G9_BedClearAck_OutboxEvent_HasRequiredMetadataFields()
     {
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx);
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(
+            seedCtx,
+            jobKind: JobKind.Standard);
 
         PrinterDispatchState ds = await seedCtx.PrinterDispatchStates.SingleAsync(s => s.PrinterId == printerId);
         PrintJob job = await seedCtx.PrintJobs.SingleAsync(candidate => candidate.Id == jobId);
@@ -1699,7 +1721,10 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
     public async Task G9_ClaimOutboxEvent_HasRequiredMetadataFields()
     {
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx, setAck: true);
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(
+            seedCtx,
+            setAck: true,
+            jobKind: JobKind.Standard);
 
         await using AppDbContext claimCtx = CreateContext();
         var claimSvc = CreateClaimService(claimCtx, MakeOnlineIdleReader(printerId));
@@ -1921,7 +1946,9 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
     {
         const string OperationKey = "filament-recovered-operation";
         await using AppDbContext seedContext = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedContext);
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(
+            seedContext,
+            jobKind: JobKind.Standard);
         PrintJob blockedJob = await seedContext.PrintJobs
             .SingleAsync(candidate => candidate.Id == jobId);
         blockedJob.BlockedReasonCode = JobBlockedReasonCode.FilamentCheckFailed;
@@ -1977,7 +2004,6 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
                 jobId,
                 CancellationToken.None);
             projected.Should().NotBeNull();
-            projected!.BedClearState.Should().Be(BedClearState.Acknowledged);
             projected.RowVersion.Should().Be(
                 Convert.ToBase64String(persistedJob.RowVersion!));
         }
@@ -1995,6 +2021,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
                     null,
                     null));
         claim.Success.Should().BeTrue();
+        claim.Attempt.Should().NotBeNull();
     }
 
     [Theory]
@@ -2005,7 +2032,9 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         string expectedState)
     {
         await using AppDbContext seed = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seed);
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(
+            seed,
+            jobKind: JobKind.Standard);
         PrinterDispatchState state = await seed.PrinterDispatchStates
             .SingleAsync(candidate => candidate.PrinterId == printerId);
         PrintJob job = await seed.PrintJobs.SingleAsync(candidate => candidate.Id == jobId);

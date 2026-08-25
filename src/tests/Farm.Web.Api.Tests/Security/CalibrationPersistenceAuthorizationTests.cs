@@ -24,7 +24,6 @@ public sealed class CalibrationPersistenceAuthorizationTests : IAsyncLifetime
         { HttpMethod.Get, "/api/calibration-sync/changes", PrintFarmerPermissions.Calibration.Read },
         { HttpMethod.Post, "/api/calibration-sync/apply", PrintFarmerPermissions.Calibration.Update },
         { HttpMethod.Post, "/api/calibration-imports/legacy-v4", PrintFarmerPermissions.Calibration.Create },
-        { HttpMethod.Post, $"/api/calibration-generated-profiles/{Guid.NewGuid()}/publish", PrintFarmerPermissions.Calibration.Publish },
     };
 
     public Task InitializeAsync() => Task.CompletedTask;

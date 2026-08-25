@@ -76,8 +76,11 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = promoted.SlicerDistribution.Should().Be("upstream");
         _ = promoted.PinnedSlicerVersion.Should().Be("2.3.1");
         _ = promoted.SlicerContainerDigest.Should().Be("sha256:pinned-container");
-        _ = promoted.FirmwareFamily.Should().Be("Klipper");
-        _ = promoted.GcodeDialect.Should().Be("Klipper");
+        // Path D (#1980): PrinterConfigurationSnapshot was deleted, so the promoter's
+        // calibration-lineage lookup can no longer resolve firmware/dialect context and always
+        // returns null for these fields until the filament-calibration saga (D7) replaces it.
+        _ = promoted.FirmwareFamily.Should().BeNull();
+        _ = promoted.GcodeDialect.Should().BeNull();
         _ = promoted.IsImmutable.Should().BeTrue();
         _ = promoted.PromotedAtUtc.Should().NotBeNull();
     }

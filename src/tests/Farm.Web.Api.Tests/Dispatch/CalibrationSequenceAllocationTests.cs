@@ -233,12 +233,13 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
     // =========================================================================
 
     [Fact]
-    public async Task SequentialCalibrationJobs_EachGetUniqueAscendingSequence()
+    public async Task SequentialCalibrationJobs_FailClosedBeforeAllocatingAnySequence()
     {
         await using AppDbContext seedCtx = CreateContext();
         (Guid printerId, Guid gcodeId) = await SeedBaseAsync(seedCtx);
 
-        // Create 3 sequential calibration jobs (different idempotency keys = different jobs).
+        // Calibration queue creation now fails closed before any outbox allocation because the
+        // authoritative printer configuration snapshot no longer exists.
         for (int i = 1; i <= 3; i++)
         {
             (JobQueueService _, AppDbContext db) = CreateSut(_connectionString);
@@ -261,22 +262,20 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
                     positionAllocator: new QueuePositionAllocator(db));
 
                 var req = MakeCalibrationRequest(gcodeId, printerId, $"seq-key-{i}");
-                JobQueuePrintJobDto? result = await sutWithData.AddJobToQueueAsync(req, null, CancellationToken.None);
-                result.Should().NotBeNull($"job {i} must be added successfully");
+                Func<Task> act = async () => await sutWithData.AddJobToQueueAsync(req, null, CancellationToken.None);
+                await act.Should().ThrowAsync<CalibrationQueueResourceNotFoundException>()
+                    .WithMessage("*authoritative printer configuration snapshot was not found*");
             }
         }
 
-        // Verify 3 distinct, ascending sequences.
+        // Verify no outbox sequence allocation occurred.
         await using AppDbContext verifyCtx = CreateContext();
         List<long> sequences = await verifyCtx.QueueDispatchOutbox
             .OrderBy(e => e.Sequence)
             .Select(e => e.Sequence)
             .ToListAsync();
 
-        sequences.Should().HaveCount(3, "three calibration jobs must produce three outbox events");
-        sequences.Should().OnlyHaveUniqueItems("each outbox event must have a distinct sequence");
-        sequences.Should().BeInAscendingOrder("sequences must be monotonically increasing");
-        sequences.Should().AllSatisfy(s => s.Should().BeGreaterThan(0, "sequences must start above 0"));
+        sequences.Should().BeEmpty("fail-closed calibration queue creation must not write outbox events");
     }
 
     // =========================================================================

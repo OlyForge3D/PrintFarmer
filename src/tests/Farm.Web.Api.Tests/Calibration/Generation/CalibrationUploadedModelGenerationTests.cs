@@ -1,4 +1,3 @@
-﻿using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -8,7 +7,6 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Security;
-using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
@@ -25,9 +23,11 @@ namespace Farm.Web.Api.Tests.Calibration.Generation;
 /// <summary>
 /// Covers the boundary between production model upload storage and the durable calibration generation
 /// saga: a model uploaded over <c>POST /api/3d-models/upload</c> must be resolvable by the very
-/// <see cref="IModelStorageResolver"/> the saga is injected with, and a final-verification attempt that
-/// links it must reach slice submission instead of failing with
-/// <see cref="CalibrationGenerationProblemCodes.LinkedAssetMissing"/>.
+/// <see cref="IModelStorageResolver"/> the saga is injected with. Path D (#1980) deleted
+/// <c>PrinterConfigurationSnapshot</c>, so the saga itself now fails every orchestration terminally with
+/// <see cref="CalibrationGenerationProblemCodes.ContextIdentityMissing"/> before it can reach model
+/// resolution or slice submission; that terminal failure is asserted directly rather than assuming the
+/// linked asset resolves.
 /// </summary>
 /// <remarks>
 /// Production upload storage records <c>Model3D.FilePath</c> as the virtual library path ("/") while the
@@ -52,8 +52,6 @@ public sealed class CalibrationUploadedModelGenerationTests : IAsyncLifetime
     private readonly byte[] _fixtureBytes = TestData.BinaryStlCuboid(20f, 20f, 20f);
 
     private UploadedModel _uploaded = null!;
-    private Guid _workerServiceId;
-    private string _workerKey = null!;
 
     /// <inheritdoc/>
     public async Task InitializeAsync()
@@ -65,7 +63,10 @@ public sealed class CalibrationUploadedModelGenerationTests : IAsyncLifetime
         }
 
         _uploaded = await UploadModelAsync();
-        (_workerServiceId, _workerKey) = await RegisterAttestedWorkerAsync();
+
+        // The generate-job endpoint preflights an operational, allow-listed attested worker through
+        // CalibrationCapabilityService before it will even accept a request.
+        await RegisterAttestedWorkerAsync();
     }
 
     /// <inheritdoc/>
@@ -103,8 +104,8 @@ public sealed class CalibrationUploadedModelGenerationTests : IAsyncLifetime
         _ = resolution.Content.SizeBytes.Should().Be(_fixtureBytes.LongLength);
     }
 
-    [Fact(DisplayName = "A final-verification run over an uploaded model submits the slice job")]
-    public async Task FinalVerificationRun_WithUploadedModel_ReachesSliceSubmission()
+    [Fact(DisplayName = "A final-verification run over an uploaded model fails terminally before slice submission")]
+    public async Task FinalVerificationRun_WithUploadedModel_FailsTerminallyWithContextIdentityMissing()
     {
         CalibrationGenerationFixture fixture = await SeedFinalVerificationAsync();
         using HttpClient caller = CreateCallerClient();
@@ -123,27 +124,22 @@ public sealed class CalibrationUploadedModelGenerationTests : IAsyncLifetime
 
         await AdvanceSagaAsync(fixture.OrchestrationId);
 
+        // Path D (#1980): PrinterConfigurationSnapshot was deleted, so the saga now fails terminally
+        // with ContextIdentityMissing before it ever reaches model resolution or slice submission,
+        // regardless of whether the linked model is a real, resolvable upload. The resolver itself is
+        // still verified directly against production upload storage by
+        // UploadedModel_ResolvesThroughInjectedModelStorageResolver above; that coverage does not
+        // depend on the saga reaching this far.
         CalibrationOrchestrationStatusDto status = await GetStatusAsync(caller, fixture.OrchestrationId);
-        _ = status.LastErrorCode.Should().BeNull(
-            "the linked asset was uploaded through the production route and must resolve");
-        _ = status.Status.Should().Be(nameof(CalibrationOrchestrationStatus.Running));
-        _ = status.CurrentStep.Should().Be(CalibrationGenerationSteps.AwaitingWorker);
-        _ = status.Model3DId.Should().Be(_uploaded.Model3DId);
+        _ = status.Status.Should().Be(nameof(CalibrationOrchestrationStatus.Failed));
+        _ = status.LastErrorCode.Should().Be(CalibrationGenerationProblemCodes.ContextIdentityMissing);
 
-        SliceJob job = await ReadSliceJobAsync(fixture.OrchestrationId);
-        _ = job.Status.Should().Be(SliceJobStatus.Queued);
-        _ = job.Model3DId.Should().Be(_uploaded.Model3DId);
-        _ = job.ModelSha256.Should().BeEquivalentTo(_uploaded.Sha256);
-
-        // The worker resolves the same stored bytes through the authenticated model route, which is the
-        // second consumer of the storage resolver on this path.
-        using HttpClient worker = CreateWorkerClient();
-        WorkerSliceJobResponse claimed = await ClaimAsync(worker);
-        _ = claimed.Id.Should().Be(job.Id);
-        byte[] delivered = await DownloadModelAsync(worker, claimed);
-        _ = delivered.Should().Equal(
-            _fixtureBytes,
-            "the worker must receive exactly the bytes the caller uploaded");
+        using IServiceScope scope = _factory.Services.CreateScope();
+        SlicerDbContext slicer = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        _ = (await slicer.SliceJobs
+            .AsNoTracking()
+            .CountAsync(job => job.CalibrationOrchestrationId == fixture.OrchestrationId))
+            .Should().Be(0, "the saga must not submit a slice job once context resolution fails terminally");
     }
 
     private async Task<UploadedModel> UploadModelAsync()
@@ -210,16 +206,34 @@ public sealed class CalibrationUploadedModelGenerationTests : IAsyncLifetime
         return client;
     }
 
-    private HttpClient CreateWorkerClient()
+    private async Task AdvanceSagaAsync(Guid orchestrationId)
     {
-        HttpClient client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Test-User-Id", OwnerUserId.ToString());
-        client.DefaultRequestHeaders.Add(WorkerLeaseHeaders.WorkerKey, _workerKey);
-        client.DefaultRequestHeaders.Add(WorkerLeaseHeaders.WorkerId, _workerServiceId.ToString());
-        return client;
+        using IServiceScope scope = _factory.Services.CreateScope();
+        ICalibrationGenerationSaga saga = scope.ServiceProvider
+            .GetRequiredService<ICalibrationGenerationSaga>();
+        _ = await saga.ResumeAsync(orchestrationId, CancellationToken.None);
     }
 
-    private async Task<(Guid ServiceId, string ApiKey)> RegisterAttestedWorkerAsync()
+    private async Task<CalibrationOrchestrationStatusDto> GetStatusAsync(
+        HttpClient caller,
+        Guid orchestrationId)
+    {
+        HttpResponseMessage response = await caller.GetAsync(
+            $"/api/calibration-orchestrations/{orchestrationId}");
+        string body = await response.Content.ReadAsStringAsync();
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        return JsonSerializer.Deserialize<CalibrationOrchestrationStatusDto>(
+            body,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+    }
+
+    /// <summary>A model that was stored through the production upload route.</summary>
+    /// <param name="Model3DId">Stored model identity.</param>
+    /// <param name="Sha256">Uppercase hexadecimal SHA-256 of the uploaded bytes.</param>
+    /// <param name="SizeBytes">Length of the uploaded bytes.</param>
+    private sealed record UploadedModel(Guid Model3DId, string Sha256, long SizeBytes);
+
+    private async Task RegisterAttestedWorkerAsync()
     {
         using IServiceScope scope = _factory.Services.CreateScope();
         SlicerDbContext slicer = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
@@ -259,74 +273,5 @@ public sealed class CalibrationUploadedModelGenerationTests : IAsyncLifetime
             UpdatedAt = DateTime.UtcNow,
         });
         _ = await slicer.SaveChangesAsync();
-        return (serviceId, apiKey);
     }
-
-    private async Task AdvanceSagaAsync(Guid orchestrationId)
-    {
-        using IServiceScope scope = _factory.Services.CreateScope();
-        ICalibrationGenerationSaga saga = scope.ServiceProvider
-            .GetRequiredService<ICalibrationGenerationSaga>();
-        _ = await saga.ResumeAsync(orchestrationId, CancellationToken.None);
-    }
-
-    private async Task<CalibrationOrchestrationStatusDto> GetStatusAsync(
-        HttpClient caller,
-        Guid orchestrationId)
-    {
-        HttpResponseMessage response = await caller.GetAsync(
-            $"/api/calibration-orchestrations/{orchestrationId}");
-        string body = await response.Content.ReadAsStringAsync();
-        _ = response.StatusCode.Should().Be(HttpStatusCode.OK, body);
-        return JsonSerializer.Deserialize<CalibrationOrchestrationStatusDto>(
-            body,
-            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
-    }
-
-    private async Task<SliceJob> ReadSliceJobAsync(Guid orchestrationId)
-    {
-        using IServiceScope scope = _factory.Services.CreateScope();
-        SlicerDbContext slicer = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
-        return await slicer.SliceJobs
-            .AsNoTracking()
-            .SingleAsync(job => job.CalibrationOrchestrationId == orchestrationId);
-    }
-
-    private async Task<WorkerSliceJobResponse> ClaimAsync(HttpClient worker)
-    {
-        HttpResponseMessage response = await worker.PostAsJsonAsync(
-            "/api/slice/claim",
-            new ClaimJobRequest
-            {
-                WorkerId = _workerServiceId,
-                Capabilities = ["orcaslicer", CalibrationContractConstants.UpstreamSlicerCapability],
-                LeaseDurationSeconds = 300,
-            });
-        string body = await response.Content.ReadAsStringAsync();
-        _ = response.StatusCode.Should().Be(HttpStatusCode.OK, body);
-        return JsonSerializer.Deserialize<WorkerSliceJobResponse>(
-            body,
-            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
-    }
-
-    private static async Task<byte[]> DownloadModelAsync(HttpClient worker, WorkerSliceJobResponse claimed)
-    {
-        using HttpRequestMessage message = new(HttpMethod.Get, $"/api/slice/{claimed.Id}/model");
-        message.Headers.Add(WorkerClaimHeaders.ClaimToken, claimed.ClaimToken.ToString());
-        message.Headers.Add(WorkerLeaseHeaders.LeaseToken, claimed.LeaseToken.ToString());
-        message.Headers.Add(
-            WorkerLeaseHeaders.LeaseFence,
-            claimed.LeaseFence.ToString(CultureInfo.InvariantCulture));
-        HttpResponseMessage response = await worker.SendAsync(message);
-        _ = response.StatusCode.Should().Be(
-            HttpStatusCode.OK,
-            await response.Content.ReadAsStringAsync());
-        return await response.Content.ReadAsByteArrayAsync();
-    }
-
-    /// <summary>A model that was stored through the production upload route.</summary>
-    /// <param name="Model3DId">Stored model identity.</param>
-    /// <param name="Sha256">Uppercase hexadecimal SHA-256 of the uploaded bytes.</param>
-    /// <param name="SizeBytes">Length of the uploaded bytes.</param>
-    private sealed record UploadedModel(Guid Model3DId, string Sha256, long SizeBytes);
 }

@@ -281,10 +281,10 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
 
     /// <summary>
     /// Create/update/delete are three separate permissions. A key holding all three must clear
-    /// their routes and must still be refused generate and publish.
+    /// their routes and must still be refused surviving generation routes it was not granted.
     /// </summary>
     [Fact]
-    public async Task CalibrationWriteScopes_ClearWriteRoutesButAreDeniedGenerateAndPublish()
+    public async Task CalibrationWriteScopes_ClearWriteRoutesButAreDeniedGenerate()
     {
         using HttpClient client = await ScopedClientAsync(
             ApiKeyScope.CalibrationRead |
@@ -310,12 +310,8 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
         ShouldClearAuthorization(delete, "calibration:delete was granted");
 
         using HttpResponseMessage generate = await client.PostAsJsonAsync(
-            $"/api/calibration-projects/{Guid.NewGuid()}/generated-profiles", new { });
+            $"/api/calibration-projects/{projectId}/attempts/{Guid.NewGuid()}/generate-job", new { });
         ShouldBeDenied(generate, "calibration:generate was not selected");
-
-        using HttpResponseMessage publish = await client.PostAsJsonAsync(
-            $"/api/calibration-generated-profiles/{Guid.NewGuid()}/publish", new { });
-        ShouldBeDenied(publish, "calibration:publish was not selected");
     }
 
     #endregion
@@ -323,7 +319,7 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
     #region Calibration generate boundary
 
     [Fact]
-    public async Task CalibrationGenerateScope_ClearsGenerateButIsDeniedPublishAndProfileMutation()
+    public async Task CalibrationGenerateScope_ClearsGenerateJobButIsDeniedProfileMutation()
     {
         using HttpClient client = await ScopedClientAsync(
             ApiKeyScope.CalibrationRead |
@@ -332,12 +328,7 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
 
         Guid projectId = Guid.NewGuid();
 
-        await AssertRouteIsAuthorizationGatedAsync(HttpMethod.Post, $"/api/calibration-projects/{projectId}/generated-profiles");
         await AssertRouteIsAuthorizationGatedAsync(HttpMethod.Post, $"/api/calibration-projects/{projectId}/attempts/{Guid.NewGuid()}/generate-job");
-
-        using HttpResponseMessage generate = await client.PostAsJsonAsync(
-            $"/api/calibration-projects/{projectId}/generated-profiles", new { });
-        ShouldClearAuthorization(generate, "calibration:generate was granted");
 
         using HttpResponseMessage generateJob = await client.PostAsJsonAsync(
             $"/api/calibration-projects/{projectId}/attempts/{Guid.NewGuid()}/generate-job", new { });
@@ -345,10 +336,6 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
             HttpStatusCode.Forbidden,
             "calibration:generate and slicing:submit are both granted");
         generateJob.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
-
-        using HttpResponseMessage publish = await client.PostAsJsonAsync(
-            $"/api/calibration-generated-profiles/{Guid.NewGuid()}/publish", new { });
-        ShouldBeDenied(publish, "calibration:publish was not selected");
 
         using HttpResponseMessage create = await client.PostAsJsonAsync(
             "/api/calibration-projects", new { name = "denied" });
@@ -385,20 +372,13 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
     #region Calibration publish boundary
 
     [Fact]
-    public async Task CalibrationPublishScope_ClearsPublishButIsDeniedGenerateAndWrite()
+    public async Task CalibrationPublishScope_IsDeniedGenerateAndWrite()
     {
         using HttpClient client = await ScopedClientAsync(
             ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationPublish);
 
-        await AssertRouteIsAuthorizationGatedAsync(HttpMethod.Post, $"/api/calibration-generated-profiles/{Guid.NewGuid()}/publish");
-
-        using HttpResponseMessage publish = await client.PostAsJsonAsync(
-            $"/api/calibration-generated-profiles/{Guid.NewGuid()}/publish", new { });
-        publish.StatusCode.Should().NotBe(HttpStatusCode.Forbidden, "calibration:publish was granted");
-        publish.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
-
         using HttpResponseMessage generate = await client.PostAsJsonAsync(
-            $"/api/calibration-projects/{Guid.NewGuid()}/generated-profiles", new { });
+            $"/api/calibration-projects/{Guid.NewGuid()}/attempts/{Guid.NewGuid()}/generate-job", new { });
         ShouldBeDenied(generate, "calibration:generate was not selected");
 
         using HttpResponseMessage create = await client.PostAsJsonAsync(
@@ -674,7 +654,7 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
     /// calibration action.
     /// </summary>
     [Fact]
-    public async Task QueuePrintScopedKey_CannotReachCalibrationPublishOrAnyCalibrationRoute()
+    public async Task QueuePrintScopedKey_CannotReachCalibrationGenerationOrAnyCalibrationRoute()
     {
         using HttpClient client = await ScopedClientAsync(
             ApiKeyScope.QueueRead |
@@ -694,10 +674,8 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
 
         List<(string Description, HttpResponseMessage Response)> denied =
         [
-            ("publish a generated calibration profile",
-                await client.PostAsJsonAsync($"/api/calibration-generated-profiles/{Guid.NewGuid()}/publish", new { })),
-            ("generate a calibration profile",
-                await client.PostAsJsonAsync($"/api/calibration-projects/{Guid.NewGuid()}/generated-profiles", new { })),
+            ("generate a calibration job",
+                await client.PostAsJsonAsync($"/api/calibration-projects/{Guid.NewGuid()}/attempts/{Guid.NewGuid()}/generate-job", new { })),
             ("read calibration projects", await client.GetAsync("/api/calibration-projects")),
             ("create a calibration project",
                 await client.PostAsJsonAsync("/api/calibration-projects", new { name = "denied" })),

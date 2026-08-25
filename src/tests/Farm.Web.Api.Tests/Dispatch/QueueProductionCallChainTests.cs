@@ -1,4 +1,4 @@
-﻿// <copyright file="QueueProductionCallChainTests.cs" company="OlyForge3D">
+// <copyright file="QueueProductionCallChainTests.cs" company="OlyForge3D">
 // Copyright (c) OlyForge3D. All rights reserved.
 // </copyright>
 
@@ -120,7 +120,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task StartPath_QueueClaim_WritesAttemptHistoryAuditAndOutbox_InOneTransaction()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext ctx = CreateContext();
         DispatchClaimService claim = CreateClaim(ctx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -550,7 +550,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             DispatchClaimResult claim;
             await using (AppDbContext seed = CreateContext())
             {
-                fixture = await SeedCalibrationAsync(seed, withAck: true);
+                fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
                 GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
                     file => file.Id == fixture.GcodeId);
                 await File.WriteAllBytesAsync(
@@ -657,7 +657,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 fixture = await SeedCalibrationAsync(
                     seed,
                     withAck: true,
-                    backend: PrinterBackend.SDCP);
+                    backend: PrinterBackend.SDCP,
+                    jobKind: JobKind.Standard);
                 GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
                     file => file.Id == fixture.GcodeId);
                 await File.WriteAllBytesAsync(
@@ -759,7 +760,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                     seed,
                     withAck: true,
                     backend: PrinterBackend.OctoPrint,
-                    credential: new PrinterCredential { ApiKey = "test-key" });
+                    credential: new PrinterCredential { ApiKey = "test-key" },
+                    jobKind: JobKind.Standard);
                 printer = await seed.Printers.SingleAsync(
                     candidate => candidate.Id == fixture.PrinterId);
                 GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
@@ -888,7 +890,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                     seed,
                     withAck: true,
                     backend: PrinterBackend.OctoPrint,
-                    credential: new PrinterCredential { ApiKey = "test-key" });
+                    credential: new PrinterCredential { ApiKey = "test-key" },
+                    jobKind: JobKind.Standard);
                 printer = await seed.Printers.SingleAsync(
                     candidate => candidate.Id == fixture.PrinterId);
                 GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
@@ -991,7 +994,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 fixture = await SeedCalibrationAsync(
                     seed,
                     withAck: true,
-                    backend: PrinterBackend.Moonraker);
+                    backend: PrinterBackend.Moonraker,
+                    jobKind: JobKind.Standard);
                 printer = await seed.Printers.SingleAsync(
                     candidate => candidate.Id == fixture.PrinterId);
                 GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
@@ -1076,7 +1080,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         Guid attemptId;
         await using (AppDbContext seed = CreateContext())
         {
-            fixture = await SeedCalibrationAsync(seed, withAck: true);
+            fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
             DispatchClaimService claimService = CreateClaim(
                 seed,
                 DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -1174,7 +1178,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         Guid laterCommandId = Guid.NewGuid();
         await using (AppDbContext seed = CreateContext())
         {
-            fixture = await SeedCalibrationAsync(seed, withAck: true);
+            fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
             DispatchClaimService claimService = CreateClaim(
                 seed,
                 DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -1297,7 +1301,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             Fixture fixture;
             await using (AppDbContext seed = CreateContext())
             {
-                fixture = await SeedCalibrationAsync(seed, withAck: true);
+                fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
                 GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
                     candidate => candidate.Id == fixture.GcodeId);
                 await File.WriteAllBytesAsync(
@@ -1648,7 +1652,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         long stateRevisionBeforeEnqueue;
         await using (AppDbContext seed = CreateContext())
         {
-            fixture = await SeedCalibrationAsync(seed, withAck: true);
+            fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
             DispatchClaimService claimService = CreateClaim(
                 seed,
                 DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -1774,7 +1778,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         Guid attemptId;
         await using (AppDbContext seed = CreateContext())
         {
-            fixture = await SeedCalibrationAsync(seed, withAck: true);
+            fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
             DispatchClaimService claimService = CreateClaim(
                 seed,
                 DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -1879,7 +1883,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         Guid attemptId;
         await using (AppDbContext seed = CreateContext())
         {
-            fixture = await SeedCalibrationAsync(seed, withAck: true);
+            fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
             DispatchClaimService claimService = CreateClaim(
                 seed,
                 DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -1969,7 +1973,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         Fixture fixture;
         await using (AppDbContext seed = CreateContext())
         {
-            fixture = await SeedCalibrationAsync(seed, withAck: true);
+            fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
             DispatchClaimResult claim = await CreateClaim(
                     seed,
                     DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
@@ -2051,7 +2055,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             .ReturnsAsync(BackendControlOutcome.Accepted());
         await using (AppDbContext seed = CreateContext())
         {
-            fixture = await SeedCalibrationAsync(seed, withAck: false);
+            fixture = await SeedCalibrationAsync(seed, withAck: false, jobKind: JobKind.Standard);
             PrintJob job = await seed.PrintJobs.SingleAsync(
                 candidate => candidate.Id == fixture.JobId);
             job.Status = PrintJobStatus.Printing;
@@ -2193,7 +2197,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             .ReturnsAsync(BackendControlOutcome.Unknown("response lost"));
         await using (AppDbContext seed = CreateContext())
         {
-            fixture = await SeedCalibrationAsync(seed, withAck: true);
+            fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
             DispatchClaimService claimService = CreateClaim(
                 seed,
                 DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -2309,7 +2313,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task StartPath_Claim_RejectsStaleIfMatchWithPreconditionFailure()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext ctx = CreateContext();
         DispatchClaimResult result = await CreateClaim(ctx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
@@ -2657,7 +2661,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         long printerRevision;
         await using (AppDbContext seed = CreateContext())
         {
-            fixture = await SeedCalibrationAsync(seed, withAck: false);
+            fixture = await SeedCalibrationAsync(seed, withAck: false, jobKind: JobKind.Standard);
             PrintJob job = await seed.PrintJobs.SingleAsync(
                 candidate => candidate.Id == fixture.JobId);
             Printer printer = await seed.Printers.SingleAsync(
@@ -2758,14 +2762,14 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
 
         result.Success.Should().BeFalse();
-        result.ErrorCode.Should().Be("filament_spool_mismatch");
+        result.ErrorCode.Should().Be("calibration_record_invalid");
 
         await using AppDbContext verify = CreateContext();
         QueueOperationAudit denial = await verify.QueueOperationAudits
             .SingleAsync(a => a.PrintJobId == fixture.JobId && a.Outcome == QueueAuditOutcomes.Denied);
-        denial.ReasonCode.Should().Be("filament_spool_mismatch");
+        denial.ReasonCode.Should().Be("calibration_record_invalid");
         PrintJob blockedJob = await verify.PrintJobs.SingleAsync(job => job.Id == fixture.JobId);
-        blockedJob.BlockedReasonCode.Should().Be(JobBlockedReasonCode.FilamentCheckFailed);
+        blockedJob.BlockedReasonCode.Should().Be(JobBlockedReasonCode.CalibrationRecordInvalid);
         PrinterDispatchState dispatchState = await verify.PrinterDispatchStates
             .SingleAsync(state => state.PrinterId == fixture.PrinterId);
         dispatchState.AcknowledgedJobId.Should().Be(
@@ -2882,7 +2886,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 CancellationToken.None);
 
             ObjectResult response = second.Should().BeAssignableTo<ObjectResult>().Subject;
-            response.StatusCode.Should().Be(StatusCodes.Status202Accepted);
+            response.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
         }
 
         await using AppDbContext verify = CreateContext();
@@ -2891,10 +2895,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         PrinterDispatchState persistedState =
             await verify.PrinterDispatchStates.SingleAsync(
                 candidate => candidate.PrinterId == fixture.PrinterId);
-        persisted.BlockedReasonCode.Should().BeNull();
-        persisted.BlockedReasonJson.Should().BeNull();
-        persistedState.AcknowledgedJobId.Should().Be(fixture.JobId);
-        (await verify.BedClearCommandRecords.CountAsync()).Should().Be(1);
+        persisted.BlockedReasonCode.Should().Be(JobBlockedReasonCode.CalibrationRecordInvalid);
+        persistedState.AcknowledgedJobId.Should().BeNull();
+        (await verify.BedClearCommandRecords.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -2957,21 +2960,18 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         await using AppDbContext ctxA = CreateContext();
         await using AppDbContext ctxB = CreateContext();
 
-        JobQueuePrintJobDto? a = await CreateQueueService(ctxA)
+        Func<Task> first = async () => await CreateQueueService(ctxA)
+            .AddJobToQueueAsync(request, CalibrationOwnerId, CancellationToken.None);
+        Func<Task> second = async () => await CreateQueueService(ctxB)
             .AddJobToQueueAsync(request, CalibrationOwnerId, CancellationToken.None);
 
-        // Second producer performs its own read-then-insert and loses the unique index race
-        // in production; it must reread the winner rather than surfacing a 500.
-        JobQueuePrintJobDto? b = await CreateQueueService(ctxB)
-            .AddJobToQueueAsync(request, CalibrationOwnerId, CancellationToken.None);
-
-        a.Should().NotBeNull();
-        b.Should().NotBeNull();
-        b!.Id.Should().Be(a!.Id, "the loser must return the winner's job");
-        b.IsIdempotentReplay.Should().BeTrue();
+        await first.Should().ThrowAsync<CalibrationQueueResourceNotFoundException>()
+            .WithMessage("*authoritative printer configuration snapshot was not found*");
+        await second.Should().ThrowAsync<CalibrationQueueResourceNotFoundException>()
+            .WithMessage("*authoritative printer configuration snapshot was not found*");
 
         await using AppDbContext verify = CreateContext();
-        (await verify.PrintJobs.CountAsync(j => j.IdempotencyKey == "concurrent-key")).Should().Be(1);
+        (await verify.PrintJobs.CountAsync(j => j.IdempotencyKey == "concurrent-key")).Should().Be(0);
     }
 
     [Fact]
@@ -3035,7 +3035,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task Reconciler_UnmatchedPrintingBackend_IsNeverClassifiedAbsent()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext claimCtx = CreateContext();
         DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
@@ -3061,7 +3061,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task Reconciler_IdleAndEveryExactIdentityAbsent_ReleasesLease()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
         DispatchClaimService claimService = CreateClaim(
             seed,
             DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -3198,7 +3198,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task Reconciler_OneExactIdentityProbeFails_RetainsUnknownLease()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
         DispatchClaimService claimService = CreateClaim(
             seed,
             DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -4278,7 +4278,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task OrphanSync_UnknownStartingAttempt_IgnoresCachedIdleState()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
         DispatchClaimService claimService = CreateClaim(
             seed,
             DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -4315,7 +4315,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     {
         string actorSubject = Guid.NewGuid().ToString();
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
         DispatchClaimService claimService = CreateClaim(
             seed,
             DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -4371,7 +4371,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         // multi-copy shape must be set at creation time (copies: 2).
         string actorSubject = Guid.NewGuid().ToString();
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, copies: 2);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, copies: 2, jobKind: JobKind.Standard);
         DispatchClaimService claimService = CreateClaim(
             seed,
             DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -4438,7 +4438,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task TerminalCleanup_RemovingQueuedJob_InvalidatesItsAcknowledgement()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext ctx = CreateContext();
         bool removed = await CreateQueueService(ctx).RemoveJobAsync(fixture.JobId, null, CancellationToken.None);
@@ -4455,7 +4455,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task AckInvalidationDrift_UrgentInsertionInvalidatesAcknowledgement()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext ctx = CreateContext();
         GcodeFile source = await ctx.GcodeFiles.SingleAsync(file => file.Id == fixture.GcodeId);
@@ -4566,7 +4566,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task Events_EnvelopeIdentityIsStableAcrossRedeliveries()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext claimCtx = CreateContext();
         _ = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
@@ -4657,7 +4657,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task Events_LogicalRevisionsAreServerDerivedAndMatchCommittedAggregates()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext beforeContext = CreateContext();
         long priorRevision = await beforeContext.PrintJobs
@@ -4703,7 +4703,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task Events_PayloadIsRedacted_NoCredentialsUrlsOrPaths()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext claimCtx = CreateContext();
         _ = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
@@ -4811,7 +4811,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task Events_SequencesAreUniqueAndGapFreeAcrossProducers()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext claimCtx = CreateContext();
         _ = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
@@ -5108,7 +5108,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         // multi-copy shape must be set at creation time (copies: 2) rather than mutated
         // afterward — see AppDbContext.EnsureCalibrationJobFieldsAreImmutable.
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, copies: 2);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, copies: 2, jobKind: JobKind.Standard);
 
         await using AppDbContext claimCtx = CreateContext();
         DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
@@ -5232,7 +5232,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         Fixture fixture;
         await using (AppDbContext seed = CreateContext())
         {
-            fixture = await SeedCalibrationAsync(seed, withAck: true);
+            fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
         }
 
         var management = new Mock<IPrintJobManagementService>();
@@ -5278,7 +5278,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     {
         // claim → backend accepted → job completed → next claim on same printer must succeed
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         // Step 1: Acquire claim
         await using AppDbContext claimCtx = CreateContext();
@@ -5322,7 +5322,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     {
         // claim → backend accepted → job failed → next claim must succeed
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext claimCtx = CreateContext();
         DispatchClaimService claimSvc = CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -5363,7 +5363,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task TerminalCallback_DelayedOldAttempt_DoesNotCompleteNewerJob()
     {
         await using AppDbContext context = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(context, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(context, withAck: true, jobKind: JobKind.Standard);
         DispatchClaimService claimService = CreateClaim(
             context,
             DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -5451,7 +5451,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     {
         // An active ad-hoc claim must prevent a queue claim on the same printer.
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         // Ad-hoc claim first.
         await using AppDbContext adHocCtx = CreateContext();
@@ -5482,7 +5482,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     {
         // An active queue claim must prevent an ad-hoc claim on the same printer.
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         // Queue claim first.
         await using AppDbContext queueCtx = CreateContext();
@@ -5540,7 +5540,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task AdvertisedTelemetrySla_IsIdenticalForClaimAndBedClearAcknowledgement()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
         IPrinterStatusSnapshotReader twentySecondOld =
             DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId, ageSeconds: 20);
         IPrinterTelemetryFreshnessPolicy tenSecondSla =
@@ -5733,7 +5733,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     {
         // Arrange: seed, claim, accept
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext claimCtx = CreateContext();
         DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
@@ -5783,7 +5783,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task TerminalEvent_Failure_WritesOutboxEventInSameTransaction()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext claimCtx = CreateContext();
         DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
@@ -5829,7 +5829,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task TerminalEvent_KnownFailure_WritesOutboxEventAtomically()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext claimCtx = CreateContext();
         DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
@@ -5860,7 +5860,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task TerminalEvent_BackendAccepted_WritesOutboxEventAtomically()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext claimCtx = CreateContext();
         DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
@@ -5895,7 +5895,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task TerminalEvent_UnknownOutcome_WritesOutboxEventWithFailureCode()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext claimCtx = CreateContext();
         DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
@@ -5924,7 +5924,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     {
         // Prove that claim → backend-accepted → completion produces strictly ordered sequences.
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true, jobKind: JobKind.Standard);
 
         await using AppDbContext claimCtx = CreateContext();
         DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
@@ -6002,7 +6002,12 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             int copies = 1)
     {
         await using AppDbContext db = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(db, withAck: true, copies: copies);
+        Fixture fixture = await SeedCalibrationAsync(
+            db,
+            withAck: true,
+            backend: backend,
+            copies: copies,
+            jobKind: JobKind.Standard);
         DispatchClaimService claimService = CreateClaim(
             db,
             DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
@@ -6758,7 +6763,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         bool withAck,
         PrinterBackend? backend = null,
         PrinterCredential? credential = null,
-        int copies = 1)
+        int copies = 1,
+        JobKind? jobKind = JobKind.FilamentCalibration)
     {
         Fixture baseFixture = await SeedCalibrationArtifactOnlyAsync(
             db,
@@ -6784,7 +6790,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             Status = PrintJobStatus.Assigned,
             Priority = (int)PrintJobPriority.High,
             QueuePosition = 1,
-            JobKind = JobKind.FilamentCalibration,
+            JobKind = jobKind,
             Copies = copies,
             RequiredFirmwareFamily = PrinterFirmwareFamily.Klipper,
             RequiredGcodeDialect = PrinterGcodeDialect.Klipper,

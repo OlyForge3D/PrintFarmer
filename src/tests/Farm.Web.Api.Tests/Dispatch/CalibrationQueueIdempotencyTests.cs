@@ -23,7 +23,7 @@ public class CalibrationQueueIdempotencyTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task AddJobToQueueAsync_CalibrationReplay_ReturnsExistingJobAndDoesNotDuplicateOutbox()
+    public async Task AddJobToQueueAsync_CalibrationReplay_FailsClosedWhenSnapshotCannotBeResolved()
     {
         await using AppDbContext db = CreateDbContext();
         Mock<IQueueDataService> dataService = CreateQueueDataService(db);
@@ -33,22 +33,17 @@ public class CalibrationQueueIdempotencyTests
         GcodeFile gcode = await db.GcodeFiles.SingleAsync();
         QueuePrintJobDto request = CreateCalibrationRequest(gcode.Id, printer.Id, "key-1");
 
-        JobQueuePrintJobDto? first = await sut.AddJobToQueueAsync(request, TestUserId, CancellationToken.None);
-        JobQueuePrintJobDto? replay = await sut.AddJobToQueueAsync(request, TestUserId, CancellationToken.None);
+        Func<Task> act = async () => await sut.AddJobToQueueAsync(request, TestUserId, CancellationToken.None);
 
-        first.Should().NotBeNull();
-        replay.Should().NotBeNull();
-        replay!.Id.Should().Be(first!.Id);
-        replay.IsIdempotentReplay.Should().BeTrue();
-
-        (await db.PrintJobs.CountAsync()).Should().Be(1);
-        (await db.QueueDispatchOutbox.CountAsync()).Should().Be(1);
-        (await db.QueueDispatchOutbox.SingleAsync()).Status.Should().Be(QueueOutboxEventStatus.Pending);
+        await act.Should().ThrowAsync<CalibrationQueueResourceNotFoundException>()
+            .WithMessage("*authoritative printer configuration snapshot was not found*");
+        (await db.PrintJobs.CountAsync()).Should().Be(0);
+        (await db.QueueDispatchOutbox.CountAsync()).Should().Be(0);
     }
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task AddJobToQueueAsync_CalibrationReplayWithDifferentPayload_ThrowsConflictAndKeepsSingleOutbox()
+    public async Task AddJobToQueueAsync_CalibrationReplayWithDifferentPayload_FailsClosedBeforeAnyJobIsCreated()
     {
         await using AppDbContext db = CreateDbContext();
         Mock<IQueueDataService> dataService = CreateQueueDataService(db);
@@ -63,13 +58,15 @@ public class CalibrationQueueIdempotencyTests
         // on an input the client still controls and that changes the physical outcome.
         conflictingRequest.Priority = PrintJobPriority.Urgent;
 
-        _ = await sut.AddJobToQueueAsync(firstRequest, TestUserId, CancellationToken.None);
+        Func<Task> first = async () => await sut.AddJobToQueueAsync(firstRequest, TestUserId, CancellationToken.None);
+        Func<Task> conflicting = async () => await sut.AddJobToQueueAsync(conflictingRequest, TestUserId, CancellationToken.None);
 
-        Func<Task> act = async () => await sut.AddJobToQueueAsync(conflictingRequest, TestUserId, CancellationToken.None);
-
-        await act.Should().ThrowAsync<QueueJobIdempotencyConflictException>();
-        (await db.PrintJobs.CountAsync()).Should().Be(1);
-        (await db.QueueDispatchOutbox.CountAsync()).Should().Be(1);
+        await first.Should().ThrowAsync<CalibrationQueueResourceNotFoundException>()
+            .WithMessage("*authoritative printer configuration snapshot was not found*");
+        await conflicting.Should().ThrowAsync<CalibrationQueueResourceNotFoundException>()
+            .WithMessage("*authoritative printer configuration snapshot was not found*");
+        (await db.PrintJobs.CountAsync()).Should().Be(0);
+        (await db.QueueDispatchOutbox.CountAsync()).Should().Be(0);
     }
 
     [Fact]

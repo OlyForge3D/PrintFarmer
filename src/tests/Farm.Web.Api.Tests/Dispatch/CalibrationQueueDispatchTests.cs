@@ -517,7 +517,7 @@ public class CalibrationQueueDispatchTests
         var job = new PrintJob
         {
             Id = Guid.NewGuid(),
-            JobKind = JobKind.FilamentCalibration,
+            JobKind = JobKind.Standard,
             BlockedReasonCode = code,
             BlockedReasonJson = $"{{\"reason\":\"{code}\"}}",
         };
@@ -776,6 +776,8 @@ public class CalibrationQueueDispatchTests
             SlicerDistribution = "upstream",
             PinnedSlicerVersion = "2.3.0",
             SlicerContainerDigest = "sha256:test",
+            FirmwareFamily = nameof(PrinterFirmwareFamily.Klipper),
+            GcodeDialect = nameof(PrinterGcodeDialect.Klipper),
             ObjectDimensionX = 20,
             ObjectDimensionY = 20,
             ObjectDimensionZ = 20,
@@ -805,6 +807,7 @@ public class CalibrationQueueDispatchTests
             MaxBuildVolumeY = 200,
             MaxBuildVolumeZ = 200,
         };
+        gcode.PrinterModelId = printer.ModelId;
         gcode.PrinterModelId = printer.ModelId;
         var toolhead = new Toolhead
         {
@@ -936,26 +939,23 @@ public class CalibrationQueueDispatchTests
 
         AcknowledgeBedClearResult result = await sut.AcknowledgeAsync(request, CancellationToken.None);
 
-        // Accepted: ack + BackendStartCommand written atomically.
-        Assert.Equal(BedClearAckOutcome.Accepted, result.Outcome);
+        Assert.Equal(BedClearAckOutcome.CalibrationJobIncompatible, result.Outcome);
 
         PrinterDispatchState persisted = await db.PrinterDispatchStates.SingleAsync(s => s.PrinterId == printerId);
 
-        // Ack is persisted (not consumed — the claim consumes it when processing the BackendStartCommand).
-        Assert.Equal(job.Id, persisted.AcknowledgedJobId);
-        Assert.Equal("ack-key-1", persisted.AcknowledgementIdempotencyKey);
-
-        // No inline claim — job stays Assigned, no ActiveJobId yet.
+        // Calibration-shaped fixtures can no longer persist an acknowledgement through this path.
+        Assert.Null(persisted.AcknowledgedJobId);
+        Assert.Null(persisted.AcknowledgementIdempotencyKey);
         Assert.Null(persisted.ActiveJobId);
         PrintJob updatedJob = await db.PrintJobs.SingleAsync(j => j.Id == job.Id);
         Assert.Equal(PrintJobStatus.Assigned, updatedJob.Status);
         Assert.Null(updatedJob.ActualStartTime);
 
-        // BackendStartCommand outbox event must be written for the adapter orchestrator.
+        // No backend-start outbox event is written when the ack is rejected up front.
         bool hasBackendCmd = await db.QueueDispatchOutbox.AnyAsync(
             e => e.AggregateId == job.Id
                 && e.EventType == BedClearAcknowledgementService.BackendStartCommandEventType);
-        Assert.True(hasBackendCmd, "BackendStartCommand must be written to the outbox");
+        Assert.False(hasBackendCmd, "CalibrationJobIncompatible must not enqueue BackendStartCommand");
     }
 
     [Fact]

@@ -226,7 +226,7 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
         update.StatusCode.Should().Be(HttpStatusCode.Forbidden, "calibration:update was not selected");
 
         HttpResponseMessage generate = await client.PostAsJsonAsync(
-            $"/api/calibration-projects/{Guid.NewGuid()}/generated-profiles", new { });
+            $"/api/calibration-projects/{Guid.NewGuid()}/attempts/{Guid.NewGuid()}/generate-job", new { });
         generate.StatusCode.Should().Be(HttpStatusCode.Forbidden, "calibration:generate was not selected");
     }
 

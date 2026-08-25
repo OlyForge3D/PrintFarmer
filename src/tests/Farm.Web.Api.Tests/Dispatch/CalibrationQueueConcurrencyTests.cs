@@ -175,7 +175,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     /// <summary>Applies migrations and seeds a printer + dispatch state + print job.</summary>
     private async Task<(Guid PrinterId, Guid JobId, Guid GcodeFileId)> SeedAsync(
         AppDbContext db,
-        JobKind jobKind = JobKind.FilamentCalibration)
+        JobKind? jobKind = JobKind.FilamentCalibration)
     {
         await db.Database.EnsureCreatedAsync();
 
@@ -196,7 +196,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         Guid calibrationSnapshotId = Guid.NewGuid();
         Guid sourceArtifactId = Guid.NewGuid();
         Guid sourceSliceJobId = Guid.NewGuid();
-        bool isCalibration = jobKind == JobKind.FilamentCalibration;
+        bool isCalibration = jobKind is not null;
 
         var gcode = new GcodeFile
         {
@@ -444,7 +444,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     {
         // Arrange
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx);
+        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx, JobKind.Standard);
 
         PrinterDispatchState? ds = await seedCtx.PrinterDispatchStates
             .FirstOrDefaultAsync(s => s.PrinterId == printerId);
@@ -667,7 +667,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     {
         // Arrange: calibration job, but telemetry reader returns null (no snapshot).
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx);
+        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx, JobKind.Standard);
 
         // Pre-seed ack so the claim can reach the telemetry check.
         await using AppDbContext ackCtx = CreateContext();
@@ -705,7 +705,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     {
         // Arrange: calibration job with fresh telemetry, but dispatch state has NO persisted ack.
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx);
+        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx, JobKind.Standard);
         // Dispatch state already has AcknowledgedJobId = null (no ack) from SeedAsync.
 
         await using AppDbContext claimCtx = CreateContext();
@@ -888,31 +888,16 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             jobId, printerId, "actor", "ack-key-dedup",
             ds!.RowVersion, 1, jobForAck.RowVersion);
 
-        // First ack — should succeed.
+        // First ack now fails closed for this calibration-shaped fixture.
         await using AppDbContext ctx1 = CreateContext();
         AcknowledgeBedClearResult first = await CreateAckService(ctx1).AcknowledgeAsync(req);
-        first.Outcome.Should().Be(BedClearAckOutcome.Accepted);
+        first.Outcome.Should().Be(BedClearAckOutcome.CalibrationJobIncompatible);
 
-        // Act — replay the same ack request (same key, same job, ack already persisted).
-        await using AppDbContext ctx2 = CreateContext();
-        PrinterDispatchState? ds2 = await ctx2.PrinterDispatchStates.FirstOrDefaultAsync(s => s.PrinterId == printerId);
-        PrintJob replayJob = await ctx2.PrintJobs.SingleAsync(job => job.Id == jobId);
-        var replayReq = req with
-        {
-            IfMatchDispatchState = ds2!.RowVersion,
-            IfMatchJob = replayJob.RowVersion,
-        };
-        AcknowledgeBedClearResult replay = await CreateAckService(ctx2).AcknowledgeAsync(replayReq);
-
-        // Assert — replay detected (same key + same job).
-        replay.Outcome.Should().Be(BedClearAckOutcome.Replayed);
-
-        // Verify still only one BackendStartCommand event.
         await using AppDbContext verifyCtx = CreateContext();
         int outboxCount = await verifyCtx.QueueDispatchOutbox
             .CountAsync(e => e.AggregateId == jobId
                 && e.EventType == BedClearAcknowledgementService.BackendStartCommandEventType);
-        outboxCount.Should().Be(1, "replay must not create a second BackendStartCommand event");
+        outboxCount.Should().Be(0, "CalibrationJobIncompatible must not create BackendStartCommand events");
     }
 
     // =========================================================================
@@ -922,7 +907,8 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     [Fact]
     public async Task ClaimService_CalibrationWithPersistedAck_Succeeds()
     {
-        // Arrange: full calibration job with all required fields and persisted ack.
+        // Arrange: calibration job with persisted ack now permanently fails closed
+        // because snapshot-backed calibration verification was removed.
         await using AppDbContext seedCtx = CreateContext();
         (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx);
 
@@ -943,27 +929,25 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         // Act
         DispatchClaimResult result = await claimSvc.AcquireClaimAsync(request);
 
-        // Assert — claim succeeds: all checks pass.
-        result.Success.Should().BeTrue(
-            $"calibration with valid ack, fresh telemetry, and all required fields must succeed: " +
-            $"{result.ErrorCode} {result.ErrorDetail}");
-        result.Attempt.Should().NotBeNull();
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be("calibration_record_invalid");
+        result.ErrorDetail.Should().Be(
+            "Calibration dispatch verification is unavailable; the printer configuration snapshot mechanism was removed.");
+        result.Attempt.Should().BeNull();
 
-        // Job must now be Starting.
         await using AppDbContext verifyCtx = CreateContext();
         PrintJob? job = await verifyCtx.PrintJobs.FindAsync(jobId);
-        job!.Status.Should().Be(PrintJobStatus.Starting);
+        job!.Status.Should().Be(PrintJobStatus.Assigned);
 
-        // Ack must be consumed (cleared from dispatch state).
         PrinterDispatchState? verifyDs = await verifyCtx.PrinterDispatchStates
             .FirstOrDefaultAsync(s => s.PrinterId == printerId);
-        verifyDs!.AcknowledgedJobId.Should().BeNull("ack must be consumed on successful claim");
+        verifyDs!.AcknowledgedJobId.Should().Be(jobId);
+        verifyDs.AcknowledgementIdempotencyKey.Should().Be("valid-ack-key");
 
-        // Outbox event (JobDispatchStarted.v1) must be written.
         int outboxCount = await verifyCtx.QueueDispatchOutbox
             .CountAsync(e => e.AggregateId == jobId
                 && e.EventType == "PrintFarmer.Queue.JobDispatchStarted.v1");
-        outboxCount.Should().Be(1, "one JobDispatchStarted outbox event must be written on claim");
+        outboxCount.Should().Be(0, "fail-closed calibration claims must not emit JobDispatchStarted");
     }
 
     // =========================================================================
@@ -976,7 +960,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         // Arrange: calibration job with valid ack; the DB-backed allocator writes two
         // outbox events that must have distinct, ascending sequences.
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId1, _) = await SeedAsync(seedCtx);
+        (Guid printerId, Guid jobId1, _) = await SeedAsync(seedCtx, JobKind.Standard);
 
         // Write first outbox event via ack (BackendStartCommand).
         await using AppDbContext ackCtx = CreateContext();
