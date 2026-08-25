@@ -640,6 +640,10 @@ public abstract class CalibrationControllerBase : ControllerBase
     protected IActionResult ImportResult(CalibrationApiResult<LegacyCalibrationImportResultDto> result) =>
         Result(result);
 
+    /// <summary>Maps a filament-calibration saga orchestration operation result.</summary>
+    protected IActionResult OrchestrationResult(CalibrationApiResult<CalibrationOrchestrationDto> result) =>
+        Result(result);
+
     private IActionResult Result<T>(CalibrationApiResult<T> result)
     {
         if (!result.IsSuccess || result.Value is null)

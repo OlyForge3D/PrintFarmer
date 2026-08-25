@@ -280,6 +280,22 @@ builder.Services.AddScoped<
 builder.Services.AddHostedService<
     Farm.Web.Api.Services.Calibration.CalibrationPhotoDeleteReconciliationService>();
 
+// Filament-calibration saga: drives the existing CalibrationOrchestration checkpoint through
+// created -> ... -> completed by calling the real SliceJobController/SlicePrintBridgeController
+// HTTP contracts on the current host, never by re-implementing their logic.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddHttpClient(
+    Farm.Web.Api.Services.Calibration.InternalApiSliceSubmissionGateway.HttpClientName);
+builder.Services.AddScoped<
+    Farm.Web.Api.Services.Calibration.ISliceSubmissionGateway,
+    Farm.Web.Api.Services.Calibration.InternalApiSliceSubmissionGateway>();
+builder.Services.AddScoped<
+    Farm.Web.Api.Services.Calibration.IPrintDispatchGateway,
+    Farm.Web.Api.Services.Calibration.InternalApiPrintDispatchGateway>();
+builder.Services.AddScoped<
+    Farm.Web.Api.Services.Calibration.ICalibrationOrchestrationSagaService,
+    Farm.Web.Api.Services.Calibration.CalibrationOrchestrationSagaService>();
+
 // Artifact -> GcodeFile promotion: scoped promoter plus the reconciler that resolves the unknown
 // outcomes a crash or a transient outage can leave between the slicer and core contexts.
 builder.Services.AddSingleton<Farm.Web.Api.Services.Gcode.GcodePromotionReconcilerState>();
