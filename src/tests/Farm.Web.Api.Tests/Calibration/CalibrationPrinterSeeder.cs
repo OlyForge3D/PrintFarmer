@@ -12,7 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Farm.Web.Api.Tests.Calibration;
 
 /// <summary>
-/// Seeds a calibration-eligible printer plus its machine/process/filament triple, mirroring the
+/// Seeds a calibration-ready printer plus its machine/process/filament triple, mirroring the
 /// production shape the candidate and context evaluators require.
 /// </summary>
 internal static class CalibrationPrinterSeeder
@@ -25,7 +25,7 @@ internal static class CalibrationPrinterSeeder
         Guid FilamentProfileId);
 
     /// <summary>
-    /// Writes an eligible printer into the core database and its profiles into the slicer store.
+    /// Writes a calibration-ready printer into the core database and its profiles into the slicer store.
     /// </summary>
     /// <param name="services">The API host's service provider.</param>
     /// <param name="profilesPublic">Whether the seeded profiles are visible to everyone.</param>
@@ -33,7 +33,7 @@ internal static class CalibrationPrinterSeeder
     /// <param name="deriveHardwareFromMachineProfile">
     /// When <see langword="true"/>, leaves every #1614 AC-2 derivable <c>Calibration*</c>/
     /// <c>Toolhead</c> column null and seeds a fully-specified machine profile
-    /// <c>RawJson</c> so the eligibility pipeline must source those fields from the resolved
+    /// <c>RawJson</c> so the calibration context resolver must source those fields from the resolved
     /// machine profile — the split-deployment counterpart of the in-process derivation unit
     /// test, proving parity across both deployment topologies (test plan item 6).
     /// </param>

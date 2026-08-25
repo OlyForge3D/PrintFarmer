@@ -236,16 +236,16 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     expect(screen.getByText('7.8.9')).toBeInTheDocument();
   });
 
-  it('labels the firmware reading as live-only (not used for calibration) when no recorded identity is returned (#1656)', () => {
+  it('labels the firmware reading as unrecorded when no recorded identity is returned (#1656)', () => {
     render(<DetailedPrinterCard printer={makePrinter()} />);
 
     fireEvent.click(screen.getByText('Version'));
 
-    expect(screen.getByText('Live reading only — not used for calibration eligibility')).toBeInTheDocument();
-    expect(screen.queryByText('Recorded — used for calibration eligibility')).not.toBeInTheDocument();
+    expect(screen.getByText('No recorded firmware identity')).toBeInTheDocument();
+    expect(screen.queryByText('Recorded firmware identity')).not.toBeInTheDocument();
   });
 
-  it('labels the firmware reading as the recorded/calibration-eligible identity when the version endpoint returns one (#1656)', () => {
+  it('labels the firmware reading as recorded when the version endpoint returns an identity (#1656)', () => {
     useQueryMock.mockImplementation(({ queryKey, enabled }: { queryKey: unknown[]; enabled?: boolean }) => {
       if (queryKey[0] === 'printerVersion') {
         return enabled
@@ -280,8 +280,8 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
 
     fireEvent.click(screen.getByText('Version'));
 
-    expect(screen.getByText('Recorded — used for calibration eligibility')).toBeInTheDocument();
-    expect(screen.queryByText('Live reading only — not used for calibration eligibility')).not.toBeInTheDocument();
+    expect(screen.getByText('Recorded firmware identity')).toBeInTheDocument();
+    expect(screen.queryByText('No recorded firmware identity')).not.toBeInTheDocument();
   });
 
   // Regression coverage for #1651: after a transient Klippy fault clears, the explicit

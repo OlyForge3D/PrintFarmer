@@ -433,10 +433,10 @@ export interface PrinterVersionInfo {
    * `firmwareVersion` above prefers a fresh live-probed reading and falls back to this same
    * persisted value only when a live reading isn't available (issue #1894) — so `firmwareVersion`
    * and `recordedFirmwareIdentity.version` can legitimately differ when the printer's live
-   * firmware has moved since the last recorded/persisted probe. Calibration eligibility always
+   * firmware has moved since the last recorded/persisted probe. Calibration context generation
    * reads the persisted value here, never the live-preferred `firmwareVersion`. `null`/absent for
    * non-Moonraker backends (PrusaLink, OctoPrint, SDCP), whose `firmwareVersion` remains a
-   * live-only reading never used by the calibration gate — the UI must not imply the two are the
+   * live-only reading never used for a calibration context — the UI must not imply the two are the
    * same fact for those backends.
    */
   recordedFirmwareIdentity?: CalibrationFirmwareIdentityDto | null;

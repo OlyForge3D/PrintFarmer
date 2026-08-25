@@ -220,7 +220,7 @@ public class PrintersService(
 
         // Manual "add printer" resolution is still a live Klipper/Moonraker probe (stock or
         // Snapmaker U1); persist the same firmware identity fields the network-scan discovery
-        // probe records, so both onboarding paths feed the calibration firmware gate identically
+        // probe records, so both onboarding paths feed calibration context resolution identically
         // (#1618 / #1613 §4.5.1, §10.2).
         dto.FirmwareFamily = PrinterFirmwareFamily.Klipper;
         dto.GcodeDialect = PrinterGcodeDialect.Klipper;
