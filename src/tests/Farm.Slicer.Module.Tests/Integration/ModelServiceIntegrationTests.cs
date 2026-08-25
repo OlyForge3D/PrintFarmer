@@ -447,10 +447,19 @@ public class ModelServiceIntegrationTests : IClassFixture<CustomWebApplicationFa
         }
         finally
         {
-            // Cleanup
-            if (Directory.Exists(modelsPath))
+            // Cleanup - modelsPath is the factory-wide shared storage directory
+            // (IClassFixture<CustomWebApplicationFactory> means one factory, and thus one
+            // storage directory, per class). Deleting the whole tree here would remove
+            // files other tests in this class depend on. Only remove the two files this
+            // test created.
+            if (File.Exists(filePath))
             {
-                Directory.Delete(modelsPath, true);
+                File.Delete(filePath);
+            }
+
+            if (File.Exists(thumbnailPath))
+            {
+                File.Delete(thumbnailPath);
             }
         }
     }

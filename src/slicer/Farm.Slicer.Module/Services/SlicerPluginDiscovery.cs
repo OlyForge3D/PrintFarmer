@@ -27,6 +27,12 @@ public static class SlicerPluginDiscovery
     private static readonly List<ISlicerLibrary> RegisteredLibraries = [];
     private static readonly List<ISlicerUIProvider> RegisteredUIProviders = [];
 
+    // Guards RegisteredLibraries/RegisteredUIProviders. Production startup only ever calls
+    // DiscoverAndRegisterSlicerPlugins()/AddSlicerRegistry() once, single-threaded, but test
+    // hosts (one WebApplicationFactory per test class) can now build concurrently, so
+    // multiple threads can call these members at the same time.
+    private static readonly Lock s_registrationLock = new();
+
     /// <summary>
     /// Loads all <c>*.dll</c> files from <paramref name="pluginsPath"/> into the
     /// default <see cref="AssemblyLoadContext"/>. Unknown or non-.NET files are
@@ -102,90 +108,98 @@ public static class SlicerPluginDiscovery
     /// </remarks>
     public static IServiceCollection DiscoverAndRegisterSlicerPlugins(this IServiceCollection services)
     {
-        try
+        // Serialize discovery: RegisteredLibraries/RegisteredUIProviders are process-wide
+        // statics mutated below (read-check-then-add), and multiple WebApplicationFactory
+        // hosts (one per test class) can now build concurrently since cross-class test
+        // parallelism was unlocked. Without this lock, concurrent List<T>.Add() calls can
+        // corrupt the lists or throw.
+        lock (s_registrationLock)
         {
-            // Get all assemblies in the current domain
-            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
-
-            foreach (Assembly assembly in assemblies)
+            try
             {
-                try
+                // Get all assemblies in the current domain
+                Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+
+                foreach (Assembly assembly in assemblies)
                 {
-                    // Look for SlicerPluginAttribute on the assembly
-                    List<SlicerPluginAttribute> pluginAttributes = assembly
-                        .GetCustomAttributes(typeof(SlicerPluginAttribute), inherit: false)
-                        .OfType<SlicerPluginAttribute>()
-                        .ToList();
-
-                    foreach (SlicerPluginAttribute attribute in pluginAttributes)
+                    try
                     {
-                        try
+                        // Look for SlicerPluginAttribute on the assembly
+                        List<SlicerPluginAttribute> pluginAttributes = assembly
+                            .GetCustomAttributes(typeof(SlicerPluginAttribute), inherit: false)
+                            .OfType<SlicerPluginAttribute>()
+                            .ToList();
+
+                        foreach (SlicerPluginAttribute attribute in pluginAttributes)
                         {
-                            // Verify types implement required interfaces
-                            if (!typeof(ISlicerLibrary).IsAssignableFrom(attribute.LibraryType))
+                            try
                             {
-                                throw new InvalidOperationException(
-                                    $"Slicer library type {attribute.LibraryType.FullName} must implement ISlicerLibrary");
-                            }
+                                // Verify types implement required interfaces
+                                if (!typeof(ISlicerLibrary).IsAssignableFrom(attribute.LibraryType))
+                                {
+                                    throw new InvalidOperationException(
+                                        $"Slicer library type {attribute.LibraryType.FullName} must implement ISlicerLibrary");
+                                }
 
-                            if (!typeof(ISlicerUIProvider).IsAssignableFrom(attribute.UIProviderType))
-                            {
-                                throw new InvalidOperationException(
-                                    $"Slicer UI provider type {attribute.UIProviderType.FullName} must implement ISlicerUIProvider");
-                            }
+                                if (!typeof(ISlicerUIProvider).IsAssignableFrom(attribute.UIProviderType))
+                                {
+                                    throw new InvalidOperationException(
+                                        $"Slicer UI provider type {attribute.UIProviderType.FullName} must implement ISlicerUIProvider");
+                                }
 
-                            // Instantiate library and UI provider
-                            ISlicerLibrary library = (ISlicerLibrary?)Activator.CreateInstance(attribute.LibraryType)
-                                ?? throw new InvalidOperationException(
-                                    $"Failed to instantiate slicer library type {attribute.LibraryType.FullName}");
+                                // Instantiate library and UI provider
+                                ISlicerLibrary library = (ISlicerLibrary?)Activator.CreateInstance(attribute.LibraryType)
+                                    ?? throw new InvalidOperationException(
+                                        $"Failed to instantiate slicer library type {attribute.LibraryType.FullName}");
 
-                            ISlicerUIProvider uiProvider = (ISlicerUIProvider?)Activator.CreateInstance(attribute.UIProviderType)
-                                ?? throw new InvalidOperationException(
-                                    $"Failed to instantiate slicer UI provider type {attribute.UIProviderType.FullName}");
+                                ISlicerUIProvider uiProvider = (ISlicerUIProvider?)Activator.CreateInstance(attribute.UIProviderType)
+                                    ?? throw new InvalidOperationException(
+                                        $"Failed to instantiate slicer UI provider type {attribute.UIProviderType.FullName}");
 
-                            // De-dup guard (issue #578): static lists accumulate across
-                            // multiple DiscoverAndRegisterSlicerPlugins() calls (e.g., in test
-                            // fixtures or when the same plugin is loaded via both compile-time
-                            // reference and runtime dir). Skip if a library with the same
-                            // (name, version) tuple is already registered.
-                            if (RegisteredLibraries.Any(l =>
-                                string.Equals(l.SlicerName, library.SlicerName, StringComparison.OrdinalIgnoreCase) &&
-                                string.Equals(l.SlicerVersion, library.SlicerVersion, StringComparison.OrdinalIgnoreCase)))
-                            {
+                                // De-dup guard (issue #578): static lists accumulate across
+                                // multiple DiscoverAndRegisterSlicerPlugins() calls (e.g., in test
+                                // fixtures or when the same plugin is loaded via both compile-time
+                                // reference and runtime dir). Skip if a library with the same
+                                // (name, version) tuple is already registered.
+                                if (RegisteredLibraries.Any(l =>
+                                    string.Equals(l.SlicerName, library.SlicerName, StringComparison.OrdinalIgnoreCase) &&
+                                    string.Equals(l.SlicerVersion, library.SlicerVersion, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    Debug.WriteLine(
+                                        $"[SlicerPluginDiscovery] Skipped duplicate plugin: {library.SlicerName} v{library.SlicerVersion} " +
+                                        $"from assembly {assembly.GetName().Name}");
+                                    continue;
+                                }
+
+                                // Register instances
+                                RegisteredLibraries.Add(library);
+                                RegisteredUIProviders.Add(uiProvider);
+
                                 Debug.WriteLine(
-                                    $"[SlicerPluginDiscovery] Skipped duplicate plugin: {library.SlicerName} v{library.SlicerVersion} " +
+                                    $"[SlicerPluginDiscovery] Loaded plugin: {library.SlicerName} v{library.SlicerVersion} " +
                                     $"from assembly {assembly.GetName().Name}");
-                                continue;
                             }
-
-                            // Register instances
-                            RegisteredLibraries.Add(library);
-                            RegisteredUIProviders.Add(uiProvider);
-
-                            Debug.WriteLine(
-                                $"[SlicerPluginDiscovery] Loaded plugin: {library.SlicerName} v{library.SlicerVersion} " +
-                                $"from assembly {assembly.GetName().Name}");
-                        }
-                        catch (Exception ex)
-                        {
-                            throw new InvalidOperationException(
-                                $"Error loading slicer plugin from attribute in assembly {assembly.GetName().Name}: {ex.Message}",
-                                ex);
+                            catch (Exception ex)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Error loading slicer plugin from attribute in assembly {assembly.GetName().Name}: {ex.Message}",
+                                    ex);
+                            }
                         }
                     }
-                }
-                catch (Exception ex) when (ex is not InvalidOperationException)
-                {
-                    // Skip assemblies that fail to load attributes (e.g., dynamic assemblies, native modules)
-                    // But log InvalidOperationException since those indicate plugin loading issues
-                    continue;
+                    catch (Exception ex) when (ex is not InvalidOperationException)
+                    {
+                        // Skip assemblies that fail to load attributes (e.g., dynamic assemblies, native modules)
+                        // But log InvalidOperationException since those indicate plugin loading issues
+                        continue;
+                    }
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException(
-                $"Error during slicer plugin discovery: {ex.Message}", ex);
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Error during slicer plugin discovery: {ex.Message}", ex);
+            }
         }
 
         return services;
@@ -199,7 +213,15 @@ public static class SlicerPluginDiscovery
     /// <returns>The service collection for chaining</returns>
     public static IServiceCollection AddSlicerRegistry(this IServiceCollection services)
     {
-        SlicerRegistry registry = new SlicerRegistry(RegisteredLibraries, RegisteredUIProviders);
+        // Snapshot under the same lock used by DiscoverAndRegisterSlicerPlugins so we never
+        // enumerate the static lists while another concurrent host build is still adding to
+        // them.
+        SlicerRegistry registry;
+        lock (s_registrationLock)
+        {
+            registry = new SlicerRegistry(RegisteredLibraries.ToList(), RegisteredUIProviders.ToList());
+        }
+
         return services.AddSingleton<ISlicerRegistry>(registry);
     }
 }
