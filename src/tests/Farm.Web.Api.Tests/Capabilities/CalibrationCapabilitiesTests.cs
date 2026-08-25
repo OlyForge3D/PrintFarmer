@@ -59,8 +59,6 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             .GetBoolean().Should().BeTrue();
         _ = root.GetProperty("calibration").GetProperty("commandsImplemented")
             .GetBoolean().Should().BeTrue();
-        _ = root.GetProperty("calibration").GetProperty("generationImplemented")
-            .GetBoolean().Should().BeFalse();
         _ = root.GetProperty("calibration").GetProperty("queueIntegrationImplemented")
             .GetBoolean().Should().BeTrue();
         _ = root.GetProperty("calibration").GetProperty("eventStreamImplemented")
@@ -94,7 +92,6 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
 
         foreach (string flag in new[]
                  {
-                     "calibrationGenerationEnabled",
                      "calibrationSlicingEnabled",
                      "calibrationQueueEnabled",
                      "calibrationJobBoundBedClearEnabled",
@@ -103,6 +100,12 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         {
             _ = root.GetProperty(flag).GetBoolean().Should().BeFalse();
         }
+
+        _ = root.TryGetProperty("calibrationGenerationEnabled", out _).Should().BeFalse(
+            "generation eligibility is generator-specific machinery, not a filament-calibration client capability");
+        _ = root.TryGetProperty("supportedExportFormats", out _).Should().BeFalse(
+            "export-format capability described generator output, which no longer exists");
+        _ = root.GetProperty("calibration").TryGetProperty("generationImplemented", out _).Should().BeFalse();
 
         // Promotion runs entirely inside this monolith host: artifacts are routable in process, the
         // library storage is writable, the durable checkpoint store answers and the reconciler is wired.
@@ -119,6 +122,10 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             .Should().Be("/api/calibration-projects");
         _ = root.GetProperty("routes").GetProperty("calibrationSync").GetString()
             .Should().Be("/api/calibration-sync/changes");
+        _ = root.GetProperty("routes").TryGetProperty("calibrationGenerateJob", out _).Should().BeFalse(
+            "the generate-job route described generator-specific machinery and is no longer advertised");
+        _ = root.GetProperty("routes").TryGetProperty("calibrationOrchestration", out _).Should().BeFalse(
+            "the orchestration route was removed with the generation subtree (#1979/#1993) and is no longer advertised");
         _ = root.GetProperty("limits").GetProperty("photoUploadMaxBytes").GetInt64()
             .Should().BeGreaterThan(0);
         _ = root.GetProperty("acceptedMimeTypes").GetProperty("photo").EnumerateArray()
@@ -225,6 +232,8 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             .GetBoolean().Should().BeFalse();
         _ = root.GetProperty("effectiveCapabilities").GetProperty("canUpdate")
             .GetBoolean().Should().BeFalse();
+        _ = root.GetProperty("effectiveCapabilities").TryGetProperty("canGenerate", out _).Should().BeFalse(
+            "canGenerate described generator-specific eligibility and was removed from the contract");
     }
 
     [Fact]
@@ -269,8 +278,7 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
                 .GetProperty("unavailableReasons")
                 .EnumerateArray()
                 .Where(reason =>
-                    reason.GetProperty("code").GetString() ==
-                    "slicer_version_unsupported")
+                    reason.GetProperty("code").GetString() == "slicer_version_unsupported")
                 .ToArray();
             _ = versionReasons.Should().ContainSingle(reason =>
                 reason.GetProperty("feature").GetString() == "slicing");
@@ -278,14 +286,11 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
                 reason.GetProperty("message").GetString() ==
                 $"Observed upstream OrcaSlicer version(s) 2.2.0; configured supported version(s): {CalibrationContractConstants.SlicerVersion}.");
 
-            // Calibration generation was removed (#1979): it now always reports a fixed
-            // "feature_removed" reason, independent of the slicer-version outcome above.
+            // Calibration generation was removed entirely (#1979/#1983/#1993): there is no longer
+            // a "calibrationGeneration" unavailable reason to report at all.
             _ = document.RootElement.GetProperty("unavailableReasons").EnumerateArray()
-                .Should().Contain(reason =>
-                    reason.GetProperty("feature").GetString() == "calibrationGeneration" &&
-                    reason.GetProperty("code").GetString() == "feature_removed" &&
-                    reason.GetProperty("message").GetString() ==
-                        "Calibration generation was removed from this deployment (#1979).");
+                .Should().NotContain(reason =>
+                    reason.GetProperty("feature").GetString() == "calibrationGeneration");
         }
     }
 
@@ -375,15 +380,14 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         _ = capabilities.UnavailableReasons.Select(reason => reason.Code)
             .Should().Contain("profile_service_unavailable");
 
-        // Issue #1849: the subsystems these flags describe (calibration commands, queue
-        // integration, event streaming) are always compiled in and registered, so they
+        // Issue #1849: the subsystems these flags describe (calibration commands,
+        // queue integration, event streaming) are always compiled in and registered, so they
         // must never be misreported as unimplemented just because the profile store happens to
         // be unreachable in this deployment. Only "operational" should reflect that.
-        // Calibration generation itself was removed (#1979), so GenerationImplemented is now
-        // always false regardless of profile-store reachability.
+        // Calibration generation itself was removed entirely (#1979/#1983/#1993), so there is no
+        // GenerationImplemented flag left on this DTO at all.
         _ = capabilities.Calibration.ContextImplemented.Should().BeTrue();
         _ = capabilities.Calibration.CommandsImplemented.Should().BeTrue();
-        _ = capabilities.Calibration.GenerationImplemented.Should().BeFalse();
         _ = capabilities.Calibration.QueueIntegrationImplemented.Should().BeTrue();
         _ = capabilities.Calibration.EventStreamImplemented.Should().BeTrue();
     }

@@ -53,13 +53,13 @@ public record PlatformCapabilitiesDto
     /// <summary>Gets whether calibration profile history is implemented and enabled.</summary>
     public bool CalibrationProfileHistoryEnabled { get; init; }
 
-    /// <summary>Gets whether calibration command generation is implemented and enabled.</summary>
-    public bool CalibrationGenerationEnabled { get; init; }
-
     /// <summary>Gets whether calibration-specific slicing is operational.</summary>
     public bool CalibrationSlicingEnabled { get; init; }
 
-    /// <summary>Gets whether calibration artifact promotion is implemented and enabled.</summary>
+    /// <summary>
+    /// Gets whether promotion of a completed filament-calibration slice attempt's G-code
+    /// artifact into the G-code library is implemented and enabled.
+    /// </summary>
     public bool CalibrationArtifactPromotionEnabled { get; init; }
 
     /// <summary>Gets whether calibration queue dispatch is implemented and enabled.</summary>
@@ -118,9 +118,6 @@ public record PlatformCapabilitiesDto
     public IReadOnlyDictionary<string, IReadOnlyList<string>> AcceptedMimeTypes { get; init; } =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
 
-    /// <summary>Gets supported calibration export format identifiers.</summary>
-    public IReadOnlyList<string> SupportedExportFormats { get; init; } = [];
-
     /// <summary>Gets non-secret health metadata for compatible slicer workers.</summary>
     public CompatibleWorkerCapabilityDto HealthyCompatibleWorker { get; init; } = new();
 
@@ -158,8 +155,6 @@ public sealed record CalibrationFeatureCapabilitiesDto
     public bool ContextImplemented { get; init; }
 
     public bool CommandsImplemented { get; init; }
-
-    public bool GenerationImplemented { get; init; }
 
     public bool QueueIntegrationImplemented { get; init; }
 
@@ -220,8 +215,6 @@ public sealed record EffectiveCalibrationCapabilitiesDto
     public bool CanUpdate { get; init; }
 
     public bool CanDelete { get; init; }
-
-    public bool CanGenerate { get; init; }
 
     public bool CanPublish { get; init; }
 

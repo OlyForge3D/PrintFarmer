@@ -44,6 +44,13 @@ public sealed class CalibrationCapabilityService(
     public const string UpstreamOrcaSlicerCapability =
         CalibrationContractConstants.UpstreamSlicerCapability;
 
+    /// <summary>
+    /// The slicer version is outside the configured bounded allow-list. Kept as a local literal
+    /// rather than a reference into the calibration-generation subtree, since this capability
+    /// document must not depend on generator machinery that is being decommissioned (D2/#1979).
+    /// </summary>
+    private const string SlicerVersionUnsupportedProblemCode = "slicer_version_unsupported";
+
     private static readonly IReadOnlyDictionary<string, string> SafeRoutes =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -131,21 +138,15 @@ public sealed class CalibrationCapabilityService(
             workerHealth.PinnedIdentityCount > 0 &&
             modelStorageResolvable;
 
-        // Calibration generation (the deterministic core, durable saga and generate-job route) was
-        // removed in #1979; the feature no longer exists in this process, so it is unconditionally
-        // unavailable rather than probed.
-        const bool calibrationGenerationOperational = false;
-
-        // The calibration command/gcode generation pipeline, calibration queue integration
-        // (JobQueueService), exact-job bed-clear acknowledgement (BedClearAcknowledgementService)
-        // and dispatch claiming/safety gating (DispatchClaimService/DispatchSafetyGates) are all
-        // unconditionally registered in ServiceCollectionExtensions and ship in every deployment:
-        // there is no configuration toggle that compiles them out. These booleans therefore
-        // reflect that build-time fact, matching the existing ContextImplemented precedent. Only
-        // "Operational" below depends on runtime evidence. Generation itself was removed (#1979),
-        // so its "Implemented" flag stays false rather than reflecting a build-time guarantee.
+        // Calibration command dispatch, exact-job bed-clear acknowledgement
+        // (BedClearAcknowledgementService) and dispatch claiming/safety gating
+        // (DispatchClaimService/DispatchSafetyGates) are all unconditionally registered in
+        // ServiceCollectionExtensions and ship in every deployment: there is no configuration
+        // toggle that compiles them out. These booleans therefore reflect that build-time fact,
+        // matching the existing ContextImplemented precedent. Only "Operational" below depends on
+        // runtime evidence. Calibration generation was removed entirely (#1979/#1993) along with
+        // its capability fields, so there is no generation flag left to compute here.
         const bool calibrationCommandsImplemented = true;
-        const bool calibrationGenerationImplemented = false;
         const bool calibrationQueueIntegrationImplemented = true;
         const bool calibrationEventStreamImplemented = true;
         bool calibrationOperational =
@@ -182,8 +183,7 @@ public sealed class CalibrationCapabilityService(
             effectiveCapabilities = BuildEffectiveCapabilities(
                 user,
                 slicingOperational,
-                calibrationContextOperational,
-                calibrationGenerationOperational);
+                calibrationContextOperational);
         }
 
         bool modelFilesEnabled = _configuration.GetValue("Platform:ModelFilesEnabled", true);
@@ -206,7 +206,6 @@ public sealed class CalibrationCapabilityService(
             CalibrationSyncEnabled = true,
             CalibrationPhotosEnabled = true,
             CalibrationProfileHistoryEnabled = true,
-            CalibrationGenerationEnabled = calibrationGenerationOperational,
             CalibrationSlicingEnabled = calibrationSlicingOperational,
             CalibrationArtifactPromotionEnabled = artifactPromotionOperational,
             CalibrationQueueEnabled = false,
@@ -234,7 +233,6 @@ public sealed class CalibrationCapabilityService(
             {
                 ContextImplemented = true,
                 CommandsImplemented = calibrationCommandsImplemented,
-                GenerationImplemented = calibrationGenerationImplemented,
                 QueueIntegrationImplemented = calibrationQueueIntegrationImplemented,
                 EventStreamImplemented = calibrationEventStreamImplemented,
                 Operational = calibrationOperational,
@@ -247,7 +245,6 @@ public sealed class CalibrationCapabilityService(
                 PhotoMaxPixels = _calibrationBlobStorage.MaxPixels,
             },
             AcceptedMimeTypes = MimeTypes,
-            SupportedExportFormats = ["orca-json"],
             HealthyCompatibleWorker = new CompatibleWorkerCapabilityDto
             {
                 Available = workerHealth.HealthyCount > 0,
@@ -500,7 +497,7 @@ public sealed class CalibrationCapabilityService(
             {
                 Feature = "slicing",
                 Code = unsupportedVersion
-                    ? "slicer_version_unsupported"
+                    ? SlicerVersionUnsupportedProblemCode
                     : workerHealth.HealthyCount == 0
                         ? "compatible_worker_unavailable"
                     : "slicing_path_unavailable",
@@ -523,13 +520,6 @@ public sealed class CalibrationCapabilityService(
                 Message = "Artifact promotion requires routable artifacts, writable G-code storage, a durable promotion checkpoint store and a healthy reconciler.",
             });
         }
-
-        reasons.Add(new()
-        {
-            Feature = "calibrationGeneration",
-            Code = "feature_removed",
-            Message = "Calibration generation was removed from this deployment (#1979).",
-        });
 
         return reasons;
     }
@@ -579,8 +569,7 @@ public sealed class CalibrationCapabilityService(
     private static EffectiveCalibrationCapabilitiesDto BuildEffectiveCapabilities(
         ClaimsPrincipal user,
         bool slicingOperational,
-        bool calibrationContextOperational,
-        bool calibrationGenerationOperational) =>
+        bool calibrationContextOperational) =>
         new()
         {
             CanCreate =
@@ -589,10 +578,6 @@ public sealed class CalibrationCapabilityService(
             CanRead = PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Read),
             CanUpdate = PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Update),
             CanDelete = PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Delete),
-            CanGenerate =
-                calibrationGenerationOperational &&
-                PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Generate) &&
-                PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Slicing.Submit),
             CanPublish = PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Publish),
             CanSubmitSlicing =
                 slicingOperational &&
