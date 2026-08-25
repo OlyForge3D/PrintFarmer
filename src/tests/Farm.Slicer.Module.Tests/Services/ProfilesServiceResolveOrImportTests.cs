@@ -367,6 +367,63 @@ public class ProfilesServiceResolveOrImportTests
     }
 
     /// <summary>
+    /// Filament profiles are unique on <c>(Name, Material, SlicerType)</c>, not <c>Name</c> alone —
+    /// OrcaSlicer legally ships same-named filaments in different materials (see
+    /// <c>ProfilesServiceRealRepositorySeedTests.SeedSystemProfiles_BundleHasSameFilamentNameInTwoMaterials_ImportsBoth</c>).
+    /// <see cref="FilamentProfile"/> has no <c>PrinterModelId</c>, so when two same-named filaments
+    /// both declare the requested model's machine in <c>CompatiblePrinters</c> (review finding on
+    /// #2004: name + CompatiblePrinters alone cannot tell the materials apart), resolution must
+    /// refuse to guess which one the caller meant rather than silently handing back an arbitrary
+    /// one — a caller asking to calibrate with one material must never be handed the Guid for a
+    /// same-named profile in a different material.
+    /// </summary>
+    [Fact]
+    public async Task ResolveOrImportProfileForModelAsync_AmbiguousSameNameFilamentsDifferByMaterial_DoesNotGuessWrongProfile()
+    {
+        Guid modelId = Guid.NewGuid();
+        const string FilamentName = "Prusa Generic";
+        const string MachineName = "Qidi X-Plus 4 0.4 nozzle";
+
+        Mock<IMachineProfileRepository> machineRepo = new(MockBehavior.Strict);
+        _ = machineRepo
+            .Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MachineProfile>
+            {
+                new() { Id = Guid.NewGuid(), Name = MachineName, SlicerType = SlicerType.OrcaSlicer, PrinterModelId = modelId, Hash = "hash-machine" }
+            });
+
+        List<FilamentProfile> existingFilaments = new()
+        {
+            new FilamentProfile { Id = Guid.NewGuid(), Name = FilamentName, Material = "PLA", SlicerType = SlicerType.OrcaSlicer, CompatiblePrinters = MachineName, Hash = "hash-pla" },
+            new FilamentProfile { Id = Guid.NewGuid(), Name = FilamentName, Material = "PETG", SlicerType = SlicerType.OrcaSlicer, CompatiblePrinters = MachineName, Hash = "hash-petg" }
+        };
+        Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Strict);
+        _ = filamentRepo
+            .Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingFilaments);
+
+        Mock<ICatalogService> catalogService = new(MockBehavior.Loose);
+        _ = catalogService
+            .Setup(c => c.GetModelByIdAsync(modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterModelDto(modelId, ModelName, Guid.NewGuid()));
+
+        ProfilesService svc = CreateService(
+            machineRepoOverride: machineRepo.Object,
+            filamentRepoOverride: filamentRepo.Object,
+            catalogServiceOverride: catalogService.Object);
+
+        using HttpClient httpClient = new(new StubHttpMessageHandler(_ => throw new InvalidOperationException("Worker should not be called; this test asserts the ambiguity is surfaced as an error, not a worker retry")));
+
+        ResolveProfileForModelResultDto result = await svc.ResolveOrImportProfileForModelAsync(
+            httpClient, modelId, ProfileResolutionType.Filament, FilamentName, CancellationToken.None);
+
+        // Neither the DB lookup nor the (attempted) import may silently pick one of the two
+        // ambiguous rows — an explicit error is the only acceptable outcome here.
+        Assert.NotNull(result.Error);
+        Assert.Null(result.ProfileId);
+    }
+
+    /// <summary>
     /// TOCTOU race (#2004 review finding): if a concurrent caller imports the same profile between
     /// this call's initial "not yet imported" lookup and its worker-backed import attempt,
     /// <c>Persist*ProfileAsync</c>'s duplicate check reports the row as <c>Skipped</c> rather than

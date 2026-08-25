@@ -996,6 +996,11 @@ public class ProfilesService(
             RawJson = sanitizedRaw,
             SettingsJson = settingsJson,
             SlicerVersion = orcaVersion,
+
+            // Persist the catalog's compatible-machine list so later name-based resolution
+            // (ResolveOrImportProfileForModelAsync) can disambiguate same-named filaments by
+            // model instead of treating every freshly imported row as model-agnostic (#2004).
+            CompatiblePrinters = NormalizeCompatiblePrintersList((IReadOnlyList<string>?)filamentProfile.CompatiblePrinters),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -1047,6 +1052,10 @@ public class ProfilesService(
             Hash = profileHash,
             RawJson = profileJson,
             SlicerVersion = orcaVersion,
+
+            // See PersistFilamentProfileAsync — persist the catalog's compatible-machine list too,
+            // as an additional disambiguation signal alongside PrinterModelId (#2004).
+            CompatiblePrinters = NormalizeCompatiblePrintersList((IReadOnlyList<string>?)processProfile.CompatiblePrinters),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -1535,15 +1544,20 @@ public class ProfilesService(
             return candidates.Count == 1 ? candidates[0] : null;
         }
 
-        MachineProfile? byModel = candidates.FirstOrDefault(m => m.PrinterModelId == printerModelId);
-        if (byModel is not null)
+        List<MachineProfile> byModel = candidates.Where(m => m.PrinterModelId == printerModelId).ToList();
+        if (byModel.Count > 0)
         {
-            return byModel;
+            // More than one row explicitly scoped to this exact model with the same name would be a
+            // data-integrity problem, not something safe to guess at — treat as ambiguous rather than
+            // silently picking one.
+            return byModel.Count == 1 ? byModel[0] : null;
         }
 
-        // No candidate is explicitly scoped to this model; a candidate with no model scoping at all
-        // is model-agnostic by construction and safe to use. Otherwise the match is ambiguous.
-        return candidates.FirstOrDefault(m => m.PrinterModelId is null);
+        // No candidate is explicitly scoped to this model; a single candidate with no model scoping
+        // at all is model-agnostic by construction and safe to use. Multiple such candidates (or none)
+        // are ambiguous.
+        List<MachineProfile> modelAgnostic = candidates.Where(m => m.PrinterModelId is null).ToList();
+        return modelAgnostic.Count == 1 ? modelAgnostic[0] : null;
     }
 
     private static T? SelectCompatibleProfileCandidate<T>(
@@ -1561,32 +1575,39 @@ public class ProfilesService(
 
         if (modelMachineNames.Count > 0)
         {
-            T? byCompatiblePrinters = candidates.FirstOrDefault(c =>
+            List<T> byCompatiblePrinters = candidates.Where(c =>
             {
                 string? compatiblePrinters = compatiblePrintersSelector(c);
                 return !string.IsNullOrWhiteSpace(compatiblePrinters) &&
                     compatiblePrinters.Split(',', StringSplitOptions.RemoveEmptyEntries)
                         .Any(cp => modelMachineNames.Any(n => string.Equals(cp.Trim(), n, StringComparison.OrdinalIgnoreCase)));
-            });
-            if (byCompatiblePrinters is not null)
+            }).ToList();
+            if (byCompatiblePrinters.Count > 0)
             {
-                return byCompatiblePrinters;
+                // Two same-named profiles both declaring compatibility with this model's machines
+                // (e.g. same-named filaments differing only by Material, which OrcaSlicer legally
+                // allows — see ProfilesServiceRealRepositorySeedTests
+                // .SeedSystemProfiles_BundleHasSameFilamentNameInTwoMaterials_ImportsBoth) cannot be
+                // told apart from name + CompatiblePrinters alone. Treat as ambiguous rather than
+                // guessing which one the caller meant.
+                return byCompatiblePrinters.Count == 1 ? byCompatiblePrinters[0] : null;
             }
         }
 
-        T? byModel = candidates.FirstOrDefault(c => printerModelIdSelector(c) == printerModelId);
-        if (byModel is not null)
+        List<T> byModel = candidates.Where(c => printerModelIdSelector(c) == printerModelId).ToList();
+        if (byModel.Count > 0)
         {
-            return byModel;
+            return byModel.Count == 1 ? byModel[0] : null;
         }
 
-        // No candidate declares itself compatible/scoped to this model, but a candidate with no
-        // scoping at all (no CompatiblePrinters, no PrinterModelId) is model-agnostic by
-        // construction and safe to use. Otherwise the match is ambiguous — return null so the
+        // No candidate declares itself compatible/scoped to this model. A single candidate with no
+        // scoping at all (no CompatiblePrinters, no PrinterModelId) is model-agnostic by construction
+        // and safe to use. Multiple such candidates, or none, are ambiguous — return null so the
         // caller treats it as "not yet imported for this model" rather than guessing.
-        return candidates.FirstOrDefault(c =>
+        List<T> modelAgnostic = candidates.Where(c =>
             string.IsNullOrWhiteSpace(compatiblePrintersSelector(c)) &&
-            printerModelIdSelector(c) is null);
+            printerModelIdSelector(c) is null).ToList();
+        return modelAgnostic.Count == 1 ? modelAgnostic[0] : null;
     }
 
     /// <inheritdoc />
