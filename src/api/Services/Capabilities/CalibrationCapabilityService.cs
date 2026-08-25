@@ -58,7 +58,6 @@ public sealed class CalibrationCapabilityService(
             ["calibrationCapabilities"] = "/api/calibration/capabilities",
             ["printers"] = "/api/printers",
             ["calibrationProjects"] = "/api/calibration-projects",
-            ["calibrationOrchestration"] = "/api/calibration-orchestrations/{id}",
             ["calibrationSync"] = "/api/calibration-sync/changes",
             ["calibrationImports"] = "/api/calibration-imports/legacy-v4",
             ["sliceJobs"] = "/api/slice",
@@ -145,7 +144,8 @@ public sealed class CalibrationCapabilityService(
         // ServiceCollectionExtensions and ship in every deployment: there is no configuration
         // toggle that compiles them out. These booleans therefore reflect that build-time fact,
         // matching the existing ContextImplemented precedent. Only "Operational" below depends on
-        // runtime evidence.
+        // runtime evidence. Calibration generation was removed entirely (#1979/#1993) along with
+        // its capability fields, so there is no generation flag left to compute here.
         const bool calibrationCommandsImplemented = true;
         const bool calibrationQueueIntegrationImplemented = true;
         const bool calibrationEventStreamImplemented = true;

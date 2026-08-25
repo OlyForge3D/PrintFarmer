@@ -1,88 +1,13 @@
-﻿using System.Text;
-
-namespace Farm.Web.Api.Services.Calibration.Generation;
+﻿namespace Farm.Web.Api.Services.Calibration;
 
 /// <summary>
-/// A single structured, machine-readable rejection reason produced by a generation service.
+/// The calibration methods supported by the calibration domain.
 /// </summary>
-/// <param name="Code">Stable snake_case reason code, safe to expose to clients.</param>
-/// <param name="Field">Dotted path of the offending input, for example <c>options.startCelsius</c>.</param>
-/// <param name="Message">Operator-facing explanation that never contains secrets, paths or hosts.</param>
-public sealed record CalibrationGenerationProblem(string Code, string Field, string Message);
-
-/// <summary>
-/// The outcome of a generation step: either an immutable value or an ordered problem list.
-/// </summary>
-/// <typeparam name="T">The produced value type.</typeparam>
-/// <param name="Value">The produced value, or <see langword="null"/> when the step was rejected.</param>
-/// <param name="Problems">The ordered rejection reasons; empty on success.</param>
 /// <remarks>
-/// Generation is fail closed. A caller must treat any non-empty problem list as a rejection and must
-/// never fall back to a synthesized default.
+/// Relocated from the deleted generator subtree (<c>Services/Calibration/Generation/</c>) so this
+/// catalogue survives the generator deletion. D7 (saga service) and D8 (step sequences/validation)
+/// depend on this catalogue.
 /// </remarks>
-public sealed record CalibrationGenerationResult<T>(
-    T? Value,
-    IReadOnlyList<CalibrationGenerationProblem> Problems)
-    where T : class
-{
-    /// <summary>Gets a value indicating whether the step produced a usable value.</summary>
-    public bool IsValid => Value is not null && Problems.Count == 0;
-}
-
-/// <summary>Non-generic factories for <see cref="CalibrationGenerationResult{T}"/>.</summary>
-/// <example>
-/// <code>
-/// CalibrationGenerationResult&lt;CalibrationSpecification&gt; result =
-///     CalibrationGenerationResults.Success(specification);
-/// </code>
-/// </example>
-public static class CalibrationGenerationResults
-{
-    /// <summary>Creates a successful result.</summary>
-    /// <typeparam name="T">The produced value type.</typeparam>
-    /// <param name="value">The produced value.</param>
-    /// <returns>A result carrying <paramref name="value"/> and no problems.</returns>
-    public static CalibrationGenerationResult<T> Success<T>(T value)
-        where T : class
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        return new CalibrationGenerationResult<T>(value, []);
-    }
-
-    /// <summary>Creates a rejected result.</summary>
-    /// <typeparam name="T">The produced value type.</typeparam>
-    /// <param name="problems">The ordered rejection reasons; must not be empty.</param>
-    /// <returns>A result carrying only problems.</returns>
-    public static CalibrationGenerationResult<T> Failure<T>(
-        IReadOnlyList<CalibrationGenerationProblem> problems)
-        where T : class
-    {
-        ArgumentNullException.ThrowIfNull(problems);
-        if (problems.Count == 0)
-        {
-            throw new ArgumentException(
-                "A rejected calibration generation result requires at least one problem.",
-                nameof(problems));
-        }
-
-        return new CalibrationGenerationResult<T>(null, problems);
-    }
-
-    /// <summary>Creates a rejected result from a single reason.</summary>
-    /// <typeparam name="T">The produced value type.</typeparam>
-    /// <param name="code">Stable snake_case reason code.</param>
-    /// <param name="field">Dotted path of the offending input.</param>
-    /// <param name="message">Operator-facing explanation.</param>
-    /// <returns>A result carrying exactly one problem.</returns>
-    public static CalibrationGenerationResult<T> Failure<T>(
-        string code,
-        string field,
-        string message)
-        where T : class =>
-        Failure<T>([new CalibrationGenerationProblem(code, field, message)]);
-}
-
-/// <summary>The calibration methods this generator supports.</summary>
 public enum CalibrationMethod
 {
     /// <summary>
@@ -260,79 +185,4 @@ public static class CalibrationMethodNames
             method,
             "Unknown calibration method."),
     };
-}
-
-/// <summary>Units used by calibration segment values. Every unit is explicit; none are implied.</summary>
-public static class CalibrationUnits
-{
-    /// <summary>Degrees Celsius.</summary>
-    public const string Celsius = "celsius";
-
-    /// <summary>Dimensionless multiplier.</summary>
-    public const string Ratio = "ratio";
-
-    /// <summary>Millimetres.</summary>
-    public const string Millimeters = "mm";
-
-    /// <summary>Millimetres per second.</summary>
-    public const string MillimetersPerSecond = "mm/s";
-
-    /// <summary>Cubic millimetres per second.</summary>
-    public const string CubicMillimetersPerSecond = "mm3/s";
-
-    /// <summary>Klipper pressure advance, expressed in seconds.</summary>
-    public const string Seconds = "s";
-
-    /// <summary>A discrete count with no physical dimension.</summary>
-    public const string Count = "count";
-}
-
-/// <summary>
-/// Canonical JSON and digest helpers shared by every calibration generation service.
-/// </summary>
-/// <remarks>
-/// All generation digests come from this one canonicalizer so a specification, plan and manifest
-/// that are structurally equal always hash equal, independent of member declaration order.
-/// </remarks>
-public static class CalibrationCanonicalJson
-{
-    /// <summary>Serializes a value to canonical JSON text.</summary>
-    /// <param name="value">The value to serialize.</param>
-    /// <returns>Canonical JSON with ordinally ordered object members.</returns>
-    public static string Serialize(object value) =>
-        Encoding.UTF8.GetString(CalibrationSnapshotBuilder.CanonicalizeToUtf8Bytes(value));
-
-    /// <summary>Computes the lowercase hexadecimal SHA-256 of the canonical JSON form of a value.</summary>
-    /// <param name="value">The value to digest.</param>
-    /// <returns>The lowercase hexadecimal digest.</returns>
-    public static string ComputeSha256(object value) =>
-        CalibrationSnapshotBuilder.ComputeSha256(value);
-
-    /// <summary>Computes the lowercase hexadecimal SHA-256 of a UTF-8 encoded text payload.</summary>
-    /// <param name="value">The text payload.</param>
-    /// <returns>The lowercase hexadecimal digest.</returns>
-    public static string ComputeTextSha256(string value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        return Convert.ToHexString(
-                System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(value)))
-            .ToLowerInvariant();
-    }
-
-    /// <summary>Computes the lowercase hexadecimal SHA-256 of a byte payload.</summary>
-    /// <param name="value">The byte payload.</param>
-    /// <returns>The lowercase hexadecimal digest.</returns>
-    public static string ComputeBytesSha256(ReadOnlySpan<byte> value) =>
-        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(value)).ToLowerInvariant();
-
-    /// <summary>
-    /// Compares two digests without regard to hexadecimal casing or surrounding whitespace.
-    /// </summary>
-    /// <param name="left">The first digest.</param>
-    /// <param name="right">The second digest.</param>
-    /// <returns><see langword="true"/> when both digests are present and equal.</returns>
-    public static bool DigestsMatch(string? left, string? right) =>
-        !string.IsNullOrWhiteSpace(left) &&
-        !string.IsNullOrWhiteSpace(right) &&
-        string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
 }

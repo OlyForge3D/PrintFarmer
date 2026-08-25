@@ -66,21 +66,15 @@
   </ItemGroup>
 
   <!--
-    The pinned OrcaSlicer worker smoke gate reuses the calibration seed and the publication/digest
-    rules that the default test suite already covers, so the operational gate and its focused unit
-    tests exercise one implementation instead of two drifting copies.
+    The pinned OrcaSlicer worker smoke gate reuses the publication/digest rules and test
+    authentication infrastructure that the default test suite already covers, so the operational
+    gate and its focused unit tests exercise one implementation instead of two drifting copies.
   -->
   <ItemGroup>
-    <Compile Include="..\Farm.Web.Api.Tests\Calibration\Generation\PinnedOrcaPublication.cs"
+    <Compile Include="..\Farm.Web.Api.Tests\Calibration\PinnedOrcaPublication.cs"
              Link="Calibration\Shared\PinnedOrcaPublication.cs" />
-    <Compile Include="..\Farm.Web.Api.Tests\Calibration\Generation\CalibrationGenerationSeed.cs"
-             Link="Calibration\Shared\CalibrationGenerationSeed.cs" />
-    <Compile Include="..\Farm.Web.Api.Tests\Calibration\Generation\CalibrationGenerationFixture.cs"
-             Link="Calibration\Shared\CalibrationGenerationFixture.cs" />
     <Compile Include="..\Farm.Web.Api.Tests\TestInfrastructure\TestAuthHandler.cs"
              Link="Calibration\Shared\TestAuthHandler.cs" />
-    <Compile Include="..\Farm.Web.Api.Tests\TestInfrastructure\SlicerModulePreloader.cs"
-             Link="Calibration\Shared\SlicerModulePreloader.cs" />
   </ItemGroup>
 
   <!--

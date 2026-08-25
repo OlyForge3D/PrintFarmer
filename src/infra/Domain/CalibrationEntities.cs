@@ -568,6 +568,10 @@ public sealed class CalibrationOrchestration
     public string? PlanManifestSha256 { get; set; }
 
     /// <summary>SHA-256 of the final annotated calibration G-code.</summary>
+    /// <remarks>
+    /// Still authoritatively consulted by <see cref="Farm.Infrastructure.Services.Queue.CalibrationQueueCanonicalizer"/>
+    /// when a promoted G-code file is queued for dispatch, independent of how the file was produced.
+    /// </remarks>
     public string? GcodeSha256 { get; set; }
 
     /// <summary>SHA-256 of the canonical calibration manifest describing the final G-code.</summary>

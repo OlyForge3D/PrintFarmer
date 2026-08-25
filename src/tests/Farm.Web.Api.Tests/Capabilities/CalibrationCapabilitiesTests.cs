@@ -124,6 +124,8 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             .Should().Be("/api/calibration-sync/changes");
         _ = root.GetProperty("routes").TryGetProperty("calibrationGenerateJob", out _).Should().BeFalse(
             "the generate-job route described generator-specific machinery and is no longer advertised");
+        _ = root.GetProperty("routes").TryGetProperty("calibrationOrchestration", out _).Should().BeFalse(
+            "the orchestration route was removed with the generation subtree (#1979/#1993) and is no longer advertised");
         _ = root.GetProperty("limits").GetProperty("photoUploadMaxBytes").GetInt64()
             .Should().BeGreaterThan(0);
         _ = root.GetProperty("acceptedMimeTypes").GetProperty("photo").EnumerateArray()
@@ -283,6 +285,12 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             _ = versionReasons.Should().OnlyContain(reason =>
                 reason.GetProperty("message").GetString() ==
                 $"Observed upstream OrcaSlicer version(s) 2.2.0; configured supported version(s): {CalibrationContractConstants.SlicerVersion}.");
+
+            // Calibration generation was removed entirely (#1979/#1983/#1993): there is no longer
+            // a "calibrationGeneration" unavailable reason to report at all.
+            _ = document.RootElement.GetProperty("unavailableReasons").EnumerateArray()
+                .Should().NotContain(reason =>
+                    reason.GetProperty("feature").GetString() == "calibrationGeneration");
         }
     }
 
@@ -376,6 +384,8 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         // queue integration, event streaming) are always compiled in and registered, so they
         // must never be misreported as unimplemented just because the profile store happens to
         // be unreachable in this deployment. Only "operational" should reflect that.
+        // Calibration generation itself was removed entirely (#1979/#1983/#1993), so there is no
+        // GenerationImplemented flag left on this DTO at all.
         _ = capabilities.Calibration.ContextImplemented.Should().BeTrue();
         _ = capabilities.Calibration.CommandsImplemented.Should().BeTrue();
         _ = capabilities.Calibration.QueueIntegrationImplemented.Should().BeTrue();

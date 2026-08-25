@@ -99,8 +99,9 @@ public static class SlicerModuleExtensions
     /// </para>
     /// <para>
     /// This does not reuse the HTTP-hop pattern used by
-    /// <c>CalibrationProfileResolutionStartup</c>/<c>SlicerHostCapabilityClientStartup</c>
-    /// (routing to the slicer-host process) because the seeder only needs to read/write a small,
+    /// <c>CalibrationProfileResolutionStartup</c> (routing to the slicer-host process; the
+    /// equivalent capability-client startup wiring was removed with the calibration generation
+    /// saga by #1979) because the seeder only needs to read/write a small,
     /// deterministic set of content-hash-keyed <b>system</b> profiles for an explicitly opt-in,
     /// disabled-by-default validation feature
     /// (<c>MoonrakerEmulatorSeed:Enabled</c>). The API and slicer-host containers already point at

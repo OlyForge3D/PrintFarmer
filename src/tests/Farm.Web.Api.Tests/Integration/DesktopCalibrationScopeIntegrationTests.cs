@@ -239,35 +239,6 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
         read.StatusCode.Should().Be(HttpStatusCode.Forbidden, "model/library scopes never imply calibration authority");
     }
 
-    /// <summary>
-    /// Generation is gated by <c>calibration:generate</c> AND <c>slicing:submit</c>, so a key with
-    /// only one of them must still be refused.
-    /// </summary>
-    [Fact]
-    public async Task GenerationRoute_RequiresBothGenerateAndSlicingSubmit()
-    {
-        await GrantOwnerPermissionsAsync(
-            PrintFarmerPermissions.Calibration.Read,
-            PrintFarmerPermissions.Calibration.Generate,
-            PrintFarmerPermissions.Slicing.Submit);
-
-        using HttpClient generateOnly = await ExchangeClientAsync(
-            ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationGenerate);
-        HttpResponseMessage refused = await generateOnly.PostAsJsonAsync(
-            $"/api/calibration-projects/{Guid.NewGuid()}/attempts/{Guid.NewGuid()}/generate-job", new { });
-        refused.StatusCode.Should().Be(HttpStatusCode.Forbidden, "slicing:submit is also required");
-
-        using HttpClient full = await ExchangeClientAsync(
-            ApiKeyScope.CalibrationRead |
-            ApiKeyScope.CalibrationGenerate |
-            ApiKeyScope.SlicingSubmit);
-        HttpResponseMessage allowed = await full.PostAsJsonAsync(
-            $"/api/calibration-projects/{Guid.NewGuid()}/attempts/{Guid.NewGuid()}/generate-job", new { });
-        allowed.StatusCode.Should().NotBe(
-            HttpStatusCode.Forbidden,
-            "both permissions are present, so authorization passes even though the ids do not exist");
-    }
-
     #endregion
 
     #region Live revocation
@@ -740,7 +711,7 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
         using HttpClient client = await CreateGenerationTokenClientAsync();
 
         HttpResponseMessage generate = await client.PostAsJsonAsync(
-            $"/api/calibration-projects/{Guid.NewGuid()}/attempts/{Guid.NewGuid()}/generate-job", new { });
+            $"/api/calibration-projects/{Guid.NewGuid()}/generated-profiles", new { });
         generate.StatusCode.Should().NotBe(
             HttpStatusCode.Forbidden,
             "calibration:generate + slicing:submit are both present");

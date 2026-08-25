@@ -2,8 +2,8 @@
 using System.Text.Json.Nodes;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.OrcaSlicer.Worker.Tests.Support;
-using Farm.Web.Api.Services.Calibration.Generation;
-using Farm.Web.Api.Tests.Calibration.Generation;
+using Farm.Web.Api.Services.Calibration;
+using Farm.Web.Api.Tests.Calibration;
 using FluentAssertions;
 using Xunit;
 using Xunit.Abstractions;
@@ -49,23 +49,22 @@ namespace Farm.Web.IntegrationTests.Calibration;
 /// Left untouched, those moves would leak into <see cref="OrcaGcodeOrientationReader"/>'s measured
 /// bounding box and make this test's pass/fail depend on vendor profile scripting instead of the
 /// model's rotation. Before slicing, this class derives each profile through
-/// <see cref="OrcaEffectiveProfileFactory.Derive(string)"/> — the exact same
-/// <see cref="OrcaProfileCommandKeys"/> neutralization rule production's own calibration plan
-/// compiler applies before a real job ever reaches a worker — so the real binary here only ever
-/// sees profiles with every <c>*_gcode</c> hook (plus <c>post_process</c>/<c>printer_notes</c>)
-/// emptied out, and the measured extents can only reflect the marker itself.
+/// <see cref="OrcaEffectiveProfileFactory.Derive(string)"/> — the same
+/// <see cref="OrcaProfileCommandKeys"/> neutralization rule a real calibration job applies before
+/// it ever reaches a worker — so the real binary here only ever sees profiles with every
+/// <c>*_gcode</c> hook (plus <c>post_process</c>/<c>printer_notes</c>) emptied out, and the
+/// measured extents can only reflect the marker itself.
 /// </para>
 /// <para>
-/// Gated identically to <see cref="CalibrationPinnedWorkerSmokeTests"/>: it shares the
-/// <see cref="CalibrationPinnedWorkerSmokeTests.SmokeCategory"/> trait and the same
-/// <see cref="PinnedOrcaPublication.ResolveGate"/> operational gate, so it only executes the
-/// real binary where a published, digest-pinned worker image and Docker are both available
-/// (manually dispatched CI via <c>orcaslicer-strict-build.yml</c> with
+/// Gated by the shared <see cref="PinnedOrcaPublication.SmokeCategory"/> trait and the same
+/// <see cref="PinnedOrcaPublication.ResolveGate"/> operational gate every pinned-worker smoke test
+/// shares, so it only executes the real binary where a published, digest-pinned worker image and
+/// Docker are both available (manually dispatched CI via <c>orcaslicer-strict-build.yml</c> with
 /// <c>publish_pinned_worker=true</c>, or a local run with the gate's environment variable set) —
 /// it never runs the real CLI on every ordinary PR build.
 /// </para>
 /// </remarks>
-[Trait("Category", CalibrationPinnedWorkerSmokeTests.SmokeCategory)]
+[Trait("Category", PinnedOrcaPublication.SmokeCategory)]
 public sealed class PinnedOrcaCliRotationTests(ITestOutputHelper output) : IAsyncLifetime
 {
     private static readonly TimeSpan WorkerStartTimeout = TimeSpan.FromMinutes(5);
@@ -145,7 +144,7 @@ public sealed class PinnedOrcaCliRotationTests(ITestOutputHelper output) : IAsyn
         _output.WriteLine(gate.Describe());
         if (!gate.CanRun)
         {
-            // Same honest-blocker contract as CalibrationPinnedWorkerSmokeTests: a required-but
+            // Same honest-blocker contract every pinned-worker smoke test shares: a required-but
             // -blocked gate fails the run; an optional one reports the blocker and skips.
             _ = gate.IsRequired.Should().BeFalse(
                 "the operational gate was required but could not execute: " + gate.BlockReason);
