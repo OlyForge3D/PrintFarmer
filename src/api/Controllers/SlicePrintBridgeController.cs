@@ -149,11 +149,17 @@ public class SlicePrintBridgeController(
         string fullPath = pathResult.Value.FullPath;
         string fileName = pathResult.Value.Artifact.FileName;
 
-        // 6. Run the general g-code safety pass before this program is ever streamed to a
+        // 6. Read the artifact once, then validate and upload from that exact byte content.
+        // Reading once (instead of validating the file, then reopening it for upload) closes
+        // a time-of-check/time-of-use gap: a file swapped on disk between validation and
+        // upload could otherwise reach the printer without ever being validated.
+        byte[] gcodeBytes = await System.IO.File.ReadAllBytesAsync(fullPath, ct);
+        string gcodeText = System.Text.Encoding.UTF8.GetString(gcodeBytes);
+
+        // 7. Run the general g-code safety pass before this program is ever streamed to a
         // physical printer. This is not calibration-scoped: any command is allowed
         // (AllowedCommands: null), and the machine envelope is sourced from the printer/
         // toolhead domain fields, never from Printer.Calibration* columns.
-        string gcodeText = await System.IO.File.ReadAllTextAsync(fullPath, ct);
         GcodeSafetyResult<GcodeSafetyReport> safetyResult = gcodeSafetyValidator.Validate(
             new GcodeSafetyRequest(
                 BuildSafetyLimits(printer),
@@ -177,15 +183,16 @@ public class SlicePrintBridgeController(
             "Sending gcode {FileName} from slice job {JobId} to printer {PrinterId} (startPrint={StartPrint})",
             fileName, id, request.PrinterId, request.StartPrint);
 
-        // 7. Upload to printer (and optionally start print)
-        await using FileStream fileStream = new(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        // 8. Upload to printer (and optionally start print) using the same bytes that were
+        // validated above, not a fresh read of the file on disk.
+        await using MemoryStream uploadStream = new(gcodeBytes, writable: false);
 
         if (request.StartPrint)
         {
-            return await UploadAndStartPrintAsync(id, request.PrinterId, fileName, fileStream, ct);
+            return await UploadAndStartPrintAsync(id, request.PrinterId, fileName, uploadStream, ct);
         }
 
-        return await UploadOnlyAsync(id, request.PrinterId, fileName, fileStream, ct);
+        return await UploadOnlyAsync(id, request.PrinterId, fileName, uploadStream, ct);
     }
 
     /// <summary>
@@ -194,7 +201,7 @@ public class SlicePrintBridgeController(
     /// <c>Printer.Calibration*</c> column: those are calibration-scoped ceilings slated for
     /// removal and must never gate the general send-to-printer safety pass.
     /// </summary>
-    private static GcodeSafetyLimits BuildSafetyLimits(Farm.Infrastructure.Domain.Printer printer)
+    private GcodeSafetyLimits BuildSafetyLimits(Farm.Infrastructure.Domain.Printer printer)
     {
         Farm.Infrastructure.Domain.Toolhead? toolhead =
             printer.Toolheads?.FirstOrDefault(t => t.IsPrimary) ??
@@ -211,8 +218,8 @@ public class SlicePrintBridgeController(
             printer.MaxBuildVolumeZ is { } sizeZ ? (decimal)sizeZ : null,
             printer.BedOriginX is { } originX ? (decimal)originX : null,
             printer.BedOriginY is { } originY ? (decimal)originY : null,
-            [],
-            []);
+            ParsePrintablePolygon(printer.PrintablePolygonJson, printer.Id),
+            ParseExcludedRegions(printer.ExcludedRegionsJson, printer.Id));
 
         var machineLimits = new GcodeSafetyMachineLimits(
             printer.MaxBedTemp,
@@ -222,11 +229,84 @@ public class SlicePrintBridgeController(
             printer.MaxTravelSpeed,
             printer.MaxAcceleration);
 
+        // Filament diameter is not attached to the printer/toolhead configuration - it lives on
+        // whichever spool is currently loaded (Spoolman), which would require a live external
+        // lookup from this hot request path. Volumetric-flow checking is therefore left disabled
+        // here (GcodeSafetyPrintLimits.Empty), same as it is unavailable to the general validator
+        // whenever a caller cannot resolve it; this does not affect any other check.
         return new GcodeSafetyLimits(
             toolheadLimits,
             bedLimits,
             machineLimits,
             GcodeSafetyPrintLimits.Empty);
+    }
+
+    private sealed record SafetyPolygonPointDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("x")] double X,
+        [property: System.Text.Json.Serialization.JsonPropertyName("y")] double Y);
+
+    private sealed record SafetyExcludedRegionDto(
+        [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name,
+        [property: System.Text.Json.Serialization.JsonPropertyName("polygon")]
+        IReadOnlyList<SafetyPolygonPointDto>? Polygon);
+
+    /// <summary>
+    /// Parses <see cref="Farm.Infrastructure.Domain.Printer.PrintablePolygonJson"/> into safety-pass
+    /// points. Malformed or absent JSON is treated as "no printable polygon configured" (the
+    /// polygon check is then skipped, same as when a printer has never configured one) rather than
+    /// failing the request, since a printer geometry-data problem is not itself a g-code injection
+    /// or thermal risk and the rest of the safety pass still runs.
+    /// </summary>
+    private List<GcodeSafetyPoint> ParsePrintablePolygon(string? json, Guid printerId)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        try
+        {
+            List<SafetyPolygonPointDto>? points = System.Text.Json.JsonSerializer.Deserialize<List<SafetyPolygonPointDto>>(json);
+            return points?.Select(p => new GcodeSafetyPoint((decimal)p.X, (decimal)p.Y)).ToList() ?? [];
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Printer {PrinterId} has malformed PrintablePolygonJson; skipping the printable-polygon safety check.",
+                printerId);
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Parses <see cref="Farm.Infrastructure.Domain.Printer.ExcludedRegionsJson"/> into safety-pass
+    /// regions. Same fail-open-on-malformed-data rationale as <see cref="ParsePrintablePolygon"/>.
+    /// </summary>
+    private List<GcodeSafetyExcludedRegion> ParseExcludedRegions(string? json, Guid printerId)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        try
+        {
+            List<SafetyExcludedRegionDto>? regions = System.Text.Json.JsonSerializer.Deserialize<List<SafetyExcludedRegionDto>>(json);
+            return regions?
+                .Select(r => new GcodeSafetyExcludedRegion(
+                    r.Name ?? string.Empty,
+                    r.Polygon?.Select(p => new GcodeSafetyPoint((decimal)p.X, (decimal)p.Y)).ToList() ?? []))
+                .ToList() ?? [];
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Printer {PrinterId} has malformed ExcludedRegionsJson; skipping the excluded-region safety check.",
+                printerId);
+            return [];
+        }
     }
 
     /// <summary>

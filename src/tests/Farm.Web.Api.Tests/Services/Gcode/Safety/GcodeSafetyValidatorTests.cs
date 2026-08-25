@@ -57,14 +57,38 @@ public sealed class GcodeSafetyValidatorTests
     {
         // General/send-to-printer semantics: an unset ceiling means "skip this check", not
         // fail-closed — printers with incomplete profiles must not have valid gcode rejected.
-        GcodeSafetyRequest request = new(
+        // Uses a gcode program commanding a nozzle temperature (260C) that WOULD be rejected if a
+        // ceiling were configured (proven by the companion case below), so this test genuinely
+        // demonstrates the skip is conditional on the ceiling being unset, not just that the
+        // validator always accepts this program regardless of the check.
+        const string ProgramWithHighNozzleTemperature = "G28\nM104 S260\nTURN_OFF_HEATERS\nM84\n";
+
+        GcodeSafetyRequest requestWithNoCeiling = new(
             GcodeSafetyLimits.Empty,
-            CleanProgram,
+            ProgramWithHighNozzleTemperature,
             GcodeSafetyCheckpoint.BeforeSendToPrinter);
+        GcodeSafetyResult<GcodeSafetyReport> resultWithNoCeiling = Validator.Validate(requestWithNoCeiling);
 
-        GcodeSafetyResult<GcodeSafetyReport> result = Validator.Validate(request);
+        _ = resultWithNoCeiling.IsValid.Should().BeTrue();
+        _ = resultWithNoCeiling.Problems.Should().BeEmpty();
 
-        _ = result.IsValid.Should().BeTrue();
+        // Companion case: the exact same program is rejected once a ceiling is configured below
+        // the commanded temperature, proving the skip above is genuinely conditional.
+        GcodeSafetyLimits limitsWithCeiling = GcodeSafetyLimits.Empty with
+        {
+            Toolhead = new GcodeSafetyToolheadLimits(
+                NozzleMaxTemperatureCelsius: 250,
+                HotendMaxTemperatureCelsius: null,
+                IsDirectDrive: null),
+        };
+        GcodeSafetyRequest requestWithCeiling = new(
+            limitsWithCeiling,
+            ProgramWithHighNozzleTemperature,
+            GcodeSafetyCheckpoint.BeforeSendToPrinter);
+        GcodeSafetyResult<GcodeSafetyReport> resultWithCeiling = Validator.Validate(requestWithCeiling);
+
+        _ = resultWithCeiling.IsValid.Should().BeFalse();
+        _ = resultWithCeiling.Problems.Select(p => p.Code).Should().Contain(GcodeSafetyProblemCodes.TemperatureAboveLimit);
     }
 
     [Fact]

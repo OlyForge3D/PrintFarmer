@@ -476,6 +476,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
     {
         Guid jobId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
+        Guid toolheadId = Guid.NewGuid();
         Artifact gcode = CreateArtifact(jobId, "gcode", "model.gcode");
         string filePath = CreateTempGcodeFile("model.gcode");
 
@@ -490,6 +491,18 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
                 Name = "Test Printer",
                 MaxBedTemp = 120,
                 MaxAcceleration = 5000,
+                Toolheads = new List<Toolhead>
+                {
+                    new()
+                    {
+                        Id = toolheadId,
+                        PrinterId = printerId,
+                        IsPrimary = true,
+                        NozzleMaxTemperature = 280,
+                        HotendMaxTemperature = 300,
+                        IsDirectDrive = true,
+                    },
+                },
             });
 
         _printersMock
@@ -514,6 +527,12 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         capturedRequest.AllowedCommands.Should().BeNull();
         capturedRequest.Limits.Machine.MaxBedTemperatureCelsius.Should().Be(120);
         capturedRequest.Limits.Machine.MaxAcceleration.Should().Be(5000);
+
+        // Proves BuildSafetyLimits actually sources the primary toolhead's ceilings (via
+        // FindByIdWithIncludesAsync), not just the printer-level machine envelope above.
+        capturedRequest.Limits.Toolhead.NozzleMaxTemperatureCelsius.Should().Be(280);
+        capturedRequest.Limits.Toolhead.HotendMaxTemperatureCelsius.Should().Be(300);
+        capturedRequest.Limits.Toolhead.IsDirectDrive.Should().BeTrue();
     }
 
     // =========================================================================
