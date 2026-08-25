@@ -756,39 +756,58 @@ public sealed class CalibrationProjectService(
             cancellationToken);
         DateTime nowUtc = UtcNow();
         bool isNewDraft = draft is null;
+
         if (draft is null)
         {
             if (request.BaseRevision.HasValue || !string.IsNullOrWhiteSpace(ifMatch))
             {
                 return Validation<CalibrationDraftDto>("draft_not_found_for_precondition");
             }
-
-            // D8: enforce the canonical per-method step sequence for a brand-new draft.
-            // Only recognized methods are checked (canonical catalogue, D2/D8); unknown or
-            // legacy method strings are left unchecked so this never gates on values this
-            // catalogue does not know about. Editing an already-reached step (an existing
-            // draft row) is not an "advance" and is never checked here.
-            if (CalibrationMethodNames.TryParse(trimmedMethod, out CalibrationMethod parsedMethod))
+        }
+        else
+        {
+            CalibrationApiResult<CalibrationDraftDto>? precondition =
+                CheckPrecondition(draft.Revision, draft.Id, "draft", request.BaseRevision, ifMatch, MapDraft(draft));
+            if (precondition is not null)
             {
-                int requestedIndex = CalibrationMethodSteps.IndexOf(parsedMethod, stepId);
-                List<string> existingStepIds = await _dbContext.CalibrationDrafts
-                    .Where(candidate => candidate.ProjectId == projectId &&
-                        candidate.DeviceLineageId == deviceLineageId &&
-                        candidate.Method == trimmedMethod &&
-                        candidate.DeletedAtUtc == null)
-                    .Select(candidate => candidate.StepId)
-                    .ToListAsync(cancellationToken);
-                int highestReachedIndex = existingStepIds
-                    .Select(existingStepId => CalibrationMethodSteps.IndexOf(parsedMethod, existingStepId))
-                    .DefaultIfEmpty(-1)
-                    .Max();
-
-                if (requestedIndex < 0 || requestedIndex != highestReachedIndex + 1)
-                {
-                    return Validation<CalibrationDraftDto>("step_out_of_sequence");
-                }
+                return precondition;
             }
+        }
 
+        // D8: enforce the canonical per-method step sequence whenever a step is first
+        // recorded under a recognized method (canonical catalogue, D2/D8) — either as a
+        // brand-new draft, or when an existing draft's method is being changed TO a
+        // recognized method (which is equally an "advance": it is the first time this row
+        // is asserting a reached step for that method). Unknown/legacy method strings are
+        // left unchecked so this never gates on values this catalogue does not know about.
+        // Re-editing a draft's values/prerequisites without changing its method is not an
+        // "advance" and is never checked.
+        bool methodChangingToRecognized = draft is not null &&
+            !string.Equals(draft.Method, trimmedMethod, StringComparison.Ordinal);
+        if ((isNewDraft || methodChangingToRecognized) &&
+            CalibrationMethodNames.TryParse(trimmedMethod, out CalibrationMethod parsedMethod))
+        {
+            int requestedIndex = CalibrationMethodSteps.IndexOf(parsedMethod, stepId);
+            List<string> existingStepIds = await _dbContext.CalibrationDrafts
+                .Where(candidate => candidate.ProjectId == projectId &&
+                    candidate.DeviceLineageId == deviceLineageId &&
+                    candidate.Method == trimmedMethod &&
+                    candidate.DeletedAtUtc == null)
+                .Select(candidate => candidate.StepId)
+                .ToListAsync(cancellationToken);
+            int highestReachedIndex = existingStepIds
+                .Select(existingStepId => CalibrationMethodSteps.IndexOf(parsedMethod, existingStepId))
+                .DefaultIfEmpty(-1)
+                .Max();
+
+            if (requestedIndex < 0 || requestedIndex != highestReachedIndex + 1)
+            {
+                return Validation<CalibrationDraftDto>("step_out_of_sequence");
+            }
+        }
+
+        if (draft is null)
+        {
             draft = new CalibrationDraft
             {
                 Id = Guid.NewGuid(),
@@ -809,14 +828,7 @@ public sealed class CalibrationProjectService(
         }
         else
         {
-            CalibrationApiResult<CalibrationDraftDto>? precondition =
-                CheckPrecondition(draft.Revision, draft.Id, "draft", request.BaseRevision, ifMatch, MapDraft(draft));
-            if (precondition is not null)
-            {
-                return precondition;
-            }
-
-            draft.Method = request.Method.Trim();
+            draft.Method = trimmedMethod;
             draft.ValuesJson = Json(request.Values);
             draft.PrerequisitesJson = Json(request.Prerequisites);
             draft.Revision++;

@@ -862,10 +862,133 @@ public sealed class CalibrationProjectServiceTests
         _ = (await db.CalibrationObservations.CountAsync()).Should().Be(0);
     }
 
-    private static CalibrationDraftUpsertRequest CreateStepDraftRequest(string method) =>
-        new()
+    [Fact]
+    public async Task AppendObservationAsync_TemperatureNonNumeric_ReturnsInvalidValidationError()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "temperature-non-numeric"),
+            actor,
+            CancellationToken.None);
+        Guid attemptId = await AddAttemptAsync(
+            db,
+            project.Value!.Id,
+            actor.Subject,
+            sequence: 1,
+            CalibrationMethodNames.Temperature);
+        CalibrationObservationCreateRequest request = new()
+        {
+            ClientId = "desktop",
+            OperationId = "temperature-non-numeric",
+            ObservationType = "measurement",
+            Measurements = JsonSerializer.SerializeToElement(new Dictionary<string, string> { ["temperature_c"] = "hot" }),
+            Result = JsonSerializer.SerializeToElement(new { }),
+            Units = JsonSerializer.SerializeToElement(new { }),
+        };
+
+        CalibrationApiResult<CalibrationObservationDto> result =
+            await service.AppendObservationAsync(attemptId, request, actor, CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        _ = result.Code.Should().Be("observation_measurement_invalid");
+        _ = (await db.CalibrationObservations.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UpsertDraftAsync_DifferentDeviceLineage_TracksSequenceIndependently()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "lineage-isolation-project"),
+            actor,
+            CancellationToken.None);
+
+        _ = await service.UpsertDraftAsync(
+            project.Value!.Id,
+            CalibrationMethodSteps.Setup,
+            CreateStepDraftRequest(CalibrationMethodNames.Temperature, "lineage-a"),
+            null,
+            actor,
+            CancellationToken.None);
+        _ = await service.UpsertDraftAsync(
+            project.Value.Id,
+            CalibrationMethodSteps.Print,
+            CreateStepDraftRequest(CalibrationMethodNames.Temperature, "lineage-a"),
+            null,
+            actor,
+            CancellationToken.None);
+
+        CalibrationApiResult<CalibrationDraftDto> lineageBSetup = await service.UpsertDraftAsync(
+            project.Value.Id,
+            CalibrationMethodSteps.Setup,
+            CreateStepDraftRequest(CalibrationMethodNames.Temperature, "lineage-b"),
+            null,
+            actor,
+            CancellationToken.None);
+
+        _ = lineageBSetup.IsSuccess.Should().BeTrue(
+            "sequence progress on lineage-a must not leak into an independent device lineage-b");
+    }
+
+    [Fact]
+    public async Task UpsertDraftAsync_EditToRecognizedMethodOutOfSequence_ReturnsValidationError()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "method-swap-project"),
+            actor,
+            CancellationToken.None);
+
+        // An unrecognized method bypasses sequence enforcement, so this "select" (last)
+        // step draft is created unchecked.
+        CalibrationApiResult<CalibrationDraftDto> unenforcedCreate = await service.UpsertDraftAsync(
+            project.Value!.Id,
+            CalibrationMethodSteps.Select,
+            CreateStepDraftRequest("manual", "device-a"),
+            null,
+            actor,
+            CancellationToken.None);
+        _ = unenforcedCreate.IsSuccess.Should().BeTrue();
+
+        // Editing that same draft row to a recognized method must not be able to launder
+        // around the sequence check: no prior "temperature" steps exist, so asserting
+        // "select" (index 3) here is still out of sequence.
+        CalibrationDraftUpsertRequest editRequest = new()
         {
             DeviceLineageId = "device-a",
+            Method = CalibrationMethodNames.Temperature,
+            Values = JsonSerializer.SerializeToElement(new { }),
+            Prerequisites = JsonSerializer.SerializeToElement(new { }),
+            BaseRevision = unenforcedCreate.Value!.Revision,
+        };
+        CalibrationApiResult<CalibrationDraftDto> swapped = await service.UpsertDraftAsync(
+            project.Value.Id,
+            CalibrationMethodSteps.Select,
+            editRequest,
+            $"\"calibration-draft-{unenforcedCreate.Value.Id:N}-{unenforcedCreate.Value.Revision}\"",
+            actor,
+            CancellationToken.None);
+
+        _ = swapped.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        _ = swapped.Code.Should().Be("step_out_of_sequence");
+    }
+
+    private static CalibrationDraftUpsertRequest CreateStepDraftRequest(string method) =>
+        CreateStepDraftRequest(method, "device-a");
+
+    private static CalibrationDraftUpsertRequest CreateStepDraftRequest(string method, string deviceLineageId) =>
+        new()
+        {
+            DeviceLineageId = deviceLineageId,
             Method = method,
             Values = JsonSerializer.SerializeToElement(new { }),
             Prerequisites = JsonSerializer.SerializeToElement(new { }),
