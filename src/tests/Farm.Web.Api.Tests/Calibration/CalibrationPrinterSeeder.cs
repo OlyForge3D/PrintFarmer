@@ -33,7 +33,7 @@ internal static class CalibrationPrinterSeeder
     /// <param name="deriveHardwareFromMachineProfile">
     /// When <see langword="true"/>, leaves every #1614 AC-2 derivable <c>Calibration*</c>/
     /// <c>Toolhead</c> column null and seeds a fully-specified machine profile
-    /// <c>RawJson</c> so the calibration context resolver must source those fields from the resolved
+    /// <c>RawJson</c> so calibration context generation must source those fields from the resolved
     /// machine profile — the split-deployment counterpart of the in-process derivation unit
     /// test, proving parity across both deployment topologies (test plan item 6).
     /// </param>
@@ -95,8 +95,6 @@ internal static class CalibrationPrinterSeeder
                     ? null
                     : """[{"x":0,"y":0},{"x":250,"y":0},{"x":250,"y":250},{"x":0,"y":250}]""",
                 ExcludedRegionsJson = "[]",
-                CalibrationMotionType =
-                    deriveHardwareFromMachineProfile ? null : CalibrationMotionType.CoreXY,
                 MaxPrintSpeed = 300,
                 MaxTravelSpeed = deriveHardwareFromMachineProfile ? null : 500,
                 MaxAcceleration = deriveHardwareFromMachineProfile ? null : 10000,
@@ -108,14 +106,9 @@ internal static class CalibrationPrinterSeeder
                 ActiveToolheadIndex = 0,
                 SupportsPressureAdvance = true,
                 SupportsFirmwareRetraction = true,
-                CalibrationHardwareVerifiedAtUtc = nowUtc,
                 CalibrationSlicerEngine = CalibrationContractConstants.SlicerEngine,
                 CalibrationSlicerDistribution = CalibrationContractConstants.SlicerDistribution,
                 CalibrationSlicerVersion = CalibrationContractConstants.SlicerVersion,
-                CalibrationProfileFormat = CalibrationContractConstants.ProfileFormat,
-                CalibrationMachineProfileId = machineProfileId,
-                CalibrationProcessProfileId = processProfileId,
-                CalibrationFilamentProfileId = filamentProfileId,
                 ApiKey = "printer-api-key",
                 Username = "printer-user",
                 Password = "printer-password",

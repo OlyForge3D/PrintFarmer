@@ -13,11 +13,9 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Spoolman;
-using Farm.Web.Api.Services.Calibration;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -28,23 +26,16 @@ namespace Farm.Web.Api.Tests.Services.Printers;
 /// <summary>
 /// Regression tests for #1656: firmware identity must have exactly one authoritative store.
 /// <see cref="PrinterVersionCache"/> (backing <c>GET /api/printers/{id}/version</c> and the UI)
-/// and <see cref="CalibrationContextResolver.ValidateFirmware"/> (the calibration context builder,
-/// retained when #1943 removed the fleet-wide projection)
-/// previously read from two unreconciled stores — a live, never-persisted cache vs. the
-/// persisted <c>Printer.Firmware*</c> columns — so a printer could show a firmware version in
-/// the UI while calibration reported it entirely missing. These tests exercise both read paths
-/// against the *same* underlying database row and assert they agree.
+/// previously read from a live, never-persisted cache rather than the persisted
+/// <c>Printer.Firmware*</c> columns, so a printer could show a stale or inconsistent firmware
+/// version in the UI. These tests exercise the read-through path and assert it persists and
+/// reports the complete firmware identity.
 /// </summary>
 public sealed class PrinterVersionCacheFirmwareIdentityTests
 {
     // Mirrors the real-world "Unknown" manufacturer + "Unknown Model" sentinel
     // (EfCatalogRepository.GetUnknownModelIdAsync) that every printer's non-nullable ModelId
-    // resolves to by default. Model is a required FK (PrinterConfiguration.HasOne(p => p.Model)),
-    // so CalibrationContextResolver.GetContextAsync's Model.Toolheads Include chain
-    // (#1922/#1931) performs an inner join and would otherwise silently drop every printer whose
-    // ModelId does not resolve to a real catalog row -- exactly the regression this file hit when
-    // PR #1931 added that Include without every printer fixture here also seeding the row its
-    // ModelId already implicitly promised to reference.
+    // resolves to by default. Model is a required FK (PrinterConfiguration.HasOne(p => p.Model)).
     private static readonly Guid UnknownManufacturerId = Guid.NewGuid();
     private static readonly Guid UnknownModelId = Guid.NewGuid();
 
@@ -72,9 +63,9 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
 
     /// <summary>
     /// Seeds the reserved "Unknown" manufacturer + "Unknown Model" catalog row that
-    /// <see cref="CreateNeverProbedMoonrakerPrinter"/>'s <c>ModelId</c> references, so
-    /// <see cref="CalibrationContextResolver.GetContextAsync"/>'s required-FK Include
-    /// chain resolves the printer instead of inner-joining it out of the result set.
+    /// <see cref="CreateNeverProbedMoonrakerPrinter"/>'s <c>ModelId</c> references, so the
+    /// required-FK <c>Model</c> Include chain resolves the printer instead of inner-joining
+    /// it out of the result set.
     /// </summary>
     private static async Task SeedUnknownCatalogModelAsync(AppDbContext db, CancellationToken cancellationToken = default)
     {
@@ -109,32 +100,6 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
             Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),
             Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>(),
             Mock.Of<IFilamentCoverageSpoolResolver>());
-    }
-
-    private static CalibrationContextResolver CreateCalibrationService(AppDbContext db)
-    {
-        IConfiguration configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new System.Collections.Generic.Dictionary<string, string?>
-            {
-                ["Calibration:StatusStaleAfterSeconds"] = "30",
-                ["Calibration:FirmwareMetadataStaleAfterSeconds"] = "86400",
-                ["Calibration:HardwareMetadataStaleAfterSeconds"] = "2592000",
-            })
-            .Build();
-
-        var statusReader = new Mock<IPrinterStatusSnapshotReader>();
-        _ = statusReader.Setup(reader => reader.GetStatusSnapshot(It.IsAny<Guid>())).Returns((PrinterStatusSnapshot?)null);
-        var capabilityFactory = new Mock<IBackendCapabilityFactory>();
-        _ = capabilityFactory
-            .Setup(factory => factory.GetSupportedCapabilities(It.IsAny<PrinterBackend>()))
-            .Returns(BackendCapabilities.Status);
-
-        return new CalibrationContextResolver(
-            db,
-            statusReader.Object,
-            capabilityFactory.Object,
-            configuration,
-            TimeProvider.System);
     }
 
     private static PrintersService CreatePrintersServiceWithUnitOfWork(
@@ -179,7 +144,7 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
     }
 
     [Fact]
-    public async Task GetAsync_NeverProbedMoonrakerPrinter_PersistsThroughAndCalibrationContextThenAgrees()
+    public async Task GetAsync_NeverProbedMoonrakerPrinter_PersistsFullFirmwareIdentityThroughReadThrough()
     {
         string dbName = $"firmware-identity-{Guid.NewGuid()}";
         Printer printer = CreateNeverProbedMoonrakerPrinter();
@@ -189,21 +154,6 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
             await SeedUnknownCatalogModelAsync(seedDb);
             _ = seedDb.Printers.Add(printer);
             _ = await seedDb.SaveChangesAsync();
-        }
-
-        // Reproduce the bug: before any read-through, calibration context resolution reports
-        // firmware as entirely missing.
-        await using (AppDbContext calibrationDbBefore = NewDb(dbName))
-        {
-            CalibrationContextResolver calibrationServiceBefore = CreateCalibrationService(calibrationDbBefore);
-            CalibrationCandidateDto before = (await calibrationServiceBefore.GetContextAsync(
-                printer.Id,
-                null,
-                "test-capture",
-                new CalibrationProfileAccessScope(UserId: null, BypassOwnership: true),
-                CancellationToken.None)).Value!;
-            _ = before.MissingInputs.Should().Contain(
-                "firmware.family", "firmware.gcodeDialect", "firmware.detectionSource", "firmware.version");
         }
 
         // Act: the version endpoint's read-through triggers a cadence-gated probe and persists
@@ -234,29 +184,6 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
         info.Verify(
             c => c.GetPrinterInformationAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()),
             Times.Once);
-
-        // Assert: calibration context resolution — reading the SAME persisted row through a fresh
-        // DbContext — now agrees exactly with what the version endpoint/UI returned and no longer
-        // reports firmware as missing (except firmware.verified, which still requires explicit
-        // operator action per #1656 constraint #3 and is unaffected by any probe).
-        await using (AppDbContext calibrationDbAfter = NewDb(dbName))
-        {
-            CalibrationContextResolver calibrationServiceAfter = CreateCalibrationService(calibrationDbAfter);
-            CalibrationCandidateDto after = (await calibrationServiceAfter.GetContextAsync(
-                printer.Id,
-                null,
-                "test-capture",
-                new CalibrationProfileAccessScope(UserId: null, BypassOwnership: true),
-                CancellationToken.None)).Value!;
-
-            _ = after.Firmware.Version.Should().Be(dto.FirmwareVersion);
-            _ = after.Firmware.Family.Should().Be(dto.RecordedFirmwareIdentity.Family);
-            _ = after.Firmware.GcodeDialect.Should().Be(dto.RecordedFirmwareIdentity.GcodeDialect);
-            _ = after.Firmware.DetectionSource.Should().Be(dto.RecordedFirmwareIdentity.DetectionSource);
-            _ = after.MissingInputs.Should().NotContain(
-                "firmware.family", "firmware.gcodeDialect", "firmware.detectionSource",
-                "firmware.version", "firmware.detectionVersion", "firmware.detectionConfidence");
-        }
     }
 
     [Fact]
@@ -432,32 +359,15 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
             "the printer has never had a meaningful firmware identity recorded, and the failed " +
             "probe did not record one either — the UI must never show 'Recorded' for a printer " +
             "whose calibration context still reports no firmware identity");
-
-        // Calibration context resolution, reading the same row, agrees: firmware is still
-        // entirely missing.
-        await using (AppDbContext calibrationDb = NewDb(dbName))
-        {
-            CalibrationContextResolver calibrationService = CreateCalibrationService(calibrationDb);
-            CalibrationCandidateDto candidate = (await calibrationService.GetContextAsync(
-                printer.Id,
-                null,
-                "test-capture",
-                new CalibrationProfileAccessScope(UserId: null, BypassOwnership: true),
-                CancellationToken.None)).Value!;
-
-            _ = candidate.MissingInputs.Should().Contain(
-                "firmware.family", "firmware.gcodeDialect", "firmware.detectionSource", "firmware.version");
-        }
     }
 
     [Fact]
-    public async Task GetAsync_LegacyKlipperPrinterWithUnsetGcodeDialect_AgreesWithCalibrationContextOnEffectiveDialect()
+    public async Task GetAsync_LegacyKlipperPrinterWithUnsetGcodeDialect_AppliesFamilyImpliesDialectFallback()
     {
         // A printer whose FirmwareFamily was set (e.g. via manual-add onboarding hints or an
         // earlier detection pass) but whose GcodeDialect column was never separately populated —
-        // both the version endpoint and the calibration context resolver must apply the same
-        // family-implies-dialect fallback, or the two would disagree on GcodeDialect specifically
-        // (a Hicks/Bishop review finding for #1656).
+        // the version endpoint must apply a family-implies-dialect fallback rather than reporting
+        // GcodeDialect as unknown (a Hicks/Bishop review finding for #1656).
         Printer printer = CreateNeverProbedMoonrakerPrinter();
         printer.FirmwareFamily = PrinterFirmwareFamily.Klipper;
         printer.GcodeDialect = PrinterGcodeDialect.Unknown; // never explicitly populated
@@ -491,19 +401,6 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
         _ = dto.Should().NotBeNull();
         _ = dto!.RecordedFirmwareIdentity.Should().NotBeNull();
         _ = dto.RecordedFirmwareIdentity!.GcodeDialect.Should().Be(nameof(PrinterGcodeDialect.Klipper));
-
-        await using (AppDbContext calibrationDb = NewDb(dbName))
-        {
-            CalibrationContextResolver calibrationService = CreateCalibrationService(calibrationDb);
-            CalibrationCandidateDto candidate = (await calibrationService.GetContextAsync(
-                printer.Id,
-                null,
-                "test-capture",
-                new CalibrationProfileAccessScope(UserId: null, BypassOwnership: true),
-                CancellationToken.None)).Value!;
-
-            _ = candidate.Firmware.GcodeDialect.Should().Be(dto.RecordedFirmwareIdentity.GcodeDialect);
-        }
     }
 
     [Fact]

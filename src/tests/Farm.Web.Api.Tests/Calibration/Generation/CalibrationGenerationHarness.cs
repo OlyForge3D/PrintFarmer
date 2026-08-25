@@ -634,7 +634,6 @@ internal sealed class CalibrationGenerationHarness : IDisposable
     private static ICalibrationProjectService CreateProjectService(AppDbContext core) =>
         new CalibrationProjectService(
             core,
-            new Mock<ICalibrationContextResolver>(MockBehavior.Loose).Object,
             new Mock<ICalibrationBlobStore>(MockBehavior.Loose).Object,
             TimeProvider.System,
             NullLogger<CalibrationProjectService>.Instance);

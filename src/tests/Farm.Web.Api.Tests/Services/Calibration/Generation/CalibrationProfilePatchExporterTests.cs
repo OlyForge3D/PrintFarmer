@@ -368,24 +368,10 @@ public sealed class CalibrationProfilePatchExporterTests
 
         CalibrationProjectService service = new(
             db,
-            new StubCalibrationContextResolver(),
             new StubCalibrationBlobStore(),
             TimeProvider.System,
             NullLogger<CalibrationProjectService>.Instance);
         return new CalibrationProfilePatchExporter(service);
-    }
-
-    private sealed class StubCalibrationContextResolver : ICalibrationContextResolver
-    {
-        public Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
-            Guid printerId,
-            long? configurationRevision,
-            string capturedBySubject,
-            CalibrationProfileAccessScope profileAccessScope,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new CalibrationServiceResult<CalibrationContextDto>(
-                null,
-                "printer_not_found"));
     }
 
     private sealed class StubCalibrationBlobStore : ICalibrationBlobStore
