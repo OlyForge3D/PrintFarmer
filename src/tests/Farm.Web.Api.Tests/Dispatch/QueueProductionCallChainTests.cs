@@ -2741,7 +2741,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task FilamentGate_RejectsClaimWhenPinnedSpoolIsNoLongerLoaded()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        // The pinned-spool filament gate only applies to FilamentCalibration jobs
+        // (DispatchClaimService.cs), so this fixture must keep that job kind.
+        Fixture fixture = await SeedCalibrationAsync(
+            seed, withAck: true, jobKind: JobKind.FilamentCalibration);
 
         await using AppDbContext swap = CreateContext();
         Printer printer = await swap.Printers.SingleAsync(p => p.Id == fixture.PrinterId);
@@ -2757,15 +2760,18 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             .AcquireClaimAsync(new DispatchClaimRequest(
                 fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
 
+        // Post-#1989/D3b: any FilamentCalibration claim now fails unconditionally
+        // via EvaluatePersistedCalibrationInputsAsync *before* EvaluatePinnedSpoolAsync
+        // is ever reached (DispatchClaimService.AcquireClaimAsync, lines ~275-291), so
+        // the pinned-spool-mismatch gate this test used to exercise is now
+        // unreachable for calibration jobs. See issue #1990.
         result.Success.Should().BeFalse();
-        result.ErrorCode.Should().Be("filament_spool_mismatch");
+        result.ErrorCode.Should().Be("calibration_dispatch_unavailable");
 
         await using AppDbContext verify = CreateContext();
         QueueOperationAudit denial = await verify.QueueOperationAudits
             .SingleAsync(a => a.PrintJobId == fixture.JobId && a.Outcome == QueueAuditOutcomes.Denied);
-        denial.ReasonCode.Should().Be("filament_spool_mismatch");
-        PrintJob blockedJob = await verify.PrintJobs.SingleAsync(job => job.Id == fixture.JobId);
-        blockedJob.BlockedReasonCode.Should().Be(JobBlockedReasonCode.FilamentCheckFailed);
+        denial.ReasonCode.Should().Be("calibration_dispatch_unavailable");
         PrinterDispatchState dispatchState = await verify.PrinterDispatchStates
             .SingleAsync(state => state.PrinterId == fixture.PrinterId);
         dispatchState.AcknowledgedJobId.Should().Be(
@@ -2775,13 +2781,16 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task BedClearAcknowledgement_AfterSpoolCorrection_SucceedsAndClearsMutableBlock()
+    public async Task BedClearAcknowledgement_AfterSpoolCorrection_CalibrationDispatchStillUnavailable()
     {
         Fixture fixture;
         Guid spoolId;
         await using (AppDbContext seed = CreateContext())
         {
-            fixture = await SeedCalibrationAsync(seed, withAck: false);
+            // The mutable filament block/clear flow this test exercises is a
+            // FilamentCalibration-only gate (BedClearAcknowledgementService.cs).
+            fixture = await SeedCalibrationAsync(
+                seed, withAck: false, jobKind: JobKind.FilamentCalibration);
             Printer printer = await seed.Printers.SingleAsync(
                 candidate => candidate.Id == fixture.PrinterId);
             Spool spool = await seed.Spools.SingleAsync(
@@ -2851,6 +2860,11 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             await correction.SaveChangesAsync();
         }
 
+        // #1989 (D3b): correcting the mutable filament block used to let the second
+        // acknowledgement clear it and succeed (202). Calibration dispatch is now
+        // unconditionally unavailable (see EvaluatePersistedCalibrationInputsAsync),
+        // so the second attempt still fails - just for a different, calibration-only
+        // reason - instead of ever reaching a successful 202.
         await using (AppDbContext correctedContext = CreateContext())
         {
             PrintJob job = await correctedContext.PrintJobs.SingleAsync(
@@ -2882,19 +2896,15 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 CancellationToken.None);
 
             ObjectResult response = second.Should().BeAssignableTo<ObjectResult>().Subject;
-            response.StatusCode.Should().Be(StatusCodes.Status202Accepted);
+            response.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
         }
 
         await using AppDbContext verify = CreateContext();
-        PrintJob persisted = await verify.PrintJobs.SingleAsync(
-            candidate => candidate.Id == fixture.JobId);
         PrinterDispatchState persistedState =
             await verify.PrinterDispatchStates.SingleAsync(
                 candidate => candidate.PrinterId == fixture.PrinterId);
-        persisted.BlockedReasonCode.Should().BeNull();
-        persisted.BlockedReasonJson.Should().BeNull();
-        persistedState.AcknowledgedJobId.Should().Be(fixture.JobId);
-        (await verify.BedClearCommandRecords.CountAsync()).Should().Be(1);
+        persistedState.AcknowledgedJobId.Should().BeNull();
+        (await verify.BedClearCommandRecords.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -2902,7 +2912,11 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task BedClearAcknowledgement_ImmutableProvenanceBlock_RemainsHardFailure()
     {
         await using AppDbContext context = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(context, withAck: false);
+        // This test asserts the immutable-provenance-block gate that only applies to
+        // FilamentCalibration jobs (BedClearAcknowledgementService.cs), so it must keep
+        // the calibration job kind unlike the other fixtures in this file.
+        Fixture fixture = await SeedCalibrationAsync(
+            context, withAck: false, jobKind: JobKind.FilamentCalibration);
         PrintJob job = await context.PrintJobs.SingleAsync(
             candidate => candidate.Id == fixture.JobId);
         Printer printer;
@@ -2957,21 +2971,24 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         await using AppDbContext ctxA = CreateContext();
         await using AppDbContext ctxB = CreateContext();
 
-        JobQueuePrintJobDto? a = await CreateQueueService(ctxA)
+        // Post-#1989/D3b: CalibrationQueueCanonicalizer.BuildAsync now unconditionally
+        // rejects every calibration-lineage artifact before any row is written (the
+        // PrinterConfigurationSnapshot compatibility check it depended on is gone; see
+        // #1990). The "loser rereads winner" unique-index race this test used to exercise
+        // is therefore unreachable for calibration jobs: both concurrent producers must
+        // fail deterministically at the same pre-insert gate, and no row must ever land.
+        Func<Task> actA = () => CreateQueueService(ctxA)
+            .AddJobToQueueAsync(request, CalibrationOwnerId, CancellationToken.None);
+        Func<Task> actB = () => CreateQueueService(ctxB)
             .AddJobToQueueAsync(request, CalibrationOwnerId, CancellationToken.None);
 
-        // Second producer performs its own read-then-insert and loses the unique index race
-        // in production; it must reread the winner rather than surfacing a 500.
-        JobQueuePrintJobDto? b = await CreateQueueService(ctxB)
-            .AddJobToQueueAsync(request, CalibrationOwnerId, CancellationToken.None);
-
-        a.Should().NotBeNull();
-        b.Should().NotBeNull();
-        b!.Id.Should().Be(a!.Id, "the loser must return the winner's job");
-        b.IsIdempotentReplay.Should().BeTrue();
+        (await actA.Should().ThrowAsync<CalibrationQueueIncompatibleException>())
+            .WithMessage("*known interim limitation*#1990*");
+        (await actB.Should().ThrowAsync<CalibrationQueueIncompatibleException>())
+            .WithMessage("*known interim limitation*#1990*");
 
         await using AppDbContext verify = CreateContext();
-        (await verify.PrintJobs.CountAsync(j => j.IdempotencyKey == "concurrent-key")).Should().Be(1);
+        (await verify.PrintJobs.CountAsync(j => j.IdempotencyKey == "concurrent-key")).Should().Be(0);
     }
 
     [Fact]
@@ -4542,7 +4559,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task Immutability_FlippingCalibrationToStandardInTheSameSaveIsRejected()
     {
         await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: false);
+        // This test asserts an immutability guard keyed on the job actually starting as
+        // FilamentCalibration, so it must keep that job kind unlike other fixtures here.
+        Fixture fixture = await SeedCalibrationAsync(
+            seed, withAck: false, jobKind: JobKind.FilamentCalibration);
 
         await using AppDbContext ctx = CreateContext();
         PrintJob job = await ctx.PrintJobs.SingleAsync(j => j.Id == fixture.JobId);
@@ -6687,39 +6707,12 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         db.Spools.Add(spool);
 
         Guid snapshotId = Guid.NewGuid();
-        PrinterConfigurationSnapshotDto snapshotDocument = new()
-        {
-            PrinterId = printer.Id,
-            ConfigurationRevision = printer.ConfigurationRevision,
-            SnapshotSha256 = new string('6', 64),
-            Toolheads =
-            [
-                new CalibrationToolheadDto(
-                    toolhead.Id,
-                    toolhead.Index,
-                    toolhead.Name,
-                    true,
-                    new CalibrationPoint3DDto(0, 0, 0),
-                    toolhead.NozzleDiameter,
-                    "Brass",
-                    "Brass",
-                    300,
-                    false,
-                    300,
-                    20,
-                    "DirectDrive",
-                    true,
-                    null,
-                    [Material]),
-            ],
-        };
         db.CalibrationProjects.Add(new CalibrationProject
         {
             Id = gcode.CalibrationProjectId!.Value,
             OwnerUserId = CalibrationOwnerId,
             Name = "Production calibration",
             PrinterId = printer.Id,
-            CurrentPrinterConfigurationSnapshotId = snapshotId,
             SelectedToolheadId = toolhead.Id,
             SelectedToolheadIndex = toolhead.Index,
             FilamentProvider = "local",
@@ -6730,34 +6723,11 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             LocalSpoolId = spool.Id,
             FilamentSnapshotJson = """{"material":"PLA"}""",
         });
-        db.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
-        {
-            Id = snapshotId,
-            ProjectId = gcode.CalibrationProjectId.Value,
-            AttemptId = gcode.CalibrationAttemptId,
-            PrinterId = printer.Id,
-            SchemaVersion = "1",
-            SanitizedSnapshotJson = JsonSerializer.Serialize(snapshotDocument),
-            SnapshotSha256 = new string('6', 64),
-            PrinterConfigurationRevision = printer.ConfigurationRevision,
-            FirmwareFamily = PrinterFirmwareFamily.Klipper,
-            GcodeDialect = PrinterGcodeDialect.Klipper,
-            SlicerEngine = "OrcaSlicer",
-            SlicerDistribution = "upstream",
-            SlicerVersion = "2.3.0",
-            SlicerContainerDigest = "sha256:test",
-            MachineProfileSha256 = gcode.MachineProfileSha256,
-            ProcessProfileSha256 = gcode.ProcessProfileSha256,
-            FilamentProfileSha256 = gcode.FilamentProfileSha256,
-            CapturedAtUtc = DateTime.UtcNow,
-            CapturedBySubject = CalibrationOwnerId.ToString(),
-        });
         db.CalibrationAttempts.Add(new CalibrationAttempt
         {
             Id = gcode.CalibrationAttemptId!.Value,
             ProjectId = gcode.CalibrationProjectId.Value,
             SpecificationSha256 = gcode.SpecificationSha256!,
-            PrinterConfigurationSnapshotId = snapshotId,
         });
         db.CalibrationOrchestrations.Add(new CalibrationOrchestration
         {
@@ -6813,7 +6783,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         bool withAck,
         PrinterBackend? backend = null,
         PrinterCredential? credential = null,
-        int copies = 1)
+        int copies = 1,
+        JobKind jobKind = JobKind.Standard)
     {
         Fixture baseFixture = await SeedCalibrationArtifactOnlyAsync(
             db,
@@ -6827,8 +6798,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         Spool spool = await db.Spools.SingleAsync(
             candidate => candidate.AssignedPrinterId == baseFixture.PrinterId);
         Toolhead toolhead = printer.Toolheads.Single();
-        PrinterConfigurationSnapshot snapshot = await db.PrinterConfigurationSnapshots
-            .SingleAsync(candidate => candidate.ProjectId == gcode.CalibrationProjectId);
+        string snapshotSha256 = new('6', 64);
+        Guid snapshotId = Guid.NewGuid();
 
         var job = new PrintJob
         {
@@ -6839,7 +6810,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             Status = PrintJobStatus.Assigned,
             Priority = (int)PrintJobPriority.High,
             QueuePosition = 1,
-            JobKind = JobKind.FilamentCalibration,
+            JobKind = jobKind,
             Copies = copies,
             RequiredFirmwareFamily = PrinterFirmwareFamily.Klipper,
             RequiredGcodeDialect = PrinterGcodeDialect.Klipper,
@@ -6854,7 +6825,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             MachineProfileSha256 = gcode.MachineProfileSha256,
             ProcessProfileSha256 = gcode.ProcessProfileSha256,
             FilamentProfileSha256 = gcode.FilamentProfileSha256,
-            PrinterConfigSnapshotSha256 = snapshot.SnapshotSha256,
+            PrinterConfigSnapshotSha256 = snapshotSha256,
             PinnedPrinterModelId = printer.ModelId,
             PinnedToolheadId = toolhead.Id,
             PinnedToolheadIndex = toolhead.Index,
@@ -6874,7 +6845,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             CalibrationProjectId = gcode.CalibrationProjectId,
             CalibrationAttemptId = gcode.CalibrationAttemptId,
             CalibrationOrchestrationId = gcode.CalibrationOrchestrationId,
-            CalibrationConfigSnapshotId = snapshot.Id,
+            CalibrationConfigSnapshotId = snapshotId,
             SourceArtifactId = gcode.SourceArtifactId,
             SliceJobId = gcode.SourceSliceJobId,
             SpoolmanSpoolId = SpoolId,

@@ -1,0 +1,120 @@
+﻿using System;
+using Microsoft.EntityFrameworkCore.Migrations;
+
+#nullable disable
+
+namespace Farm.Migrations.PostgreSQL.Migrations
+{
+    /// <inheritdoc />
+    public partial class DeletePrinterConfigurationSnapshot : Migration
+    {
+        /// <inheritdoc />
+        protected override void Up(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.DropForeignKey(
+                name: "FK_CalibrationAttempts_PrinterConfigurationSnapshots_PrinterCo~",
+                table: "CalibrationAttempts");
+
+            migrationBuilder.DropTable(
+                name: "PrinterConfigurationSnapshots");
+
+            migrationBuilder.DropIndex(
+                name: "IX_CalibrationAttempts_PrinterConfigurationSnapshotId",
+                table: "CalibrationAttempts");
+
+            migrationBuilder.DropColumn(
+                name: "CurrentPrinterConfigurationSnapshotId",
+                table: "CalibrationProjects");
+
+            migrationBuilder.DropColumn(
+                name: "PrinterConfigurationSnapshotId",
+                table: "CalibrationAttempts");
+        }
+
+        /// <inheritdoc />
+        protected override void Down(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.AddColumn<Guid>(
+                name: "CurrentPrinterConfigurationSnapshotId",
+                table: "CalibrationProjects",
+                type: "uuid",
+                nullable: true);
+
+            migrationBuilder.AddColumn<Guid>(
+                name: "PrinterConfigurationSnapshotId",
+                table: "CalibrationAttempts",
+                type: "uuid",
+                nullable: true);
+
+            migrationBuilder.CreateTable(
+                name: "PrinterConfigurationSnapshots",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    AttemptId = table.Column<Guid>(type: "uuid", nullable: true),
+                    Backend = table.Column<int>(type: "integer", nullable: false),
+                    BackendApiVersion = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: true),
+                    BackendVersion = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: true),
+                    CapturedAtUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    CapturedBySubject = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: false),
+                    ExactFilamentProfileJson = table.Column<string>(type: "text", nullable: true),
+                    ExactMachineProfileJson = table.Column<string>(type: "text", nullable: true),
+                    ExactProcessProfileJson = table.Column<string>(type: "text", nullable: true),
+                    FilamentProfileId = table.Column<Guid>(type: "uuid", nullable: true),
+                    FilamentProfileSha256 = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
+                    FirmwareDetectionSource = table.Column<int>(type: "integer", nullable: false),
+                    FirmwareFamily = table.Column<int>(type: "integer", nullable: false),
+                    FirmwareVersion = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: true),
+                    GcodeDialect = table.Column<int>(type: "integer", nullable: false),
+                    MachineProfileId = table.Column<Guid>(type: "uuid", nullable: true),
+                    MachineProfileSha256 = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
+                    PrinterConfigurationRevision = table.Column<long>(type: "bigint", nullable: false),
+                    PrinterId = table.Column<Guid>(type: "uuid", nullable: false),
+                    ProcessProfileId = table.Column<Guid>(type: "uuid", nullable: true),
+                    ProcessProfileSha256 = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
+                    ProjectId = table.Column<Guid>(type: "uuid", nullable: false),
+                    SanitizedSnapshotJson = table.Column<string>(type: "text", nullable: false),
+                    SchemaVersion = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
+                    SlicerContainerDigest = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
+                    SlicerDistribution = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    SlicerEngine = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    SlicerVersion = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
+                    SnapshotSha256 = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PrinterConfigurationSnapshots", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_PrinterConfigurationSnapshots_CalibrationProjects_ProjectId",
+                        column: x => x.ProjectId,
+                        principalTable: "CalibrationProjects",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_CalibrationAttempts_PrinterConfigurationSnapshotId",
+                table: "CalibrationAttempts",
+                column: "PrinterConfigurationSnapshotId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PrinterConfigurationSnapshots_AttemptId",
+                table: "PrinterConfigurationSnapshots",
+                column: "AttemptId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PrinterConfigurationSnapshots_ProjectId_SnapshotSha256",
+                table: "PrinterConfigurationSnapshots",
+                columns: new[] { "ProjectId", "SnapshotSha256" },
+                unique: true);
+
+            migrationBuilder.AddForeignKey(
+                name: "FK_CalibrationAttempts_PrinterConfigurationSnapshots_PrinterCo~",
+                table: "CalibrationAttempts",
+                column: "PrinterConfigurationSnapshotId",
+                principalTable: "PrinterConfigurationSnapshots",
+                principalColumn: "Id",
+                onDelete: ReferentialAction.Restrict);
+        }
+    }
+}

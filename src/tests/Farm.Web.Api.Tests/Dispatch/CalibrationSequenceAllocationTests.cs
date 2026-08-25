@@ -84,7 +84,17 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
     }
 
     /// <summary>Applies schema and seeds one printer + gcode file, returns their IDs.</summary>
-    private async Task<(Guid PrinterId, Guid GcodeId)> SeedBaseAsync(AppDbContext db)
+    /// <param name="db">Context to seed into.</param>
+    /// <param name="calibrationLineage">
+    /// When <see langword="true"/> (default), the gcode artifact carries calibration
+    /// lineage so create/ack paths route through calibration-specific handling. Set to
+    /// <see langword="false"/> for tests that only need the generic sequence-allocation
+    /// mechanics via <see cref="JobKind.Standard"/>: post-#1989/D3b,
+    /// <c>CalibrationQueueCanonicalizer.BuildAsync</c> unconditionally rejects any
+    /// artifact carrying calibration lineage (the deleted
+    /// <c>PrinterConfigurationSnapshot</c> compatibility check it depended on; see #1990).
+    /// </param>
+    private async Task<(Guid PrinterId, Guid GcodeId)> SeedBaseAsync(AppDbContext db, bool calibrationLineage = true)
     {
         await db.Database.EnsureCreatedAsync();
 
@@ -95,7 +105,6 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
         Guid projectId = Guid.NewGuid();
         Guid attemptId = Guid.NewGuid();
         Guid orchestrationId = Guid.NewGuid();
-        Guid snapshotId = Guid.NewGuid();
         Guid sourceArtifactId = Guid.NewGuid();
         Guid sliceJobId = Guid.NewGuid();
         Guid toolheadId = Guid.NewGuid();
@@ -115,11 +124,11 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             IsImmutable = true,
             PromotedAtUtc = DateTime.UtcNow.AddMinutes(-1),
             ContentSha256 = new string('e', 64),
-            CalibrationProjectId = projectId,
-            CalibrationAttemptId = attemptId,
-            CalibrationOrchestrationId = orchestrationId,
-            SourceArtifactId = sourceArtifactId,
-            SourceSliceJobId = sliceJobId,
+            CalibrationProjectId = calibrationLineage ? projectId : null,
+            CalibrationAttemptId = calibrationLineage ? attemptId : null,
+            CalibrationOrchestrationId = calibrationLineage ? orchestrationId : null,
+            SourceArtifactId = calibrationLineage ? sourceArtifactId : null,
+            SourceSliceJobId = calibrationLineage ? sliceJobId : null,
             SourceModelSha256 = new string('8', 64),
             CalibrationManifestSha256 = new string('9', 64),
             SpecificationSha256 = new string('a', 64),
@@ -180,39 +189,12 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             InUse = true,
             AssignedPrinterId = printer.Id,
         });
-        PrinterConfigurationSnapshotDto snapshotDocument = new()
-        {
-            PrinterId = printer.Id,
-            ConfigurationRevision = 1,
-            SnapshotSha256 = new string('f', 64),
-            Toolheads =
-            [
-                new CalibrationToolheadDto(
-                    toolheadId,
-                    0,
-                    "Primary",
-                    true,
-                    new CalibrationPoint3DDto(0, 0, 0),
-                    0.4,
-                    "Brass",
-                    "Brass",
-                    300,
-                    false,
-                    300,
-                    20,
-                    "DirectDrive",
-                    true,
-                    null,
-                    ["PLA"]),
-            ],
-        };
         db.CalibrationProjects.Add(new CalibrationProject
         {
             Id = projectId,
             OwnerUserId = Guid.NewGuid(),
             Name = "Sequence calibration",
             PrinterId = printer.Id,
-            CurrentPrinterConfigurationSnapshotId = snapshotId,
             SelectedToolheadId = toolheadId,
             SelectedToolheadIndex = 0,
             FilamentProvider = "local",
@@ -223,32 +205,11 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             LocalSpoolId = spoolId,
             FilamentSnapshotJson = """{"material":"PLA"}""",
         });
-        db.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
-        {
-            Id = snapshotId,
-            ProjectId = projectId,
-            AttemptId = attemptId,
-            PrinterId = printer.Id,
-            SchemaVersion = "1",
-            SanitizedSnapshotJson = JsonSerializer.Serialize(snapshotDocument),
-            SnapshotSha256 = new string('f', 64),
-            PrinterConfigurationRevision = 1,
-            FirmwareFamily = PrinterFirmwareFamily.Klipper,
-            GcodeDialect = PrinterGcodeDialect.Klipper,
-            SlicerEngine = "OrcaSlicer",
-            SlicerDistribution = "upstream",
-            SlicerVersion = "2.3.0",
-            SlicerContainerDigest = "sha256:abc",
-            MachineProfileSha256 = new string('b', 64),
-            ProcessProfileSha256 = new string('c', 64),
-            FilamentProfileSha256 = new string('d', 64),
-        });
         db.CalibrationAttempts.Add(new CalibrationAttempt
         {
             Id = attemptId,
             ProjectId = projectId,
             SpecificationSha256 = new string('a', 64),
-            PrinterConfigurationSnapshotId = snapshotId,
         });
         db.CalibrationOrchestrations.Add(new CalibrationOrchestration
         {
@@ -270,12 +231,13 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
         return (printer.Id, gcode.Id);
     }
 
-    private static QueuePrintJobDto MakeCalibrationRequest(Guid gcodeId, Guid printerId, string idempotencyKey) =>
+    private static QueuePrintJobDto MakeCalibrationRequest(
+        Guid gcodeId, Guid printerId, string idempotencyKey, JobKind requestedJobKind = JobKind.FilamentCalibration) =>
         new()
         {
             GcodeFileId = gcodeId,
             AssignedPrinterId = printerId,
-            JobKind = JobKind.FilamentCalibration,
+            JobKind = requestedJobKind,
             IdempotencyKey = idempotencyKey,
             Copies = 1,
             Priority = PrintJobPriority.Normal,
@@ -288,10 +250,16 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
     [Fact]
     public async Task SequentialCalibrationJobs_EachGetUniqueAscendingSequence()
     {
+        // This test proves the outbox sequence allocator produces distinct, ascending
+        // sequences across repeated inserts - a generic mechanic exercised by both the
+        // calibration and standard AddJobToQueueAsync branches (JobQueueService.cs), not
+        // calibration-specific gating. Post-#1989/D3b, a calibration-lineage artifact is
+        // unconditionally rejected by CalibrationQueueCanonicalizer.BuildAsync (see #1990),
+        // so this must seed a non-calibration artifact and queue Standard jobs instead.
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid gcodeId) = await SeedBaseAsync(seedCtx);
+        (Guid printerId, Guid gcodeId) = await SeedBaseAsync(seedCtx, calibrationLineage: false);
 
-        // Create 3 sequential calibration jobs (different idempotency keys = different jobs).
+        // Create 3 sequential standard jobs (different idempotency keys = different jobs).
         for (int i = 1; i <= 3; i++)
         {
             (JobQueueService _, AppDbContext db) = CreateSut(_connectionString);
@@ -313,7 +281,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
                     sequenceAllocator: allocator,
                     positionAllocator: new QueuePositionAllocator(db));
 
-                var req = MakeCalibrationRequest(gcodeId, printerId, $"seq-key-{i}");
+                var req = MakeCalibrationRequest(gcodeId, printerId, $"seq-key-{i}", JobKind.Standard);
                 JobQueuePrintJobDto? result = await sutWithData.AddJobToQueueAsync(req, null, CancellationToken.None);
                 result.Should().NotBeNull($"job {i} must be added successfully");
             }
@@ -326,7 +294,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             .Select(e => e.Sequence)
             .ToListAsync();
 
-        sequences.Should().HaveCount(3, "three calibration jobs must produce three outbox events");
+        sequences.Should().HaveCount(3, "three standard jobs must produce three outbox events");
         sequences.Should().OnlyHaveUniqueItems("each outbox event must have a distinct sequence");
         sequences.Should().BeInAscendingOrder("sequences must be monotonically increasing");
         sequences.Should().AllSatisfy(s => s.Should().BeGreaterThan(0, "sequences must start above 0"));

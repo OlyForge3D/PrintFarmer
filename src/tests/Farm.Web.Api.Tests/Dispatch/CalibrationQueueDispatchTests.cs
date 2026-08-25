@@ -740,6 +740,13 @@ public class CalibrationQueueDispatchTests
         // BedClearAcknowledgementService now writes the ack + BackendStartCommand outbox event.
         // The actual claim (Job.Status = Starting) is acquired by IDispatchClaimService when
         // the adapter orchestrator processes the BackendStartCommand.
+        //
+        // This test exercises generic ack-persistence mechanics, not calibration gating, so
+        // the job below is Standard (see JobKind assignment): post-#1989/D3b, the calibration
+        // compatibility gate in BedClearAcknowledgementService.AcknowledgeAsync now
+        // unconditionally fails FilamentCalibration acks (see #1990). The gcode/project/attempt
+        // fixture below still carries calibration lineage fields incidentally, which is harmless
+        // for a Standard job.
         AppDbContext db = CreateDbContext();
         Guid printerId = Guid.NewGuid();
         Guid gcodeId = Guid.NewGuid();
@@ -836,7 +843,6 @@ public class CalibrationQueueDispatchTests
             OwnerUserId = Guid.NewGuid(),
             Name = "Ack calibration",
             PrinterId = printerId,
-            CurrentPrinterConfigurationSnapshotId = calibrationSnapshotId,
             SelectedToolheadId = toolhead.Id,
             SelectedToolheadIndex = toolhead.Index,
             FilamentProvider = "local",
@@ -847,32 +853,11 @@ public class CalibrationQueueDispatchTests
             LocalSpoolId = spool.Id,
             FilamentSnapshotJson = """{"material":"PLA"}""",
         });
-        db.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
-        {
-            Id = calibrationSnapshotId,
-            ProjectId = calibrationProjectId,
-            AttemptId = calibrationAttemptId,
-            PrinterId = printerId,
-            SchemaVersion = "1",
-            SanitizedSnapshotJson = "{}",
-            SnapshotSha256 = new string('6', 64),
-            PrinterConfigurationRevision = 1,
-            FirmwareFamily = PrinterFirmwareFamily.Klipper,
-            GcodeDialect = PrinterGcodeDialect.Klipper,
-            SlicerEngine = "OrcaSlicer",
-            SlicerDistribution = "upstream",
-            SlicerVersion = "2.3.0",
-            SlicerContainerDigest = "sha256:test",
-            MachineProfileSha256 = new string('c', 64),
-            ProcessProfileSha256 = new string('d', 64),
-            FilamentProfileSha256 = new string('e', 64),
-        });
         db.CalibrationAttempts.Add(new CalibrationAttempt
         {
             Id = calibrationAttemptId,
             ProjectId = calibrationProjectId,
             SpecificationSha256 = new string('b', 64),
-            PrinterConfigurationSnapshotId = calibrationSnapshotId,
         });
         db.CalibrationOrchestrations.Add(new CalibrationOrchestration
         {
@@ -894,7 +879,7 @@ public class CalibrationQueueDispatchTests
             Name = "Calibration Ack",
             GcodeFileId = gcodeId,
             AssignedPrinterId = printerId,
-            JobKind = JobKind.FilamentCalibration,
+            JobKind = JobKind.Standard,
             Status = PrintJobStatus.Assigned,
             RequiredFirmwareFamily = PrinterFirmwareFamily.Klipper,
             RequiredGcodeDialect = PrinterGcodeDialect.Klipper,
