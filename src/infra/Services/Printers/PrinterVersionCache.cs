@@ -308,10 +308,11 @@ public sealed class PrinterVersionCache(
 
     /// <summary>
     /// Thin-probe path for non-Moonraker backends (PrusaLink, OctoPrint, SDCP, #1656 constraint
-    /// #2): <see cref="MoonrakerOnboardingResolver"/> is Moonraker-specific and the calibration
-    /// gate only ever accepts Klipper-family firmware, so these backends can never satisfy it
-    /// regardless of the value shown here. Behavior is unchanged from before #1656: probe on
-    /// every cache miss, no DB persistence attempt, no recorded identity to report.
+    /// #2): <see cref="MoonrakerOnboardingResolver"/> is Moonraker-specific, and calibration
+    /// context resolution requires Klipper-family firmware. These backends therefore cannot
+    /// provide a recorded identity regardless of the value shown here. Behavior is unchanged
+    /// from before #1656: probe on every cache miss, no DB persistence attempt, no recorded
+    /// identity to report.
     /// </summary>
     private static async Task<PrinterVersionInfoDto> GetThinProbeVersionAsync(
         Printer printer,

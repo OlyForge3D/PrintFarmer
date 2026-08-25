@@ -25,7 +25,7 @@ internal static class CalibrationPrinterSeeder
         Guid FilamentProfileId);
 
     /// <summary>
-    /// Writes an eligible printer into the core database and its profiles into the slicer store.
+    /// Writes a calibration-ready printer into the core database and its profiles into the slicer store.
     /// </summary>
     /// <param name="services">The API host's service provider.</param>
     /// <param name="profilesPublic">Whether the seeded profiles are visible to everyone.</param>

@@ -936,8 +936,8 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                 <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.firmwareVersion || '—'}</dd>
                 <dd className="text-[11px] text-pf-text-secondary">
                   {printerVersionQuery.data.recordedFirmwareIdentity
-                    ? 'Recorded configuration identity'
-                    : 'Live reading only — not persisted'}
+                    ? 'Recorded firmware identity'
+                    : 'Live reading only — no recorded identity'}
                 </dd>
               </div>
               <div>

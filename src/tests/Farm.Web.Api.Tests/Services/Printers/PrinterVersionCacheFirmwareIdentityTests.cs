@@ -179,7 +179,7 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
     }
 
     [Fact]
-    public async Task GetAsync_NeverProbedMoonrakerPrinter_PersistsThroughAndCalibrationGateThenAgrees()
+    public async Task GetAsync_NeverProbedMoonrakerPrinter_PersistsThroughAndCalibrationContextThenAgrees()
     {
         string dbName = $"firmware-identity-{Guid.NewGuid()}";
         Printer printer = CreateNeverProbedMoonrakerPrinter();
@@ -191,8 +191,8 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
             _ = await seedDb.SaveChangesAsync();
         }
 
-        // Reproduce the bug: before any read-through, the calibration gate reports firmware as
-        // entirely missing.
+        // Reproduce the bug: before any read-through, calibration context resolution reports
+        // firmware as entirely missing.
         await using (AppDbContext calibrationDbBefore = NewDb(dbName))
         {
             CalibrationContextResolver calibrationServiceBefore = CreateCalibrationService(calibrationDbBefore);
@@ -235,10 +235,10 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
             c => c.GetPrinterInformationAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()),
             Times.Once);
 
-        // Assert: the calibration gate — reading the SAME persisted row through a fresh
-        // DbContext — now agrees exactly with what the version endpoint/UI returned, and no
-        // longer reports firmware as missing (except firmware.verified, which stays gated on
-        // explicit operator action per #1656 constraint #3 and is unaffected by any probe).
+        // Assert: calibration context resolution — reading the SAME persisted row through a fresh
+        // DbContext — now agrees exactly with what the version endpoint/UI returned and no longer
+        // reports firmware as missing (except firmware.verified, which still requires explicit
+        // operator action per #1656 constraint #3 and is unaffected by any probe).
         await using (AppDbContext calibrationDbAfter = NewDb(dbName))
         {
             CalibrationContextResolver calibrationServiceAfter = CreateCalibrationService(calibrationDbAfter);
@@ -288,8 +288,8 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
         PrinterVersionInfoDto? dto = await cache.GetAsync(printer.Id, CancellationToken.None);
 
         // The live probe still runs on every cache miss — matching the pre-#1656 thin-probe
-        // cadence exactly, so BackendVersion/ApiVersion (fields the calibration gate never reads)
-        // stay live and this is not a functional regression versus the old behavior.
+        // cadence exactly, so BackendVersion/ApiVersion (fields the calibration context resolver
+        // never reads) stay live and this is not a functional regression versus the old behavior.
         info.Verify(
             c => c.GetPrinterInformationAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()),
             Times.Once);
@@ -301,8 +301,8 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
         // #1894: the displayed FirmwareVersion prefers the fresh live probe reading, exactly like
         // BackendVersion/ApiVersion already did — a stale/recorded value must never win over a
         // successful live probe. The persisted/recorded firmware identity — the single
-        // authoritative fact the calibration gate reads — is separately untouched: the cadence
-        // guard still blocks the DB write, so what's persisted (and reported via
+        // authoritative fact the calibration context resolver reads — is separately untouched:
+        // the cadence guard still blocks the DB write, so what's persisted (and reported via
         // RecordedFirmwareIdentity) stays the last recorded value, never the fresh probe's reading.
         _ = dto.FirmwareVersion.Should().Be("v99.99.99");
         _ = dto.RecordedFirmwareIdentity.Should().NotBeNull();
@@ -431,10 +431,10 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
         _ = dto.RecordedFirmwareIdentity.Should().BeNull(
             "the printer has never had a meaningful firmware identity recorded, and the failed " +
             "probe did not record one either — the UI must never show 'Recorded' for a printer " +
-            "the calibration gate still reports as having no firmware identity at all");
+            "whose calibration context still reports no firmware identity");
 
-        // The calibration gate, reading the same row, agrees: firmware is still entirely
-        // missing.
+        // Calibration context resolution, reading the same row, agrees: firmware is still
+        // entirely missing.
         await using (AppDbContext calibrationDb = NewDb(dbName))
         {
             CalibrationContextResolver calibrationService = CreateCalibrationService(calibrationDb);
@@ -451,11 +451,11 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
     }
 
     [Fact]
-    public async Task GetAsync_LegacyKlipperPrinterWithUnsetGcodeDialect_AgreesWithCalibrationGateOnEffectiveDialect()
+    public async Task GetAsync_LegacyKlipperPrinterWithUnsetGcodeDialect_AgreesWithCalibrationContextOnEffectiveDialect()
     {
         // A printer whose FirmwareFamily was set (e.g. via manual-add onboarding hints or an
         // earlier detection pass) but whose GcodeDialect column was never separately populated —
-        // both the version endpoint and the calibration gate must apply the same
+        // both the version endpoint and the calibration context resolver must apply the same
         // family-implies-dialect fallback, or the two would disagree on GcodeDialect specifically
         // (a Hicks/Bishop review finding for #1656).
         Printer printer = CreateNeverProbedMoonrakerPrinter();
