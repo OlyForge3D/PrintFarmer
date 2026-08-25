@@ -102,7 +102,6 @@ caller-specific permissions:
   "calibrationSyncEnabled": true,
   "calibrationPhotosEnabled": true,
   "calibrationProfileHistoryEnabled": true,
-  "calibrationGenerationEnabled": false,
   "calibrationSlicingEnabled": false,
   "calibrationArtifactPromotionEnabled": false,
   "calibrationQueueEnabled": false,
@@ -121,7 +120,6 @@ caller-specific permissions:
   "calibration": {
     "contextImplemented": true,
     "commandsImplemented": true,
-    "generationImplemented": false,
     "queueIntegrationImplemented": true,
     "eventStreamImplemented": true,
     "operational": true
@@ -181,8 +179,8 @@ resolver cannot complete the single profile-triple request. Persistence, synchro
 photos, and immutable generated-profile history are implemented independently.
 `calibrationSlicingEnabled` is computed, never constant: it additionally
 requires a healthy worker that attests its pinned OrcaSlicer binary digest and
-container digest, plus a resolvable stored-model path. Generation, promotion,
-queue, and event-streaming feature flags remain false. Routes are canonical
+container digest, plus a resolvable stored-model path. Promotion, queue, and
+event-streaming feature flags remain false. Routes are canonical
 same-origin paths and never disclose internal service addresses.
 
 ### Canonical slice contract
@@ -386,10 +384,11 @@ for the full scope-to-permission table.
 The deterministic calibration generation pipeline (specification compilation,
 Klipper G-code generation, the OrcaSlicer plan compiler, the durable
 generation saga, and `POST /api/calibration-projects/{projectId}/attempts/{attemptId}/generate-job`
-and `GET /api/calibration-orchestrations/{id}`) was removed in #1979. The
-capabilities response now reports `generationImplemented: false` and a fixed
-`calibrationGeneration` / `feature_removed` entry in `unavailableReasons`;
-`effectiveCapabilities.canGenerate` is always false. Calibration persistence,
+and `GET /api/calibration-orchestrations/{id}`) was removed in #1979/#1993. The
+capabilities response no longer exposes a `generationImplemented` flag, a
+`calibrationGeneration` / `feature_removed` entry in `unavailableReasons`, or
+an `effectiveCapabilities.canGenerate` field — the whole capability surface
+was deleted rather than reported as false (#1983). Calibration persistence,
 synchronization, private photos, and immutable generated-profile history
 (below) are unaffected and continue to operate independently of generation.
 
