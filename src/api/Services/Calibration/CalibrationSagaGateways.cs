@@ -23,19 +23,24 @@ public sealed record SliceSubmissionResult(bool Success, Guid? SliceJobId, strin
         new(false, null, errorCode, detail);
 }
 
-/// <summary>Outcome of polling a previously submitted slice job.</summary>
+/// <summary>
+/// Outcome of polling a previously submitted slice job. There is no gcode-artifact identifier on
+/// the real <c>GET /api/slice/{id}</c> response (<c>SliceJobStatusResponse</c>) - once a slice
+/// reports <c>Completed</c>, its gcode is resolved through <c>GET /api/artifacts/job/{jobId}</c>
+/// downstream, which this saga never needs to do itself because
+/// <c>SlicePrintBridgeController.SendToPrinterAsync</c> only needs the slice job ID, not a
+/// resolved gcode/artifact ID, to dispatch a print.
+/// </summary>
 public sealed record SliceStatusResult(
     bool Success,
     string? SliceStatus,
-    Guid? GcodeFileId,
     string? ErrorCode,
     string? ErrorDetail)
 {
-    public static SliceStatusResult Ok(string sliceStatus, Guid? gcodeFileId) =>
-        new(true, sliceStatus, gcodeFileId, null, null);
+    public static SliceStatusResult Ok(string sliceStatus) => new(true, sliceStatus, null, null);
 
     public static SliceStatusResult Failed(string errorCode, string? detail = null) =>
-        new(false, null, null, errorCode, detail);
+        new(false, null, errorCode, detail);
 }
 
 /// <summary>Outcome of dispatching a completed slice job's gcode to a printer.</summary>
@@ -113,8 +118,10 @@ public sealed class InternalApiSliceSubmissionGateway(
                 return SliceSubmissionResult.Failed("slice_submission_rejected", body);
             }
 
+            // POST /api/slice returns SubmitSliceJobResponse, whose job identifier is serialized
+            // as "jobId" (camelCase of SubmitSliceJobResponse.JobId) - not "id".
             using JsonDocument document = JsonDocument.Parse(body);
-            if (!document.RootElement.TryGetProperty("id", out JsonElement idElement) ||
+            if (!document.RootElement.TryGetProperty("jobId", out JsonElement idElement) ||
                 !idElement.TryGetGuid(out Guid sliceJobId))
             {
                 return SliceSubmissionResult.Failed("slice_submission_response_invalid");
@@ -156,13 +163,7 @@ public sealed class InternalApiSliceSubmissionGateway(
                 return SliceStatusResult.Failed("slice_status_response_invalid");
             }
 
-            Guid? gcodeFileId = document.RootElement.TryGetProperty("gcodeFileId", out JsonElement gcodeElement) &&
-                gcodeElement.ValueKind == JsonValueKind.String &&
-                gcodeElement.TryGetGuid(out Guid parsedGcodeId)
-                ? parsedGcodeId
-                : null;
-
-            return SliceStatusResult.Ok(status, gcodeFileId);
+            return SliceStatusResult.Ok(status);
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
         {
@@ -171,15 +172,18 @@ public sealed class InternalApiSliceSubmissionGateway(
         }
     }
 
+    /// <summary>
+    /// Retrieves the shared, DI-configured internal <see cref="HttpClient"/> and forwards the
+    /// caller's own bearer token so the internal call is authorized exactly as the caller's own
+    /// permissions allow - never any more. The client's <see cref="HttpClient.BaseAddress"/> is
+    /// pinned once via <c>Program.cs</c>'s <c>AddHttpClient</c> registration from trusted
+    /// configuration; it is deliberately never derived from the inbound request's own
+    /// <c>Host</c>/<c>Scheme</c>, which would let a caller redirect this server's own bearer-token
+    /// bearing calls to an arbitrary host it controls.
+    /// </summary>
     private HttpClient CreateClient()
     {
         HttpClient client = _httpClientFactory.CreateClient(HttpClientName);
-        HttpRequest? inboundRequest = _httpContextAccessor.HttpContext?.Request;
-        if (client.BaseAddress is null && inboundRequest is not null)
-        {
-            client.BaseAddress = new Uri($"{inboundRequest.Scheme}://{inboundRequest.Host}");
-        }
-
         string? authorization = _httpContextAccessor.HttpContext?.Request.Headers.Authorization;
         if (!string.IsNullOrEmpty(authorization) &&
             AuthenticationHeaderValue.TryParse(authorization, out AuthenticationHeaderValue? parsedHeader))
@@ -215,13 +219,11 @@ public sealed class InternalApiPrintDispatchGateway(
     {
         try
         {
+            // The client's BaseAddress is pinned via Program.cs's AddHttpClient registration from
+            // trusted configuration - never derived from the inbound request's own Host/Scheme,
+            // which would let a caller redirect this server's own bearer-token bearing calls to an
+            // arbitrary host it controls.
             HttpClient client = _httpClientFactory.CreateClient(InternalApiSliceSubmissionGateway.HttpClientName);
-            HttpRequest? inboundRequest = _httpContextAccessor.HttpContext?.Request;
-            if (client.BaseAddress is null && inboundRequest is not null)
-            {
-                client.BaseAddress = new Uri($"{inboundRequest.Scheme}://{inboundRequest.Host}");
-            }
-
             string? authorization = _httpContextAccessor.HttpContext?.Request.Headers.Authorization;
             if (!string.IsNullOrEmpty(authorization) &&
                 AuthenticationHeaderValue.TryParse(authorization, out AuthenticationHeaderValue? parsedHeader))

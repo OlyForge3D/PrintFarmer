@@ -282,10 +282,19 @@ builder.Services.AddHostedService<
 
 // Filament-calibration saga: drives the existing CalibrationOrchestration checkpoint through
 // created -> ... -> completed by calling the real SliceJobController/SlicePrintBridgeController
-// HTTP contracts on the current host, never by re-implementing their logic.
+// HTTP contracts, never by re-implementing their logic. The internal HttpClient's base address is
+// pinned from trusted configuration (never derived from an inbound request's Host/Scheme, which
+// would let a caller redirect this server's own bearer-token bearing calls to an arbitrary host it
+// controls) - matching the same configuration-driven pattern already used for cross-process
+// internal calls (see Farm.Slicer.Host's "MainApi" client).
 builder.Services.AddHttpContextAccessor();
+string calibrationSagaInternalApiBaseUrl =
+    builder.Configuration["Calibration:InternalApiBaseUrl"]
+    ?? builder.Configuration["MainApi:BaseUrl"]
+    ?? "http://localhost:5245";
 builder.Services.AddHttpClient(
-    Farm.Web.Api.Services.Calibration.InternalApiSliceSubmissionGateway.HttpClientName);
+    Farm.Web.Api.Services.Calibration.InternalApiSliceSubmissionGateway.HttpClientName,
+    client => client.BaseAddress = new Uri(calibrationSagaInternalApiBaseUrl.TrimEnd('/') + "/"));
 builder.Services.AddScoped<
     Farm.Web.Api.Services.Calibration.ISliceSubmissionGateway,
     Farm.Web.Api.Services.Calibration.InternalApiSliceSubmissionGateway>();

@@ -31,13 +31,16 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         (Guid orchestrationId, Guid attemptId) = await CreateProjectAndAttemptAsync(projectService, actor);
 
         Guid sliceJobId = Guid.NewGuid();
-        Guid gcodeFileId = Guid.NewGuid();
         sliceGateway.SubmitBehavior = _ => SliceSubmissionResult.Ok(sliceJobId);
-        sliceGateway.StatusBehavior = _ => SliceStatusResult.Ok("Completed", gcodeFileId);
+        sliceGateway.StatusBehavior = _ => SliceStatusResult.Ok("Completed");
         printGateway.SendBehavior = (_, _) => PrintDispatchResult.Ok();
 
         // created -> cloning-profile
         CalibrationApiResult<CalibrationOrchestrationDto> result = await AdvanceAsync(saga, orchestrationId, actor);
+        _ = result.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.CloningProfile);
+
+        // cloning-profile -> slicing
+        result = await AdvanceAsync(saga, orchestrationId, actor);
         _ = result.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.Slicing);
 
         // slicing -> awaiting-slice
@@ -48,7 +51,6 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         // awaiting-slice -> sending-to-printer (slice reports Completed)
         result = await AdvanceAsync(saga, orchestrationId, actor);
         _ = result.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.SendingToPrinter);
-        _ = result.Value!.GcodeFileId.Should().Be(gcodeFileId);
 
         // sending-to-printer -> awaiting-print
         result = await AdvanceAsync(saga, orchestrationId, actor);
@@ -108,19 +110,27 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         CalibrationActor actor = CreateActor();
         (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(actor, projectService, methodName: "not-a-real-method");
 
+        // created -> cloning-profile: this hop never validates the method, so it always succeeds.
+        CalibrationApiResult<CalibrationOrchestrationDto> firstAdvance =
+            await AdvanceAsync(saga, orchestrationId, actor);
+        _ = firstAdvance.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.CloningProfile);
+        _ = firstAdvance.Value!.Status.Should().Be(nameof(CalibrationOrchestrationStatus.Running));
+
+        // cloning-profile validates the method and fails terminally without retrying, since the
+        // attempt is immutable and re-parsing the same unparsable method can never succeed.
         CalibrationApiResult<CalibrationOrchestrationDto> result = await AdvanceAsync(saga, orchestrationId, actor);
 
-        _ = result.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.Created);
+        _ = result.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.CloningProfile);
         _ = result.Value!.Status.Should().Be(nameof(CalibrationOrchestrationStatus.Failed));
         _ = result.Value!.LastErrorCode.Should().Be("unknown_calibration_method");
 
         // A terminal failure is not a new precondition on future calibrations: it only stops this
         // one orchestration's own automatic advancement, and further Advance calls report the
         // terminal conflict rather than silently re-running anything.
-        CalibrationApiResult<CalibrationOrchestrationDto> secondAdvance =
+        CalibrationApiResult<CalibrationOrchestrationDto> thirdAdvance =
             await AdvanceAsync(saga, orchestrationId, actor);
-        _ = secondAdvance.StatusCode.Should().Be(StatusCodes.Status409Conflict);
-        _ = secondAdvance.Code.Should().Be("calibration_orchestration_terminally_failed");
+        _ = thirdAdvance.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = thirdAdvance.Code.Should().Be("calibration_orchestration_terminally_failed");
     }
 
     [Fact]
@@ -137,6 +147,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         CalibrationActor actor = CreateActor();
         (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(projectService, actor);
         _ = await AdvanceAsync(saga, orchestrationId, actor); // created -> cloning-profile transition
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // cloning-profile -> slicing transition
 
         int submitAttempts = 0;
         Guid sliceJobId = Guid.NewGuid();
@@ -177,6 +188,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         CalibrationActor actor = CreateActor();
         (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(projectService, actor);
         _ = await AdvanceAsync(saga, orchestrationId, actor); // created -> cloning-profile transition
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // cloning-profile -> slicing transition
 
         CalibrationApiResult<CalibrationOrchestrationDto> result = null!;
         for (int i = 0; i < CalibrationOrchestrationSagaService.MaximumStepRetries + 1; i++)
@@ -201,7 +213,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         FakeSliceSubmissionGateway sliceGateway = new()
         {
             SubmitBehavior = _ => SliceSubmissionResult.Ok(Guid.NewGuid()),
-            StatusBehavior = _ => SliceStatusResult.Ok("Processing", null),
+            StatusBehavior = _ => SliceStatusResult.Ok("Processing"),
         };
         CalibrationOrchestrationSagaService saga = CreateSaga(
             db,
@@ -210,6 +222,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
             new FakePrintDispatchGateway());
         CalibrationActor actor = CreateActor();
         (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(projectService, actor);
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> cloning-profile
         _ = await AdvanceAsync(saga, orchestrationId, actor); // -> slicing
         _ = await AdvanceAsync(saga, orchestrationId, actor); // -> awaiting-slice
 
@@ -236,6 +249,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
             new FakePrintDispatchGateway());
         CalibrationActor actor = CreateActor();
         (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(projectService, actor);
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> cloning-profile
         _ = await AdvanceAsync(saga, orchestrationId, actor); // -> slicing
         _ = await AdvanceAsync(saga, orchestrationId, actor); // -> awaiting-slice
 
@@ -255,12 +269,13 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         FakeSliceSubmissionGateway sliceGateway = new()
         {
             SubmitBehavior = _ => SliceSubmissionResult.Ok(sliceJobId),
-            StatusBehavior = _ => SliceStatusResult.Ok("Completed", Guid.NewGuid()),
+            StatusBehavior = _ => SliceStatusResult.Ok("Completed"),
         };
         FakePrintDispatchGateway printGateway = new();
         CalibrationOrchestrationSagaService saga = CreateSaga(db, projectService, sliceGateway, printGateway);
         CalibrationActor actor = CreateActor();
         (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(projectService, actor);
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> cloning-profile
         _ = await AdvanceAsync(saga, orchestrationId, actor); // -> slicing
         _ = await AdvanceAsync(saga, orchestrationId, actor); // -> awaiting-slice
         _ = await AdvanceAsync(saga, orchestrationId, actor); // -> sending-to-printer
@@ -291,12 +306,13 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         FakeSliceSubmissionGateway sliceGateway = new()
         {
             SubmitBehavior = _ => SliceSubmissionResult.Ok(Guid.NewGuid()),
-            StatusBehavior = _ => SliceStatusResult.Ok("Completed", Guid.NewGuid()),
+            StatusBehavior = _ => SliceStatusResult.Ok("Completed"),
         };
         FakePrintDispatchGateway printGateway = new() { SendBehavior = (_, _) => PrintDispatchResult.Ok() };
         CalibrationOrchestrationSagaService saga = CreateSaga(db, projectService, sliceGateway, printGateway);
         CalibrationActor actor = CreateActor();
         (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(projectService, actor);
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> cloning-profile
         _ = await AdvanceAsync(saga, orchestrationId, actor); // -> slicing
         _ = await AdvanceAsync(saga, orchestrationId, actor); // -> awaiting-slice
         _ = await AdvanceAsync(saga, orchestrationId, actor); // -> sending-to-printer
@@ -310,6 +326,163 @@ public sealed class CalibrationOrchestrationSagaServiceTests
 
         _ = result.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.AwaitingPrint);
         _ = result.Value!.Status.Should().Be(nameof(CalibrationOrchestrationStatus.Failed));
+    }
+
+    [Fact]
+    public async Task AdvanceAsync_AwaitingPrint_ReportedFailureThenSucceeds_RetriesWithinBudget()
+    {
+        await using AppDbContext db = CreateContext();
+        CalibrationProjectService projectService = CreateProjectService(db);
+        FakeSliceSubmissionGateway sliceGateway = new()
+        {
+            SubmitBehavior = _ => SliceSubmissionResult.Ok(Guid.NewGuid()),
+            StatusBehavior = _ => SliceStatusResult.Ok("Completed"),
+        };
+        FakePrintDispatchGateway printGateway = new() { SendBehavior = (_, _) => PrintDispatchResult.Ok() };
+        CalibrationOrchestrationSagaService saga = CreateSaga(db, projectService, sliceGateway, printGateway);
+        CalibrationActor actor = CreateActor();
+        (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(projectService, actor);
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> cloning-profile
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> slicing
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> awaiting-slice
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> sending-to-printer
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> awaiting-print
+
+        CalibrationApiResult<CalibrationOrchestrationDto> failed =
+            await AdvanceAsync(saga, orchestrationId, actor, printFailed: true);
+        _ = failed.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.AwaitingPrint);
+        _ = failed.Value!.Status.Should().Be(nameof(CalibrationOrchestrationStatus.WaitingToRetry));
+        _ = failed.Value!.RetryCount.Should().Be(1);
+
+        CalibrationApiResult<CalibrationOrchestrationDto> succeeded =
+            await AdvanceAsync(saga, orchestrationId, actor, printCompleted: true);
+        _ = succeeded.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.AwaitingMeasurement);
+        _ = succeeded.Value!.Status.Should().Be(nameof(CalibrationOrchestrationStatus.Running));
+    }
+
+    [Fact]
+    public async Task AdvanceAsync_AwaitingSlice_JobFailsPastRetryBudget_FailsTerminally()
+    {
+        await using AppDbContext db = CreateContext();
+        CalibrationProjectService projectService = CreateProjectService(db);
+        FakeSliceSubmissionGateway sliceGateway = new()
+        {
+            SubmitBehavior = _ => SliceSubmissionResult.Ok(Guid.NewGuid()),
+            StatusBehavior = _ => SliceStatusResult.Failed("slice_job_failed"),
+        };
+        CalibrationOrchestrationSagaService saga = CreateSaga(
+            db,
+            projectService,
+            sliceGateway,
+            new FakePrintDispatchGateway());
+        CalibrationActor actor = CreateActor();
+        (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(projectService, actor);
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> cloning-profile
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> slicing
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> awaiting-slice
+
+        // A failed slice job reverts to "slicing" so it can be resubmitted. Make the resubmission
+        // also fail, so the retry budget is exhausted by real, repeated failures rather than an
+        // endless resubmit-then-fail-poll cycle (a successful resubmission legitimately resets the
+        // retry counter, since it represents a fresh slice job).
+        sliceGateway.SubmitBehavior = _ => SliceSubmissionResult.Failed("slice_submission_failed");
+
+        CalibrationApiResult<CalibrationOrchestrationDto> result = null!;
+        for (int i = 0; i < CalibrationOrchestrationSagaService.MaximumStepRetries + 1; i++)
+        {
+            result = await AdvanceAsync(saga, orchestrationId, actor);
+        }
+
+        _ = result.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.Slicing);
+        _ = result.Value!.Status.Should().Be(nameof(CalibrationOrchestrationStatus.Failed));
+        _ = result.Value!.RetryCount.Should().Be(CalibrationOrchestrationSagaService.MaximumStepRetries + 1);
+
+        CalibrationApiResult<CalibrationOrchestrationDto> afterFailure =
+            await AdvanceAsync(saga, orchestrationId, actor);
+        _ = afterFailure.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+    }
+
+    [Fact]
+    public async Task AdvanceAsync_SendingToPrinterFailsPastRetryBudget_FailsTerminally()
+    {
+        await using AppDbContext db = CreateContext();
+        CalibrationProjectService projectService = CreateProjectService(db);
+        FakeSliceSubmissionGateway sliceGateway = new()
+        {
+            SubmitBehavior = _ => SliceSubmissionResult.Ok(Guid.NewGuid()),
+            StatusBehavior = _ => SliceStatusResult.Ok("Completed"),
+        };
+        FakePrintDispatchGateway printGateway = new()
+        {
+            SendBehavior = (_, _) => PrintDispatchResult.Failed("send_to_printer_rejected"),
+        };
+        CalibrationOrchestrationSagaService saga = CreateSaga(db, projectService, sliceGateway, printGateway);
+        CalibrationActor actor = CreateActor();
+        (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(projectService, actor);
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> cloning-profile
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> slicing
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> awaiting-slice
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> sending-to-printer
+
+        CalibrationApiResult<CalibrationOrchestrationDto> result = null!;
+        for (int i = 0; i < CalibrationOrchestrationSagaService.MaximumStepRetries + 1; i++)
+        {
+            result = await AdvanceAsync(saga, orchestrationId, actor);
+        }
+
+        _ = result.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.SendingToPrinter);
+        _ = result.Value!.Status.Should().Be(nameof(CalibrationOrchestrationStatus.Failed));
+
+        CalibrationApiResult<CalibrationOrchestrationDto> afterFailure =
+            await AdvanceAsync(saga, orchestrationId, actor);
+        _ = afterFailure.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+    }
+
+    [Fact]
+    public async Task AdvanceAsync_ResubmittedSlice_ReplacesPreviouslyRecordedSliceJobId()
+    {
+        // Verifies the ApplyOutcome overwrite fix: once a slice job has been submitted and its ID
+        // recorded, a later resubmission at the same "slicing" step (e.g. after a transient
+        // failure elsewhere forced a retry through this step again) must have its new SliceJobId
+        // actually replace the stale one - `??=` would have left the first ID stuck forever.
+        await using AppDbContext db = CreateContext();
+        CalibrationProjectService projectService = CreateProjectService(db);
+        Guid firstSliceJobId = Guid.NewGuid();
+        Guid secondSliceJobId = Guid.NewGuid();
+        int submitCount = 0;
+        FakeSliceSubmissionGateway sliceGateway = new()
+        {
+            SubmitBehavior = _ =>
+            {
+                submitCount++;
+                return SliceSubmissionResult.Ok(submitCount == 1 ? firstSliceJobId : secondSliceJobId);
+            },
+        };
+        CalibrationOrchestrationSagaService saga = CreateSaga(
+            db,
+            projectService,
+            sliceGateway,
+            new FakePrintDispatchGateway());
+        CalibrationActor actor = CreateActor();
+        (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(projectService, actor);
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> cloning-profile
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // -> slicing
+
+        CalibrationApiResult<CalibrationOrchestrationDto> firstSubmission =
+            await AdvanceAsync(saga, orchestrationId, actor); // slicing -> awaiting-slice
+        _ = firstSubmission.Value!.SliceJobId.Should().Be(firstSliceJobId);
+
+        // Force the orchestration back to "slicing" as if the first slice job had been discovered
+        // failed, then resubmit.
+        CalibrationOrchestration orchestration = await db.CalibrationOrchestrations.SingleAsync(
+            o => o.Id == orchestrationId);
+        orchestration.CurrentStep = CalibrationSagaSteps.Slicing;
+        _ = await db.SaveChangesAsync();
+
+        CalibrationApiResult<CalibrationOrchestrationDto> secondSubmission =
+            await AdvanceAsync(saga, orchestrationId, actor);
+        _ = secondSubmission.Value!.SliceJobId.Should().Be(secondSliceJobId);
+        _ = secondSubmission.Value!.SliceJobId.Should().NotBe(firstSliceJobId);
     }
 
     [Fact]
@@ -495,7 +668,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
             _ => SliceSubmissionResult.Ok(Guid.NewGuid());
 
         public Func<Guid, SliceStatusResult> StatusBehavior { get; set; } =
-            _ => SliceStatusResult.Ok("Completed", Guid.NewGuid());
+            _ => SliceStatusResult.Ok("Completed");
 
         public Task<SliceSubmissionResult> SubmitAsync(CalibrationSliceSubmission submission, CancellationToken ct) =>
             Task.FromResult(SubmitBehavior(submission));

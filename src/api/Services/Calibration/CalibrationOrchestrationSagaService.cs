@@ -165,6 +165,47 @@ public sealed class CalibrationOrchestrationSagaService(
                 "calibration_orchestration_advance_invalid");
         }
 
+        // A quick, unlocked existence/visibility check up front lets a caller for an unknown or
+        // invisible orchestration fail fast (404) without ever contending on the per-orchestration
+        // lock below.
+        if (await FindVisibleOrchestrationAsync(orchestrationId, actor, cancellationToken) is null)
+        {
+            return CalibrationApiResult<CalibrationOrchestrationDto>.Failure(
+                StatusCodes.Status404NotFound,
+                "calibration_orchestration_not_found");
+        }
+
+        // Serialize every advance attempt for this one orchestration within this process: two
+        // concurrent Advance calls (e.g. a double-clicked retry, or overlapping polls) must never
+        // both load the same "what step runs next" state and then both perform an external,
+        // non-idempotent side effect (submitting a slice job, dispatching a print) before either
+        // save can detect the conflict - by the time SaveChangesAsync notices, the side effect has
+        // already happened. Everything that reads or acts on orchestration state - including the
+        // reload immediately below - happens only after this lock is held, so a racing caller
+        // that was waiting always observes the *other* caller's already-applied change, never a
+        // stale snapshot taken before it. This lock closes that window for the common
+        // single-process deployment; the DbUpdateConcurrencyException handling below is defense
+        // in depth for the residual multi-instance case.
+        SemaphoreSlim advanceLock = GetAdvanceLock(orchestrationId);
+        await advanceLock.WaitAsync(cancellationToken);
+        try
+        {
+            return await AdvanceLockedAsync(orchestrationId, request, actor, cancellationToken);
+        }
+        finally
+        {
+            _ = advanceLock.Release();
+        }
+    }
+
+    private async Task<CalibrationApiResult<CalibrationOrchestrationDto>> AdvanceLockedAsync(
+        Guid orchestrationId,
+        CalibrationOrchestrationAdvanceRequest request,
+        CalibrationActor actor,
+        CancellationToken cancellationToken)
+    {
+        // Reload fresh now that the lock is held - a racer that was waiting must never act on a
+        // snapshot taken before the previous holder's change was saved.
         CalibrationOrchestration? orchestration = await FindVisibleOrchestrationAsync(
             orchestrationId,
             actor,
@@ -201,7 +242,9 @@ public sealed class CalibrationOrchestrationSagaService(
         DateTime nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
         StepOutcome outcome = orchestration.CurrentStep switch
         {
-            CalibrationSagaSteps.Created or CalibrationSagaSteps.CloningProfile =>
+            CalibrationSagaSteps.Created =>
+                StepOutcome.Advance(CalibrationSagaSteps.CloningProfile, "step:created"),
+            CalibrationSagaSteps.CloningProfile =>
                 RunCloningProfileStep(attempt),
             CalibrationSagaSteps.Slicing =>
                 await RunSlicingStepAsync(orchestration, attempt, cancellationToken),
@@ -233,7 +276,7 @@ public sealed class CalibrationOrchestrationSagaService(
         // orchestration's own state change.
         if (outcome.EventType is not null)
         {
-            _ = await _calibrationService.AppendAttemptEventAsync(
+            CalibrationApiResult<CalibrationAttemptEventDto> appendResult = await _calibrationService.AppendAttemptEventAsync(
                 attempt.Id,
                 new CalibrationAttemptEventCreateRequest
                 {
@@ -241,7 +284,7 @@ public sealed class CalibrationOrchestrationSagaService(
                     OperationId = request.OperationId,
                     EventType = outcome.EventType,
                     SliceJobId = outcome.SliceJobId ?? orchestration.SliceJobId,
-                    GcodeFileId = outcome.GcodeFileId ?? orchestration.GcodeFileId,
+                    GcodeFileId = orchestration.GcodeFileId,
                     PrintJobId = orchestration.PrintJobId,
                     CalibrationOrchestrationId = orchestration.Id,
                     ErrorCode = outcome.ErrorCode,
@@ -254,13 +297,35 @@ public sealed class CalibrationOrchestrationSagaService(
                 actor,
                 cancellationToken);
 
+            // A non-throwing append failure (e.g. a validation or idempotency-payload mismatch)
+            // must never let the orchestration advance without the promised timeline event
+            // actually being recorded - the event *is* the audit trail this saga exists to keep.
+            if (!appendResult.IsSuccess)
+            {
+                return CalibrationApiResult<CalibrationOrchestrationDto>.Failure(
+                    appendResult.StatusCode,
+                    appendResult.Code ?? "calibration_orchestration_event_append_failed");
+            }
+
             orchestration = await _dbContext.CalibrationOrchestrations.SingleAsync(
                 candidate => candidate.Id == orchestrationId,
                 cancellationToken);
         }
 
         ApplyOutcome(orchestration, outcome, nowUtc);
-        _ = await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            _ = await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Another Advance call for this same orchestration committed first. Report an
+            // explicit, retryable conflict rather than letting the caller's write silently lose
+            // (last-write-wins) or surfacing an unhandled 500.
+            return CalibrationApiResult<CalibrationOrchestrationDto>.Failure(
+                StatusCodes.Status409Conflict,
+                "calibration_orchestration_advance_conflict");
+        }
 
         if (outcome.Terminal)
         {
@@ -280,8 +345,22 @@ public sealed class CalibrationOrchestrationSagaService(
                 outcome.ErrorCode);
         }
 
+        if (outcome.Terminal || outcome.Completed)
+        {
+            // No further Advance call can legitimately progress this orchestration, so its
+            // per-orchestration lock (and the bookkeeping entry backing it) can be released for
+            // good - otherwise AdvanceLocks would grow for as long as the process lives.
+            _ = AdvanceLocks.TryRemove(orchestration.Id, out _);
+        }
+
         return CalibrationApiResult<CalibrationOrchestrationDto>.Success(MapOrchestration(orchestration));
     }
+
+    /// <summary>Per-orchestration in-process serialization lock for <see cref="AdvanceAsync"/>.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, SemaphoreSlim> AdvanceLocks = new();
+
+    private static SemaphoreSlim GetAdvanceLock(Guid orchestrationId) =>
+        AdvanceLocks.GetOrAdd(orchestrationId, static _ => new SemaphoreSlim(1, 1));
 
     /// <summary>Validates the attempt's method against the saga's calibration-method catalogue.</summary>
     /// <remarks>
@@ -346,10 +425,7 @@ public sealed class CalibrationOrchestrationSagaService(
 
         if (string.Equals(result.SliceStatus, "Completed", StringComparison.OrdinalIgnoreCase))
         {
-            return StepOutcome.Advance(
-                CalibrationSagaSteps.SendingToPrinter,
-                "step:slicing-completed",
-                gcodeFileId: result.GcodeFileId);
+            return StepOutcome.Advance(CalibrationSagaSteps.SendingToPrinter, "step:slicing-completed");
         }
 
         if (string.Equals(result.SliceStatus, "Failed", StringComparison.OrdinalIgnoreCase) ||
@@ -437,18 +513,24 @@ public sealed class CalibrationOrchestrationSagaService(
         StepOutcome.Advance(CalibrationSagaSteps.Completed, "step:advanced", completed: true);
 
     /// <summary>
-    /// Builds the exact JSON body posted to <c>POST /api/slice</c>: the attempt's own recorded
-    /// input (which already carries whatever model/profile references a slicing step needs), with
-    /// the calibration overlay applied so the request uses the bundled-template calibration mode
-    /// (issue #1938/#1952) instead of an ordinary manual slice. Deliberately never sets
-    /// <c>calibrationProjectId</c>/<c>calibrationAttemptId</c>/<c>calibrationOrchestrationId</c> on
-    /// the request: those fields conflict with <c>calibration.method</c> and are reserved for the
-    /// unrelated promote-to-primary-queue flow.
+    /// Builds the exact JSON body for <c>POST /api/slice</c> from the attempt's own recorded
+    /// input, always overlaid with the resolved <c>calibration.method</c>/<c>calibration.params</c>
+    /// fields so <c>SliceJobController</c> treats this submission as a genuine calibration slice
+    /// (issue #1938/#1952) instead of an ordinary manual slice. Deliberately strips
+    /// <c>calibrationProjectId</c>/<c>calibrationAttemptId</c>/<c>calibrationOrchestrationId</c>
+    /// from whatever <see cref="CalibrationAttempt.InputJson"/> happens to carry: those three keys
+    /// are reserved for the unrelated promote-to-primary-queue flow and
+    /// <c>SliceJobController</c> rejects (<c>calibration_mode_conflicts_with_saga_ids</c>) any
+    /// request that sets <c>calibration.method</c> alongside any of them, so this saga must never
+    /// forward them even if a stored input happened to contain one.
     /// </summary>
     private static JsonObject BuildSliceSubmissionBody(CalibrationAttempt attempt, CalibrationMethod method)
     {
         JsonNode? parsedBody = JsonNode.Parse(attempt.InputJson);
         JsonObject bodyObject = parsedBody as JsonObject ?? [];
+        bodyObject.Remove("calibrationProjectId");
+        bodyObject.Remove("calibrationAttemptId");
+        bodyObject.Remove("calibrationOrchestrationId");
         JsonNode? specification = JsonNode.Parse(attempt.SpecificationJson);
         bodyObject["calibration"] = new JsonObject
         {
@@ -461,8 +543,11 @@ public sealed class CalibrationOrchestrationSagaService(
     private void ApplyOutcome(CalibrationOrchestration orchestration, StepOutcome outcome, DateTime nowUtc)
     {
         orchestration.CurrentStep = outcome.NextStep ?? orchestration.CurrentStep;
-        orchestration.SliceJobId ??= outcome.SliceJobId;
-        orchestration.GcodeFileId ??= outcome.GcodeFileId;
+
+        // Overwrite, never merge-if-null: a re-slice after a failed/stale attempt must be able to
+        // replace the previously recorded SliceJobId with the new one. `??=` would have left the
+        // first (possibly failed) job's ID permanently stuck on the orchestration.
+        orchestration.SliceJobId = outcome.SliceJobId ?? orchestration.SliceJobId;
         orchestration.LastErrorCode = outcome.ErrorCode;
         orchestration.LastErrorJson = outcome.ErrorDetail is null
             ? null
@@ -533,7 +618,6 @@ public sealed class CalibrationOrchestrationSagaService(
         string? NextStep,
         string? EventType,
         Guid? SliceJobId,
-        Guid? GcodeFileId,
         string? ErrorCode,
         string? ErrorDetail,
         int? RetryCount,
@@ -542,15 +626,14 @@ public sealed class CalibrationOrchestrationSagaService(
         bool Completed)
     {
         public static StepOutcome NoChange() =>
-            new(false, null, null, null, null, null, null, null, false, false, false);
+            new(false, null, null, null, null, null, null, false, false, false);
 
         public static StepOutcome Advance(
             string nextStep,
             string eventType,
             Guid? sliceJobId = null,
-            Guid? gcodeFileId = null,
             bool completed = false) =>
-            new(true, nextStep, eventType, sliceJobId, gcodeFileId, null, null, 0, false, false, completed);
+            new(true, nextStep, eventType, sliceJobId, null, null, 0, false, false, completed);
 
         /// <summary>A transient failure that stays on the same step and retries, or fails terminally past budget.</summary>
         public static StepOutcome Retryable(int currentRetryCount, string retryStep, string errorCode, string? detail)
@@ -562,7 +645,6 @@ public sealed class CalibrationOrchestrationSagaService(
                 retryStep,
                 exhausted ? "step:failed" : "step:retrying",
                 null,
-                null,
                 errorCode,
                 detail,
                 nextRetryCount,
@@ -572,6 +654,6 @@ public sealed class CalibrationOrchestrationSagaService(
         }
 
         public static StepOutcome TerminalFailure(string errorCode, string? detail) =>
-            new(true, null, "step:failed", null, null, errorCode, detail, null, false, true, false);
+            new(true, null, "step:failed", null, errorCode, detail, null, false, true, false);
     }
 }
