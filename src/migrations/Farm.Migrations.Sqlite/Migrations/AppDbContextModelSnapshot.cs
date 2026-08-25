@@ -497,7 +497,7 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("ParentAttemptId")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("PrinterConfigurationSnapshotId")
+                    b.Property<Guid?>("PrinterConfigurationSnapshotId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ProfileSnapshotIdsJson")
@@ -8574,8 +8574,7 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.PrinterConfigurationSnapshot", null)
                         .WithMany()
                         .HasForeignKey("PrinterConfigurationSnapshotId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("Farm.Infrastructure.Domain.CalibrationProject", null)
                         .WithMany()
