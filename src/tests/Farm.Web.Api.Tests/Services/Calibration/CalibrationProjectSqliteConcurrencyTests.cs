@@ -206,11 +206,15 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
         await using SqliteCalibrationStore store = await SqliteCalibrationStore.CreateAsync();
         Guid ownerId = Guid.NewGuid();
         CalibrationActor actor = new(ownerId, "owner", false);
-        TwoCallerPrinterContextService printerContext = new(store.PrinterId);
-        await using AppDbContext firstWriterContext = store.CreateContext();
-        await using AppDbContext secondWriterContext = store.CreateContext();
-        CalibrationProjectService firstWriter = CreateService(firstWriterContext, printerContext);
-        CalibrationProjectService secondWriter = CreateService(secondWriterContext, printerContext);
+        // Path D (#1981): CreateProjectAsync no longer calls GetContextAsync, so the previous
+        // TwoCallerPrinterContextService synchronization barrier stopped working. Barrier instead
+        // on the CalibrationIdempotencyRecords read that FindReplayAsync still performs early in
+        // CreateProjectAsync, forcing both concurrent writers to race at the same point.
+        IdempotencyReadBarrierInterceptor barrier = new();
+        await using AppDbContext firstWriterContext = store.CreateContext(barrier);
+        await using AppDbContext secondWriterContext = store.CreateContext(barrier);
+        CalibrationProjectService firstWriter = CreateService(firstWriterContext, store.PrinterId);
+        CalibrationProjectService secondWriter = CreateService(secondWriterContext, store.PrinterId);
 
         Task<CalibrationApiResult<CalibrationProjectDto>> first = firstWriter.CreateProjectAsync(
             CreateProjectRequest(store.PrinterId, "concurrent-1"),
@@ -708,34 +712,6 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
                     SnapshotSha256 = new string('a', 64),
                 },
             };
-        }
-    }
-
-    private sealed class TwoCallerPrinterContextService(Guid printerId) : StaticPrinterContextService(printerId)
-    {
-        private readonly TaskCompletionSource _bothCallersReachedContext = new(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        private int _callerCount;
-
-        public override async Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
-            Guid requestedPrinterId,
-            long? configurationRevision,
-            string capturedBySubject,
-            CalibrationProfileAccessScope profileAccessScope,
-            CancellationToken cancellationToken)
-        {
-            if (Interlocked.Increment(ref _callerCount) == 2)
-            {
-                _ = _bothCallersReachedContext.TrySetResult();
-            }
-
-            await _bothCallersReachedContext.Task.WaitAsync(cancellationToken);
-            return await base.GetContextAsync(
-                requestedPrinterId,
-                configurationRevision,
-                capturedBySubject,
-                profileAccessScope,
-                cancellationToken);
         }
     }
 

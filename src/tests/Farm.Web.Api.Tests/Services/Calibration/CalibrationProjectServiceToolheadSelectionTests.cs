@@ -43,7 +43,7 @@ public sealed class CalibrationProjectServiceToolheadSelectionTests
     }
 
     [Fact]
-    public async Task CreateProjectAsync_MatchingSelectedToolheadPair_CreatesProject()
+    public async Task CreateProjectAsync_SelectedToolheadPairWithNoContext_Rejects()
     {
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
@@ -59,9 +59,12 @@ public sealed class CalibrationProjectServiceToolheadSelectionTests
             new(ownerId, ownerId.ToString(), false),
             CancellationToken.None);
 
-        _ = result.StatusCode.Should().Be(StatusCodes.Status201Created);
-        _ = result.Value!.SelectedToolheadId.Should().Be(ToolheadBId);
-        _ = result.Value.SelectedToolheadIndex.Should().Be(ToolheadBIndex);
+        // Path D (#1981): no printer configuration context is resolved, so there is no captured
+        // toolhead list to validate a selection against - any selection is now rejected, even one
+        // that would previously have matched a resolved context.
+        _ = result.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        _ = result.Code.Should().Be("toolhead_selection_invalid");
+        _ = (await db.CalibrationProjects.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -197,7 +200,7 @@ public sealed class CalibrationProjectServiceToolheadSelectionTests
     }
 
     [Fact]
-    public async Task CreateProjectAsync_MatchingPair_PersistsExactCapturedIdentity()
+    public async Task CreateProjectAsync_MatchingPairWithNoContext_RejectsWithoutPersisting()
     {
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
@@ -213,11 +216,11 @@ public sealed class CalibrationProjectServiceToolheadSelectionTests
             new(ownerId, ownerId.ToString(), false),
             CancellationToken.None);
 
-        _ = result.StatusCode.Should().Be(StatusCodes.Status201Created);
-        Farm.Infrastructure.Domain.CalibrationProject persisted =
-            await db.CalibrationProjects.AsNoTracking().SingleAsync();
-        _ = persisted.SelectedToolheadId.Should().Be(ToolheadAId);
-        _ = persisted.SelectedToolheadIndex.Should().Be(ToolheadAIndex);
+        // Path D (#1981): without a resolved context there is no captured toolhead identity to
+        // persist - the selection is rejected and nothing is written.
+        _ = result.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        _ = result.Code.Should().Be("toolhead_selection_invalid");
+        _ = (await db.CalibrationProjects.CountAsync()).Should().Be(0);
     }
 
     private static AppDbContext CreateContext()

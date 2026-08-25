@@ -228,10 +228,13 @@ public sealed class CalibrationProjectService(
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-    private readonly ICalibrationContextResolver _printerContextService =
-        printerContextService ?? throw new ArgumentNullException(nameof(printerContextService));
+    // Context-free stand-in for ValidateSelectedToolhead (#1981): its Toolheads list is always
+    // empty, so any actual toolhead selection is rejected (no captured toolhead list to match
+    // against), while an absent selection is still allowed - matching the method's own
+    // unmodified short-circuit for that case.
+    private static readonly CalibrationContextDto EmptyToolheadValidationContext = new(new CalibrationCandidateDto());
 
+    private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly ICalibrationBlobStore _blobStore = blobStore ?? throw new ArgumentNullException(nameof(blobStore));
 
     private readonly TimeProvider _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
@@ -305,31 +308,18 @@ public sealed class CalibrationProjectService(
             return replay;
         }
 
-        CalibrationServiceResult<CalibrationContextDto> contextResult =
-            await _printerContextService.GetContextAsync(
-                request.PrinterId,
-                request.PrinterConfigurationRevision,
-                actor.Subject,
-                new CalibrationProfileAccessScope(actor.UserId, actor.IsFarmAdmin),
-                cancellationToken);
-        if (contextResult.Value is null)
-        {
-            return ContextFailure<CalibrationProjectDto>(contextResult);
-        }
-
-        CalibrationContextDto context = contextResult.Value;
-        if (ValidateSelectedToolhead(request, context) is string toolheadCode)
+        // Path D (#1981): filament calibration is context-free, so no printer configuration
+        // context is resolved here. ValidateSelectedToolhead is unchanged and still short-circuits
+        // to "allowed" when no toolhead selection is present (the filament-calibration case);
+        // it is invoked against a fixed empty context so that any actual selection - which would
+        // otherwise require a resolved toolhead list to validate against - is rejected.
+        if (ValidateSelectedToolhead(request, EmptyToolheadValidationContext) is string toolheadCode)
         {
             return Validation<CalibrationProjectDto>(toolheadCode);
         }
 
         DateTime nowUtc = UtcNow();
         Guid projectId = Guid.NewGuid();
-        PrinterConfigurationSnapshot snapshot = CreateSnapshot(
-            projectId,
-            null,
-            context,
-            actor.Subject);
         CalibrationProject project = new()
         {
             Id = projectId,
@@ -338,7 +328,11 @@ public sealed class CalibrationProjectService(
             LifecycleStatus = CalibrationProjectLifecycleStatus.Active,
             ExperienceMode = ParseExperienceMode(request.ExperienceMode),
             PrinterId = request.PrinterId,
-            CurrentPrinterConfigurationSnapshotId = snapshot.Id,
+
+            // No printer-configuration snapshot is resolved for context-free filament
+            // calibration; snapshot creation is optional/best-effort and is simply skipped
+            // when no context is available (#1981).
+            CurrentPrinterConfigurationSnapshotId = null,
             SelectedToolheadId = request.SelectedToolheadId,
             SelectedToolheadIndex = request.SelectedToolheadIndex,
             FilamentProvider = request.FilamentProvider.Trim(),
@@ -366,7 +360,6 @@ public sealed class CalibrationProjectService(
         };
         CalibrationProjectDto result = MapProject(project);
         _ = _dbContext.CalibrationProjects.Add(project);
-        _ = _dbContext.PrinterConfigurationSnapshots.Add(snapshot);
         AddChange(project, "project", project.Id, project.Revision, CalibrationChangeType.Created, request.RequestId, actor);
         AddIdempotency(
             actor,
@@ -1029,18 +1022,9 @@ public sealed class CalibrationProjectService(
             return Validation<CalibrationAttemptDto>("parent_attempt_not_found");
         }
 
-        CalibrationServiceResult<CalibrationContextDto> contextResult =
-            await _printerContextService.GetContextAsync(
-                project.PrinterId,
-                request.PrinterConfigurationRevision,
-                actor.Subject,
-                new CalibrationProfileAccessScope(actor.UserId, actor.IsFarmAdmin),
-                cancellationToken);
-        if (contextResult.Value is null)
-        {
-            return ContextFailure<CalibrationAttemptDto>(contextResult);
-        }
-
+        // Path D (#1981): filament calibration is context-free, so no printer configuration
+        // context is resolved and no PrinterConfigurationSnapshot is created here. The snapshot
+        // linkage is optional/best-effort, not a hard dependency.
         for (int appendAttempt = 0; appendAttempt < MaximumAppendAttempts; appendAttempt++)
         {
             long nextSequence = (await _dbContext.CalibrationAttempts
@@ -1050,16 +1034,6 @@ public sealed class CalibrationProjectService(
                 .DefaultIfEmpty()
                 .Max() + 1;
             Guid attemptId = Guid.NewGuid();
-            PrinterConfigurationSnapshot? existingSnapshot = await _dbContext.PrinterConfigurationSnapshots
-                .SingleOrDefaultAsync(
-                    snapshot => snapshot.ProjectId == projectId &&
-                        snapshot.SnapshotSha256 == contextResult.Value.Snapshot.SnapshotSha256,
-                    cancellationToken);
-            PrinterConfigurationSnapshot snapshot = existingSnapshot ?? CreateSnapshot(
-                projectId,
-                attemptId,
-                contextResult.Value,
-                actor.Subject);
             DateTime nowUtc = UtcNow();
             CalibrationAttempt attempt = new()
             {
@@ -1073,7 +1047,7 @@ public sealed class CalibrationProjectService(
                 InputJson = Json(request.Input),
                 SpecificationJson = Json(request.Specification),
                 SpecificationSha256 = ComputeCanonicalHash(request.Specification),
-                PrinterConfigurationSnapshotId = snapshot.Id,
+                PrinterConfigurationSnapshotId = null,
                 ProfileSnapshotIdsJson = Json(request.ProfileSnapshotIds),
                 ActualSpoolSnapshotJson = request.ActualSpoolSnapshot.HasValue
                     ? Json(request.ActualSpoolSnapshot.Value)
@@ -1095,11 +1069,6 @@ public sealed class CalibrationProjectService(
                 UpdatedAtUtc = nowUtc,
             };
             CalibrationAttemptDto result = MapAttempt(attempt, "planned");
-            if (existingSnapshot is null)
-            {
-                _ = _dbContext.PrinterConfigurationSnapshots.Add(snapshot);
-            }
-
             _ = _dbContext.CalibrationAttempts.Add(attempt);
             _ = _dbContext.CalibrationOrchestrations.Add(orchestration);
             AddChange(
@@ -3107,26 +3076,6 @@ public sealed class CalibrationProjectService(
         return null;
     }
 
-    private static CalibrationApiResult<T> ContextFailure<T>(
-        CalibrationServiceResult<CalibrationContextDto> contextResult)
-    {
-        return contextResult.ErrorCode switch
-        {
-            "printer_not_found" => NotFound<T>(),
-            "printer_configuration_changed" => CalibrationApiResult<T>.Failure(
-                StatusCodes.Status409Conflict,
-                "printer_configuration_changed"),
-            string code when code.StartsWith("profile_service_", StringComparison.Ordinal) =>
-                CalibrationApiResult<T>.Failure(
-                    StatusCodes.Status503ServiceUnavailable,
-                    "storage_or_dependency_unavailable"),
-            "status_unavailable" => CalibrationApiResult<T>.Failure(
-                StatusCodes.Status503ServiceUnavailable,
-                "storage_or_dependency_unavailable"),
-            _ => Validation<T>(contextResult.ErrorCode ?? "printer_context_invalid"),
-        };
-    }
-
     private static CalibrationApiResult<T> NotFound<T>() =>
         CalibrationApiResult<T>.Failure(StatusCodes.Status404NotFound, "calibration_resource_not_found");
 
@@ -3203,62 +3152,6 @@ public sealed class CalibrationProjectService(
 
     private static CalibrationExperienceMode ParseExperienceMode(string value) =>
         Enum.Parse<CalibrationExperienceMode>(value, ignoreCase: true);
-
-    private static PrinterConfigurationSnapshot CreateSnapshot(
-        Guid projectId,
-        Guid? attemptId,
-        CalibrationContextDto context,
-        string actorSubject)
-    {
-        PrinterConfigurationSnapshotDto source = context.Snapshot;
-        return new()
-        {
-            Id = Guid.NewGuid(),
-            ProjectId = projectId,
-            AttemptId = attemptId,
-            PrinterId = source.PrinterId,
-            SchemaVersion = source.SchemaVersion,
-            SanitizedSnapshotJson = JsonSerializer.Serialize(source, JsonOptions),
-            SnapshotSha256 = source.SnapshotSha256,
-            PrinterConfigurationRevision = source.ConfigurationRevision,
-            FirmwareFamily = ParseFirmwareFamily(source.Firmware.Family),
-            GcodeDialect = ParseGcodeDialect(source.Firmware.GcodeDialect),
-            FirmwareDetectionSource = ParseDetectionSource(source.Firmware.DetectionSource),
-            FirmwareVersion = source.Firmware.Version,
-            Backend = (int)context.Backend,
-            BackendVersion = source.BackendVersion,
-            BackendApiVersion = source.BackendApiVersion,
-            SlicerEngine = source.Slicer.Engine ?? string.Empty,
-            SlicerDistribution = source.Slicer.Distribution ?? string.Empty,
-            SlicerVersion = source.Slicer.Version,
-            MachineProfileId = source.Profiles.Machine?.Id,
-            ExactMachineProfileJson = source.Profiles.Machine?.ExactJson,
-            MachineProfileSha256 = source.Profiles.Machine?.Sha256,
-            ProcessProfileId = source.Profiles.Process?.Id,
-            ExactProcessProfileJson = source.Profiles.Process?.ExactJson,
-            ProcessProfileSha256 = source.Profiles.Process?.Sha256,
-            FilamentProfileId = source.Profiles.Filament?.Id,
-            ExactFilamentProfileJson = source.Profiles.Filament?.ExactJson,
-            FilamentProfileSha256 = source.Profiles.Filament?.Sha256,
-            CapturedAtUtc = source.CapturedAtUtc,
-            CapturedBySubject = actorSubject,
-        };
-    }
-
-    private static PrinterFirmwareFamily ParseFirmwareFamily(string value) =>
-        Enum.TryParse(value, true, out PrinterFirmwareFamily family)
-            ? family
-            : PrinterFirmwareFamily.Unknown;
-
-    private static PrinterGcodeDialect ParseGcodeDialect(string value) =>
-        Enum.TryParse(value, true, out PrinterGcodeDialect dialect)
-            ? dialect
-            : PrinterGcodeDialect.Unknown;
-
-    private static FirmwareDetectionSource ParseDetectionSource(string value) =>
-        Enum.TryParse(value, true, out FirmwareDetectionSource source)
-            ? source
-            : FirmwareDetectionSource.Unknown;
 
     private static string DeriveAttemptStatus(string eventType) =>
         eventType.Trim().ToLowerInvariant() switch
