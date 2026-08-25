@@ -115,8 +115,6 @@ internal sealed class CalibrationGenerationHarness : IDisposable
     public ICalibrationGenerationSaga CreateSaga(CalibrationGenerationHarnessOptions? options = null)
     {
         CalibrationGenerationHarnessOptions resolved = options ?? new CalibrationGenerationHarnessOptions();
-        CalibrationSlicerCompatibilityPolicy compatibilityPolicy =
-            new(resolved.SupportedSlicerVersions);
         AppDbContext core = CreateCoreContext();
         SlicerContextFactory slicerFactory = new(_slicerConnectionString);
         IArtifactsRepository artifactsRepository = new EfArtifactsRepository(slicerFactory);
@@ -146,17 +144,7 @@ internal sealed class CalibrationGenerationHarness : IDisposable
         return new CalibrationGenerationSaga(
             core,
             CreateProjectService(core),
-            new CalibrationSpecificationCompiler(TimeProvider.System, compatibilityPolicy),
-            new CalibrationModelValidator(),
-            resolved.PlanCompiler ?? new OrcaCalibrationPlanCompiler(compatibilityPolicy),
-            new KlipperCalibrationGcodeGenerator(compatibilityPolicy),
-            new CalibrationGcodeAnnotator(),
-            new CalibrationGcodeProgramValidator(
-                new Farm.Web.Api.Services.Gcode.Safety.GcodeSafetyValidator(),
-                compatibilityPolicy),
             BuildProbe(resolved, core, slicerFactory, promoter, modelStorage, sliceJobs, artifacts, artifactsRepository),
-            promoter,
-            storagePaths,
             TimeProvider.System,
             NullLogger<CalibrationGenerationSaga>.Instance,
             resolved.SliceSubmissionRoutable ? sliceJobs : null,

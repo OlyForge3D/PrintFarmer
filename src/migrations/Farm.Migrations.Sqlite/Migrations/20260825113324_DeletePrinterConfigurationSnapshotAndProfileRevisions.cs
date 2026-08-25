@@ -303,6 +303,15 @@ namespace Farm.Migrations.Sqlite.Migrations
                 columns: new[] { "ProjectId", "SnapshotSha256" },
                 unique: true);
 
+            // Up permanently deletes PrinterConfigurationSnapshots data; any CalibrationAttempts row that
+            // referenced a since-deleted snapshot keeps an orphaned, non-null Guid value in this nullable
+            // column. Re-adding the FK below against the freshly (empty) recreated table would fail validation
+            // for those rows, so null them out first. This down-migration is a best-effort schema rollback;
+            // the underlying snapshot data cannot be restored regardless.
+            migrationBuilder.Sql(
+                "UPDATE \"CalibrationAttempts\" SET \"PrinterConfigurationSnapshotId\" = NULL " +
+                "WHERE \"PrinterConfigurationSnapshotId\" IS NOT NULL;");
+
             migrationBuilder.AddForeignKey(
                 name: "FK_CalibrationAttempts_PrinterConfigurationSnapshots_PrinterConfigurationSnapshotId",
                 table: "CalibrationAttempts",

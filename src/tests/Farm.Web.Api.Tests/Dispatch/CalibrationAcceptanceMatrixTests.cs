@@ -1306,40 +1306,6 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task G3_ClaimPolicy_AttemptWithoutSnapshotId_RejectsWithDispatchUnavailable()
-    {
-        // Regression test for issue #1990: PR #1987 (D4) made CalibrationProjectService
-        // unconditionally null the CalibrationAttempt.PrinterConfigurationSnapshotId FK,
-        // with no replacement path. Before the #1990 fix, this fell through to a dead DB
-        // lookup on a nonexistent snapshot id and surfaced as the generic
-        // "calibration_record_invalid" code. Simulate the regression directly on an
-        // otherwise fully-valid, seeded calibration job by nulling out the attempt's
-        // snapshot id after seeding, and assert the claim now fails fast with the
-        // distinct, documented "calibration_dispatch_unavailable" code (see #1990, #1984).
-        await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx, setAck: true);
-
-        PrintJob seededJob = await seedCtx.PrintJobs.SingleAsync(j => j.Id == jobId);
-
-        // Use raw SQL rather than an EF-tracked update: CalibrationAttempt rows are immutable
-        // once persisted (AppDbContext.EnsureCalibrationHistoryIsImmutable), which is exactly
-        // the invariant a real D4-created attempt never violates — it is born this way.
-        _ = await seedCtx.Database.ExecuteSqlInterpolatedAsync(
-            $"UPDATE CalibrationAttempts SET PrinterConfigurationSnapshotId = NULL WHERE Id = {seededJob.CalibrationAttemptId}");
-
-        await using AppDbContext claimCtx = CreateContext();
-        var claimSvc = CreateClaimService(claimCtx, MakeOnlineIdleReader(printerId));
-
-        var result = await claimSvc.AcquireClaimAsync(
-            new DispatchClaimRequest(jobId, printerId, "actor", "BedClear", "valid-ack-key", null, null));
-
-        result.Success.Should().BeFalse();
-        result.ErrorCode.Should().Be("calibration_dispatch_unavailable",
-            "a calibration attempt with no compatibility-pinning snapshot (issue #1990) must fail fast " +
-            "with a distinct, documented code rather than a generic dead-lookup rejection");
-    }
-
-    [Fact]
     public async Task G3_ClaimPolicy_FullValidJob_WithAck_Succeeds()
     {
         await using AppDbContext seedCtx = CreateContext();

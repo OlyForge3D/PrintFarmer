@@ -1,4 +1,4 @@
-using System.Data.Common;
+﻿using System.Data.Common;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -41,15 +41,7 @@ namespace Farm.Web.Api.Services.Calibration.Generation;
 public sealed class CalibrationGenerationSaga(
     AppDbContext dbContext,
     ICalibrationProjectService projectService,
-    ICalibrationSpecificationCompiler specificationCompiler,
-    ICalibrationModelValidator modelValidator,
-    IOrcaCalibrationPlanCompiler planCompiler,
-    IKlipperCalibrationGcodeGenerator gcodeGenerator,
-    ICalibrationGcodeAnnotator annotator,
-    ICalibrationGcodeProgramValidator safetyValidator,
     ICalibrationGenerationCapabilityProbe capabilityProbe,
-    IGcodeArtifactPromoter promoter,
-    IStoragePathService storagePaths,
     TimeProvider timeProvider,
     ILogger<CalibrationGenerationSaga> logger,
     ISliceJobRepository? sliceJobs = null,
@@ -517,6 +509,10 @@ public sealed class CalibrationGenerationSaga(
         // resolution, plan compilation, slicing, promotion) is unreachable until the
         // filament-calibration saga (D7) replaces this snapshot-based context.
         await FailTerminallyAsync(
+            project,
+            orchestration,
+            CalibrationGenerationProblemCodes.ContextIdentityMissing,
+            [
                 new(
                     CalibrationGenerationProblemCodes.ContextIdentityMissing,
                     "attempt.printerConfigurationSnapshotId",

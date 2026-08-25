@@ -49,13 +49,6 @@ public static class CalibrationGenerationProblemCodes
     /// <summary>A required authoritative identifier is absent.</summary>
     public const string ContextIdentityMissing = "context_identity_missing";
 
-    /// <summary>
-    /// The attempt has no printer-configuration compatibility-pinning snapshot because filament
-    /// calibration attempts created after D4 (#1987) never populate one. This is a known interim
-    /// limitation (issue #1990) pending #1984 (D7), not a missing or corrupted record.
-    /// </summary>
-    public const string CompatibilitySnapshotUnavailable = "compatibility_snapshot_unavailable";
-
     /// <summary>The idempotency operation identifier is absent.</summary>
     public const string OperationIdMissing = "operation_id_missing";
 
