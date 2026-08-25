@@ -93,3 +93,16 @@ jobs:
           setup
           test_model_thumbnail_replacement_routing
           teardown
+
+      # Issue #2020: enforce that SlicePrintBridgeController's send-to-printer
+      # and add-to-queue routes are carved out of the generic /api/slice
+      # prefix in nginx-proxy-split.conf so they still reach the main API
+      # (which owns them) instead of being 404'd by slicer-host in split
+      # deployments.
+      - name: Run nginx slice print bridge routing regression test
+        run: |
+          source tests/test-framework.sh
+          source tests/test-compose-generator.sh
+          setup
+          test_slice_print_bridge_routing
+          teardown
