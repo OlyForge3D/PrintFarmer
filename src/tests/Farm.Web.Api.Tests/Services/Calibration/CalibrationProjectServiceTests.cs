@@ -623,6 +623,269 @@ public sealed class CalibrationProjectServiceTests
         _ = (await db.CalibrationObservations.CountAsync()).Should().Be(1);
     }
 
+    [Fact]
+    public async Task UpsertDraftAsync_ValidInSequenceAdvance_Succeeds()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "step-sequence-project"),
+            actor,
+            CancellationToken.None);
+
+        CalibrationApiResult<CalibrationDraftDto> setup = await service.UpsertDraftAsync(
+            project.Value!.Id,
+            CalibrationMethodSteps.Setup,
+            CreateStepDraftRequest(CalibrationMethodNames.Temperature),
+            null,
+            actor,
+            CancellationToken.None);
+        CalibrationApiResult<CalibrationDraftDto> print = await service.UpsertDraftAsync(
+            project.Value.Id,
+            CalibrationMethodSteps.Print,
+            CreateStepDraftRequest(CalibrationMethodNames.Temperature),
+            null,
+            actor,
+            CancellationToken.None);
+
+        _ = setup.IsSuccess.Should().BeTrue();
+        _ = print.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UpsertDraftAsync_OutOfSequenceStep_ReturnsValidationError()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "step-out-of-sequence-project"),
+            actor,
+            CancellationToken.None);
+
+        CalibrationApiResult<CalibrationDraftDto> result = await service.UpsertDraftAsync(
+            project.Value!.Id,
+            CalibrationMethodSteps.Measure,
+            CreateStepDraftRequest(CalibrationMethodNames.Temperature),
+            null,
+            actor,
+            CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        _ = result.Code.Should().Be("step_out_of_sequence");
+        _ = (await db.CalibrationDrafts.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(200)]
+    [InlineData(150)]
+    [InlineData(320)]
+    public async Task AppendObservationAsync_TemperatureInRange_Succeeds(int temperatureC)
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, $"temperature-in-range-{temperatureC}"),
+            actor,
+            CancellationToken.None);
+        Guid attemptId = await AddAttemptAsync(
+            db,
+            project.Value!.Id,
+            actor.Subject,
+            sequence: 1,
+            CalibrationMethodNames.Temperature);
+
+        CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
+            attemptId,
+            CreateMeasurementRequest($"temperature-in-range-{temperatureC}", "temperature_c", temperatureC),
+            actor,
+            CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status201Created);
+    }
+
+    [Theory]
+    [InlineData(149)]
+    [InlineData(321)]
+    public async Task AppendObservationAsync_TemperatureOutOfRange_ReturnsValidationError(int temperatureC)
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, $"temperature-out-of-range-{temperatureC}"),
+            actor,
+            CancellationToken.None);
+        Guid attemptId = await AddAttemptAsync(
+            db,
+            project.Value!.Id,
+            actor.Subject,
+            sequence: 1,
+            CalibrationMethodNames.Temperature);
+
+        CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
+            attemptId,
+            CreateMeasurementRequest($"temperature-out-of-range-{temperatureC}", "temperature_c", temperatureC),
+            actor,
+            CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        _ = result.Code.Should().Be("observation_measurement_out_of_range");
+        _ = (await db.CalibrationObservations.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(0.98)]
+    [InlineData(0.5)]
+    [InlineData(1.5)]
+    public async Task AppendObservationAsync_FlowRatioInRange_Succeeds(decimal flowRatio)
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, $"flow-in-range-{flowRatio}"),
+            actor,
+            CancellationToken.None);
+        Guid attemptId = await AddAttemptAsync(
+            db,
+            project.Value!.Id,
+            actor.Subject,
+            sequence: 1,
+            CalibrationMethodNames.FlowRatioCoarse);
+
+        CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
+            attemptId,
+            CreateMeasurementRequest($"flow-in-range-{flowRatio}", "flow_ratio", flowRatio),
+            actor,
+            CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status201Created);
+    }
+
+    [Theory]
+    [InlineData(0.49)]
+    [InlineData(1.51)]
+    public async Task AppendObservationAsync_FlowRatioOutOfRange_ReturnsValidationError(decimal flowRatio)
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, $"flow-out-of-range-{flowRatio}"),
+            actor,
+            CancellationToken.None);
+        Guid attemptId = await AddAttemptAsync(
+            db,
+            project.Value!.Id,
+            actor.Subject,
+            sequence: 1,
+            CalibrationMethodNames.FlowRatioCoarse);
+
+        CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
+            attemptId,
+            CreateMeasurementRequest($"flow-out-of-range-{flowRatio}", "flow_ratio", flowRatio),
+            actor,
+            CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        _ = result.Code.Should().Be("observation_measurement_out_of_range");
+        _ = (await db.CalibrationObservations.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(0.05)]
+    [InlineData(0.0)]
+    [InlineData(2.0)]
+    public async Task AppendObservationAsync_PressureAdvanceInRange_Succeeds(decimal pressureAdvance)
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, $"pa-in-range-{pressureAdvance}"),
+            actor,
+            CancellationToken.None);
+        Guid attemptId = await AddAttemptAsync(
+            db,
+            project.Value!.Id,
+            actor.Subject,
+            sequence: 1,
+            CalibrationMethodNames.PressureAdvanceTower);
+
+        CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
+            attemptId,
+            CreateMeasurementRequest($"pa-in-range-{pressureAdvance}", "pressure_advance", pressureAdvance),
+            actor,
+            CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status201Created);
+    }
+
+    [Theory]
+    [InlineData(-0.01)]
+    [InlineData(2.01)]
+    public async Task AppendObservationAsync_PressureAdvanceOutOfRange_ReturnsValidationError(decimal pressureAdvance)
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, $"pa-out-of-range-{pressureAdvance}"),
+            actor,
+            CancellationToken.None);
+        Guid attemptId = await AddAttemptAsync(
+            db,
+            project.Value!.Id,
+            actor.Subject,
+            sequence: 1,
+            CalibrationMethodNames.PressureAdvanceTower);
+
+        CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
+            attemptId,
+            CreateMeasurementRequest($"pa-out-of-range-{pressureAdvance}", "pressure_advance", pressureAdvance),
+            actor,
+            CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        _ = result.Code.Should().Be("observation_measurement_out_of_range");
+        _ = (await db.CalibrationObservations.CountAsync()).Should().Be(0);
+    }
+
+    private static CalibrationDraftUpsertRequest CreateStepDraftRequest(string method) =>
+        new()
+        {
+            DeviceLineageId = "device-a",
+            Method = method,
+            Values = JsonSerializer.SerializeToElement(new { }),
+            Prerequisites = JsonSerializer.SerializeToElement(new { }),
+        };
+
+    private static CalibrationObservationCreateRequest CreateMeasurementRequest(
+        string operationId,
+        string measurementKey,
+        decimal measurementValue) =>
+        new()
+        {
+            ClientId = "desktop",
+            OperationId = operationId,
+            ObservationType = "measurement",
+            Measurements = JsonSerializer.SerializeToElement(
+                new Dictionary<string, decimal> { [measurementKey] = measurementValue }),
+            Result = JsonSerializer.SerializeToElement(new { }),
+            Units = JsonSerializer.SerializeToElement(new { }),
+        };
+
     private static AppDbContext CreateContext()
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
@@ -694,7 +957,15 @@ public sealed class CalibrationProjectServiceTests
         AppDbContext db,
         Guid projectId,
         string actorSubject,
-        long sequence)
+        long sequence) =>
+        await AddAttemptAsync(db, projectId, actorSubject, sequence, method: "manual");
+
+    private static async Task<Guid> AddAttemptAsync(
+        AppDbContext db,
+        Guid projectId,
+        string actorSubject,
+        long sequence,
+        string method)
     {
         Guid attemptId = Guid.NewGuid();
         _ = db.CalibrationAttempts.Add(new CalibrationAttempt
@@ -703,7 +974,7 @@ public sealed class CalibrationProjectServiceTests
             ProjectId = projectId,
             Sequence = sequence,
             CalibrationKind = "flow",
-            Method = "manual",
+            Method = method,
             DefinitionVersion = "1",
             InputJson = "{}",
             SpecificationJson = "{}",
@@ -752,3 +1023,4 @@ public sealed class CalibrationProjectServiceTests
         }
     }
 }
+

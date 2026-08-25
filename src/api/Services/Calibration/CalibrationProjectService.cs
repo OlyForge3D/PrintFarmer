@@ -747,6 +747,7 @@ public sealed class CalibrationProjectService(
         }
 
         string deviceLineageId = request.DeviceLineageId.Trim();
+        string trimmedMethod = request.Method.Trim();
         CalibrationDraft? draft = await _dbContext.CalibrationDrafts.SingleOrDefaultAsync(
             candidate => candidate.ProjectId == projectId &&
                 candidate.StepId == stepId &&
@@ -762,13 +763,39 @@ public sealed class CalibrationProjectService(
                 return Validation<CalibrationDraftDto>("draft_not_found_for_precondition");
             }
 
+            // D8: enforce the canonical per-method step sequence for a brand-new draft.
+            // Only recognized methods are checked (canonical catalogue, D2/D8); unknown or
+            // legacy method strings are left unchecked so this never gates on values this
+            // catalogue does not know about. Editing an already-reached step (an existing
+            // draft row) is not an "advance" and is never checked here.
+            if (CalibrationMethodNames.TryParse(trimmedMethod, out CalibrationMethod parsedMethod))
+            {
+                int requestedIndex = CalibrationMethodSteps.IndexOf(parsedMethod, stepId);
+                List<string> existingStepIds = await _dbContext.CalibrationDrafts
+                    .Where(candidate => candidate.ProjectId == projectId &&
+                        candidate.DeviceLineageId == deviceLineageId &&
+                        candidate.Method == trimmedMethod &&
+                        candidate.DeletedAtUtc == null)
+                    .Select(candidate => candidate.StepId)
+                    .ToListAsync(cancellationToken);
+                int highestReachedIndex = existingStepIds
+                    .Select(existingStepId => CalibrationMethodSteps.IndexOf(parsedMethod, existingStepId))
+                    .DefaultIfEmpty(-1)
+                    .Max();
+
+                if (requestedIndex < 0 || requestedIndex != highestReachedIndex + 1)
+                {
+                    return Validation<CalibrationDraftDto>("step_out_of_sequence");
+                }
+            }
+
             draft = new CalibrationDraft
             {
                 Id = Guid.NewGuid(),
                 ProjectId = projectId,
                 StepId = stepId,
                 DeviceLineageId = deviceLineageId,
-                Method = request.Method.Trim(),
+                Method = trimmedMethod,
                 ValuesJson = Json(request.Values),
                 PrerequisitesJson = Json(request.Prerequisites),
                 Revision = 1,
@@ -1266,6 +1293,15 @@ public sealed class CalibrationProjectService(
         if (attempt is null)
         {
             return NotFound<CalibrationObservationDto>();
+        }
+
+        // D8: reject physically implausible flow-ratio/temperature/PA values. Only enforced
+        // when the attempt's method resolves to a known kind with a defined range and the
+        // corresponding measurement key is present; this validates values submitted during a
+        // run and is never a precondition to creating the attempt/starting calibration.
+        if (ValidateMeasurementRange(attempt.Method, request.Measurements) is string measurementRangeCode)
+        {
+            return Validation<CalibrationObservationDto>(measurementRangeCode);
         }
 
         if (request.SelectionParentObservationId.HasValue &&
@@ -2947,6 +2983,41 @@ public sealed class CalibrationProjectService(
 
     private static bool IsJsonContainer(JsonElement value) =>
         value.ValueKind is JsonValueKind.Object or JsonValueKind.Array;
+
+    /// <summary>
+    /// D8: validates a submitted observation measurement against the attempt method's
+    /// canonical semantic range, when the method is recognized, the resolved kind has a
+    /// defined range, and the measurement key is present in the payload.
+    /// </summary>
+    /// <param name="attemptMethod">The immutable attempt's recorded method name.</param>
+    /// <param name="measurements">The submitted <c>measurements</c> JSON payload.</param>
+    /// <returns>A validation error code, or <see langword="null"/> when no range applies or the value is in range.</returns>
+    private static string? ValidateMeasurementRange(string attemptMethod, JsonElement measurements)
+    {
+        if (!CalibrationMethodNames.TryParse(attemptMethod, out CalibrationMethod method))
+        {
+            return null;
+        }
+
+        CalibrationMeasurementRange? range =
+            CalibrationMeasurementRanges.ForKind(CalibrationMethodNames.ToKind(method));
+        if (range is null ||
+            measurements.ValueKind != JsonValueKind.Object ||
+            !measurements.TryGetProperty(range.MeasurementKey, out JsonElement measurementValue))
+        {
+            return null;
+        }
+
+        if (measurementValue.ValueKind != JsonValueKind.Number ||
+            !measurementValue.TryGetDecimal(out decimal value))
+        {
+            return "observation_measurement_invalid";
+        }
+
+        return value < range.Minimum || value > range.Maximum
+            ? "observation_measurement_out_of_range"
+            : null;
+    }
 
     private static string? ValidateSafeJson(JsonElement value)
     {
