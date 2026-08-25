@@ -5404,10 +5404,11 @@ public class PrintersController(
     /// Re-probes this printer's firmware identity on demand and persists the detected facts.
     /// </summary>
     /// <remarks>
-    /// The persisted firmware columns the calibration gate reads are written only during onboarding
-    /// or as a side effect of a discovery scan posting back a matching <c>ServerUrl</c> (throttled to
-    /// <c>Discovery:FirmwareReprobeIntervalHours</c>). A printer registered before firmware detection
-    /// existed therefore has no way back to a calibratable state. This endpoint is that way back.
+    /// The persisted firmware columns the calibration context resolver reads are written only during
+    /// onboarding or as a side effect of a discovery scan posting back a matching <c>ServerUrl</c>
+    /// (throttled to <c>Discovery:FirmwareReprobeIntervalHours</c>). A printer registered before
+    /// firmware detection existed therefore has no way back to a calibratable state. This endpoint
+    /// is that way back.
     ///
     /// Note that the live <c>GET /printers/{id}/version</c> reading is a different value entirely: it
     /// reports firmware straight from the backend through an in-memory cache and never populates
