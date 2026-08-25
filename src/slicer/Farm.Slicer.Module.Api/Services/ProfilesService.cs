@@ -1464,27 +1464,129 @@ public class ProfilesService(
 
     /// <summary>
     /// Looks up an already-imported OrcaSlicer profile of the given type by name (case-insensitive),
-    /// mirroring the lookup pattern used by <c>SliceJobController.ResolveNamedProfilesAsync</c>.
+    /// disambiguating same-named candidates against <paramref name="printerModelId"/> using the same
+    /// compatibility rules <see cref="SliceJobController.SelectCompatibleProfile{T}"/> applies (#2004
+    /// review finding: <c>Name</c> alone is not a unique key for <see cref="ProcessProfile"/> or
+    /// <see cref="FilamentProfile"/> — OrcaSlicer ships same-named profiles scoped to different
+    /// printer models via <c>PrinterModelId</c>/<c>CompatiblePrinters</c>). Returns <see langword="null"/>
+    /// both when no candidate matches by name and when multiple same-named candidates exist and none
+    /// can be confidently tied to <paramref name="printerModelId"/> — the caller treats either case as
+    /// "not yet imported for this model" and falls through to worker-backed resolution rather than
+    /// risking a false match.
     /// </summary>
-    private async Task<Guid?> FindExistingProfileIdByNameAsync(ProfileResolutionType profileType, string profileName, CancellationToken ct)
+    private async Task<Guid?> FindExistingProfileIdByNameAsync(ProfileResolutionType profileType, string profileName, Guid printerModelId, CancellationToken ct)
     {
         switch (profileType)
         {
             case ProfileResolutionType.Machine:
+            {
                 IReadOnlyList<MachineProfile> machines = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
-                return machines.FirstOrDefault(m => string.Equals(m.Name, profileName, StringComparison.OrdinalIgnoreCase))?.Id;
+                List<MachineProfile> candidates = machines
+                    .Where(m => string.Equals(m.Name, profileName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                return SelectCompatibleMachineCandidate(candidates, printerModelId)?.Id;
+            }
 
             case ProfileResolutionType.Process:
+            {
                 IReadOnlyList<ProcessProfile> processes = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
-                return processes.FirstOrDefault(p => string.Equals(p.Name, profileName, StringComparison.OrdinalIgnoreCase))?.Id;
+                List<ProcessProfile> candidates = processes
+                    .Where(p => string.Equals(p.Name, profileName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                IReadOnlyList<string> modelMachineNames = await GetMachineNamesForModelAsync(printerModelId, ct);
+                return SelectCompatibleProfileCandidate(
+                    candidates, printerModelId, modelMachineNames, p => p.PrinterModelId, p => p.CompatiblePrinters)?.Id;
+            }
 
             case ProfileResolutionType.Filament:
+            {
                 IReadOnlyList<FilamentProfile> filaments = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
-                return filaments.FirstOrDefault(f => string.Equals(f.Name, profileName, StringComparison.OrdinalIgnoreCase))?.Id;
+                List<FilamentProfile> candidates = filaments
+                    .Where(f => string.Equals(f.Name, profileName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                IReadOnlyList<string> modelMachineNames = await GetMachineNamesForModelAsync(printerModelId, ct);
+                return SelectCompatibleProfileCandidate(
+                    candidates, printerModelId, modelMachineNames, _ => null, f => f.CompatiblePrinters)?.Id;
+            }
 
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// Machine profile names imported for <paramref name="printerModelId"/>, used to disambiguate
+    /// same-named process/filament candidates via their <c>CompatiblePrinters</c> lists (which store
+    /// machine profile names, not catalog model names/aliases).
+    /// </summary>
+    private async Task<IReadOnlyList<string>> GetMachineNamesForModelAsync(Guid printerModelId, CancellationToken ct)
+    {
+        IReadOnlyList<MachineProfile> machines = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+        return machines
+            .Where(m => m.PrinterModelId == printerModelId)
+            .Select(m => m.Name)
+            .ToList();
+    }
+
+    private static MachineProfile? SelectCompatibleMachineCandidate(List<MachineProfile> candidates, Guid printerModelId)
+    {
+        if (candidates.Count <= 1)
+        {
+            return candidates.Count == 1 ? candidates[0] : null;
+        }
+
+        MachineProfile? byModel = candidates.FirstOrDefault(m => m.PrinterModelId == printerModelId);
+        if (byModel is not null)
+        {
+            return byModel;
+        }
+
+        // No candidate is explicitly scoped to this model; a candidate with no model scoping at all
+        // is model-agnostic by construction and safe to use. Otherwise the match is ambiguous.
+        return candidates.FirstOrDefault(m => m.PrinterModelId is null);
+    }
+
+    private static T? SelectCompatibleProfileCandidate<T>(
+        List<T> candidates,
+        Guid printerModelId,
+        IReadOnlyList<string> modelMachineNames,
+        Func<T, Guid?> printerModelIdSelector,
+        Func<T, string?> compatiblePrintersSelector)
+        where T : class
+    {
+        if (candidates.Count <= 1)
+        {
+            return candidates.Count == 1 ? candidates[0] : null;
+        }
+
+        if (modelMachineNames.Count > 0)
+        {
+            T? byCompatiblePrinters = candidates.FirstOrDefault(c =>
+            {
+                string? compatiblePrinters = compatiblePrintersSelector(c);
+                return !string.IsNullOrWhiteSpace(compatiblePrinters) &&
+                    compatiblePrinters.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Any(cp => modelMachineNames.Any(n => string.Equals(cp.Trim(), n, StringComparison.OrdinalIgnoreCase)));
+            });
+            if (byCompatiblePrinters is not null)
+            {
+                return byCompatiblePrinters;
+            }
+        }
+
+        T? byModel = candidates.FirstOrDefault(c => printerModelIdSelector(c) == printerModelId);
+        if (byModel is not null)
+        {
+            return byModel;
+        }
+
+        // No candidate declares itself compatible/scoped to this model, but a candidate with no
+        // scoping at all (no CompatiblePrinters, no PrinterModelId) is model-agnostic by
+        // construction and safe to use. Otherwise the match is ambiguous — return null so the
+        // caller treats it as "not yet imported for this model" rather than guessing.
+        return candidates.FirstOrDefault(c =>
+            string.IsNullOrWhiteSpace(compatiblePrintersSelector(c)) &&
+            printerModelIdSelector(c) is null);
     }
 
     /// <inheritdoc />
@@ -1512,7 +1614,7 @@ public class ProfilesService(
         {
             // Already-imported case: no worker call, no admin action needed — this is the common
             // path once a model has been used at least once (#2004).
-            Guid? existingId = await FindExistingProfileIdByNameAsync(profileType, profileName, ct);
+            Guid? existingId = await FindExistingProfileIdByNameAsync(profileType, profileName, printerModelId, ct);
             if (existingId.HasValue)
             {
                 result.ProfileId = existingId;
@@ -1562,11 +1664,25 @@ public class ProfilesService(
 
             if (importResult.TotalImported == 0)
             {
+                // A concurrent caller may have imported (or be importing) the same profile between
+                // our initial lookup and this point — Persist*ProfileAsync's duplicate check would
+                // then report Skipped rather than Imported for what is actually a successful,
+                // already-visible row. Re-check the DB before declaring failure so a genuine race
+                // resolves as success rather than a false "not found or incompatible" error (#2004
+                // review finding).
+                Guid? wonByConcurrentImport = await FindExistingProfileIdByNameAsync(profileType, profileName, printerModelId, ct);
+                if (wonByConcurrentImport.HasValue)
+                {
+                    result.ProfileId = wonByConcurrentImport;
+                    result.Imported = false;
+                    return result;
+                }
+
                 result.Error = $"Profile '{profileName}' was not found or is not compatible with printer model '{catalogModel.Name}'";
                 return result;
             }
 
-            Guid? importedId = await FindExistingProfileIdByNameAsync(profileType, profileName, ct);
+            Guid? importedId = await FindExistingProfileIdByNameAsync(profileType, profileName, printerModelId, ct);
             if (!importedId.HasValue)
             {
                 result.Error = $"Profile '{profileName}' was imported but could not be located afterward";

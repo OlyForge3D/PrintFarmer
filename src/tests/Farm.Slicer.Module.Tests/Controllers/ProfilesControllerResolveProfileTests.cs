@@ -1,8 +1,12 @@
 ﻿using System;
+using System.Linq;
 using System.Net.Http;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Security;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
+using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Http;
@@ -23,6 +27,35 @@ namespace Farm.Slicer.Module.Tests.Controllers;
 /// </summary>
 public class ProfilesControllerResolveProfileTests
 {
+    /// <summary>
+    /// Review finding (Hicks): the tests above call the action method directly, which never
+    /// exercises the MVC filter pipeline, so they cannot prove the endpoint is actually gated by
+    /// <c>Calibration.Update</c> rather than accidentally left open or still requiring
+    /// <c>slicer_engines:admin</c> like its sibling actions. This asserts, via reflection, that
+    /// <see cref="ProfilesController.ResolveProfileForModelAsync"/> carries the method-level
+    /// <see cref="RequirePermissionAttribute"/> with exactly <see cref="PrintFarmerPermissions.Calibration.Update"/>,
+    /// layered on top of the controller's class-level <see cref="PrintFarmerPermissions.Slicing.Submit"/>
+    /// requirement — matching the desktop client's actual scopes (Slicing.Submit +
+    /// Calibration read/write) and explicitly NOT the admin-only permission the import wizard uses.
+    /// </summary>
+    [Fact]
+    public void ResolveProfileForModelAsync_IsGatedByCalibrationUpdate_NotAdmin()
+    {
+        MethodInfo method = typeof(ProfilesController).GetMethod(nameof(ProfilesController.ResolveProfileForModelAsync))
+            ?? throw new InvalidOperationException($"{nameof(ProfilesController.ResolveProfileForModelAsync)} not found via reflection");
+
+        RequirePermissionAttribute methodAttribute = method.GetCustomAttributes<RequirePermissionAttribute>().SingleOrDefault()
+            ?? throw new InvalidOperationException("Expected exactly one method-level RequirePermissionAttribute");
+
+        Assert.Equal(PrintFarmerPermissions.Calibration.Update, methodAttribute.Permission);
+        Assert.NotEqual("slicer_engines:admin", methodAttribute.Permission);
+
+        RequirePermissionAttribute classAttribute = typeof(ProfilesController).GetCustomAttributes<RequirePermissionAttribute>().SingleOrDefault()
+            ?? throw new InvalidOperationException("Expected exactly one class-level RequirePermissionAttribute");
+
+        Assert.Equal(PrintFarmerPermissions.Slicing.Submit, classAttribute.Permission);
+    }
+
     [Fact]
     public async Task ResolveProfileForModelAsync_NullRequest_Returns400()
     {

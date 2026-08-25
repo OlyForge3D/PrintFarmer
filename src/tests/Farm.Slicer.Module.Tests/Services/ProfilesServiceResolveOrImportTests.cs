@@ -310,6 +310,174 @@ public class ProfilesServiceResolveOrImportTests
         Assert.Single(persisted);
     }
 
+    /// <summary>
+    /// Same-named process profiles are not unique in this codebase — OrcaSlicer ships process
+    /// profiles with the same display name scoped to different printer models (review finding on
+    /// #2004: <c>Name</c> alone is not a unique key for <see cref="ProcessProfile"/>/
+    /// <see cref="FilamentProfile"/>, mirroring <c>SliceJobController.SelectCompatibleProfile</c>).
+    /// When two same-named process profiles exist — one scoped to the requested model, one scoped
+    /// to a different model — resolution must return the model-scoped candidate, not just the
+    /// first name match, and must not touch the worker.
+    /// </summary>
+    [Fact]
+    public async Task ResolveOrImportProfileForModelAsync_DuplicateNameAcrossModels_ReturnsModelScopedCandidate()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid otherModelId = Guid.NewGuid();
+        const string ProcessName = "0.20mm Standard";
+
+        Guid correctProfileId = Guid.NewGuid();
+        Guid wrongProfileId = Guid.NewGuid();
+        List<ProcessProfile> existingProcesses = new()
+        {
+            new ProcessProfile { Id = wrongProfileId, Name = ProcessName, SlicerType = SlicerType.OrcaSlicer, PrinterModelId = otherModelId, Hash = "hash-wrong" },
+            new ProcessProfile { Id = correctProfileId, Name = ProcessName, SlicerType = SlicerType.OrcaSlicer, PrinterModelId = modelId, Hash = "hash-correct" }
+        };
+
+        Mock<IProcessProfileRepository> processRepo = new(MockBehavior.Strict);
+        _ = processRepo
+            .Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingProcesses);
+
+        Mock<IMachineProfileRepository> machineRepo = new(MockBehavior.Strict);
+        _ = machineRepo
+            .Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MachineProfile>());
+
+        Mock<ICatalogService> catalogService = new(MockBehavior.Strict);
+        Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService = new(MockBehavior.Strict);
+
+        ProfilesService svc = CreateService(
+            processRepoOverride: processRepo.Object,
+            machineRepoOverride: machineRepo.Object,
+            catalogServiceOverride: catalogService.Object,
+            slicersServiceOverride: slicersService.Object);
+
+        using HttpClient httpClient = new(new StubHttpMessageHandler(_ => throw new InvalidOperationException("Worker should not be called when a model-scoped candidate already exists")));
+
+        ResolveProfileForModelResultDto result = await svc.ResolveOrImportProfileForModelAsync(
+            httpClient, modelId, ProfileResolutionType.Process, ProcessName, CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.False(result.Imported);
+        Assert.Equal(correctProfileId, result.ProfileId);
+
+        catalogService.VerifyNoOtherCalls();
+        slicersService.VerifyNoOtherCalls();
+    }
+
+    /// <summary>
+    /// TOCTOU race (#2004 review finding): if a concurrent caller imports the same profile between
+    /// this call's initial "not yet imported" lookup and its worker-backed import attempt,
+    /// <c>Persist*ProfileAsync</c>'s duplicate check reports the row as <c>Skipped</c> rather than
+    /// newly <c>Imported</c> — leaving <c>TotalImported == 0</c> even though the profile now exists.
+    /// Resolution must re-check the DB before declaring failure, so the loser of the race still
+    /// gets back a usable Guid instead of a false "not found or incompatible" error.
+    /// </summary>
+    [Fact]
+    public async Task ResolveOrImportProfileForModelAsync_ConcurrentImportWonByAnotherCaller_ReturnsExistingIdInsteadOfError()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid manufacturerId = Guid.NewGuid();
+        Guid winningProfileId = Guid.NewGuid();
+
+        // First lookup (short-circuit): nothing imported yet. Second lookup (after the "import"
+        // attempt below reports zero new imports): another caller has since persisted the row.
+        int machineLookupCall = 0;
+        Mock<IMachineProfileRepository> machineRepo = new(MockBehavior.Loose);
+        _ = machineRepo
+            .Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                machineLookupCall++;
+                return machineLookupCall == 1
+                    ? new List<MachineProfile>()
+                    : new List<MachineProfile>
+                    {
+                        new() { Id = winningProfileId, Name = ModelName, SlicerType = SlicerType.OrcaSlicer, PrinterModelId = modelId, Hash = "hash-won-race" }
+                    };
+            });
+
+        // Simulates the winner of the race: PersistMachineProfileAsync's duplicate check
+        // (checkDuplicates: true) finds a hash match already persisted as a system OrcaSlicer
+        // profile already linked to this model, so it returns false (Skipped) rather than
+        // throwing or setting importResult.Error — exactly the ambiguous "Skipped" signal the
+        // real race produces.
+        _ = machineRepo
+            .Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MachineProfile
+            {
+                Id = winningProfileId,
+                Name = ModelName,
+                SlicerType = SlicerType.OrcaSlicer,
+                IsSystem = true,
+                PrinterModelId = modelId,
+                Hash = "hash-won-race"
+            });
+
+        Mock<ICatalogService> catalogService = new(MockBehavior.Loose);
+        _ = catalogService
+            .Setup(c => c.GetModelByIdAsync(modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterModelDto(modelId, ModelName, manufacturerId));
+        _ = catalogService
+            .Setup(c => c.GetManufacturerByIdAsync(manufacturerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ManufacturerDto(manufacturerId, ManufacturerName));
+        _ = catalogService
+            .Setup(c => c.GetModelAliasesAsync(modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SlicerModelAliasDto> { new(Guid.NewGuid(), modelId, ModelName, "OrcaSlicer") });
+
+        Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService = new(MockBehavior.Loose);
+        _ = slicersService
+            .Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SlicerService>
+            {
+                new()
+                {
+                    Name = "orca",
+                    SlicerType = 1,
+                    Host = "http://worker",
+                    Status = "Online",
+                    LastSeen = DateTime.UtcNow,
+                    Version = Farm.Infrastructure.PrinterCalibration.CalibrationContractConstants.SlicerVersion,
+                    CapabilitiesJson = $"[\"{Farm.Infrastructure.PrinterCalibration.CalibrationContractConstants.UpstreamSlicerCapability}\"]"
+                }
+            });
+
+        Mock<IProfileParsingService> parsingService = new(MockBehavior.Loose);
+        _ = parsingService
+            .Setup(p => p.ParseAndPrepare(It.IsAny<string>()))
+            .Returns((string json) => (json, json, "hash-won-race"));
+
+        ProfilesService svc = CreateService(
+            machineRepoOverride: machineRepo.Object,
+            catalogServiceOverride: catalogService.Object,
+            slicersServiceOverride: slicersService.Object,
+            parsingServiceOverride: parsingService.Object);
+
+        // Worker catalog has a matching machine profile for this name, so the import attempt
+        // proceeds to the persist step — where the duplicate check above reports it as already
+        // persisted (Skipped, TotalImported == 0), simulating a concurrent caller having already
+        // won the race for this exact profile.
+        MachineProfileDto workerMachineProfile = new()
+        {
+            Name = ModelName,
+            Manufacturer = ManufacturerName,
+            PrinterModel = ModelName
+        };
+
+        using HttpClient httpClient = CreateWorkerHttpClient(BuildWorkerProfilesResponseJson(
+            ManufacturerName,
+            ModelName,
+            new List<MachineProfileDto> { workerMachineProfile }));
+
+        ResolveProfileForModelResultDto result = await svc.ResolveOrImportProfileForModelAsync(
+            httpClient, modelId, ProfileResolutionType.Machine, ModelName, CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.False(result.Imported);
+        Assert.Equal(winningProfileId, result.ProfileId);
+    }
+
     private static ProfilesService CreateService(
         IProcessProfileRepository? processRepoOverride = null,
         IMachineProfileRepository? machineRepoOverride = null,
