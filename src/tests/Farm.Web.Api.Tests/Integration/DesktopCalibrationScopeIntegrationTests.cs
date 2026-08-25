@@ -224,10 +224,6 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
         HttpResponseMessage update = await client.PutAsJsonAsync(
             $"/api/calibration-projects/{Guid.NewGuid()}/drafts/step", new { });
         update.StatusCode.Should().Be(HttpStatusCode.Forbidden, "calibration:update was not selected");
-
-        HttpResponseMessage generate = await client.PostAsJsonAsync(
-            $"/api/calibration-projects/{Guid.NewGuid()}/generated-profiles", new { });
-        generate.StatusCode.Should().Be(HttpStatusCode.Forbidden, "calibration:generate was not selected");
     }
 
     [Fact]
@@ -707,17 +703,16 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
     /// issued for. Reads on the profile catalog remain reachable, which is disclosed in the docs
     /// and in the UI scope description.
     /// </summary>
+    /// <remarks>
+    /// This used to also assert that the generate route itself cleared authorization for a
+    /// CalibrationGenerate-scoped token. That route (and <c>CalibrationGeneratedProfilesController</c>)
+    /// was removed by D3a (issue #1980); the scope/permission itself is retained (it still powers
+    /// <c>CalibrationCapabilityService</c>'s UI capability flags) but no HTTP route enforces it now.
+    /// </remarks>
     [Fact]
     public async Task GenerationToken_StillSatisfiesItsIntendedSlicingAuthorization()
     {
         using HttpClient client = await CreateGenerationTokenClientAsync();
-
-        HttpResponseMessage generate = await client.PostAsJsonAsync(
-            $"/api/calibration-projects/{Guid.NewGuid()}/generated-profiles", new { });
-        generate.StatusCode.Should().NotBe(
-            HttpStatusCode.Forbidden,
-            "calibration:generate + slicing:submit are both present");
-        generate.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
 
         // Strict: the catalog read must actually succeed, not merely avoid a 403. A bare
         // NotBe(Forbidden) would also be satisfied by a 404 (wrong route) or a 503 (dependency

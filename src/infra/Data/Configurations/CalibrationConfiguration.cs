@@ -194,61 +194,6 @@ public sealed class CalibrationBlobCleanupConfiguration : IEntityTypeConfigurati
     }
 }
 
-/// <summary>Configures immutable generated-profile history and operation audit rows.</summary>
-public sealed class GeneratedProfileRevisionConfiguration : IEntityTypeConfiguration<GeneratedProfileRevision>
-{
-    public void Configure(EntityTypeBuilder<GeneratedProfileRevision> builder)
-    {
-        _ = builder.HasKey(revision => revision.Id);
-        _ = builder.Property(revision => revision.ProfileType).IsRequired().HasMaxLength(64);
-        _ = builder.Property(revision => revision.SchemaVersion).IsRequired().HasMaxLength(32);
-        _ = builder.Property(revision => revision.SlicerEngine).IsRequired().HasMaxLength(64);
-        _ = builder.Property(revision => revision.SlicerDistribution).IsRequired().HasMaxLength(64);
-        _ = builder.Property(revision => revision.SlicerVersion).HasMaxLength(64);
-        _ = builder.Property(revision => revision.SlicerContainerDigest).HasMaxLength(256);
-        _ = builder.Property(revision => revision.Name).IsRequired().HasMaxLength(256);
-        _ = builder.Property(revision => revision.NormalizedSettingsJson).IsRequired();
-        _ = builder.Property(revision => revision.SourceProfileFingerprint).IsRequired().HasMaxLength(64);
-        _ = builder.Property(revision => revision.ExactProfileJson).IsRequired();
-        _ = builder.Property(revision => revision.Sha256).IsRequired().HasMaxLength(64);
-        _ = builder.Property(revision => revision.GeneratorVersion).IsRequired().HasMaxLength(64);
-        _ = builder.Property(revision => revision.GenerationRequestId).IsRequired().HasMaxLength(128);
-        _ = builder.Property(revision => revision.CreatedBySubject).IsRequired().HasMaxLength(256);
-        _ = builder.Property(revision => revision.FlowRatio).HasPrecision(10, 6);
-        _ = builder.Property(revision => revision.PressureAdvance).HasPrecision(10, 6);
-        _ = builder.Property(revision => revision.PressureAdvanceSmoothTime).HasPrecision(10, 6);
-        _ = builder.Property(revision => revision.RetractionLength).HasPrecision(10, 6);
-        _ = builder.Property(revision => revision.RetractionSpeed).HasPrecision(10, 6);
-        _ = builder.Property(revision => revision.RetractionMinimumTravel).HasPrecision(10, 6);
-        _ = builder.Property(revision => revision.RetractionLiftZ).HasPrecision(10, 6);
-        _ = builder.Property(revision => revision.MaximumVolumetricFlow).HasPrecision(10, 6);
-        _ = builder.HasIndex(revision => new { revision.ProjectId, revision.RevisionNumber }).IsUnique();
-        _ = builder.HasIndex(revision => new { revision.ProjectId, revision.GenerationRequestId }).IsUnique();
-        _ = builder.HasOne<CalibrationProject>().WithMany().HasForeignKey(revision => revision.ProjectId)
-            .OnDelete(DeleteBehavior.Cascade);
-        _ = builder.HasOne<CalibrationAttempt>().WithMany().HasForeignKey(revision => revision.SourceAttemptId)
-            .OnDelete(DeleteBehavior.Restrict);
-    }
-}
-
-/// <summary>Configures append-only generated-profile publication and export records.</summary>
-public sealed class GeneratedProfileRevisionOperationConfiguration : IEntityTypeConfiguration<GeneratedProfileRevisionOperation>
-{
-    public void Configure(EntityTypeBuilder<GeneratedProfileRevisionOperation> builder)
-    {
-        _ = builder.HasKey(operation => operation.Id);
-        _ = builder.Property(operation => operation.OperationType).IsRequired().HasMaxLength(32);
-        _ = builder.Property(operation => operation.OperationId).IsRequired().HasMaxLength(128);
-        _ = builder.Property(operation => operation.ExportFormat).HasMaxLength(64);
-        _ = builder.Property(operation => operation.ActorSubject).IsRequired().HasMaxLength(256);
-        _ = builder.HasIndex(operation => new { operation.GeneratedProfileRevisionId, operation.OperationId })
-            .IsUnique();
-        _ = builder.HasOne<GeneratedProfileRevision>().WithMany()
-            .HasForeignKey(operation => operation.GeneratedProfileRevisionId)
-            .OnDelete(DeleteBehavior.Cascade);
-    }
-}
-
 /// <summary>Configures exact idempotency replay storage.</summary>
 public sealed class CalibrationIdempotencyRecordConfiguration : IEntityTypeConfiguration<CalibrationIdempotencyRecord>
 {

@@ -212,45 +212,6 @@ public sealed class CalibrationProjectsController(ICalibrationProjectService cal
             cancellationToken);
         return AttemptResult(result);
     }
-
-    /// <summary>Lists immutable generated-profile revisions without starting generation work.</summary>
-    [HttpGet("{projectId:guid}/generated-profiles")]
-    [RequirePermission(PrintFarmerPermissions.Calibration.Read)]
-    public async Task<IActionResult> GetGeneratedProfilesAsync(
-        Guid projectId,
-        CancellationToken cancellationToken)
-    {
-        CalibrationActor? actor = GetActor();
-        if (actor is null)
-        {
-            return AuthenticationProblem();
-        }
-
-        return Ok(await _calibrationService.GetGeneratedProfilesAsync(projectId, actor, cancellationToken));
-    }
-
-    /// <summary>Records validated externally generated profile content as immutable history.</summary>
-    [HttpPost("{projectId:guid}/generated-profiles")]
-    [RequirePermission(PrintFarmerPermissions.Calibration.Generate)]
-    public async Task<IActionResult> CreateGeneratedProfileAsync(
-        Guid projectId,
-        [FromBody] GeneratedProfileRevisionCreateRequest request,
-        CancellationToken cancellationToken)
-    {
-        CalibrationActor? actor = GetActor();
-        if (actor is null)
-        {
-            return AuthenticationProblem();
-        }
-
-        CalibrationApiResult<GeneratedProfileRevisionDto> result =
-            await _calibrationService.CreateGeneratedProfileAsync(
-                projectId,
-                request,
-                actor,
-                cancellationToken);
-        return GeneratedProfileResult(result);
-    }
 }
 
 /// <summary>Provides authenticated append-only attempt, observation, and photo APIs.</summary>
@@ -491,104 +452,6 @@ public sealed class CalibrationPhotosController(ICalibrationProjectService calib
     }
 }
 
-/// <summary>Provides read, content, export-history, and publish-history APIs for generated profiles.</summary>
-[ApiController]
-[Route("api/calibration-generated-profiles")]
-[Authorize]
-[CalibrationApiContract]
-public sealed class CalibrationGeneratedProfilesController(ICalibrationProjectService calibrationService)
-    : CalibrationControllerBase
-{
-    private readonly ICalibrationProjectService _calibrationService =
-        calibrationService ?? throw new ArgumentNullException(nameof(calibrationService));
-
-    /// <summary>Gets a generated profile revision.</summary>
-    [HttpGet("{revisionId:guid}")]
-    [RequirePermission(PrintFarmerPermissions.Calibration.Read)]
-    public async Task<IActionResult> GetGeneratedProfileAsync(Guid revisionId, CancellationToken cancellationToken)
-    {
-        CalibrationActor? actor = GetActor();
-        if (actor is null)
-        {
-            return AuthenticationProblem();
-        }
-
-        return GeneratedProfileResult(await _calibrationService.GetGeneratedProfileAsync(
-            revisionId,
-            actor,
-            cancellationToken));
-    }
-
-    /// <summary>Returns immutable validated exact upstream-Orca JSON.</summary>
-    [HttpGet("{revisionId:guid}/content")]
-    [RequirePermission(PrintFarmerPermissions.Calibration.Read)]
-    public async Task<IActionResult> GetGeneratedProfileContentAsync(
-        Guid revisionId,
-        CancellationToken cancellationToken)
-    {
-        CalibrationActor? actor = GetActor();
-        if (actor is null)
-        {
-            return AuthenticationProblem();
-        }
-
-        CalibrationApiResult<GeneratedProfileRevisionDto> result =
-            await _calibrationService.GetGeneratedProfileAsync(revisionId, actor, cancellationToken);
-        if (!result.IsSuccess || result.Value is null)
-        {
-            return GeneratedProfileResult(result);
-        }
-
-        Response.Headers.ETag = $"\"{result.Value.Sha256}\"";
-        Response.Headers.ContentDisposition = $"attachment; filename=\"calibration-profile-{revisionId:N}.json\"";
-        return Content(result.Value.ExactProfile.GetRawText(), "application/json");
-    }
-
-    /// <summary>Records an immutable export operation; it does not generate profile content.</summary>
-    [HttpPost("{revisionId:guid}/export")]
-    [RequirePermission(PrintFarmerPermissions.Calibration.Generate)]
-    public async Task<IActionResult> ExportGeneratedProfileAsync(
-        Guid revisionId,
-        [FromBody] GeneratedProfileRevisionOperationRequest request,
-        CancellationToken cancellationToken)
-    {
-        CalibrationActor? actor = GetActor();
-        if (actor is null)
-        {
-            return AuthenticationProblem();
-        }
-
-        return GeneratedProfileResult(await _calibrationService.RecordGeneratedProfileOperationAsync(
-            revisionId,
-            request,
-            "export",
-            actor,
-            cancellationToken));
-    }
-
-    /// <summary>Records immutable publication intent without mutating profile history.</summary>
-    [HttpPost("{revisionId:guid}/publish")]
-    [RequirePermission(PrintFarmerPermissions.Calibration.Publish)]
-    public async Task<IActionResult> PublishGeneratedProfileAsync(
-        Guid revisionId,
-        [FromBody] GeneratedProfileRevisionOperationRequest request,
-        CancellationToken cancellationToken)
-    {
-        CalibrationActor? actor = GetActor();
-        if (actor is null)
-        {
-            return AuthenticationProblem();
-        }
-
-        return GeneratedProfileResult(await _calibrationService.RecordGeneratedProfileOperationAsync(
-            revisionId,
-            request,
-            "publish",
-            actor,
-            cancellationToken));
-    }
-}
-
 /// <summary>Provides the authoritative cursor-based calibration synchronization protocol.</summary>
 [ApiController]
 [Route("api/calibration-sync")]
@@ -768,10 +631,6 @@ public abstract class CalibrationControllerBase : ControllerBase
         SetETag("photo", result.Value.Id, result.Value.Revision);
         return StatusCode(result.StatusCode, result.Value);
     }
-
-    /// <summary>Maps generated-profile history operations.</summary>
-    protected IActionResult GeneratedProfileResult(CalibrationApiResult<GeneratedProfileRevisionDto> result) =>
-        Result(result);
 
     /// <summary>Maps change feed responses.</summary>
     protected IActionResult ChangesResult(CalibrationApiResult<CalibrationChangesResponse> result) =>

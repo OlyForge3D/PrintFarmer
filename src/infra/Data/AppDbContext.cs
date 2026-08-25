@@ -289,11 +289,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<CalibrationBlobCleanup> CalibrationBlobCleanups => Set<CalibrationBlobCleanup>();
 
-    public DbSet<GeneratedProfileRevision> GeneratedProfileRevisions => Set<GeneratedProfileRevision>();
-
-    public DbSet<GeneratedProfileRevisionOperation> GeneratedProfileRevisionOperations =>
-        Set<GeneratedProfileRevisionOperation>();
-
     public DbSet<CalibrationIdempotencyRecord> CalibrationIdempotencyRecords =>
         Set<CalibrationIdempotencyRecord>();
 
@@ -744,8 +739,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         EnsureImmutable<CalibrationAttempt>();
         EnsureImmutable<CalibrationAttemptEvent>();
         EnsureImmutable<CalibrationObservation>();
-        EnsureImmutable<GeneratedProfileRevision>();
-        EnsureImmutable<GeneratedProfileRevisionOperation>();
         EnsureImmutable<CalibrationChange>();
     }
 
