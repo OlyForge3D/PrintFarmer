@@ -5,11 +5,17 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Metrics;
+using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
 using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Artifacts;
 
+// Shares ArtifactsMetricsSerialCollection with ArtifactsMetricsTests: this class calls
+// ArtifactsMetrics.ResetForTests() per test, which must never interleave with
+// ArtifactsMetricsTests' before/after gauge measurements. See the collection definition
+// for the full rationale.
+[Collection(ArtifactsMetricsSerialCollection.Name)]
 public class ArtifactsThresholdTests
 {
     [Fact(DisplayName = "Warning threshold event fires when exceeded")]

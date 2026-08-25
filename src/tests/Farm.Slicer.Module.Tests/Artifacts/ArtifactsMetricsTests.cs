@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Settings;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Metrics;
+using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,6 +18,13 @@ using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Artifacts;
 
+// Shares ArtifactsMetricsSerialCollection with ArtifactsThresholdTests so ArtifactsMetrics.ResetForTests()
+// can never interleave with the gauge/counter measurement windows below. Uploads from OTHER,
+// unrelated test classes can still run concurrently with these tests (they only ever add to the
+// shared static counters, never reset them), so the assertions below tolerate that noise with
+// ">=" / "Contains" checks rather than requiring exact totals. See the collection definition for
+// the full rationale.
+[Collection(ArtifactsMetricsSerialCollection.Name)]
 public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory = factory;
@@ -138,12 +146,16 @@ public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClass
         meterListener.RecordObservableInstruments();
         await Task.Delay(100);
 
-        // Assert
+        // Assert - use ">=" rather than exact equality: unrelated test classes running
+        // concurrently (bounded parallelism, see IntegrationTestCollection.cs) may also upload
+        // artifacts and monotonically add to this process-wide static gauge. ResetForTests()
+        // calls (the only thing that could make the delta come out too LOW) are excluded via
+        // ArtifactsMetricsSerialCollection, so ">=" is a real, non-flaky assertion here.
         long finalGaugeValue = gaugeValues.Last();
         int expectedIncrease = content1.Length + content2.Length;
 
-        _ = (finalGaugeValue - initialGaugeValue).Should().Be(expectedIncrease,
-            "gauge should reflect cumulative size of both uploads");
+        _ = (finalGaugeValue - initialGaugeValue).Should().BeGreaterThanOrEqualTo(expectedIncrease,
+            "gauge should reflect at least the cumulative size of both uploads");
 
         meterListener.Dispose();
     }
@@ -190,8 +202,12 @@ public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClass
 
         await Task.Delay(100);
 
-        // Assert
-        _ = counterTotal.Should().Be(5, "counter should increment for each upload");
+        // Assert - use ">=" rather than exact equality: unrelated test classes running
+        // concurrently may also record uploads on this process-wide static counter, which the
+        // MeterListener above captures regardless of which class caused them. Those additions
+        // can only push the total up, never down, so ">=" remains a real, non-flaky assertion
+        // that this test's own 5 uploads were recorded.
+        _ = counterTotal.Should().BeGreaterThanOrEqualTo(5, "counter should increment for each upload");
 
         meterListener.Dispose();
     }
