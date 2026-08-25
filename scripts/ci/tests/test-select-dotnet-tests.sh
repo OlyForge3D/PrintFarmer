@@ -1524,7 +1524,7 @@ _check_drift_full_job_snapshot() {
   expected="$(cat <<'CANONICAL_MIGRATION_DRIFT_JOB'
   migration-drift:
     name: Migration drift (${{ matrix.label }})
-    needs: [select, ci-tools, dotnet-build]
+    needs: [select, ci-tools]
     if: ${{ needs.select.outputs.want_mig_drift == 'true' }}
     runs-on: ubuntu-latest
     strategy:
