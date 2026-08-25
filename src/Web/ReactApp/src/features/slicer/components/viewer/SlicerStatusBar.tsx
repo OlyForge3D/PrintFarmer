@@ -38,9 +38,17 @@ export const SlicerStatusBar: React.FC<SlicerStatusBarProps> = ({
   const hasSliceInfo = slicesRemaining !== undefined && slicesTotal !== undefined;
 
   return (
-    <div className="flex items-center justify-between px-4 py-2 bg-pf-bg-1 border-t border-pf-border shrink-0">
+    // Issue #1974: at narrow (390px) viewports there isn't room for the left
+    // (object/bed info) and right (slice note/button) groups on one line. Without
+    // `flex-wrap` the row squeezed both groups via flexbox shrink instead of
+    // wrapping, and unprotected text spans (no `shrink-0`/`whitespace-nowrap`)
+    // collapsed into a narrow, barely-readable vertical column next to the
+    // slice button. `flex-wrap` lets the right group drop to its own row
+    // instead, and `min-w-0` on that group lets its slice-note text wrap
+    // normally (by word) across the full row width rather than being squeezed.
+    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-4 py-2 bg-pf-bg-1 border-t border-pf-border shrink-0">
       {/* Left side: Object info and bed dimensions */}
-      <div className="flex items-center gap-6 text-sm text-pf-text-secondary">
+      <div className="flex items-center gap-6 text-sm text-pf-text-secondary whitespace-nowrap">
         <span className="font-medium">
           {objectCount} object{objectCount !== 1 ? 's' : ''}
         </span>
@@ -50,14 +58,17 @@ export const SlicerStatusBar: React.FC<SlicerStatusBarProps> = ({
       </div>
 
       {/* Right side: Slice info and button */}
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 min-w-0">
         {sliceNote && (
-          <span className="text-xs text-pf-text-secondary" data-testid="slice-note">
+          <span
+            className="w-full text-right text-xs text-pf-text-secondary sm:w-auto sm:text-left"
+            data-testid="slice-note"
+          >
             {sliceNote}
           </span>
         )}
         {hasSliceInfo && (
-          <div className="flex items-center gap-2 text-sm text-pf-text-secondary">
+          <div className="flex shrink-0 items-center gap-2 text-sm text-pf-text-secondary">
             <span>
               {slicesRemaining} / {slicesTotal} left
             </span>
@@ -77,7 +88,7 @@ export const SlicerStatusBar: React.FC<SlicerStatusBarProps> = ({
           variant="primary"
           onClick={onSlice}
           disabled={!canSlice || slicing}
-          className="px-6 py-1.5"
+          className="shrink-0 px-6 py-1.5"
         >
           {slicing ? 'Slicing...' : (sliceButtonLabel ?? 'Slice')}
         </Button>
