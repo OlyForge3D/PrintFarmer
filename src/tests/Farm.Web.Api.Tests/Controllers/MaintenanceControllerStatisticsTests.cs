@@ -89,7 +89,8 @@ public class MaintenanceControllerStatisticsTests
         {
             Id = printerId,
             Name = "Moonraker Ready",
-            ServerUrl = "http://printer.local"
+            ServerUrl = "http://printer.local",
+            Backend = (int)PrinterBackend.Moonraker
         };
 
         _statisticsRepository
@@ -124,6 +125,83 @@ public class MaintenanceControllerStatisticsTests
         Assert.Equal(1.0, stats.TotalFilamentUsedMeters, precision: 10);
         Assert.Equal(1000 * 0.00237, stats.TotalFilamentUsedGrams, precision: 10);
         _statisticsRepository.Verify(r => r.UpsertAsync(It.IsAny<PrinterStatistics>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetPrinterStatisticsAsync_ExistingPrinterWithoutStats_OctoPrintLiveTotals_FilamentAlreadyInMeters()
+    {
+        // OctoPrintClient normalizes FilamentUsed to meters before aggregating into JobTotals
+        // (unlike Moonraker, which reports millimeters). Applying the millimeter conversion to an
+        // OctoPrint printer's totals would underreport filament usage by a factor of 1000.
+        Guid printerId = Guid.NewGuid();
+        var printer = new Printer
+        {
+            Id = printerId,
+            Name = "OctoPrint Ready",
+            ServerUrl = "http://printer.local",
+            Backend = (int)PrinterBackend.OctoPrint
+        };
+
+        _statisticsRepository
+            .Setup(r => r.GetByPrinterIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrinterStatistics?)null);
+        _printersService
+            .Setup(s => s.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printer);
+        _printersService
+            .Setup(s => s.GetHistoryTotalsAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryTotals
+            {
+                JobTotals = new JobTotals
+                {
+                    TotalJobs = 2,
+                    TotalTime = 7200,
+                    TotalPrintTime = 7100,
+                    TotalFilamentUsed = 2.5 // already meters, per OctoPrintClient
+                }
+            });
+
+        MaintenanceController controller = CreateController();
+
+        ActionResult<PrinterStatistics> result = await controller.GetPrinterStatisticsAsync(printerId, CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        PrinterStatistics stats = Assert.IsType<PrinterStatistics>(ok.Value);
+        Assert.Equal(2, stats.TotalJobsCompleted);
+        Assert.Equal(2.5, stats.TotalFilamentUsedMeters, precision: 10);
+        Assert.Equal(2.5 * 1000.0 * 0.00237, stats.TotalFilamentUsedGrams, precision: 10);
+    }
+
+    [Fact]
+    public async Task GetPrinterStatisticsAsync_ExistingPrinterWithoutStats_LiveHistoryThrowsUnexpectedException_Returns500()
+    {
+        // An unexpected exception (not one of the recognized transient/upstream failure types) is a
+        // real bug, not a "backend is unreachable" condition, so it must not be silently swallowed
+        // into a misleading 200-with-zeros response.
+        Guid printerId = Guid.NewGuid();
+        var printer = new Printer
+        {
+            Id = printerId,
+            Name = "Buggy printer",
+            ServerUrl = "http://printer.local"
+        };
+
+        _statisticsRepository
+            .Setup(r => r.GetByPrinterIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrinterStatistics?)null);
+        _printersService
+            .Setup(s => s.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printer);
+        _printersService
+            .Setup(s => s.GetHistoryTotalsAsync(printerId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("unexpected bug"));
+
+        MaintenanceController controller = CreateController();
+
+        ActionResult<PrinterStatistics> result = await controller.GetPrinterStatisticsAsync(printerId, CancellationToken.None);
+
+        ObjectResult errorResult = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(500, errorResult.StatusCode);
     }
 
     [Fact]
