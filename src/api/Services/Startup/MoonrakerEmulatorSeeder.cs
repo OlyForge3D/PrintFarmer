@@ -261,14 +261,14 @@ public sealed class MoonrakerEmulatorSeeder(
 
             await SeedActiveJobAsync(unitOfWork, jobs, printer, seed, cancellationToken);
 
-            CalibrationProfileTrio trio = await EnsureCalibrationProfileTrioAsync(
+            _ = await EnsureCalibrationProfileTrioAsync(
                 machineProfiles,
                 processProfiles,
                 filamentProfiles,
                 modelId,
                 profileTrioCache,
                 cancellationToken);
-            ApplyCalibrationGenerationDefaults(unitOfWork, printer, trio, isNewPrinter: existing is null);
+            ApplyCalibrationGenerationDefaults(unitOfWork, printer, isNewPrinter: existing is null);
         }
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -616,7 +616,6 @@ public sealed class MoonrakerEmulatorSeeder(
     /// Provides the printer repository used to append a toolhead for an already-tracked printer.
     /// </param>
     /// <param name="printer">The printer to populate calibration generation fields on.</param>
-    /// <param name="trio">The resolved machine/process/filament calibration profile trio.</param>
     /// <param name="isNewPrinter">
     /// <see langword="true"/> for a printer not yet tracked by EF Core (safe to append a child
     /// <see cref="Toolhead"/> directly to <see cref="Printer.Toolheads"/>); <see langword="false"/>
@@ -627,7 +626,6 @@ public sealed class MoonrakerEmulatorSeeder(
     private static void ApplyCalibrationGenerationDefaults(
         IUnitOfWork unitOfWork,
         Printer printer,
-        CalibrationProfileTrio trio,
         bool isNewPrinter)
     {
         DateTime nowUtc = DateTime.UtcNow;
@@ -651,7 +649,6 @@ public sealed class MoonrakerEmulatorSeeder(
         printer.PrintablePolygonJson =
             """[{"x":0,"y":0},{"x":250,"y":0},{"x":250,"y":250},{"x":0,"y":250}]""";
         printer.ExcludedRegionsJson = "[]";
-        printer.CalibrationMotionType = CalibrationMotionType.CoreXY;
         printer.MaxPrintSpeed = 300;
         printer.MaxTravelSpeed = 500;
         printer.MaxAcceleration = 10000;
@@ -663,15 +660,10 @@ public sealed class MoonrakerEmulatorSeeder(
         printer.ActiveToolheadIndex = 0;
         printer.SupportsPressureAdvance = true;
         printer.SupportsFirmwareRetraction = true;
-        printer.CalibrationHardwareVerifiedAtUtc = nowUtc;
 
         printer.CalibrationSlicerEngine = CalibrationContractConstants.SlicerEngine;
         printer.CalibrationSlicerDistribution = CalibrationContractConstants.SlicerDistribution;
         printer.CalibrationSlicerVersion = CalibrationContractConstants.SlicerVersion;
-        printer.CalibrationProfileFormat = CalibrationContractConstants.ProfileFormat;
-        printer.CalibrationMachineProfileId = trio.MachineProfileId;
-        printer.CalibrationProcessProfileId = trio.ProcessProfileId;
-        printer.CalibrationFilamentProfileId = trio.FilamentProfileId;
 
         // Guard on ANY existing physical toolhead, not just index 0: these emulator-seeded
         // fixture printers are exclusively created and managed by this seeder and never gain

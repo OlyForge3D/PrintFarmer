@@ -53,7 +53,8 @@ public sealed class DatabaseMigrationTests
             "20260821205923_AddNozzleMaterialCatalog",
             "20260823210035_AddPrinterModelAccelerationFields",
             "20260824020853_RenameCalibrationHasHeatedChamberToHasHeatedChamber",
-            "20260825084406_MakeCalibrationAttemptSnapshotIdOptional");
+            "20260825084406_MakeCalibrationAttemptSnapshotIdOptional",
+            "20260825110105_RemoveDeprecatedCalibrationPrinterColumns");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -410,7 +411,8 @@ public sealed class DatabaseMigrationTests
             "20260821205923_AddNozzleMaterialCatalog",
             "20260823210035_AddPrinterModelAccelerationFields",
             "20260824020853_RenameCalibrationHasHeatedChamberToHasHeatedChamber",
-            "20260825084406_MakeCalibrationAttemptSnapshotIdOptional");
+            "20260825084406_MakeCalibrationAttemptSnapshotIdOptional",
+            "20260825110105_RemoveDeprecatedCalibrationPrinterColumns");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -936,6 +938,7 @@ public sealed class DatabaseMigrationTests
                 "20260823205528_AddPrinterModelAccelerationFields",
                 "20260824020759_RenameCalibrationHasHeatedChamberToHasHeatedChamber",
                 "20260825084151_MakeCalibrationAttemptSnapshotIdOptional",
+                "20260825110032_RemoveDeprecatedCalibrationPrinterColumns",
             ]
             :
             [
@@ -954,6 +957,7 @@ public sealed class DatabaseMigrationTests
                 "20260823205544_AddPrinterModelAccelerationFields",
                 "20260824020821_RenameCalibrationHasHeatedChamberToHasHeatedChamber",
                 "20260825084201_MakeCalibrationAttemptSnapshotIdOptional",
+                "20260825110042_RemoveDeprecatedCalibrationPrinterColumns",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");

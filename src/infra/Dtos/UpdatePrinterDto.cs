@@ -85,7 +85,6 @@ public record UpdatePrinterDto(
     double? BedOriginY = null,
     CalibrationPointDto[]? PrintablePolygon = null,
     CalibrationExcludedRegionDto[]? ExcludedRegions = null,
-    CalibrationMotionType? CalibrationMotionType = null,
     int? MaxTravelSpeed = null,
     int? MaxAcceleration = null,
     int? MaxTravelAcceleration = null,
@@ -96,13 +95,8 @@ public record UpdatePrinterDto(
     int? ActiveToolheadIndex = null,
     bool? SupportsPressureAdvance = null,
     bool? SupportsFirmwareRetraction = null,
-    DateTime? CalibrationHardwareVerifiedAtUtc = null,
 
     // Explicit upstream OrcaSlicer profile selection
     string? CalibrationSlicerEngine = null,
     string? CalibrationSlicerDistribution = null,
-    string? CalibrationSlicerVersion = null,
-    string? CalibrationProfileFormat = null,
-    Guid? CalibrationMachineProfileId = null,
-    Guid? CalibrationProcessProfileId = null,
-    Guid? CalibrationFilamentProfileId = null);
+    string? CalibrationSlicerVersion = null);

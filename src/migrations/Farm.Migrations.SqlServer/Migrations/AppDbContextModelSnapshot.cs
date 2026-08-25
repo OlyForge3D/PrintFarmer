@@ -6130,30 +6130,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime?>("CalibrationConfigurationUpdatedAtUtc")
                         .HasColumnType("datetime2");
 
-                    b.Property<Guid?>("CalibrationFilamentProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("CalibrationHardwareVerifiedAtUtc")
-                        .HasColumnType("datetime2");
-
                     b.Property<bool?>("CalibrationHasEnclosure")
                         .HasColumnType("bit");
 
                     b.Property<bool?>("CalibrationHasHeatedBed")
                         .HasColumnType("bit");
-
-                    b.Property<Guid?>("CalibrationMachineProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("CalibrationMotionType")
-                        .HasColumnType("int");
-
-                    b.Property<Guid?>("CalibrationProcessProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("CalibrationProfileFormat")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("CalibrationSlicerDistribution")
                         .HasMaxLength(64)

@@ -312,9 +312,6 @@ public class Printer : IRevisionedEntity
     /// <summary>Exact excluded-region JSON supplied by an authoritative configuration source.</summary>
     public string? ExcludedRegionsJson { get; set; }
 
-    /// <summary>Explicit motion system for calibration; null means unknown.</summary>
-    public CalibrationMotionType? CalibrationMotionType { get; set; }
-
     /// <summary>Maximum travel speed in millimeters per second.</summary>
     public int? MaxTravelSpeed { get; set; }
 
@@ -353,9 +350,6 @@ public class Printer : IRevisionedEntity
     /// <summary>Whether Klipper firmware-retraction semantics were verified.</summary>
     public bool? SupportsFirmwareRetraction { get; set; }
 
-    /// <summary>When the complete calibration hardware metadata was verified.</summary>
-    public DateTime? CalibrationHardwareVerifiedAtUtc { get; set; }
-
     /// <summary>Explicit slicer engine identity selected for calibration.</summary>
     public string? CalibrationSlicerEngine { get; set; }
 
@@ -364,18 +358,6 @@ public class Printer : IRevisionedEntity
 
     /// <summary>Explicit pinned slicer version selected for calibration.</summary>
     public string? CalibrationSlicerVersion { get; set; }
-
-    /// <summary>Explicit slicer profile-format identity selected for calibration.</summary>
-    public string? CalibrationProfileFormat { get; set; }
-
-    /// <summary>Explicit upstream OrcaSlicer machine profile soft reference.</summary>
-    public Guid? CalibrationMachineProfileId { get; set; }
-
-    /// <summary>Explicit upstream OrcaSlicer process profile soft reference.</summary>
-    public Guid? CalibrationProcessProfileId { get; set; }
-
-    /// <summary>Explicit upstream OrcaSlicer filament profile soft reference.</summary>
-    public Guid? CalibrationFilamentProfileId { get; set; }
 
     // Bed temperature ranges
     public int? MaxBedTemp { get; set; }

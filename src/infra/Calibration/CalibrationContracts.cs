@@ -95,7 +95,7 @@ public sealed record CalibrationFirmwareIdentityDto(
     /// firmware identity — as opposed to a never-probed printer whose <c>Firmware*</c> columns
     /// are still at their unset defaults (<see cref="PrinterFirmwareFamily.Unknown"/>,
     /// <c>null</c> version). This deliberately mirrors the two conditions
-    /// <c>CalibrationContextResolver.ValidateFirmware</c> treats as an outright-missing
+    /// calibration firmware validation treats as an outright-missing
     /// firmware identity (as opposed to merely "not Klipper", which is a different rejection):
     /// an unset family, or a missing version string. A caller that shows "Recorded" identity in
     /// the UI (#1656, PR #1660 review round 5/Hicks finding) must use this — not mere
@@ -301,8 +301,6 @@ public class CalibrationCandidateDto
     public bool? SupportsPressureAdvance { get; init; }
 
     public bool? SupportsFirmwareRetraction { get; init; }
-
-    public DateTime? CalibrationHardwareVerifiedAtUtc { get; init; }
 }
 
 public sealed class CalibrationContextDto : CalibrationCandidateDto
@@ -355,7 +353,6 @@ public sealed class CalibrationContextDto : CalibrationCandidateDto
         RejectionReasons = candidate.RejectionReasons;
         SupportsPressureAdvance = candidate.SupportsPressureAdvance;
         SupportsFirmwareRetraction = candidate.SupportsFirmwareRetraction;
-        CalibrationHardwareVerifiedAtUtc = candidate.CalibrationHardwareVerifiedAtUtc;
     }
 
     public string SchemaVersion { get; init; } = CalibrationContractConstants.SchemaVersion;
