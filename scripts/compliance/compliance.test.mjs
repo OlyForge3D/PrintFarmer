@@ -21,6 +21,7 @@ import {
   enrichSbomDocument,
   scanPublicationFiles,
   findNugetAssetsFiles,
+  readJson,
   sha256,
   validateLicenseMetadata,
   validateDependencyLicenses,
@@ -324,6 +325,50 @@ test('validateProvenanceManifest rejects an unverified asset', async () => {
     const errors = await validateProvenanceManifest(root, manifest);
     assert.ok(hasCode(errors, 'PROVENANCE_EXCLUDED_CONTENT'));
   });
+});
+
+test('production manifest no longer governs self-authored Calibration paths, only Governed/ folders', async () => {
+  const manifest = await readJson(
+    path.join(repositoryRoot, 'compliance', 'calibration-provenance.json'),
+  );
+  assert.deepEqual(manifest.governedPathPatterns, ['src/**/Governed/**']);
+  assert.deepEqual(manifest.entries, []);
+  assert.deepEqual(manifest.referenceRecords, []);
+
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-governed-scope-'));
+  try {
+    await mkdir(path.join(root, 'compliance'), { recursive: true });
+    await copyFile(
+      path.join(repositoryRoot, 'compliance', 'calibration-provenance.schema.json'),
+      path.join(root, 'compliance', 'calibration-provenance.schema.json'),
+    );
+
+    const selfAuthoredCalibrationPath = 'src/api/Services/Calibration/UnrelatedSelfAuthored.cs';
+    const apiGovernedPath = 'src/api/Services/Governed/PortedFromUpstream.cs';
+    const workerGovernedPath = 'src/orcaslicer-worker/Services/Governed/PortedFromUpstream.cs';
+    for (const filePath of [selfAuthoredCalibrationPath, apiGovernedPath, workerGovernedPath]) {
+      await mkdir(path.join(root, path.dirname(filePath)), { recursive: true });
+      await writeFile(path.join(root, filePath), 'internal static class Placeholder {}\n');
+    }
+
+    const errors = await validateProvenanceManifest(root, manifest);
+    const missingEntryPaths = errors
+      .filter((error) => error.code === 'PROVENANCE_MANIFEST_ENTRY_MISSING')
+      .map((error) => error.path)
+      .sort();
+
+    // Assert the exact set of governed-but-unlisted files, not just that the
+    // Governed/ paths are present: this also guards against a future PR
+    // silently re-adding manifest.entries (which would otherwise satisfy the
+    // Calibration and Governed assertions below without failing here).
+    assert.deepEqual(
+      missingEntryPaths,
+      [apiGovernedPath, workerGovernedPath].sort(),
+      'only files under a Governed/ folder should be reported as governed without a manifest entry',
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
 });
 
 test('validateLicenseMetadata rejects conflicting first-party metadata', async () => {
