@@ -65,6 +65,8 @@ readonly ALL_TEST_PROJECTS=(
   "Farm.Web.Api.Tests|tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj|false|$DEFAULT_TEST_FILTER"
   "Farm.Slicer.Module.Tests|tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj|false|$DEFAULT_TEST_FILTER"
   "Farm.OrcaSlicer.Worker.Tests|tests/Farm.OrcaSlicer.Worker.Tests/Farm.OrcaSlicer.Worker.Tests.csproj|false|$DEFAULT_TEST_FILTER"
+  "Farm.Moonraker.Emulator.Tests|tests/Farm.Moonraker.Emulator.Tests/Farm.Moonraker.Emulator.Tests.csproj|false|$DEFAULT_TEST_FILTER"
+  "Farm.Slicer.ProfileParsing.Tests|tests/Farm.Slicer.ProfileParsing.Tests/Farm.Slicer.ProfileParsing.Tests.csproj|false|$DEFAULT_TEST_FILTER"
   "Farm.Web.IntegrationTests|tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj|true|$DEFAULT_TEST_FILTER"
 )
 
