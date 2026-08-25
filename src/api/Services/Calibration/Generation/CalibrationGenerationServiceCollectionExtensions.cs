@@ -35,6 +35,9 @@ public static class CalibrationGenerationServiceCollectionExtensions
             IKlipperCalibrationGcodeGenerator,
             KlipperCalibrationGcodeGenerator>();
         services.TryAddScoped<ICalibrationGcodeAnnotator, CalibrationGcodeAnnotator>();
+        services.TryAddSingleton<
+            Farm.Web.Api.Services.Gcode.Safety.IGcodeSafetyValidator,
+            Farm.Web.Api.Services.Gcode.Safety.GcodeSafetyValidator>();
         services.TryAddScoped<
             ICalibrationGcodeProgramValidator,
             CalibrationGcodeProgramValidator>();
