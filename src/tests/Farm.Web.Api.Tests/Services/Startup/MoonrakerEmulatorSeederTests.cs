@@ -207,7 +207,7 @@ public sealed class MoonrakerEmulatorSeederTests
         Assert.Equal(4, printersService.Invocations.Count);
 
         // #1851: every seeded printer must carry the calibration generation data that
-        // production's CalibrationContextResolver requires, not just base identity.
+        // calibration-scoped consumers require, not just base identity.
         Assert.All(added, printer =>
         {
             Assert.Equal(PrinterFirmwareFamily.Klipper, printer.FirmwareFamily);
@@ -218,16 +218,9 @@ public sealed class MoonrakerEmulatorSeederTests
             Assert.Equal(
                 CalibrationContractConstants.SlicerDistribution,
                 printer.CalibrationSlicerDistribution);
-            Assert.Equal(
-                CalibrationContractConstants.ProfileFormat,
-                printer.CalibrationProfileFormat);
-            Assert.NotNull(printer.CalibrationMachineProfileId);
-            Assert.NotNull(printer.CalibrationProcessProfileId);
-            Assert.NotNull(printer.CalibrationFilamentProfileId);
             Assert.Equal(250, printer.MaxBuildVolumeX);
             Assert.Equal(250, printer.MaxBuildVolumeY);
             Assert.Equal(250, printer.MaxBuildVolumeZ);
-            Assert.Equal(CalibrationMotionType.CoreXY, printer.CalibrationMotionType);
             Assert.Equal(0, printer.ActiveToolheadIndex);
             Assert.Single(printer.Toolheads);
             Toolhead toolhead = printer.Toolheads.Single();

@@ -20,7 +20,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid ownerId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationActor actor = new(ownerId, ownerId.ToString(), false);
         CalibrationProjectCreateRequest request = CreateProjectRequest(printerId, "request-1");
 
@@ -48,7 +48,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateServiceWithThrowingContext(db);
+        CalibrationProjectService service = CreateService(db);
 
         CalibrationApiResult<CalibrationProjectDto> result = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "no-context-project"),
@@ -67,7 +67,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateServiceWithThrowingContext(db);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "no-context-attempt-project"),
             actor,
@@ -91,7 +91,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         Guid ownerId = Guid.NewGuid();
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> created = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "request-2"),
             new(ownerId, ownerId.ToString(), false),
@@ -114,7 +114,7 @@ public sealed class CalibrationProjectServiceTests
         Guid printerId = Guid.NewGuid();
         Guid ownerId = Guid.NewGuid();
         CalibrationActor actor = new(ownerId, ownerId.ToString(), false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> created = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "request-3"),
             actor,
@@ -147,7 +147,7 @@ public sealed class CalibrationProjectServiceTests
         Guid printerId = Guid.NewGuid();
         Guid ownerId = Guid.NewGuid();
         CalibrationActor actor = new(ownerId, ownerId.ToString(), false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> created = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "request-4"),
             actor,
@@ -170,7 +170,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> created = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "unsafe-ordered-steps"),
             actor,
@@ -202,7 +202,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> created = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "unsafe-current-selections"),
             actor,
@@ -231,7 +231,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> created = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "batch-state"),
             actor,
@@ -269,7 +269,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> created = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "sync-replay"),
             actor,
@@ -302,7 +302,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> created = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "sync-delete"),
             actor,
@@ -333,7 +333,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> created = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "photo-replay"),
             actor,
@@ -391,7 +391,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> created = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "photo-purge"),
             actor,
@@ -435,7 +435,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> created = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "photo-delete"),
             actor,
@@ -487,7 +487,7 @@ public sealed class CalibrationProjectServiceTests
         Guid printerId = Guid.NewGuid();
         Guid ownerId = Guid.NewGuid();
         CalibrationActor actor = new(ownerId, ownerId.ToString(), false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> created = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "request-5"),
             actor,
@@ -545,7 +545,7 @@ public sealed class CalibrationProjectServiceTests
         Guid printerId = Guid.NewGuid();
         Guid ownerId = Guid.NewGuid();
         CalibrationActor actor = new(ownerId, ownerId.ToString(), false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         _ = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "request-6"),
             actor,
@@ -572,7 +572,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> projectA = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "project-a"),
             actor,
@@ -613,7 +613,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "event-project"),
             actor,
@@ -651,7 +651,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "observation-project"),
             actor,
@@ -693,7 +693,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> projectA = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "gp-project-a"),
             actor,
@@ -727,7 +727,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "profile-op-project"),
             actor,
@@ -785,7 +785,7 @@ public sealed class CalibrationProjectServiceTests
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationProjectService service = CreateService(db);
         CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
             CreateProjectRequest(printerId, "publish-project"),
             actor,
@@ -838,20 +838,9 @@ public sealed class CalibrationProjectServiceTests
         return new(options);
     }
 
-    private static CalibrationProjectService CreateService(AppDbContext db, Guid printerId) =>
+    private static CalibrationProjectService CreateService(AppDbContext db) =>
         new(
             db,
-            new TestPrinterContextService(printerId),
-            new TestCalibrationBlobStore(),
-            TimeProvider.System,
-            NullLogger<CalibrationProjectService>.Instance);
-
-    // Proves CreateProjectAsync/CreateAttemptAsync no longer call GetContextAsync (#1981): any
-    // invocation fails the test outright instead of silently returning a fabricated context.
-    private static CalibrationProjectService CreateServiceWithThrowingContext(AppDbContext db) =>
-        new(
-            db,
-            new ThrowingPrinterContextService(),
             new TestCalibrationBlobStore(),
             TimeProvider.System,
             NullLogger<CalibrationProjectService>.Instance);
@@ -953,68 +942,6 @@ public sealed class CalibrationProjectServiceTests
         });
         _ = await db.SaveChangesAsync();
         return attemptId;
-    }
-
-    private sealed class TestPrinterContextService(Guid printerId) : ICalibrationContextResolver
-    {
-        public Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
-            Guid requestedPrinterId,
-            long? configurationRevision,
-            string capturedBySubject,
-            CalibrationProfileAccessScope profileAccessScope,
-            CancellationToken cancellationToken)
-        {
-            if (requestedPrinterId != printerId || configurationRevision != 1)
-            {
-                return Task.FromResult(new CalibrationServiceResult<CalibrationContextDto>(
-                    null,
-                    "printer_configuration_changed",
-                    1));
-            }
-
-            CalibrationCandidateDto candidate = new()
-            {
-                Id = printerId,
-                Eligible = true,
-                ConfigurationRevision = 1,
-                Firmware = new("Klipper", "Klipper", "Printer", "v1", null, null, DateTime.UtcNow, true),
-                Slicer = new(
-                    CalibrationContractConstants.SlicerEngine,
-                    CalibrationContractConstants.SlicerDistribution,
-                    CalibrationContractConstants.SlicerVersion,
-                    CalibrationContractConstants.ProfileFormat),
-            };
-            CalibrationContextDto context = new(candidate)
-            {
-                CapturedAtUtc = DateTime.UtcNow,
-                CapturedBySubject = capturedBySubject,
-                Snapshot = new()
-                {
-                    PrinterId = printerId,
-                    ConfigurationRevision = 1,
-                    CapturedAtUtc = DateTime.UtcNow,
-                    CapturedBySubject = capturedBySubject,
-                    Firmware = candidate.Firmware,
-                    Slicer = candidate.Slicer,
-                    SnapshotSha256 = new string('b', 64),
-                },
-            };
-            return Task.FromResult(new CalibrationServiceResult<CalibrationContextDto>(context));
-        }
-    }
-
-    // Throws immediately if invoked, so any test using this stub fails loudly if
-    // CreateProjectAsync/CreateAttemptAsync ever resume calling GetContextAsync (#1981).
-    private sealed class ThrowingPrinterContextService : ICalibrationContextResolver
-    {
-        public Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
-            Guid requestedPrinterId,
-            long? configurationRevision,
-            string capturedBySubject,
-            CalibrationProfileAccessScope profileAccessScope,
-            CancellationToken cancellationToken) =>
-            throw new InvalidOperationException(
-                "GetContextAsync must not be called by CreateProjectAsync/CreateAttemptAsync (#1981).");
     }
 
     private sealed class TestCalibrationBlobStore : ICalibrationBlobStore

@@ -1605,6 +1605,20 @@ public sealed class DispatchClaimService(
         CalibrationAttempt? attempt = await db.CalibrationAttempts
             .AsNoTracking()
             .SingleOrDefaultAsync(candidate => candidate.Id == job.CalibrationAttemptId, ct);
+
+        // #1990: D4 (#1987) stopped populating a printer-configuration snapshot for every new
+        // attempt and never regained a replacement path for the compatibility-pinning data this
+        // gate requires. Fail explicitly here instead of letting the (guaranteed-empty) snapshot
+        // lookup below fold into the generic "record is missing" branch, which reads like data
+        // corruption rather than a known, temporary limitation. Interim short-circuit pending
+        // #1984 (D7), not a fix for the underlying gap.
+        if (attempt is not null && attempt.PrinterConfigurationSnapshotId is null)
+        {
+            return DispatchClaimResult.Fail(
+                "calibration_dispatch_unavailable",
+                "Filament calibration dispatch is temporarily unavailable pending #1984; see issue #1990.");
+        }
+
         PrinterConfigurationSnapshot? snapshot = await db.PrinterConfigurationSnapshots
             .AsNoTracking()
             .SingleOrDefaultAsync(candidate => candidate.Id == job.CalibrationConfigSnapshotId, ct);

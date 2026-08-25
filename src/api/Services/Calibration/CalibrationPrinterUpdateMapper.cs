@@ -96,7 +96,6 @@ internal static class CalibrationPrinterUpdateMapper
         changed |= Set(update.BedOriginY, printer.BedOriginY, value => printer.BedOriginY = value);
         changed |= SetJson(update.PrintablePolygon, printer.PrintablePolygonJson, value => printer.PrintablePolygonJson = value);
         changed |= SetJson(update.ExcludedRegions, printer.ExcludedRegionsJson, value => printer.ExcludedRegionsJson = value);
-        changed |= Set(update.CalibrationMotionType, printer.CalibrationMotionType, value => printer.CalibrationMotionType = value);
         changed |= Set(update.MaxTravelSpeed, printer.MaxTravelSpeed, value => printer.MaxTravelSpeed = value);
         changed |= Set(update.MaxAcceleration, printer.MaxAcceleration, value => printer.MaxAcceleration = value);
         changed |= Set(update.MaxTravelAcceleration, printer.MaxTravelAcceleration, value => printer.MaxTravelAcceleration = value);
@@ -107,18 +106,10 @@ internal static class CalibrationPrinterUpdateMapper
         changed |= Set(update.ActiveToolheadIndex, printer.ActiveToolheadIndex, value => printer.ActiveToolheadIndex = value);
         changed |= Set(update.SupportsPressureAdvance, printer.SupportsPressureAdvance, value => printer.SupportsPressureAdvance = value);
         changed |= Set(update.SupportsFirmwareRetraction, printer.SupportsFirmwareRetraction, value => printer.SupportsFirmwareRetraction = value);
-        changed |= SetDate(
-            update.CalibrationHardwareVerifiedAtUtc,
-            printer.CalibrationHardwareVerifiedAtUtc,
-            value => printer.CalibrationHardwareVerifiedAtUtc = value);
 
         changed |= SetString(update.CalibrationSlicerEngine, printer.CalibrationSlicerEngine, value => printer.CalibrationSlicerEngine = value);
         changed |= SetString(update.CalibrationSlicerDistribution, printer.CalibrationSlicerDistribution, value => printer.CalibrationSlicerDistribution = value);
         changed |= SetString(update.CalibrationSlicerVersion, printer.CalibrationSlicerVersion, value => printer.CalibrationSlicerVersion = value);
-        changed |= SetString(update.CalibrationProfileFormat, printer.CalibrationProfileFormat, value => printer.CalibrationProfileFormat = value);
-        changed |= SetProfileId(update.CalibrationMachineProfileId, printer.CalibrationMachineProfileId, value => printer.CalibrationMachineProfileId = value);
-        changed |= SetProfileId(update.CalibrationProcessProfileId, printer.CalibrationProcessProfileId, value => printer.CalibrationProcessProfileId = value);
-        changed |= SetProfileId(update.CalibrationFilamentProfileId, printer.CalibrationFilamentProfileId, value => printer.CalibrationFilamentProfileId = value);
 
         return changed;
     }
@@ -231,26 +222,6 @@ internal static class CalibrationPrinterUpdateMapper
         }
 
         assign(json);
-        return true;
-    }
-
-    private static bool SetProfileId(
-        Guid? requested,
-        Guid? current,
-        Action<Guid?> assign)
-    {
-        if (!requested.HasValue)
-        {
-            return false;
-        }
-
-        Guid? normalized = requested.Value == Guid.Empty ? null : requested;
-        if (normalized == current)
-        {
-            return false;
-        }
-
-        assign(normalized);
         return true;
     }
 }

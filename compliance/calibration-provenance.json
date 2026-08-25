@@ -162,35 +162,6 @@
       }
     },
     {
-      "id": "calibration-context-service",
-      "destinationPath": "src/api/Services/Calibration/CalibrationContextResolver.cs",
-      "referenceUrls": [
-        "https://github.com/OlyForge3D/PrintFarmer/issues/896",
-        "https://github.com/OlyForge3D/PrintFarmer/issues/1943",
-        "https://github.com/SoftFever/OrcaSlicer/wiki/Calibration"
-      ],
-      "statement": "Independent PrintFarmer implementation of the issue #896 immutable calibration context builder, slimmed by issue #1943 to remove the fleet-wide eligibility projection; the upstream OrcaSlicer wiki was used only as behavioral reference and no external source code was copied or adapted.",
-      "review": {
-        "reviewer": "Copilot App",
-        "reviewDate": "2026-07-25",
-        "decision": "approved"
-      }
-    },
-    {
-      "id": "calibration-context-service-tests",
-      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/CalibrationContextResolverTests.cs",
-      "referenceUrls": [
-        "https://github.com/OlyForge3D/PrintFarmer/issues/896",
-        "https://github.com/OlyForge3D/PrintFarmer/issues/1943"
-      ],
-      "statement": "Independent PrintFarmer test implementation of the issue #896 context-resolution, redaction, freshness, and snapshot contracts, restored by issue #1943 after the fleet-wide eligibility projection and its tests were removed; no external calibration source code was copied or adapted.",
-      "review": {
-        "reviewer": "Copilot App",
-        "reviewDate": "2026-07-25",
-        "decision": "approved"
-      }
-    },
-    {
       "id": "calibration-generation-kestrel-api-host",
       "destinationPath": "src/tests/Farm.Web.IntegrationTests/Calibration/KestrelCalibrationApiHost.cs",
       "referenceUrls": [
