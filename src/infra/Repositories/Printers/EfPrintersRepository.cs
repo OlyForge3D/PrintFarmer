@@ -268,19 +268,8 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
         await _db.CalibrationAttemptEvents
             .Where(@event => projectIds.Contains(@event.ProjectId))
             .ExecuteDeleteAsync(ct);
-        await _db.GeneratedProfileRevisionOperations
-            .Where(operation => _db.GeneratedProfileRevisions.Any(revision =>
-                revision.Id == operation.GeneratedProfileRevisionId
-                && projectIds.Contains(revision.ProjectId)))
-            .ExecuteDeleteAsync(ct);
-        await _db.GeneratedProfileRevisions
-            .Where(revision => projectIds.Contains(revision.ProjectId))
-            .ExecuteDeleteAsync(ct);
         await _db.CalibrationAttempts
             .Where(attempt => projectIds.Contains(attempt.ProjectId))
-            .ExecuteDeleteAsync(ct);
-        await _db.PrinterConfigurationSnapshots
-            .Where(snapshot => projectIds.Contains(snapshot.ProjectId))
             .ExecuteDeleteAsync(ct);
         await _db.CalibrationDrafts
             .Where(draft => projectIds.Contains(draft.ProjectId))

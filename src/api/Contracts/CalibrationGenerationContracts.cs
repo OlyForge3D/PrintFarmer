@@ -167,38 +167,11 @@ public sealed record CalibrationOrchestrationStatusDto
     /// <summary>Submitted canonical slice job identity.</summary>
     public Guid? SliceJobId { get; init; }
 
-    /// <summary>Worker that claimed and executed the slice job.</summary>
-    public Guid? WorkerId { get; init; }
-
-    /// <summary>Slicer artifact the worker produced.</summary>
-    public Guid? SourceArtifactId { get; init; }
-
-    /// <summary>Server-composed artifact that was safety validated and promoted.</summary>
-    public Guid? FinalArtifactId { get; init; }
-
     /// <summary>Promoted G-code library file identity.</summary>
     public Guid? GcodeFileId { get; init; }
 
     /// <summary>SHA-256 of the recompiled canonical specification.</summary>
     public string? SpecificationSha256 { get; init; }
-
-    /// <summary>SHA-256 of the compiled upstream-Orca plan manifest.</summary>
-    public string? PlanManifestSha256 { get; init; }
-
-    /// <summary>SHA-256 of the final annotated calibration G-code.</summary>
-    public string? GcodeSha256 { get; init; }
-
-    /// <summary>SHA-256 of the canonical calibration manifest.</summary>
-    public string? ManifestSha256 { get; init; }
-
-    /// <summary>Trusted generator version that produced the run.</summary>
-    public string? GeneratorVersion { get; init; }
-
-    /// <summary>Pinned slicer container digest attested by the accepted worker.</summary>
-    public string? SlicerContainerDigest { get; init; }
-
-    /// <summary>Pinned slicer binary digest attested by the accepted worker.</summary>
-    public string? SlicerBinarySha256 { get; init; }
 
     /// <summary>Authenticated route that reports this orchestration's durable status.</summary>
     public required string StatusRoute { get; init; }

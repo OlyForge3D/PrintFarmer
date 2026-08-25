@@ -106,7 +106,6 @@ public class CalibrationQueueIdempotencyTests
         Guid projectId = Guid.NewGuid();
         Guid attemptId = Guid.NewGuid();
         Guid orchestrationId = Guid.NewGuid();
-        Guid snapshotId = Guid.NewGuid();
         Guid sourceArtifactId = Guid.NewGuid();
         Guid sliceJobId = Guid.NewGuid();
         Guid modelId = Guid.NewGuid();
@@ -183,61 +182,12 @@ public class CalibrationQueueIdempotencyTests
             InUse = true,
             AssignedPrinterId = printerId,
         };
-        var snapshotDocument = new PrinterConfigurationSnapshotDto
-        {
-            PrinterId = printerId,
-            ConfigurationRevision = 7,
-            SnapshotSha256 = new string('6', 64),
-            Toolheads =
-            [
-                new CalibrationToolheadDto(
-                    toolheadId,
-                    0,
-                    "Primary",
-                    true,
-                    new CalibrationPoint3DDto(0, 0, 0),
-                    0.4,
-                    "Brass",
-                    "Brass",
-                    300,
-                    false,
-                    300,
-                    20,
-                    "DirectDrive",
-                    true,
-                    null,
-                    ["PLA"]),
-            ],
-        };
-        var snapshot = new PrinterConfigurationSnapshot
-        {
-            Id = snapshotId,
-            ProjectId = projectId,
-            AttemptId = attemptId,
-            PrinterId = printerId,
-            SchemaVersion = "1",
-            SanitizedSnapshotJson = JsonSerializer.Serialize(snapshotDocument),
-            SnapshotSha256 = new string('6', 64),
-            PrinterConfigurationRevision = 7,
-            FirmwareFamily = PrinterFirmwareFamily.Klipper,
-            GcodeDialect = PrinterGcodeDialect.Klipper,
-            SlicerEngine = "OrcaSlicer",
-            SlicerDistribution = "upstream",
-            SlicerVersion = "2.3.0",
-            SlicerContainerDigest = "sha256:test",
-            MachineProfileSha256 = new string('3', 64),
-            ProcessProfileSha256 = new string('4', 64),
-            FilamentProfileSha256 = new string('5', 64),
-            CapturedAtUtc = DateTime.UtcNow,
-            CapturedBySubject = TestUserId.ToString(),
-        };
         var project = new CalibrationProject
         {
             Id = projectId,
             OwnerUserId = TestUserId,
             Name = "Project",
             PrinterId = printerId,
-            CurrentPrinterConfigurationSnapshotId = snapshotId,
             SelectedToolheadId = toolheadId,
             SelectedToolheadIndex = 0,
             FilamentProvider = "local",
@@ -253,7 +203,6 @@ public class CalibrationQueueIdempotencyTests
             Id = attemptId,
             ProjectId = projectId,
             SpecificationSha256 = new string('2', 64),
-            PrinterConfigurationSnapshotId = snapshotId,
         };
         var orchestration = new CalibrationOrchestration
         {
@@ -262,11 +211,7 @@ public class CalibrationQueueIdempotencyTests
             AttemptId = attemptId,
             SpecificationSha256 = new string('2', 64),
             SliceJobId = sliceJobId,
-            FinalArtifactId = sourceArtifactId,
             GcodeFileId = gcode.Id,
-            GcodeSha256 = new string('1', 64),
-            ManifestSha256 = new string('9', 64),
-            SlicerContainerDigest = "sha256:test",
         };
 
         db.GcodeFiles.Add(gcode);
@@ -275,7 +220,6 @@ public class CalibrationQueueIdempotencyTests
         db.Spools.Add(spool);
         db.CalibrationProjects.Add(project);
         db.CalibrationAttempts.Add(attempt);
-        db.PrinterConfigurationSnapshots.Add(snapshot);
         db.CalibrationOrchestrations.Add(orchestration);
         db.SaveChanges();
 

@@ -836,7 +836,6 @@ public class CalibrationQueueDispatchTests
             OwnerUserId = Guid.NewGuid(),
             Name = "Ack calibration",
             PrinterId = printerId,
-            CurrentPrinterConfigurationSnapshotId = calibrationSnapshotId,
             SelectedToolheadId = toolhead.Id,
             SelectedToolheadIndex = toolhead.Index,
             FilamentProvider = "local",
@@ -847,32 +846,11 @@ public class CalibrationQueueDispatchTests
             LocalSpoolId = spool.Id,
             FilamentSnapshotJson = """{"material":"PLA"}""",
         });
-        db.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
-        {
-            Id = calibrationSnapshotId,
-            ProjectId = calibrationProjectId,
-            AttemptId = calibrationAttemptId,
-            PrinterId = printerId,
-            SchemaVersion = "1",
-            SanitizedSnapshotJson = "{}",
-            SnapshotSha256 = new string('6', 64),
-            PrinterConfigurationRevision = 1,
-            FirmwareFamily = PrinterFirmwareFamily.Klipper,
-            GcodeDialect = PrinterGcodeDialect.Klipper,
-            SlicerEngine = "OrcaSlicer",
-            SlicerDistribution = "upstream",
-            SlicerVersion = "2.3.0",
-            SlicerContainerDigest = "sha256:test",
-            MachineProfileSha256 = new string('c', 64),
-            ProcessProfileSha256 = new string('d', 64),
-            FilamentProfileSha256 = new string('e', 64),
-        });
         db.CalibrationAttempts.Add(new CalibrationAttempt
         {
             Id = calibrationAttemptId,
             ProjectId = calibrationProjectId,
             SpecificationSha256 = new string('b', 64),
-            PrinterConfigurationSnapshotId = calibrationSnapshotId,
         });
         db.CalibrationOrchestrations.Add(new CalibrationOrchestration
         {
@@ -881,11 +859,7 @@ public class CalibrationQueueDispatchTests
             AttemptId = calibrationAttemptId,
             SpecificationSha256 = new string('b', 64),
             SliceJobId = sourceSliceJobId,
-            FinalArtifactId = sourceArtifactId,
             GcodeFileId = gcodeId,
-            GcodeSha256 = new string('a', 64),
-            ManifestSha256 = new string('9', 64),
-            SlicerContainerDigest = "sha256:test",
         });
 
         PrintJob job = new()

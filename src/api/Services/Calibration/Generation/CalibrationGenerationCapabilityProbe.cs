@@ -526,3 +526,18 @@ public sealed class CalibrationGenerationCapabilityProbe(
         public bool HasObservedVersions => ObservedVersions.Count > 0;
     }
 }
+
+/// <summary>
+/// The pinned upstream slicer identity a registered worker actually attested.
+/// </summary>
+/// <param name="Version">Reported slicer version.</param>
+/// <param name="Distribution">Reported slicer distribution.</param>
+/// <param name="ContainerDigest">Reported container digest of the pinned image.</param>
+/// <param name="BinarySha256">Reported digest of the pinned slicer binary.</param>
+/// <param name="WorkerId">Worker that published the attestation.</param>
+public sealed record CalibrationPinnedSlicerIdentity(
+    string Version,
+    string Distribution,
+    string ContainerDigest,
+    string BinarySha256,
+    Guid WorkerId);

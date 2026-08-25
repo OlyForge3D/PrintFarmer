@@ -6,8 +6,7 @@ namespace Farm.Web.Api.Services.Calibration.Generation;
 /// Registers the deterministic calibration generation core.
 /// </summary>
 /// <remarks>
-/// These services are pure, side-effect free application/domain services apart from the profile patch
-/// exporter, which persists through the authoritative calibration project service. Registering them
+/// These services are pure, side-effect free application/domain services. Registering them
 /// does not advertise generation as operational: the capability document keeps
 /// <c>calibrationGenerationEnabled</c> false until the whole production path is proven.
 /// </remarks>
@@ -38,9 +37,6 @@ public static class CalibrationGenerationServiceCollectionExtensions
         services.TryAddScoped<
             ICalibrationGcodeSafetyValidator,
             CalibrationGcodeSafetyValidator>();
-        services.TryAddScoped<
-            ICalibrationProfilePatchExporter,
-            CalibrationProfilePatchExporter>();
         return services;
     }
 }

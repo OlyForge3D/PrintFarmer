@@ -118,73 +118,6 @@ public sealed class CalibrationProject
     public DateTime? DeletedAtUtc { get; set; }
 }
 
-/// <summary>
-/// Immutable, credential-free snapshot of the explicit printer and profile
-/// context used by a project or attempt.
-/// </summary>
-public sealed class PrinterConfigurationSnapshot
-{
-    public Guid Id { get; set; }
-
-    public Guid ProjectId { get; set; }
-
-    public Guid? AttemptId { get; set; }
-
-    public Guid PrinterId { get; set; }
-
-    public string SchemaVersion { get; set; } = string.Empty;
-
-    public string SanitizedSnapshotJson { get; set; } = "{}";
-
-    public string SnapshotSha256 { get; set; } = string.Empty;
-
-    public long PrinterConfigurationRevision { get; set; }
-
-    public PrinterFirmwareFamily FirmwareFamily { get; set; }
-
-    public PrinterGcodeDialect GcodeDialect { get; set; }
-
-    public FirmwareDetectionSource FirmwareDetectionSource { get; set; }
-
-    public string? FirmwareVersion { get; set; }
-
-    public int Backend { get; set; }
-
-    public string? BackendVersion { get; set; }
-
-    public string? BackendApiVersion { get; set; }
-
-    public string SlicerEngine { get; set; } = string.Empty;
-
-    public string SlicerDistribution { get; set; } = string.Empty;
-
-    public string? SlicerVersion { get; set; }
-
-    public string? SlicerContainerDigest { get; set; }
-
-    public Guid? MachineProfileId { get; set; }
-
-    public string? ExactMachineProfileJson { get; set; }
-
-    public string? MachineProfileSha256 { get; set; }
-
-    public Guid? ProcessProfileId { get; set; }
-
-    public string? ExactProcessProfileJson { get; set; }
-
-    public string? ProcessProfileSha256 { get; set; }
-
-    public Guid? FilamentProfileId { get; set; }
-
-    public string? ExactFilamentProfileJson { get; set; }
-
-    public string? FilamentProfileSha256 { get; set; }
-
-    public DateTime CapturedAtUtc { get; set; }
-
-    public string CapturedBySubject { get; set; } = string.Empty;
-}
-
 /// <summary>Editable, device-lineage-specific work in progress for a calibration step.</summary>
 public sealed class CalibrationDraft
 {
@@ -387,96 +320,6 @@ public sealed class CalibrationBlobCleanup
     public DateTime CreatedAtUtc { get; set; }
 }
 
-/// <summary>Immutable authoritative version of an upstream OrcaSlicer profile.</summary>
-public sealed class GeneratedProfileRevision
-{
-    public Guid Id { get; set; }
-
-    public Guid ProjectId { get; set; }
-
-    public Guid SourceAttemptId { get; set; }
-
-    public Guid? ParentRevisionId { get; set; }
-
-    public long RevisionNumber { get; set; }
-
-    public string ProfileType { get; set; } = string.Empty;
-
-    public string SchemaVersion { get; set; } = string.Empty;
-
-    public string SlicerEngine { get; set; } = string.Empty;
-
-    public string SlicerDistribution { get; set; } = string.Empty;
-
-    public string? SlicerVersion { get; set; }
-
-    public string? SlicerContainerDigest { get; set; }
-
-    public string Name { get; set; } = string.Empty;
-
-    public string NormalizedSettingsJson { get; set; } = "{}";
-
-    public decimal? FlowRatio { get; set; }
-
-    public decimal? PressureAdvance { get; set; }
-
-    public decimal? PressureAdvanceSmoothTime { get; set; }
-
-    public decimal? RetractionLength { get; set; }
-
-    public decimal? RetractionSpeed { get; set; }
-
-    public decimal? RetractionMinimumTravel { get; set; }
-
-    public decimal? RetractionLiftZ { get; set; }
-
-    public int? NozzleTemperature { get; set; }
-
-    public int? BedTemperature { get; set; }
-
-    public decimal? MaximumVolumetricFlow { get; set; }
-
-    public Guid? SourceMachineProfileId { get; set; }
-
-    public Guid? SourceProcessProfileId { get; set; }
-
-    public Guid? SourceFilamentProfileId { get; set; }
-
-    public string SourceProfileFingerprint { get; set; } = string.Empty;
-
-    public string ExactProfileJson { get; set; } = "{}";
-
-    public string Sha256 { get; set; } = string.Empty;
-
-    public string GeneratorVersion { get; set; } = string.Empty;
-
-    public string GenerationRequestId { get; set; } = string.Empty;
-
-    public DateTime CreatedAtUtc { get; set; }
-
-    public string CreatedBySubject { get; set; } = string.Empty;
-}
-
-/// <summary>Append-only audit row for a generated-profile export or publication request.</summary>
-public sealed class GeneratedProfileRevisionOperation
-{
-    public Guid Id { get; set; }
-
-    public Guid GeneratedProfileRevisionId { get; set; }
-
-    public string OperationType { get; set; } = string.Empty;
-
-    public string OperationId { get; set; } = string.Empty;
-
-    public Guid? PublishedProfileId { get; set; }
-
-    public string? ExportFormat { get; set; }
-
-    public DateTime OccurredAtUtc { get; set; }
-
-    public string ActorSubject { get; set; } = string.Empty;
-}
-
 /// <summary>Durable exact-replay record for a caller's calibration mutation.</summary>
 public sealed class CalibrationIdempotencyRecord
 {
@@ -538,8 +381,6 @@ public sealed class CalibrationOrchestration
 
     public Guid? SliceJobId { get; set; }
 
-    public Guid? SourceArtifactId { get; set; }
-
     public Guid? GcodeFileId { get; set; }
 
     public Guid? PrintJobId { get; set; }
@@ -563,33 +404,6 @@ public sealed class CalibrationOrchestration
 
     /// <summary>SHA-256 of the recompiled canonical specification this run is pinned to.</summary>
     public string? SpecificationSha256 { get; set; }
-
-    /// <summary>SHA-256 of the compiled upstream-Orca plan manifest.</summary>
-    public string? PlanManifestSha256 { get; set; }
-
-    /// <summary>SHA-256 of the final annotated calibration G-code.</summary>
-    public string? GcodeSha256 { get; set; }
-
-    /// <summary>SHA-256 of the canonical calibration manifest describing the final G-code.</summary>
-    public string? ManifestSha256 { get; set; }
-
-    /// <summary>Version of the trusted generator that produced the specification, plan and program.</summary>
-    public string? GeneratorVersion { get; set; }
-
-    /// <summary>Pinned slicer container digest the accepted worker attested.</summary>
-    public string? SlicerContainerDigest { get; set; }
-
-    /// <summary>Pinned slicer binary digest the accepted worker attested.</summary>
-    public string? SlicerBinarySha256 { get; set; }
-
-    /// <summary>Worker that claimed and executed the submitted slice job.</summary>
-    public Guid? WorkerId { get; set; }
-
-    /// <summary>Server-composed final artifact that was safety validated and promoted.</summary>
-    public Guid? FinalArtifactId { get; set; }
-
-    /// <summary>Idempotency operation key used for the artifact promotion hop.</summary>
-    public string? PromotionOperationId { get; set; }
 
     /// <summary>UTC timestamp at which the current step started, used for stuck-step reconciliation.</summary>
     public DateTime? StepStartedAtUtc { get; set; }

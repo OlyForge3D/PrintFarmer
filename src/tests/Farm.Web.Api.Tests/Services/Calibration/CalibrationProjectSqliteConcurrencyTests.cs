@@ -344,69 +344,6 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
     }
 
     [Fact]
-    public async Task CreateGeneratedProfileAsync_ConcurrentDistinctOperations_AllocateUniqueRevisions()
-    {
-        await using SqliteCalibrationStore store = await SqliteCalibrationStore.CreateAsync();
-        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        Guid projectId;
-        Guid attemptId;
-        await using (AppDbContext setupContext = store.CreateContext())
-        {
-            CalibrationProjectService setupService = CreateService(setupContext, store.PrinterId);
-            CalibrationApiResult<CalibrationProjectDto> project = await setupService.CreateProjectAsync(
-                CreateProjectRequest(store.PrinterId, "profile-project"),
-                actor,
-                CancellationToken.None);
-            CalibrationApiResult<CalibrationAttemptDto> attempt = await setupService.CreateAttemptAsync(
-                project.Value!.Id,
-                new CalibrationAttemptCreateRequest
-                {
-                    ClientId = "desktop",
-                    RequestId = "profile-attempt",
-                    CalibrationKind = "flow",
-                    Method = "manual",
-                    DefinitionVersion = "1",
-                    Input = JsonSerializer.SerializeToElement(new { }),
-                    Specification = JsonSerializer.SerializeToElement(new { }),
-                    ProfileSnapshotIds = JsonSerializer.SerializeToElement(Array.Empty<Guid>()),
-                    PrinterConfigurationRevision = 1,
-                },
-                actor,
-                CancellationToken.None);
-            projectId = project.Value.Id;
-            attemptId = attempt.Value!.Id;
-        }
-
-        GeneratedProfileRevisionReadBarrierInterceptor barrier = new();
-        await using AppDbContext firstContext = store.CreateContext(barrier);
-        await using AppDbContext secondContext = store.CreateContext(barrier);
-        Task<CalibrationApiResult<GeneratedProfileRevisionDto>> first =
-            CreateService(firstContext, store.PrinterId).CreateGeneratedProfileAsync(
-                projectId,
-                CreateGeneratedProfileRequest(attemptId, "profile-1", "First profile", 0.98m),
-                actor,
-                CancellationToken.None);
-        Task<CalibrationApiResult<GeneratedProfileRevisionDto>> second =
-            CreateService(secondContext, store.PrinterId).CreateGeneratedProfileAsync(
-                projectId,
-                CreateGeneratedProfileRequest(attemptId, "profile-2", "Second profile", 1.02m),
-                actor,
-                CancellationToken.None);
-
-        CalibrationApiResult<GeneratedProfileRevisionDto>[] results = await Task.WhenAll(first, second);
-
-        _ = results.Should().OnlyContain(result => result.StatusCode == StatusCodes.Status201Created);
-        _ = results.Should().OnlyContain(result => !result.Replayed);
-        _ = results.Select(result => result.Value!.RevisionNumber).Order().Should().Equal(1, 2);
-        await using AppDbContext verificationContext = store.CreateContext();
-        GeneratedProfileRevision[] revisions = await verificationContext.GeneratedProfileRevisions
-            .OrderBy(revision => revision.RevisionNumber)
-            .ToArrayAsync();
-        _ = revisions.Should().HaveCount(2);
-        _ = revisions.Select(revision => revision.Name).Should().BeEquivalentTo("First profile", "Second profile");
-    }
-
-    [Fact]
     public async Task UploadPhotoAsync_ConcurrentExactRetry_ReplaysSinglePhoto()
     {
         await using SqliteCalibrationStore store = await SqliteCalibrationStore.CreateAsync();
@@ -527,28 +464,6 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
             ClientId = "desktop",
             OperationId = operationId,
             EventType = "started",
-        };
-
-    private static GeneratedProfileRevisionCreateRequest CreateGeneratedProfileRequest(
-        Guid attemptId,
-        string operationId,
-        string name,
-        decimal flowRatio) =>
-        new()
-        {
-            ClientId = "desktop",
-            GenerationRequestId = operationId,
-            SourceAttemptId = attemptId,
-            ProfileType = "filament",
-            SchemaVersion = "1.0",
-            SlicerEngine = CalibrationContractConstants.SlicerEngine,
-            SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
-            Name = name,
-            NormalizedSettings = JsonSerializer.SerializeToElement(new { flow_ratio = flowRatio }),
-            ExactProfileJson = JsonSerializer.Serialize(new { flow_ratio = flowRatio }),
-            SourceProfileFingerprint = new string('a', 64),
-            GeneratorVersion = "test",
-            FlowRatio = flowRatio,
         };
 
     private static string ProjectEtag(Guid projectId, long revision) =>
@@ -768,34 +683,6 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
                 }
 
                 await _bothSequenceReadsReachedBarrier.Task.WaitAsync(cancellationToken);
-            }
-
-            return await base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
-        }
-    }
-
-    private sealed class GeneratedProfileRevisionReadBarrierInterceptor : DbCommandInterceptor
-    {
-        private readonly TaskCompletionSource _bothRevisionReadsReachedBarrier = new(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        private int _revisionReadCount;
-
-        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
-            DbCommand command,
-            CommandEventData eventData,
-            InterceptionResult<DbDataReader> result,
-            CancellationToken cancellationToken = default)
-        {
-            if (command.CommandText.Contains("GeneratedProfileRevisions", StringComparison.Ordinal) &&
-                command.CommandText.Contains("\"RevisionNumber\"", StringComparison.Ordinal) &&
-                Interlocked.Increment(ref _revisionReadCount) <= 2)
-            {
-                if (_revisionReadCount == 2)
-                {
-                    _ = _bothRevisionReadsReachedBarrier.TrySetResult();
-                }
-
-                await _bothRevisionReadsReachedBarrier.Task.WaitAsync(cancellationToken);
             }
 
             return await base.ReaderExecutingAsync(command, eventData, result, cancellationToken);

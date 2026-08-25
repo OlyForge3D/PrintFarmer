@@ -532,8 +532,6 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PrinterConfigurationSnapshotId");
-
                     b.HasIndex("ProjectId", "AttemptRequestId")
                         .IsUnique();
 
@@ -959,21 +957,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
-                    b.Property<Guid?>("FinalArtifactId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<Guid?>("GcodeFileId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("GcodeSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
                     b.Property<string>("GenerationRequestSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("GeneratorVersion")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
@@ -991,10 +978,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
-                    b.Property<string>("ManifestSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
                     b.Property<Guid?>("Model3DId")
                         .HasColumnType("uniqueidentifier");
 
@@ -1006,19 +989,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
-                    b.Property<string>("PlanManifestSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
                     b.Property<Guid?>("PrintJobId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("PromotionOperationId")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
 
                     b.Property<int>("RetryCount")
                         .HasColumnType("int");
@@ -1028,17 +1003,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("bigint");
 
                     b.Property<Guid?>("SliceJobId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("SlicerBinarySha256")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("SlicerContainerDigest")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<Guid?>("SourceArtifactId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("SpecificationSha256")
@@ -1053,9 +1017,6 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("WorkerId")
-                        .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 
@@ -2661,195 +2622,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("State", "UpdatedAtUtc");
 
                     b.ToTable("GcodePromotionCheckpoints");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.GeneratedProfileRevision", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("BedTemperature")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBySubject")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("ExactProfileJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<decimal?>("FlowRatio")
-                        .HasPrecision(10, 6)
-                        .HasColumnType("decimal(10,6)");
-
-                    b.Property<string>("GenerationRequestId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("GeneratorVersion")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<decimal?>("MaximumVolumetricFlow")
-                        .HasPrecision(10, 6)
-                        .HasColumnType("decimal(10,6)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("NormalizedSettingsJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int?>("NozzleTemperature")
-                        .HasColumnType("int");
-
-                    b.Property<Guid?>("ParentRevisionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal?>("PressureAdvance")
-                        .HasPrecision(10, 6)
-                        .HasColumnType("decimal(10,6)");
-
-                    b.Property<decimal?>("PressureAdvanceSmoothTime")
-                        .HasPrecision(10, 6)
-                        .HasColumnType("decimal(10,6)");
-
-                    b.Property<string>("ProfileType")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal?>("RetractionLength")
-                        .HasPrecision(10, 6)
-                        .HasColumnType("decimal(10,6)");
-
-                    b.Property<decimal?>("RetractionLiftZ")
-                        .HasPrecision(10, 6)
-                        .HasColumnType("decimal(10,6)");
-
-                    b.Property<decimal?>("RetractionMinimumTravel")
-                        .HasPrecision(10, 6)
-                        .HasColumnType("decimal(10,6)");
-
-                    b.Property<decimal?>("RetractionSpeed")
-                        .HasPrecision(10, 6)
-                        .HasColumnType("decimal(10,6)");
-
-                    b.Property<long>("RevisionNumber")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("SchemaVersion")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<string>("Sha256")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("SlicerContainerDigest")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("SlicerDistribution")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("SlicerEngine")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("SlicerVersion")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<Guid>("SourceAttemptId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("SourceFilamentProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("SourceMachineProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("SourceProcessProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("SourceProfileFingerprint")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SourceAttemptId");
-
-                    b.HasIndex("ProjectId", "GenerationRequestId")
-                        .IsUnique();
-
-                    b.HasIndex("ProjectId", "RevisionNumber")
-                        .IsUnique();
-
-                    b.ToTable("GeneratedProfileRevisions");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.GeneratedProfileRevisionOperation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ActorSubject")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("ExportFormat")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<Guid>("GeneratedProfileRevisionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("OccurredAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("OperationId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("OperationType")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<Guid?>("PublishedProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("GeneratedProfileRevisionId", "OperationId")
-                        .IsUnique();
-
-                    b.ToTable("GeneratedProfileRevisionOperations");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.HarvestDiscoveredFile", b =>
@@ -6368,128 +6140,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("Printers");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterConfigurationSnapshot", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("AttemptId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Backend")
-                        .HasColumnType("int");
-
-                    b.Property<string>("BackendApiVersion")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("BackendVersion")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<DateTime>("CapturedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CapturedBySubject")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("ExactFilamentProfileJson")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("ExactMachineProfileJson")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("ExactProcessProfileJson")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("FilamentProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("FilamentProfileSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<int>("FirmwareDetectionSource")
-                        .HasColumnType("int");
-
-                    b.Property<int>("FirmwareFamily")
-                        .HasColumnType("int");
-
-                    b.Property<string>("FirmwareVersion")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<int>("GcodeDialect")
-                        .HasColumnType("int");
-
-                    b.Property<Guid?>("MachineProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("MachineProfileSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<long>("PrinterConfigurationRevision")
-                        .HasColumnType("bigint");
-
-                    b.Property<Guid>("PrinterId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("ProcessProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ProcessProfileSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("SanitizedSnapshotJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("SchemaVersion")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<string>("SlicerContainerDigest")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("SlicerDistribution")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("SlicerEngine")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("SlicerVersion")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("SnapshotSha256")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AttemptId");
-
-                    b.HasIndex("ProjectId", "SnapshotSha256")
-                        .IsUnique();
-
-                    b.ToTable("PrinterConfigurationSnapshots");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterDispatchState", b =>
                 {
                     b.Property<Guid>("PrinterId")
@@ -8624,11 +8274,6 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationAttempt", b =>
                 {
-                    b.HasOne("Farm.Infrastructure.Domain.PrinterConfigurationSnapshot", null)
-                        .WithMany()
-                        .HasForeignKey("PrinterConfigurationSnapshotId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("Farm.Infrastructure.Domain.CalibrationProject", null)
                         .WithMany()
                         .HasForeignKey("ProjectId")
@@ -8911,30 +8556,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired();
 
                     b.Navigation("Printer");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.GeneratedProfileRevision", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.CalibrationProject", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Farm.Infrastructure.Domain.CalibrationAttempt", null)
-                        .WithMany()
-                        .HasForeignKey("SourceAttemptId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.GeneratedProfileRevisionOperation", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.GeneratedProfileRevision", null)
-                        .WithMany()
-                        .HasForeignKey("GeneratedProfileRevisionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.HarvestDiscoveredFile", b =>
@@ -9621,15 +9242,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Model");
 
                     b.Navigation("PrinterGroup");
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterConfigurationSnapshot", b =>
-                {
-                    b.HasOne("Farm.Infrastructure.Domain.CalibrationProject", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterDispatchState", b =>

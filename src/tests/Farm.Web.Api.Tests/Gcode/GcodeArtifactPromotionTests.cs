@@ -1727,28 +1727,6 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 CreatedBySubject = "seed",
                 UpdatedBySubject = "seed",
             });
-            _ = core.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
-            {
-                Id = snapshotId,
-                ProjectId = projectId,
-                AttemptId = attemptId,
-                PrinterId = printerId,
-                SchemaVersion = "1.0",
-                SanitizedSnapshotJson = "{}",
-                SnapshotSha256 =
-                    Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"snapshot-{snapshotId}"))),
-                PrinterConfigurationRevision = 1,
-                FirmwareFamily = PrinterFirmwareFamily.Klipper,
-                GcodeDialect = PrinterGcodeDialect.Klipper,
-                FirmwareDetectionSource = FirmwareDetectionSource.Printer,
-                SlicerEngine = "OrcaSlicer",
-                SlicerDistribution = "upstream",
-                SlicerVersion = "2.3.1",
-                SlicerContainerDigest = "sha256:pinned-container",
-                MachineProfileSha256 = machineProfileSha256,
-                CapturedAtUtc = nowUtc,
-                CapturedBySubject = "seed",
-            });
             _ = core.CalibrationAttempts.Add(new CalibrationAttempt
             {
                 Id = attemptId,
@@ -1758,7 +1736,6 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 Method = "flow-coarse",
                 DefinitionVersion = "1.0",
                 SpecificationSha256 = specificationSha256,
-                PrinterConfigurationSnapshotId = snapshotId,
                 AttemptRequestId = $"attempt-{attemptId:N}",
                 CreatedAtUtc = nowUtc,
                 CreatedBySubject = "seed",

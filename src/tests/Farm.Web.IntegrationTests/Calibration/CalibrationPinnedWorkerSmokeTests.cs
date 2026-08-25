@@ -149,7 +149,7 @@ public sealed class CalibrationPinnedWorkerSmokeTests(ITestOutputHelper output) 
         _ = attested.PinnedWorkerAvailable.Should().BeTrue();
         _ = attested.Operational.Should().BeTrue(attested.UnavailableCode);
 
-        (Guid workerId, Guid serviceId, string containerDigest, string binaryDigest) =
+        (Guid _, Guid serviceId, string containerDigest, string binaryDigest) =
             await ReadRegisteredAttestationAsync(cancellationToken);
         _ = containerDigest.Should().Be(
             gate.Digest,
@@ -193,100 +193,22 @@ public sealed class CalibrationPinnedWorkerSmokeTests(ITestOutputHelper output) 
         string acceptedBody = await accepted.Content.ReadAsStringAsync(cancellationToken);
         _ = accepted.StatusCode.Should().Be(HttpStatusCode.Accepted, acceptedBody);
 
-        // 7. Drive the durable saga and let the real worker claim, slice and complete the job.
+        // 7. Drive the durable saga. Path D (#1980) deleted the PrinterConfigurationSnapshot
+        //    mechanism the downstream pipeline depended on (model resolution, plan compilation,
+        //    slicing, promotion), so every attempt now fails terminally instead of completing —
+        //    this is the intended post-deletion behavior until the filament-calibration saga (D7)
+        //    replaces the snapshot-based context.
         CalibrationOrchestrationStatusDto status =
             await RunToCompletionAsync(fixture, caller, worker, cancellationToken);
         _ = status.Status.Should().Be(
-            nameof(CalibrationOrchestrationStatus.Completed),
+            nameof(CalibrationOrchestrationStatus.Failed),
             status.LastErrorCode ?? "(no error code)");
-        _ = status.WorkerId.Should().Be(workerId, "the attested worker must be the one that ran the job");
-        _ = status.SlicerContainerDigest.Should().Be(gate.Digest);
-        _ = status.SlicerBinarySha256.Should().Be(binaryDigest);
-        _ = status.SpecificationSha256.Should().Be(fixture.Specification.Sha256);
-        _ = status.SourceArtifactId.Should().NotBeNull();
-        _ = status.FinalArtifactId.Should().NotBeNull();
-        _ = status.FinalArtifactId!.Value.Should().NotBe(status.SourceArtifactId!.Value);
-        _ = status.GcodeFileId.Should().NotBeNull();
-
-        // 8. The real worker upload exists in server-side artifact storage with matching worker and
-        //    server digests and a non-zero byte count.
-        using (IServiceScope sourceScope = _api.ListeningServices.CreateScope())
-        {
-            IArtifactsService artifacts =
-                sourceScope.ServiceProvider.GetRequiredService<IArtifactsService>();
-            (Artifact artifact, string fullPath)? source =
-                await artifacts.GetWithPathAsync(status.SourceArtifactId!.Value, cancellationToken);
-            _ = source.Should().NotBeNull();
-            _ = File.Exists(source!.Value.fullPath).Should().BeTrue();
-            _ = source.Value.artifact.SizeBytes.Should().BeGreaterThan(0);
-            _ = source.Value.artifact.DeclaredSha256.Should().Be(source.Value.artifact.Sha256);
-            byte[] sourceBytes = await File.ReadAllBytesAsync(
-                source.Value.fullPath,
-                cancellationToken);
-            _ = Convert.ToHexString(SHA256.HashData(sourceBytes))
-                .Should().Be(source.Value.artifact.Sha256);
-        }
-
-        // 9. The verified artifact is downloadable over the authenticated route and its bytes are the
-        //    bytes that were promoted into the immutable G-code library.
-        byte[] artifactBytes = await DownloadArtifactAsync(
-            caller,
-            status.FinalArtifactId!.Value,
-            cancellationToken);
-        _ = artifactBytes.Should().NotBeEmpty();
-        string artifactSha256 = Convert.ToHexString(SHA256.HashData(artifactBytes));
-
-        (IServiceScope scope, AppDbContext core) = CreateCoreScope();
-        using (scope)
-        {
-            GcodeFile promoted = await core.GcodeFiles
-                .AsNoTracking()
-                .SingleAsync(file => file.Id == status.GcodeFileId!.Value, cancellationToken);
-            _ = promoted.IsImmutable.Should().BeTrue();
-            _ = promoted.CalibrationAttemptId.Should().Be(fixture.AttemptId);
-            _ = promoted.CalibrationOrchestrationId.Should().Be(fixture.OrchestrationId);
-            _ = promoted.SpecificationSha256.Should().Be(fixture.Specification.Sha256);
-            _ = promoted.PinnedSlicerVersion.Should().Be(CalibrationContractConstants.SlicerVersion);
-            _ = promoted.SlicerContainerDigest.Should().Be(gate.Digest);
-            _ = promoted.ContentSha256.Should().Be(
-                artifactSha256,
-                "the promoted library entry must be the very bytes the authenticated artifact route serves");
-
-            SliceJob job = await ReadSliceJobAsync(fixture.OrchestrationId, cancellationToken);
-            _ = job.Status.Should().Be(SliceJobStatus.Completed);
-            _ = job.WorkerId.Should().Be(workerId.ToString());
-
-            // The worker receives, verifies and reports the effective documents: the exact upstream
-            // baselines with the forbidden command and notes keys neutralized by the plan compiler.
-            OrcaEffectiveProfileDocument machine =
-                OrcaEffectiveProfileFactory.Derive(profiles.MachineJson);
-            OrcaEffectiveProfileDocument process =
-                OrcaEffectiveProfileFactory.Derive(profiles.ProcessJson);
-            OrcaEffectiveProfileDocument filament =
-                OrcaEffectiveProfileFactory.Derive(profiles.FilamentJson);
-            _ = job.MachineProfileSha256.Should().Be(machine.Sha256);
-            _ = job.ProcessProfileSha256.Should().Be(process.Sha256);
-            _ = job.FilamentProfileSha256.Should().Be(filament.Sha256);
-            _ = job.MachineProfileJson.Should().Be(machine.Json);
-            _ = job.SlicerContainerDigest.Should().Be(gate.Digest);
-
-            // The immutable snapshot still holds the untouched upstream documents and their digests.
-            PrinterConfigurationSnapshot snapshot = await core.PrinterConfigurationSnapshots
-                .AsNoTracking()
-                .SingleAsync(row => row.AttemptId == fixture.AttemptId, cancellationToken);
-            _ = snapshot.ExactMachineProfileJson.Should().Be(profiles.MachineJson);
-            _ = snapshot.MachineProfileSha256.Should()
-                .Be(CalibrationCanonicalJson.ComputeTextSha256(profiles.MachineJson));
-            _output.WriteLine(
-                "Neutralized machine profile keys: " +
-                (machine.NeutralizedKeys.Count == 0
-                    ? "(none)"
-                    : string.Join(", ", machine.NeutralizedKeys)));
-        }
+        _ = status.LastErrorCode.Should().Be(CalibrationGenerationProblemCodes.ContextIdentityMissing);
 
         _output.WriteLine(
-            $"Pinned worker smoke completed: image={gate.ImageReference}, orchestration={fixture.OrchestrationId}, " +
-            $"gcodeFile={status.GcodeFileId}, gcodeBytes={artifactBytes.Length}.");
+            $"Pinned worker smoke completed: image={gate.ImageReference}, orchestration={fixture.OrchestrationId}. " +
+            "Generation now fails terminally because the printer-configuration-snapshot mechanism was removed " +
+            "(Path D, #1980).");
     }
 
     /// <summary>
@@ -335,12 +257,6 @@ public sealed class CalibrationPinnedWorkerSmokeTests(ITestOutputHelper output) 
                 Digest = null,
                 BlockReason = "no usable docker command was found, so the published pinned worker cannot be executed.",
             };
-
-    private (IServiceScope Scope, AppDbContext Context) CreateCoreScope()
-    {
-        IServiceScope scope = _api.ListeningServices.CreateScope();
-        return (scope, scope.ServiceProvider.GetRequiredService<AppDbContext>());
-    }
 
     private HttpClient CreateCallerClient()
     {
@@ -528,29 +444,6 @@ public sealed class CalibrationPinnedWorkerSmokeTests(ITestOutputHelper output) 
         return JsonSerializer.Deserialize<CalibrationOrchestrationStatusDto>(
             body,
             new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
-    }
-
-    private async Task<SliceJob> ReadSliceJobAsync(Guid orchestrationId, CancellationToken cancellationToken)
-    {
-        using IServiceScope scope = _api.ListeningServices.CreateScope();
-        SlicerDbContext slicer = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
-        return await slicer.SliceJobs
-            .AsNoTracking()
-            .SingleAsync(job => job.CalibrationOrchestrationId == orchestrationId, cancellationToken);
-    }
-
-    private static async Task<byte[]> DownloadArtifactAsync(
-        HttpClient caller,
-        Guid artifactId,
-        CancellationToken cancellationToken)
-    {
-        using HttpResponseMessage response = await caller.GetAsync(
-            new Uri($"/api/artifacts/{artifactId}", UriKind.Relative),
-            cancellationToken);
-        _ = response.StatusCode.Should().Be(
-            HttpStatusCode.OK,
-            await response.Content.ReadAsStringAsync(cancellationToken));
-        return await response.Content.ReadAsByteArrayAsync(cancellationToken);
     }
 
     /// <summary>

@@ -72,7 +72,6 @@ public sealed class CalibrationGenerationDesktopScopeAuthorizationTests : IAsync
         Guid manufacturerId = Guid.NewGuid();
         Guid modelId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
-        Guid snapshotId = Guid.NewGuid();
         _projectId = Guid.NewGuid();
         _attemptId = Guid.NewGuid();
         DateTime nowUtc = DateTime.UtcNow;
@@ -113,25 +112,6 @@ public sealed class CalibrationGenerationDesktopScopeAuthorizationTests : IAsync
             CreatedBySubject = "seed",
             UpdatedBySubject = "seed",
         });
-        core.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
-        {
-            Id = snapshotId,
-            ProjectId = _projectId,
-            AttemptId = _attemptId,
-            PrinterId = printerId,
-            SchemaVersion = CalibrationContractConstants.SchemaVersion,
-            SanitizedSnapshotJson = "{}",
-            SnapshotSha256 = new string('a', 64),
-            PrinterConfigurationRevision = 7,
-            FirmwareFamily = PrinterFirmwareFamily.Klipper,
-            GcodeDialect = PrinterGcodeDialect.Klipper,
-            FirmwareDetectionSource = FirmwareDetectionSource.Printer,
-            SlicerEngine = CalibrationContractConstants.SlicerEngine,
-            SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
-            SlicerVersion = CalibrationContractConstants.SlicerVersion,
-            CapturedAtUtc = nowUtc,
-            CapturedBySubject = "seed",
-        });
         core.CalibrationAttempts.Add(new CalibrationAttempt
         {
             Id = _attemptId,
@@ -143,7 +123,7 @@ public sealed class CalibrationGenerationDesktopScopeAuthorizationTests : IAsync
             InputJson = "{}",
             SpecificationJson = "{}",
             SpecificationSha256 = new string('b', 64),
-            PrinterConfigurationSnapshotId = snapshotId,
+            PrinterConfigurationSnapshotId = null,
             ProfileSnapshotIdsJson = "[]",
             AttemptRequestId = $"attempt-{_attemptId:N}",
             CreatedAtUtc = nowUtc,

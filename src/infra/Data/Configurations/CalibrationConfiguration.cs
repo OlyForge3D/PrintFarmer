@@ -42,33 +42,6 @@ public sealed class CalibrationProjectConfiguration : IEntityTypeConfiguration<C
     }
 }
 
-/// <summary>Configures immutable snapshots captured from the printer-context contract.</summary>
-public sealed class PrinterConfigurationSnapshotConfiguration : IEntityTypeConfiguration<PrinterConfigurationSnapshot>
-{
-    public void Configure(EntityTypeBuilder<PrinterConfigurationSnapshot> builder)
-    {
-        _ = builder.HasKey(snapshot => snapshot.Id);
-        _ = builder.Property(snapshot => snapshot.SchemaVersion).IsRequired().HasMaxLength(32);
-        _ = builder.Property(snapshot => snapshot.SanitizedSnapshotJson).IsRequired();
-        _ = builder.Property(snapshot => snapshot.SnapshotSha256).IsRequired().HasMaxLength(64);
-        _ = builder.Property(snapshot => snapshot.FirmwareVersion).HasMaxLength(128);
-        _ = builder.Property(snapshot => snapshot.BackendVersion).HasMaxLength(128);
-        _ = builder.Property(snapshot => snapshot.BackendApiVersion).HasMaxLength(128);
-        _ = builder.Property(snapshot => snapshot.SlicerEngine).IsRequired().HasMaxLength(64);
-        _ = builder.Property(snapshot => snapshot.SlicerDistribution).IsRequired().HasMaxLength(64);
-        _ = builder.Property(snapshot => snapshot.SlicerVersion).HasMaxLength(64);
-        _ = builder.Property(snapshot => snapshot.SlicerContainerDigest).HasMaxLength(256);
-        _ = builder.Property(snapshot => snapshot.MachineProfileSha256).HasMaxLength(64);
-        _ = builder.Property(snapshot => snapshot.ProcessProfileSha256).HasMaxLength(64);
-        _ = builder.Property(snapshot => snapshot.FilamentProfileSha256).HasMaxLength(64);
-        _ = builder.Property(snapshot => snapshot.CapturedBySubject).IsRequired().HasMaxLength(256);
-        _ = builder.HasIndex(snapshot => new { snapshot.ProjectId, snapshot.SnapshotSha256 }).IsUnique();
-        _ = builder.HasIndex(snapshot => snapshot.AttemptId);
-        _ = builder.HasOne<CalibrationProject>().WithMany().HasForeignKey(snapshot => snapshot.ProjectId)
-            .OnDelete(DeleteBehavior.Cascade);
-    }
-}
-
 /// <summary>Configures editable drafts and their active-lineage uniqueness rule.</summary>
 public sealed class CalibrationDraftConfiguration : IEntityTypeConfiguration<CalibrationDraft>
 {
@@ -109,9 +82,6 @@ public sealed class CalibrationAttemptConfiguration : IEntityTypeConfiguration<C
         _ = builder.HasIndex(attempt => new { attempt.ProjectId, attempt.AttemptRequestId }).IsUnique();
         _ = builder.HasOne<CalibrationProject>().WithMany().HasForeignKey(attempt => attempt.ProjectId)
             .OnDelete(DeleteBehavior.Cascade);
-        _ = builder.HasOne<PrinterConfigurationSnapshot>().WithMany()
-            .HasForeignKey(attempt => attempt.PrinterConfigurationSnapshotId)
-            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -194,61 +164,6 @@ public sealed class CalibrationBlobCleanupConfiguration : IEntityTypeConfigurati
     }
 }
 
-/// <summary>Configures immutable generated-profile history and operation audit rows.</summary>
-public sealed class GeneratedProfileRevisionConfiguration : IEntityTypeConfiguration<GeneratedProfileRevision>
-{
-    public void Configure(EntityTypeBuilder<GeneratedProfileRevision> builder)
-    {
-        _ = builder.HasKey(revision => revision.Id);
-        _ = builder.Property(revision => revision.ProfileType).IsRequired().HasMaxLength(64);
-        _ = builder.Property(revision => revision.SchemaVersion).IsRequired().HasMaxLength(32);
-        _ = builder.Property(revision => revision.SlicerEngine).IsRequired().HasMaxLength(64);
-        _ = builder.Property(revision => revision.SlicerDistribution).IsRequired().HasMaxLength(64);
-        _ = builder.Property(revision => revision.SlicerVersion).HasMaxLength(64);
-        _ = builder.Property(revision => revision.SlicerContainerDigest).HasMaxLength(256);
-        _ = builder.Property(revision => revision.Name).IsRequired().HasMaxLength(256);
-        _ = builder.Property(revision => revision.NormalizedSettingsJson).IsRequired();
-        _ = builder.Property(revision => revision.SourceProfileFingerprint).IsRequired().HasMaxLength(64);
-        _ = builder.Property(revision => revision.ExactProfileJson).IsRequired();
-        _ = builder.Property(revision => revision.Sha256).IsRequired().HasMaxLength(64);
-        _ = builder.Property(revision => revision.GeneratorVersion).IsRequired().HasMaxLength(64);
-        _ = builder.Property(revision => revision.GenerationRequestId).IsRequired().HasMaxLength(128);
-        _ = builder.Property(revision => revision.CreatedBySubject).IsRequired().HasMaxLength(256);
-        _ = builder.Property(revision => revision.FlowRatio).HasPrecision(10, 6);
-        _ = builder.Property(revision => revision.PressureAdvance).HasPrecision(10, 6);
-        _ = builder.Property(revision => revision.PressureAdvanceSmoothTime).HasPrecision(10, 6);
-        _ = builder.Property(revision => revision.RetractionLength).HasPrecision(10, 6);
-        _ = builder.Property(revision => revision.RetractionSpeed).HasPrecision(10, 6);
-        _ = builder.Property(revision => revision.RetractionMinimumTravel).HasPrecision(10, 6);
-        _ = builder.Property(revision => revision.RetractionLiftZ).HasPrecision(10, 6);
-        _ = builder.Property(revision => revision.MaximumVolumetricFlow).HasPrecision(10, 6);
-        _ = builder.HasIndex(revision => new { revision.ProjectId, revision.RevisionNumber }).IsUnique();
-        _ = builder.HasIndex(revision => new { revision.ProjectId, revision.GenerationRequestId }).IsUnique();
-        _ = builder.HasOne<CalibrationProject>().WithMany().HasForeignKey(revision => revision.ProjectId)
-            .OnDelete(DeleteBehavior.Cascade);
-        _ = builder.HasOne<CalibrationAttempt>().WithMany().HasForeignKey(revision => revision.SourceAttemptId)
-            .OnDelete(DeleteBehavior.Restrict);
-    }
-}
-
-/// <summary>Configures append-only generated-profile publication and export records.</summary>
-public sealed class GeneratedProfileRevisionOperationConfiguration : IEntityTypeConfiguration<GeneratedProfileRevisionOperation>
-{
-    public void Configure(EntityTypeBuilder<GeneratedProfileRevisionOperation> builder)
-    {
-        _ = builder.HasKey(operation => operation.Id);
-        _ = builder.Property(operation => operation.OperationType).IsRequired().HasMaxLength(32);
-        _ = builder.Property(operation => operation.OperationId).IsRequired().HasMaxLength(128);
-        _ = builder.Property(operation => operation.ExportFormat).HasMaxLength(64);
-        _ = builder.Property(operation => operation.ActorSubject).IsRequired().HasMaxLength(256);
-        _ = builder.HasIndex(operation => new { operation.GeneratedProfileRevisionId, operation.OperationId })
-            .IsUnique();
-        _ = builder.HasOne<GeneratedProfileRevision>().WithMany()
-            .HasForeignKey(operation => operation.GeneratedProfileRevisionId)
-            .OnDelete(DeleteBehavior.Cascade);
-    }
-}
-
 /// <summary>Configures exact idempotency replay storage.</summary>
 public sealed class CalibrationIdempotencyRecordConfiguration : IEntityTypeConfiguration<CalibrationIdempotencyRecord>
 {
@@ -280,13 +195,6 @@ public sealed class CalibrationOrchestrationConfiguration : IEntityTypeConfigura
         _ = builder.Property(orchestration => orchestration.Revision).IsConcurrencyToken().ValueGeneratedNever();
         _ = builder.Property(orchestration => orchestration.GenerationRequestSha256).HasMaxLength(64);
         _ = builder.Property(orchestration => orchestration.SpecificationSha256).HasMaxLength(64);
-        _ = builder.Property(orchestration => orchestration.PlanManifestSha256).HasMaxLength(64);
-        _ = builder.Property(orchestration => orchestration.GcodeSha256).HasMaxLength(64);
-        _ = builder.Property(orchestration => orchestration.ManifestSha256).HasMaxLength(64);
-        _ = builder.Property(orchestration => orchestration.GeneratorVersion).HasMaxLength(64);
-        _ = builder.Property(orchestration => orchestration.SlicerContainerDigest).HasMaxLength(128);
-        _ = builder.Property(orchestration => orchestration.SlicerBinarySha256).HasMaxLength(128);
-        _ = builder.Property(orchestration => orchestration.PromotionOperationId).HasMaxLength(128);
         _ = builder.Property(orchestration => orchestration.LeaseOwner).HasMaxLength(128);
         _ = builder.HasIndex(orchestration => orchestration.AttemptId).IsUnique();
         _ = builder.HasIndex(orchestration => new { orchestration.Status, orchestration.NextRetryAtUtc });

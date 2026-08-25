@@ -6686,40 +6686,12 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         };
         db.Spools.Add(spool);
 
-        Guid snapshotId = Guid.NewGuid();
-        PrinterConfigurationSnapshotDto snapshotDocument = new()
-        {
-            PrinterId = printer.Id,
-            ConfigurationRevision = printer.ConfigurationRevision,
-            SnapshotSha256 = new string('6', 64),
-            Toolheads =
-            [
-                new CalibrationToolheadDto(
-                    toolhead.Id,
-                    toolhead.Index,
-                    toolhead.Name,
-                    true,
-                    new CalibrationPoint3DDto(0, 0, 0),
-                    toolhead.NozzleDiameter,
-                    "Brass",
-                    "Brass",
-                    300,
-                    false,
-                    300,
-                    20,
-                    "DirectDrive",
-                    true,
-                    null,
-                    [Material]),
-            ],
-        };
         db.CalibrationProjects.Add(new CalibrationProject
         {
             Id = gcode.CalibrationProjectId!.Value,
             OwnerUserId = CalibrationOwnerId,
             Name = "Production calibration",
             PrinterId = printer.Id,
-            CurrentPrinterConfigurationSnapshotId = snapshotId,
             SelectedToolheadId = toolhead.Id,
             SelectedToolheadIndex = toolhead.Index,
             FilamentProvider = "local",
@@ -6730,34 +6702,11 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             LocalSpoolId = spool.Id,
             FilamentSnapshotJson = """{"material":"PLA"}""",
         });
-        db.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
-        {
-            Id = snapshotId,
-            ProjectId = gcode.CalibrationProjectId.Value,
-            AttemptId = gcode.CalibrationAttemptId,
-            PrinterId = printer.Id,
-            SchemaVersion = "1",
-            SanitizedSnapshotJson = JsonSerializer.Serialize(snapshotDocument),
-            SnapshotSha256 = new string('6', 64),
-            PrinterConfigurationRevision = printer.ConfigurationRevision,
-            FirmwareFamily = PrinterFirmwareFamily.Klipper,
-            GcodeDialect = PrinterGcodeDialect.Klipper,
-            SlicerEngine = "OrcaSlicer",
-            SlicerDistribution = "upstream",
-            SlicerVersion = "2.3.0",
-            SlicerContainerDigest = "sha256:test",
-            MachineProfileSha256 = gcode.MachineProfileSha256,
-            ProcessProfileSha256 = gcode.ProcessProfileSha256,
-            FilamentProfileSha256 = gcode.FilamentProfileSha256,
-            CapturedAtUtc = DateTime.UtcNow,
-            CapturedBySubject = CalibrationOwnerId.ToString(),
-        });
         db.CalibrationAttempts.Add(new CalibrationAttempt
         {
             Id = gcode.CalibrationAttemptId!.Value,
             ProjectId = gcode.CalibrationProjectId.Value,
             SpecificationSha256 = gcode.SpecificationSha256!,
-            PrinterConfigurationSnapshotId = snapshotId,
         });
         db.CalibrationOrchestrations.Add(new CalibrationOrchestration
         {
@@ -6766,11 +6715,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             AttemptId = gcode.CalibrationAttemptId.Value,
             SpecificationSha256 = gcode.SpecificationSha256,
             SliceJobId = gcode.SourceSliceJobId,
-            FinalArtifactId = gcode.SourceArtifactId,
             GcodeFileId = gcode.Id,
-            GcodeSha256 = gcode.ContentSha256,
-            ManifestSha256 = gcode.CalibrationManifestSha256,
-            SlicerContainerDigest = gcode.SlicerContainerDigest,
         });
 
         await db.SaveChangesAsync();
@@ -6827,8 +6772,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         Spool spool = await db.Spools.SingleAsync(
             candidate => candidate.AssignedPrinterId == baseFixture.PrinterId);
         Toolhead toolhead = printer.Toolheads.Single();
-        PrinterConfigurationSnapshot snapshot = await db.PrinterConfigurationSnapshots
-            .SingleAsync(candidate => candidate.ProjectId == gcode.CalibrationProjectId);
+        Guid calibrationConfigSnapshotId = Guid.NewGuid();
+        string calibrationConfigSnapshotSha256 = new('6', 64);
 
         var job = new PrintJob
         {
@@ -6854,7 +6799,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             MachineProfileSha256 = gcode.MachineProfileSha256,
             ProcessProfileSha256 = gcode.ProcessProfileSha256,
             FilamentProfileSha256 = gcode.FilamentProfileSha256,
-            PrinterConfigSnapshotSha256 = snapshot.SnapshotSha256,
+            PrinterConfigSnapshotSha256 = calibrationConfigSnapshotSha256,
             PinnedPrinterModelId = printer.ModelId,
             PinnedToolheadId = toolhead.Id,
             PinnedToolheadIndex = toolhead.Index,
@@ -6874,7 +6819,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             CalibrationProjectId = gcode.CalibrationProjectId,
             CalibrationAttemptId = gcode.CalibrationAttemptId,
             CalibrationOrchestrationId = gcode.CalibrationOrchestrationId,
-            CalibrationConfigSnapshotId = snapshot.Id,
+            CalibrationConfigSnapshotId = calibrationConfigSnapshotId,
             SourceArtifactId = gcode.SourceArtifactId,
             SliceJobId = gcode.SourceSliceJobId,
             SpoolmanSpoolId = SpoolId,

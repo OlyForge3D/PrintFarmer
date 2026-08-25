@@ -1,6 +1,4 @@
-﻿using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -276,149 +274,6 @@ internal sealed class CalibrationGenerationHarness : IDisposable
         return workerId;
     }
 
-    /// <summary>Claims the next compatible slice job as the registered worker.</summary>
-    /// <param name="workerId">Registered worker identity.</param>
-    /// <returns>The claimed job, or <see langword="null"/> when no compatible job exists.</returns>
-    public async Task<SliceJob?> ClaimNextSliceJobAsync(Guid workerId)
-    {
-        await using SlicerDbContext slicer = CreateSlicerContext();
-        Worker worker = await slicer.Workers.SingleAsync(candidate => candidate.Id == workerId);
-        EfSliceJobRepository repository = new(slicer);
-        return await repository.ClaimNextJobAsync(
-            WorkerClaimIdentity.FromRegisteredWorker(worker),
-            leaseDurationSeconds: 300,
-            maxRetries: 3,
-            ct: CancellationToken.None);
-    }
-
-    /// <summary>Completes the submitted slice job the way an authenticated worker would.</summary>
-    /// <param name="orchestrationId">The orchestration whose job should be completed.</param>
-    /// <param name="workerId">The worker credited with the artifact.</param>
-    /// <param name="gcode">The sliced program bytes the worker uploaded.</param>
-    /// <param name="status">Terminal job status to record.</param>
-    /// <param name="produceArtifact">Whether the worker uploaded a G-code artifact.</param>
-    /// <returns>The produced worker artifact identity, when one was written.</returns>
-    public async Task<Guid?> CompleteWorkerJobAsync(
-        Guid orchestrationId,
-        Guid workerId,
-        string gcode = ";worker sliced output\nG28\nG1 X10 Y10 F1200\n",
-        string status = SliceJobStatus.Completed,
-        bool produceArtifact = true)
-    {
-        await using SlicerDbContext slicer = CreateSlicerContext();
-        SliceJob job = await slicer.SliceJobs.SingleAsync(
-            candidate => candidate.CalibrationOrchestrationId == orchestrationId);
-        Guid claimToken = job.ClaimToken ?? Guid.NewGuid();
-        job.Status = status;
-        job.WorkerId = workerId;
-        job.ClaimToken = claimToken;
-        job.LeaseToken = claimToken;
-        job.CompletedAt = DateTime.UtcNow;
-        job.UpdatedAt = DateTime.UtcNow;
-
-        Guid? artifactId = null;
-        if (status == SliceJobStatus.Completed && produceArtifact)
-        {
-            byte[] bytes = Encoding.UTF8.GetBytes(gcode);
-            string relativePath = $"{Guid.NewGuid():N}.gcode";
-            await File.WriteAllBytesAsync(Path.Join(ArtifactRoot, relativePath), bytes);
-            artifactId = Guid.NewGuid();
-            string digest = Convert.ToHexString(SHA256.HashData(bytes));
-            _ = slicer.Artifacts.Add(new Artifact
-            {
-                Id = artifactId.Value,
-                JobId = job.Id,
-                WorkerId = workerId,
-                ClaimToken = claimToken,
-                Kind = SlicerArtifactKinds.Gcode,
-                FileName = "sliced.gcode",
-                RelativePath = relativePath,
-                ContentType = "text/x.gcode",
-                SizeBytes = bytes.LongLength,
-                Sha256 = digest,
-                DeclaredSha256 = digest,
-                CreatedAt = DateTime.UtcNow,
-            });
-            job.ArtifactIdsCsv = artifactId.Value.ToString("D");
-        }
-
-        _ = await slicer.SaveChangesAsync();
-        return artifactId;
-    }
-
-    /// <summary>
-    /// Completes a reclaimed job with one stale upload and one accepted upload from the current claim.
-    /// </summary>
-    public async Task<(Guid StaleArtifactId, Guid AcceptedArtifactId)> CompleteReclaimedWorkerJobAsync(
-        Guid orchestrationId,
-        Guid staleWorkerId,
-        Guid currentWorkerId)
-    {
-        await using SlicerDbContext slicer = CreateSlicerContext();
-        SliceJob job = await slicer.SliceJobs.SingleAsync(
-            candidate => candidate.CalibrationOrchestrationId == orchestrationId);
-        Guid staleClaimToken = Guid.NewGuid();
-        Guid currentClaimToken = Guid.NewGuid();
-        Guid staleArtifactId = Guid.NewGuid();
-        Guid acceptedArtifactId = Guid.NewGuid();
-        DateTime nowUtc = DateTime.UtcNow;
-
-        Artifact stale = await WriteWorkerArtifactAsync(
-            job.Id,
-            staleArtifactId,
-            staleWorkerId,
-            staleClaimToken,
-            ";stale claimant output\nG28\nG1 X1 Y1 F1200\n",
-            nowUtc.AddMinutes(-1));
-        Artifact accepted = await WriteWorkerArtifactAsync(
-            job.Id,
-            acceptedArtifactId,
-            currentWorkerId,
-            currentClaimToken,
-            ";accepted claimant output\nG28\nG1 X10 Y10 F1200\n",
-            nowUtc);
-        slicer.Artifacts.AddRange(stale, accepted);
-
-        job.Status = SliceJobStatus.Completed;
-        job.WorkerId = currentWorkerId;
-        job.ClaimToken = currentClaimToken;
-        job.LeaseToken = currentClaimToken;
-        job.ArtifactIdsCsv = acceptedArtifactId.ToString("D");
-        job.CompletedAt = nowUtc;
-        job.UpdatedAt = nowUtc;
-        _ = await slicer.SaveChangesAsync();
-        return (staleArtifactId, acceptedArtifactId);
-    }
-
-    private async Task<Artifact> WriteWorkerArtifactAsync(
-        Guid jobId,
-        Guid artifactId,
-        Guid workerId,
-        Guid claimToken,
-        string gcode,
-        DateTime createdAt)
-    {
-        byte[] bytes = Encoding.UTF8.GetBytes(gcode);
-        string relativePath = $"{artifactId:N}.gcode";
-        await File.WriteAllBytesAsync(Path.Join(ArtifactRoot, relativePath), bytes);
-        string digest = Convert.ToHexString(SHA256.HashData(bytes));
-        return new Artifact
-        {
-            Id = artifactId,
-            JobId = jobId,
-            WorkerId = workerId,
-            ClaimToken = claimToken,
-            Kind = SlicerArtifactKinds.Gcode,
-            FileName = "sliced.gcode",
-            RelativePath = relativePath,
-            ContentType = "text/x.gcode",
-            SizeBytes = bytes.LongLength,
-            Sha256 = digest,
-            DeclaredSha256 = digest,
-            CreatedAt = createdAt,
-        };
-    }
-
     /// <summary>Reads the durable orchestration row.</summary>
     /// <param name="orchestrationId">The orchestration identity.</param>
     /// <returns>The persisted row.</returns>
@@ -430,17 +285,6 @@ internal sealed class CalibrationGenerationHarness : IDisposable
             .SingleAsync(candidate => candidate.Id == orchestrationId);
     }
 
-    /// <summary>Reads the submitted slice job of an orchestration, when one exists.</summary>
-    /// <param name="orchestrationId">The orchestration identity.</param>
-    /// <returns>The slice job, or <see langword="null"/>.</returns>
-    public async Task<SliceJob?> FindSliceJobAsync(Guid orchestrationId)
-    {
-        await using SlicerDbContext slicer = CreateSlicerContext();
-        return await slicer.SliceJobs
-            .AsNoTracking()
-            .SingleOrDefaultAsync(candidate => candidate.CalibrationOrchestrationId == orchestrationId);
-    }
-
     /// <summary>Counts submitted slice jobs of an orchestration.</summary>
     /// <param name="orchestrationId">The orchestration identity.</param>
     /// <returns>The number of durable jobs.</returns>
@@ -450,33 +294,6 @@ internal sealed class CalibrationGenerationHarness : IDisposable
         return await slicer.SliceJobs
             .AsNoTracking()
             .CountAsync(candidate => candidate.CalibrationOrchestrationId == orchestrationId);
-    }
-
-    /// <summary>Lists all artifacts of an orchestration's slice job.</summary>
-    /// <param name="orchestrationId">The orchestration identity.</param>
-    /// <returns>The artifacts, oldest first.</returns>
-    public async Task<IReadOnlyList<Artifact>> ListArtifactsAsync(Guid orchestrationId)
-    {
-        await using SlicerDbContext slicer = CreateSlicerContext();
-        SliceJob? job = await slicer.SliceJobs
-            .AsNoTracking()
-            .SingleOrDefaultAsync(candidate => candidate.CalibrationOrchestrationId == orchestrationId);
-        return job is null
-            ? []
-            : await slicer.Artifacts
-                .AsNoTracking()
-                .Where(artifact => artifact.JobId == job.Id)
-                .OrderBy(artifact => artifact.CreatedAt)
-                .ToListAsync();
-    }
-
-    /// <summary>Counts stored models owned by a user.</summary>
-    /// <param name="ownerId">The owning user.</param>
-    /// <returns>The number of stored models.</returns>
-    public async Task<int> CountStoredModelsAsync(Guid ownerId)
-    {
-        await using SlicerDbContext slicer = CreateSlicerContext();
-        return await slicer.Models3D.AsNoTracking().CountAsync(model => model.UploadedByUserId == ownerId);
     }
 
     /// <summary>Reads the promoted library file of a completed run.</summary>
@@ -517,21 +334,6 @@ internal sealed class CalibrationGenerationHarness : IDisposable
         await using AppDbContext core = CreateCoreContext();
         return await core.CalibrationChanges.AsNoTracking().CountAsync(change => change.ProjectId == projectId);
     }
-
-    /// <summary>Simulates a crash by resetting the durable row to an earlier checkpoint.</summary>
-    /// <param name="orchestrationId">The orchestration identity.</param>
-    /// <param name="step">The step to resume from.</param>
-    /// <returns>A task that completes when the row is rewritten.</returns>
-    public Task RewindToStepAsync(Guid orchestrationId, string step) =>
-        MutateOrchestrationAsync(orchestrationId, orchestration =>
-        {
-            orchestration.CurrentStep = step;
-            orchestration.Status = CalibrationOrchestrationStatus.Running;
-            orchestration.LeaseOwner = null;
-            orchestration.LeaseExpiresAtUtc = null;
-            orchestration.NextRetryAtUtc = null;
-            orchestration.CompletedAtUtc = null;
-        });
 
     /// <summary>Rewrites the durable row to reproduce a specific interrupted state.</summary>
     /// <param name="orchestrationId">The orchestration identity.</param>

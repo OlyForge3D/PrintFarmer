@@ -95,7 +95,6 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
         Guid projectId = Guid.NewGuid();
         Guid attemptId = Guid.NewGuid();
         Guid orchestrationId = Guid.NewGuid();
-        Guid snapshotId = Guid.NewGuid();
         Guid sourceArtifactId = Guid.NewGuid();
         Guid sliceJobId = Guid.NewGuid();
         Guid toolheadId = Guid.NewGuid();
@@ -180,39 +179,12 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             InUse = true,
             AssignedPrinterId = printer.Id,
         });
-        PrinterConfigurationSnapshotDto snapshotDocument = new()
-        {
-            PrinterId = printer.Id,
-            ConfigurationRevision = 1,
-            SnapshotSha256 = new string('f', 64),
-            Toolheads =
-            [
-                new CalibrationToolheadDto(
-                    toolheadId,
-                    0,
-                    "Primary",
-                    true,
-                    new CalibrationPoint3DDto(0, 0, 0),
-                    0.4,
-                    "Brass",
-                    "Brass",
-                    300,
-                    false,
-                    300,
-                    20,
-                    "DirectDrive",
-                    true,
-                    null,
-                    ["PLA"]),
-            ],
-        };
         db.CalibrationProjects.Add(new CalibrationProject
         {
             Id = projectId,
             OwnerUserId = Guid.NewGuid(),
             Name = "Sequence calibration",
             PrinterId = printer.Id,
-            CurrentPrinterConfigurationSnapshotId = snapshotId,
             SelectedToolheadId = toolheadId,
             SelectedToolheadIndex = 0,
             FilamentProvider = "local",
@@ -223,32 +195,11 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             LocalSpoolId = spoolId,
             FilamentSnapshotJson = """{"material":"PLA"}""",
         });
-        db.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
-        {
-            Id = snapshotId,
-            ProjectId = projectId,
-            AttemptId = attemptId,
-            PrinterId = printer.Id,
-            SchemaVersion = "1",
-            SanitizedSnapshotJson = JsonSerializer.Serialize(snapshotDocument),
-            SnapshotSha256 = new string('f', 64),
-            PrinterConfigurationRevision = 1,
-            FirmwareFamily = PrinterFirmwareFamily.Klipper,
-            GcodeDialect = PrinterGcodeDialect.Klipper,
-            SlicerEngine = "OrcaSlicer",
-            SlicerDistribution = "upstream",
-            SlicerVersion = "2.3.0",
-            SlicerContainerDigest = "sha256:abc",
-            MachineProfileSha256 = new string('b', 64),
-            ProcessProfileSha256 = new string('c', 64),
-            FilamentProfileSha256 = new string('d', 64),
-        });
         db.CalibrationAttempts.Add(new CalibrationAttempt
         {
             Id = attemptId,
             ProjectId = projectId,
             SpecificationSha256 = new string('a', 64),
-            PrinterConfigurationSnapshotId = snapshotId,
         });
         db.CalibrationOrchestrations.Add(new CalibrationOrchestration
         {
@@ -257,11 +208,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             AttemptId = attemptId,
             SpecificationSha256 = new string('a', 64),
             SliceJobId = sliceJobId,
-            FinalArtifactId = sourceArtifactId,
             GcodeFileId = gcode.Id,
-            GcodeSha256 = gcode.ContentSha256,
-            ManifestSha256 = gcode.CalibrationManifestSha256,
-            SlicerContainerDigest = "sha256:abc",
         });
 
         db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printer.Id });

@@ -1060,19 +1060,17 @@ public sealed class GcodeArtifactPromoter(
             return CalibrationLineageContext.Empty;
         }
 
-        PrinterConfigurationSnapshot? snapshot = await _dbContext.PrinterConfigurationSnapshots
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                candidate => candidate.Id == attempt.PrinterConfigurationSnapshotId,
-                cancellationToken);
+        // Path D (#1980): PrinterConfigurationSnapshot was deleted, and every attempt created
+        // after Path D (#1981) already has a null snapshot reference, so this lookup always
+        // returned an empty snapshot in practice. Reproduce that behavior directly.
         return new CalibrationLineageContext(
             attempt.SpecificationSha256,
-            snapshot?.FirmwareFamily.ToString(),
-            snapshot?.GcodeDialect.ToString(),
-            snapshot?.MachineProfileSha256,
-            snapshot?.ProcessProfileSha256,
-            snapshot?.FilamentProfileSha256,
-            snapshot?.SlicerContainerDigest);
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
     }
 
     private static string ComputeRequestSha256(GcodeArtifactPromotionRequest request, string contentSha256)

@@ -290,7 +290,6 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
                 OwnerUserId = Guid.NewGuid(),
                 Name = "Test calibration",
                 PrinterId = printer.Id,
-                CurrentPrinterConfigurationSnapshotId = calibrationSnapshotId,
                 SelectedToolheadId = toolhead.Id,
                 SelectedToolheadIndex = toolhead.Index,
                 FilamentProvider = "local",
@@ -301,32 +300,11 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
                 LocalSpoolId = spool.Id,
                 FilamentSnapshotJson = """{"material":"PLA"}""",
             });
-            db.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
-            {
-                Id = calibrationSnapshotId,
-                ProjectId = calibrationProjectId,
-                AttemptId = calibrationAttemptId,
-                PrinterId = printer.Id,
-                SchemaVersion = "1",
-                SnapshotSha256 = new string('6', 64),
-                PrinterConfigurationRevision = 1,
-                FirmwareFamily = PrinterFirmwareFamily.Klipper,
-                GcodeDialect = PrinterGcodeDialect.Klipper,
-                SanitizedSnapshotJson = "{}",
-                SlicerEngine = "OrcaSlicer",
-                SlicerDistribution = "upstream",
-                SlicerVersion = "2.3.0",
-                SlicerContainerDigest = "sha256:test",
-                MachineProfileSha256 = new string('m', 64),
-                ProcessProfileSha256 = new string('p', 64),
-                FilamentProfileSha256 = new string('f', 64),
-            });
             db.CalibrationAttempts.Add(new CalibrationAttempt
             {
                 Id = calibrationAttemptId,
                 ProjectId = calibrationProjectId,
                 SpecificationSha256 = new string('s', 64),
-                PrinterConfigurationSnapshotId = calibrationSnapshotId,
             });
             db.CalibrationOrchestrations.Add(new CalibrationOrchestration
             {
@@ -335,11 +313,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
                 AttemptId = calibrationAttemptId,
                 SpecificationSha256 = new string('s', 64),
                 SliceJobId = sourceSliceJobId,
-                FinalArtifactId = sourceArtifactId,
                 GcodeFileId = gcode.Id,
-                GcodeSha256 = new string('a', 64),
-                ManifestSha256 = new string('9', 64),
-                SlicerContainerDigest = "sha256:test",
             });
         }
 

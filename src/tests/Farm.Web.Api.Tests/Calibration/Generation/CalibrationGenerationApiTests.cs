@@ -42,7 +42,6 @@ public sealed class CalibrationGenerationApiTests : IAsyncLifetime
         Guid manufacturerId = Guid.NewGuid();
         Guid modelId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
-        Guid snapshotId = Guid.NewGuid();
         _projectId = Guid.NewGuid();
         _attemptId = Guid.NewGuid();
         _orchestrationId = Guid.NewGuid();
@@ -84,25 +83,6 @@ public sealed class CalibrationGenerationApiTests : IAsyncLifetime
             CreatedBySubject = "seed",
             UpdatedBySubject = "seed",
         });
-        _ = core.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
-        {
-            Id = snapshotId,
-            ProjectId = _projectId,
-            AttemptId = _attemptId,
-            PrinterId = printerId,
-            SchemaVersion = CalibrationContractConstants.SchemaVersion,
-            SanitizedSnapshotJson = "{}",
-            SnapshotSha256 = new string('a', 64),
-            PrinterConfigurationRevision = 7,
-            FirmwareFamily = PrinterFirmwareFamily.Klipper,
-            GcodeDialect = PrinterGcodeDialect.Klipper,
-            FirmwareDetectionSource = FirmwareDetectionSource.Printer,
-            SlicerEngine = CalibrationContractConstants.SlicerEngine,
-            SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
-            SlicerVersion = CalibrationContractConstants.SlicerVersion,
-            CapturedAtUtc = nowUtc,
-            CapturedBySubject = "seed",
-        });
         _ = core.CalibrationAttempts.Add(new CalibrationAttempt
         {
             Id = _attemptId,
@@ -114,7 +94,7 @@ public sealed class CalibrationGenerationApiTests : IAsyncLifetime
             InputJson = "{}",
             SpecificationJson = "{}",
             SpecificationSha256 = new string('b', 64),
-            PrinterConfigurationSnapshotId = snapshotId,
+            PrinterConfigurationSnapshotId = null,
             ProfileSnapshotIdsJson = "[]",
             AttemptRequestId = $"attempt-{_attemptId:N}",
             CreatedAtUtc = nowUtc,

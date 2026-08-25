@@ -175,38 +175,25 @@ internal static class CalibrationGenerationSeed
                 CreatedBySubject = "seed",
                 UpdatedBySubject = "seed",
             });
-            _ = core.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
-            {
-                Id = snapshotId,
-                ProjectId = projectId,
-                AttemptId = attemptId,
-                PrinterId = printerId,
-                SchemaVersion = CalibrationContractConstants.SchemaVersion,
-                SanitizedSnapshotJson = JsonSerializer.Serialize(document, SnapshotOptions),
-                SnapshotSha256 = snapshotSha256,
-                PrinterConfigurationRevision = 42,
-                FirmwareFamily = PrinterFirmwareFamily.Klipper,
-                GcodeDialect = PrinterGcodeDialect.Klipper,
-                FirmwareDetectionSource = FirmwareDetectionSource.Printer,
-                FirmwareVersion = "v0.12.0-321",
-                SlicerEngine = CalibrationContractConstants.SlicerEngine,
-                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
-                SlicerVersion = pinned.Version,
-                SlicerContainerDigest = pinned.ContainerDigest,
-                MachineProfileId = machineProfileId,
-                ExactMachineProfileJson = profileSet.MachineJson,
-                MachineProfileSha256 = CalibrationCanonicalJson.ComputeTextSha256(profileSet.MachineJson),
-                ProcessProfileId = processProfileId,
-                ExactProcessProfileJson = profileSet.ProcessJson,
-                ProcessProfileSha256 = CalibrationCanonicalJson.ComputeTextSha256(profileSet.ProcessJson),
-                FilamentProfileId = filamentProfileId,
-                ExactFilamentProfileJson = profileSet.FilamentJson,
-                FilamentProfileSha256 = CalibrationCanonicalJson.ComputeTextSha256(profileSet.FilamentJson),
-                CapturedAtUtc = nowUtc,
-                CapturedBySubject = "seed",
-            });
             _ = await core.SaveChangesAsync();
         }
+
+        SeededSnapshot snapshot = new(
+            snapshotId,
+            printerId,
+            machineProfileId,
+            processProfileId,
+            filamentProfileId,
+            profileSet.MachineJson,
+            CalibrationCanonicalJson.ComputeTextSha256(profileSet.MachineJson),
+            profileSet.ProcessJson,
+            CalibrationCanonicalJson.ComputeTextSha256(profileSet.ProcessJson),
+            profileSet.FilamentJson,
+            CalibrationCanonicalJson.ComputeTextSha256(profileSet.FilamentJson),
+            snapshotSha256,
+            42,
+            nowUtc,
+            pinned);
 
         CalibrationMethodOptionsRequest options = new() { Model3DId = importedAsset?.Model3DId };
         CalibrationSpecification specification = await CompileSpecificationAsync(
@@ -214,7 +201,8 @@ internal static class CalibrationGenerationSeed
             projectId,
             attemptId,
             orchestrationId,
-            snapshotId,
+            document,
+            snapshot,
             method,
             options,
             importedAsset,
@@ -295,7 +283,8 @@ internal static class CalibrationGenerationSeed
         Guid projectId,
         Guid attemptId,
         Guid orchestrationId,
-        Guid snapshotId,
+        PrinterConfigurationSnapshotDto document,
+        SeededSnapshot snapshot,
         string method,
         CalibrationMethodOptionsRequest options,
         CalibrationModelReference? importedAsset,
@@ -305,39 +294,223 @@ internal static class CalibrationGenerationSeed
         CalibrationProject project = await core.CalibrationProjects
             .AsNoTracking()
             .SingleAsync(candidate => candidate.Id == projectId);
-        PrinterConfigurationSnapshot snapshot = await core.PrinterConfigurationSnapshots
-            .AsNoTracking()
-            .SingleAsync(candidate => candidate.Id == snapshotId);
 
         CalibrationGenerationResult<CalibrationMethodOptions> bound =
             CalibrationMethodOptionsBinder.Bind(
                 method,
                 CalibrationMethodOptions.CurrentDefinitionVersion,
                 options);
-        CalibrationGenerationResult<CalibrationGenerationContext> context =
-            CalibrationGenerationContextFactory.Build(
-                project,
-                new CalibrationAttempt { Id = attemptId, ProjectId = projectId },
-                new CalibrationOrchestration
-                {
-                    Id = orchestrationId,
-                    ProjectId = projectId,
-                    AttemptId = attemptId,
-                    OperationId = AttemptOperationId,
-                },
-                snapshot,
-                snapshot.PrinterConfigurationRevision,
-                pinned,
-                importedAsset);
+        CalibrationGenerationContext context = BuildContext(
+            project,
+            attemptId,
+            orchestrationId,
+            document,
+            snapshot,
+            importedAsset);
         CalibrationGenerationResult<CalibrationSpecification> compiled =
             new CalibrationSpecificationCompiler(
                 TimeProvider.System,
                 new CalibrationSlicerCompatibilityPolicy([pinned.Version]))
-                .Compile(context.Value!, bound.Value!);
+                .Compile(context, bound.Value!);
         return compiled.Value ?? throw new InvalidOperationException(
             "The seed could not compile a valid calibration specification: " +
             string.Join(", ", compiled.Problems.Select(problem => $"{problem.Code}@{problem.Field}")));
     }
+
+    /// <summary>
+    /// The in-memory equivalent of the now-deleted immutable printer configuration snapshot row.
+    /// </summary>
+    /// <remarks>
+    /// D3 (#1980) deleted the <c>PrinterConfigurationSnapshot</c> entity and its table. Generation
+    /// tests still need a full <see cref="CalibrationGenerationContext"/> to exercise the deterministic
+    /// compiler, so this seed rebuilds that context directly from an in-memory document rather than a
+    /// persisted snapshot row.
+    /// </remarks>
+    private sealed record SeededSnapshot(
+        Guid Id,
+        Guid PrinterId,
+        Guid MachineProfileId,
+        Guid ProcessProfileId,
+        Guid FilamentProfileId,
+        string ExactMachineProfileJson,
+        string MachineProfileSha256,
+        string ExactProcessProfileJson,
+        string ProcessProfileSha256,
+        string ExactFilamentProfileJson,
+        string FilamentProfileSha256,
+        string SnapshotSha256,
+        long PrinterConfigurationRevision,
+        DateTime CapturedAtUtc,
+        CalibrationPinnedSlicerIdentity Pinned);
+
+    /// <summary>Rebuilds the authoritative generation context from the seeded document and snapshot.</summary>
+    private static CalibrationGenerationContext BuildContext(
+        CalibrationProject project,
+        Guid attemptId,
+        Guid orchestrationId,
+        PrinterConfigurationSnapshotDto document,
+        SeededSnapshot snapshot,
+        CalibrationModelReference? importedAsset)
+    {
+        CalibrationToolheadDto toolhead = SelectToolhead(project, document)
+            ?? throw new InvalidOperationException("The seeded document does not describe the selected toolhead.");
+        DateTime capturedAtUtc = DateTime.SpecifyKind(snapshot.CapturedAtUtc, DateTimeKind.Utc);
+        return new CalibrationGenerationContext
+        {
+            ProjectId = project.Id,
+            AttemptId = attemptId,
+            OrchestrationId = orchestrationId,
+            PrinterId = snapshot.PrinterId,
+            PrinterConfigurationSnapshotId = snapshot.Id,
+            PrinterConfigurationRevision = snapshot.PrinterConfigurationRevision,
+            PrinterConfigurationSnapshotSha256 = snapshot.SnapshotSha256,
+            CurrentPrinterConfigurationRevision = snapshot.PrinterConfigurationRevision,
+            SnapshotCapturedAtUtc = capturedAtUtc,
+            Compatibility = new CalibrationCompatibilityIdentity(
+                PrinterFirmwareFamily.Klipper.ToString(),
+                PrinterGcodeDialect.Klipper.ToString(),
+                Blank(CalibrationContractConstants.SlicerEngine),
+                Blank(CalibrationContractConstants.SlicerDistribution),
+                snapshot.Pinned.Version,
+                snapshot.Pinned.ContainerDigest,
+                snapshot.Pinned.BinarySha256,
+                document.Profiles.Machine?.ProfileFormat ?? CalibrationContractConstants.ProfileFormat),
+            Firmware = new CalibrationFirmwareContext(
+                PrinterFirmwareFamily.Klipper.ToString(),
+                "v0.12.0-321",
+                document.Firmware.DetectionSource,
+                PrinterGcodeDialect.Klipper.ToString(),
+                document.Firmware.Verified,
+                document.Firmware.DetectedAtUtc ?? capturedAtUtc),
+            Toolhead = new CalibrationToolheadContext(
+                toolhead.Id,
+                toolhead.Index,
+                Decimal(toolhead.NozzleDiameter) ?? 0m,
+                toolhead.NozzleType,
+                toolhead.NozzleMaterial,
+                toolhead.NozzleMaxTemperature,
+                toolhead.HotendMaxTemperature,
+                Decimal(toolhead.MaxVolumetricFlow),
+                toolhead.IsDirectDrive),
+            Bed = new CalibrationBedGeometry(
+                Decimal(document.BuildVolume.X),
+                Decimal(document.BuildVolume.Y),
+                Decimal(document.BuildVolume.Z),
+                Decimal(document.BedOrigin.X),
+                Decimal(document.BedOrigin.Y),
+                MapPolygon(document.PrintablePolygon),
+                MapExcludedRegions(document.ExcludedRegions)),
+            Limits = new CalibrationMachineLimits(
+                document.MaxBedTemperature,
+                document.HasHeatedChamber,
+                document.MaxChamberTemperature,
+                document.MaxPrintSpeed,
+                document.MaxTravelSpeed,
+                document.MaxAcceleration,
+                document.MaxTravelAcceleration),
+            Filament = BuildFilament(project, document, snapshot),
+            Process = BuildProcess(document),
+            Profiles = new CalibrationProfileTriplet(
+                Profile(snapshot.MachineProfileId, document.Profiles.Machine, snapshot.ExactMachineProfileJson, snapshot.MachineProfileSha256),
+                Profile(snapshot.ProcessProfileId, document.Profiles.Process, snapshot.ExactProcessProfileJson, snapshot.ProcessProfileSha256),
+                Profile(snapshot.FilamentProfileId, document.Profiles.Filament, snapshot.ExactFilamentProfileJson, snapshot.FilamentProfileSha256)),
+            Generator = CalibrationGeneratorIdentity.Current,
+            OperationId = AttemptOperationId,
+            ImportedAsset = importedAsset,
+        };
+    }
+
+    private static CalibrationToolheadDto? SelectToolhead(
+        CalibrationProject project,
+        PrinterConfigurationSnapshotDto document)
+    {
+        if (document.Toolheads.Count == 0)
+        {
+            return null;
+        }
+
+        if (project.SelectedToolheadId is { } selectedId &&
+            document.Toolheads.FirstOrDefault(candidate => candidate.Id == selectedId) is { } byId)
+        {
+            return byId;
+        }
+
+        if (project.SelectedToolheadIndex is { } selectedIndex &&
+            document.Toolheads.FirstOrDefault(candidate => candidate.Index == selectedIndex) is { } byIndex)
+        {
+            return byIndex;
+        }
+
+        return document.Toolheads.FirstOrDefault(candidate => candidate.IsPrimary) ?? document.Toolheads[0];
+    }
+
+    private static CalibrationFilamentContext BuildFilament(
+        CalibrationProject project,
+        PrinterConfigurationSnapshotDto document,
+        SeededSnapshot snapshot)
+    {
+        CalibrationFilamentProductChoiceDto? product = document.FilamentProducts
+            .FirstOrDefault(candidate => candidate.ProfileId == snapshot.FilamentProfileId);
+        return new CalibrationFilamentContext(
+            snapshot.FilamentProfileId,
+            product?.Material ?? Blank(project.FilamentMaterial),
+            product?.Sku ?? project.FilamentSku,
+            product?.Manufacturer ?? project.FilamentVendor,
+            project.FilamentDiameter,
+            document.BaselineSettings.NozzleTemperature,
+            document.BaselineSettings.BedTemperature,
+            null,
+            null,
+            Decimal(document.BaselineSettings.MaxVolumetricFlow),
+            project.LocalSpoolId,
+            null);
+    }
+
+    private static CalibrationProcessContext BuildProcess(PrinterConfigurationSnapshotDto document) =>
+        new(
+            Decimal(document.BaselineSettings.LayerHeight),
+            null,
+            null,
+            Whole(document.BaselineSettings.PrintSpeed),
+            null,
+            document.MaxTravelSpeed,
+            null,
+            null,
+            null,
+            null);
+
+    private static CalibrationExactProfile Profile(
+        Guid id,
+        CalibrationProfileDto? described,
+        string exactJson,
+        string sha256) =>
+        new(id, described?.Kind ?? string.Empty, described?.Name, described?.ProfileRevision, exactJson, sha256);
+
+    private static IReadOnlyList<CalibrationBedPoint> MapPolygon(
+        IReadOnlyList<CalibrationPointDto>? polygon) =>
+        polygon is null
+            ? []
+            : [.. polygon.Select(point => new CalibrationBedPoint((decimal)point.X, (decimal)point.Y))];
+
+    private static IReadOnlyList<CalibrationExcludedRegion> MapExcludedRegions(
+        IReadOnlyList<CalibrationExcludedRegionDto>? regions) =>
+        regions is null
+            ? []
+            : [.. regions.Select(region => new CalibrationExcludedRegion(
+                region.Name ?? string.Empty,
+                MapPolygon(region.Polygon)))];
+
+    private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private static decimal? Decimal(double? value) =>
+        value is { } number && !double.IsNaN(number) && !double.IsInfinity(number)
+            ? decimal.Round((decimal)number, 4)
+            : null;
+
+    private static int? Whole(double? value) =>
+        value is { } number && !double.IsNaN(number) && !double.IsInfinity(number)
+            ? (int)Math.Round(number, MidpointRounding.AwayFromZero)
+            : null;
 
     private static PrinterConfigurationSnapshotDto BuildSnapshotDocument(
         Guid printerId,
