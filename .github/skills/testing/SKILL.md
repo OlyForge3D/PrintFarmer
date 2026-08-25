@@ -16,7 +16,7 @@ Run each expensive suite once per code state and capture output with `tee`. Afte
 | Change area | Validation command |
 |---|---|
 | Backend/API/shared .NET build | `cd src && dotnet build ./farm-web.sln -c Debug 2>&1 | tee /tmp/printfarmer-dotnet-build.log` |
-| Backend/API full tests | `cd src && dotnet test ./farm-web.sln -c Debug --no-build 2>&1 | tee /tmp/printfarmer-dotnet-test.log` |
+| Backend/API full tests | `cd src && dotnet test ./farm-web.sln -c Debug --no-build --settings ./vstest.runsettings --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini 2>&1 | tee /tmp/printfarmer-dotnet-test.log` |
 | Slicer module tests | `cd src && dotnet test ./tests/Farm.Slicer.Module.Tests --no-restore 2>&1 | tee /tmp/printfarmer-slicer-test.log` |
 | React build | `cd src/Web/ReactApp && npm run build 2>&1 | tee /tmp/printfarmer-react-build.log` |
 | React tests | `cd src/Web/ReactApp && npm run test:run 2>&1 | tee /tmp/printfarmer-react-test.log` |
@@ -36,7 +36,7 @@ Backend example:
 ```bash
 cd src
 dotnet build ./farm-web.sln -c Debug 2>&1 | tee /tmp/printfarmer-dotnet-build.log
-dotnet test ./farm-web.sln -c Debug --no-build 2>&1 | tee /tmp/printfarmer-dotnet-test.log
+dotnet test ./farm-web.sln -c Debug --no-build --settings ./vstest.runsettings --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini 2>&1 | tee /tmp/printfarmer-dotnet-test.log
 ```
 
 Frontend example:

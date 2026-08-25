@@ -211,7 +211,7 @@ All tests pass and are automated:
 ```bash
 # Backend tests
 cd ./src
-dotnet test ./farm-web.sln -c Debug
+dotnet test ./farm-web.sln -c Debug --settings ./vstest.runsettings --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini
 # ✅ 1572/1572 API tests passing
 
 # Frontend tests

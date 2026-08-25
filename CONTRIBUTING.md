@@ -72,7 +72,7 @@ npm run dev
 ```bash
 # From repo root
 cd ./src
-dotnet test ./farm-web.sln -c Debug
+dotnet test ./farm-web.sln -c Debug --settings ./vstest.runsettings --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini
 
 # Frontend tests
 cd ./Web/ReactApp

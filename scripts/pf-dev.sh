@@ -157,7 +157,7 @@ status(){ if read_meta; then
 
 logs(){ if [[ "$FOLLOW" == 1 ]]; then tail -f "$API_LOG" "$VITE_LOG"; else echo "API log:  $API_LOG"; echo "React log: $VITE_LOG"; tail -n 25 "$API_LOG" 2>/dev/null || true; echo "---"; tail -n 25 "$VITE_LOG" 2>/dev/null || true; fi }
 
-run_tests(){ pushd "$SRC_DIR" >/dev/null; info "Running API tests"; dotnet test ./farm-web.sln -c Debug || warn "API tests failed"; pushd "$REACT_DIR" >/dev/null; info "Running React tests"; npm test -- --run || warn "React tests failed"; popd >/dev/null; popd >/dev/null; }
+run_tests(){ pushd "$SRC_DIR" >/dev/null; info "Running API tests"; dotnet test ./farm-web.sln -c Debug --settings ./vstest.runsettings --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini || warn "API tests failed"; pushd "$REACT_DIR" >/dev/null; info "Running React tests"; npm test -- --run || warn "React tests failed"; popd >/dev/null; popd >/dev/null; }
 
 clean(){ info "Cleaning pid/log artifacts"; rm -f "$META_PID_FILE" "$PID_DIR/printfarmer-"*.pid "$API_LOG" "$VITE_LOG" 2>/dev/null || true; if [[ ${DEEP:-0} -eq 1 ]]; then info "Deep clean bin/obj"; find "$SRC_DIR" -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} +; fi; success "Clean complete"; }
 

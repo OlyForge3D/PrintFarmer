@@ -268,11 +268,54 @@ Before committing new tests:
 - [ ] Edge cases covered (empty collections, boundary values)
 - [ ] Integration with existing test suite verified
 
+## Bounded Test Execution
+
+The documented full-solution command is `dotnet test ./farm-web.sln -c Debug --settings
+./vstest.runsettings --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini`
+(run from `src/`). Two independent bounds keep this command from ever hanging
+indefinitely (issue #2013):
+
+- **`src/vstest.runsettings`** sets `RunConfiguration/TestSessionTimeout` (40 minutes) —
+  VSTest aborts the entire `dotnet test` invocation across every project in the solution
+  if it runs longer than that, well above the normal full-suite duration observed in CI
+  and on Windows/Linux hosts.
+- **`--blame-hang-timeout 10m`** bounds an individual testhost: if VSTest observes no
+  test start/finish activity for that long, it kills the stalled testhost (and any child
+  processes) and writes a sequence file plus a `--blame-hang-dump-type mini` dump
+  identifying exactly which test was in flight. This turns a silent multi-hour hang into
+  a fast, diagnosable failure.
+
+Issue #2013 reproduced `Farm.Slicer.Module.Tests`' testhost remaining hung for 4+ hours
+on a macOS QA host with no further output, after `Farm.Web.Api.Tests` completed with 35
+known environment-shaped failures (below). The exact hang was not reproducible on Windows
+— the same project completes cleanly in a few minutes there — so rather than guess at a
+macOS-only root cause blind, this bounding is a defensive guard: whatever stalls a
+testhost locally now fails fast with actionable diagnostics instead of hanging silently
+for hours. If the guard ever fires again, the blame sequence/dump files under the test
+project's `TestResults/` directory identify the exact hung test, which should replace
+this rationale with a targeted fix once known.
+
+### Known environment-only local failures (macOS)
+
+These `Farm.Web.Api.Tests` failure categories are environment/platform limitations, not
+product regressions — exact-SHA GitHub CI is green for the same commit. Do not try to
+force them to pass on an unprovisioned local host:
+
+- **Unsupported artifact leases** — macOS-specific file-locking/lease APIs the test
+  exercises are not available on that platform.
+- **Unprovisioned PostgreSQL/SQL Server provider variables** — tests that require a real
+  Postgres or SQL Server connection string are skipped in CI's matrix but fail locally
+  when those env vars are not set; provision the provider (e.g. via Docker) or skip that
+  filter locally, e.g. `dotnet test --filter "Category!=RequiresPostgres&Category!=RequiresSqlServer"`.
+- **A downstream timeout** caused by the unprovisioned provider above.
+- **A SQLite active-statement/collation error** — an ordering/locking difference in the
+  SQLite native library between the CI Linux runners and local macOS.
+
 ## Useful Commands
 
 ```bash
 # Run all tests
-dotnet test ./farm-web.sln -c Debug
+dotnet test ./farm-web.sln -c Debug --settings ./vstest.runsettings --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini
 
 # Run specific test class
 dotnet test --filter "FullyQualifiedName~BackendClientFactoryTests"
