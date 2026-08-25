@@ -41,7 +41,7 @@ Backend:
 cd src
 dotnet restore ./farm-web.sln
 dotnet build ./farm-web.sln -c Debug
-dotnet test ./farm-web.sln -c Debug --settings ./vstest.runsettings --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini 2>&1 | tee /tmp/printfarmer-dotnet-test.log
+dotnet test ./farm-web.sln -c Debug --no-build --settings ./vstest.runsettings --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini 2>&1 | tee /tmp/printfarmer-dotnet-test.log
 dotnet format ./farm-web.sln --verify-no-changes
 ```
 

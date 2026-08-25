@@ -188,7 +188,7 @@ cd src
 dotnet build ./farm-web.sln -c Debug
 
 # Run tests
-dotnet test ./farm-web.sln -c Debug
+dotnet test ./farm-web.sln -c Debug --settings ./vstest.runsettings --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini
 cd Web/ReactApp && npm run test:run
 EOF
 
