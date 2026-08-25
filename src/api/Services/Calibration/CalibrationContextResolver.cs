@@ -22,7 +22,7 @@ public sealed record CalibrationServiceResult<T>(
 /// configuration snapshot) that <see cref="CalibrationProjectService"/> needs to create
 /// projects and attempts. The fleet-wide eligibility projection formerly exposed here
 /// (<c>GetCandidatesAsync</c>, backing <c>PrinterCalibrationController</c>) was removed in
-/// #1943: nothing called it once the eligibility gate was gone, and no React consumer ever
+/// #1943: nothing called it once the fleet-wide projection was removed, and no React consumer ever
 /// called it either (#1940 step 1). <see cref="GetContextAsync"/> itself still computes <see
 /// cref="CalibrationCandidateDto.Eligible"/> and <see
 /// cref="CalibrationCandidateDto.RejectionReasons"/> as a side effect of deriving the

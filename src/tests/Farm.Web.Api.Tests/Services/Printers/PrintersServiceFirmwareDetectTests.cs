@@ -18,11 +18,11 @@ namespace Farm.Web.Api.Tests.Services.Printers;
 /// Tests for the on-demand firmware detection producer
 /// <see cref="PrintersService.DetectFirmwareIdentityAsync"/>.
 ///
-/// The persisted firmware columns the calibration gate reads previously had no operator-reachable
-/// writer: onboarding wrote them once, and the only refresh path was a side effect of a discovery
-/// scan posting back a matching ServerUrl, throttled to a multi-hour cadence. A printer registered
-/// before firmware detection existed therefore could never reach a calibratable state. These tests
-/// pin the behaviour that closes that gap.
+/// The persisted firmware columns the calibration context resolver reads previously had no
+/// operator-reachable writer: onboarding wrote them once, and the only refresh path was a side
+/// effect of a discovery scan posting back a matching ServerUrl, throttled to a multi-hour cadence.
+/// A printer registered before firmware detection existed therefore could never reach a calibratable
+/// state. These tests pin the behaviour that closes that gap.
 /// </summary>
 public sealed class PrintersServiceFirmwareDetectTests
 {
@@ -331,7 +331,7 @@ public sealed class PrintersServiceFirmwareDetectTests
         printer.FirmwareFamily.Should().Be(PrinterFirmwareFamily.Klipper);
 
         // A probe that cannot read software_version must not erase a version recorded earlier,
-        // because firmware.version is itself one of the calibration gate's required inputs.
+        // because firmware.version is required by calibration context resolution.
         printer.FirmwareVersion.Should().Be("v0.11.0-previously-recorded");
     }
 

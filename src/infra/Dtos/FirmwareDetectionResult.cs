@@ -36,7 +36,7 @@ public enum FirmwareDetectionFailure
 /// <param name="DetectedAtUtc">When the probe ran, when it succeeded.</param>
 /// <param name="IdentityVerified">
 /// Whether a human has attested this identity. A probe never sets this — it is echoed so a caller
-/// can tell that detection alone still leaves the calibration firmware gate unsatisfied.
+/// can tell that detection alone still leaves calibration firmware verification unsatisfied.
 /// </param>
 public sealed record FirmwareDetectionResult(
     bool Succeeded,

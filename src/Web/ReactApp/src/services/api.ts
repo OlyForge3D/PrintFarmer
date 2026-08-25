@@ -1062,7 +1062,7 @@ export class ApiClient {
 
   /**
    * Re-probes the printer's firmware identity on demand and persists the detected
-   * facts to the columns the calibration gate reads.
+   * facts to the columns the calibration context resolver reads.
    *
    * This is deliberately separate from `GET /printers/{id}/version`, which reads
    * firmware live through an in-memory cache and never writes the database. That

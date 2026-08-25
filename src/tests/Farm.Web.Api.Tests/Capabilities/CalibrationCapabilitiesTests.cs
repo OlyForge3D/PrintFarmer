@@ -77,7 +77,7 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             .GetString().Should().Be("upstream");
 
         _ = root.TryGetProperty("supportedPrinterBackends", out _).Should().BeFalse(
-            "a network backend must never imply calibration firmware or dialect eligibility");
+            "a network backend must never imply calibration firmware or dialect support");
         _ = root.GetProperty("supportedFirmwareFamilies").EnumerateArray()
             .Select(value => value.GetString()).Should().Equal("Klipper");
         _ = root.GetProperty("supportedGcodeDialects").EnumerateArray()
