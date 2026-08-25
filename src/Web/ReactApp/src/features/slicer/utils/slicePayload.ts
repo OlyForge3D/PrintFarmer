@@ -59,14 +59,30 @@ export function buildSlicePayloadModels(activePlateModels: LoadedModel[]): Slice
   };
 }
 
+/** Matches a well-formed GUID/UUID string (the shape the API binds to `Guid?`). */
+const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * True when `value` is a well-formed GUID. `model3DId` is bound server-side to
+ * `System.Guid?` (see `SubmitSliceJobRequest`), so any other string — a
+ * client-only bed-model instance id, a synthetic `url-<timestamp>` id
+ * assigned to a URL-loaded model, or a `<id>-cut-<n>-<timestamp>` id assigned
+ * to a cut piece — fails JSON model binding with "The JSON value could not be
+ * converted to System.Nullable`1[System.Guid]" (issue #1973) rather than
+ * simply being ignored.
+ */
+export function isValidModelGuid(value: string | undefined | null): value is string {
+  return !!value && GUID_PATTERN.test(value);
+}
+
 /**
  * Resolve the `model3DId` field for a slice request: set only when the
- * active plate resolves to a single sliceable model, so the backend can
- * link the job to that library model. `payload.modelFileUrls` is only
- * populated when there is more than one sliceable model (see
- * `buildSlicePayloadModels`), so callers must key off `sliceableCount`
- * rather than `modelFileUrls.length` — reading `.length` off the
- * possibly-undefined `modelFileUrls` was the direct cause of the
+ * active plate resolves to a single sliceable model that is backed by a
+ * persisted library model, so the backend can link the job to that model.
+ * `payload.modelFileUrls` is only populated when there is more than one
+ * sliceable model (see `buildSlicePayloadModels`), so callers must key off
+ * `sliceableCount` rather than `modelFileUrls.length` — reading `.length` off
+ * the possibly-undefined `modelFileUrls` was the direct cause of the
  * "Cannot read properties of undefined (reading 'length')" crash in
  * issue #1709.
  *
@@ -74,16 +90,23 @@ export function buildSlicePayloadModels(activePlateModels: LoadedModel[]): Slice
  * model id — a library model placed twice (issue #1771) produces two
  * instances with distinct ids sharing one `libraryModelId`. Prefer
  * `libraryModelId` so the backend still links the job to the correct
- * catalog model; fall back to `id` for instances with no library source
- * (e.g. cut pieces) and finally to the caller-supplied `selectedModelId`.
+ * catalog model; fall back to `id`, then to the caller-supplied
+ * `selectedModelId`.
+ *
+ * Every candidate is validated as a GUID before being returned. A model
+ * loaded directly from a URL, or a cut/split piece, has no `libraryModelId`
+ * and only a synthetic, non-GUID `id` — those are not persisted library
+ * models, so the field is correctly omitted (undefined) rather than sent as
+ * a value the API rejects (issue #1973).
  */
 export function resolveModel3DId(
   payload: SlicePayloadModels,
   selectedModelId?: string,
 ): string | undefined {
-  return payload.sliceableCount <= 1
-    ? payload.primary?.libraryModelId || payload.primary?.id || selectedModelId || undefined
-    : undefined;
+  if (payload.sliceableCount > 1) return undefined;
+
+  const candidate = payload.primary?.libraryModelId || payload.primary?.id || selectedModelId;
+  return isValidModelGuid(candidate) ? candidate : undefined;
 }
 
 /**

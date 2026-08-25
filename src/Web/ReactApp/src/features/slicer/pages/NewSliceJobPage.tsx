@@ -2103,6 +2103,14 @@ export const NewSliceJobPage: React.FC = () => {
           const offset = prev.length * 30; // offset each model so they don't overlap
           const instance: LoadedModel = {
             id: `url-${Date.now()}`,
+            // When the URL resolves to a persisted library model (matched via
+            // `modelIdMatch` above), link the job back to it so `model3DId`
+            // carries the real GUID instead of being omitted. URLs that don't
+            // match a library model (e.g. an arbitrary external file) leave
+            // this undefined, and `resolveModel3DId` correctly omits
+            // `model3DId` rather than sending the synthetic `id` — sending it
+            // is exactly what issue #1973 fixed.
+            libraryModelId: matchedModel?.id,
             url: resolvedUrl,
             viewerUrl: resolvedUrl,
             fileName,

@@ -10,6 +10,28 @@ export interface RevisionConflictInfo {
   actualRevision: number;
 }
 
+/**
+ * Extracts a human-readable message from an ASP.NET Core
+ * `ValidationProblemDetails`-style `errors` dictionary, e.g.
+ * `{ errors: { "$.model3DId": ["The JSON value could not be converted to
+ * System.Nullable`1[System.Guid]. Path: $.model3DId"] } }`. Automatic model
+ * binding failures (a malformed request body) return this shape with no
+ * top-level `message`/`detail` field, so without this the caller only ever
+ * sees a generic "Request failed with status code 400" (issue #1973).
+ * Returns undefined when the body has no such `errors` map.
+ */
+export function extractValidationErrorMessage(data: unknown): string | undefined {
+  if (!data || typeof data !== 'object') return undefined;
+  const errors = (data as { errors?: unknown }).errors;
+  if (!errors || typeof errors !== 'object') return undefined;
+
+  const messages = Object.values(errors as Record<string, unknown>)
+    .flatMap((value) => (Array.isArray(value) ? value : [value]))
+    .filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+  return messages.length > 0 ? messages.join(' ') : undefined;
+}
+
 /** Narrows an unknown thrown value to the shared `ApiError` shape. */
 export function isApiError(error: unknown): error is ApiError {
   return (
