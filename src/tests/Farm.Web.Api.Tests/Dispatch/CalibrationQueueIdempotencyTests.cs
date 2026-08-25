@@ -23,8 +23,17 @@ public class CalibrationQueueIdempotencyTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task AddJobToQueueAsync_CalibrationReplay_ReturnsExistingJobAndDoesNotDuplicateOutbox()
+    public async Task AddJobToQueueAsync_CalibrationReplay_ThrowsIncompatibleException()
     {
+        // Post-#1989/D3b: PrinterConfigurationSnapshot was deleted, so
+        // CalibrationQueueCanonicalizer.BuildAsync now unconditionally throws
+        // CalibrationQueueIncompatibleException for every calibration-lineage artifact
+        // before the replay/idempotency-conflict logic below it is ever reached (see
+        // #1990, the tracked interim limitation). This test used to prove that a replayed
+        // calibration request returns the existing job without duplicating its outbox
+        // event; that path is now structurally unreachable, so this asserts the new,
+        // deterministic failure mode instead — including on a would-be replay, which
+        // must fail identically to the first attempt (never partially succeed).
         await using AppDbContext db = CreateDbContext();
         Mock<IQueueDataService> dataService = CreateQueueDataService(db);
         JobQueueService sut = CreateSut(db, dataService.Object);
@@ -33,23 +42,25 @@ public class CalibrationQueueIdempotencyTests
         GcodeFile gcode = await db.GcodeFiles.SingleAsync();
         QueuePrintJobDto request = CreateCalibrationRequest(gcode.Id, printer.Id, "key-1");
 
-        JobQueuePrintJobDto? first = await sut.AddJobToQueueAsync(request, TestUserId, CancellationToken.None);
-        JobQueuePrintJobDto? replay = await sut.AddJobToQueueAsync(request, TestUserId, CancellationToken.None);
+        Func<Task> first = async () => await sut.AddJobToQueueAsync(request, TestUserId, CancellationToken.None);
+        Func<Task> replay = async () => await sut.AddJobToQueueAsync(request, TestUserId, CancellationToken.None);
 
-        first.Should().NotBeNull();
-        replay.Should().NotBeNull();
-        replay!.Id.Should().Be(first!.Id);
-        replay.IsIdempotentReplay.Should().BeTrue();
+        await first.Should().ThrowAsync<CalibrationQueueIncompatibleException>()
+            .WithMessage("*known interim limitation*#1990*");
+        await replay.Should().ThrowAsync<CalibrationQueueIncompatibleException>()
+            .WithMessage("*known interim limitation*#1990*");
 
-        (await db.PrintJobs.CountAsync()).Should().Be(1);
-        (await db.QueueDispatchOutbox.CountAsync()).Should().Be(1);
-        (await db.QueueDispatchOutbox.SingleAsync()).Status.Should().Be(QueueOutboxEventStatus.Pending);
+        (await db.PrintJobs.CountAsync()).Should().Be(0, "no row can be written when the gate rejects before insert");
+        (await db.QueueDispatchOutbox.CountAsync()).Should().Be(0);
     }
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task AddJobToQueueAsync_CalibrationReplayWithDifferentPayload_ThrowsConflictAndKeepsSingleOutbox()
+    public async Task AddJobToQueueAsync_CalibrationReplayWithDifferentPayload_ThrowsIncompatibleExceptionNotConflict()
     {
+        // See comment on the sibling test above. Both the original and the "conflicting"
+        // request now fail identically at the unconditional calibration gate, never
+        // reaching the idempotency-conflict check this test used to exercise.
         await using AppDbContext db = CreateDbContext();
         Mock<IQueueDataService> dataService = CreateQueueDataService(db);
         JobQueueService sut = CreateSut(db, dataService.Object);
@@ -63,13 +74,18 @@ public class CalibrationQueueIdempotencyTests
         // on an input the client still controls and that changes the physical outcome.
         conflictingRequest.Priority = PrintJobPriority.Urgent;
 
-        _ = await sut.AddJobToQueueAsync(firstRequest, TestUserId, CancellationToken.None);
+        Func<Task> act1 = async () => await sut.AddJobToQueueAsync(firstRequest, TestUserId, CancellationToken.None);
+        await act1.Should().ThrowAsync<CalibrationQueueIncompatibleException>()
+            .WithMessage("*known interim limitation*#1990*");
 
         Func<Task> act = async () => await sut.AddJobToQueueAsync(conflictingRequest, TestUserId, CancellationToken.None);
 
-        await act.Should().ThrowAsync<QueueJobIdempotencyConflictException>();
-        (await db.PrintJobs.CountAsync()).Should().Be(1);
-        (await db.QueueDispatchOutbox.CountAsync()).Should().Be(1);
+        // Not QueueJobIdempotencyConflictException — the calibration gate rejects both
+        // requests identically, before idempotency conflict detection can ever run.
+        await act.Should().ThrowAsync<CalibrationQueueIncompatibleException>()
+            .WithMessage("*known interim limitation*#1990*");
+        (await db.PrintJobs.CountAsync()).Should().Be(0);
+        (await db.QueueDispatchOutbox.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -100,13 +116,12 @@ public class CalibrationQueueIdempotencyTests
             Mock.Of<ILogger<JobQueueService>>(),
             db: db);
 
-    private static Mock<IQueueDataService> CreateQueueDataService(AppDbContext db)
+    private static Mock<IQueueDataService> CreateQueueDataService(AppDbContext db, bool calibrationLineage = true)
     {
         Guid printerId = Guid.NewGuid();
         Guid projectId = Guid.NewGuid();
         Guid attemptId = Guid.NewGuid();
         Guid orchestrationId = Guid.NewGuid();
-        Guid snapshotId = Guid.NewGuid();
         Guid sourceArtifactId = Guid.NewGuid();
         Guid sliceJobId = Guid.NewGuid();
         Guid modelId = Guid.NewGuid();
@@ -123,14 +138,18 @@ public class CalibrationQueueIdempotencyTests
 
             // Server-authoritative calibration lineage (issue #900, defect 3): the JobKind
             // and provenance are derived from THIS artifact, never from the client request.
+            // Post-#1989/D3b, CalibrationQueueCanonicalizer.BuildAsync unconditionally
+            // rejects any artifact carrying this lineage (see #1990), so callers that only
+            // need a "fully valid job" fixture (not calibration-specific gating) must omit
+            // it via calibrationLineage: false.
             IsImmutable = true,
             PromotedAtUtc = DateTime.UtcNow.AddMinutes(-1),
             ContentSha256 = new string('1', 64),
-            CalibrationProjectId = projectId,
-            CalibrationAttemptId = attemptId,
-            CalibrationOrchestrationId = orchestrationId,
-            SourceArtifactId = sourceArtifactId,
-            SourceSliceJobId = sliceJobId,
+            CalibrationProjectId = calibrationLineage ? projectId : null,
+            CalibrationAttemptId = calibrationLineage ? attemptId : null,
+            CalibrationOrchestrationId = calibrationLineage ? orchestrationId : null,
+            SourceArtifactId = calibrationLineage ? sourceArtifactId : null,
+            SourceSliceJobId = calibrationLineage ? sliceJobId : null,
             SourceModelSha256 = new string('8', 64),
             CalibrationManifestSha256 = new string('9', 64),
             SpecificationSha256 = new string('2', 64),
@@ -183,61 +202,12 @@ public class CalibrationQueueIdempotencyTests
             InUse = true,
             AssignedPrinterId = printerId,
         };
-        var snapshotDocument = new PrinterConfigurationSnapshotDto
-        {
-            PrinterId = printerId,
-            ConfigurationRevision = 7,
-            SnapshotSha256 = new string('6', 64),
-            Toolheads =
-            [
-                new CalibrationToolheadDto(
-                    toolheadId,
-                    0,
-                    "Primary",
-                    true,
-                    new CalibrationPoint3DDto(0, 0, 0),
-                    0.4,
-                    "Brass",
-                    "Brass",
-                    300,
-                    false,
-                    300,
-                    20,
-                    "DirectDrive",
-                    true,
-                    null,
-                    ["PLA"]),
-            ],
-        };
-        var snapshot = new PrinterConfigurationSnapshot
-        {
-            Id = snapshotId,
-            ProjectId = projectId,
-            AttemptId = attemptId,
-            PrinterId = printerId,
-            SchemaVersion = "1",
-            SanitizedSnapshotJson = JsonSerializer.Serialize(snapshotDocument),
-            SnapshotSha256 = new string('6', 64),
-            PrinterConfigurationRevision = 7,
-            FirmwareFamily = PrinterFirmwareFamily.Klipper,
-            GcodeDialect = PrinterGcodeDialect.Klipper,
-            SlicerEngine = "OrcaSlicer",
-            SlicerDistribution = "upstream",
-            SlicerVersion = "2.3.0",
-            SlicerContainerDigest = "sha256:test",
-            MachineProfileSha256 = new string('3', 64),
-            ProcessProfileSha256 = new string('4', 64),
-            FilamentProfileSha256 = new string('5', 64),
-            CapturedAtUtc = DateTime.UtcNow,
-            CapturedBySubject = TestUserId.ToString(),
-        };
         var project = new CalibrationProject
         {
             Id = projectId,
             OwnerUserId = TestUserId,
             Name = "Project",
             PrinterId = printerId,
-            CurrentPrinterConfigurationSnapshotId = snapshotId,
             SelectedToolheadId = toolheadId,
             SelectedToolheadIndex = 0,
             FilamentProvider = "local",
@@ -253,7 +223,6 @@ public class CalibrationQueueIdempotencyTests
             Id = attemptId,
             ProjectId = projectId,
             SpecificationSha256 = new string('2', 64),
-            PrinterConfigurationSnapshotId = snapshotId,
         };
         var orchestration = new CalibrationOrchestration
         {
@@ -275,7 +244,6 @@ public class CalibrationQueueIdempotencyTests
         db.Spools.Add(spool);
         db.CalibrationProjects.Add(project);
         db.CalibrationAttempts.Add(attempt);
-        db.PrinterConfigurationSnapshots.Add(snapshot);
         db.CalibrationOrchestrations.Add(orchestration);
         db.SaveChanges();
 
@@ -286,12 +254,13 @@ public class CalibrationQueueIdempotencyTests
         return mock;
     }
 
-    private static QueuePrintJobDto CreateCalibrationRequest(Guid gcodeFileId, Guid printerId, string idempotencyKey) =>
+    private static QueuePrintJobDto CreateCalibrationRequest(
+        Guid gcodeFileId, Guid printerId, string idempotencyKey, JobKind requestedJobKind = JobKind.FilamentCalibration) =>
         new()
         {
             GcodeFileId = gcodeFileId,
             AssignedPrinterId = printerId,
-            JobKind = JobKind.FilamentCalibration,
+            JobKind = requestedJobKind,
             IdempotencyKey = idempotencyKey,
             Copies = 1,
             Priority = PrintJobPriority.High,

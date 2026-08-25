@@ -271,9 +271,6 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
         await _db.CalibrationAttempts
             .Where(attempt => projectIds.Contains(attempt.ProjectId))
             .ExecuteDeleteAsync(ct);
-        await _db.PrinterConfigurationSnapshots
-            .Where(snapshot => projectIds.Contains(snapshot.ProjectId))
-            .ExecuteDeleteAsync(ct);
         await _db.CalibrationDrafts
             .Where(draft => projectIds.Contains(draft.ProjectId))
             .ExecuteDeleteAsync(ct);

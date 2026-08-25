@@ -42,33 +42,6 @@ public sealed class CalibrationProjectConfiguration : IEntityTypeConfiguration<C
     }
 }
 
-/// <summary>Configures immutable snapshots captured from the printer-context contract.</summary>
-public sealed class PrinterConfigurationSnapshotConfiguration : IEntityTypeConfiguration<PrinterConfigurationSnapshot>
-{
-    public void Configure(EntityTypeBuilder<PrinterConfigurationSnapshot> builder)
-    {
-        _ = builder.HasKey(snapshot => snapshot.Id);
-        _ = builder.Property(snapshot => snapshot.SchemaVersion).IsRequired().HasMaxLength(32);
-        _ = builder.Property(snapshot => snapshot.SanitizedSnapshotJson).IsRequired();
-        _ = builder.Property(snapshot => snapshot.SnapshotSha256).IsRequired().HasMaxLength(64);
-        _ = builder.Property(snapshot => snapshot.FirmwareVersion).HasMaxLength(128);
-        _ = builder.Property(snapshot => snapshot.BackendVersion).HasMaxLength(128);
-        _ = builder.Property(snapshot => snapshot.BackendApiVersion).HasMaxLength(128);
-        _ = builder.Property(snapshot => snapshot.SlicerEngine).IsRequired().HasMaxLength(64);
-        _ = builder.Property(snapshot => snapshot.SlicerDistribution).IsRequired().HasMaxLength(64);
-        _ = builder.Property(snapshot => snapshot.SlicerVersion).HasMaxLength(64);
-        _ = builder.Property(snapshot => snapshot.SlicerContainerDigest).HasMaxLength(256);
-        _ = builder.Property(snapshot => snapshot.MachineProfileSha256).HasMaxLength(64);
-        _ = builder.Property(snapshot => snapshot.ProcessProfileSha256).HasMaxLength(64);
-        _ = builder.Property(snapshot => snapshot.FilamentProfileSha256).HasMaxLength(64);
-        _ = builder.Property(snapshot => snapshot.CapturedBySubject).IsRequired().HasMaxLength(256);
-        _ = builder.HasIndex(snapshot => new { snapshot.ProjectId, snapshot.SnapshotSha256 }).IsUnique();
-        _ = builder.HasIndex(snapshot => snapshot.AttemptId);
-        _ = builder.HasOne<CalibrationProject>().WithMany().HasForeignKey(snapshot => snapshot.ProjectId)
-            .OnDelete(DeleteBehavior.Cascade);
-    }
-}
-
 /// <summary>Configures editable drafts and their active-lineage uniqueness rule.</summary>
 public sealed class CalibrationDraftConfiguration : IEntityTypeConfiguration<CalibrationDraft>
 {
@@ -109,9 +82,6 @@ public sealed class CalibrationAttemptConfiguration : IEntityTypeConfiguration<C
         _ = builder.HasIndex(attempt => new { attempt.ProjectId, attempt.AttemptRequestId }).IsUnique();
         _ = builder.HasOne<CalibrationProject>().WithMany().HasForeignKey(attempt => attempt.ProjectId)
             .OnDelete(DeleteBehavior.Cascade);
-        _ = builder.HasOne<PrinterConfigurationSnapshot>().WithMany()
-            .HasForeignKey(attempt => attempt.PrinterConfigurationSnapshotId)
-            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
