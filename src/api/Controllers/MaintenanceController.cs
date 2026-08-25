@@ -1,7 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
@@ -964,7 +968,9 @@ public class MaintenanceController(
 
     /// <summary>
     /// Gets cumulative statistics for a specific printer.
-    /// Existing printers without accrued statistics return an empty, non-persisted snapshot.
+    /// Existing printers without an accrued maintenance-statistics row fall back to the printer
+    /// backend's own live history totals (e.g. Moonraker's <c>/server/history/totals</c>) so the
+    /// card reflects real print history instead of an unconditional zero snapshot (issue #1994).
     /// </summary>
     [HttpGet("printers/{printerId:guid}/statistics")]
     [ProducesResponseType(typeof(PrinterStatistics), 200)]
@@ -982,7 +988,7 @@ public class MaintenanceController(
                     return NotFound($"Printer not found: {printerId}");
                 }
 
-                return Ok(new PrinterStatistics
+                PrinterStatistics liveSnapshot = new()
                 {
                     Id = printerId,
                     PrinterId = printerId,
@@ -997,15 +1003,92 @@ public class MaintenanceController(
                     LastSyncTime = default,
                     CreatedAt = default,
                     UpdatedAt = default
-                });
+                };
+
+                // No accrued row exists yet, most likely because the periodic PrintStatsSyncHostedService
+                // has not run for this printer yet. Rather than return a hardcoded zero snapshot while the
+                // backend already has real print history, query the backend's live history totals
+                // directly (the same call backing GET /api/printers/{id}/history/totals) and use them
+                // for this response.
+                try
+                {
+                    HistoryTotals liveTotals = await _printersService.GetHistoryTotalsAsync(printerId, ct);
+                    ApplyLiveHistoryTotals(liveSnapshot, liveTotals.JobTotals, (PrinterBackend)printer.Backend);
+                }
+                catch (Exception ex) when (
+                    ex is KeyNotFoundException or HttpRequestException or SocketException or IOException
+                        or InvalidDataException or TimeoutException)
+                {
+                    // Expected, transient failure modes talking to the printer backend (offline, timed
+                    // out, deleted between the two lookups above, malformed response). Fall back to the
+                    // zero-valued snapshot rather than failing the whole request. Cancellation and any
+                    // other unexpected exception are deliberately NOT caught here so they surface through
+                    // the outer handler below instead of being silently hidden behind a misleading 200.
+                    _logger.LogWarning(
+                        ex,
+                        "[MaintenanceController] Failed to fetch live history totals for printer {PrinterId}; returning zero-valued fallback statistics",
+                        printerId);
+                }
+
+                return Ok(liveSnapshot);
             }
 
             return Ok(stats);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The request was cancelled by the caller (e.g. navigated away while the live backend call
+            // was in flight); this is not an application error, so don't report it as a 500.
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[MaintenanceController] Error getting statistics for printer {PrinterId}", printerId);
             return StatusCode(500, $"Internal Server Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Overlays live backend history totals onto a non-persisted statistics snapshot.
+    /// Mirrors the unit conversions used by <c>PrintStatsSyncHostedService</c>: backend total print
+    /// time is always in seconds (converted to hours), but filament-used units are NOT consistent
+    /// across backends. Moonraker and PrusaLink report millimeters (<c>PrusaLinkApiClient</c> sums
+    /// the raw <c>filament.tool0.length</c> value without conversion); OctoPrint's history adapter
+    /// already converts to meters (see <c>OctoPrintClient</c>). Filament totals are therefore only
+    /// converted for the backends whose units are known here; other backends (e.g. SDCP, which does
+    /// not report filament usage in history at all) keep the zero-valued filament fallback to avoid
+    /// silently reporting a value off by a unit-conversion factor.
+    /// </summary>
+    private static void ApplyLiveHistoryTotals(PrinterStatistics snapshot, JobTotals? jobTotals, PrinterBackend backend)
+    {
+        if (jobTotals is null)
+        {
+            return;
+        }
+
+        snapshot.TotalPrintHours = jobTotals.TotalPrintTime / 3600.0;
+        snapshot.TotalJobsCompleted = (int)jobTotals.TotalJobs;
+
+        switch (backend)
+        {
+            case PrinterBackend.Moonraker:
+            case PrinterBackend.PrusaLink:
+                // Moonraker reports total_filament_used in millimeters; PrusaLinkApiClient sums the
+                // raw PrusaLink "length" field (also millimeters) without converting it.
+                double filamentMm = jobTotals.TotalFilamentUsed;
+                snapshot.TotalFilamentUsedMeters = filamentMm / 1000.0;
+                snapshot.TotalFilamentUsedGrams = filamentMm * 0.00237;
+                break;
+            case PrinterBackend.OctoPrint:
+                // OctoPrintClient already normalizes filament length to meters before aggregating.
+                double filamentMeters = jobTotals.TotalFilamentUsed;
+                snapshot.TotalFilamentUsedMeters = filamentMeters;
+                snapshot.TotalFilamentUsedGrams = filamentMeters * 1000.0 * 0.00237;
+                break;
+            default:
+                // Unknown/unsupported unit convention for this backend; leave filament fields at 0
+                // rather than risk a unit-mismatched value.
+                break;
         }
     }
 
