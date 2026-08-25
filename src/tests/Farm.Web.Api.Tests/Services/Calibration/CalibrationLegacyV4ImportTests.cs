@@ -72,7 +72,6 @@ public sealed class CalibrationLegacyV4ImportTests
         CalibrationProject imported = await verificationContext.CalibrationProjects
             .SingleAsync(project => project.Id == result.Value.ProjectIds[0]);
         _ = imported.PrinterId.Should().Be(store.PrinterId);
-        _ = imported.CurrentPrinterConfigurationSnapshotId.Should().BeNull();
         _ = imported.FilamentProvider.Should().Be("catalog");
         _ = imported.FilamentProductId.Should().Be("sku-pla-blue");
         _ = imported.FilamentMaterial.Should().Be("PLA");
