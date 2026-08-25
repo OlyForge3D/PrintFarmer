@@ -304,7 +304,7 @@ jobs:
   # ---------------------------------------------------------------------------
   migration-drift:
     name: Migration drift (${{ matrix.label }})
-    needs: [select, ci-tools, dotnet-build]
+    needs: [select, ci-tools]
     if: ${{ needs.select.outputs.want_mig_drift == 'true' }}
     runs-on: ubuntu-latest
     strategy:
@@ -383,7 +383,7 @@ jobs:
   # ---------------------------------------------------------------------------
   dotnet-test:
     name: .NET test (${{ matrix.name }})
-    needs: [select, ci-tools, dotnet-build]
+    needs: [select, ci-tools]
     if: ${{ needs.select.outputs.want_dotnet_test == 'true' }}
     runs-on: ubuntu-latest
     strategy:
@@ -501,7 +501,7 @@ jobs:
   # ---------------------------------------------------------------------------
   dotnet-test-providers:
     name: .NET provider tests (DbHeavy)
-    needs: [select, ci-tools, dotnet-build]
+    needs: [select, ci-tools]
     if: ${{ needs.select.outputs.want_dotnet_test == 'true' }}
     runs-on: ubuntu-latest
     services:
