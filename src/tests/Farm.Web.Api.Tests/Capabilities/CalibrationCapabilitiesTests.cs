@@ -283,7 +283,9 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             _ = document.RootElement.GetProperty("unavailableReasons").EnumerateArray()
                 .Should().Contain(reason =>
                     reason.GetProperty("feature").GetString() == "calibrationGeneration" &&
-                    reason.GetProperty("code").GetString() == "feature_removed");
+                    reason.GetProperty("code").GetString() == "feature_removed" &&
+                    reason.GetProperty("message").GetString() ==
+                        "Calibration generation was removed from this deployment (#1979).");
         }
     }
 

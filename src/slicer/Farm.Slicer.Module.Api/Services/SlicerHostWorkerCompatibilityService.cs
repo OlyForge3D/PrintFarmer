@@ -31,13 +31,13 @@ public interface ISlicerHostWorkerCompatibilityService
 /// Default <see cref="ISlicerHostWorkerCompatibilityService"/>.
 /// </summary>
 /// <remarks>
-/// This is a faithful port of the query
-/// <c>Farm.Web.Api.Services.Calibration.Generation.CalibrationGenerationCapabilityProbe.FindWorkerCompatibilityAsync</c>
-/// runs against a local <c>IDbContextFactory&lt;SlicerDbContext&gt;</c> in a monolith deployment. In a
-/// split/microservices deployment the main API has no such factory, because this host owns
-/// <see cref="SlicerDbContext"/> in its own process; the main API instead calls this endpoint over an
-/// authenticated internal HTTP hop guarded by <c>WorkerAuth:SharedKey</c> (issue #1848). Keeping the
-/// query identical here is what makes both topologies report the same answer.
+/// This is a faithful port of the query the deleted calibration generation saga's capability
+/// probe (removed by #1979) used to run against a local <c>IDbContextFactory&lt;SlicerDbContext&gt;</c>
+/// in a monolith deployment. In a split/microservices deployment the main API has no such factory,
+/// because this host owns <see cref="SlicerDbContext"/> in its own process; the main API instead
+/// calls this endpoint over an authenticated internal HTTP hop guarded by
+/// <c>WorkerAuth:SharedKey</c> (issue #1848). Keeping the query identical here is what makes both
+/// topologies report the same answer.
 /// </remarks>
 public sealed class SlicerHostWorkerCompatibilityService(
     IDbContextFactory<SlicerDbContext> slicerContextFactory,

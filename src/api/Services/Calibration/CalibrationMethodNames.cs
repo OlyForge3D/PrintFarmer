@@ -1,4 +1,4 @@
-namespace Farm.Web.Api.Services.Calibration;
+﻿namespace Farm.Web.Api.Services.Calibration;
 
 /// <summary>
 /// The calibration methods supported by the calibration domain.
