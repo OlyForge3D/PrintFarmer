@@ -58,7 +58,7 @@ import type { LoadedModel, BedConfig } from '@/features/slicer/components/viewer
 import type { BufferGeometry } from 'three';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 import { buildSlicerViewerModelUrl, getSlicerViewerFileType } from '@/features/slicer/utils/model-file-utils';
-import { loadModelArrayBuffer } from '@/common/utils/authenticatedModelUrl';
+import { loadModelArrayBuffer, isAuthenticatedModelUrl } from '@/common/utils/authenticatedModelUrl';
 import { buildSlicePayloadModels, resolveModel3DId, modelTransformJson, diffProcessOverrides } from '@/features/slicer/utils/slicePayload';
 import { readOrcaBundle } from '@/features/slicer/utils/orcaBundleLoader';
 import { SlicerWorkspaceBoundary } from '@/features/slicer/components/viewer/SlicerWorkspaceBoundary';
@@ -2085,7 +2085,18 @@ export const NewSliceJobPage: React.FC = () => {
     // flight (or hasn't been triggered yet) at submit time; it dedupes
     // against/reuses that query's cache, and runs concurrently with the
     // reachability check below rather than adding extra latency.
-    const modelIdMatch = /\/3d-models\/file\/([^/?#]+)/.exec(resolvedUrl);
+    //
+    // Only attempt this id match for the API's own authenticated model
+    // endpoint (`isAuthenticatedModelUrl`), not for an arbitrary absolute
+    // URL. Otherwise a URL like "https://evil.example/3d-models/file/<real
+    // GUID>" would spoof a match against the user's own model list and
+    // attach that unrelated model's GUID as `model3DId` to a job whose
+    // fetched geometry comes from a completely different, attacker-supplied
+    // source — a data-integrity/model-substitution risk flagged in review of
+    // issue #1973.
+    const modelIdMatch = isAuthenticatedModelUrl(resolvedUrl)
+      ? /\/3d-models\/file\/([^/?#]+)/.exec(resolvedUrl)
+      : null;
     const matchedModelPromise = modelIdMatch
       ? qc.ensureQueryData({ queryKey: MODELS_LIST_BASIC_QUERY_KEY, queryFn: fetchModelsListBasic, staleTime: 20_000 })
         .then((list) => list.find((m) => m.id === modelIdMatch[1]))
