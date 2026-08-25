@@ -534,6 +534,30 @@ public sealed class CalibrationGenerationSaga(
             return CalibrationApiResult<CalibrationOrchestrationStatusDto>.Success(Project(orchestration));
         }
 
+        // #1990: D4 (#1987) stopped populating a printer-configuration snapshot for every new
+        // attempt and never regained a replacement path for the compatibility-pinning data this
+        // saga requires. Fail explicitly here instead of letting the lookup below - which is
+        // guaranteed to find nothing for an attempt with no snapshot FK - surface as
+        // ContextIdentityMissing, which reads like a lost/corrupted record rather than a known,
+        // temporary limitation. This is an interim short-circuit pending #1984 (D7), not a fix
+        // for the underlying gap. Historical (pre-D4) attempts may still carry a real snapshot FK
+        // and are unaffected.
+        if (attempt.PrinterConfigurationSnapshotId is null)
+        {
+            await FailTerminallyAsync(
+                project,
+                orchestration,
+                CalibrationGenerationProblemCodes.CompatibilitySnapshotUnavailable,
+                [
+                    new(
+                        CalibrationGenerationProblemCodes.CompatibilitySnapshotUnavailable,
+                        "attempt.printerConfigurationSnapshotId",
+                        "Filament calibration generation is temporarily unavailable pending #1984; see issue #1990."),
+                ],
+                cancellationToken);
+            return CalibrationApiResult<CalibrationOrchestrationStatusDto>.Success(Project(orchestration));
+        }
+
         PrinterConfigurationSnapshot? snapshot = await _dbContext.PrinterConfigurationSnapshots
             .AsNoTracking()
             .FirstOrDefaultAsync(

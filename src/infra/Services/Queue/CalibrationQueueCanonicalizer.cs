@@ -204,6 +204,22 @@ public sealed class CalibrationQueueCanonicalizer(AppDbContext db)
             .AsNoTracking()
             .SingleOrDefaultAsync(candidate => candidate.Id == orchestrationId, ct)
             ?? throw Missing("calibration orchestration");
+
+        // #1990: D4 (#1987) stopped populating a printer-configuration snapshot for every new
+        // attempt and never regained a replacement path for the compatibility-pinning data this
+        // canonicalizer requires. Fail explicitly here instead of letting the lookup below - which
+        // is guaranteed to find nothing for an attempt with no snapshot FK - surface as a generic
+        // "not found", which reads like data corruption rather than a known, temporary limitation.
+        // This is an interim short-circuit pending #1984 (D7), not a fix for the underlying gap.
+        if (attempt.PrinterConfigurationSnapshotId is null)
+        {
+            throw Incompatible(
+                "Filament calibration dispatch requires a printer-configuration compatibility " +
+                "snapshot, which is not currently populated for this attempt. This is a known " +
+                "interim limitation (see issue #1990) pending #1984; the attempt cannot be queued " +
+                "until that support lands.");
+        }
+
         PrinterConfigurationSnapshot snapshot = await _db.PrinterConfigurationSnapshots
             .AsNoTracking()
             .SingleOrDefaultAsync(
