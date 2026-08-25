@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.PrinterCalibration;
 using FluentAssertions;
 
-namespace Farm.Web.Api.Tests.Calibration.Generation;
+namespace Farm.Web.Api.Tests.Calibration;
 
 /// <summary>
 /// Covers the immutable registry identity rules and the mandatory smoke gating decision that the

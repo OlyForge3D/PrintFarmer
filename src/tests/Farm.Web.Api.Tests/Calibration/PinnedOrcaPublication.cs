@@ -1,6 +1,6 @@
 ﻿using System.Text.RegularExpressions;
 
-namespace Farm.Web.Api.Tests.Calibration.Generation;
+namespace Farm.Web.Api.Tests.Calibration;
 
 /// <summary>
 /// Validates the immutable registry identity of a published pinned OrcaSlicer worker image and
@@ -18,9 +18,22 @@ namespace Farm.Web.Api.Tests.Calibration.Generation;
 /// <c>Farm.Web.IntegrationTests</c> so the gate the workflow depends on is the same code the focused
 /// tests cover.
 /// </para>
+/// <para>
+/// This type was originally authored alongside the calibration generation saga's own pinned-worker
+/// smoke test (removed in #1979), but it is generic pinned-worker publication/gate infrastructure
+/// with no dependency on the saga itself, and it is still relied on by
+/// <c>PinnedOrcaCliRotationTests</c> in <c>Farm.Web.IntegrationTests</c> — so it was relocated here
+/// rather than deleted with the rest of the saga.
+/// </para>
 /// </remarks>
 internal static partial class PinnedOrcaPublication
 {
+    /// <summary>
+    /// The xUnit trait category shared by every test that requires the real, pinned OrcaSlicer
+    /// worker container to be pullable and runnable in the current environment.
+    /// </summary>
+    public const string SmokeCategory = "PinnedOrcaSmoke";
+
     /// <summary>Environment variable carrying the published repository, without tag or digest.</summary>
     public const string ImageVariable = "PRINTFARMER_ORCASLICER_IMAGE";
 
