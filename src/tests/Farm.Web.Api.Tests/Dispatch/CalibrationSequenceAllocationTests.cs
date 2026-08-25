@@ -218,11 +218,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             AttemptId = attemptId,
             SpecificationSha256 = new string('a', 64),
             SliceJobId = sliceJobId,
-            FinalArtifactId = sourceArtifactId,
             GcodeFileId = gcode.Id,
-            GcodeSha256 = gcode.ContentSha256,
-            ManifestSha256 = gcode.CalibrationManifestSha256,
-            SlicerContainerDigest = "sha256:abc",
         });
 
         db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printer.Id });

@@ -6736,11 +6736,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             AttemptId = gcode.CalibrationAttemptId.Value,
             SpecificationSha256 = gcode.SpecificationSha256,
             SliceJobId = gcode.SourceSliceJobId,
-            FinalArtifactId = gcode.SourceArtifactId,
             GcodeFileId = gcode.Id,
-            GcodeSha256 = gcode.ContentSha256,
-            ManifestSha256 = gcode.CalibrationManifestSha256,
-            SlicerContainerDigest = gcode.SlicerContainerDigest,
         });
 
         await db.SaveChangesAsync();

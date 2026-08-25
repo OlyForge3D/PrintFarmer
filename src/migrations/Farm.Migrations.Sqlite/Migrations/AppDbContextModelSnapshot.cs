@@ -943,21 +943,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("FinalArtifactId")
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("GcodeFileId")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("GcodeSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("GenerationRequestSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("GeneratorVersion")
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
@@ -975,10 +964,6 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("ManifestSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("Model3DId")
                         .HasColumnType("TEXT");
 
@@ -990,18 +975,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("PlanManifestSha256")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("PrintJobId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("ProjectId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PromotionOperationId")
-                        .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("RetryCount")
@@ -1012,17 +989,6 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid?>("SliceJobId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SlicerBinarySha256")
-                        .HasMaxLength(128)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SlicerContainerDigest")
-                        .HasMaxLength(128)
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("SourceArtifactId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SpecificationSha256")
@@ -1036,9 +1002,6 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedAtUtc")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("WorkerId")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");

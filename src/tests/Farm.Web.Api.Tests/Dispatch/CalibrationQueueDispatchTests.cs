@@ -866,11 +866,7 @@ public class CalibrationQueueDispatchTests
             AttemptId = calibrationAttemptId,
             SpecificationSha256 = new string('b', 64),
             SliceJobId = sourceSliceJobId,
-            FinalArtifactId = sourceArtifactId,
             GcodeFileId = gcodeId,
-            GcodeSha256 = new string('a', 64),
-            ManifestSha256 = new string('9', 64),
-            SlicerContainerDigest = "sha256:test",
         });
 
         PrintJob job = new()
