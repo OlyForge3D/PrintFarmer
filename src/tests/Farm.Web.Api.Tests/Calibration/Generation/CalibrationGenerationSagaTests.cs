@@ -312,6 +312,41 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         _ = (await _harness.CountSliceJobsAsync(fixture.OrchestrationId)).Should().Be(0);
     }
 
+    [Fact(DisplayName =
+        "An attempt with no printer-configuration snapshot fails explicitly with a known-limitation " +
+        "code (#1990), not a dead lookup masquerading as a missing record")]
+    public async Task ResumeAsync_WithoutSnapshotId_FailsWithCompatibilitySnapshotUnavailable()
+    {
+        CalibrationGenerationFixture fixture = await _harness.SeedAttemptAsync();
+        _ = await _harness.AddAttestedWorkerAsync();
+        _ = await _harness.CreateSaga().CreateOrResumeAsync(
+            fixture.ProjectId,
+            fixture.AttemptId,
+            "generate-no-snapshot",
+            fixture.Request(),
+            fixture.Owner,
+            CancellationToken.None);
+
+        // Simulate the D4 regression (#1990): CreateAttemptAsync unconditionally sets
+        // PrinterConfigurationSnapshotId = null for every new attempt today. Use raw SQL
+        // rather than an EF-tracked update: CalibrationAttempt rows are immutable once
+        // persisted (AppDbContext.EnsureCalibrationHistoryIsImmutable), which is exactly
+        // the invariant a real D4-created attempt never violates — it is born this way.
+        await using (Farm.Infrastructure.Data.AppDbContext core = _harness.CreateCoreContext())
+        {
+            _ = await core.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE CalibrationAttempts SET PrinterConfigurationSnapshotId = NULL WHERE Id = {fixture.AttemptId}");
+        }
+
+        _ = await _harness.CreateSaga().ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+
+        CalibrationOrchestration orchestration = await _harness.GetOrchestrationAsync(fixture.OrchestrationId);
+        _ = orchestration.Status.Should().Be(CalibrationOrchestrationStatus.Failed);
+        _ = orchestration.LastErrorCode.Should()
+            .Be(CalibrationGenerationProblemCodes.CompatibilitySnapshotUnavailable);
+        _ = (await _harness.CountSliceJobsAsync(fixture.OrchestrationId)).Should().Be(0);
+    }
+
     [Fact(DisplayName = "The submitted slice job carries the full calibration and profile lineage")]
     public async Task ResumeAsync_SubmitsSliceJobWithCompleteLineage()
     {
