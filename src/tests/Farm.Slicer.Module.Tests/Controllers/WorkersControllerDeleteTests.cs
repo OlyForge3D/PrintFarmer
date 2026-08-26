@@ -65,7 +65,7 @@ public sealed class WorkersControllerDeleteTests
         _ = result.Should().BeOfType<NotFoundResult>();
     }
 
-    private static Worker CreateWorker(Guid id)
+    private static Farm.Slicer.Module.Domain.Worker CreateWorker(Guid id)
     {
         DateTime now = DateTime.UtcNow;
         return new Worker
