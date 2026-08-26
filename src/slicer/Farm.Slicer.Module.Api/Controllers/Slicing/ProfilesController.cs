@@ -915,6 +915,7 @@ public class ProfilesController(
     /// </param>
     [HttpPost("process/for-machines")]
     [ProducesResponseType(typeof(List<ProcessProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(List<ProcessProfileSummaryDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetProcessProfilesForMachinesAsync(
         [FromServices] HttpClient httpClient,
@@ -961,6 +962,7 @@ public class ProfilesController(
     /// </param>
     [HttpPost("filament/for-machines")]
     [ProducesResponseType(typeof(List<FilamentProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(List<FilamentProfileSummaryDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetFilamentProfilesForMachinesAsync(
         [FromServices] HttpClient httpClient,

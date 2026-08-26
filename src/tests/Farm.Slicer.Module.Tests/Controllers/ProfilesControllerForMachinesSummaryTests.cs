@@ -45,6 +45,13 @@ public class ProfilesControllerForMachinesSummaryTests
         Assert.Equal("; START_GCODE_MARKER", returned.StartGcode);
         Assert.Equal("; END_GCODE_MARKER", returned.EndGcode);
         Assert.True(returned.Settings.ContainsKey("raw_setting_key"));
+
+        // Assert what actually crosses the wire, not just the CLR object graph, so a future
+        // change to serialization options can't silently drop the full-profile contract.
+        string json = JsonSerializer.Serialize(value);
+        Assert.Contains("raw_setting_key", json, StringComparison.Ordinal);
+        Assert.Contains("START_GCODE_MARKER", json, StringComparison.Ordinal);
+        Assert.Contains("END_GCODE_MARKER", json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -100,6 +107,76 @@ public class ProfilesControllerForMachinesSummaryTests
         _ = Assert.IsType<List<FilamentProfileSummaryDto>>(ok.Value);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("full")]
+    [InlineData("unknown-value")]
+    public async Task GetFilamentProfilesForMachinesAsync_NonSummaryView_FallsBackToFullDto(string? view)
+    {
+        FilamentProfileDto fullProfile = CreateFilamentProfile();
+        Mock<IProfilesService> profilesService = new(MockBehavior.Strict);
+        _ = profilesService
+            .Setup(s => s.GetFilamentProfilesForMachinesAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+            .ReturnsAsync([fullProfile]);
+
+        ProfilesController controller = CreateController(profilesService);
+        using HttpClient httpClient = new();
+
+        IActionResult result = await controller.GetFilamentProfilesForMachinesAsync(
+            httpClient, new ForMachinesRequest { MachineNames = ["Qidi X-Plus 4 0.4 nozzle"] }, CancellationToken.None, view: view);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        IReadOnlyList<FilamentProfileDto> value = Assert.IsAssignableFrom<IReadOnlyList<FilamentProfileDto>>(ok.Value);
+        FilamentProfileDto returned = Assert.Single(value);
+        Assert.Equal("; START_GCODE_MARKER", returned.StartGcode);
+        Assert.True(returned.Settings.ContainsKey("raw_setting_key"));
+    }
+
+    [Fact]
+    public async Task GetFilamentProfilesForMachinesAsync_SummaryView_NullCompatiblePrinters_DoesNotThrow()
+    {
+        // Regression: a worker/profile that deserializes with compatible_printers: null must not
+        // crash the summary projection (FromFull must not blindly wrap a null list).
+        FilamentProfileDto fullProfile = CreateFilamentProfile();
+        fullProfile.CompatiblePrinters = null!;
+        Mock<IProfilesService> profilesService = new(MockBehavior.Strict);
+        _ = profilesService
+            .Setup(s => s.GetFilamentProfilesForMachinesAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+            .ReturnsAsync([fullProfile]);
+
+        ProfilesController controller = CreateController(profilesService);
+        using HttpClient httpClient = new();
+
+        IActionResult result = await controller.GetFilamentProfilesForMachinesAsync(
+            httpClient, new ForMachinesRequest { MachineNames = ["Qidi X-Plus 4 0.4 nozzle"] }, CancellationToken.None, view: "summary");
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        List<FilamentProfileSummaryDto> value = Assert.IsType<List<FilamentProfileSummaryDto>>(ok.Value);
+        Assert.Empty(Assert.Single(value).CompatiblePrinters);
+    }
+
+    [Fact]
+    public async Task GetProcessProfilesForMachinesAsync_SummaryView_NullCompatiblePrinters_DoesNotThrow()
+    {
+        ProcessProfileDto fullProfile = CreateProcessProfile();
+        fullProfile.CompatiblePrinters = null!;
+        Mock<IProfilesService> profilesService = new(MockBehavior.Strict);
+        _ = profilesService
+            .Setup(s => s.GetProcessProfilesForMachinesAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+            .ReturnsAsync([fullProfile]);
+
+        ProfilesController controller = CreateController(profilesService);
+        using HttpClient httpClient = new();
+
+        IActionResult result = await controller.GetProcessProfilesForMachinesAsync(
+            httpClient, new ForMachinesRequest { MachineNames = ["Qidi X-Plus 4 0.4 nozzle"] }, CancellationToken.None, view: "summary");
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        List<ProcessProfileSummaryDto> value = Assert.IsType<List<ProcessProfileSummaryDto>>(ok.Value);
+        Assert.Empty(Assert.Single(value).CompatiblePrinters);
+    }
+
     [Fact]
     public async Task GetProcessProfilesForMachinesAsync_DefaultView_ReturnsFullDtoWithSettings()
     {
@@ -119,6 +196,34 @@ public class ProfilesControllerForMachinesSummaryTests
         IReadOnlyList<ProcessProfileDto> value = Assert.IsAssignableFrom<IReadOnlyList<ProcessProfileDto>>(ok.Value);
         ProcessProfileDto returned = Assert.Single(value);
         Assert.True(returned.Settings.ContainsKey("raw_setting_key"));
+
+        // Assert what actually crosses the wire, not just the CLR object graph.
+        string defaultJson = JsonSerializer.Serialize(value);
+        Assert.Contains("raw_setting_key", defaultJson, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("full")]
+    [InlineData("unknown-value")]
+    public async Task GetProcessProfilesForMachinesAsync_NonSummaryView_FallsBackToFullDto(string? view)
+    {
+        ProcessProfileDto fullProfile = CreateProcessProfile();
+        Mock<IProfilesService> profilesService = new(MockBehavior.Strict);
+        _ = profilesService
+            .Setup(s => s.GetProcessProfilesForMachinesAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+            .ReturnsAsync([fullProfile]);
+
+        ProfilesController controller = CreateController(profilesService);
+        using HttpClient httpClient = new();
+
+        IActionResult result = await controller.GetProcessProfilesForMachinesAsync(
+            httpClient, new ForMachinesRequest { MachineNames = ["Qidi X-Plus 4 0.4 nozzle"] }, CancellationToken.None, view: view);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        IReadOnlyList<ProcessProfileDto> value = Assert.IsAssignableFrom<IReadOnlyList<ProcessProfileDto>>(ok.Value);
+        Assert.True(Assert.Single(value).Settings.ContainsKey("raw_setting_key"));
     }
 
     [Fact]
