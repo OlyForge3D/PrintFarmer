@@ -103,7 +103,7 @@ classify.
 | `orca_worker`: `src/orcaslicer-worker/**` | | ✓ | `Farm.OrcaSlicer.Worker.Tests` | | |
 | `smartplug`: `src/modules/Farm.Modules.SmartPlug/**` | | ✓ | `Farm.Modules.SmartPlug.Tests`, `Farm.Web.Api.Tests` | | |
 | `maintenance`: `src/modules/Farm.Modules.Maintenance/**` | | ✓ | `Farm.Modules.Maintenance.Tests`, `Farm.Web.Api.Tests` | | |
-| `calibration`: `src/modules/Farm.Modules.Calibration/**` | | ✓ | `Farm.Modules.Calibration.Tests`, `Farm.Web.Api.Tests` | | |
+| `calibration`: `src/modules/Farm.Modules.Calibration/**` | | ✓ | `Farm.Modules.Calibration.Tests`, `Farm.Modules.Gcode.Tests`, `Farm.Web.Api.Tests` | | |
 | `gcode`: `src/modules/Farm.Modules.Gcode/**` | | ✓ | `Farm.Modules.Gcode.Tests`, `Farm.Web.Api.Tests` | | |
 | `migrations_app`: `src/migrations/Farm.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests` | `AppPg`, `AppSqlServer` | |
 | `migrations_slcr`: `src/migrations/Farm.Slicer.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests` | `SlicerPg`, `SlicerSqlServer` | |
@@ -158,15 +158,21 @@ contract-negotiation and health-check tests) intentionally stayed behind in
 `Farm.Web.Api.Tests`, so the bucket selects both `Farm.Modules.Calibration.Tests`
 and `Farm.Web.Api.Tests`. Because `Farm.Modules.Calibration` depends on both
 `Farm.Infrastructure` and `Farm.Slicer.Module`, the `infra` and `slicer` buckets
-also select `Farm.Modules.Calibration.Tests`.
+also select `Farm.Modules.Calibration.Tests`. `Farm.Modules.Gcode` project-references
+`Farm.Modules.Calibration` directly (`GcodeArtifactPromoter` implements
+`IGcodeArtifactPromoter`, which moved into Calibration in Phase 10), so the
+`calibration` bucket also selects `Farm.Modules.Gcode.Tests` -- a Calibration-only
+change must re-run Gcode's tests too.
 
 `gcode` follows the same controller-owning pattern: its five moved
 controllers' own coverage (`RouteTableSnapshotTests`) intentionally stayed
 behind in `Farm.Web.Api.Tests`, so the bucket selects both
 `Farm.Modules.Gcode.Tests` and `Farm.Web.Api.Tests`. Because
-`Farm.Modules.Gcode` depends on both `Farm.Infrastructure` and
+`Farm.Modules.Gcode` depends on `Farm.Infrastructure`,
 `Farm.Slicer.Module`/`Farm.Slicer.Module.Api` (this module requires
-`AddSlicerModule` on), the `infra` and `slicer` buckets also select
+`AddSlicerModule` on), and `Farm.Modules.Calibration` (`GcodeArtifactPromoter`
+implements `IGcodeArtifactPromoter`, which moved into Calibration in Phase 10),
+the `infra`, `slicer`, and `calibration` buckets also select
 `Farm.Modules.Gcode.Tests`.
 
 ### Full-safe (`full_matrix=1`) triggers

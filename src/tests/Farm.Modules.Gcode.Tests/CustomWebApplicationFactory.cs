@@ -116,6 +116,19 @@ public class CustomWebApplicationFactory : HostFixture<Program>
                 services.Remove(slicerFactoryDescriptor);
             }
 
+            // AddSlicerModule registers both a scoped and a singleton DbContextOptions<SlicerDbContext>
+            // descriptor (the latter backing IDbContextFactory); the FirstOrDefault removal above only
+            // catches whichever comes first, so explicitly remove the singleton one too, or it keeps
+            // pointing at the production connection string. See Farm.Web.Api.Tests.CustomWebApplicationFactory
+            // for the same fix.
+            ServiceDescriptor? slicerSingletonOpts = services.FirstOrDefault(d =>
+                d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>)
+                && d.Lifetime == ServiceLifetime.Singleton);
+            if (slicerSingletonOpts != null)
+            {
+                services.Remove(slicerSingletonOpts);
+            }
+
             services.AddDbContext<Farm.Slicer.Module.Data.SlicerDbContext>(options =>
             {
                 options.UseSqlite(

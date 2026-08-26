@@ -677,6 +677,10 @@ case_calibration_change() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix calibration" "$matrix" "Farm.Modules.Calibration.Tests" || return 1
+  # Farm.Modules.Gcode project-references Farm.Modules.Calibration directly
+  # (issue #2039), so a Calibration-only change must also select
+  # Farm.Modules.Gcode.Tests.
+  assert_contains "matrix gcode depends on calibration" "$matrix" "Farm.Modules.Gcode.Tests" || return 1
   # The retained calibration contract-negotiation/health-check/route-table
   # coverage (RouteTableSnapshotTests, CalibrationProfileResolutionContractTests)
   # intentionally stayed in Farm.Web.Api.Tests, so a controller-owning module

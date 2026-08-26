@@ -184,6 +184,7 @@
       "dependsOnProjects": [
         "src/modules/Farm.Modules.Gcode/",
         "src/modules/Farm.Modules.Abstractions/",
+        "src/modules/Farm.Modules.Calibration/",
         "src/infra/",
         "src/slicer/Farm.Slicer.Module/",
         "src/slicer/Farm.Slicer.Module.Api/"

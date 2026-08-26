@@ -907,7 +907,12 @@ main() {
     # stayed behind in Farm.Web.Api.Tests -- see docs/MODULE_MIGRATION_PATTERN.md.
     # A controller-owning module must therefore also select Farm.Web.Api.Tests,
     # unlike a pure-service module such as Farm.OrcaSlicer.Worker.
-    test_names+=("Farm.Modules.Calibration.Tests" "Farm.Web.Api.Tests")
+    # Farm.Modules.Gcode project-references Farm.Modules.Calibration directly
+    # (GcodeArtifactPromoter's IGcodeArtifactPromoter contract moved there in
+    # Phase 10, #2038), so a Calibration-only change must also select
+    # Farm.Modules.Gcode.Tests or a Calibration API break can silently reach
+    # Gcode with CI green.
+    test_names+=("Farm.Modules.Calibration.Tests" "Farm.Modules.Gcode.Tests" "Farm.Web.Api.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_gcode )); then
