@@ -87,6 +87,27 @@ public class CalibrationTests : IDisposable
         }
     }
 
+    [Fact]
+    public void ClientAcceptedWireNames_ExcludesYoloMethodsButIncludesEverythingElse()
+    {
+        // Issue #2051: the two YOLO methods parse (they are catalogued) but are not yet
+        // slicer-supported, so they must not appear in the list a controller advertises to
+        // clients as "supported methods" — otherwise the API would recommend a method it
+        // immediately rejects.
+        CalibrationMethods.ClientAcceptedWireNames.Should()
+            .NotContain("flow_rate_yolo_recommended")
+            .And.NotContain("flow_rate_yolo_perfectionist");
+
+        foreach (string wireName in CalibrationMethods.ClientAcceptedWireNames)
+        {
+            CalibrationMethods.TryParse(wireName, out CalibrationMethod method).Should().BeTrue();
+            CalibrationMethods.IsSlicerSupported(method).Should().BeTrue();
+        }
+
+        CalibrationMethods.ClientAcceptedWireNames.Should()
+            .HaveCount(CalibrationMethods.SupportedWireNames.Count - 2);
+    }
+
     [Theory]
     [InlineData(CalibrationMethod.FlowRateYoloRecommended, "Orca-LinearFlow.3mf")]
     [InlineData(CalibrationMethod.FlowRateYoloPerfectionist, "Orca-LinearFlow_fine.3mf")]

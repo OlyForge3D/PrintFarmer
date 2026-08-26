@@ -124,7 +124,7 @@ public partial class SliceJobController(
             if (!CalibrationMethods.TryParse(request.Calibration.Method, out CalibrationMethod parsedMethod))
             {
                 string message = $"Unsupported calibration method '{request.Calibration.Method}'. " +
-                    $"Supported methods: {string.Join(", ", CalibrationMethods.SupportedWireNames)}.";
+                    $"Supported methods: {string.Join(", ", CalibrationMethods.ClientAcceptedWireNames)}.";
                 return SlicerApiProblems.InvalidRequest(this, "unsupported_calibration_method", message);
             }
 

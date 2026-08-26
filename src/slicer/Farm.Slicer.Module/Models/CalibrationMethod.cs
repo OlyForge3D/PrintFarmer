@@ -87,8 +87,24 @@ public static class CalibrationMethods
             [CalibrationMethod.FlowRateYoloPerfectionist] = "flow_rate_yolo_perfectionist",
         };
 
-    /// <summary>The wire names of every currently-supported calibration method.</summary>
+    /// <summary>
+    /// The wire names of every calibration method <see cref="TryParse"/> recognizes, including
+    /// <see cref="CalibrationMethod.FlowRateYoloRecommended"/>/<see cref="CalibrationMethod.FlowRateYoloPerfectionist"/>,
+    /// which parse successfully but are not yet slicer-supported (see <see cref="IsSlicerSupported"/>).
+    /// Do not surface this list as "supported methods" in a client-facing error message — use
+    /// <see cref="ClientAcceptedWireNames"/> for that.
+    /// </summary>
     public static IReadOnlyList<string> SupportedWireNames { get; } = [.. WireNameToMethod.Keys];
+
+    /// <summary>
+    /// The wire names of calibration methods a client can actually submit a job for today — the
+    /// subset of <see cref="SupportedWireNames"/> for which <see cref="IsSlicerSupported"/> is
+    /// <see langword="true"/>. Use this (not <see cref="SupportedWireNames"/>) when listing
+    /// accepted methods in a client-facing error message, so the list never advertises a method
+    /// the same request would otherwise be rejected for.
+    /// </summary>
+    public static IReadOnlyList<string> ClientAcceptedWireNames { get; } =
+        [.. WireNameToMethod.Where(pair => IsSlicerSupported(pair.Value)).Select(pair => pair.Key)];
 
     /// <summary>
     /// Attempts to parse a client-supplied calibration method name. Only the methods currently

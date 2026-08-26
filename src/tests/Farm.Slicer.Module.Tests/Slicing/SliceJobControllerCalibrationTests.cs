@@ -41,6 +41,12 @@ public sealed class SliceJobControllerCalibrationTests
         var problem = objectResult.Value.Should().BeOfType<ProblemDetails>().Subject;
         _ = problem.Extensions["code"].Should().Be("unsupported_calibration_method");
         _ = problem.Detail.Should().Contain("flow_rate_pass_1").And.Contain("temperature_tower");
+
+        // Issue #2051 regression: the YOLO methods parse successfully (they are catalogued) but
+        // are rejected separately as "not yet slicer-supported" — they must never appear in the
+        // "Supported methods" list of an *unrelated* unsupported-method error, or a client would
+        // be told to retry with a method that request would also reject.
+        _ = problem.Detail.Should().NotContain("flow_rate_yolo_recommended").And.NotContain("flow_rate_yolo_perfectionist");
     }
 
     [Theory]
