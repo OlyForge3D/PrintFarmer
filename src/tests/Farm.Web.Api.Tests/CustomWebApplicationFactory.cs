@@ -285,14 +285,18 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     // parallelism: once a host is built, all of its requests/tests still run concurrently with
     // every other class's.
     //
-    // The permit count was tuned empirically, not chosen arbitrarily: 1 (fully serial builds)
-    // reliably passed but left the suite around 12 minutes; 2 concurrent builds cut that to
-    // ~11m15s with zero new failures across repeated runs; 3 concurrent builds saved only
-    // ~10 more seconds but introduced a new, unrelated timing-sensitive flake
-    // (MoonrakerSnapmakerU1CameraTests) under the extra CPU contention. 2 is the value that
-    // measurably helps wall-clock without reintroducing any flake — do not raise this further
-    // without re-running the 3-consecutive-green flake check to confirm it stays stable.
-    private static readonly SemaphoreSlim HostBuildLock = new(2, 2);
+    // Permit count is 1 (fully serial host builds), not tuned upward for wall-clock: raising it
+    // was tried and reverted. BackendPluginExtensions.DiscoverAndLoadPlugins (product code, out
+    // of scope for this test-only change) wraps Assembly.GetTypes() in a catch that silently
+    // swallows ReflectionTypeLoadException rather than salvaging the types that DID load, so a
+    // partial-load race under >1 concurrent callers can silently drop plugin registrations
+    // instead of failing loudly — there is no way to prove that is safe for any N > 1 without
+    // reading or changing that product code, which this PR must not do. Passing empirically
+    // under a higher permit count for a bounded number of runs is not proof of safety for a race
+    // like this one; only permit=1 removes the race entirely. This does cost wall-clock (measured
+    // ~12 minutes vs. the ~11 minute target) but correctness takes priority — do not raise this
+    // without first eliminating the underlying product-code race.
+    private static readonly SemaphoreSlim HostBuildLock = new(1, 1);
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -621,14 +625,42 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         await ResetSingletonRowAsync(context, new MutationCounter());
 
         await context.SaveChangesAsync();
+
+        // RevisionConcurrency.Advance() (invoked unconditionally from AppDbContext.SaveChangesAsync
+        // above, product code) forces every Modified IRevisionedEntity's Revision to its true
+        // persisted OriginalValue + 1, overwriting whatever value SetValues assigned above — so
+        // without this follow-up, DispatchSettings/OutboxSequenceState's Revision would climb by
+        // one on every reset instead of returning to the intended baseline (1). Forcing
+        // OriginalValue instead was tried and reverted: EF also uses a concurrency token's
+        // OriginalValue as the UPDATE's WHERE-clause match against the real row, so overriding it
+        // to anything other than the row's true prior value makes the WHERE clause miss and throws
+        // DbUpdateConcurrencyException ("expected to affect 1 row(s), but actually affected 0").
+        // ExecuteUpdateAsync issues a direct SQL UPDATE that bypasses change tracking (and
+        // therefore Advance() and the concurrency check) entirely, so it can force Revision back
+        // to baseline without fighting the automatic +1 or requiring any original-value match.
+        await ResetRevisionAsync<DispatchSettings>(context, 1);
+        await ResetRevisionAsync<OutboxSequenceState>(context, 1);
     }
+
+    /// <summary>
+    /// Forces every row of <typeparamref name="TEntity"/> to <paramref name="revision"/> via a
+    /// direct SQL UPDATE (EF Core's <c>ExecuteUpdateAsync</c>), bypassing change tracking so
+    /// <see cref="RevisionConcurrency.Advance"/> never sees — and therefore never overwrites —
+    /// this write. Safe to call unconditionally for the two revisioned singleton tables: each has
+    /// exactly one row at this point in <see cref="ResetSingletonModelDataAsync"/>.
+    /// </summary>
+    private static Task ResetRevisionAsync<TEntity>(AppDbContext context, long revision)
+        where TEntity : class, IRevisionedEntity
+        => context.Set<TEntity>().ExecuteUpdateAsync(setters => setters.SetProperty(e => e.Revision, revision));
 
     /// <summary>
     /// Resets the single row of a singleton entity type to <paramref name="defaults"/>: updates
     /// every scalar property of the existing tracked row in place if one exists, or inserts
     /// <paramref name="defaults"/> as a new row otherwise. Using <c>CurrentValues.SetValues</c>
     /// (rather than restating each property assignment by hand) keeps this in sync automatically
-    /// as each entity type gains or loses properties.
+    /// as each entity type gains or loses properties. See <see cref="ResetSingletonModelDataAsync"/>
+    /// for why <see cref="IRevisionedEntity"/> rows need an additional follow-up step beyond this
+    /// method to actually land on their intended baseline <c>Revision</c>.
     /// </summary>
     private static async Task ResetSingletonRowAsync<TEntity>(AppDbContext context, TEntity defaults)
         where TEntity : class

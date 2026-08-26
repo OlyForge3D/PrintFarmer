@@ -28,6 +28,7 @@ namespace Farm.Web.Api.Tests.Integration;
 /// </summary>
 [Trait("Category", "DbHeavy")]
 [TestTiming]
+[Collection(RateLimiterEnvSerialCollection.Name)]
 public class DesktopApiKeyExchangePolicyIntegrationTests : IClassFixture<DesktopApiKeyExchangePolicyIntegrationTests.Factory>, IAsyncLifetime
 {
     public class Factory : CustomWebApplicationFactory
