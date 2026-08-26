@@ -75,6 +75,137 @@ import os
 import re
 import sys
 
+
+def _strip_noncode(text):
+    """Return a copy of `text` with every character that is not real C#
+    code -- comments, and the contents of char/string literals, including
+    the delimiter braces of interpolation holes such as `$"{expr}"` and any
+    string nested inside one -- replaced with a space (newlines are kept so
+    line/character positions are unaffected). Brace-counting over the
+    result therefore reflects only genuine code-block nesting (namespace,
+    class, method, lambda, etc.), and is not perturbed by a `{`/`}` that
+    only exists as interpolation-hole punctuation or as an ordinary
+    character inside a string/char literal or comment.
+    """
+    n = len(text)
+    blanks = []
+
+    def scan_string(i, verbatim, interpolated):
+        start = i
+        while i < n:
+            c = text[i]
+            if not verbatim and c == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if verbatim and c == '"':
+                if i + 1 < n and text[i + 1] == '"':
+                    i += 2
+                    continue
+                blanks.append((start, i))
+                return i + 1
+            if not verbatim and c == '"':
+                blanks.append((start, i))
+                return i + 1
+            if interpolated and c == "{":
+                if i + 1 < n and text[i + 1] == "{":
+                    i += 2
+                    continue
+                blanks.append((start, i))
+                blanks.append((i, i + 1))
+                i = scan_code(i + 1, stop_at_hole_close=True)
+                start = i
+                continue
+            if interpolated and c == "}" and i + 1 < n and text[i + 1] == "}":
+                i += 2
+                continue
+            i += 1
+        blanks.append((start, n))
+        return n
+
+    def scan_code(i, stop_at_hole_close):
+        hole_depth = 0
+        while i < n:
+            c = text[i]
+            if c == "/" and i + 1 < n and text[i + 1] == "/":
+                j = text.find("\n", i)
+                j = n if j == -1 else j
+                blanks.append((i, j))
+                i = j
+                continue
+            if c == "/" and i + 1 < n and text[i + 1] == "*":
+                j = text.find("*/", i + 2)
+                j = n if j == -1 else j + 2
+                blanks.append((i, j))
+                i = j
+                continue
+            if c == "'":
+                j = i + 1
+                j = j + 2 if j < n and text[j] == "\\" else j + 1
+                while j < n and text[j] != "'":
+                    j += 1
+                j = min(j + 1, n)
+                blanks.append((i, j))
+                i = j
+                continue
+            if text[i:i + 3] in ("$@\"", "@$\""):
+                blanks.append((i, i + 3))
+                i = scan_string(i + 3, verbatim=True, interpolated=True)
+                continue
+            if text[i:i + 2] == '@"':
+                blanks.append((i, i + 2))
+                i = scan_string(i + 2, verbatim=True, interpolated=False)
+                continue
+            if text[i:i + 2] == '$"':
+                blanks.append((i, i + 2))
+                i = scan_string(i + 2, verbatim=False, interpolated=True)
+                continue
+            if c == '"':
+                blanks.append((i, i + 1))
+                i = scan_string(i + 1, verbatim=False, interpolated=False)
+                continue
+            if stop_at_hole_close and c == "{":
+                hole_depth += 1
+                i += 1
+                continue
+            if stop_at_hole_close and c == "}":
+                if hole_depth == 0:
+                    blanks.append((i, i + 1))
+                    return i + 1
+                hole_depth -= 1
+                i += 1
+                continue
+            i += 1
+        return i
+
+    scan_code(0, stop_at_hole_close=False)
+    out = list(text)
+    for s, e in blanks:
+        for k in range(s, e):
+            if out[k] != "\n":
+                out[k] = " "
+    return "".join(out)
+
+
+def _code_brace_depths(code_text):
+    """Return a list, parallel to `code_text`, of the C#-code brace depth at
+    each character position (the depth *before* consuming that position's
+    character): depth 0 is outside any {}-delimited block. Callers must
+    pass text already run through `_strip_noncode`, so that braces inside
+    comments and string/char literals (including interpolation-hole
+    delimiters) do not perturb the count.
+    """
+    depths = [0] * (len(code_text) + 1)
+    depth = 0
+    for idx, ch in enumerate(code_text):
+        depths[idx] = depth
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+    depths[len(code_text)] = depth
+    return depths
+
+
 manifest_path, src_root = sys.argv[1], sys.argv[2]
 
 with open(manifest_path, encoding="utf-8") as f:
@@ -371,7 +502,7 @@ for sharded_entry in entries:
     # declare more than one test class (e.g. a class under test plus its
     # in-memory fake), and relying on the file name would either miss the
     # non-eponymous classes entirely or produce a false failure once a class
-    # is renamed independently of its file. See the indentation-depth
+    # is renamed independently of its file. See the code-nesting-depth
     # reasoning further below for how nested (non-owning) classes, such as
     # an `IClassFixture` factory declared inside its test class, are
     # excluded from this association.
@@ -418,16 +549,25 @@ for sharded_entry in entries:
             # already closed by the time the fact appears.
             #
             # Distinguishing a true top-level test class from a nested one
-            # requires knowing where each class's body actually ends, which
-            # in general requires brace matching -- and C# interpolated
-            # strings (`$"...{expr}..."`) can contain braces that are not
-            # real code blocks, making naive brace counting unreliable
-            # without a full tokenizer. Instead, this codebase consistently
-            # indents nested classes deeper than the outer class that
-            # declares them, so indentation depth (of the line containing
-            # each `class` keyword) is used to tell top-level classes apart
-            # from nested ones: only classes at the shallowest indentation
-            # seen in the file are eligible to own a fact.
+            # requires knowing where each class's body actually ends. Naive
+            # brace counting over the raw source is unreliable because C#
+            # interpolated strings (`$"...{expr}..."`) contain `{`/`}`
+            # characters that are not real code-block delimiters -- but
+            # `_strip_noncode` resolves that by blanking out comments and
+            # the contents of every string/char literal (including
+            # interpolation-hole delimiters and any string nested inside a
+            # hole) before brace-counting, so `_code_brace_depths` gives the
+            # exact, syntactically-grounded nesting depth of each class
+            # declaration: a class at namespace scope (this codebase uses
+            # file-scoped namespaces exclusively) sits at depth 0, and a
+            # class nested inside another class's body (e.g. the
+            # `public class Factory : CustomWebApplicationFactory` xUnit
+            # fixture idiom, or a `[CollectionDefinition]` marker class)
+            # sits at depth 1 or deeper -- regardless of how either class
+            # happens to be indented, so a genuine top-level sibling that is
+            # accidentally mis-indented can never be misattributed as
+            # nested, and a genuinely nested class can never be mistaken for
+            # top-level.
             class_matches = list(
                 re.finditer(
                     r"\bpublic\s+(?:(?:sealed|abstract|static|partial)\s+)*class\s+"
@@ -442,44 +582,23 @@ for sharded_entry in entries:
                 )
                 continue
 
-            def _indent(pos: int) -> int:
-                line_start = text.rfind("\n", 0, pos) + 1
-                return pos - line_start
-
-            # Guardrail against the indentation heuristic itself: a genuine
-            # sibling top-level class that is accidentally mis-indented by a
-            # stray space (a formatting slip, not real nesting) would
-            # otherwise be silently excluded as "nested" -- exactly the kind
-            # of false pass this validator exists to prevent, since a
-            # class-specific shard filter naming only the correctly-indented
-            # sibling would then wrongly appear to cover both. Rather than
-            # guess, require every observed indentation to be either the
-            # file's minimum (a top-level class) or exactly one 4-space
-            # nesting step above it (the one nested-fixture idiom this
-            # heuristic is designed to handle); anything else -- a third
-            # indentation level, or a gap that isn't a clean 4-space step --
-            # fails the validator closed instead of silently misattributing.
-            NESTED_INDENT_STEP = 4
-            indents = sorted({_indent(m.start()) for m in class_matches})
-            if len(indents) > 2 or (
-                len(indents) == 2 and indents[1] != indents[0] + NESTED_INDENT_STEP
-            ):
+            code_depths = _code_brace_depths(_strip_noncode(text))
+            class_depths = {m.start(): code_depths[m.start()] for m in class_matches}
+            min_depth = min(class_depths.values())
+            if min_depth != 0:
                 errors.append(
-                    f"{entry_name}: test source {relative} has public class "
-                    f"declarations at indentation levels {indents}, which the "
-                    "shard-coverage validator cannot safely disambiguate into "
-                    "top-level vs. nested fixture classes (expected either a "
-                    "single indentation level, or exactly two levels "
-                    f"{NESTED_INDENT_STEP} spaces apart) -- refusing to guess "
-                    "which class(es) own the [Fact]/[Theory] attributes here"
+                    f"{entry_name}: test source {relative} has every public class "
+                    f"declaration nested at code depth {min_depth} (none at "
+                    "namespace scope), which the shard-coverage validator did "
+                    "not expect -- refusing to guess which class(es) own the "
+                    "[Fact]/[Theory] attributes here"
                 )
                 continue
 
-            min_indent = indents[0]
             class_positions = [
                 (m.start(), m.group(1))
                 for m in class_matches
-                if _indent(m.start()) == min_indent
+                if class_depths[m.start()] == min_depth
             ]
 
             active_classes = set()

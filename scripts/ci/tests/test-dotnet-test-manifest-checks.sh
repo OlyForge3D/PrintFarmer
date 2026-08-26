@@ -27,9 +27,16 @@
 #      matrix since select-dotnet-tests.sh looks entries up by name), and
 #   9. FAILs when an API shard filter drops a root-level test class even though
 #      the directory-level `(root)` ownership marker still exists, and
-#  10. FAILs closed (rather than silently misattributing) when a test source
-#      file has two public classes at indentation levels that are neither
-#      equal nor a single clean 4-space nesting step apart.
+#  10. FAILs when two new, unregistered top-level sibling classes in one file
+#      are declared at different indentation (a stray extra space on the
+#      second) -- both must still be reported as uncovered, proving neither
+#      is ever silently excluded as "nested" merely because of how it is
+#      indented, and
+#  11. FAILs closed (rather than silently guessing) when a file's public
+#      class(es) are all nested at a non-zero code-brace depth (e.g. wrapped
+#      in a block-scoped `namespace X { ... }` instead of this codebase's
+#      usual file-scoped `namespace X;`), so there is no class at namespace
+#      scope to safely treat as the owner of its [Fact]/[Theory] attributes.
 # =============================================================================
 
 set -uo pipefail
@@ -335,19 +342,21 @@ with open(out_path, "w", encoding="utf-8") as f:
   fi
 }
 
-case_sibling_indentation_mismatch_fails() {
-  # Negative: two public classes in one file at indentation levels that are
-  # neither equal (both top-level) nor exactly one 4-space nesting step
-  # apart (top-level + its one nested fixture) must fail closed rather than
-  # silently treating the more-indented one as a nested fixture and
-  # dropping its facts from shard-coverage consideration. This is the
-  # scenario a stray extra space on a genuine second top-level class would
-  # produce -- the validator must refuse to guess, not misattribute.
-  local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/Controllers/_ScratchIndentGuardTests.cs"
+case_sibling_mismatched_indentation_both_flagged_uncovered_fails() {
+  # Negative (proves no misattribution): two public top-level sibling
+  # classes at different indentation (a stray extra space on the second)
+  # must BOTH still be recognized as real, independent owning classes --
+  # indentation is just formatting and must not affect whether a class is
+  # treated as top-level. Since these are brand-new class names with no
+  # registered shard filter, the validator must report a coverage gap for
+  # *each* of them; if the mis-indented sibling were ever silently excluded
+  # as "nested" (the exact false pass this check guards against), only one
+  # gap -- or none -- would be reported instead of two.
+  local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/_ScratchSiblingCoverageTests.cs"
   cat >"$scratch" <<'EOF'
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Web.Api.Tests;
 
-public class ScratchIndentGuardTests
+public class ScratchSiblingCoverageTests
 {
     [Fact]
     public void Foo()
@@ -355,7 +364,7 @@ public class ScratchIndentGuardTests
     }
 }
 
- public class ScratchIndentGuardSiblingTests
+ public class ScratchSiblingCoverageSiblingTests
 {
     [Fact]
     public void Bar()
@@ -368,11 +377,49 @@ EOF
   report="$(bash "$VALIDATOR" 2>&1)" || rc=$?
   rm -f "$scratch"
   if (( rc == 0 )); then
-    printf '  expected validator to fail on mismatched sibling indentation, but it passed\n' >&2
+    printf '  expected validator to fail (both new sibling classes are uncovered), but it passed\n' >&2
     return 1
   fi
-  if [[ "$report" != *"public class declarations at indentation levels"* ]]; then
-    printf '  expected an indentation-disambiguation error, got:\n%s\n' "$report" >&2
+  if [[ "$report" != *"no shard filter covers test source _ScratchSiblingCoverageTests.cs class ScratchSiblingCoverageTests"* ]]; then
+    printf '  expected a coverage-gap error naming the first (indent-0) sibling, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchSiblingCoverageTests.cs class ScratchSiblingCoverageSiblingTests"* ]]; then
+    printf '  expected a coverage-gap error naming the second (mis-indented) sibling too -- it must not have been silently treated as nested, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_block_scoped_namespace_fails_closed() {
+  # Negative: every public class in a file at code-nesting depth > 0 (e.g.
+  # every class sits inside a block-scoped `namespace X { ... }` wrapper
+  # instead of this codebase's usual file-scoped `namespace X;`) means the
+  # validator found no class at namespace scope at all -- it must refuse to
+  # guess which class(es) own the [Fact]/[Theory] attributes rather than
+  # silently treating the shallowest-nested class as if it were top-level.
+  local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/Controllers/_ScratchBlockScopedNamespaceTests.cs"
+  cat >"$scratch" <<'EOF'
+namespace Farm.Web.Api.Tests.Controllers
+{
+    public class ScratchBlockScopedNamespaceTests
+    {
+        [Fact]
+        public void Foo()
+        {
+        }
+    }
+}
+EOF
+  local rc=0
+  local report
+  report="$(bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$scratch"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail closed on an every-class-nested file, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"has every public class declaration nested at code depth"* ]]; then
+    printf '  expected a nested-at-every-class error, got:\n%s\n' "$report" >&2
     return 1
   fi
 }
@@ -387,7 +434,8 @@ TESTS=(
   case_pinned_default_filter_narrowed_fails
   case_canonical_name_renamed_fails
   case_api_shard_filter_coverage_fails
-  case_sibling_indentation_mismatch_fails
+  case_sibling_mismatched_indentation_both_flagged_uncovered_fails
+  case_block_scoped_namespace_fails_closed
 )
 
 printf '=== dotnet test manifest validator regression suite ===\n'
