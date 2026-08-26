@@ -413,7 +413,7 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
         return new SlicerDbContext(builder.Options);
     }
 
-    private static Farm.Slicer.Module.Domain.Worker AddWorker(
+    private static Worker AddWorker(
         SlicerDbContext context,
         SlicerEngineType engine,
         string status,
