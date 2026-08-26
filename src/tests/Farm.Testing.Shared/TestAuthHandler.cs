@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Tests.TestInfrastructure;
+namespace Farm.Testing.Shared;
 
 #pragma warning disable CS0618 // AuthenticationHandler constructor with ISystemClock is obsolete but required until ASP.NET packages support TimeProvider directly
 public class TestAuthHandler(

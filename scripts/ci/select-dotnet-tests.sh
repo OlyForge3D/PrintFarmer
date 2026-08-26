@@ -334,6 +334,12 @@ load_changed_files() {
 #   tests_orca      — src/tests/Farm.OrcaSlicer.Worker.Tests/**
 #   tests_integration — src/tests/Farm.Web.IntegrationTests/**
 #   tests_modules   — src/tests/Farm.Modules.Abstractions.Tests/**
+#   tests_shared    — src/tests/Farm.Testing.Shared/** (issue #2032: shared
+#                     host-independent test fixtures/HostFixture base
+#                     referenced by Farm.Web.Api.Tests, Farm.Slicer.Module.Tests
+#                     and Farm.Web.IntegrationTests. Foundational like
+#                     Farm.Modules.Abstractions, so treated as full-safe below
+#                     rather than attempting to enumerate every consumer.)
 #   tests_other     — any other src/tests/**
 #   tools           — src/tools/**
 #   dotnet_config   — src/*.props, src/*.targets, src/.editorconfig
@@ -419,6 +425,7 @@ classify_path() {
     src/tests/Farm.OrcaSlicer.Worker.Tests/*)   printf 'tests_orca' ; return ;;
     src/tests/Farm.Web.IntegrationTests/*)      printf 'tests_integration' ; return ;;
     src/tests/Farm.Modules.Abstractions.Tests/*) printf 'tests_modules' ; return ;;
+    src/tests/Farm.Testing.Shared/*)          printf 'tests_shared' ; return ;;
     src/tests/*)             printf 'tests_other' ; return ;;
     src/tools/*)             printf 'tools' ; return ;;
   esac
@@ -606,7 +613,7 @@ main() {
   local has_orca=0 has_discovery=0 has_settings=0 has_modules=0
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
-  local has_tests_integration=0 has_tests_modules=0 has_tests_other=0
+  local has_tests_integration=0 has_tests_modules=0 has_tests_shared=0 has_tests_other=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
 
   local p category
@@ -632,6 +639,7 @@ main() {
       tests_orca)      has_tests_orca=1 ;;
       tests_integration) has_tests_integration=1 ;;
       tests_modules)   has_tests_modules=1 ;;
+      tests_shared)    has_tests_shared=1 ;;
       tests_other)     has_tests_other=1 ;;
       tools)           has_tools=1 ;;
       unknown_src)     has_unknown_src=1 ;;
@@ -677,6 +685,14 @@ main() {
   # and Farm.Moonraker.Emulator.Tests above) — full-safe until it is.
   if (( has_tests_modules )); then
     emit_full_safe "full-safe: Farm.Modules.Abstractions.Tests changed"
+  fi
+  # tests_shared: Farm.Testing.Shared (issue #2032) is the shared HostFixture
+  # base + fixture library referenced by Farm.Web.Api.Tests,
+  # Farm.Slicer.Module.Tests and Farm.Web.IntegrationTests. Foundational like
+  # Farm.Modules.Abstractions — treat any change as full-safe rather than
+  # attempting to enumerate every consuming test project.
+  if (( has_tests_shared )); then
+    emit_full_safe "full-safe: Farm.Testing.Shared changed"
   fi
 
   # From here, we're in scoped-selection territory.

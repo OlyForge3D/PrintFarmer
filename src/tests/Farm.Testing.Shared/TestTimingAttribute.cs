@@ -2,7 +2,7 @@
 using System.Reflection;
 using Xunit.Sdk;
 
-namespace Farm.Web.Api.Tests;
+namespace Farm.Testing.Shared;
 
 /// <summary>
 /// Lightweight per-test timing instrumentation. Emits a console line and appends to test-timings.csv

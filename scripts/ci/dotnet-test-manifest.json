@@ -16,7 +16,8 @@
         "src/migrations/Farm.Migrations.PostgreSQL/",
         "src/migrations/Farm.Migrations.SqlServer/",
         "src/migrations/Farm.Slicer.Migrations.PostgreSQL/",
-        "src/migrations/Farm.Slicer.Migrations.SqlServer/"
+        "src/migrations/Farm.Slicer.Migrations.SqlServer/",
+        "src/tests/Farm.Testing.Shared/"
       ],
       "defaultFilter": "Category!=DbHeavy&Category!=Docker",
       "shards": [
@@ -51,7 +52,8 @@
         "src/worker-shared/",
         "src/backends/Farm.Backend.Plugin.Core/",
         "src/migrations/Farm.Slicer.Migrations.PostgreSQL/",
-        "src/migrations/Farm.Slicer.Migrations.SqlServer/"
+        "src/migrations/Farm.Slicer.Migrations.SqlServer/",
+        "src/tests/Farm.Testing.Shared/"
       ],
       "defaultFilter": "Category!=DbHeavy&Category!=Docker",
       "shards": [],
@@ -135,7 +137,8 @@
         "src/migrations/Farm.Migrations.PostgreSQL/",
         "src/migrations/Farm.Migrations.SqlServer/",
         "src/migrations/Farm.Slicer.Migrations.PostgreSQL/",
-        "src/migrations/Farm.Slicer.Migrations.SqlServer/"
+        "src/migrations/Farm.Slicer.Migrations.SqlServer/",
+        "src/tests/Farm.Testing.Shared/"
       ],
       "defaultFilter": "Category!=DbHeavy&Category!=Docker",
       "shards": [],

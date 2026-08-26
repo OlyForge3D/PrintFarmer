@@ -16,3 +16,5 @@ global using Farm.Slicer.Module.Models;
 global using Farm.Slicer.Module.Services;
 // Test infrastructure
 global using Farm.Slicer.Module.Tests.TestInfrastructure;
+// TestPaths moved to Farm.Testing.Shared (issue #2032)
+global using Farm.Testing.Shared;
