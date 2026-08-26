@@ -33,6 +33,7 @@ COPY src/modules/Farm.Modules.SmartPlug/*.csproj ./modules/Farm.Modules.SmartPlu
 COPY src/modules/Farm.Modules.PrintQueue/*.csproj ./modules/Farm.Modules.PrintQueue/
 COPY src/modules/Farm.Modules.Maintenance/*.csproj ./modules/Farm.Modules.Maintenance/
 COPY src/modules/Farm.Modules.Gcode/*.csproj ./modules/Farm.Modules.Gcode/
+COPY src/modules/Farm.Modules.Identity/*.csproj ./modules/Farm.Modules.Identity/
 COPY src/api/*.csproj ./api/
 COPY Directory.Build.props ./
 COPY global.json ./

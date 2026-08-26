@@ -216,6 +216,25 @@
       "notes": "New in issue #2039 (Phase 11: Services/Gcode, Services/FileManagement, the 5 Gcode/harvest/promotion controllers, and their Chunk*/*Gcode*/MultiUpload*/Move*/DeleteFilesRequest DTOs moved out of Farm.Web.Api into Farm.Modules.Gcode, following the Farm.Modules.SmartPlug (#2036)/Farm.Modules.Calibration (#2038) leaf-module pattern). Unlike those two, this module needs AddSlicerModule ON (artifact-to-gcode promotion depends on the slicer module's repositories), so its own CustomWebApplicationFactory (Farm.Modules.Gcode.Tests/CustomWebApplicationFactory.cs) always registers the slicer module -- the epic's own note that a shared slicer-on HostFixture sub-fixture does not exist yet in Farm.Testing.Shared, so this factory is a narrow, purpose-built copy of Farm.Web.Api.Tests' own default (slicer-on) factory rather than a generalized shared fixture. Depends on Farm.Infrastructure and Farm.Slicer.Module/Farm.Slicer.Module.Api. Gets its own narrow select-dotnet-tests.sh buckets (gcode/tests_gcode). RouteTableSnapshotTests stays in Farm.Web.Api.Tests, so select-dotnet-tests.sh's gcode bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module)."
     },
     {
+      "name": "Farm.Modules.Identity.Tests",
+      "testProject": "tests/Farm.Modules.Identity.Tests/Farm.Modules.Identity.Tests.csproj",
+      "productionProject": "modules/Farm.Modules.Identity/Farm.Modules.Identity.csproj",
+      "pathPrefixes": ["src/tests/Farm.Modules.Identity.Tests/"],
+      "dependsOnProjects": [
+        "src/modules/Farm.Modules.Identity/",
+        "src/modules/Farm.Modules.Abstractions/",
+        "src/infra/",
+        "src/api/",
+        "src/tests/Farm.Web.Api.Tests/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Modules.Identity.Tests",
+      "notes": "New in issue #2041 (Phase 13: Auth, users, API keys, quotas, roles, permissions, security audit, and password policy -- the 9 auth/admin controllers plus PermissionCatalogService/RolePermissionService/TokenRevocationCleanupService -- moved out of Farm.Web.Api into Farm.Modules.Identity, depending on Farm.Modules.Abstractions' IApiModule seam from #2035). Follows the Farm.Modules.Calibration.Tests pattern above: its own narrow select-dotnet-tests.sh buckets (identity/tests_identity) rather than full-safe. The 4 reflection-based architecture tests (AuthorizeRolesGateArchitectureTests, AnonymousEndpointArchitectureTests, NoClientsAllArchitectureTests, OpenApiAuthorizationTests), RouteTableSnapshotTests, and the genuine CustomWebApplicationFactory integration tests that exercise the assembled host (AuthenticationServiceIntegrationTests, AuthAuditServiceIntegrationTests, plus the Farm.Infrastructure-resident auth service unit tests under Services/Authentication/) all stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's identity bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module)."
+    },
+    {
       "name": "Farm.Web.IntegrationTests",
       "testProject": "tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj",
       "productionProject": "api/Farm.Web.Api.csproj",

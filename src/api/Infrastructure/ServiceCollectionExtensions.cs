@@ -453,7 +453,8 @@ public static class ServiceCollectionExtensions
         // live tokens" (#1454) -- used by both the role-permissions-changed path (#1471) and
         // the role-assignment-changed path so there is exactly one revocation code path.
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IEffectivePermissionsRevocationService, Farm.Infrastructure.Services.Authentication.EffectivePermissionsRevocationService>();
-        _ = services.AddHostedService<Services.Authentication.TokenRevocationCleanupService>();
+        // TokenRevocationCleanupService hosted service moved to Farm.Modules.Identity's
+        // IApiModule registration (issue #2041).
         _ = services.AddScoped<Farm.Infrastructure.Services.Users.IUsersService, Farm.Infrastructure.Services.Users.UsersService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IPasskeyService, Farm.Infrastructure.Services.Authentication.PasskeyService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Roles.IRoleManagementService, Farm.Infrastructure.Services.Roles.RoleManagementService>();
