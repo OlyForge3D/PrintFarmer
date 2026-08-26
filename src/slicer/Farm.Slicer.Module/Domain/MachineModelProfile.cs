@@ -17,6 +17,8 @@ namespace Farm.Slicer.Module.Domain;
 /// </remarks>
 public class MachineModelProfile
 {
+    private string _name = string.Empty;
+
     public Guid Id { get; set; }
 
     /// <summary>
@@ -24,7 +26,22 @@ public class MachineModelProfile
     /// </summary>
     [Required]
     [MaxLength(256)]
-    public string Name { get; set; } = string.Empty;
+    public string Name
+    {
+        get => _name;
+        set
+        {
+            _name = value ?? string.Empty;
+            NameNormalized = NormalizeNameKey(_name);
+        }
+    }
+
+    /// <summary>
+    /// Trimmed, Unicode case-folded model-name key used to enforce portable uniqueness.
+    /// </summary>
+    [Required]
+    [MaxLength(256)]
+    public string NameNormalized { get; private set; } = string.Empty;
 
     /// <summary>
     /// The manufacturer name (e.g., "Sovol", "Prusa").
@@ -53,6 +70,30 @@ public class MachineModelProfile
     [MaxLength(32)]
     public string? SlicerVersion { get; set; }
 
+    /// <summary>Distribution that owns the pinned source preset, normally OrcaSlicer.</summary>
+    [MaxLength(64)]
+    public string? SlicerDistribution { get; set; }
+
+    /// <summary>Exact source machine_model name used to generate this family.</summary>
+    [MaxLength(256)]
+    public string? SourceMachineModelName { get; set; }
+
+    /// <summary>Canonical JSON containing the family-shared native OrcaSlicer overrides.</summary>
+    public string? FamilyOverridesJson { get; set; }
+
+    /// <summary>Soft reference to the user who created this farm-wide family.</summary>
+    public Guid? CreatedByUserId { get; set; }
+
+    /// <summary>Most recent successful render timestamp.</summary>
+    public DateTime? LastRenderedAt { get; set; }
+
+    /// <summary>OrcaSlicer version for which the current derived bundle was rendered.</summary>
+    [MaxLength(32)]
+    public string? RenderedForOrcaVersion { get; set; }
+
+    /// <summary>Health of the derived worker bundle.</summary>
+    public ProfileFamilyRenderStatus RenderStatus { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public DateTime UpdatedAt { get; set; }
@@ -61,4 +102,24 @@ public class MachineModelProfile
     /// Navigation property for machine profiles that inherit from this model (slicer-internal relationship).
     /// </summary>
     public ICollection<MachineProfile> MachineProfiles { get; set; } = [];
+
+    internal bool RefreshNormalizedName()
+    {
+        string normalizedName = NormalizeNameKey(_name);
+        if (string.Equals(NameNormalized, normalizedName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        NameNormalized = normalizedName;
+        return true;
+    }
+
+    /// <summary>
+    /// Builds a provider-independent equality key for persisted profile-family names.
+    /// This deliberately does not use CatalogNameNormalizer, which formats display casing
+    /// without making differently-cased names equal.
+    /// </summary>
+    internal static string NormalizeNameKey(string value) =>
+        value.Trim().ToUpperInvariant();
 }

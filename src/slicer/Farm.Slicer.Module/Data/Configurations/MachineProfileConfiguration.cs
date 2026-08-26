@@ -28,6 +28,8 @@ public class MachineProfileConfiguration : IEntityTypeConfiguration<MachineProfi
         _ = builder.Property(p => p.SettingsJson).HasColumnType("TEXT");
         _ = builder.Property(p => p.Hash).HasMaxLength(64);
         _ = builder.Property(p => p.IsSystem).HasDefaultValue(false);
+        _ = builder.Property(p => p.SourceSystemPresetName).HasMaxLength(255);
+        _ = builder.Property(p => p.OverridesJson).HasColumnType("TEXT");
 
         // Slicer-internal FK: MachineProfile → MachineModelProfile
         _ = builder.HasOne(p => p.MachineModelProfile)

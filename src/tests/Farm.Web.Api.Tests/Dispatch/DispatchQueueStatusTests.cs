@@ -27,7 +27,7 @@ namespace Farm.Web.Api.Tests.Dispatch;
 /// - GET /api/dispatch/history supports date range filtering
 /// - Unauthorized access returns 401
 /// </summary>
-public class DispatchQueueStatusTests : IAsyncLifetime
+public class DispatchQueueStatusTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient _client = null!;
@@ -38,20 +38,21 @@ public class DispatchQueueStatusTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public DispatchQueueStatusTests()
+    public DispatchQueueStatusTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _client?.Dispose();
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     // =========================================================================

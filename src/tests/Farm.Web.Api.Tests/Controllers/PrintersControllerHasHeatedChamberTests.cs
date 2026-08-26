@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -21,25 +21,26 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// dispatch-safety, not calibration-specific logic.
 /// </summary>
 [Trait("Category", "Integration")]
-public class PrintersControllerHasHeatedChamberTests : IAsyncLifetime
+public class PrintersControllerHasHeatedChamberTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
 
-    public PrintersControllerHasHeatedChamberTests()
+    public PrintersControllerHasHeatedChamberTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _client?.Dispose();
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     private async Task<Guid> SeedPrinterAsync()

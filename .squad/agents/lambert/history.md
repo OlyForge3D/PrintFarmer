@@ -119,3 +119,61 @@ warnings), all 1370 Farm.Web.Api.Tests pass.
 - Never serialize shard records with `|`: VSTest OR filters contain that character. ASCII Unit Separator with reader-side reserved-character rejection preserves fail-closed parsing.
 - Matrix identity and build identity are deliberately separate: `<leg>-<shard>` is unique for checks/TRX/results artifacts, while all shards keep the same `.csproj` in `matrix.project` so they share one compiled-project artifact.
 - The manifest validator now scans API test sources containing `[Fact]`/`[Theory]` and requires each source's fully qualified prefix to be present in its owning shard filter; directory ownership alone is not sufficient.
+
+## OrcaSlicer profile-family backend trace (2026-08-25)
+
+- Registered printers resolve Orca machine variants through `Printer.ModelId` -> `PrinterModelAlias.SlicerModelName` -> worker `printer_model`; the machine lookup never reads custom `SlicerDbContext` profiles.
+- Single-profile clone writes a user-owned DB `MachineProfile` but leaves raw `name`/`printer_model`/`inherits` unchanged and does not create an alias or worker entry. This data-source split is the definitive clone-loop cause; worker cache invalidation cannot help.
+- Backend has `MachineModelProfile` + child `MachineProfile.MachineModelProfileId`, but seeding does not populate the child FK and the family entity has no user owner.
+- A family clone must create one family plus all nozzle variants, rewrite exact variant names and shared `printer_model`, link every child, add/resolve target association, and materialize process/filament `compatible_printers` with the new exact names. Prefer computing family-editable fields as the invariant intersection across resolved variants with a per-nozzle denylist.
+- Detailed trace: `decisions/inbox/lambert-profile-family-backend.md`.
+
+
+## OrcaSlicer profile-family inheritance follow-up (2026-08-25)
+
+- Real Voron machine families do not inherit from a shared model-settings base: `machine_model` is metadata, while every nozzle child inherits `fdm_klipper_common` and repeats family geometry/identity. A custom family therefore still needs one child per nozzle.
+- Voron process compatibility is primarily exact system-preset names (`compatible_printers`), not `printer_model`. Preserve a custom child's exact source preset name as its compatibility identity while keeping custom family/child names for selection and display.
+- Orca's user-preset compatibility identity comes from `inherits`, but PrintFarmer's current `WithSystemPresetInherits` rewrites that value to the DTO display name. Genuine custom children need a separate path that preserves their source-system ancestor.
+- DB/custom profiles do not traverse the worker resource inheritance resolver: the API snapshots `RawJson` verbatim and workers expect complete flat settings. Small override-only inheritance requires a new resolver/materializer before slice-job snapshotting.
+- Recommended model: persist source preset identity + Orca provenance/version, small family overrides, and one child per nozzle; materialize against the worker catalog; use source preset identity for process/filament matching; use DB family/target-printer association for UI selection. This avoids duplicating all process/filament profiles.
+- `clone-from-template` clones process rows only and sets a soft printer pointer; it does not create a custom machine profile or family associated with the target catalog model.
+
+## 2026-08-25 — Machine profile family cloning Phase 1 + Phase 2b
+
+Implemented reason-coded 404s for both profile lookup gates, the SlicerDbContext family/variant metadata and render-state model, PostgreSQL/SQL Server/SQLite migrations, transactional `clone-family`, deterministic non-null hashes, native Orca family rendering with per-nozzle deltas and resolved compatibility, AppDbContext alias creation, and the atomic Parker worker bundle client. Added fidelity, Prusa-condition, empty/universal filament, missing-source, persistence/conflict, worker-contract, discovery, execution, migration, and Phase 1 tests. Full build passed; all three snapshots have no pending changes; Lambert-scoped format passed. The required full test run exposed and drove a fix for the string-converted enum default; all relevant post-fix targeted tests passed. See `decisions/inbox/lambert-phase2b-impl.md` for contracts and full evidence.
+
+
+## 2026-08-25 — Phase 1 frontend contract reconciliation
+
+Reconciled both profile lookup gates with Ripley's landed consumer: coded 404 bodies now serialize exactly `code` and optional `detail` (null detail omitted), replacing the initially implemented `message` field. Added a wire serialization test that rejects `message`; focused controller tests pass 8/8 and scoped formatting passes. Recorded the complete camelCase `POST /api/slicer/profiles/clone-family` request, 201 response, and error-code/status map in `decisions/inbox/lambert-phase2b-impl.md` for the Phase 3 wizard.
+
+## 2026-08-25 — Worker custom-inheritance 422 preservation
+
+Reconciled Parker's final custom-bundle mutation behavior: HTTP 422 `failures[]` is parsed by `ProfileFamilyWorkerClient`, preserving bundle/family/profile/missing-parent details in `ProfileFamilySourceException`. This keeps failed render state while allowing the clone-family controller to return `source_preset_unavailable` 422 rather than generic worker-unavailable 503. Added adapter and endpoint contract coverage; focused tests pass 3/3 and scoped formatting passes.
+
+## 2026-08-25 — Final profile-family migration regression verification
+
+Confirmed Parker's 1,352-test SQLite cascade came from the transient enum-default mapping and no longer reproduces: explicit string conversion plus SQL string default passes the exact provider-aware SQLite migration test. Full suite now passes Slicer.Module 1,178/1,178 and exposes only six documented missing-server-environment tests plus two stale expected migration lists; added the PostgreSQL/SQL Server IDs and their focused contract passes 2/2. All three provider snapshots are clean, and custom family/variant hashes remain deterministic and non-null for SQL Server's unfiltered unique index.
+
+## 2026-08-25 — Unified profile-family error envelope
+
+Standardized every explicit Phase 1/Phase 2b API error on `code` + `detail`; clone-family no longer emits `message`, including preserved worker inheritance failures. Focused endpoint test passes and asserts `message` is absent; scoped format passes. Reconfirmed all PostgreSQL/SQL Server/SQLite migration files and clean snapshots, plus deterministic non-null family/child hashes for SQL Server's unfiltered unique index. Per coordinator request, did not rerun the full suite after this final field-name-only edit.
+
+## 2026-08-25 — Hicks profile-family review fixes
+
+Resolved all three ordinary REQUEST_CHANGES findings. Worker HTTP 422 parsing now filters nullable `failures[]` entries and safely preserves typed `source_preset_unavailable` behavior for null-only and mixed arrays. Clone-family disabled controller-level automatic `[ApiController]` rejection in favor of explicit `ModelState` handling, so missing required fields now return the promised `{code, detail}` envelope; an HTTP-level test prevents direct-controller blind spots. Added the required acceptance path using the real renderer, family/alias persistence, actual worker bundle store/cache reload, and real `for-model` HTTP route: initial 404 becomes 200 with the generated variant. Targeted build and scoped format pass; four focused cases passed initially, and the three fixture-corrected failures pass 3/3 on rerun. Full suite was intentionally not rerun per coordinator direction.
+
+## 2026-08-25 — Bishop profile-family review fixes
+
+Resolved the ordinary architecture/data-integrity rejection: removed SQLite-only `NOCASE` from alias resolution/writes; failed families now retry in place with the same ID/bundle and transactional child replacement after worker or alias failures; successful alias writes evict the slicer-host's ten-minute alias cache. Also stopped mutating request DTOs, moved name lookup into SQL, narrowed 409 translation to the family-name index, removed the dead Location header, and corrected bundle docs. Added non-SQLite alias, worker/alias recovery, and cached-empty invalidation tests. Focused tests pass 10/10, scoped format passes, and focused build has no warnings in changed files. Anchor-only divergent-parent neutralization remains a documented non-blocking renderer follow-up.
+
+## 2026-08-25 — Authenticated slicer-host cross-domain lookups
+
+Closed Vasquez's microservices blocker by introducing dedicated read-only Main API routes authenticated with the existing `WorkerAuth:SharedKey` / `X-Slicer-Api-Key` convention. The slicer host's named `MainApi` client now attaches the key, catalog/printer adapters use only internal routes, and 401/403/authentication-unavailable 503 responses propagate as status-bearing `HttpRequestException`s instead of degrading to empty data. Public JWT/user authorization remains unchanged. Added host and HTTP-pipeline regression coverage (4/4 and 3/3), kept clone-to-lookup acceptance green (1/1), and removed the acceptance test's worker executable reference that leaked `Farm.Slicer.Worker.Core` into the slicer test compiler namespace. API/host targeted builds and scoped format pass; full suite intentionally deferred to consolidated validation.
+## 2026-08-25 — Duplicate service-credential rejection
+
+Hardened the internal slicer-host authentication seam to reject duplicate `X-Slicer-Api-Key` values rather than selecting one. Added HTTP-pipeline coverage; internal route tests pass 4/4, targeted API build succeeds, and scoped format is clean. Full suite remains deferred to consolidated validation.
+
+## 2026-08-25 — Profile-family cancellation and crash retry recovery
+
+Closed Bishop B1-R: post-persistence cancellation now marks the family Failed using an uncancelled persistence token before propagating, and both Failed and crash-left Pending families retry in place. Added relational cancellation/Pending recovery tests (focused class 6/6), renamed an EF InMemory alias test to stop claiming SQL-provider portability, and verified its behavior 1/1. Targeted build and scoped format pass; no full-suite rerun.

@@ -13,6 +13,9 @@ repository are intentionally omitted.
 - [Architecture](./ARCHITECTURE.md) - System components and data flow
 - [Architecture Flows](./ARCHITECTURE_FLOWS.md) - Detailed request and service
   interactions
+- [Module Migration Pattern](./MODULE_MIGRATION_PATTERN.md) - Step-by-step
+  playbook for extracting a `Farm.Modules.*` vertical-slice assembly out of
+  `Farm.Web.Api`, worked through the `Farm.Modules.SmartPlug` pilot (#2036)
 - [Features](./FEATURES.md) - User-facing feature overview
 - [Troubleshooting](./TROUBLESHOOTING.md) - Common problems and remedies
 

@@ -137,3 +137,21 @@ Files I now know cold:
 - The compact list DTO (`getPrinters()` → `PrinterFast[]` cast to `Printer[]`) is a recurring hazard: any guard reading a concurrency/state field off a grid-passed `printer` prop must fall back to a detail fetch, not to another view of the same prop.
 - Prefer disabling a control with an accessible reason over letting a click dead-end into a toast — matches `MaterialLoadout`'s existing `canMutate`/`blockedReason` pattern and the a11y rule that disabled controls carry an explanation.
 - Validation: `npm run build` clean; `npm run test:run` 428 files / 4753 tests / 0 failed; `npm run lint` clean.
+
+## 2026-08-25 — Machine profile family frontend trace
+
+- New Slice Job is hybrid: live Orca worker system profiles (`machineProfilesForModel`) plus DB-owned custom profiles (`customProfiles`) merged client-side.
+- The no-profile clone loop has a deterministic frontend cache defect: `/clone-from-template` success invalidates worker/hierarchy/extended keys but not `['customProfiles']`; the worker correctly remains empty after a DB clone, while the 30-second custom cache remains empty.
+- `CloneProfilesModal` performs no navigation. It closes back to `/slicer`; any observed URL redirect comes from outside that component.
+- No React code consumes literal Orca `machine_model_list`. Worker hierarchy types expose manufacturer → model → variants, but their service methods have no frontend callers.
+- Slicer Profiles management labels an individual variant list as “Machine Model”; family UX needs a first-class base-model/family picker rather than reusing that selector unchanged.
+- `MetadataProfileEditor` is reusable for shared family fields, but `ProfileEditorModal` is not reusable whole because it saves one profile and exposes nozzle-specific settings.
+
+
+## 2026-08-25 — Profile family Phases 0–1 truth-state UI
+
+- Removed the auto-opened `CloneProfilesModal` from `/slicer`; it cloned process profiles and could not resolve missing machine coverage.
+- Added a reason-specific machine-profile empty-state card: `no_profiles_for_model` offers an explained-disabled **Create profile family** action; `alias_matched_no_profiles` points to coverage/engine-version drift; absent/unknown codes degrade generically.
+- Assumed HTTP body `{ code, detail? }`, surfaced by `apiClient` at `error.data`; reason values are `no_profiles_for_model` and `alias_matched_no_profiles`.
+- Because Phase 1 removes the clone success callback, the Phase 0 `customProfiles` invalidation line has no surviving site in the combined end state; Phase 3 must invalidate all four approved family-related keys.
+- Validation: build passed; React suite passed once (463 files / 5,135 tests); lint passed with one pre-existing warning in untouched `SlicerWorkspace.tsx`.

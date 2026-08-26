@@ -26,8 +26,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// Tests the new camera management endpoints, printer relationships, and enum fields.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class CameraManagementTests : IAsyncLifetime
+public class CameraManagementTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
@@ -38,21 +37,21 @@ public class CameraManagementTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
-    public CameraManagementTests()
+    public CameraManagementTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _client?.Dispose();
-        _factory?.Dispose();
+        return Task.CompletedTask;
     }
 
     /// <summary>

@@ -981,24 +981,23 @@ public class DispatchScorerTests : IDisposable
 /// Tests use CustomWebApplicationFactory for full HTTP testing.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class DispatchEndpointIntegrationTests : IAsyncLifetime
+public class DispatchEndpointIntegrationTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
 
-    public DispatchEndpointIntegrationTests()
+    public DispatchEndpointIntegrationTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        _factory?.Dispose();
+        return Task.CompletedTask;
     }
 
     // TODO: These endpoint tests require Lambert's DispatchController to be implemented.

@@ -19,7 +19,7 @@ public sealed class DiscoveryRegistrationSecurityTests
     public async Task RegisterDiscoveryResult_UsesServerSideTargetAndConsumesOpaqueIdentifier()
     {
         using var factory = new CustomWebApplicationFactory();
-        await factory.ResetDatabaseAsync();
+        await factory.ResetDataAsync();
         using HttpClient client = await factory.CreateAdminClientAsync();
         const string sessionId = "secure-registration-session";
         const string serverUrl = "http://printer.internal:7125";
@@ -74,7 +74,7 @@ public sealed class DiscoveryRegistrationSecurityTests
     public async Task RegisterDiscoveryResult_RequiresFarmAdministrator()
     {
         using var factory = new CustomWebApplicationFactory();
-        await factory.ResetDatabaseAsync();
+        await factory.ResetDataAsync();
         using HttpClient client = await factory.CreateAuthenticatedClientAsync();
 
         HttpResponseMessage response = await client.PostAsJsonAsync(

@@ -1,5 +1,6 @@
 ﻿using System.Net.Http.Json;
 using System.Text.Json;
+using Farm.Infrastructure;
 using Farm.Slicer.Module.Services;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -8,8 +9,8 @@ namespace Farm.Slicer.Host.Services;
 
 /// <summary>
 /// HTTP-based printer lookup that calls the main API to resolve printer details.
-/// Results are cached in-memory to reduce round trips. Failures degrade gracefully
-/// by returning <c>null</c> / <c>"Unknown"</c> instead of throwing.
+/// Results are cached in-memory to reduce round trips. Transport failures degrade gracefully
+/// by returning <c>null</c> / <c>"Unknown"</c>; service authentication failures remain explicit.
 /// </summary>
 public sealed class HttpPrinterLookupService : IPrinterLookupService
 {
@@ -54,7 +55,8 @@ public sealed class HttpPrinterLookupService : IPrinterLookupService
         try
         {
             using HttpClient http = _httpClientFactory.CreateClient("MainApi");
-            using HttpResponseMessage response = await http.GetAsync($"api/printers/{printerId}", ct);
+            using HttpResponseMessage response =
+                await http.GetAsync(SlicerHostLookupContract.PrinterPath(printerId), ct);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -62,20 +64,21 @@ public sealed class HttpPrinterLookupService : IPrinterLookupService
                 return null;
             }
 
-            PrinterApiResponse? dto = await response.Content.ReadFromJsonAsync<PrinterApiResponse>(JsonOptions, ct);
+            SlicerHostPrinterLookupDto? dto =
+                await response.Content.ReadFromJsonAsync<SlicerHostPrinterLookupDto>(
+                    JsonOptions,
+                    ct);
 
             if (dto is null)
             {
                 return null;
             }
 
-            // Basic PrinterDto does not include ModelId; use null.
-            // ModelName is resolved by the main API and included in the response.
-            var info = new PrinterInfo(dto.Id, dto.Name, ModelId: null, dto.ModelName);
+            var info = new PrinterInfo(dto.Id, dto.Name, dto.ModelId, dto.ModelName);
             _cache.Set(cacheKey, info, CacheDuration);
             return info;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        catch (Exception ex) when (IsRecoverableFailure(ex))
         {
             _logger.LogWarning(ex, "Failed to resolve printer {PrinterId} from main API", printerId);
             return null;
@@ -89,14 +92,8 @@ public sealed class HttpPrinterLookupService : IPrinterLookupService
         return info?.Name ?? "Unknown";
     }
 
-    /// <summary>
-    /// Minimal projection of the main API's <c>PrinterDto</c> response.
-    /// Only the fields needed for cross-domain resolution are included.
-    /// The basic GET /api/printers/{id} endpoint returns Name and ModelName
-    /// but not ModelId. Use the /details endpoint if ModelId is needed.
-    /// </summary>
-    private sealed record PrinterApiResponse(
-        Guid Id,
-        string Name,
-        string? ModelName);
+    private static bool IsRecoverableFailure(Exception exception) =>
+        exception is TaskCanceledException or JsonException
+        || (exception is HttpRequestException httpRequestException
+            && !MainApiResponseGuard.IsAuthenticationFailure(httpRequestException));
 }

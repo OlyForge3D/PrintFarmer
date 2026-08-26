@@ -18,8 +18,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// with camelCase property naming and string enum values.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class AttentionControllerTests : IAsyncLifetime
+public class AttentionControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _anonClient;
@@ -32,14 +31,14 @@ public class AttentionControllerTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    public AttentionControllerTests()
+    public AttentionControllerTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _anonClient = _factory.CreateClient();
         _authClient = await _factory.CreateAuthenticatedClientAsync();
     }
@@ -48,7 +47,6 @@ public class AttentionControllerTests : IAsyncLifetime
     {
         _anonClient?.Dispose();
         _authClient?.Dispose();
-        _factory?.Dispose();
         return Task.CompletedTask;
     }
 

@@ -29,7 +29,7 @@ namespace Farm.Web.Api.Tests.Dispatch;
 /// - Unauthorized access returns 401
 /// - Individual job failures don't fail the entire batch
 /// </summary>
-public class BatchDispatchTests : IAsyncLifetime
+public class BatchDispatchTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient _client = null!;
@@ -40,20 +40,21 @@ public class BatchDispatchTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public BatchDispatchTests()
+    public BatchDispatchTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _client?.Dispose();
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     // =========================================================================

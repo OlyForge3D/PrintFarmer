@@ -6,10 +6,9 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Services.Thumbnails;
+using Farm.Testing.Shared;
 using Farm.Web.Api.Services.Authentication;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,15 +20,12 @@ namespace Farm.Slicer.Module.Tests;
 /// Provides isolated in-memory SQLite database for each slicer test instance.
 /// Uses SQLite in-memory with shared cache so each factory instance gets its own isolated database.
 /// </summary>
-public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyncDisposable
+public class CustomWebApplicationFactory : HostFixture<Program>
 {
-    private readonly string _connectionString;
-    private readonly string _modelStoragePath;
-    private readonly string _gcodeStoragePath;
-    private readonly SqliteConnection _keepAliveConnection;
     private static int _databaseCounter;
 
     public CustomWebApplicationFactory()
+        : base($"slicer_test_{System.Threading.Interlocked.Increment(ref _databaseCounter)}")
     {
         // Force-load the Slicer API assembly so the integration shim's AppDomain scan
         // finds SlicerApiModuleRegistrar and registers ISlicerFileStorage.
@@ -37,18 +33,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         // not yet in AppDomain.GetAssemblies() when AddSlicerIntegration scans for plugins.
         System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(
             typeof(Farm.Slicer.Module.Api.SlicerApiExtensions).TypeHandle);
-
-        int dbId = System.Threading.Interlocked.Increment(ref _databaseCounter);
-        _keepAliveConnection = new SqliteConnection($"Data Source=file:slicer_test_{dbId}?mode=memory&cache=shared");
-        _keepAliveConnection.Open();
-        _connectionString = _keepAliveConnection.ConnectionString;
-
-        string tempDir = Path.Join(Path.GetTempPath(), $"slicer_test_{Guid.NewGuid()}");
-        _modelStoragePath = Path.Join(tempDir, "models");
-        _gcodeStoragePath = Path.Join(tempDir, "gcode");
-
-        Directory.CreateDirectory(_modelStoragePath);
-        Directory.CreateDirectory(_gcodeStoragePath);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -58,8 +42,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["WorkerAuth:SharedKey"] = "test-worker-key",
-                ["STORAGE_PATHS:UPLOADS"] = _modelStoragePath,
-                ["STORAGE_PATHS:GCODE"] = _gcodeStoragePath
+                ["STORAGE_PATHS:UPLOADS"] = ModelStoragePath,
+                ["STORAGE_PATHS:GCODE"] = GcodeStoragePath
             });
         });
 
@@ -88,13 +72,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             services.AddDbContext<SlicerDbContext>(options =>
             {
                 options.UseSqlite(
-                    _connectionString,
+                    ConnectionString,
                     sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
             });
 
             DbContextOptionsBuilder<SlicerDbContext> optionsBuilder = new DbContextOptionsBuilder<SlicerDbContext>();
             optionsBuilder.UseSqlite(
-                _connectionString,
+                ConnectionString,
                 sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
             services.AddSingleton(optionsBuilder.Options);
             services.AddDbContextFactory<SlicerDbContext>(_ => { }, ServiceLifetime.Scoped);
@@ -127,13 +111,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             services.AddDbContext<AppDbContext>(options =>
             {
                 options.UseSqlite(
-                    _connectionString,
+                    ConnectionString,
                     sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
             });
 
             DbContextOptionsBuilder<AppDbContext> appOptionsBuilder = new();
             appOptionsBuilder.UseSqlite(
-                _connectionString,
+                ConnectionString,
                 sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
             services.AddSingleton(appOptionsBuilder.Options);
             services.AddDbContextFactory<AppDbContext>(_ => { }, ServiceLifetime.Scoped);
@@ -161,7 +145,16 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 { appCreator.CreateTables(); }
                 catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
             }
+
+            ConfigureTestServices(services);
         });
+    }
+
+    /// <summary>
+    /// Allows specialized integration fixtures to replace narrowly scoped services.
+    /// </summary>
+    protected virtual void ConfigureTestServices(IServiceCollection services)
+    {
     }
 
     /// <summary>
@@ -172,35 +165,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         _ = useInMemorySqlite;
 
         return new CustomWebApplicationFactory();
-    }
-
-    /// <inheritdoc />
-    public override async ValueTask DisposeAsync()
-    {
-        try
-        {
-            string? tempDir = Path.GetDirectoryName(_modelStoragePath);
-            if (!string.IsNullOrEmpty(tempDir) && Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
-        }
-        catch
-        {
-            // Ignore cleanup errors
-        }
-
-        try
-        {
-            _keepAliveConnection.Close();
-            _keepAliveConnection.Dispose();
-        }
-        catch
-        {
-            // Ignore connection cleanup errors
-        }
-
-        await base.DisposeAsync();
     }
 
     /// <summary>

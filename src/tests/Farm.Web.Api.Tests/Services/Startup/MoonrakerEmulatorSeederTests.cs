@@ -185,7 +185,10 @@ public sealed class MoonrakerEmulatorSeederTests
             NullLogger<MoonrakerEmulatorSeeder>.Instance);
 
         await seeder.StartAsync(CancellationToken.None);
-        await seeded.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        // Widened from 2s: under full test-suite parallelism (maxParallelThreads=0),
+        // thread-pool/CPU contention from dozens of concurrently-running hosts can
+        // legitimately delay this background seeder's first save past a short timeout.
+        await seeded.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await seeder.StopAsync(CancellationToken.None);
 
         Assert.Equal(5, added.Count);

@@ -1,7 +1,9 @@
 ﻿using Xunit;
 
-// Enable parallel test execution at the assembly level.
-// Unit tests will run in parallel for speed.
-// Integration tests using SQLite should use [Collection(IntegrationTestCollection.Name)]
-// to run sequentially and avoid disk I/O conflicts.
-[assembly: CollectionBehavior(CollectionBehavior.CollectionPerClass, MaxParallelThreads = 4)]
+// Run test collections/classes in parallel. Each integration test class either owns its own
+// isolated named in-memory SQLite database (per-class CustomWebApplicationFactory via
+// IClassFixture) or shares one via IntegrationTestCollection — in both cases the database is
+// private to that class/collection, so there are no cross-class disk I/O conflicts to guard
+// against. MaxParallelThreads is left unset so xUnit uses its default (processor-count-based)
+// degree of parallelism; xunit.runner.json controls the actual thread cap.
+[assembly: CollectionBehavior(CollectionBehavior.CollectionPerClass)]

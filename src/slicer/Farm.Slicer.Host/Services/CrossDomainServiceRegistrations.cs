@@ -28,11 +28,13 @@ public static class CrossDomainServiceRegistrations
             ?? configuration["SlicerApi:BaseUrl"]
             ?? "http://api:5245";
 
+        services.AddTransient<MainApiServiceAuthenticationHandler>();
         services.AddHttpClient("MainApi", client =>
-        {
-            client.BaseAddress = new Uri(mainApiBaseUrl.TrimEnd('/') + "/");
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
+            {
+                client.BaseAddress = new Uri(mainApiBaseUrl.TrimEnd('/') + "/");
+                client.Timeout = TimeSpan.FromSeconds(10);
+            })
+            .AddHttpMessageHandler<MainApiServiceAuthenticationHandler>();
 
         services.AddMemoryCache();
 

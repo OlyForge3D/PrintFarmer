@@ -27,28 +27,39 @@ namespace Farm.Web.Api.Tests.Integration;
 /// holds that permission, and never accompanied by a role claim.
 /// </summary>
 [Trait("Category", "DbHeavy")]
-[Collection(IntegrationTestCollection.Name)]
 [TestTiming]
-public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
+public class DesktopCalibrationScopeIntegrationTests : IClassFixture<DesktopCalibrationScopeIntegrationTests.Factory>, IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory;
+    public class Factory : CustomWebApplicationFactory
+    {
+        public Factory()
+            : base(new Dictionary<string, string?>
+            {
+                ["Security:DevModeBypassAuth"] = "false",
+                // This class's host (and its singleton in-memory rate limiter) is shared
+                // across every test via IClassFixture, and several tests here exchange the
+                // same API key more than once. Raise the ceiling well above what any single
+                // test performs so cumulative attempts across the whole class never trip the
+                // default limit (5/minute) meant for a single client in production.
+                ["RateLimiting:Authentication:MaxApiKeyExchangeAttemptsPerMinute"] = "1000"
+            })
+        {
+        }
+    }
+
+    private readonly Factory _factory;
     private HttpClient _anonymousClient = null!;
     private HttpClient _loginClient = null!;
     private Guid _ownerId;
 
-    public DesktopCalibrationScopeIntegrationTests()
+    public DesktopCalibrationScopeIntegrationTests(Factory factory)
     {
-        // DevModeBypassAuth would succeed every pending requirement on GET requests and mask the
-        // very authorization decisions this class exists to prove.
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
-        {
-            ["Security:DevModeBypassAuth"] = "false"
-        });
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _anonymousClient = _factory.CreateClient();
         _loginClient = await _factory.CreateAuthenticatedClientAsync(
             "calibration-scope-owner",
@@ -65,7 +76,6 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
     {
         _anonymousClient?.Dispose();
         _loginClient?.Dispose();
-        _factory?.Dispose();
         return Task.CompletedTask;
     }
 

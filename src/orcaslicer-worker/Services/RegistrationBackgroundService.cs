@@ -11,6 +11,7 @@ public class RegistrationBackgroundService : BackgroundService
     private readonly ISlicerRegistrationClient _registrationClient;
     private readonly IWorkerStateService _workerState;
     private readonly CachedOrcaProfilesService? _cachedProfilesService;
+    private readonly CustomProfilesReconciliationState _customProfilesState;
     private readonly ILogger<RegistrationBackgroundService> _logger;
     private readonly IHostApplicationLifetime _lifetime;
 
@@ -24,6 +25,7 @@ public class RegistrationBackgroundService : BackgroundService
         ISlicerRegistrationClient registrationClient,
         IWorkerStateService workerState,
         ISlicerProfilesService profilesService,
+        CustomProfilesReconciliationState customProfilesState,
         IConfiguration configuration,
         ILogger<RegistrationBackgroundService> logger,
         IHostApplicationLifetime lifetime)
@@ -33,6 +35,8 @@ public class RegistrationBackgroundService : BackgroundService
 
         // Get the cached service if available (for waiting on cache readiness)
         _cachedProfilesService = profilesService as CachedOrcaProfilesService;
+        _customProfilesState = customProfilesState
+            ?? throw new ArgumentNullException(nameof(customProfilesState));
         ArgumentNullException.ThrowIfNull(configuration);
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _lifetime = lifetime ?? throw new ArgumentNullException(nameof(lifetime));
@@ -93,8 +97,11 @@ public class RegistrationBackgroundService : BackgroundService
 
                 // Send heartbeat with current capacity
                 WorkerState state = _workerState.GetWorkerState();
-                int freeSlots = Math.Max(0, _maxConcurrentJobs - state.ActiveJobs);
-                string status = state.IsShuttingDown ? "Draining" : "Online";
+                (int freeSlots, string status) =
+                    CalculateHeartbeatAvailability(
+                        state,
+                        _maxConcurrentJobs,
+                        _customProfilesState.IsReady);
 
                 SlicerHeartbeatResult heartbeatResult = await _registrationClient.HeartbeatAsync(
                     _serviceId,
@@ -130,10 +137,38 @@ public class RegistrationBackgroundService : BackgroundService
         _logger.LogInformation("RegistrationBackgroundService stopped.");
     }
 
-    private async Task<bool> TryRegisterAsync(CancellationToken cancellationToken)
+    internal static (int FreeSlots, string Status)
+        CalculateHeartbeatAvailability(
+            WorkerState state,
+            int maxConcurrentJobs,
+            bool customProfilesReady)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        int freeSlots = customProfilesReady
+            ? Math.Max(0, maxConcurrentJobs - state.ActiveJobs)
+            : 0;
+        string status = state.IsShuttingDown
+            ? "Draining"
+            : customProfilesReady
+                ? "Online"
+                : "Error";
+        return (freeSlots, status);
+    }
+
+    internal async Task<bool> TryRegisterAsync(CancellationToken cancellationToken)
     {
         try
         {
+            if (!_customProfilesState.IsReady)
+            {
+                string failure = _customProfilesState.Failure
+                    ?? "initial reconciliation is pending";
+                _logger.LogWarning(
+                    "Registration deferred because custom profiles are not synchronized: {Failure}",
+                    failure);
+                return false;
+            }
+
             _logger.LogInformation("Attempting to register with slicer registry...");
 
             (Guid serviceId, string apiKey) = await _registrationClient.RegisterAsync(cancellationToken);

@@ -26,7 +26,6 @@ using Farm.Web.Api.Infrastructure.OpenApi;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Capabilities;
 using Farm.Web.Api.Startup;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
@@ -200,12 +199,13 @@ catch
 IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 
 // Vertical-slice API module discovery/registration seam (issue #2035, epic #2019). Discovery
-// only scans assemblies explicitly listed here -- no Farm.Modules.* assembly is listed yet, so
-// this is a guaranteed no-op today: zero ApplicationParts added, zero routes changed.
-// Registering the call now means the host wiring itself -- not just the abstraction -- is
-// exercised before the first module lands. A later phase adds that module's marker assembly
-// here, e.g.: AddApiModules(mvcBuilder, builder.Configuration, typeof(SomeModule).Assembly).
-builder.Services.AddApiModules(mvcBuilder, builder.Configuration);
+// only scans assemblies explicitly listed here. Farm.Modules.SmartPlug is the pilot module
+// (issue #2036) -- the first assembly to move a controller + services out of the monolith.
+builder.Services.AddApiModules(
+    mvcBuilder,
+    builder.Configuration,
+    typeof(Farm.Modules.SmartPlug.SmartPlugApiModule).Assembly,
+    typeof(Farm.Modules.Calibration.CalibrationApiModule).Assembly);
 
 if (slicerModuleEnabled)
 {
@@ -213,12 +213,6 @@ if (slicerModuleEnabled)
     builder.Services.AddSlicerIntegration(mvcBuilder, builder.Configuration);
     builder.Services.AddSlicerHostAdapters();
 }
-
-// Calibration profile resolution. Monolith hosts keep the local database-backed resolver registered
-// by AddSlicerModule; split/microservices hosts get the authenticated HTTP adapter that reaches the
-// slicer host owning the profile store (otherwise no resolver exists and calibration discovery
-// returns profile_service_unavailable).
-builder.Services.AddCalibrationProfileResolution(builder.Configuration);
 
 // MoonrakerEmulatorSeeder runs on the API host in every deployment topology and needs the
 // machine/process/filament profile repositories. Split/microservices hosts skip AddSlicerModule,
@@ -260,59 +254,6 @@ builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 // Feature services (OctoPrint, File Management, Print Jobs, Maintenance, SPA)
 builder.Services.AddPrintFarmerFeatureServices(builder.Configuration, builder.Environment);
-builder.Services.AddSingleton(
-    new Farm.Infrastructure.PrinterCalibration.CalibrationSlicerCompatibilityPolicy(
-        builder.Configuration
-            .GetSection(
-                Farm.Infrastructure.PrinterCalibration.CalibrationSlicerCompatibilityPolicy
-                    .ConfigurationKey)
-            .Get<string[]>()));
-builder.Services.AddScoped<ICalibrationCapabilityService, CalibrationCapabilityService>();
-builder.Services.AddOptions<Farm.Web.Api.Services.Calibration.CalibrationBlobStorageOptions>()
-    .Bind(builder.Configuration.GetSection(
-        Farm.Web.Api.Services.Calibration.CalibrationBlobStorageOptions.SectionName))
-    .Validate(
-        options =>
-            !string.IsNullOrWhiteSpace(options.RootPath) &&
-            options.MaxBytes > 0 &&
-            options.MaxWidth > 0 &&
-            options.MaxHeight > 0 &&
-            options.MaxPixels > 0,
-        "Calibration blob storage requires a private root and positive limits.")
-    .ValidateOnStart();
-builder.Services.AddSingleton<
-    Farm.Web.Api.Services.Calibration.ICalibrationBlobStore,
-    Farm.Web.Api.Services.Calibration.CalibrationBlobStore>();
-builder.Services.AddScoped<
-    Farm.Web.Api.Services.Calibration.ICalibrationProjectService,
-    Farm.Web.Api.Services.Calibration.CalibrationProjectService>();
-builder.Services.AddHostedService<
-    Farm.Web.Api.Services.Calibration.CalibrationPhotoDeleteReconciliationService>();
-
-// Filament-calibration saga: drives the existing CalibrationOrchestration checkpoint through
-// created -> ... -> completed by calling the real SliceJobController/SlicePrintBridgeController
-// HTTP contracts, never by re-implementing their logic. The internal HttpClient's base address is
-// pinned from trusted configuration (never derived from an inbound request's Host/Scheme, which
-// would let a caller redirect this server's own bearer-token bearing calls to an arbitrary host it
-// controls) - matching the same configuration-driven pattern already used for cross-process
-// internal calls (see Farm.Slicer.Host's "MainApi" client).
-builder.Services.AddHttpContextAccessor();
-string calibrationSagaInternalApiBaseUrl =
-    builder.Configuration["Calibration:InternalApiBaseUrl"]
-    ?? builder.Configuration["MainApi:BaseUrl"]
-    ?? "http://localhost:5245";
-builder.Services.AddHttpClient(
-    Farm.Web.Api.Services.Calibration.InternalApiSliceSubmissionGateway.HttpClientName,
-    client => client.BaseAddress = new Uri(calibrationSagaInternalApiBaseUrl.TrimEnd('/') + "/"));
-builder.Services.AddScoped<
-    Farm.Web.Api.Services.Calibration.ISliceSubmissionGateway,
-    Farm.Web.Api.Services.Calibration.InternalApiSliceSubmissionGateway>();
-builder.Services.AddScoped<
-    Farm.Web.Api.Services.Calibration.IPrintDispatchGateway,
-    Farm.Web.Api.Services.Calibration.InternalApiPrintDispatchGateway>();
-builder.Services.AddScoped<
-    Farm.Web.Api.Services.Calibration.ICalibrationOrchestrationSagaService,
-    Farm.Web.Api.Services.Calibration.CalibrationOrchestrationSagaService>();
 
 // Artifact -> GcodeFile promotion: scoped promoter plus the reconciler that resolves the unknown
 // outcomes a crash or a transient outage can leave between the slicer and core contexts.
@@ -547,8 +488,9 @@ app.UseAuthorization();
 // Configure API routing and SignalR hubs
 app.MapControllers();
 
-// Map endpoints for any discovered IApiModule (issue #2035, epic #2019). No-op today -- no
-// module assembly exists yet -- until a later phase moves a controller into one.
+// Map endpoints for any discovered IApiModule (issue #2035, epic #2019). Farm.Modules.SmartPlug
+// has no minimal-API endpoints of its own -- its controller is routed via MapControllers() --
+// so this remains effectively a no-op for that module until a later phase adds one that needs it.
 app.MapApiModules();
 
 // Public farm hubs require authenticated clients.

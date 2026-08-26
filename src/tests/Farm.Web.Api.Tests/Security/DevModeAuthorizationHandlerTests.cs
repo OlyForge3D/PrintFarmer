@@ -13,17 +13,19 @@ namespace Farm.Web.Api.Tests.Security;
 public sealed class DevModeAuthorizationHandlerTests
 {
     [Theory]
-    [InlineData("Development", true, "GET", true)]
-    [InlineData("Development", false, "GET", false)]
-    [InlineData("Production", true, "GET", false)]
-    [InlineData("Staging", true, "GET", false)]
-    [InlineData("Development", true, "HEAD", true)]
-    [InlineData("Development", true, "OPTIONS", true)]
-    [InlineData("Development", true, "POST", false)]
+    [InlineData("Development", true, "GET", true, true)]
+    [InlineData("Development", true, "GET", false, false)]
+    [InlineData("Development", false, "GET", true, false)]
+    [InlineData("Production", true, "GET", true, false)]
+    [InlineData("Staging", true, "GET", true, false)]
+    [InlineData("Development", true, "HEAD", true, true)]
+    [InlineData("Development", true, "OPTIONS", true, true)]
+    [InlineData("Development", true, "POST", true, false)]
     public async Task HandleAsync_BypassesOnlySafeDevelopmentRequests(
         string environmentName,
         bool bypassRequested,
         string method,
+        bool authenticated,
         bool expectedSuccess)
     {
         IConfiguration configuration = new ConfigurationBuilder()
@@ -41,9 +43,12 @@ public sealed class DevModeAuthorizationHandlerTests
         var requirement = new TestRequirement();
         var httpContext = new DefaultHttpContext();
         httpContext.Request.Method = method;
+        ClaimsIdentity identity = authenticated
+            ? new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())], "TestAuth")
+            : new ClaimsIdentity();
         var authorizationContext = new AuthorizationHandlerContext(
             [requirement],
-            new ClaimsPrincipal(new ClaimsIdentity()),
+            new ClaimsPrincipal(identity),
             httpContext);
 
         await handler.HandleAsync(authorizationContext);

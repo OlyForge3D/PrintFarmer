@@ -21,30 +21,35 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// 404 is the gate response rather than a 401.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class AttentionControllerDisabledTests : IAsyncLifetime
+public class AttentionControllerDisabledTests : IClassFixture<AttentionControllerDisabledTests.Factory>, IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory;
-    private HttpClient? _authClient;
-
-    public AttentionControllerDisabledTests()
+    public class Factory : CustomWebApplicationFactory
     {
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
+        public Factory() : base(new Dictionary<string, string?>
         {
             ["OperatorFeatures:attentionEnabled"] = "false",
-        });
+        })
+        {
+        }
+    }
+
+    private readonly Factory _factory;
+    private HttpClient? _authClient;
+
+    public AttentionControllerDisabledTests(Factory factory)
+    {
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _authClient = await _factory.CreateAuthenticatedClientAsync();
     }
 
     public Task DisposeAsync()
     {
         _authClient?.Dispose();
-        _factory?.Dispose();
         return Task.CompletedTask;
     }
 

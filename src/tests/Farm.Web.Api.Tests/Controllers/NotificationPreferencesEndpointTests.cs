@@ -39,8 +39,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 ///   string -&gt; 400 (no successful mutation).
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public sealed class NotificationPreferencesEndpointTests : IAsyncLifetime
+public sealed class NotificationPreferencesEndpointTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _anonClient;
@@ -51,15 +50,15 @@ public sealed class NotificationPreferencesEndpointTests : IAsyncLifetime
         PropertyNameCaseInsensitive = true,
     };
 
-    public NotificationPreferencesEndpointTests()
+    public NotificationPreferencesEndpointTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     /// <inheritdoc />
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _anonClient = _factory.CreateClient();
         _authClient = await _factory.CreateAuthenticatedClientAsync();
     }
@@ -69,7 +68,6 @@ public sealed class NotificationPreferencesEndpointTests : IAsyncLifetime
     {
         _anonClient?.Dispose();
         _authClient?.Dispose();
-        _factory?.Dispose();
         return Task.CompletedTask;
     }
 

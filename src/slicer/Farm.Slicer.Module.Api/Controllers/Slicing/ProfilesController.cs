@@ -872,7 +872,9 @@ public class ProfilesController(
             if (orcaAliases.Count == 0)
             {
                 _logger.LogWarning("No OrcaSlicer alias configured for model {ModelName}", LogSanitizer.Sanitize(model.Name));
-                return NotFound($"No OrcaSlicer alias configured for model {model.Name}");
+                return NotFound(new ProfileLookupErrorDto(
+                    "no_profiles_for_model",
+                    $"OrcaSlicer ships no machine profiles for model '{model.Name}', and no custom profile family exists for it."));
             }
 
             _logger.LogInformation(
@@ -885,6 +887,17 @@ public class ProfilesController(
                 orcaAliases,
                 ct,
                 slicerEngineVersion);
+
+            if (profiles.Count == 0)
+            {
+                string attemptedAliases = string.Join(
+                    ", ",
+                    orcaAliases.Select(alias => $"'{alias}'"));
+                return NotFound(new ProfileLookupErrorDto(
+                    "alias_matched_no_profiles",
+                    $"Tried OrcaSlicer model name(s) {attemptedAliases}; the slicer worker has no matching profiles."));
+            }
+
             return Ok(profiles);
         }
         catch (HttpRequestException ex)
@@ -1079,6 +1092,16 @@ public class ProfilesController(
         {
             _logger.LogWarning("Printer not found: {Message}", LogSanitizer.Sanitize(ex.Message));
             return NotFound(ex.Message);
+        }
+        catch (ProfileLookupNotFoundException ex)
+        {
+            _logger.LogWarning("No profiles available for printer: {Message}", LogSanitizer.Sanitize(ex.Message));
+            return NotFound(new ProfileLookupErrorDto(ex.Code, ex.Message));
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", LogSanitizer.Sanitize(ex.Message));
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
         }
         catch (Exception ex)
         {

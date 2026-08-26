@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Dtos;
@@ -61,7 +62,9 @@ public class ProfilesControllerMachineProfilesTests
         IActionResult result = await controller.GetMachineProfilesForModelIdAsync(httpClient, modelId, CancellationToken.None);
 
         NotFoundObjectResult notFound = Assert.IsType<NotFoundObjectResult>(result);
-        Assert.Contains("No OrcaSlicer alias configured", Assert.IsType<string>(notFound.Value), StringComparison.Ordinal);
+        ProfileLookupErrorDto error = Assert.IsType<ProfileLookupErrorDto>(notFound.Value);
+        Assert.Equal("no_profiles_for_model", error.Code);
+        Assert.Contains("Test Model", error.Detail, StringComparison.Ordinal);
         profilesService.Verify(
             s => s.GetMachineProfilesForCatalogModelAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()),
             Times.Never);
@@ -101,7 +104,7 @@ public class ProfilesControllerMachineProfilesTests
     }
 
     [Fact]
-    public async Task GetMachineProfilesForModelIdAsync_AliasMiss_Returns200EmptyArray()
+    public async Task GetMachineProfilesForModelIdAsync_AliasMiss_Returns404WithReasonCode()
     {
         Guid modelId = Guid.NewGuid();
         Mock<IProfilesService> profilesService = new(MockBehavior.Strict);
@@ -123,9 +126,10 @@ public class ProfilesControllerMachineProfilesTests
         using HttpClient httpClient = new();
         IActionResult result = await controller.GetMachineProfilesForModelIdAsync(httpClient, modelId, CancellationToken.None);
 
-        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
-        IReadOnlyList<MachineProfileDto> value = Assert.IsAssignableFrom<IReadOnlyList<MachineProfileDto>>(ok.Value);
-        Assert.Empty(value);
+        NotFoundObjectResult notFound = Assert.IsType<NotFoundObjectResult>(result);
+        ProfileLookupErrorDto error = Assert.IsType<ProfileLookupErrorDto>(notFound.Value);
+        Assert.Equal("alias_matched_no_profiles", error.Code);
+        Assert.Contains("'Alias One'", error.Detail, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -157,6 +161,47 @@ public class ProfilesControllerMachineProfilesTests
         string body = Assert.IsType<string>(objectResult.Value);
         Assert.Equal("OrcaSlicer worker unavailable", body);
         Assert.DoesNotContain(rawExceptionMessage, body, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("no_profiles_for_model")]
+    [InlineData("alias_matched_no_profiles")]
+    public async Task GetAvailableProfilesForPrinterAsync_ProfileLookupMiss_Returns404WithReasonCode(
+        string code)
+    {
+        Guid printerId = Guid.NewGuid();
+        Mock<IProfilesService> profilesService = new(MockBehavior.Strict);
+        Mock<ICatalogServiceAdapter> catalogService = new(MockBehavior.Strict);
+        _ = profilesService
+            .Setup(service => service.GetAvailableProfilesForPrinterAsync(
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProfileLookupNotFoundException(code, "No matching profiles."));
+        ProfilesController controller = CreateController(profilesService, catalogService);
+
+        IActionResult result = await controller.GetAvailableProfilesForPrinterAsync(
+            printerId,
+            CancellationToken.None);
+
+        NotFoundObjectResult notFound = Assert.IsType<NotFoundObjectResult>(result);
+        ProfileLookupErrorDto error = Assert.IsType<ProfileLookupErrorDto>(notFound.Value);
+        Assert.Equal(code, error.Code);
+        Assert.Equal("No matching profiles.", error.Detail);
+    }
+
+    [Fact]
+    public void ProfileLookupErrorDto_SerializesExactWireContract()
+    {
+        const string detail = "No matching profiles.";
+
+        string json = JsonSerializer.Serialize(new ProfileLookupErrorDto("no_profiles_for_model", detail));
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+
+        Assert.Equal(2, root.EnumerateObject().Count());
+        Assert.Equal("no_profiles_for_model", root.GetProperty("code").GetString());
+        Assert.Equal(detail, root.GetProperty("detail").GetString());
+        Assert.False(root.TryGetProperty("message", out _));
     }
 
     private static ProfilesController CreateController(

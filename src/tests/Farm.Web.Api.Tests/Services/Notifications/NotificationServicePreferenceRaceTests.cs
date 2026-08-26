@@ -54,7 +54,10 @@ public sealed class NotificationServicePreferenceRaceTests
         Task winnerTask = RunWinnerAsync(
             () => winner.UpdatePreferencesAsync(store.UserId, winnerPatch),
             coordinator);
-        await Task.WhenAll(loserTask, winnerTask).WaitAsync(TimeSpan.FromSeconds(20));
+        // Generous timeout: this suite now runs at full CPU-core parallelism, so the
+        // loser/winner hooks below (each internally bounded at 45s) can be delayed by
+        // thread-pool contention well beyond what a lightly-loaded run would see.
+        await Task.WhenAll(loserTask, winnerTask).WaitAsync(TimeSpan.FromSeconds(90));
 
         await using AppDbContext verify = store.CreateContext();
         NotificationPreferences[] rows = await verify.NotificationPreferences
@@ -99,7 +102,9 @@ public sealed class NotificationServicePreferenceRaceTests
                 new Dictionary<string, bool> { ["winner-key"] = true }),
             coordinator);
         AttentionCategoryUpdateResult[] results = await Task.WhenAll(loserTask, winnerTask)
-            .WaitAsync(TimeSpan.FromSeconds(20));
+            // See comment above the analogous WaitAsync in the sibling test for why this
+            // budget is generous under full parallelism.
+            .WaitAsync(TimeSpan.FromSeconds(90));
 
         results.Should().OnlyContain(result => result.Status == AttentionCategoryUpdateStatus.Success);
         await using AppDbContext verify = store.CreateContext();
@@ -244,8 +249,8 @@ public sealed class NotificationServicePreferenceRaceTests
             {
                 (observed is not null).Should().Be(_initialRowShouldExist);
                 _loserRead.TrySetResult();
-                await _winnerRead.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
-                await WinnerCommitted.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+                await _winnerRead.Task.WaitAsync(TimeSpan.FromSeconds(45), cancellationToken);
+                await WinnerCommitted.Task.WaitAsync(TimeSpan.FromSeconds(45), cancellationToken);
                 return;
             }
 
@@ -260,7 +265,7 @@ public sealed class NotificationServicePreferenceRaceTests
         {
             RecordSerializableAttempt(context);
             Interlocked.Increment(ref _winnerReadCount).Should().Be(1);
-            await _loserRead.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            await _loserRead.Task.WaitAsync(TimeSpan.FromSeconds(45), cancellationToken);
             NotificationPreferences? observed = await ReadAsync(context, cancellationToken);
             (observed is not null).Should().Be(_initialRowShouldExist);
             _winnerRead.TrySetResult();

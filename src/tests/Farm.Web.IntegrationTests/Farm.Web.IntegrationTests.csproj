@@ -73,8 +73,14 @@
   <ItemGroup>
     <Compile Include="..\Farm.Web.Api.Tests\Calibration\PinnedOrcaPublication.cs"
              Link="Calibration\Shared\PinnedOrcaPublication.cs" />
-    <Compile Include="..\Farm.Web.Api.Tests\TestInfrastructure\TestAuthHandler.cs"
-             Link="Calibration\Shared\TestAuthHandler.cs" />
+  </ItemGroup>
+
+  <!--
+    TestAuthHandler now lives in Farm.Testing.Shared (issue #2032) and is referenced via
+    ProjectReference below instead of a linked Compile Include.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Farm.Testing.Shared\Farm.Testing.Shared.csproj" />
   </ItemGroup>
 
   <!--

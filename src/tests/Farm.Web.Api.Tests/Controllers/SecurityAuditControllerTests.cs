@@ -17,10 +17,16 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// Integration tests for <see cref="SecurityAuditController"/>.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class SecurityAuditControllerTests : IAsyncLifetime
+public class SecurityAuditControllerTests : IClassFixture<SecurityAuditControllerTests.Factory>, IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory;
+    public class Factory : CustomWebApplicationFactory
+    {
+        public Factory() : base(new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" })
+        {
+        }
+    }
+
+    private readonly Factory _factory;
     private HttpClient? _adminClient;
     private HttpClient? _nonAdminClient;
 
@@ -31,27 +37,27 @@ public class SecurityAuditControllerTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    public SecurityAuditControllerTests()
+    public SecurityAuditControllerTests(Factory factory)
     {
         // Disable DevModeBypassAuth so auth tests (401/403) behave correctly regardless
         // of the local appsettings.Development.json setting. Production behavior must be verified.
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" });
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _adminClient = await _factory.CreateAdminClientAsync();
         _nonAdminClient = await _factory.CreateAuthenticatedClientAsync(
             username: "test-nonadmin",
             email: "nonadmin@example.com");
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _adminClient?.Dispose();
         _nonAdminClient?.Dispose();
-        _factory.Dispose();
+        return Task.CompletedTask;
     }
 
     // ─── helpers ────────────────────────────────────────────────────────────

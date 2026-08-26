@@ -49,6 +49,12 @@ public class MachineProfile
 
     public string? SlicerDistribution { get; set; }
 
+    /// <summary>Exact stock machine preset from which this nozzle variant was harvested.</summary>
+    public string? SourceSystemPresetName { get; set; }
+
+    /// <summary>Canonical JSON containing this source nozzle variant's delta from the family base.</summary>
+    public string? OverridesJson { get; set; }
+
     public string? ProfileFormat { get; set; }
 
     /// <summary>Soft reference to the user who created this profile (no FK constraint).</summary>

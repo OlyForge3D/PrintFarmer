@@ -14,24 +14,35 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// HTTP-level authorization and response-shape coverage for the first-run bootstrap contract.
 /// </summary>
 [Trait("Category", "Integration")]
-public sealed class SetupBootstrapControllerTests : IAsyncLifetime
+public sealed class SetupBootstrapControllerTests : IClassFixture<SetupBootstrapControllerTests.Factory>, IAsyncLifetime
 {
-    private const string DeploymentBaseUrl = "http://spoolman.deployment.local:7912";
-    private CustomWebApplicationFactory _factory = null!;
-
-    public async Task InitializeAsync()
+    public class Factory : CustomWebApplicationFactory
     {
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
+        public Factory() : base(new Dictionary<string, string?>
         {
             ["Security:DevModeBypassAuth"] = "false",
             ["Spoolman:BaseUrl"] = DeploymentBaseUrl,
-        });
-        await _factory.ResetDatabaseAsync();
+        })
+        {
+        }
     }
 
-    public async Task DisposeAsync()
+    private const string DeploymentBaseUrl = "http://spoolman.deployment.local:7912";
+    private readonly Factory _factory;
+
+    public SetupBootstrapControllerTests(Factory factory)
     {
-        await _factory.DisposeAsync();
+        _factory = factory;
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDataAsync();
+    }
+
+    public Task DisposeAsync()
+    {
+        return Task.CompletedTask;
     }
 
     [Fact]
@@ -71,7 +82,7 @@ public sealed class SetupBootstrapControllerTests : IAsyncLifetime
             ["Security:DevModeBypassAuth"] = "false",
             ["Spoolman:BaseUrl"] = "http://setup-user:setup-password@spoolman.local:7912?token=setup-token",
         });
-        await factory.ResetDatabaseAsync();
+        await factory.ResetDataAsync();
         using HttpClient anonymousClient = factory.CreateClient();
 
         HttpResponseMessage response = await anonymousClient.GetAsync("/api/setup/bootstrap");
