@@ -344,6 +344,12 @@ load_changed_files() {
 #                     Phase 10: the calibration vertical-slice module carved
 #                     out of Farm.Web.Api, following the smartplug pattern
 #                     above). Matched before the generic `src/modules/*` case.
+#   identity        — src/modules/Farm.Modules.Identity/** (issue #2041,
+#                     Phase 13: Auth/users/API keys/quotas/roles/permissions/
+#                     security-audit/password-policy vertical-slice module
+#                     carved out of Farm.Web.Api, following the calibration
+#                     pattern above). Matched before the generic
+#                     `src/modules/*` case.
 #   migrations_app  — src/migrations/Farm.Migrations.*/**
 #   migrations_slcr — src/migrations/Farm.Slicer.Migrations.*/**
 #   tests_api       — src/tests/Farm.Web.Api.Tests/**
@@ -363,6 +369,8 @@ load_changed_files() {
 #                     #2037). Matched before the generic `src/tests/*` case.
 #   tests_calibration — src/tests/Farm.Modules.Calibration.Tests/** (issue
 #                     #2038). Matched before the generic `src/tests/*` case.
+#   tests_identity  — src/tests/Farm.Modules.Identity.Tests/** (issue #2041).
+#                     Matched before the generic `src/tests/*` case.
 #   tests_other     — any other src/tests/**
 #   tools           — src/tools/**
 #   dotnet_config   — src/*.props, src/*.targets, src/.editorconfig
@@ -456,6 +464,11 @@ classify_path() {
     # matched first so it gets its own narrow bucket instead of falling into
     # the full-safe `modules` bucket.
     src/modules/Farm.Modules.Calibration/*) printf 'calibration' ; return ;;
+    # Farm.Modules.Identity is a concrete vertical-slice module (issue #2041,
+    # Phase 13) following the same pattern as smartplug/maintenance/calibration
+    # above -- matched first so it gets its own narrow bucket instead of
+    # falling into the full-safe `modules` bucket.
+    src/modules/Farm.Modules.Identity/*) printf 'identity' ; return ;;
     src/modules/*)           printf 'modules' ; return ;;
     src/migrations/Farm.Migrations.*)         printf 'migrations_app' ; return ;;
     src/migrations/Farm.Slicer.Migrations.*)  printf 'migrations_slcr' ; return ;;
@@ -468,6 +481,7 @@ classify_path() {
     src/tests/Farm.Modules.SmartPlug.Tests/*)   printf 'tests_smartplug' ; return ;;
     src/tests/Farm.Modules.Maintenance.Tests/*) printf 'tests_maintenance' ; return ;;
     src/tests/Farm.Modules.Calibration.Tests/*) printf 'tests_calibration' ; return ;;
+    src/tests/Farm.Modules.Identity.Tests/*)    printf 'tests_identity' ; return ;;
     src/tests/*)             printf 'tests_other' ; return ;;
     src/tools/*)             printf 'tools' ; return ;;
   esac
@@ -653,11 +667,11 @@ main() {
   local has_shared_config=0 has_ci_selector=0 has_frontend=0
   local has_api=0 has_infra=0 has_backend=0 has_backend_core=0 has_slicer=0
   local has_orca=0 has_discovery=0 has_settings=0 has_modules=0 has_smartplug=0
-  local has_maintenance=0 has_calibration=0
+  local has_maintenance=0 has_calibration=0 has_identity=0
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
   local has_tests_integration=0 has_tests_modules=0 has_tests_shared=0 has_tests_smartplug=0 has_tests_other=0
-  local has_tests_maintenance=0 has_tests_calibration=0
+  local has_tests_maintenance=0 has_tests_calibration=0 has_tests_identity=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
 
   local p category
@@ -679,6 +693,7 @@ main() {
       smartplug)       has_smartplug=1 ;;
       maintenance)     has_maintenance=1 ;;
       calibration)     has_calibration=1 ;;
+      identity)        has_identity=1 ;;
       migrations_app)  has_mig_app=1 ;;
       migrations_slcr) has_mig_slcr=1 ;;
       tests_api)       has_tests_api=1 ;;
@@ -690,6 +705,7 @@ main() {
       tests_smartplug) has_tests_smartplug=1 ;;
       tests_maintenance) has_tests_maintenance=1 ;;
       tests_calibration) has_tests_calibration=1 ;;
+      tests_identity)  has_tests_identity=1 ;;
       tests_other)     has_tests_other=1 ;;
       tools)           has_tools=1 ;;
       unknown_src)     has_unknown_src=1 ;;
@@ -757,10 +773,10 @@ main() {
   # Any .NET-relevant bucket forces a full solution build to preserve compile
   # coverage across the whole graph.
   if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
-        has_orca || has_smartplug || has_maintenance || has_calibration ||
+        has_orca || has_smartplug || has_maintenance || has_calibration || has_identity ||
         has_mig_app || has_mig_slcr ||
         has_tests_api || has_tests_slicer || has_tests_orca ||
-        has_tests_integration || has_tests_smartplug || has_tests_maintenance || has_tests_calibration || has_tools )); then
+        has_tests_integration || has_tests_smartplug || has_tests_maintenance || has_tests_calibration || has_tests_identity || has_tools )); then
     want_dotnet_build="true"
   fi
 
@@ -774,10 +790,10 @@ main() {
   if (( has_infra )); then
     # Farm.OrcaSlicer.Worker.Tests references infra through the worker graph.
     # Farm.Modules.SmartPlug (issue #2036), Farm.Modules.Maintenance (issue
-    # #2037), and Farm.Modules.Calibration (issue #2038) also reference
-    # Farm.Infrastructure directly, so an infra change must re-run all three
-    # test projects too.
-    test_names+=("Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests")
+    # #2037), Farm.Modules.Calibration (issue #2038), and Farm.Modules.Identity
+    # (issue #2041) also reference Farm.Infrastructure directly, so an infra
+    # change must re-run all four test projects too.
+    test_names+=("Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests" "Farm.Modules.Identity.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_backend )); then
@@ -843,6 +859,20 @@ main() {
     test_names+=("Farm.Modules.Calibration.Tests" "Farm.Web.Api.Tests")
     net_test_bucket_hit=1
   fi
+  if (( has_identity )); then
+    # Farm.Modules.Identity (issue #2041) owns the 9 auth/users/roles/
+    # permissions/security-audit/password-policy controllers, but several
+    # tests that cover surfaces that did NOT move (the 4 reflection-based
+    # architecture tests, RouteTableSnapshotTests, and genuine
+    # CustomWebApplicationFactory integration tests such as
+    # AuthenticationServiceIntegrationTests/AuthAuditServiceIntegrationTests)
+    # intentionally stayed behind in Farm.Web.Api.Tests -- see
+    # docs/MODULE_MIGRATION_PATTERN.md. A controller-owning module must
+    # therefore also select Farm.Web.Api.Tests, unlike a pure-service module
+    # such as Farm.OrcaSlicer.Worker.
+    test_names+=("Farm.Modules.Identity.Tests" "Farm.Web.Api.Tests")
+    net_test_bucket_hit=1
+  fi
   if (( has_mig_app )); then
     # Api.Tests and IntegrationTests cover the assembled API graph that includes
     # the App migration projects.
@@ -906,6 +936,10 @@ main() {
     test_names+=("Farm.Modules.Calibration.Tests")
     net_test_bucket_hit=1
   fi
+  if (( has_tests_identity )); then
+    test_names+=("Farm.Modules.Identity.Tests")
+    net_test_bucket_hit=1
+  fi
   if (( net_test_bucket_hit )); then
     want_dotnet_test="true"
   fi
@@ -922,6 +956,7 @@ main() {
   if (( has_smartplug )); then reason+="smartplug "; fi
   if (( has_maintenance )); then reason+="maintenance "; fi
   if (( has_calibration )); then reason+="calibration "; fi
+  if (( has_identity )); then reason+="identity "; fi
   if (( has_mig_app )); then reason+="mig-app "; fi
   if (( has_mig_slcr )); then reason+="mig-slicer "; fi
   if (( has_tests_api )); then reason+="tests-api "; fi
@@ -931,6 +966,7 @@ main() {
   if (( has_tests_smartplug )); then reason+="tests-smartplug "; fi
   if (( has_tests_maintenance )); then reason+="tests-maintenance "; fi
   if (( has_tests_calibration )); then reason+="tests-calibration "; fi
+  if (( has_tests_identity )); then reason+="tests-identity "; fi
   if (( has_tools )); then reason+="tools "; fi
   if (( has_docs )); then reason+="docs "; fi
   if (( has_mobile )); then reason+="mobile "; fi
