@@ -81,10 +81,8 @@ public static class BackgroundServicesStartup
             configuration.GetSection(Farm.Infrastructure.Services.Queue.QueueRetentionSettings.SectionName));
         services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueRetentionPruneService>();
 
-        // Electricity Module - poll enabled PowerMonitor records, persist PowerReading rows,
-        // and aggregate KwhUsed for completed print jobs
-        services.AddHostedService<Farm.Web.Api.Services.PowerMonitor.PowerMonitorPollingService>();
-
+        // Electricity Module - PowerMonitorPollingService is now registered by
+        // Farm.Modules.SmartPlug's SmartPlugApiModule (issue #2036, epic #2019).
         return services;
     }
 }

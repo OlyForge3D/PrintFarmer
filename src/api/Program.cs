@@ -200,12 +200,9 @@ catch
 IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 
 // Vertical-slice API module discovery/registration seam (issue #2035, epic #2019). Discovery
-// only scans assemblies explicitly listed here -- no Farm.Modules.* assembly is listed yet, so
-// this is a guaranteed no-op today: zero ApplicationParts added, zero routes changed.
-// Registering the call now means the host wiring itself -- not just the abstraction -- is
-// exercised before the first module lands. A later phase adds that module's marker assembly
-// here, e.g.: AddApiModules(mvcBuilder, builder.Configuration, typeof(SomeModule).Assembly).
-builder.Services.AddApiModules(mvcBuilder, builder.Configuration);
+// only scans assemblies explicitly listed here. Farm.Modules.SmartPlug is the pilot module
+// (issue #2036) -- the first assembly to move a controller + services out of the monolith.
+builder.Services.AddApiModules(mvcBuilder, builder.Configuration, typeof(Farm.Modules.SmartPlug.SmartPlugApiModule).Assembly);
 
 if (slicerModuleEnabled)
 {
@@ -547,8 +544,9 @@ app.UseAuthorization();
 // Configure API routing and SignalR hubs
 app.MapControllers();
 
-// Map endpoints for any discovered IApiModule (issue #2035, epic #2019). No-op today -- no
-// module assembly exists yet -- until a later phase moves a controller into one.
+// Map endpoints for any discovered IApiModule (issue #2035, epic #2019). Farm.Modules.SmartPlug
+// has no minimal-API endpoints of its own -- its controller is routed via MapControllers() --
+// so this remains effectively a no-op for that module until a later phase adds one that needs it.
 app.MapApiModules();
 
 // Public farm hubs require authenticated clients.
