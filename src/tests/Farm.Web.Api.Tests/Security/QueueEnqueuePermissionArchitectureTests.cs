@@ -13,7 +13,7 @@ namespace Farm.Web.Api.Tests.Security;
 /// (<c>POST /api/files/local</c>) enqueued print jobs via
 /// <see cref="IJobQueueService.AddJobToQueueAsync"/> with no permission check at all, because
 /// <c>[AllowAnonymous]</c> skipped the authorization middleware entirely. This test performs a
-/// best-effort static call-graph walk from every controller action in the main API assembly and
+/// best-effort static call-graph walk from every controller action in <see cref="WalkableAssemblies"/> and
 /// fails if any action that transitively reaches <see cref="IJobQueueService.AddJobToQueueAsync"/>
 /// does not itself carry a <c>queue:write</c>-or-stronger <see cref="RequirePermissionAttribute"/>
 /// (method- or class-level), so a future endpoint cannot reintroduce the same class of bug.

@@ -21,6 +21,10 @@ public sealed class RoleToPermissionMigrationCompletenessTests
         typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
         typeof(Farm.Infrastructure.Services.SignalR.HarvestHub).Assembly,
         typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly,
+        // Issue #2040: Farm.Modules.PrintQueue controllers moved out of Farm.Web.Api and must be
+        // scanned here explicitly, or a reintroduced farm_admin role-name gate on one of them
+        // would silently escape this guard.
+        typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
     ];
 
     [Fact]

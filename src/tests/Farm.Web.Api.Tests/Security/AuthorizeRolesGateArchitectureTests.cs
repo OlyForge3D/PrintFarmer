@@ -61,6 +61,12 @@ public sealed class AuthorizeRolesGateArchitectureTests
     [
         typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
         typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly,
+        // Issue #2040: Farm.Modules.PrintQueue is hosted by the main API (Farm.Web.Api), not the
+        // slicer host, and must be scanned here for the same reason it was added to
+        // QueueEnqueuePermissionArchitectureTests.WalkableAssemblies — controllers that moved out
+        // of Farm.Web.Api into a module assembly silently drop out of an assembly-array-based
+        // scan unless the new assembly is added explicitly.
+        typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
     ];
 
     [Fact]
@@ -138,9 +144,9 @@ public sealed class AuthorizeRolesGateArchitectureTests
 
         foreach (Assembly assembly in ScannedAssemblies)
         {
-            AuthorizationOptions options = assembly == typeof(Farm.Web.Api.Controllers.PrintersController).Assembly
-                ? mainApiOptions
-                : slicerHostOptions;
+            AuthorizationOptions options = assembly == typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly
+                ? slicerHostOptions
+                : mainApiOptions;
 
             foreach (Type type in assembly.GetTypes())
             {
