@@ -1,5 +1,6 @@
 ﻿using System.Net.Http.Json;
 using System.Text.Json;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.Extensions.Caching.Memory;
@@ -56,7 +57,10 @@ public sealed class HttpCatalogServiceAdapter : ICatalogServiceAdapter
         {
             using HttpClient http = _httpClientFactory.CreateClient("MainApi");
             List<ManufacturerApiResponse>? manufacturers =
-                await http.GetFromJsonAsync<List<ManufacturerApiResponse>>("api/catalog/manufacturers", JsonOptions, ct);
+                await http.GetFromJsonAsync<List<ManufacturerApiResponse>>(
+                    SlicerHostLookupContract.ManufacturersPath,
+                    JsonOptions,
+                    ct);
 
             manufacturers ??= [];
 
@@ -74,7 +78,7 @@ public sealed class HttpCatalogServiceAdapter : ICatalogServiceAdapter
             _cache.Set(ManufacturersCacheKey, names, CacheDuration);
             return names;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        catch (Exception ex) when (IsRecoverableFailure(ex))
         {
             _logger.LogWarning(ex, "Failed to fetch manufacturer names from main API");
             return [];
@@ -101,7 +105,8 @@ public sealed class HttpCatalogServiceAdapter : ICatalogServiceAdapter
         try
         {
             using HttpClient http = _httpClientFactory.CreateClient("MainApi");
-            using HttpResponseMessage response = await http.GetAsync($"api/catalog/printer-models/{modelId}", ct);
+            using HttpResponseMessage response =
+                await http.GetAsync(SlicerHostLookupContract.PrinterModelPath(modelId), ct);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -123,7 +128,7 @@ public sealed class HttpCatalogServiceAdapter : ICatalogServiceAdapter
             _cache.Set(cacheKey, info, CacheDuration);
             return info;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        catch (Exception ex) when (IsRecoverableFailure(ex))
         {
             _logger.LogWarning(ex, "Failed to resolve catalog model {ModelId} from main API", modelId);
             return null;
@@ -145,13 +150,15 @@ public sealed class HttpCatalogServiceAdapter : ICatalogServiceAdapter
             using HttpClient http = _httpClientFactory.CreateClient("MainApi");
             List<SlicerModelAliasDto>? aliases =
                 await http.GetFromJsonAsync<List<SlicerModelAliasDto>>(
-                    $"api/catalog/printer-models/{modelId}/aliases", JsonOptions, ct);
+                    SlicerHostLookupContract.ModelAliasesPath(modelId),
+                    JsonOptions,
+                    ct);
 
             IReadOnlyList<SlicerModelAliasDto> result = aliases ?? [];
             _cache.Set(cacheKey, result, CacheDuration);
             return result;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        catch (Exception ex) when (IsRecoverableFailure(ex))
         {
             _logger.LogWarning(ex, "Failed to fetch model aliases for {ModelId} from main API", modelId);
             return [];
@@ -192,6 +199,11 @@ public sealed class HttpCatalogServiceAdapter : ICatalogServiceAdapter
 
         return map is not null && map.TryGetValue(manufacturerId, out string? name) ? name : null;
     }
+
+    private static bool IsRecoverableFailure(Exception exception) =>
+        exception is TaskCanceledException or JsonException
+        || (exception is HttpRequestException httpRequestException
+            && !MainApiResponseGuard.IsAuthenticationFailure(httpRequestException));
 
     private static string GetAliasesCacheKey(Guid modelId) => $"catalog:aliases:{modelId}";
 }

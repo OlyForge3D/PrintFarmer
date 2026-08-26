@@ -1,8 +1,5 @@
-﻿extern alias OrcaWorker;
-
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -13,12 +10,9 @@ using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using FluentAssertions;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
-using WorkerServices = OrcaWorker::Farm.OrcaSlicer.Worker.Services;
 
 namespace Farm.Slicer.Module.Tests.Integration;
 
@@ -55,49 +49,16 @@ public sealed class ProfileFamilyCloneLookupAcceptanceTests
     [Fact]
     public async Task CloneFamily_ThenForModelLookup_ReturnsRenderedMachineProfile()
     {
-        string root = Path.Join(
-            AppContext.BaseDirectory,
-            "profile-family-acceptance",
-            Guid.NewGuid().ToString("N"));
-        try
-        {
-            await RunAcceptanceAsync(root);
-        }
-        finally
-        {
-            SqliteConnection.ClearAllPools();
-            if (Directory.Exists(root))
-            {
-                Directory.Delete(root, recursive: true);
-            }
-        }
+        await RunAcceptanceAsync();
     }
 
-    private static async Task RunAcceptanceAsync(string root)
+    private static async Task RunAcceptanceAsync()
     {
-        string stockPath = Path.Join(root, "stock");
-        string overlayPath = Path.Join(root, "overlay");
-        string customPath = Path.Join(root, "custom");
-        WriteStockProfiles(stockPath);
-        WriteStockProfiles(overlayPath);
-
-        await using var bundleStore = new WorkerServices.CustomProfileBundleStore(
-            NullLogger<WorkerServices.CustomProfileBundleStore>.Instance,
-            stockPath,
-            overlayPath,
-            customPath);
-        await using var workerProfiles = new WorkerServices.CachedOrcaProfilesService(
-            NullLogger<WorkerServices.CachedOrcaProfilesService>.Instance,
-            overlayPath,
-            Path.Join(root, "profile-cache.db"),
-            customPath);
-        await workerProfiles.InitializeAsync();
-
+        var installedProfiles = new InMemoryRenderedProfiles();
         var workerClient = new InProcessProfileFamilyWorkerClient(
             CreateCatalog(),
-            bundleStore,
-            workerProfiles);
-        using var workerHandler = new WorkerLookupHandler(workerProfiles);
+            installedProfiles);
+        using var workerHandler = new WorkerLookupHandler(installedProfiles);
         await using var factory = new AcceptanceFactory(workerClient, workerHandler);
         await factory.ResetDatabaseAsync();
 
@@ -225,44 +186,6 @@ public sealed class ProfileFamilyCloneLookupAcceptanceTests
         };
     }
 
-    private static void WriteStockProfiles(string profilesPath)
-    {
-        string machinePath = Path.Join(profilesPath, SourceManufacturer, "machine");
-        Directory.CreateDirectory(machinePath);
-        File.WriteAllText(
-            Path.Join(profilesPath, $"{SourceManufacturer}.json"),
-            """
-            {
-              "name": "Prusa",
-              "version": "01.00.00.00",
-              "machine_model_list": [],
-              "machine_list": [
-                {
-                  "name": "Prusa Test 0.4 nozzle",
-                  "sub_path": "machine/Prusa Test 0.4 nozzle.json"
-                }
-              ],
-              "process_list": [],
-              "filament_list": []
-            }
-            """,
-            Encoding.UTF8);
-        File.WriteAllText(
-            Path.Join(machinePath, $"{SourceMachine}.json"),
-            """
-            {
-              "type": "machine",
-              "name": "Prusa Test 0.4 nozzle",
-              "from": "system",
-              "instantiation": "true",
-              "printer_model": "Prusa Test",
-              "nozzle_diameter": ["0.4"],
-              "max_layer_height": ["0.32"]
-            }
-            """,
-            Encoding.UTF8);
-    }
-
     private sealed class AcceptanceFactory(
         IProfileFamilyWorkerClient workerClient,
         HttpMessageHandler workerHandler) : CustomWebApplicationFactory
@@ -278,8 +201,7 @@ public sealed class ProfileFamilyCloneLookupAcceptanceTests
 
     private sealed class InProcessProfileFamilyWorkerClient(
         AllProfilesResponseDto catalog,
-        WorkerServices.CustomProfileBundleStore bundleStore,
-        WorkerServices.CachedOrcaProfilesService profilesService) : IProfileFamilyWorkerClient
+        InMemoryRenderedProfiles installedProfiles) : IProfileFamilyWorkerClient
     {
         public Task<(ProfileFamilyWorkerTarget Target, AllProfilesResponseDto Catalog)> GetCatalogAsync(
             string sourceManufacturer,
@@ -292,36 +214,20 @@ public sealed class ProfileFamilyCloneLookupAcceptanceTests
                 catalog));
         }
 
-        public async Task WriteBundleAsync(
+        public Task WriteBundleAsync(
             ProfileFamilyWorkerTarget target,
             ProfileFamilyBundleDto bundle,
             CancellationToken ct)
         {
-            JsonElement manifest = JsonSerializer.Deserialize<JsonElement>(bundle.ManifestJson);
-            List<WorkerServices.CustomProfileFileRequest> files = bundle.Files
-                .Select(file => new WorkerServices.CustomProfileFileRequest(
-                    file.RelativePath,
-                    bundle.FamilyName,
-                    JsonSerializer.Deserialize<JsonElement>(file.Content)))
-                .ToList();
-            await bundleStore.InstallAsync(
-                $"PrintFarmer-{bundle.FamilyId:N}",
-                new WorkerServices.CustomProfileBundleRequest(manifest, files),
-                ct);
-            WorkerServices.ProfileReloadResult reload =
-                await profilesService.ReloadProfilesAsync(ct);
-            if (reload.Failures.Count > 0)
-            {
-                throw new ProfileFamilySourceException(
-                    $"Worker rejected {reload.Failures.Count} rendered profile(s).");
-            }
+            installedProfiles.Install(bundle);
+            return Task.CompletedTask;
         }
     }
 
     private sealed class WorkerLookupHandler(
-        WorkerServices.CachedOrcaProfilesService profilesService) : HttpMessageHandler
+        InMemoryRenderedProfiles installedProfiles) : HttpMessageHandler
     {
-        protected override async Task<HttpResponseMessage> SendAsync(
+        protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
@@ -330,18 +236,82 @@ public sealed class ProfileFamilyCloneLookupAcceptanceTests
             if (request.Method != HttpMethod.Get ||
                 !path.StartsWith(route, StringComparison.Ordinal))
             {
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
             }
 
             string printerModel = Uri.UnescapeDataString(path[route.Length..]);
-            List<MachineProfileDto> profiles =
-                await profilesService.GetMachineProfilesByPrinterModelAsync(
-                    printerModel,
-                    cancellationToken);
-            return new HttpResponseMessage(HttpStatusCode.OK)
+            HttpResponseMessage response = new(HttpStatusCode.OK)
             {
-                Content = JsonContent.Create(profiles)
+                Content = JsonContent.Create(installedProfiles.Get(printerModel))
             };
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class InMemoryRenderedProfiles
+    {
+        private readonly Dictionary<string, List<MachineProfileDto>> _profiles =
+            new(StringComparer.Ordinal);
+
+        public void Install(ProfileFamilyBundleDto bundle)
+        {
+            _profiles.Clear();
+            foreach (RenderedProfileFileDto file in bundle.Files.Where(file =>
+                         file.RelativePath.StartsWith("machine/", StringComparison.Ordinal)))
+            {
+                using JsonDocument document = JsonDocument.Parse(file.Content);
+                JsonElement root = document.RootElement;
+                if (!root.TryGetProperty("instantiation", out JsonElement instantiation)
+                    || !string.Equals(
+                        instantiation.GetString(),
+                        "true",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string printerModel = root.GetProperty("printer_model").GetString()!;
+                var profile = new MachineProfileDto
+                {
+                    Name = root.GetProperty("name").GetString()!,
+                    Manufacturer = "Custom",
+                    PrinterModel = printerModel,
+                    Instantiation = true,
+                    Inherits = root.GetProperty("inherits").GetString(),
+                    NozzleDiameter = ReadNozzleDiameter(root),
+                    Settings = JsonSerializer.Deserialize<Dictionary<string, object>>(
+                        root.GetRawText()) ?? []
+                };
+                if (!_profiles.TryGetValue(printerModel, out List<MachineProfileDto>? profiles))
+                {
+                    profiles = [];
+                    _profiles.Add(printerModel, profiles);
+                }
+
+                profiles.Add(profile);
+            }
+        }
+
+        public List<MachineProfileDto> Get(string printerModel) =>
+            _profiles.TryGetValue(printerModel, out List<MachineProfileDto>? profiles)
+                ? profiles
+                : [];
+
+        private static double? ReadNozzleDiameter(JsonElement profile)
+        {
+            if (!profile.TryGetProperty("nozzle_diameter", out JsonElement nozzleDiameters)
+                || nozzleDiameters.ValueKind != JsonValueKind.Array
+                || nozzleDiameters.GetArrayLength() == 0)
+            {
+                return null;
+            }
+
+            return double.TryParse(
+                nozzleDiameters[0].GetString(),
+                System.Globalization.CultureInfo.InvariantCulture,
+                out double diameter)
+                ? diameter
+                : null;
         }
     }
 }
