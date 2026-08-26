@@ -133,7 +133,9 @@ manifest_test_projects = {
 tests_dir = os.path.join(src_root, "tests")
 discovered = []
 if os.path.isdir(tests_dir):
-    for root, _dirs, files in os.walk(tests_dir):
+    for root, dirs, files in os.walk(tests_dir):
+        # Never descend into build output; it can't contain a real project file.
+        dirs[:] = [d for d in dirs if d not in ("bin", "obj")]
         for fname in files:
             if fname.endswith(".Tests.csproj"):
                 rel = os.path.relpath(os.path.join(root, fname), src_root)
@@ -152,10 +154,16 @@ else:
     if not shards:
         errors.append("Farm.Web.Api.Tests has no shards defined")
 
+    # bin/obj are dotnet build output, never test-namespace directories; they
+    # only exist locally after a build has run and must not affect shard
+    # exhaustiveness checks.
+    BUILD_OUTPUT_DIRS = {"bin", "obj"}
     api_test_dir = os.path.join(src_root, "tests", "Farm.Web.Api.Tests")
     actual_subdirs = set()
     if os.path.isdir(api_test_dir):
         for entry_name in os.listdir(api_test_dir):
+            if entry_name in BUILD_OUTPUT_DIRS:
+                continue
             if os.path.isdir(os.path.join(api_test_dir, entry_name)):
                 actual_subdirs.add(entry_name)
     # "(root)" is a synthetic bucket for loose top-level .cs files that are
