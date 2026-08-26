@@ -56,6 +56,20 @@ public sealed class WorkerVersionEndpointTests : IDisposable
         WorkerConstants.SlicerVersion.Should().Be("2.4.2");
     }
 
+    [Fact]
+    public async Task ReloadProfilesEndpoint_MissingManagementKey_ReturnsUnauthorized()
+    {
+        using HttpClient client = _factory.CreateClient();
+
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/profiles/cache/reload",
+            content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        response.Content.Headers.ContentType?.MediaType.Should()
+            .Be("application/problem+json");
+    }
+
     public void Dispose()
     {
         _factory.Dispose();

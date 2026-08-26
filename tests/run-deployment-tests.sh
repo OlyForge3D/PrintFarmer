@@ -446,6 +446,9 @@ run_full_tests() {
     log_subsection "Test: OrcaSlicer Binary Metadata"
     run_test_suite "OrcaSlicer binary metadata tests" "$SCRIPT_DIR/test-orcaslicer-binary-metadata.sh" || true
 
+    log_subsection "Test: OrcaSlicer Profile Overlay"
+    run_test_suite "OrcaSlicer profile overlay tests" "$SCRIPT_DIR/test-orcaslicer-profile-overlay.sh" || true
+
     log_subsection "Test: BuildKit Snapshot Corruption Auto-Repair (#1527)"
     run_test_suite "BuildKit snapshot corruption auto-repair tests" "$SCRIPT_DIR/test-buildkit-snapshot-repair.sh" || true
     

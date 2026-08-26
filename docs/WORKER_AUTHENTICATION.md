@@ -6,7 +6,7 @@ container network.
 
 | Credential | Header | Scope |
 |---|---|---|
-| Bootstrap registration key | `X-Slicer-Api-Key` | Registry list and registration |
+| Bootstrap and worker-management key | `X-Slicer-Api-Key` | Registry list/registration and worker custom-profile management |
 | Registry-issued service key | `X-Slicer-Service-Api-Key` | One registered service's lifecycle routes |
 | Registry-issued worker service key | `X-Worker-Key` and `X-Worker-Id` | Worker-only job, model, and artifact routes |
 
@@ -21,9 +21,10 @@ only from `WorkerAuth:SharedKey`, normally supplied as
 secret input; Docker Compose maps it to the canonical .NET configuration path
 for every participating service.
 
-The bootstrap value is used only for registration. After registration, the
-worker keeps the returned per-service key in memory and uses it for lifecycle
-and worker-only requests.
+The bootstrap value is used for registration and for trusted management calls
+from the slicer API to a worker's custom-profile routes. After registration,
+the worker keeps the returned per-service key in memory and uses it for
+lifecycle and job-scoped worker requests.
 
 Every worker-facing process refuses to start when `WorkerAuth:SharedKey` is
 missing or blank, including `Development` and `Testing`. Startup logs identify
@@ -91,6 +92,16 @@ The shared registry key protects:
 
 - `GET /api/slicers`
 - `POST /api/slicers/register`
+
+The same configured key protects these inbound worker-management routes:
+
+- `PUT /api/profiles/custom-bundles/{bundleName}`
+- `DELETE /api/profiles/custom-bundles/{bundleName}`
+- `POST /api/profiles/cache/reload`
+
+These routes accept the canonical `X-Slicer-Api-Key` header (and the existing
+compact `X-Slicer-ApiKey` compatibility spelling). They never accept a key in
+the URL or request body.
 
 The registry-issued service key protects the service identified by `{id}`:
 

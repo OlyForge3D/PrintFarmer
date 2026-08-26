@@ -92,6 +92,72 @@ current worker release.
 2. The bundled compose template `scripts/docker/compose-templates/docker-compose.orcaslicer-worker-previous.yml` configures the previous engine and its service name. Enable it in generated stacks with `ENABLE_ORCA_WORKER_PREVIOUS=yes` when running `scripts/docker/compose-generator.sh` (default is off, so single-engine installs are unchanged).
 3. The Dockerfile (`scripts/docker/dockerfiles/Dockerfile.multistage`) restores and publishes both `Farm.Slicers.OrcaSlicer.v2_4_0` and `Farm.Slicers.OrcaSlicer.v2_3_1` plugins into the shared plugin drop that the host loads via `Slicer:PluginsPath`.
 
+### Runtime custom profile overlay
+
+The worker scans one composed root at `/app/profiles`. Its container entrypoint
+creates symbolic links for both immutable stock entries from
+`/opt/orcaslicer/resources/profiles` and writable custom entries from
+`/app/custom-profiles`, then sets `ORCA_PROFILES_PATH=/app/profiles`. Parent
+resolution therefore sees stock and custom manufacturers in the same root
+without writing user data into the OrcaSlicer installation.
+
+Symbolic links are intentional. A .NET 10 Linux probe verified all three worker
+access patterns through linked entries:
+
+- `Directory.GetFiles(..., TopDirectoryOnly)` found linked manifests.
+- `Directory.EnumerateDirectories(...)` found linked manufacturer directories.
+- `Directory.GetFiles(..., AllDirectories)` traversed those directories.
+
+This avoids copying more than 5,000 JSON files at every start. Hard links were
+rejected because container image layers and named volumes need not share a
+filesystem.
+
+Compose creates one persistent named volume per engine version:
+`printfarmer-custom-profiles-${ORCASLICER_VERSION}` for the current worker and
+the equivalent `ORCASLICER_VERSION_PREVIOUS` volume for the drain worker. All
+replicas of one version share its volume; different versions never share
+rendered families.
+
+The API installs complete rendered bundles through authenticated worker routes:
+
+```http
+PUT /api/profiles/custom-bundles/Custom
+X-Slicer-Api-Key: <WorkerAuth:SharedKey>
+Content-Type: application/json
+
+{
+  "manifest": {
+    "name": "Custom",
+    "machine_model_list": [],
+    "machine_list": [],
+    "filament_list": [],
+    "process_list": []
+  },
+  "files": [
+    {
+      "relativePath": "machine/Micron 180 base.json",
+      "familyName": "Micron 180",
+      "document": {
+        "name": "Micron 180 base",
+        "inherits": "Voron 2.4 250 0.4 nozzle",
+        "instantiation": "false"
+      }
+    }
+  ]
+}
+```
+
+`DELETE /api/profiles/custom-bundles/{bundleName}` removes a bundle.
+`POST /api/profiles/cache/reload` performs a full in-process reload. Install and
+remove already perform that reload; callers do not need a second request.
+
+Reload clears SQLite plus every `OrcaProfilesService` JSON, manifest,
+filesystem, machine, and resolved-list cache. A custom profile with an
+unresolved parent is excluded and returns HTTP 422 with its bundle, family,
+profile, and missing parent. Stock bundles retain their existing tolerant
+behavior. Invalid paths, stock-bundle name collisions, and unconfigured
+distinct roots are rejected without exposing filesystem paths.
+
 ### Lifecycle policy
 
 We ship **at most two** engine versions in-tree at any time: the current default and one prior. When a new default is promoted, retire the oldest plugin project and its Dockerfile restore stanza only after completing the drain gate below. This keeps the arm64 emulation cost, image size, and cache surface bounded, and matches the operational reality that operators rarely need more than one migration window overlap.

@@ -1,6 +1,7 @@
 ﻿using System.Net.Http.Headers;
 using System.Text.Json;
 using Farm.Infrastructure.OrcaSlicer;
+using Farm.OrcaSlicer.Worker.Controllers;
 using Farm.OrcaSlicer.Worker.Health;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Module.Dtos;
@@ -64,6 +65,8 @@ public sealed class Program
             ILogger<CachedOrcaProfilesService> logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger<CachedOrcaProfilesService>();
             return new CachedOrcaProfilesService(logger);
         });
+        _ = builder.Services.AddSingleton<CustomProfileBundleStore>();
+        _ = builder.Services.AddSingleton<WorkerSharedKeyValidator>();
         _ = builder.Services.AddSingleton<ISlicerProfilesService>(sp => sp.GetRequiredService<CachedOrcaProfilesService>());
         _ = builder.Services.AddSingleton<IProfilePreloadService, ProfilePreloadService>(); // profile preload before readiness
 

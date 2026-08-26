@@ -20,6 +20,7 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     private readonly ILogger<CachedOrcaProfilesService> _logger;
     private readonly string _profilesPath;
     private bool _cacheInitialized;
+    private bool _databaseInitialized;
     private readonly SemaphoreSlim _initLock = new(1, 1);
     private readonly TaskCompletionSource _cacheReadyTcs = new();
 
@@ -34,10 +35,17 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     /// </summary>
     public Task CacheReadyTask => _cacheReadyTcs.Task;
 
-    public CachedOrcaProfilesService(ILogger<CachedOrcaProfilesService> logger, string? profilesPath = null, string? dbPath = null)
+    public CachedOrcaProfilesService(
+        ILogger<CachedOrcaProfilesService> logger,
+        string? profilesPath = null,
+        string? dbPath = null,
+        string? customProfilesPath = null)
     {
         _logger = logger;
-        _innerService = new OrcaProfilesService(logger, profilesPath);
+        _innerService = new OrcaProfilesService(
+            logger,
+            profilesPath,
+            customProfilesPath);
 
         // Determine profiles path for hash calculation
         string? envPath = Environment.GetEnvironmentVariable("ORCA_PROFILES_PATH");
@@ -60,67 +68,72 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
         await _initLock.WaitAsync(ct);
         try
         {
-            if (_cacheInitialized)
-            {
-                return;
-            }
-
-            Stopwatch sw = Stopwatch.StartNew();
-
-            await _cacheDb.InitializeAsync(ct);
-
-            // Include parser/cache compatibility so expression-parser fixes invalidate stale compatibility data.
-            string profilesHash = $"{CacheCompatibilityVersion}:{CalculateProfilesHash()}";
-
-            if (await _cacheDb.IsCacheValidAsync(profilesHash, ct))
-            {
-                (int m, int f, int p) = await _cacheDb.GetCountsAsync(ct);
-                _logger.LogInformation("SQLite cache is valid. Loaded {M} machines, {F} filaments, {P} processes in {SwElapsedMilliseconds}ms", m, f, p, sw.ElapsedMilliseconds);
-                _cacheInitialized = true;
-                _cacheReadyTcs.TrySetResult();
-                return;
-            }
-
-            _logger.LogInformation("SQLite cache is stale or empty. Rebuilding from JSON profiles...");
-
-            await _cacheDb.ClearCacheAsync(ct);
-
-            // Load from inner service (JSON parsing)
-            Stopwatch parseWatch = Stopwatch.StartNew();
-
-            IList<MachineProfileDto> machines = await _innerService.ListAvailableMachineProfilesAsync(ct);
-            long machineTime = parseWatch.ElapsedMilliseconds;
-
-            IList<FilamentProfileDto> filaments = await _innerService.ListAvailableFilamentProfilesAsync(ct);
-            long filamentTime = parseWatch.ElapsedMilliseconds - machineTime;
-
-            IList<ProcessProfileDto> processes = await _innerService.ListAvailableProcessProfilesAsync(ct);
-            long processTime = parseWatch.ElapsedMilliseconds - filamentTime - machineTime;
-
-            _logger.LogInformation("Parsed JSON profiles in {ParseWatchElapsedMilliseconds}ms: machines={MachineTime}ms, filaments={FilamentTime}ms, processes={ProcessTime}ms", parseWatch.ElapsedMilliseconds, machineTime, filamentTime, processTime);
-
-            // Store in SQLite
-            Stopwatch storeWatch = Stopwatch.StartNew();
-
-            await _cacheDb.StoreMachineProfilesAsync(machines, ct);
-            await _cacheDb.StoreFilamentProfilesAsync(filaments, ct);
-            await _cacheDb.StoreProcessProfilesAsync(processes, ct);
-            await _cacheDb.SetMetadataAsync("profiles_hash", profilesHash, ct);
-            await _cacheDb.SetMetadataAsync("cached_at", DateTime.UtcNow.ToString("O"), ct);
-
-            _logger.LogInformation("Stored {MachinesCount} machines, {FilamentsCount} filaments, {ProcessesCount} processes in SQLite in {StoreWatchElapsedMilliseconds}ms", machines.Count, filaments.Count, processes.Count, storeWatch.ElapsedMilliseconds);
-
-            _cacheInitialized = true;
-
-            _logger.LogInformation("Total cache initialization: {SwElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
-
-            // Signal that the cache is ready for requests
-            _cacheReadyTcs.TrySetResult();
+            await InitializeCoreAsync(ct);
         }
         finally
         {
             _initLock.Release();
         }
+    }
+
+    private async Task InitializeCoreAsync(CancellationToken ct)
+    {
+        if (_cacheInitialized)
+        {
+            return;
+        }
+
+        Stopwatch sw = Stopwatch.StartNew();
+
+        if (!_databaseInitialized)
+        {
+            await _cacheDb.InitializeAsync(ct);
+            _databaseInitialized = true;
+        }
+
+        // Include parser/cache compatibility so expression-parser fixes invalidate stale compatibility data.
+        string profilesHash = $"{CacheCompatibilityVersion}:{CalculateProfilesHash()}";
+
+        if (await _cacheDb.IsCacheValidAsync(profilesHash, ct))
+        {
+            (int m, int f, int p) = await _cacheDb.GetCountsAsync(ct);
+            _logger.LogInformation("SQLite cache is valid. Loaded {M} machines, {F} filaments, {P} processes in {SwElapsedMilliseconds}ms", m, f, p, sw.ElapsedMilliseconds);
+            _cacheInitialized = true;
+            _cacheReadyTcs.TrySetResult();
+            return;
+        }
+
+        _logger.LogInformation("SQLite cache is stale or empty. Rebuilding from JSON profiles...");
+
+        await _cacheDb.ClearCacheAsync(ct);
+
+        Stopwatch parseWatch = Stopwatch.StartNew();
+
+        IList<MachineProfileDto> machines = await _innerService.ListAvailableMachineProfilesAsync(ct);
+        long machineTime = parseWatch.ElapsedMilliseconds;
+
+        IList<FilamentProfileDto> filaments = await _innerService.ListAvailableFilamentProfilesAsync(ct);
+        long filamentTime = parseWatch.ElapsedMilliseconds - machineTime;
+
+        IList<ProcessProfileDto> processes = await _innerService.ListAvailableProcessProfilesAsync(ct);
+        long processTime = parseWatch.ElapsedMilliseconds - filamentTime - machineTime;
+
+        _logger.LogInformation("Parsed JSON profiles in {ParseWatchElapsedMilliseconds}ms: machines={MachineTime}ms, filaments={FilamentTime}ms, processes={ProcessTime}ms", parseWatch.ElapsedMilliseconds, machineTime, filamentTime, processTime);
+
+        Stopwatch storeWatch = Stopwatch.StartNew();
+
+        await _cacheDb.StoreMachineProfilesAsync(machines, ct);
+        await _cacheDb.StoreFilamentProfilesAsync(filaments, ct);
+        await _cacheDb.StoreProcessProfilesAsync(processes, ct);
+        await _cacheDb.SetMetadataAsync("profiles_hash", profilesHash, ct);
+        await _cacheDb.SetMetadataAsync("cached_at", DateTime.UtcNow.ToString("O"), ct);
+
+        _logger.LogInformation("Stored {MachinesCount} machines, {FilamentsCount} filaments, {ProcessesCount} processes in SQLite in {StoreWatchElapsedMilliseconds}ms", machines.Count, filaments.Count, processes.Count, storeWatch.ElapsedMilliseconds);
+
+        _cacheInitialized = true;
+
+        _logger.LogInformation("Total cache initialization: {SwElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
+        _cacheReadyTcs.TrySetResult();
     }
 
     private string CalculateProfilesHash()
@@ -284,7 +297,42 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
         try
         {
             _cacheInitialized = false;
+            _innerService.ClearCaches();
             await _cacheDb.ClearCacheAsync(ct);
+        }
+        finally
+        {
+            _initLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Clears both SQLite and process-lifetime profile caches, then completes a
+    /// full in-process rebuild before returning.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Counts and strict custom-profile load failures from the rebuilt cache.</returns>
+    public async Task<ProfileReloadResult> ReloadProfilesAsync(CancellationToken ct = default)
+    {
+        await _initLock.WaitAsync(ct);
+        try
+        {
+            _cacheInitialized = false;
+            _innerService.ClearCaches();
+
+            if (_databaseInitialized)
+            {
+                await _cacheDb.ClearCacheAsync(ct);
+            }
+
+            await InitializeCoreAsync(ct);
+            (int machineCount, int filamentCount, int processCount) =
+                await _cacheDb.GetCountsAsync(ct);
+            return new ProfileReloadResult(
+                machineCount,
+                filamentCount,
+                processCount,
+                _innerService.CustomProfileLoadFailures);
         }
         finally
         {
@@ -299,3 +347,16 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
         await Task.CompletedTask;
     }
 }
+
+/// <summary>
+/// Result of a complete in-process profile cache rebuild.
+/// </summary>
+/// <param name="MachineCount">Number of selectable machine profiles.</param>
+/// <param name="FilamentCount">Number of filament profiles.</param>
+/// <param name="ProcessCount">Number of process profiles.</param>
+/// <param name="Failures">Custom profiles excluded due to incomplete inheritance.</param>
+public sealed record ProfileReloadResult(
+    int MachineCount,
+    int FilamentCount,
+    int ProcessCount,
+    IReadOnlyList<CustomProfileLoadFailure> Failures);

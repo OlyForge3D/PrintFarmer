@@ -36,6 +36,7 @@ x-worker-volumes: &worker-volumes
   - ${EXTERNAL_ORCA_WORKER_TEMP:-.volumes/printfarmer-orcaslicer-temp}:/app/temp
   - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models:ro
   - ${EXTERNAL_GCODE_PATH:-.volumes/printfarmer-gcode-storage}:/app/gcode:ro
+  - orcaslicer-custom-profiles:/app/custom-profiles
 
 x-worker-security: &worker-security {}
 
@@ -47,6 +48,10 @@ x-worker-deployment: &worker-deployment
     reservations:
       cpus: '${ORCA_WORKER_CPU_REQUEST:-0.5}'
       memory: ${ORCA_WORKER_MEMORY_REQUEST:-512m}
+
+volumes:
+  orcaslicer-custom-profiles:
+    name: printfarmer-custom-profiles-${ORCASLICER_VERSION:-2.4.2}
 
 services:
   orcaslicer-worker:
@@ -64,6 +69,10 @@ services:
       - Worker__StorageEndpoint=${WORKER_API_BASE_URL:-http://slicer-host:5246}
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
+      - ORCA_STOCK_PROFILES_PATH=/opt/orcaslicer/resources/profiles
+      - ORCA_CUSTOM_PROFILES_PATH=/app/custom-profiles
+      - ORCA_PROFILES_PATH=/app/profiles
+      - PROFILE_CACHE_PATH=/app/cache
       # Stable identity across redeploys: RegisterAsync upserts on this ID so a
       # redeploy updates the existing worker/service record instead of creating
       # a duplicate. Fresh credentials are still issued on every registration.

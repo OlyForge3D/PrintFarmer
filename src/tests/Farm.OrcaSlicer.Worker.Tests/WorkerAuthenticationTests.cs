@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using Farm.OrcaSlicer.Worker.Controllers;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Worker.Core;
 using FluentAssertions;
@@ -92,6 +93,20 @@ public sealed class WorkerAuthenticationTests
             .Which.Should().Contain("WorkerAuth:SharedKey")
             .And.Contain("MemoryConfigurationProvider")
             .And.NotContain(key);
+    }
+
+    [Fact]
+    public void WorkerSharedKeyValidator_PresentedKey_UsesExistingBootstrapCredential()
+    {
+        IConfiguration configuration = CreateConfiguration(
+            new KeyValuePair<string, string?>(
+                "WorkerAuth:SharedKey",
+                "worker-management-key"));
+        var validator = new WorkerSharedKeyValidator(configuration);
+
+        validator.Validate("worker-management-key").Should().BeTrue();
+        validator.Validate("wrong-key").Should().BeFalse();
+        validator.Validate(null).Should().BeFalse();
     }
 
     private static IConfiguration CreateConfiguration(

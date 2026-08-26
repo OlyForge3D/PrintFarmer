@@ -193,3 +193,53 @@ Status: Backlog item cleared. Beta trigger gated on PR stack merge.
 - The branch-matching main-checkout session had no active session ID and was classified inactive. Its 20 Markdown records had no same-name canonical collisions, no exact duplicates, and no local secret-pattern flags; recovery remains coordinator-owned because all are unique.
 - Retained `/decisions/`; removed absent `/decisions.md`, `/agents/`, `/orchestration-log/`, and `/log/`; left out-of-scope `/memory/` unchanged. Canonical `.squad/decisions.md` and Parker history remain tracked, while canonical generated logs keep their separate explicit ignores.
 - Focused state-root tests passed 2/2. Bishop, Hicks, and Vasquez reached joint consensus APPROVE on exact SHA `429283d3870cd1553224a2f6e101547d657055b3`. PR #1204 targets `development` and closes #1135.
+
+
+### 2026-08-25: Custom Orca profile injection spike
+
+- **PASS:** an artifact-root `Custom.json` bundle was discovered by the unmodified worker;
+  `Custom/Micron 180 base` resolved across manufacturers to
+  `Voron/Voron 2.4 250 0.4 nozzle`, and the child resolved through the base. The worker API
+  returned inherited Klipper G-code/motion limits plus the 180 x 180 x 165 overrides.
+- Filesystem hash invalidation is startup-only. Live addition and live deletion both left
+  SQLite/in-memory results stale; restarting rebuilt 452 -> 453 machines on addition and
+  453 -> 452 on removal. Phase 2a still needs an explicit invalidate endpoint that also
+  clears every inner `OrcaProfilesService` cache.
+- No custom missing-parent warning occurred. An abstract `instantiation: false` base listed
+  in `machine_list` increments the loader's `failureCount` even though this is expected.
+- Existing DTO projection gotchas: `MachineProfileDto.Inherits` is not assigned by
+  `ParseMachineProfile` (the raw Settings bag is correct), and promoted printable X/Y do
+  not reflect the four-point area even though raw settings do.
+- Docker Desktop was unavailable, so the same worker code was run natively against an
+  isolated `ORCA_PROFILES_PATH`; Linux overlay/volume permissions remain untested. The live
+  farm and all databases were untouched. Evidence and the retained throwaway bundle are
+  under the session artifact `files\parker-injection-spike\` directory.
+
+
+### 2026-08-25: Vendor-generality extension to profile injection spike
+
+- Surveyed 11 installed manifests. Nine of ten machine vendors ship filament profiles;
+  Voron alone has zero. Qidi has 1,287 filament entries, Flashforge 570, and the separate
+  universal OrcaFilamentLibrary has 482, so Voron materially understates renderer volume.
+- Raw compatibility is vendor-diverse. Prusa has 151 condition-only process entries out of
+  334; explicit filament arrays dominate Prusa/Elegoo/Qidi. Many leaves declare neither
+  directly because compatibility can be inherited, so classification must use the
+  worker's resolved `CompatiblePrinters`, never raw leaf presence.
+- Worker runtime confirmed a condition-only Prusa process materializes to both CORE One HF
+  and non-HF 0.4 source variants. Conditions are evaluated only against machines from the
+  same manufacturer folder. Rendered Custom stubs must write an explicit custom-name array
+  and clear inherited `compatible_printers_condition` to prevent source conditions leaking.
+- A second additive machine probe inherited `Prusa CORE One 0.4 nozzle` across manufacturer
+  directories and returned resolved Prusa marlin2 settings, 270 mm height, start G-code,
+  and printer-note markers with zero missing-parent warnings. The vendor-neutral mechanism
+  remains PASS. The probe was removed and worker stopped; source artifacts were retained
+  under `files\parker-injection-spike\vendor-generality-bundle\`.
+
+
+### 2026-08-25: Orca custom-profile worker foundation (Phase 2a)
+
+- Selected a symlink-composed `/app/profiles` root after a .NET 10 Linux probe confirmed top-level manifests, linked manufacturer directories, and recursive JSON traversal all work. Stock stays immutable; custom source lives in `/app/custom-profiles` on Orca-version-keyed named volumes.
+- Added authenticated install/replace, remove, and reconciliation reload routes using the existing `WorkerAuth:SharedKey` / `X-Slicer-Api-Key` convention. Bundle writes are staged and atomically promoted with collision, traversal, and size validation.
+- Implemented restart-free reload that clears SQLite and every inner `OrcaProfilesService` process cache. Worker tests pass 372/372, including missing-parent failure followed by successful same-process reload after the parent chain is installed.
+- Custom missing parents now exclude affected profiles and return structured HTTP 422 details; stock missing-parent behavior remains tolerant. The overlay deployment test passes in the full deployment runner.
+- Full solution build passed. The captured full test and format gates remain red from concurrent/unrelated slicer migration and baseline formatting work; full deployment remained 6/11 because Docker/Python were unavailable and an existing TLS trap check failed. Details are in `decisions/inbox/parker-phase2a-impl.md`.
