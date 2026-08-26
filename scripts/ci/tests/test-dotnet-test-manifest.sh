@@ -123,7 +123,7 @@ for entry in entries:
 # mistyped field (e.g. requiresProviders as a string instead of a list, or
 # runIntegration as "true" instead of true) would silently break downstream
 # consumers without this check.
-REQUIRED_STRING_FIELDS = ("productionProject", "testProject", "defaultFilter", "leg")
+REQUIRED_STRING_FIELDS = ("name", "productionProject", "testProject", "defaultFilter", "leg")
 REQUIRED_LIST_FIELDS = ("pathPrefixes", "dependsOnProjects", "shards", "requiresProviders")
 REQUIRED_BOOL_FIELDS = ("runIntegration",)
 for entry in entries:
@@ -146,6 +146,69 @@ for entry in entries:
         value = entry[field]
         if not isinstance(value, bool):
             errors.append(f"{name}: field '{field}' must be a boolean, got {value!r}")
+
+# 2c. Pin the canonical name -> testProject/productionProject/defaultFilter/
+# runIntegration mapping for every known entry. Structural presence/type
+# checks alone would still accept a PR that (accidentally or otherwise)
+# repoints a project's `testProject` at a different .csproj, silently swaps
+# `runIntegration`, or narrows `defaultFilter` to a smaller passing subset --
+# none of that would fail the checks above, and it would quietly weaken what
+# CI actually exercises for that leg. Changing one of these pinned values is
+# still possible, but only by also updating EXPECTED_CANONICAL here, which
+# puts the change in the diff a reviewer sees rather than letting it hide in
+# a JSON-only edit.
+EXPECTED_CANONICAL = {
+    "Farm.Web.Api.Tests": {
+        "testProject": "tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj",
+        "productionProject": "api/Farm.Web.Api.csproj",
+        "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+        "runIntegration": False,
+    },
+    "Farm.Slicer.Module.Tests": {
+        "testProject": "tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj",
+        "productionProject": "slicer/Farm.Slicer.Module/Farm.Slicer.Module.csproj",
+        "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+        "runIntegration": False,
+    },
+    "Farm.OrcaSlicer.Worker.Tests": {
+        "testProject": "tests/Farm.OrcaSlicer.Worker.Tests/Farm.OrcaSlicer.Worker.Tests.csproj",
+        "productionProject": "orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj",
+        "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+        "runIntegration": False,
+    },
+    "Farm.Moonraker.Emulator.Tests": {
+        "testProject": "tests/Farm.Moonraker.Emulator.Tests/Farm.Moonraker.Emulator.Tests.csproj",
+        "productionProject": "moonraker-emulator/Farm.Moonraker.Emulator/Farm.Moonraker.Emulator.csproj",
+        "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+        "runIntegration": False,
+    },
+    "Farm.Slicer.ProfileParsing.Tests": {
+        "testProject": "tests/Farm.Slicer.ProfileParsing.Tests/Farm.Slicer.ProfileParsing.Tests.csproj",
+        "productionProject": "slicer/Farm.Slicer.ProfileParsing/Farm.Slicer.ProfileParsing.csproj",
+        "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+        "runIntegration": False,
+    },
+    "Farm.Web.IntegrationTests": {
+        "testProject": "tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj",
+        "productionProject": "api/Farm.Web.Api.csproj",
+        "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+        "runIntegration": True,
+    },
+}
+entries_by_name = {entry.get("name"): entry for entry in entries if entry.get("name")}
+for pinned_name, pinned_fields in EXPECTED_CANONICAL.items():
+    entry = entries_by_name.get(pinned_name)
+    if entry is None:
+        continue  # absence is already reported by the checks above/below.
+    for field, expected_value in pinned_fields.items():
+        actual_value = entry.get(field)
+        if actual_value != expected_value:
+            errors.append(
+                f"{pinned_name}: field '{field}' does not match its pinned canonical "
+                f"value (expected {expected_value!r}, got {actual_value!r} -- if this "
+                "is an intentional change to what CI selects/runs for this project, "
+                "update EXPECTED_CANONICAL in test-dotnet-test-manifest.sh in the same PR)"
+            )
 
 # 3. Farm.Web.IntegrationTests must be explicitly registered (it never
 # matches the '*.Tests.csproj' glob used for auto-discovery below).

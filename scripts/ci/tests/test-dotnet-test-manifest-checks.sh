@@ -190,12 +190,76 @@ case_crash_fails_closed() {
   fi
 }
 
+case_invalid_name_fails() {
+  # Negative: a whitespace-only 'name' is falsy-checked by the duplicate
+  # detector but is a valid (truthy for non-empty, but garbage) string that
+  # earlier passed schema validation since 'name' was not itself a checked
+  # field. Confirms 'name' is now enforced as a non-empty, trimmed string.
+  local mutant ; mutant="$(mktemp)"
+  build_mutant "$mutant" '
+import json, sys
+out_path, src_path = sys.argv[1], sys.argv[2]
+with open(src_path, encoding="utf-8") as f:
+    data = json.load(f)
+data["testProjects"][1]["name"] = "   "
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump(data, f)
+'
+  local rc=0
+  local report
+  report="$(TEST_MANIFEST_PATH="$mutant" bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$mutant"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail on a whitespace-only name, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"field 'name' must be a non-empty string"* ]]; then
+    printf '  expected a name-field type/empty error, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_pinned_default_filter_narrowed_fails() {
+  # Negative: silently narrowing a known project's 'defaultFilter' (or
+  # swapping its 'testProject'/'runIntegration') would weaken what CI
+  # actually exercises for that leg without failing any structural/schema
+  # check. The validator pins canonical values for known entries in
+  # EXPECTED_CANONICAL specifically to catch this.
+  local mutant ; mutant="$(mktemp)"
+  build_mutant "$mutant" '
+import json, sys
+out_path, src_path = sys.argv[1], sys.argv[2]
+with open(src_path, encoding="utf-8") as f:
+    data = json.load(f)
+for entry in data["testProjects"]:
+    if entry.get("name") == "Farm.Web.Api.Tests":
+        entry["defaultFilter"] = "FullyQualifiedName~SomeTinySubset"
+        break
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump(data, f)
+'
+  local rc=0
+  local report
+  report="$(TEST_MANIFEST_PATH="$mutant" bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$mutant"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail on a narrowed pinned defaultFilter, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"does not match its pinned canonical value"* ]]; then
+    printf '  expected a pinned-canonical-value mismatch error, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
 TESTS=(
   case_baseline_roundtrip_passes
   case_duplicate_test_project_path_fails
   case_missing_required_field_fails
   case_wrong_type_field_fails
   case_crash_fails_closed
+  case_invalid_name_fails
+  case_pinned_default_filter_narrowed_fails
 )
 
 printf '=== dotnet test manifest validator regression suite ===\n'
