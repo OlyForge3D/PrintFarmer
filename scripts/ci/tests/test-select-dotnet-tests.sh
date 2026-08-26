@@ -282,6 +282,7 @@ case_infra_change() {
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
   assert_contains "matrix smartplug" "$matrix" "Farm.Modules.SmartPlug.Tests" || return 1
   assert_contains "matrix maintenance" "$matrix" "Farm.Modules.Maintenance.Tests" || return 1
+  assert_contains "matrix calibration" "$matrix" "Farm.Modules.Calibration.Tests" || return 1
   assert_app_migration_drift "$out" || return 1
 }
 
@@ -455,6 +456,7 @@ case_slicer_change() {
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   assert_contains "matrix orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  assert_contains "matrix calibration" "$matrix" "Farm.Modules.Calibration.Tests" || return 1
   local mig ; mig="$(get_output "$out" mig_matrix)"
   assert_contains "mig slicer pg" "$mig" "SlicerPg" || return 1
   assert_contains "mig slicer sql" "$mig" "SlicerSqlServer" || return 1
@@ -540,6 +542,27 @@ case_maintenance_change() {
   assert_contains "reason maintenance" "$reason" "maintenance" || return 1
 }
 
+case_calibration_change() {
+  local out="$1"
+  CHANGED_FILES="src/modules/Farm.Modules.Calibration/Services/Calibration/CalibrationProjectService.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix calibration" "$matrix" "Farm.Modules.Calibration.Tests" || return 1
+  # The retained calibration contract-negotiation/health-check/route-table
+  # coverage (RouteTableSnapshotTests, CalibrationProfileResolutionContractTests)
+  # intentionally stayed in Farm.Web.Api.Tests, so a controller-owning module
+  # must select it too.
+  assert_contains "api covers controller" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason calibration" "$reason" "calibration" || return 1
+}
+
 case_test_only_maintenance() {
   local out="$1"
   CHANGED_FILES="src/tests/Farm.Modules.Maintenance.Tests/Hubs/MaintenanceHubTests.cs"
@@ -553,6 +576,19 @@ case_test_only_maintenance() {
   assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
 }
 
+case_test_only_calibration() {
+  local out="$1"
+  CHANGED_FILES="src/tests/Farm.Modules.Calibration.Tests/Services/Calibration/CalibrationProjectServiceTests.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix calibration" "$matrix" "Farm.Modules.Calibration.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+}
+
 case_maintenance_mixed_with_unrelated_backend() {
   local out="$1"
   CHANGED_FILES=$'src/modules/Farm.Modules.Maintenance/Hubs/MaintenanceHub.cs\nsrc/backends/Farm.Backends.SomePlugin/SomeFile.cs'
@@ -563,6 +599,18 @@ case_maintenance_mixed_with_unrelated_backend() {
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix maintenance" "$matrix" "Farm.Modules.Maintenance.Tests" || return 1
 }
+
+case_calibration_mixed_with_unrelated_backend() {
+  local out="$1"
+  CHANGED_FILES=$'src/modules/Farm.Modules.Calibration/Services/Capabilities/CalibrationCapabilityService.cs\nsrc/backends/Farm.Backends.SomePlugin/SomeFile.cs'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix calibration" "$matrix" "Farm.Modules.Calibration.Tests" || return 1
+}
+
 
 case_migration_app_change() {
   local out="$1"
@@ -2633,6 +2681,9 @@ TESTS=(
   case_maintenance_change
   case_test_only_maintenance
   case_maintenance_mixed_with_unrelated_backend
+  case_calibration_change
+  case_test_only_calibration
+  case_calibration_mixed_with_unrelated_backend
   case_migration_app_change
   case_migration_slicer_change
   case_test_only_api

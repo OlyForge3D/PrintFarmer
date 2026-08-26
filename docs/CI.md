@@ -93,13 +93,14 @@ classify.
 | --- | :---: | :---: | --- | --- | :---: |
 | `frontend`: `src/Web/**` | ✓ | | | | |
 | `api`: `src/api/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests` | `AppPg`, `AppSqlServer` | |
-| `infra`: `src/infra/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.SmartPlug.Tests`, `Farm.Modules.Maintenance.Tests` | `AppPg`, `AppSqlServer` | |
+| `infra`: `src/infra/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.SmartPlug.Tests`, `Farm.Modules.Maintenance.Tests`, `Farm.Modules.Calibration.Tests` | `AppPg`, `AppSqlServer` | |
 | `backend_core`: `src/backends/Farm.Backend.Plugin.Core/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests` | | |
 | `backend_plugin`: every other `src/backends/**` path (concrete plugin projects) | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests` | | |
-| `slicer`: `src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests` | `SlicerPg`, `SlicerSqlServer` | |
+| `slicer`: `src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.Calibration.Tests` | `SlicerPg`, `SlicerSqlServer` | |
 | `orca_worker`: `src/orcaslicer-worker/**` | | ✓ | `Farm.OrcaSlicer.Worker.Tests` | | |
 | `smartplug`: `src/modules/Farm.Modules.SmartPlug/**` | | ✓ | `Farm.Modules.SmartPlug.Tests`, `Farm.Web.Api.Tests` | | |
 | `maintenance`: `src/modules/Farm.Modules.Maintenance/**` | | ✓ | `Farm.Modules.Maintenance.Tests`, `Farm.Web.Api.Tests` | | |
+| `calibration`: `src/modules/Farm.Modules.Calibration/**` | | ✓ | `Farm.Modules.Calibration.Tests`, `Farm.Web.Api.Tests` | | |
 | `migrations_app`: `src/migrations/Farm.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests` | `AppPg`, `AppSqlServer` | |
 | `migrations_slcr`: `src/migrations/Farm.Slicer.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests` | `SlicerPg`, `SlicerSqlServer` | |
 | `tests_api`: `src/tests/Farm.Web.Api.Tests/**` | | ✓ | `Farm.Web.Api.Tests` | | |
@@ -107,6 +108,7 @@ classify.
 | `tests_orca`: `src/tests/Farm.OrcaSlicer.Worker.Tests/**` | | ✓ | `Farm.OrcaSlicer.Worker.Tests` | | |
 | `tests_smartplug`: `src/tests/Farm.Modules.SmartPlug.Tests/**` | | ✓ | `Farm.Modules.SmartPlug.Tests` | | |
 | `tests_maintenance`: `src/tests/Farm.Modules.Maintenance.Tests/**` | | ✓ | `Farm.Modules.Maintenance.Tests` | | |
+| `tests_calibration`: `src/tests/Farm.Modules.Calibration.Tests/**` | | ✓ | `Farm.Modules.Calibration.Tests` | | |
 | `tests_integration`: `src/tests/Farm.Web.IntegrationTests/**` | | ✓ | `Farm.Web.IntegrationTests` | | |
 | `tests_shared`: `src/tests/Farm.Testing.Shared/**` | ✓ | ✓ | all | all | ✓ |
 | `tests_other`: every other `src/tests/**` path | ✓ | ✓ | all | all | ✓ |
@@ -144,6 +146,14 @@ Similarly, `maintenance` selects `Farm.Web.Api.Tests`: five controllers plus
 `MaintenanceHubAuthorizationIntegrationTests`, and
 `MaintenanceScheduleDeploymentToolheadScopeTests` intentionally stayed behind
 in `Farm.Web.Api.Tests`.
+
+`calibration` follows the same controller-owning pattern: its two moved
+controllers' own coverage (`RouteTableSnapshotTests`, the calibration
+contract-negotiation and health-check tests) intentionally stayed behind in
+`Farm.Web.Api.Tests`, so the bucket selects both `Farm.Modules.Calibration.Tests`
+and `Farm.Web.Api.Tests`. Because `Farm.Modules.Calibration` depends on both
+`Farm.Infrastructure` and `Farm.Slicer.Module`, the `infra` and `slicer` buckets
+also select `Farm.Modules.Calibration.Tests`.
 
 ### Full-safe (`full_matrix=1`) triggers
 

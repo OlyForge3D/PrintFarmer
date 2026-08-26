@@ -1,4 +1,8 @@
-﻿namespace Farm.Web.Api.Services.Calibration;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+namespace Farm.Web.Api.Services.Calibration;
 
 /// <summary>
 /// Retries durable calibration photo-delete requests that could not remove their

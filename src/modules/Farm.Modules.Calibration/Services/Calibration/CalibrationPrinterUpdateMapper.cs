@@ -5,7 +5,7 @@ using Farm.Infrastructure.Domain;
 
 namespace Farm.Web.Api.Services.Calibration;
 
-internal static class CalibrationPrinterUpdateMapper
+public static class CalibrationPrinterUpdateMapper
 {
     /// <summary>Generous but finite bound on nozzle offsets, in millimeters.</summary>
     private const double MaxOffsetMagnitudeMm = 100;

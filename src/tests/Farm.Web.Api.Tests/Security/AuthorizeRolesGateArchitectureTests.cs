@@ -71,6 +71,7 @@ public sealed class AuthorizeRolesGateArchitectureTests
         // their own assembly are still "API controllers" for this guard's purposes.
         typeof(Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController).Assembly,
         typeof(Farm.Web.Api.Controllers.MaintenanceController).Assembly,
+        typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
     ];
 
     /// <summary>
@@ -91,6 +92,7 @@ public sealed class AuthorizeRolesGateArchitectureTests
         typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
         typeof(Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController).Assembly,
         typeof(Farm.Web.Api.Controllers.MaintenanceController).Assembly,
+        typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
     ];
 
     [Fact]

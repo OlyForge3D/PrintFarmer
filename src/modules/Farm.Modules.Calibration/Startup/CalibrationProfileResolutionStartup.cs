@@ -1,5 +1,7 @@
 ﻿using Farm.Infrastructure.PrinterCalibration;
 using Farm.Web.Api.Services.Calibration;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Farm.Web.Api.Startup;

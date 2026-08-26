@@ -51,6 +51,7 @@ public sealed class QueueEnqueuePermissionArchitectureTests
     {
         typeof(Farm.Web.Api.Controllers.PrintersController).Assembly, // Farm.Web.Api
         typeof(IJobQueueService).Assembly, // Farm.Infrastructure
+        typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly, // Farm.Modules.Calibration
     };
 
     private static readonly Dictionary<short, OpCode> OpCodesByValue = BuildOpCodeMap();
@@ -62,42 +63,49 @@ public sealed class QueueEnqueuePermissionArchitectureTests
             ?? throw new InvalidOperationException(
                 $"{nameof(IJobQueueService)}.{nameof(IJobQueueService.AddJobToQueueAsync)} not found — has it been renamed?");
 
-        Assembly apiAssembly = typeof(Farm.Web.Api.Controllers.PrintersController).Assembly;
+        Assembly[] controllerHostingAssemblies =
+        [
+            typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
+            typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly, // Farm.Modules.Calibration
+        ];
         List<string> offenders = [];
         int actionsReachingTarget = 0;
 
-        foreach (Type controllerType in apiAssembly.GetTypes())
+        foreach (Assembly apiAssembly in controllerHostingAssemblies)
         {
-            if (!typeof(ControllerBase).IsAssignableFrom(controllerType) || controllerType.IsAbstract)
+            foreach (Type controllerType in apiAssembly.GetTypes())
             {
-                continue;
-            }
-
-            foreach (MethodInfo action in controllerType.GetMethods(
-                BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
-            {
-                if (action.IsSpecialName || action.GetCustomAttribute<NonActionAttribute>() is not null)
+                if (!typeof(ControllerBase).IsAssignableFrom(controllerType) || controllerType.IsAbstract)
                 {
                     continue;
                 }
 
-                string displayName = $"{controllerType.FullName}.{action.Name}";
-
-                if (!CallGraphReachesTarget(action, targetMethod))
+                foreach (MethodInfo action in controllerType.GetMethods(
+                    BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
                 {
-                    continue;
-                }
+                    if (action.IsSpecialName || action.GetCustomAttribute<NonActionAttribute>() is not null)
+                    {
+                        continue;
+                    }
 
-                actionsReachingTarget++;
+                    string displayName = $"{controllerType.FullName}.{action.Name}";
 
-                if (Allowlist.Contains(displayName))
-                {
-                    continue;
-                }
+                    if (!CallGraphReachesTarget(action, targetMethod))
+                    {
+                        continue;
+                    }
 
-                if (!HasQueueWriteOrStrongerPermission(action, controllerType))
-                {
-                    offenders.Add(displayName);
+                    actionsReachingTarget++;
+
+                    if (Allowlist.Contains(displayName))
+                    {
+                        continue;
+                    }
+
+                    if (!HasQueueWriteOrStrongerPermission(action, controllerType))
+                    {
+                        offenders.Add(displayName);
+                    }
                 }
             }
         }
