@@ -11,7 +11,6 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// <summary>
 /// Tests /api/slice/{id}/progress endpoint updates job state and emits event prerequisites.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public class SliceJobProgressEndpointTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

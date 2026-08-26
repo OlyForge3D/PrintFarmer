@@ -24,7 +24,6 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// </remarks>
 [Trait("Category", "Integration")]
 [Trait("Category", "Regression")]
-[Collection(IntegrationTestCollection.Name)]
 public class Model3DFileDownloadRegressionTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

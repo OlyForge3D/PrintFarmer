@@ -1,0 +1,148 @@
+{
+  "$comment": "Checked CI test-selection manifest (issue #2031). One entry per .NET test project the CI matrix knows how to run. select-dotnet-tests.sh loads ALL_TEST_PROJECTS from this file instead of a hardcoded bash array. `pathPrefixes` and `dependsOnProjects` document (for scripts/ci/tests/test-dotnet-test-manifest.sh and human readers) the mapping already encoded in classify_path()/main() in select-dotnet-tests.sh; they are NOT re-interpreted at selection time, so changing them here has no effect on which tests run for a given change -- see docs/CI.md for the authoritative bucket table. `leg` names the CI matrix leg a project's tests execute in; several projects/shards may share one leg without adding a new required check, decoupling test-assembly count from CI-leg count.",
+  "testProjects": [
+    {
+      "name": "Farm.Web.Api.Tests",
+      "testProject": "tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj",
+      "productionProject": "api/Farm.Web.Api.csproj",
+      "pathPrefixes": ["src/tests/Farm.Web.Api.Tests/"],
+      "dependsOnProjects": [
+        "src/api/",
+        "src/infra/",
+        "src/backends/",
+        "src/slicer/",
+        "src/Slicers/",
+        "src/worker-shared/",
+        "src/migrations/Farm.Migrations.PostgreSQL/",
+        "src/migrations/Farm.Migrations.SqlServer/",
+        "src/migrations/Farm.Slicer.Migrations.PostgreSQL/",
+        "src/migrations/Farm.Slicer.Migrations.SqlServer/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [
+        {
+          "name": "core",
+          "namespacePrefixes": ["Backends", "Builders", "Calibration", "Capabilities", "Controllers", "Data", "DataManagement", "Dispatch", "Domain", "Dtos"],
+          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Backends|FullyQualifiedName~Farm.Web.Api.Tests.Builders|FullyQualifiedName~Farm.Web.Api.Tests.Calibration|FullyQualifiedName~Farm.Web.Api.Tests.Capabilities|FullyQualifiedName~Farm.Web.Api.Tests.Controllers|FullyQualifiedName~Farm.Web.Api.Tests.Data|FullyQualifiedName~Farm.Web.Api.Tests.DataManagement|FullyQualifiedName~Farm.Web.Api.Tests.Dispatch|FullyQualifiedName~Farm.Web.Api.Tests.Domain|FullyQualifiedName~Farm.Web.Api.Tests.Dtos"
+        },
+        {
+          "name": "infra",
+          "namespacePrefixes": ["Discovery", "Filters", "Gcode", "Health", "Hubs", "Infrastructure", "Integration", "Locations", "Logging", "Middleware", "Migrations", "Monitoring", "Network"],
+          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Discovery|FullyQualifiedName~Farm.Web.Api.Tests.Filters|FullyQualifiedName~Farm.Web.Api.Tests.Gcode|FullyQualifiedName~Farm.Web.Api.Tests.Health|FullyQualifiedName~Farm.Web.Api.Tests.Hubs|FullyQualifiedName~Farm.Web.Api.Tests.Infrastructure|FullyQualifiedName~Farm.Web.Api.Tests.Integration|FullyQualifiedName~Farm.Web.Api.Tests.Locations|FullyQualifiedName~Farm.Web.Api.Tests.Logging|FullyQualifiedName~Farm.Web.Api.Tests.Middleware|FullyQualifiedName~Farm.Web.Api.Tests.Migrations|FullyQualifiedName~Farm.Web.Api.Tests.Monitoring|FullyQualifiedName~Farm.Web.Api.Tests.Network"
+        },
+        {
+          "name": "services",
+          "namespacePrefixes": ["Repositories", "Security", "Services", "Slicing", "Startup", "TestHelpers", "TestInfrastructure", "Util", "(root)"],
+          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Repositories|FullyQualifiedName~Farm.Web.Api.Tests.Security|FullyQualifiedName~Farm.Web.Api.Tests.Services|FullyQualifiedName~Farm.Web.Api.Tests.Slicing|FullyQualifiedName~Farm.Web.Api.Tests.Startup|FullyQualifiedName~Farm.Web.Api.Tests.TestHelpers|FullyQualifiedName~Farm.Web.Api.Tests.TestInfrastructure|FullyQualifiedName~Farm.Web.Api.Tests.Util"
+        }
+      ],
+      "requiresProviders": ["postgres", "sqlserver"],
+      "runIntegration": false,
+      "leg": "Farm.Web.Api.Tests"
+    },
+    {
+      "name": "Farm.Slicer.Module.Tests",
+      "testProject": "tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj",
+      "productionProject": "slicer/Farm.Slicer.Module/Farm.Slicer.Module.csproj",
+      "pathPrefixes": ["src/tests/Farm.Slicer.Module.Tests/"],
+      "dependsOnProjects": [
+        "src/slicer/",
+        "src/Slicers/",
+        "src/worker-shared/",
+        "src/backends/Farm.Backend.Plugin.Core/",
+        "src/migrations/Farm.Slicer.Migrations.PostgreSQL/",
+        "src/migrations/Farm.Slicer.Migrations.SqlServer/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Slicer.Module.Tests"
+    },
+    {
+      "name": "Farm.OrcaSlicer.Worker.Tests",
+      "testProject": "tests/Farm.OrcaSlicer.Worker.Tests/Farm.OrcaSlicer.Worker.Tests.csproj",
+      "productionProject": "orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj",
+      "pathPrefixes": ["src/tests/Farm.OrcaSlicer.Worker.Tests/"],
+      "dependsOnProjects": [
+        "src/orcaslicer-worker/",
+        "src/infra/",
+        "src/backends/Farm.Backend.Plugin.Core/",
+        "src/slicer/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.OrcaSlicer.Worker.Tests"
+    },
+    {
+      "name": "Farm.Moonraker.Emulator.Tests",
+      "testProject": "tests/Farm.Moonraker.Emulator.Tests/Farm.Moonraker.Emulator.Tests.csproj",
+      "productionProject": "moonraker-emulator/Farm.Moonraker.Emulator/Farm.Moonraker.Emulator.csproj",
+      "pathPrefixes": ["src/tests/Farm.Moonraker.Emulator.Tests/"],
+      "dependsOnProjects": [
+        "src/moonraker-emulator/",
+        "src/backends/Farm.Backend.Plugin.Moonraker/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Moonraker.Emulator.Tests",
+      "notes": "Registered but not yet wired into a path-selection bucket (issue #2022) -- currently only exercised via the tests_other/full-safe fallback in select-dotnet-tests.sh. This manifest entry preserves that behavior; it does not change selection."
+    },
+    {
+      "name": "Farm.Slicer.ProfileParsing.Tests",
+      "testProject": "tests/Farm.Slicer.ProfileParsing.Tests/Farm.Slicer.ProfileParsing.Tests.csproj",
+      "productionProject": "slicer/Farm.Slicer.ProfileParsing/Farm.Slicer.ProfileParsing.csproj",
+      "pathPrefixes": ["src/tests/Farm.Slicer.ProfileParsing.Tests/"],
+      "dependsOnProjects": [
+        "src/slicer/Farm.Slicer.ProfileParsing/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Slicer.ProfileParsing.Tests",
+      "notes": "Registered but not yet wired into a path-selection bucket (issue #2022) -- currently only exercised via the tests_other/full-safe fallback in select-dotnet-tests.sh. This manifest entry preserves that behavior; it does not change selection."
+    },
+    {
+      "name": "Farm.Modules.Abstractions.Tests",
+      "testProject": "tests/Farm.Modules.Abstractions.Tests/Farm.Modules.Abstractions.Tests.csproj",
+      "productionProject": "modules/Farm.Modules.Abstractions/Farm.Modules.Abstractions.csproj",
+      "pathPrefixes": ["src/tests/Farm.Modules.Abstractions.Tests/"],
+      "dependsOnProjects": [
+        "src/modules/Farm.Modules.Abstractions/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Modules.Abstractions.Tests",
+      "notes": "New in issue #2035 (Phase 7: Farm.Modules.Abstractions + IApiModule host seam). select-dotnet-tests.sh treats src/modules/** and src/tests/Farm.Modules.Abstractions.Tests/** as full-safe (modules/tests_modules buckets) rather than a narrower path-selection bucket, since the module host seam is foundational and every future Farm.Modules.* vertical slice will reference it."
+    },
+    {
+      "name": "Farm.Web.IntegrationTests",
+      "testProject": "tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj",
+      "productionProject": "api/Farm.Web.Api.csproj",
+      "pathPrefixes": ["src/tests/Farm.Web.IntegrationTests/"],
+      "dependsOnProjects": [
+        "src/api/",
+        "src/infra/",
+        "src/backends/",
+        "src/slicer/",
+        "src/migrations/Farm.Migrations.PostgreSQL/",
+        "src/migrations/Farm.Migrations.SqlServer/",
+        "src/migrations/Farm.Slicer.Migrations.PostgreSQL/",
+        "src/migrations/Farm.Slicer.Migrations.SqlServer/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": true,
+      "leg": "Farm.Web.IntegrationTests",
+      "notes": "Intentionally excluded from farm-web.sln by design (its csproj disables IsTestProject unless RunIntegrationTests=true); the workflow passes -p:RunIntegrationTests=true for this leg only. Must remain registered here even though it does not end in the literal '*.Tests.csproj' suffix and so is not auto-discovered by the manifest-completeness glob check."
+    }
+  ]
+}

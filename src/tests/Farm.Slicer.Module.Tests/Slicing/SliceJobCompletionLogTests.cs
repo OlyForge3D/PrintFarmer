@@ -18,7 +18,6 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// <summary>
 /// Tests inline log text handling in slice job completion endpoint.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory = factory;

@@ -13,7 +13,6 @@ using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Artifacts;
 
-[Collection(IntegrationTestCollection.Name)]
 public class ArtifactsControllerKindValidationTests(CustomWebApplicationFactory factory) : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory = factory;

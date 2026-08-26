@@ -12,7 +12,6 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// resolution endpoint and its availability probe, since the main API's split-mode resolver adapter
 /// depends on both routes existing exactly where the shared contract says they do.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public class SlicerHostCalibrationResolutionRouteTests(
     StandaloneSlicerHostApplicationFactory factory)
     : IClassFixture<StandaloneSlicerHostApplicationFactory>

@@ -919,18 +919,34 @@ public class ProfilesController(
     /// <param name="request">Request containing list of machine profile names.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <param name="slicerEngineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
+    /// <param name="view">
+    /// Optional response projection. Pass <c>summary</c> to receive
+    /// <see cref="ProcessProfileSummaryDto"/> entries (identity/applicability metadata only,
+    /// without the opaque <c>Settings</c> bag) for calibration/list clients. Omit for the full
+    /// <see cref="ProcessProfileDto"/>, which slice submission, export, and clone still need
+    /// (see #2049).
+    /// </param>
     [HttpPost("process/for-machines")]
-    [ProducesResponseType(typeof(List<ProcessProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(
+        typeof(List<ProcessProfileDto>),
+        StatusCodes.Status200OK,
+        Description = "Full process profiles by default. With ?view=summary, returns List<ProcessProfileSummaryDto> instead (no Settings).")]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetProcessProfilesForMachinesAsync(
         [FromServices] HttpClient httpClient,
         [FromBody] ForMachinesRequest request,
         CancellationToken ct,
-        [FromQuery] string? slicerEngineVersion = null)
+        [FromQuery] string? slicerEngineVersion = null,
+        [FromQuery] string? view = null)
     {
         try
         {
             IReadOnlyList<ProcessProfileDto> profiles = await _profilesService.GetProcessProfilesForMachinesAsync(httpClient, request.MachineNames, ct, slicerEngineVersion);
+            if (IsSummaryView(view))
+            {
+                return Ok(profiles.Select(ProcessProfileSummaryDto.FromFull).ToList());
+            }
+
             return Ok(profiles);
         }
         catch (HttpRequestException ex)
@@ -952,18 +968,34 @@ public class ProfilesController(
     /// <param name="request">Request containing list of machine profile names.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <param name="slicerEngineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
+    /// <param name="view">
+    /// Optional response projection. Pass <c>summary</c> to receive
+    /// <see cref="FilamentProfileSummaryDto"/> entries (identity/applicability metadata only,
+    /// without <c>StartGcode</c>/<c>EndGcode</c> or the opaque <c>Settings</c> bag) for
+    /// calibration/list clients. Omit for the full <see cref="FilamentProfileDto"/>, which
+    /// slice submission, export, and clone still need (see #2049).
+    /// </param>
     [HttpPost("filament/for-machines")]
-    [ProducesResponseType(typeof(List<FilamentProfileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(
+        typeof(List<FilamentProfileDto>),
+        StatusCodes.Status200OK,
+        Description = "Full filament profiles by default. With ?view=summary, returns List<FilamentProfileSummaryDto> instead (no Settings/StartGcode/EndGcode).")]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetFilamentProfilesForMachinesAsync(
         [FromServices] HttpClient httpClient,
         [FromBody] ForMachinesRequest request,
         CancellationToken ct,
-        [FromQuery] string? slicerEngineVersion = null)
+        [FromQuery] string? slicerEngineVersion = null,
+        [FromQuery] string? view = null)
     {
         try
         {
             IReadOnlyList<FilamentProfileDto> profiles = await _profilesService.GetFilamentProfilesForMachinesAsync(httpClient, request.MachineNames, ct, slicerEngineVersion);
+            if (IsSummaryView(view))
+            {
+                return Ok(profiles.Select(FilamentProfileSummaryDto.FromFull).ToList());
+            }
+
             return Ok(profiles);
         }
         catch (HttpRequestException ex)
@@ -977,6 +1009,16 @@ public class ProfilesController(
             return StatusCode(500, "Error fetching profiles from worker");
         }
     }
+
+    /// <summary>
+    /// Determines whether a <c>view</c> query value requests the lightweight summary
+    /// projection (identity/applicability metadata only, no gcode or <c>Settings</c> bag)
+    /// instead of the full profile DTO. Only <c>summary</c> (case-insensitive) opts in;
+    /// omitted or any other value preserves the full-profile response for backward
+    /// compatibility (see #2049).
+    /// </summary>
+    private static bool IsSummaryView(string? view) =>
+        string.Equals(view, "summary", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Get template filament profiles from the OrcaFilamentLibrary.

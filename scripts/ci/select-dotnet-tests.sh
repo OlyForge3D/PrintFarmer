@@ -25,6 +25,10 @@
 #   GITHUB_OUTPUT         path to the step outputs file (required). Failure to
 #                         write to it exits with rc=3 rather than silently
 #                         producing no outputs.
+#   TEST_MANIFEST_PATH    override path to the checked test-project manifest
+#                         (default: dotnet-test-manifest.json next to this
+#                         script). Used by test-select-dotnet-tests.sh and
+#                         test-dotnet-test-manifest.sh to point at fixtures.
 #
 # Outputs (GITHUB_OUTPUT):
 #   want_frontend, want_dotnet_build, want_dotnet_test, want_mig_drift
@@ -48,27 +52,103 @@
 
 set -uo pipefail
 
-SCRIPT_VERSION="1.3.0"
+SCRIPT_VERSION="1.4.0"
 
 # ---------------------------------------------------------------------------
-# Required CI test projects. The final two fields are the test-project
-# opt-in flag for integration-only build properties and the xUnit category
-# filter used by PR CI. Keeping the filter in the selector matrix makes the
-# default API gate explicit and reusable by both local commands and the
-# GitHub Actions matrix, rather than hardcoding it in one workflow leg only.
-# Farm.Web.IntegrationTests intentionally lives outside farm-web.sln and must
-# be invoked directly with RunIntegrationTests=true because its csproj disables
-# test discovery otherwise.
+# Required CI test projects, loaded from the checked manifest
+# scripts/ci/dotnet-test-manifest.json (issue #2031) rather than a hardcoded
+# array, so the set of registered test projects has exactly one source of
+# truth that scripts/ci/tests/test-dotnet-test-manifest.sh can validate for
+# completeness (every `*.Tests.csproj` on disk registered exactly once).
+#
+# Each loaded entry keeps the same 4-field `name|project|run_integration|filter`
+# shape the rest of this script already expects: the test-project opt-in flag
+# for integration-only build properties and the xUnit category filter used by
+# PR CI. Keeping the filter in the selector matrix makes the default API gate
+# explicit and reusable by both local commands and the GitHub Actions matrix,
+# rather than hardcoding it in one workflow leg only. Farm.Web.IntegrationTests
+# intentionally lives outside farm-web.sln and must be invoked directly with
+# RunIntegrationTests=true because its csproj disables test discovery
+# otherwise.
+#
+# The manifest's `pathPrefixes`/`dependsOnProjects`/`shards` fields are
+# declarative documentation validated by test-dotnet-test-manifest.sh; they are
+# NOT read here and have no effect on classify_path()/main() below, which
+# continue to encode the actual bucket→test-selection mapping (see docs/CI.md).
 # ---------------------------------------------------------------------------
 readonly DEFAULT_TEST_FILTER='Category!=DbHeavy&Category!=Docker'
-readonly ALL_TEST_PROJECTS=(
-  "Farm.Web.Api.Tests|tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj|false|$DEFAULT_TEST_FILTER"
-  "Farm.Slicer.Module.Tests|tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj|false|$DEFAULT_TEST_FILTER"
-  "Farm.OrcaSlicer.Worker.Tests|tests/Farm.OrcaSlicer.Worker.Tests/Farm.OrcaSlicer.Worker.Tests.csproj|false|$DEFAULT_TEST_FILTER"
-  "Farm.Moonraker.Emulator.Tests|tests/Farm.Moonraker.Emulator.Tests/Farm.Moonraker.Emulator.Tests.csproj|false|$DEFAULT_TEST_FILTER"
-  "Farm.Slicer.ProfileParsing.Tests|tests/Farm.Slicer.ProfileParsing.Tests/Farm.Slicer.ProfileParsing.Tests.csproj|false|$DEFAULT_TEST_FILTER"
-  "Farm.Web.IntegrationTests|tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj|true|$DEFAULT_TEST_FILTER"
-)
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly TEST_MANIFEST="${TEST_MANIFEST_PATH:-$SCRIPT_DIR/dotnet-test-manifest.json}"
+
+if [[ ! -r "$TEST_MANIFEST" ]]; then
+  printf 'select-dotnet-tests: manifest not readable at %s\n' "$TEST_MANIFEST" >&2
+  exit 3
+fi
+
+# Prefer python3 (what ci.yml's TRX-parsing steps already require on
+# ubuntu-latest runners); fall back to `python` for local dev shells. A plain
+# `command -v python3` is not sufficient: on Windows, `python3` can resolve to
+# a Microsoft Store execution-alias stub that exists on PATH but exits
+# non-zero with no real interpreter behind it, so each candidate is probed
+# with `--version` before being accepted.
+PYTHON_BIN=""
+for candidate in python3 python; do
+  candidate_path="$(command -v "$candidate" 2>/dev/null || true)"
+  if [[ -n "$candidate_path" ]] && "$candidate_path" --version >/dev/null 2>&1; then
+    PYTHON_BIN="$candidate_path"
+    break
+  fi
+done
+if [[ -z "$PYTHON_BIN" ]]; then
+  printf 'select-dotnet-tests: no working python3/python interpreter found to read manifest\n' >&2
+  exit 3
+fi
+
+# Read the manifest via a plain command substitution (not a `< <(...)`
+# process substitution): bash propagates the exit status of a `var="$(cmd)"`
+# assignment to `$?`, which lets us fail closed below if the interpreter
+# crashes partway through (e.g. a malformed entry raises a KeyError after
+# already printing a few valid lines). A process-substitution pipeline does
+# not expose that exit status at all, so a partial crash would silently
+# produce a partial ALL_TEST_PROJECTS array instead of failing closed.
+manifest_output="$("$PYTHON_BIN" - "$TEST_MANIFEST" <<'PYEOF'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    data = json.load(f)
+
+for entry in data["testProjects"]:
+    name = entry["name"]
+    project = entry["testProject"]
+    run_integration = "true" if entry.get("runIntegration") else "false"
+    test_filter = entry.get("defaultFilter") or ""
+    print(f"{name}|{project}|{run_integration}|{test_filter}")
+PYEOF
+)"
+manifest_reader_rc=$?
+if [[ $manifest_reader_rc -ne 0 ]]; then
+  printf 'select-dotnet-tests: manifest reader failed (rc=%d) for %s -- treating as fail-closed\n' \
+    "$manifest_reader_rc" "$TEST_MANIFEST" >&2
+  exit 3
+fi
+
+ALL_TEST_PROJECTS=()
+while IFS= read -r manifest_line; do
+  # Strip a trailing CR: some local Windows Python interpreters translate
+  # stdout newlines to CRLF even when the script only ever prints "\n".
+  # `command -v python3` may legitimately return one of these on a dev
+  # machine, so tolerate CRLF here rather than assuming LF-only output.
+  manifest_line="${manifest_line%$'\r'}"
+  [[ -z "$manifest_line" ]] && continue
+  ALL_TEST_PROJECTS+=("$manifest_line")
+done <<< "$manifest_output"
+if [[ ${#ALL_TEST_PROJECTS[@]} -eq 0 ]]; then
+  printf 'select-dotnet-tests: manifest at %s produced zero test projects\n' "$TEST_MANIFEST" >&2
+  exit 3
+fi
+readonly ALL_TEST_PROJECTS
 
 # All migration context/provider pairs (matches the ci.yml legacy drift block).
 readonly ALL_MIG_ENTRIES=(
@@ -241,12 +321,19 @@ load_changed_files() {
 #   orca_worker     — src/orcaslicer-worker/**
 #   discovery       — src/discovery/**, src/printer-discovery/**
 #   settings        — src/settings/**
+#   modules         — src/modules/** (Farm.Modules.Abstractions — the
+#                     IApiModule host-seam contract, issue #2035. Foundational
+#                     like discovery/settings: Farm.Web.Api references it
+#                     directly and every future Farm.Modules.* vertical slice
+#                     will too, so treat any change as full-safe rather than
+#                     attempting to enumerate dependents.
 #   migrations_app  — src/migrations/Farm.Migrations.*/**
 #   migrations_slcr — src/migrations/Farm.Slicer.Migrations.*/**
 #   tests_api       — src/tests/Farm.Web.Api.Tests/**
 #   tests_slicer    — src/tests/Farm.Slicer.Module.Tests/**
 #   tests_orca      — src/tests/Farm.OrcaSlicer.Worker.Tests/**
 #   tests_integration — src/tests/Farm.Web.IntegrationTests/**
+#   tests_modules   — src/tests/Farm.Modules.Abstractions.Tests/**
 #   tests_other     — any other src/tests/**
 #   tools           — src/tools/**
 #   dotnet_config   — src/*.props, src/*.targets, src/.editorconfig
@@ -324,12 +411,14 @@ classify_path() {
     src/discovery/*)         printf 'discovery' ; return ;;
     src/printer-discovery/*) printf 'discovery' ; return ;;
     src/settings/*)          printf 'settings' ; return ;;
+    src/modules/*)           printf 'modules' ; return ;;
     src/migrations/Farm.Migrations.*)         printf 'migrations_app' ; return ;;
     src/migrations/Farm.Slicer.Migrations.*)  printf 'migrations_slcr' ; return ;;
     src/tests/Farm.Web.Api.Tests/*)             printf 'tests_api' ; return ;;
     src/tests/Farm.Slicer.Module.Tests/*)       printf 'tests_slicer' ; return ;;
     src/tests/Farm.OrcaSlicer.Worker.Tests/*)   printf 'tests_orca' ; return ;;
     src/tests/Farm.Web.IntegrationTests/*)      printf 'tests_integration' ; return ;;
+    src/tests/Farm.Modules.Abstractions.Tests/*) printf 'tests_modules' ; return ;;
     src/tests/*)             printf 'tests_other' ; return ;;
     src/tools/*)             printf 'tools' ; return ;;
   esac
@@ -514,10 +603,10 @@ main() {
   # Bucket flags.
   local has_shared_config=0 has_ci_selector=0 has_frontend=0
   local has_api=0 has_infra=0 has_backend=0 has_backend_core=0 has_slicer=0
-  local has_orca=0 has_discovery=0 has_settings=0
+  local has_orca=0 has_discovery=0 has_settings=0 has_modules=0
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
-  local has_tests_integration=0 has_tests_other=0
+  local has_tests_integration=0 has_tests_modules=0 has_tests_other=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
 
   local p category
@@ -535,12 +624,14 @@ main() {
       orca_worker)     has_orca=1 ;;
       discovery)       has_discovery=1 ;;
       settings)        has_settings=1 ;;
+      modules)         has_modules=1 ;;
       migrations_app)  has_mig_app=1 ;;
       migrations_slcr) has_mig_slcr=1 ;;
       tests_api)       has_tests_api=1 ;;
       tests_slicer)    has_tests_slicer=1 ;;
       tests_orca)      has_tests_orca=1 ;;
       tests_integration) has_tests_integration=1 ;;
+      tests_modules)   has_tests_modules=1 ;;
       tests_other)     has_tests_other=1 ;;
       tools)           has_tools=1 ;;
       unknown_src)     has_unknown_src=1 ;;
@@ -571,9 +662,21 @@ main() {
   if (( has_settings )); then
     emit_full_safe "full-safe: settings abstractions changed"
   fi
+  # Farm.Modules.Abstractions is the IApiModule host-seam contract (issue
+  # #2035) — foundational like discovery/settings, so treat any change as
+  # full-safe rather than attempting to enumerate dependents.
+  if (( has_modules )); then
+    emit_full_safe "full-safe: module host seam (Farm.Modules.Abstractions) changed"
+  fi
   # tests_other = a future unmapped test project. Do not silently ignore.
   if (( has_tests_other )); then
     emit_full_safe "full-safe: unmapped test project changed"
+  fi
+  # tests_modules: Farm.Modules.Abstractions.Tests is not yet wired into a
+  # narrower path-selection bucket (mirrors Farm.Slicer.ProfileParsing.Tests
+  # and Farm.Moonraker.Emulator.Tests above) — full-safe until it is.
+  if (( has_tests_modules )); then
+    emit_full_safe "full-safe: Farm.Modules.Abstractions.Tests changed"
   fi
 
   # From here, we're in scoped-selection territory.

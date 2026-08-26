@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.RateLimiting;
+using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Web.Api.Services.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -136,6 +137,18 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
             services.AddSingleton(appOptionsBuilder.Options);
             services.AddDbContextFactory<AppDbContext>(_ => { }, ServiceLifetime.Scoped);
+
+            // Replace the real Assimp/OrcaPreviewRenderer-based thumbnail generator with a
+            // fast fake: the real renderer's cost scales with mesh complexity (a single
+            // large-mesh upload alone measured well over a minute), and every test that
+            // uploads a model without a client-supplied thumbnail exercises it.
+            ServiceDescriptor? thumbnailDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IThumbnailGenerationService));
+            if (thumbnailDescriptor != null)
+            {
+                services.Remove(thumbnailDescriptor);
+            }
+
+            services.AddSingleton<IThumbnailGenerationService, FakeThumbnailGenerationService>();
 
             // Create AppDbContext tables in the shared DB
             ServiceProvider sp2 = services.BuildServiceProvider();

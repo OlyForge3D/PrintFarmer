@@ -23,7 +23,6 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// submitting user's own) and snapshots native profile JSON onto the job, routing it onto the
 /// same robust <c>NativeProfiles</c> worker path already used by ID-based submissions.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime
 {
     private const string MachineProfileJson = """{"type":"machine","printer_model":"Test","nozzle_diameter":["0.4"]}""";

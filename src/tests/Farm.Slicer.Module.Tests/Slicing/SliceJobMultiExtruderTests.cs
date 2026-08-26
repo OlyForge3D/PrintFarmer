@@ -9,7 +9,6 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// Validates that <c>ExtruderFilamentProfileNames</c> flows through the HTTP API,
 /// gets embedded into <c>SlicerProfileJson</c>, and is persisted on the entity.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public class SliceJobMultiExtruderTests(ITestOutputHelper output) : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory = new();

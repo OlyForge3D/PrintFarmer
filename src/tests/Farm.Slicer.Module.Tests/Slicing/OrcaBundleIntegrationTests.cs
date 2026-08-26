@@ -16,7 +16,6 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// Integration tests for OrcaSlicer bundle import/export round-trip functionality.
 /// Tests the complete workflow: preview → import → export → verify.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public class OrcaBundleIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;

@@ -15,7 +15,6 @@ namespace Farm.Slicer.Module.Tests.SlicerServices;
 /// Integration tests for slicer worker registration with the central registry
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
 public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory = new CustomWebApplicationFactory();

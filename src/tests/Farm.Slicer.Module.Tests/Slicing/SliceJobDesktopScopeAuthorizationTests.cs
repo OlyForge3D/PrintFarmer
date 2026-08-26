@@ -27,7 +27,6 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// login/session tokens (proven by every other test in
 /// <see cref="SliceJobCanonicalSubmissionTests"/>, which authenticate as a worker) are unaffected.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public sealed class SliceJobDesktopScopeAuthorizationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory = new();

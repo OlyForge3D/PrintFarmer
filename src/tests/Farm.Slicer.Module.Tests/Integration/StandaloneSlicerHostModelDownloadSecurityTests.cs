@@ -21,7 +21,6 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// <summary>
 /// Verifies model-byte security through the standalone slicer-host pipeline used by split deployments.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
 public class StandaloneSlicerHostModelDownloadSecurityTests(
     StandaloneSlicerHostApplicationFactory factory)
     : IClassFixture<StandaloneSlicerHostApplicationFactory>

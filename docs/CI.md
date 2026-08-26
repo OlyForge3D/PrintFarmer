@@ -310,12 +310,69 @@ given tree.
 
 ## Extending
 
-- **New test project**: add a row to `ALL_TEST_PROJECTS` and (as needed) the
-  classification map in `select-dotnet-tests.sh`, then add a matching test case
-  in the selector suite. Add it to `farm-web.sln` when appropriate, but CI also
-  supports required projects that intentionally live outside the solution.
+- **New test project**: add an entry to the checked manifest
+  `scripts/ci/dotnet-test-manifest.json` (`name`, `productionProject`,
+  `testProject`, `pathPrefixes`, `dependsOnProjects`, `defaultFilter`,
+  `shards`, `requiresProviders`, `runIntegration`, `leg`) and (as needed)
+  the classification map in `select-dotnet-tests.sh`, then add a matching
+  test case in the selector suite. Add it to `farm-web.sln` when
+  appropriate, but CI also supports required projects that intentionally
+  live outside the solution. Run
+  `bash scripts/ci/tests/test-dotnet-test-manifest.sh` to confirm the
+  manifest still registers every `*.Tests.csproj` on disk exactly once (and,
+  for `Farm.Web.Api.Tests`, that its `shards` remain exhaustive, mutually
+  exclusive, and non-empty) before opening a PR — the same check also runs
+  in the `ci-tools` job.
 - **New bucket**: extend `classify_path()` and add a case in the selector suite.
 - **New full-safe trigger**: extend the trigger switch in `main()` of the
   selector and add a case.
 - **Docker/external-service opt-in**: consider a separate workflow triggered
   by `workflow_dispatch` rather than expanding this one.
+
+### Test-project manifest
+
+`scripts/ci/select-dotnet-tests.sh` loads its `ALL_TEST_PROJECTS` list from
+`scripts/ci/dotnet-test-manifest.json` at startup (via a `python3`/`python`
+loader; override the path with `TEST_MANIFEST_PATH` for testing) instead of a
+hardcoded array, so there is exactly one checked source of truth per test
+project. The manifest is fail-closed: a missing file, invalid JSON, or an
+empty `testProjects` list all exit non-zero (rc=3) rather than silently
+producing an empty test matrix.
+
+Per-entry fields:
+
+| Field | Meaning |
+| --- | --- |
+| `name` | Matrix leg/test-project identifier, matched by literal string in `classify_path()`/`main()`. |
+| `productionProject` | The `.csproj` under `src/` whose changes this test project primarily covers. Documentation only. |
+| `testProject` | Path to the test `.csproj`, relative to `src/`. Consumed by the selector and the CI matrix. |
+| `pathPrefixes` | Repo paths whose changes should select this project. Documents the existing `classify_path()` bucket mapping; not re-interpreted at runtime — see the bucket table above for the authoritative mapping. |
+| `dependsOnProjects` | Additional production paths this test project's coverage depends on (declarative documentation, validated by eye, not enforced). |
+| `defaultFilter` | The `dotnet test --filter` expression used by the ordinary PR gate. |
+| `shards` | Optional `{name, namespacePrefixes, filter}` partitions of a large test project's namespaces, for a possible future parallel-shard matrix. Declared and validated (exhaustive, mutually exclusive, non-empty) but **not** wired into `ci.yml` execution today — adding shard-level matrix legs would multiply required checks, which is out of scope; `CI summary` continues to be the only aggregate required check. |
+| `requiresProviders` | Non-empty only for projects with `DbHeavy`/`Docker`-tagged tests exercised by the separate `dotnet-test-providers` job (e.g. `["postgres", "sqlserver"]`). |
+| `runIntegration` | `true` only for `Farm.Web.IntegrationTests`; passed through as `-p:RunIntegrationTests=true`. |
+| `leg` | CI matrix leg the project's tests execute in. Several test projects (or shards of the same project) may share one `leg` without adding a new required check — this decouples test-assembly count from CI-leg count. |
+
+`Farm.Moonraker.Emulator.Tests` and `Farm.Slicer.ProfileParsing.Tests` are
+registered in the manifest (see #2022) but have no dedicated bucket in
+`classify_path()` — a change to either project's own directory only
+currently reaches them via the `tests_other` full-safe fallback, and a
+change to their production dependencies does not scope-select them. This is
+intentionally unchanged by the manifest; giving them a dedicated bucket is a
+possible future improvement, not part of this file's job.
+
+Validate the manifest itself with:
+
+```bash
+bash scripts/ci/tests/test-dotnet-test-manifest.sh
+```
+
+The validator's own logic (duplicate-`testProject`-path detection, full
+schema enforcement, fail-closed behavior on a crashed reader) has its own
+regression suite, run against mutated copies of the real manifest:
+
+```bash
+bash scripts/ci/tests/test-dotnet-test-manifest-checks.sh
+```
+

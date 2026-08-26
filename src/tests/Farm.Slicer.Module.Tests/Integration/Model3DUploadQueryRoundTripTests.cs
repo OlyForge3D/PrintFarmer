@@ -31,7 +31,6 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// </summary>
 [Trait("Category", "Integration")]
 [Trait("Category", "Regression")]
-[Collection(IntegrationTestCollection.Name)]
 public class Model3DUploadQueryRoundTripTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
