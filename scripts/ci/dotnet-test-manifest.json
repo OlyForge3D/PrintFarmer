@@ -215,6 +215,26 @@
       "notes": "New in issue #2041 (Phase 13: Auth, users, API keys, quotas, roles, permissions, security audit, and password policy -- the 9 auth/admin controllers plus PermissionCatalogService/RolePermissionService/TokenRevocationCleanupService -- moved out of Farm.Web.Api into Farm.Modules.Identity, depending on Farm.Modules.Abstractions' IApiModule seam from #2035). Follows the Farm.Modules.Calibration.Tests pattern above: its own narrow select-dotnet-tests.sh buckets (identity/tests_identity) rather than full-safe. The 4 reflection-based architecture tests (AuthorizeRolesGateArchitectureTests, AnonymousEndpointArchitectureTests, NoClientsAllArchitectureTests, OpenApiAuthorizationTests), RouteTableSnapshotTests, and the genuine CustomWebApplicationFactory integration tests that exercise the assembled host (AuthenticationServiceIntegrationTests, AuthAuditServiceIntegrationTests, plus the Farm.Infrastructure-resident auth service unit tests under Services/Authentication/) all stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's identity bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module)."
     },
     {
+      "name": "Farm.Modules.Administration.Tests",
+      "testProject": "tests/Farm.Modules.Administration.Tests/Farm.Modules.Administration.Tests.csproj",
+      "productionProject": "modules/Farm.Modules.Administration/Farm.Modules.Administration.csproj",
+      "pathPrefixes": ["src/tests/Farm.Modules.Administration.Tests/"],
+      "dependsOnProjects": [
+        "src/modules/Farm.Modules.Administration/",
+        "src/modules/Farm.Modules.Abstractions/",
+        "src/settings/Farm.Settings.Abstractions/",
+        "src/infra/",
+        "src/api/",
+        "src/tests/Farm.Web.Api.Tests/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Modules.Administration.Tests",
+      "notes": "New in issue #2042 (Phase 14: the Admin Control Center overview aggregation, admin data export/import, Home Assistant, and Telegram admin controllers, plus the settings and unified-settings controllers -- AdminOverviewService, AdminDataController, AdminHomeAssistantController, AdminTelegramController, AdminOverviewController, SettingsController, UnifiedSettingsController, and DiscoveryHeartbeatMonitorService (moved alongside UnifiedSettingsController, its only consumer, to avoid a circular Farm.Web.Api -> Farm.Modules.Administration -> Farm.Web.Api dependency, mirroring how Phase 13 moved TokenRevocationCleanupService) -- moved out of Farm.Web.Api into Farm.Modules.Administration, depending on Farm.Infrastructure and Farm.Settings.Abstractions). Follows the Farm.Modules.Identity.Tests pattern above: its own narrow select-dotnet-tests.sh buckets (administration/tests_administration) rather than full-safe. AdminDataControllerTests, UnifiedSettingsPerKeyPostTests, and UnifiedSettingsAnonymousAccessTests are full-host CustomWebApplicationFactory integration tests that stay dependent on Farm.Web.Api.Tests's internal configOverrides constructor (see AssemblyInfo.ModuleTestsVisible.cs), so select-dotnet-tests.sh's administration bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module)."
+    },
+    {
       "name": "Farm.Web.IntegrationTests",
       "testProject": "tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj",
       "productionProject": "api/Farm.Web.Api.csproj",

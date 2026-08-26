@@ -212,7 +212,8 @@ builder.Services.AddApiModules(
     typeof(Farm.Modules.PrintQueue.PrintQueueApiModule).Assembly,
     typeof(Farm.Modules.Maintenance.MaintenanceApiModule).Assembly,
     typeof(Farm.Modules.Calibration.CalibrationApiModule).Assembly,
-    typeof(Farm.Modules.Identity.IdentityApiModule).Assembly);
+    typeof(Farm.Modules.Identity.IdentityApiModule).Assembly,
+    typeof(Farm.Modules.Administration.AdministrationApiModule).Assembly);
 
 if (slicerModuleEnabled)
 {

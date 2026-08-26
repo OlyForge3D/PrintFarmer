@@ -1,5 +1,8 @@
 ﻿using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Settings;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Workers;
 

@@ -454,6 +454,7 @@ public static class ServiceCollectionExtensions
         // live tokens" (#1454) -- used by both the role-permissions-changed path (#1471) and
         // the role-assignment-changed path so there is exactly one revocation code path.
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IEffectivePermissionsRevocationService, Farm.Infrastructure.Services.Authentication.EffectivePermissionsRevocationService>();
+
         // TokenRevocationCleanupService hosted service moved to Farm.Modules.Identity's
         // IApiModule registration (issue #2041).
         _ = services.AddScoped<Farm.Infrastructure.Services.Users.IUsersService, Farm.Infrastructure.Services.Users.UsersService>();
@@ -851,9 +852,8 @@ public static class ServiceCollectionExtensions
             // System log cleanup (common service, not plugin-specific)
             _ = services.AddHostedService<Farm.Infrastructure.Services.SystemLogs.SystemLogCleanupService>();
 
-            // Discovery heartbeat monitor - tracks external discovery microservice status
-            _ = services.AddSingleton<Farm.Web.Api.Services.Workers.DiscoveryHeartbeatMonitorService>();
-            _ = services.AddHostedService(sp => sp.GetRequiredService<Farm.Web.Api.Services.Workers.DiscoveryHeartbeatMonitorService>());
+            // Discovery heartbeat monitor moved to Farm.Modules.Administration's IApiModule
+            // registration (issue #2042).
 
             // Auto-dispatch background service (event-driven, reacts to printer-idle triggers)
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchBackgroundService>();
