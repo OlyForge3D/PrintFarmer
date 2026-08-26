@@ -308,7 +308,14 @@ load_changed_files() {
 #   docs            — docs/**, *.md, LICENSE, .editorconfig outside src/
 #   frontend        — src/Web/**
 #   api             — src/api/**
-#   infra           — src/infra/** (conservatively includes App model drift)
+#   infra           — src/infra/** (conservatively includes App model drift).
+#                     Selects Farm.Infrastructure.Tests (issue #2033) directly;
+#                     deliberately does NOT select Farm.Web.Api.Tests /
+#                     Farm.Web.IntegrationTests any more -- those legs build
+#                     Farm.Web.Api themselves, and the separate full-solution
+#                     dotnet-build job (want_dotnet_build=true here) already
+#                     gives infra-only changes compile coverage against
+#                     Farm.Web.Api without paying for its test suite.
 #   backend_core    — src/backends/Farm.Backend.Plugin.Core/**
 #                     (referenced by Farm.Slicer.Module in addition to the
 #                     concrete plugins, so both test projects are affected).
@@ -338,6 +345,10 @@ load_changed_files() {
 #   migrations_app  — src/migrations/Farm.Migrations.*/**
 #   migrations_slcr — src/migrations/Farm.Slicer.Migrations.*/**
 #   tests_api       — src/tests/Farm.Web.Api.Tests/**
+#   tests_infra     — src/tests/Farm.Infrastructure.Tests/** (issue #2033:
+#                     Farm.Infrastructure.Tests's own test-file changes get
+#                     a narrow bucket, mirroring tests_api, rather than
+#                     falling into tests_other/full-safe.)
 #   tests_slicer    — src/tests/Farm.Slicer.Module.Tests/**
 #   tests_orca      — src/tests/Farm.OrcaSlicer.Worker.Tests/**
 #   tests_integration — src/tests/Farm.Web.IntegrationTests/**
@@ -438,6 +449,7 @@ classify_path() {
     src/migrations/Farm.Migrations.*)         printf 'migrations_app' ; return ;;
     src/migrations/Farm.Slicer.Migrations.*)  printf 'migrations_slcr' ; return ;;
     src/tests/Farm.Web.Api.Tests/*)             printf 'tests_api' ; return ;;
+    src/tests/Farm.Infrastructure.Tests/*)      printf 'tests_infra' ; return ;;
     src/tests/Farm.Slicer.Module.Tests/*)       printf 'tests_slicer' ; return ;;
     src/tests/Farm.OrcaSlicer.Worker.Tests/*)   printf 'tests_orca' ; return ;;
     src/tests/Farm.Web.IntegrationTests/*)      printf 'tests_integration' ; return ;;
@@ -631,7 +643,7 @@ main() {
   local has_orca=0 has_discovery=0 has_settings=0 has_modules=0 has_smartplug=0
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
-  local has_tests_integration=0 has_tests_modules=0 has_tests_shared=0 has_tests_smartplug=0 has_tests_other=0
+  local has_tests_integration=0 has_tests_modules=0 has_tests_shared=0 has_tests_smartplug=0 has_tests_infra=0 has_tests_other=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
 
   local p category
@@ -654,6 +666,7 @@ main() {
       migrations_app)  has_mig_app=1 ;;
       migrations_slcr) has_mig_slcr=1 ;;
       tests_api)       has_tests_api=1 ;;
+      tests_infra)     has_tests_infra=1 ;;
       tests_slicer)    has_tests_slicer=1 ;;
       tests_orca)      has_tests_orca=1 ;;
       tests_integration) has_tests_integration=1 ;;
@@ -730,44 +743,57 @@ main() {
         has_orca || has_smartplug ||
         has_mig_app || has_mig_slcr ||
         has_tests_api || has_tests_slicer || has_tests_orca ||
-        has_tests_integration || has_tests_smartplug || has_tools )); then
+        has_tests_integration || has_tests_smartplug || has_tests_infra || has_tools )); then
     want_dotnet_build="true"
   fi
 
   # tools alone → build only, no tests.
   local net_test_bucket_hit=0
-  if (( has_api || has_infra )); then
-    # api / infra sit under both tests. Both are affected.
+  if (( has_api )); then
+    # api sits under Farm.Web.Api.Tests directly; Slicer.Module.Tests and
+    # IntegrationTests are run conservatively alongside it.
     test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.Web.IntegrationTests")
     net_test_bucket_hit=1
   fi
   if (( has_infra )); then
-    # Farm.OrcaSlicer.Worker.Tests references infra through the worker graph.
-    # Farm.Modules.SmartPlug (issue #2036) also references Farm.Infrastructure
-    # directly, so an infra change must re-run its test project too.
-    test_names+=("Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests")
+    # Farm.Infrastructure.Tests (issue #2033) references Farm.Infrastructure
+    # directly and now owns the cohort-C domain/data/service tests formerly
+    # only reachable via Farm.Web.Api.Tests, so a src/infra/**-only change
+    # selects it directly instead of Farm.Web.Api.Tests/IntegrationTests.
+    # Those two are deliberately NOT re-added here: the want_dotnet_build=true
+    # full-solution build above already re-compiles Farm.Web.Api against any
+    # infra change, so an infra-only PR gets compile coverage without paying
+    # for the web-host test suite. Farm.Slicer.Module.Tests IS kept, though --
+    # Farm.Slicer.Module.csproj itself has a ProjectReference straight to
+    # Farm.Infrastructure.csproj (independent of Farm.Web.Api), so an infra
+    # change can break it too. Farm.OrcaSlicer.Worker.Tests and
+    # Farm.Modules.SmartPlug.Tests reference Farm.Infrastructure directly too.
+    test_names+=("Farm.Infrastructure.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_backend )); then
     # Concrete backend plugins (Moonraker/PrusaLink/OctoPrint/Sdcp/FlashForge/
-    # TestEmulator) are referenced by Farm.Web.Api. IntegrationTests targets the
+    # TestEmulator) are referenced by Farm.Web.Api AND directly by
+    # Farm.Infrastructure.Tests (issue #2033). IntegrationTests targets the
     # assembled API, so run it alongside Api.Tests; they are NOT referenced by
     # Farm.Slicer.Module or Farm.Slicer.Module.Tests.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Web.IntegrationTests")
+    test_names+=("Farm.Web.Api.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_backend_core )); then
     # Farm.Backend.Plugin.Core is referenced directly by Farm.Web.Api.Tests
     # AND transitively by Farm.Slicer.Module.Tests through Farm.Slicer.Module
     # (src/slicer/Farm.Slicer.Module/Farm.Slicer.Module.csproj declares
-    # ../../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj).
-    # A Core edit must therefore run both test suites.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests")
+    # ../../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj),
+    # AND directly by Farm.Infrastructure.Tests (issue #2033). A Core edit
+    # must therefore run all affected test suites.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_slicer )); then
-    # slicer projects are referenced by both test suites.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests")
+    # slicer projects are referenced by both test suites, and directly by
+    # Farm.Infrastructure.Tests (issue #2033) through Farm.Slicer.Module.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_orca )); then
@@ -787,16 +813,19 @@ main() {
   fi
   if (( has_mig_app )); then
     # Api.Tests and IntegrationTests cover the assembled API graph that includes
-    # the App migration projects.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Web.IntegrationTests")
+    # the App migration projects; Farm.Infrastructure.Tests (issue #2033)
+    # references Farm.Migrations.Sqlite/PostgreSQL/SqlServer directly.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests")
     mig_names+=("AppPg" "AppSqlServer")
     want_mig_drift="true"
     net_test_bucket_hit=1
   fi
   if (( has_mig_slcr )); then
     # Farm.Web.Api references slicer migrations directly, IntegrationTests
-    # targets the assembled API, and Slicer.Module.Tests covers the slicer graph.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.Web.IntegrationTests")
+    # targets the assembled API, Slicer.Module.Tests covers the slicer graph,
+    # and Farm.Infrastructure.Tests (issue #2033) references
+    # Farm.Slicer.Migrations.Sqlite/PostgreSQL/SqlServer directly.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests")
     mig_names+=("SlicerPg" "SlicerSqlServer")
     want_mig_drift="true"
     net_test_bucket_hit=1
@@ -822,6 +851,10 @@ main() {
   # in the future — for now we still build to keep --no-build safe.
   if (( has_tests_api )); then
     test_names+=("Farm.Web.Api.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_tests_infra )); then
+    test_names+=("Farm.Infrastructure.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_tests_slicer )); then
@@ -857,6 +890,7 @@ main() {
   if (( has_mig_app )); then reason+="mig-app "; fi
   if (( has_mig_slcr )); then reason+="mig-slicer "; fi
   if (( has_tests_api )); then reason+="tests-api "; fi
+  if (( has_tests_infra )); then reason+="tests-infra "; fi
   if (( has_tests_slicer )); then reason+="tests-slicer "; fi
   if (( has_tests_orca )); then reason+="tests-orca "; fi
   if (( has_tests_integration )); then reason+="tests-integration "; fi

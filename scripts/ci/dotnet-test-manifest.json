@@ -142,6 +142,62 @@
       "notes": "New in issue #2036 (Phase 8: the SmartPlug/PowerMonitor pilot vertical-slice module moved out of Farm.Web.Api into Farm.Modules.SmartPlug, depending on Farm.Modules.Abstractions' IApiModule seam from #2035). Unlike Farm.Modules.Abstractions.Tests above, this project gets its own narrow select-dotnet-tests.sh buckets (smartplug/tests_smartplug) rather than full-safe, since it is a concrete leaf module with a single dependent test project -- the pattern later Farm.Modules.* phases (9-18) should copy. The retained CustomWebApplicationFactory-based integration test for /api/admin/power-monitors (AdminPowerMonitorsControllerTests) and RouteTableSnapshotTests both stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's smartplug bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module)."
     },
     {
+      "name": "Farm.Infrastructure.Tests",
+      "testProject": "tests/Farm.Infrastructure.Tests/Farm.Infrastructure.Tests.csproj",
+      "productionProject": "infra/Farm.Infrastructure.csproj",
+      "pathPrefixes": ["src/tests/Farm.Infrastructure.Tests/"],
+      "dependsOnProjects": [
+        "src/infra/",
+        "src/backends/",
+        "src/slicer/Farm.Slicer.Module/",
+        "src/slicer/Farm.Slicer.Module.Api/",
+        "src/migrations/Farm.Migrations.Sqlite/",
+        "src/migrations/Farm.Migrations.PostgreSQL/",
+        "src/migrations/Farm.Migrations.SqlServer/",
+        "src/migrations/Farm.Slicer.Migrations.Sqlite/",
+        "src/migrations/Farm.Slicer.Migrations.PostgreSQL/",
+        "src/migrations/Farm.Slicer.Migrations.SqlServer/",
+        "src/tests/Farm.Testing.Shared/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [
+        {
+          "name": "notifications",
+          "namespacePrefixes": ["Services/Notifications", "Services/Attention", "Services/ShiftPlan"],
+          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Services.Notifications|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Attention|FullyQualifiedName~Farm.Infrastructure.Tests.Services.ShiftPlan"
+        },
+        {
+          "name": "dispatch",
+          "namespacePrefixes": ["Dispatch", "Services/AutoDispatch", "Services/Queue", "Services/FailureDetection"],
+          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Dispatch|FullyQualifiedName~Farm.Infrastructure.Tests.Services.AutoDispatch|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Queue|FullyQualifiedName~Farm.Infrastructure.Tests.Services.FailureDetection"
+        },
+        {
+          "name": "printers",
+          "namespacePrefixes": ["Services/Printers", "Services/Cameras", "Locations", "Discovery"],
+          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Services.Printers|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Cameras|FullyQualifiedName~Farm.Infrastructure.Tests.Locations|FullyQualifiedName~Farm.Infrastructure.Tests.Discovery"
+        },
+        {
+          "name": "slicing",
+          "namespacePrefixes": ["Infrastructure", "Builders", "Services/Sync"],
+          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Infrastructure|FullyQualifiedName~Farm.Infrastructure.Tests.Builders|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Sync"
+        },
+        {
+          "name": "filament",
+          "namespacePrefixes": ["Services/Cost", "Data"],
+          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Services.Cost|FullyQualifiedName~Farm.Infrastructure.Tests.Data"
+        },
+        {
+          "name": "admin",
+          "namespacePrefixes": ["Repositories", "DataManagement", "Domain", "Logging", "Migrations", "Network", "Dtos", "Services/Idempotency", "Services/RateLimiting", "Services/Statistics"],
+          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Repositories|FullyQualifiedName~Farm.Infrastructure.Tests.DataManagement|FullyQualifiedName~Farm.Infrastructure.Tests.Domain|FullyQualifiedName~Farm.Infrastructure.Tests.Logging|FullyQualifiedName~Farm.Infrastructure.Tests.Migrations|FullyQualifiedName~Farm.Infrastructure.Tests.Network|FullyQualifiedName~Farm.Infrastructure.Tests.Dtos|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Idempotency|FullyQualifiedName~Farm.Infrastructure.Tests.Services.RateLimiting|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Statistics"
+        }
+      ],
+      "requiresProviders": ["postgres", "sqlserver"],
+      "runIntegration": false,
+      "leg": "Farm.Infrastructure.Tests",
+      "notes": "New in issue #2033 (Phase 5: cohort C moved out of Farm.Web.Api.Tests). shards[] here are a runtime partition for parallel wall-clock only (proven exhaustive/mutually-exclusive/non-empty across the 26 moved namespace groups), NOT a compile-time blast-radius split -- the whole project still builds and restores as one unit per CI leg. select-dotnet-tests.sh's has_infra/has_backend/has_backend_core/has_slicer/has_mig_app/has_mig_slcr buckets all select this project (see comments there) since Farm.Infrastructure.Tests.csproj references Farm.Infrastructure, every backend plugin, Farm.Slicer.Module(.Api), and every migration project directly. has_infra intentionally no longer also selects Farm.Web.Api.Tests/Farm.Web.IntegrationTests -- see select-dotnet-tests.sh for why the full-solution dotnet-build job still provides compile coverage for that combination."
+    },
+    {
       "name": "Farm.Web.IntegrationTests",
       "testProject": "tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj",
       "productionProject": "api/Farm.Web.Api.csproj",

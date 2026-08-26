@@ -93,15 +93,16 @@ classify.
 | --- | :---: | :---: | --- | --- | :---: |
 | `frontend`: `src/Web/**` | ✓ | | | | |
 | `api`: `src/api/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests` | `AppPg`, `AppSqlServer` | |
-| `infra`: `src/infra/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.SmartPlug.Tests` | `AppPg`, `AppSqlServer` | |
-| `backend_core`: `src/backends/Farm.Backend.Plugin.Core/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests` | | |
-| `backend_plugin`: every other `src/backends/**` path (concrete plugin projects) | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests` | | |
-| `slicer`: `src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests` | `SlicerPg`, `SlicerSqlServer` | |
+| `infra`: `src/infra/**` | | ✓ | `Farm.Infrastructure.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Modules.SmartPlug.Tests` | `AppPg`, `AppSqlServer` | |
+| `backend_core`: `src/backends/Farm.Backend.Plugin.Core/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests` | | |
+| `backend_plugin`: every other `src/backends/**` path (concrete plugin projects) | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests` | | |
+| `slicer`: `src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests` | `SlicerPg`, `SlicerSqlServer` | |
 | `orca_worker`: `src/orcaslicer-worker/**` | | ✓ | `Farm.OrcaSlicer.Worker.Tests` | | |
 | `smartplug`: `src/modules/Farm.Modules.SmartPlug/**` | | ✓ | `Farm.Modules.SmartPlug.Tests`, `Farm.Web.Api.Tests` | | |
-| `migrations_app`: `src/migrations/Farm.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests` | `AppPg`, `AppSqlServer` | |
-| `migrations_slcr`: `src/migrations/Farm.Slicer.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests` | `SlicerPg`, `SlicerSqlServer` | |
+| `migrations_app`: `src/migrations/Farm.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests` | `AppPg`, `AppSqlServer` | |
+| `migrations_slcr`: `src/migrations/Farm.Slicer.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests` | `SlicerPg`, `SlicerSqlServer` | |
 | `tests_api`: `src/tests/Farm.Web.Api.Tests/**` | | ✓ | `Farm.Web.Api.Tests` | | |
+| `tests_infra`: `src/tests/Farm.Infrastructure.Tests/**` | | ✓ | `Farm.Infrastructure.Tests` | | |
 | `tests_slicer`: `src/tests/Farm.Slicer.Module.Tests/**` | | ✓ | `Farm.Slicer.Module.Tests` | | |
 | `tests_orca`: `src/tests/Farm.OrcaSlicer.Worker.Tests/**` | | ✓ | `Farm.OrcaSlicer.Worker.Tests` | | |
 | `tests_smartplug`: `src/tests/Farm.Modules.SmartPlug.Tests/**` | | ✓ | `Farm.Modules.SmartPlug.Tests` | | |
@@ -117,6 +118,17 @@ classify.
 | `docs`: `docs/**`, root `*.md`, `LICENSE*`, root `.editorconfig`, `.gitignore`, `.gitattributes` | | | | | |
 | `mobile`: `mobile/**` | | | | | |
 | `unclassified`: every other repository path | | | | | |
+
+**`infra` and the `Farm.Web.Api` test legs (issue #2033):** an `src/infra/**`-only
+change no longer selects the `Farm.Web.Api.Tests`/`Farm.Web.IntegrationTests` matrix
+legs. Those legs restore/build/test `Farm.Web.Api.csproj` (or its `Farm.Web.Api`
+production reference) as part of their own step, so re-running them on an
+infra-only change would pay for a full `Farm.Web.Api` build inside a test leg. The
+separate `dotnet-build` job — still forced by `want_dotnet_build=true` for `infra` —
+already compiles `Farm.Web.Api` against the change, so compile coverage is not lost;
+only the (slower) web-host test suite is skipped. `Farm.Infrastructure.Tests` itself
+has no `ProjectReference` to `Farm.Web.Api`, so selecting it satisfies "a change
+touching only `src/infra/**` selects this leg without building `Farm.Web.Api`."
 
 `ci-tools` is unconditional and therefore runs for every bucket, including
 `docs`, `mobile`, and `unclassified`. `dependency-compliance` is gated on
