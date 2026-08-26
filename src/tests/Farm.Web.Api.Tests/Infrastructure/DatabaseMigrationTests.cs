@@ -739,7 +739,8 @@ public sealed class DatabaseMigrationTests
             "20260821151953_AddSliceJobFailureReason",
             "20260822141641_AddWorkerDisableSource",
             "20260824024658_AddSliceJobCalibrationFields",
-            "20260826021050_AddCustomProfileFamilyRenderingState");
+            "20260826021050_AddCustomProfileFamilyRenderingState",
+            "20260826063137_EnforceNormalizedMachineModelProfileNames");
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 
@@ -1039,6 +1040,7 @@ public sealed class DatabaseMigrationTests
                 "20260822141629_AddWorkerDisableSource",
                 "20260824023212_AddSliceJobCalibrationFields",
                 "20260826021028_AddCustomProfileFamilyRenderingState",
+                "20260826063137_EnforceNormalizedMachineModelProfileNames",
             ]
             :
             [
@@ -1051,6 +1053,7 @@ public sealed class DatabaseMigrationTests
                 "20260822141635_AddWorkerDisableSource",
                 "20260824023226_AddSliceJobCalibrationFields",
                 "20260826021040_AddCustomProfileFamilyRenderingState",
+                "20260826063137_EnforceNormalizedMachineModelProfileNames",
             ];
         _ = slicerMigrations.Should().Equal(expectedSlicerMigrations,
             $"the {provider} slicer migration set must apply in the exact recorded order");

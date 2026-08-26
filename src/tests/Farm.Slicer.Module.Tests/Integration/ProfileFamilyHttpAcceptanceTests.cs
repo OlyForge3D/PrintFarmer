@@ -12,6 +12,7 @@ using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
+using Farm.Slicer.Module.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,8 +23,8 @@ using WorkerServices = OrcaWorker::Farm.OrcaSlicer.Worker.Services;
 
 namespace Farm.Slicer.Module.Tests.Integration;
 
-[Collection(IntegrationTestCollection.Name)]
 public sealed class ProfileFamilyHttpContractTests(CustomWebApplicationFactory factory)
+    : IClassFixture<CustomWebApplicationFactory>
 {
     [Fact]
     public async Task CloneFamily_MissingRequiredFields_ReturnsFeatureErrorEnvelope()
@@ -44,7 +45,6 @@ public sealed class ProfileFamilyHttpContractTests(CustomWebApplicationFactory f
     }
 }
 
-[Collection(IntegrationTestCollection.Name)]
 public sealed class ProfileFamilyCloneLookupAcceptanceTests
 {
     private const string SourceManufacturer = "Prusa";

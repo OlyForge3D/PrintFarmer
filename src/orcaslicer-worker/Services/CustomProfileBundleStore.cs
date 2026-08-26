@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Farm.Infrastructure.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.OrcaSlicer.Worker.Services;
@@ -76,7 +77,7 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
         ValidateConfiguration();
-        ValidateBundleName(bundleName);
+        bundleName = ValidateBundleName(bundleName);
         PreparedBundle prepared = PrepareBundle(bundleName, request);
 
         await _mutationLock.WaitAsync(ct);
@@ -139,7 +140,7 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
 
             _logger.LogInformation(
                 "Installed custom OrcaSlicer bundle {BundleName} with {FileCount} profile documents",
-                bundleName,
+                LogSanitizer.Sanitize(bundleName),
                 prepared.Files.Count);
         }
         finally
@@ -160,7 +161,7 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         CancellationToken ct = default)
     {
         ValidateConfiguration();
-        ValidateBundleName(bundleName);
+        bundleName = ValidateBundleName(bundleName);
 
         await _mutationLock.WaitAsync(ct);
         try
@@ -191,7 +192,7 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
 
             _logger.LogInformation(
                 "Removed custom OrcaSlicer bundle {BundleName}",
-                bundleName);
+                LogSanitizer.Sanitize(bundleName));
             return true;
         }
         finally
@@ -357,27 +358,40 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         }
     }
 
-    private static void ValidateBundleName(string bundleName)
+    private static string ValidateBundleName(string bundleName)
     {
-        if (string.IsNullOrWhiteSpace(bundleName)
-            || bundleName.Length > 128
-            || bundleName.All(character => character == '.')
-            || string.Equals(
-                bundleName,
-                ".printfarmer",
-                StringComparison.OrdinalIgnoreCase)
-            || bundleName.StartsWith(
-                ".install-",
-                StringComparison.OrdinalIgnoreCase)
-            || bundleName.StartsWith(
-                ".backup-",
-                StringComparison.OrdinalIgnoreCase)
-            || !BundleNameRegex().IsMatch(bundleName))
+        if (string.IsNullOrWhiteSpace(bundleName))
         {
             throw new CustomProfileBundleException(
                 "invalid_bundle_name",
                 "Bundle names may contain only letters, digits, periods, underscores, and hyphens.");
         }
+
+        string safeBundleName = Path.GetFileName(bundleName);
+        if (!string.Equals(
+                safeBundleName,
+                bundleName,
+                StringComparison.Ordinal)
+            || safeBundleName.Length > 128
+            || safeBundleName.All(character => character == '.')
+            || string.Equals(
+                safeBundleName,
+                ".printfarmer",
+                StringComparison.OrdinalIgnoreCase)
+            || safeBundleName.StartsWith(
+                ".install-",
+                StringComparison.OrdinalIgnoreCase)
+            || safeBundleName.StartsWith(
+                ".backup-",
+                StringComparison.OrdinalIgnoreCase)
+            || !BundleNameRegex().IsMatch(safeBundleName))
+        {
+            throw new CustomProfileBundleException(
+                "invalid_bundle_name",
+                "Bundle names may contain only letters, digits, periods, underscores, and hyphens.");
+        }
+
+        return safeBundleName;
     }
 
     private PreparedBundle PrepareBundle(
@@ -474,14 +488,24 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         }
 
         string[] segments = relativePath.Split('/');
-        if (segments.Any(segment =>
-                string.IsNullOrWhiteSpace(segment)
-                || segment is "." or ".."
-                || segment.StartsWith('.')))
+        for (int index = 0; index < segments.Length; index++)
         {
-            throw new CustomProfileBundleException(
-                "invalid_profile_path",
-                $"Profile path '{relativePath}' contains an invalid segment.");
+            string segment = segments[index];
+            string safeSegment = Path.GetFileName(segment);
+            if (string.IsNullOrWhiteSpace(safeSegment)
+                || segment is "." or ".."
+                || segment.StartsWith('.')
+                || !string.Equals(
+                    safeSegment,
+                    segment,
+                    StringComparison.Ordinal))
+            {
+                throw new CustomProfileBundleException(
+                    "invalid_profile_path",
+                    $"Profile path '{relativePath}' contains an invalid segment.");
+            }
+
+            segments[index] = safeSegment;
         }
 
         return string.Join('/', segments);
@@ -586,24 +610,18 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         string manifestLink = GetOverlayManifestPath(bundleName);
         string directoryLink = GetOverlayDirectoryPath(bundleName);
         bool manifestCreated = false;
-        bool directoryCreated = false;
 
         try
         {
             manifestCreated = EnsureFileLink(
                 manifestLink,
                 GetCustomManifestPath(bundleName));
-            directoryCreated = EnsureDirectoryLink(
+            _ = EnsureDirectoryLink(
                 directoryLink,
                 GetCustomDirectoryPath(bundleName));
         }
         catch
         {
-            if (directoryCreated)
-            {
-                Directory.Delete(directoryLink);
-            }
-
             if (manifestCreated)
             {
                 File.Delete(manifestLink);
@@ -792,7 +810,7 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
                 continue;
             }
 
-            ValidateBundleName(bundleName);
+            bundleName = ValidateBundleName(bundleName);
             if (!Directory.Exists(GetCustomDirectoryPath(bundleName)))
             {
                 _logger.LogWarning(
@@ -824,7 +842,7 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
                 continue;
             }
 
-            ValidateBundleName(bundleName);
+            bundleName = ValidateBundleName(bundleName);
             if (!File.Exists(GetCustomManifestPath(bundleName)))
             {
                 _logger.LogWarning(
@@ -897,11 +915,20 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         string errorMessage)
     {
         string canonicalRoot = Path.GetFullPath(root);
+        if (Path.IsPathRooted(relativePath)
+            || Path.IsPathFullyQualified(relativePath)
+            || DriveQualifiedPathRegex().IsMatch(relativePath))
+        {
+            throw new CustomProfileBundleException(
+                errorCode,
+                errorMessage);
+        }
+
         string rootPrefix = Path.EndsInDirectorySeparator(canonicalRoot)
             ? canonicalRoot
             : canonicalRoot + Path.DirectorySeparatorChar;
         string candidate = Path.GetFullPath(
-            Path.Combine(canonicalRoot, relativePath));
+            Path.Join(canonicalRoot, relativePath));
         StringComparison comparison = OperatingSystem.IsWindows()
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
