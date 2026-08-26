@@ -4,7 +4,7 @@ using System.Text.Json;
 using Farm.Infrastructure.Settings;
 using Xunit;
 
-namespace Farm.Infrastructure.Settings.Tests;
+namespace Farm.Infrastructure.Tests.Infrastructure;
 
 public class IAppSettingTests
 {

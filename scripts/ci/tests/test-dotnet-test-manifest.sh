@@ -12,10 +12,15 @@
 #      `*.Tests.csproj` glob (it is "...IntegrationTests.csproj", not
 #      "...Integration.Tests.csproj") and so is never auto-discovered by (1)
 #      — is present in the manifest anyway, by explicit name.
-#   4. `Farm.Web.Api.Tests`'s shards are not exhaustive (every subdirectory
-#      under src/tests/Farm.Web.Api.Tests/ covered by exactly one shard) or
-#      not mutually exclusive (no subdirectory listed twice) or any shard is
-#      empty (zero namespace prefixes).
+#   4. Any manifest entry's shards (Farm.Web.Api.Tests and
+#      Farm.Infrastructure.Tests today) are not exhaustive, not mutually
+#      exclusive, or any shard is empty (zero namespace prefixes). Exhaustive/
+#      mutually-exclusive is proven at the directory level for entries whose
+#      declared prefixes are flat top-level names, and always at the
+#      per-source-file level via a filter-vs-namespace match (this is the
+#      only proof available for entries like Farm.Infrastructure.Tests that
+#      split a single top-level directory, e.g. Services/, across shards
+#      using nested "Parent/Child" namespacePrefixes).
 #   5. The #2022 fix regresses: `Farm.Moonraker.Emulator.Tests` and
 #      `Farm.Slicer.ProfileParsing.Tests` must remain registered in the
 #      manifest (they are only reachable via the tests_other/full-safe
@@ -285,66 +290,81 @@ for rel in discovered:
     if rel not in manifest_test_projects:
         errors.append(f"discovered test project not registered in manifest: {rel}")
 
-# 4. Farm.Web.Api.Tests shard exhaustiveness / mutual exclusivity / non-empty.
-api_entry = next((e for e in entries if e.get("name") == "Farm.Web.Api.Tests"), None)
-if api_entry is None:
-    errors.append("Farm.Web.Api.Tests entry not found in manifest (required for shard validation)")
-else:
-    shards = api_entry.get("shards", [])
-    if not shards:
-        errors.append("Farm.Web.Api.Tests has no shards defined")
+# 4. Shard exhaustiveness / mutual exclusivity / non-empty, generalized over
+# every manifest entry that declares shards (originally Farm.Web.Api.Tests
+# only; Farm.Infrastructure.Tests added in #2033 with the same obligation).
+# bin/obj are dotnet build output, never test-namespace directories; they
+# only exist locally after a build has run and must not affect shard
+# exhaustiveness checks.
+BUILD_OUTPUT_DIRS = {"bin", "obj"}
 
-    # bin/obj are dotnet build output, never test-namespace directories; they
-    # only exist locally after a build has run and must not affect shard
-    # exhaustiveness checks.
-    BUILD_OUTPUT_DIRS = {"bin", "obj"}
-    api_test_dir = os.path.join(src_root, "tests", "Farm.Web.Api.Tests")
-    actual_subdirs = set()
-    if os.path.isdir(api_test_dir):
-        for entry_name in os.listdir(api_test_dir):
-            if entry_name in BUILD_OUTPUT_DIRS:
-                continue
-            if os.path.isdir(os.path.join(api_test_dir, entry_name)):
-                actual_subdirs.add(entry_name)
-    # "(root)" is a synthetic bucket for loose top-level .cs files that are
-    # not inside any namespace subdirectory -- not a real directory.
-    expected = actual_subdirs | {"(root)"}
+if not any(e.get("shards") for e in entries):
+    errors.append("no manifest entry declares any shards (expected at least Farm.Web.Api.Tests and Farm.Infrastructure.Tests)")
+
+for sharded_entry in entries:
+    entry_name = sharded_entry.get("name", "<unnamed>")
+    shards = sharded_entry.get("shards", [])
+    if not shards:
+        continue
+
+    test_project_rel = sharded_entry.get("testProject")
+    entry_test_dir = os.path.join(src_root, os.path.dirname(test_project_rel)) if test_project_rel else None
+    if not entry_test_dir or not os.path.isdir(entry_test_dir):
+        errors.append(f"{entry_name}: has shards but its test directory does not exist: {entry_test_dir}")
+        continue
 
     seen_prefixes = {}
     for shard in shards:
         shard_name = shard.get("name", "<unnamed shard>")
         prefixes = shard.get("namespacePrefixes", [])
         if not prefixes:
-            errors.append(f"Farm.Web.Api.Tests shard '{shard_name}' has zero namespacePrefixes (must be non-empty)")
+            errors.append(f"{entry_name}: shard '{shard_name}' has zero namespacePrefixes (must be non-empty)")
         for p in prefixes:
             seen_prefixes.setdefault(p, []).append(shard_name)
 
-    # Mutually exclusive: no prefix claimed by more than one shard.
+    # Mutually exclusive: no declared prefix claimed by more than one shard.
     for p, owners in seen_prefixes.items():
         if len(owners) > 1:
-            errors.append(f"Farm.Web.Api.Tests namespace prefix '{p}' claimed by multiple shards: {', '.join(owners)}")
+            errors.append(f"{entry_name}: namespace prefix '{p}' claimed by multiple shards: {', '.join(owners)}")
 
-    # Exhaustive: every real subdirectory (+ the root bucket) must be
-    # claimed by exactly one shard.
-    covered = set(seen_prefixes.keys())
-    missing = expected - covered
-    if missing:
-        errors.append(f"Farm.Web.Api.Tests shards do not cover: {', '.join(sorted(missing))}")
-
-    # No shard should claim something that doesn't exist (catches typos/rot).
-    unexpected = covered - expected
-    if unexpected:
-        errors.append(f"Farm.Web.Api.Tests shards reference nonexistent namespaces: {', '.join(sorted(unexpected))}")
+    # Directory-level exhaustiveness only applies cleanly when every declared
+    # prefix is a flat top-level directory name (Farm.Web.Api.Tests' shards).
+    # Farm.Infrastructure.Tests uses nested "Parent/Child" prefixes (e.g.
+    # "Services/Notifications") to split a single top-level directory (e.g.
+    # "Services") across several shards, so top-level-directory enumeration
+    # cannot prove exhaustiveness there -- the per-file filter check below
+    # (which does not depend on directory structure at all) is the actual
+    # proof for those entries.
+    all_flat = all("/" not in p for p in seen_prefixes)
+    if all_flat:
+        actual_subdirs = set()
+        for child in os.listdir(entry_test_dir):
+            if child in BUILD_OUTPUT_DIRS:
+                continue
+            if os.path.isdir(os.path.join(entry_test_dir, child)):
+                actual_subdirs.add(child)
+        # "(root)" is a synthetic bucket for loose top-level .cs files that
+        # are not inside any namespace subdirectory -- not a real directory.
+        expected = actual_subdirs | {"(root)"}
+        covered = set(seen_prefixes.keys())
+        missing = expected - covered
+        if missing:
+            errors.append(f"{entry_name}: shards do not cover: {', '.join(sorted(missing))}")
+        unexpected = covered - expected
+        if unexpected:
+            errors.append(f"{entry_name}: shards reference nonexistent namespaces: {', '.join(sorted(unexpected))}")
 
     # Directory ownership alone cannot prove the VSTest FullyQualifiedName
-    # expressions select every test. Root-level classes share the base
-    # namespace, and a file may deliberately use a namespace that differs from
-    # its directory (IAppSettingTests does). Check every source file containing
-    # xUnit facts/theories against the positive filter prefixes of its owning
-    # shard. A trailing dot is required so `Data` cannot accidentally match
-    # `DataManagement`, or a root class whose name starts with a directory.
-    shard_by_name = {shard.get("name"): shard for shard in shards}
-    for root, dirs, files in os.walk(api_test_dir):
+    # expressions select every test, and for entries with nested prefixes it
+    # is not even attempted above. Check every source file containing xUnit
+    # facts/theories directly against every shard's filter: it must match
+    # exactly one. Root-level classes share the base namespace, and a file
+    # may deliberately use a namespace that differs from its directory (this
+    # is why this check does not rely on which directory the file is in). A
+    # trailing dot is required in every filter term so `Data` cannot
+    # accidentally match `DataManagement`, or a root class whose name starts
+    # with a directory/shard name.
+    for root, dirs, files in os.walk(entry_test_dir):
         dirs[:] = [d for d in dirs if d not in BUILD_OUTPUT_DIRS]
         for file_name in files:
             if not file_name.endswith(".cs"):
@@ -355,36 +375,40 @@ else:
             if not re.search(r"\[\s*(?:Fact|Theory)\b", text):
                 continue
 
-            relative = os.path.relpath(path, api_test_dir)
-            parts = relative.split(os.sep)
-            prefix = "(root)" if len(parts) == 1 else parts[0]
-            owners = seen_prefixes.get(prefix, [])
-            if len(owners) != 1:
-                continue
-
+            relative = os.path.relpath(path, entry_test_dir)
             namespace_match = re.search(
                 r"^\s*namespace\s+([A-Za-z_][A-Za-z0-9_.]*)",
                 text,
                 re.MULTILINE,
             )
             if namespace_match is None:
-                errors.append(f"Farm.Web.Api.Tests test source has no namespace: {relative}")
+                errors.append(f"{entry_name}: test source has no namespace: {relative}")
                 continue
             namespace = namespace_match.group(1)
             candidate = f"{namespace}.{os.path.splitext(file_name)[0]}."
-            owner_filter = shard_by_name[owners[0]].get("filter", "")
-            positive_prefixes = re.findall(
-                r"FullyQualifiedName~([^|&()]+)",
-                owner_filter,
-            )
-            if not any(
-                token.endswith(".") and candidate.startswith(token)
-                for token in positive_prefixes
-            ):
+
+            matching_shards = []
+            for shard in shards:
+                positive_prefixes = re.findall(
+                    r"FullyQualifiedName~([^|&()]+)",
+                    shard.get("filter", ""),
+                )
+                if any(
+                    token.endswith(".") and candidate.startswith(token)
+                    for token in positive_prefixes
+                ):
+                    matching_shards.append(shard.get("name", "<unnamed shard>"))
+
+            if not matching_shards:
                 errors.append(
-                    "Farm.Web.Api.Tests shard "
-                    f"'{owners[0]}' filter does not cover test source {relative} "
-                    f"(expected a prefix matching {candidate})"
+                    f"{entry_name}: no shard filter covers test source {relative} "
+                    f"(candidate FullyQualifiedName prefix {candidate})"
+                )
+            elif len(matching_shards) > 1:
+                errors.append(
+                    f"{entry_name}: test source {relative} is matched by multiple shard "
+                    f"filters: {', '.join(matching_shards)} (candidate FullyQualifiedName "
+                    f"prefix {candidate})"
                 )
 
 for e in errors:
