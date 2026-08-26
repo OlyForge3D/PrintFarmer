@@ -2324,6 +2324,162 @@ case_mutate_helper_propagates_awk_failure() {
   return 0
 }
 
+# ---------------------------------------------------------------------------
+# Manifest-backed loading (issue #2031). These cases prove the selector
+# actually reads scripts/ci/dotnet-test-manifest.json (via TEST_MANIFEST_PATH)
+# rather than a hardcoded array, that it fails closed on a missing/empty
+# manifest, and that a real changed-path run against the checked-in default
+# manifest still produces exactly today's per-bucket matrix (positive,
+# negative, and mixed-path coverage for the new loader; full-safe coverage
+# for the manifest itself is exercised by case_unknown_test_project_full_safe
+# and friends above, which are unaffected by the manifest source).
+# ---------------------------------------------------------------------------
+
+case_manifest_default_path_reflects_checked_in_file() {
+  # Positive: with no override, the selector must resolve the manifest next
+  # to itself (scripts/ci/dotnet-test-manifest.json) and load all 6 checked-in
+  # test projects for a full-safe run.
+  local out="$1"
+  EVENT_NAME="workflow_dispatch" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "manifest api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_contains "manifest slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  assert_contains "manifest orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  assert_contains "manifest moonraker (#2022 regression guard)" "$matrix" "Farm.Moonraker.Emulator.Tests" || return 1
+  assert_contains "manifest profile parsing (#2022 regression guard)" "$matrix" "Farm.Slicer.ProfileParsing.Tests" || return 1
+  assert_contains "manifest integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+}
+
+case_manifest_missing_file_fails_closed() {
+  # Negative: an unreadable manifest path must exit rc=3, not silently fall
+  # back to an empty/hardcoded test list.
+  local rc=0
+  local missing ; missing="$(mktemp -u)"
+  CHANGED_FILES="src/api/Foo.cs" \
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" \
+    TEST_MANIFEST_PATH="$missing" \
+    bash "$SELECTOR" >/dev/null 2>&1 || rc=$?
+  if (( rc != 3 )); then
+    printf '  expected rc=3 for missing manifest, got %d\n' "$rc" >&2
+    return 1
+  fi
+}
+
+case_manifest_empty_test_projects_fails_closed() {
+  # Negative: a syntactically valid manifest with zero entries must fail
+  # closed (rc=3) rather than silently produce an empty test matrix, which
+  # would look identical to "nothing changed" and mask a broken manifest.
+  local rc=0
+  local empty_manifest ; empty_manifest="$(mktemp)"
+  printf '{"testProjects": []}\n' > "$empty_manifest"
+  CHANGED_FILES="src/api/Foo.cs" \
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" \
+    TEST_MANIFEST_PATH="$empty_manifest" \
+    bash "$SELECTOR" >/dev/null 2>&1 || rc=$?
+  rm -f "$empty_manifest"
+  if (( rc != 3 )); then
+    printf '  expected rc=3 for empty manifest, got %d\n' "$rc" >&2
+    return 1
+  fi
+}
+
+case_manifest_malformed_json_fails_closed() {
+  # Negative: invalid JSON must fail closed (rc=3), not swallow the parse
+  # error and continue with an empty/partial project list.
+  local rc=0
+  local bad_manifest ; bad_manifest="$(mktemp)"
+  printf '{ this is not valid json' > "$bad_manifest"
+  CHANGED_FILES="src/api/Foo.cs" \
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" \
+    TEST_MANIFEST_PATH="$bad_manifest" \
+    bash "$SELECTOR" >/dev/null 2>&1 || rc=$?
+  rm -f "$bad_manifest"
+  if (( rc != 3 )); then
+    printf '  expected rc=3 for malformed manifest JSON, got %d\n' "$rc" >&2
+    return 1
+  fi
+}
+
+case_manifest_partial_crash_fails_closed() {
+  # Negative: a manifest that is valid JSON but whose second entry is
+  # missing the required 'name' key makes the Python reader print one valid
+  # line and then crash with a KeyError. The selector must fail closed
+  # (rc=3) on this partial-output crash rather than silently proceeding with
+  # only the first entry, which would look like an innocuous, intentionally
+  # small manifest instead of a broken one.
+  local rc=0
+  local partial_manifest ; partial_manifest="$(mktemp)"
+  cat > "$partial_manifest" <<'JSON'
+{
+  "testProjects": [
+    {
+      "name": "Farm.Web.Api.Tests",
+      "testProject": "tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj",
+      "runIntegration": false,
+      "defaultFilter": "Category!=DbHeavy"
+    },
+    {
+      "testProject": "tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj",
+      "runIntegration": false,
+      "defaultFilter": "Category!=DbHeavy"
+    }
+  ]
+}
+JSON
+  CHANGED_FILES="src/api/Foo.cs" \
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" \
+    TEST_MANIFEST_PATH="$partial_manifest" \
+    bash "$SELECTOR" >/dev/null 2>&1 || rc=$?
+  rm -f "$partial_manifest"
+  if (( rc != 3 )); then
+    printf '  expected rc=3 for a manifest reader crash after partial output, got %d\n' "$rc" >&2
+    return 1
+  fi
+}
+
+case_manifest_custom_projects_reflected_in_matrix() {
+  # Mixed-path: point at a custom single-project manifest (fabricated
+  # project name, still routed through the unchanged api bucket) and prove
+  # the matrix output tracks the *substituted* manifest content rather than
+  # any residual hardcoded array — i.e. this is really manifest-driven.
+  local out="$1"
+  local custom_manifest ; custom_manifest="$(mktemp)"
+  cat > "$custom_manifest" <<'JSON'
+{
+  "testProjects": [
+    {
+      "name": "Farm.Web.Api.Tests",
+      "testProject": "tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj",
+      "runIntegration": false,
+      "defaultFilter": "Category=CustomManifestProbe"
+    }
+  ]
+}
+JSON
+  CHANGED_FILES="src/api/Controllers/PrintersController.cs" \
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" \
+    TEST_MANIFEST_PATH="$custom_manifest" \
+    select_run >/dev/null 2>&1
+  local rc=$?
+  rm -f "$custom_manifest"
+  (( rc == 0 )) || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "custom filter propagated" "$matrix" '"filter":"Category=CustomManifestProbe"' || return 1
+  # api bucket normally also selects Farm.Slicer.Module.Tests and
+  # Farm.Web.IntegrationTests (see case_api_change); a 1-entry manifest must
+  # not conjure test names it doesn't declare.
+  assert_not_contains "no slicer for 1-entry manifest" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  assert_not_contains "no integration for 1-entry manifest" "$matrix" "Farm.Web.IntegrationTests" || return 1
+}
+
 
 # =============================================================================
 # Runner
@@ -2408,6 +2564,12 @@ TESTS=(
   case_drift_shape_rejects_inline_flow_shadow_migration_drift_job
   case_drift_shape_accepts_migration_drift_extra_sibling_job
   case_mutate_helper_propagates_awk_failure
+  case_manifest_default_path_reflects_checked_in_file
+  case_manifest_missing_file_fails_closed
+  case_manifest_empty_test_projects_fails_closed
+  case_manifest_malformed_json_fails_closed
+  case_manifest_partial_crash_fails_closed
+  case_manifest_custom_projects_reflected_in_matrix
 )
 
 printf '=== select-dotnet-tests.sh test suite ===\n'
