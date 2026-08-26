@@ -67,6 +67,12 @@ public sealed class AuthorizeRolesGateArchitectureTests
     [
         typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
         typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly,
+        // Issue #2040: Farm.Modules.PrintQueue is hosted by the main API (Farm.Web.Api), not the
+        // slicer host, and must be scanned here for the same reason it was added to
+        // QueueEnqueuePermissionArchitectureTests.WalkableAssemblies — controllers that moved out
+        // of Farm.Web.Api into a module assembly silently drop out of an assembly-array-based
+        // scan unless the new assembly is added explicitly.
+        typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
         // Module-decomposition epic (#2019): controllers that moved out of Farm.Web.Api into
         // their own assembly are still "API controllers" for this guard's purposes.
         typeof(Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController).Assembly,
@@ -90,6 +96,7 @@ public sealed class AuthorizeRolesGateArchitectureTests
     private static readonly HashSet<Assembly> MainApiHostedAssemblies =
     [
         typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
+        typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
         typeof(Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController).Assembly,
         typeof(Farm.Web.Api.Controllers.MaintenanceController).Assembly,
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,

@@ -13,7 +13,7 @@ namespace Farm.Web.Api.Tests.Security;
 /// (<c>POST /api/files/local</c>) enqueued print jobs via
 /// <see cref="IJobQueueService.AddJobToQueueAsync"/> with no permission check at all, because
 /// <c>[AllowAnonymous]</c> skipped the authorization middleware entirely. This test performs a
-/// best-effort static call-graph walk from every controller action in the main API assembly and
+/// best-effort static call-graph walk from every controller action in <see cref="WalkableAssemblies"/> and
 /// fails if any action that transitively reaches <see cref="IJobQueueService.AddJobToQueueAsync"/>
 /// does not itself carry a <c>queue:write</c>-or-stronger <see cref="RequirePermissionAttribute"/>
 /// (method- or class-level), so a future endpoint cannot reintroduce the same class of bug.
@@ -43,14 +43,21 @@ public sealed class QueueEnqueuePermissionArchitectureTests
 
     /// <summary>
     /// Assemblies whose methods are eligible to be walked as call-graph nodes. Restricting the
-    /// walk to the main API and infrastructure assemblies keeps the graph bounded (no wandering
-    /// into EF Core, BCL collections, etc.) while still covering every real production call site
-    /// of <see cref="IJobQueueService.AddJobToQueueAsync"/>.
+    /// walk to the main API, print-queue module, and infrastructure assemblies keeps the graph
+    /// bounded (no wandering into EF Core, BCL collections, etc.) while still covering every real
+    /// production call site of <see cref="IJobQueueService.AddJobToQueueAsync"/>. The print-queue
+    /// module assembly is included because issue #2040 moved JobQueueController,
+    /// SlicePrintBridgeController, and PrintApprovalsController — all real call sites of
+    /// AddJobToQueueAsync — out of Farm.Web.Api and into Farm.Modules.PrintQueue; without this
+    /// entry the walk (and the controller-enumeration loop below, which also scans
+    /// WalkableAssemblies) would silently stop inspecting those controllers instead of failing
+    /// loudly.
     /// </summary>
     private static readonly HashSet<Assembly> WalkableAssemblies = new()
     {
         typeof(Farm.Web.Api.Controllers.PrintersController).Assembly, // Farm.Web.Api
         typeof(IJobQueueService).Assembly, // Farm.Infrastructure
+        typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly, // Farm.Modules.PrintQueue
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly, // Farm.Modules.Calibration
     };
 
@@ -63,49 +70,45 @@ public sealed class QueueEnqueuePermissionArchitectureTests
             ?? throw new InvalidOperationException(
                 $"{nameof(IJobQueueService)}.{nameof(IJobQueueService.AddJobToQueueAsync)} not found — has it been renamed?");
 
-        Assembly[] controllerHostingAssemblies =
-        [
-            typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
-            typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly, // Farm.Modules.Calibration
-        ];
         List<string> offenders = [];
         int actionsReachingTarget = 0;
 
-        foreach (Assembly apiAssembly in controllerHostingAssemblies)
+        // Enumerate controller types across every walkable assembly, not just Farm.Web.Api:
+        // issue #2040 moved several controller entry points (JobQueueController,
+        // SlicePrintBridgeController, PrintApprovalsController) into Farm.Modules.PrintQueue, so
+        // restricting this loop to Farm.Web.Api would silently stop scanning them.
+        foreach (Type controllerType in WalkableAssemblies.SelectMany(a => a.GetTypes()).Distinct())
         {
-            foreach (Type controllerType in apiAssembly.GetTypes())
+            if (!typeof(ControllerBase).IsAssignableFrom(controllerType) || controllerType.IsAbstract)
             {
-                if (!typeof(ControllerBase).IsAssignableFrom(controllerType) || controllerType.IsAbstract)
+                continue;
+            }
+
+            foreach (MethodInfo action in controllerType.GetMethods(
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+            {
+                if (action.IsSpecialName || action.GetCustomAttribute<NonActionAttribute>() is not null)
                 {
                     continue;
                 }
 
-                foreach (MethodInfo action in controllerType.GetMethods(
-                    BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+                string displayName = $"{controllerType.FullName}.{action.Name}";
+
+                if (!CallGraphReachesTarget(action, targetMethod))
                 {
-                    if (action.IsSpecialName || action.GetCustomAttribute<NonActionAttribute>() is not null)
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    string displayName = $"{controllerType.FullName}.{action.Name}";
+                actionsReachingTarget++;
 
-                    if (!CallGraphReachesTarget(action, targetMethod))
-                    {
-                        continue;
-                    }
+                if (Allowlist.Contains(displayName))
+                {
+                    continue;
+                }
 
-                    actionsReachingTarget++;
-
-                    if (Allowlist.Contains(displayName))
-                    {
-                        continue;
-                    }
-
-                    if (!HasQueueWriteOrStrongerPermission(action, controllerType))
-                    {
-                        offenders.Add(displayName);
-                    }
+                if (!HasQueueWriteOrStrongerPermission(action, controllerType))
+                {
+                    offenders.Add(displayName);
                 }
             }
         }
