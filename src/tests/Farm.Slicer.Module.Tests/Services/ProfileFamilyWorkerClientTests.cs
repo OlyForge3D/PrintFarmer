@@ -116,6 +116,84 @@ public sealed class ProfileFamilyWorkerClientTests
         exception.Message.Should().Contain("missing parent 'Stock 0.6 nozzle'");
     }
 
+    [Fact]
+    public async Task WriteBundleAsync_IncompleteInheritanceWithNullFailure_UsesSafeFallback()
+    {
+        var handler = new RecordingHandler(
+            HttpStatusCode.UnprocessableEntity,
+            """{"failures":[null]}""");
+        using HttpClient httpClient = new(handler);
+        var client = new ProfileFamilyWorkerClient(
+            httpClient,
+            new Mock<ISlicersService>(MockBehavior.Strict).Object,
+            CreateWorkerConfiguration(),
+            NullLogger<ProfileFamilyWorkerClient>.Instance);
+        var bundle = new ProfileFamilyBundleDto(
+            Guid.NewGuid(),
+            "Farm Test",
+            """{"name":"Custom","machine_list":[]}""",
+            []);
+
+        Func<Task> act = () => client.WriteBundleAsync(
+            new ProfileFamilyWorkerTarget("http://worker:5100", "2.3.0"),
+            bundle,
+            CancellationToken.None);
+
+        await act.Should()
+            .ThrowAsync<ProfileFamilySourceException>()
+            .WithMessage("*source preset inheritance was incomplete, but returned no failure details*");
+    }
+
+    [Fact]
+    public async Task WriteBundleAsync_IncompleteInheritanceWithMixedFailures_PreservesValidFailure()
+    {
+        var handler = new RecordingHandler(
+            HttpStatusCode.UnprocessableEntity,
+            """
+            {
+              "failures": [
+                null,
+                {
+                  "bundleName": "Custom",
+                  "familyName": "Farm Test",
+                  "profileName": "Farm Test 0.6 nozzle",
+                  "missingParent": "Stock 0.6 nozzle"
+                }
+              ]
+            }
+            """);
+        using HttpClient httpClient = new(handler);
+        var client = new ProfileFamilyWorkerClient(
+            httpClient,
+            new Mock<ISlicersService>(MockBehavior.Strict).Object,
+            CreateWorkerConfiguration(),
+            NullLogger<ProfileFamilyWorkerClient>.Instance);
+        var bundle = new ProfileFamilyBundleDto(
+            Guid.NewGuid(),
+            "Farm Test",
+            """{"name":"Custom","machine_list":[]}""",
+            []);
+
+        Func<Task> act = () => client.WriteBundleAsync(
+            new ProfileFamilyWorkerTarget("http://worker:5100", "2.3.0"),
+            bundle,
+            CancellationToken.None);
+
+        ProfileFamilySourceException exception = (await act.Should()
+            .ThrowAsync<ProfileFamilySourceException>()).Which;
+        exception.Message.Should().Contain("bundle 'Custom'");
+        exception.Message.Should().Contain("profile 'Farm Test 0.6 nozzle'");
+        exception.Message.Should().Contain("missing parent 'Stock 0.6 nozzle'");
+    }
+
+    private static IConfiguration CreateWorkerConfiguration() =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["WorkerAuth:SharedKey"] = "test-worker-key"
+            })
+            .Build();
+
     private sealed class RecordingHandler : HttpMessageHandler
     {
         private readonly HttpStatusCode _statusCode;

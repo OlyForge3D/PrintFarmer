@@ -11,7 +11,6 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 /// <summary>
 /// Creates farm-wide custom OrcaSlicer machine profile families.
 /// </summary>
-[ApiController]
 [Route("api/slicer/profiles")]
 [Tags("Slicer Profiles")]
 [Authorize]
@@ -39,6 +38,15 @@ public sealed class ProfileFamiliesController(
         [FromBody] CloneProfileFamilyRequestDto? request,
         CancellationToken ct)
     {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(new
+            {
+                code = "invalid_profile_family",
+                detail = "One or more profile family fields are invalid."
+            });
+        }
+
         if (request is null)
         {
             return BadRequest(new { code = "invalid_profile_family", detail = "Request body is required." });

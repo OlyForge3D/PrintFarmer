@@ -119,7 +119,11 @@ public sealed class ProfileFamilyWorkerClient(
                 ex);
         }
 
-        if (mutationResponse?.Failures is not { Count: > 0 } failures)
+        List<WorkerProfileLoadFailure> failures = mutationResponse?.Failures?
+            .OfType<WorkerProfileLoadFailure>()
+            .ToList()
+            ?? [];
+        if (failures.Count == 0)
         {
             return new ProfileFamilySourceException(
                 $"OrcaSlicer worker rejected custom bundle '{requestedBundleName}' because " +
@@ -214,7 +218,7 @@ public sealed class ProfileFamilyWorkerClient(
         JsonElement Document);
 
     private sealed record WorkerBundleMutationResponse(
-        IReadOnlyList<WorkerProfileLoadFailure>? Failures);
+        IReadOnlyList<WorkerProfileLoadFailure?>? Failures);
 
     private sealed record WorkerProfileLoadFailure(
         string? BundleName,
