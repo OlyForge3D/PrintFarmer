@@ -142,6 +142,25 @@
       "notes": "New in issue #2036 (Phase 8: the SmartPlug/PowerMonitor pilot vertical-slice module moved out of Farm.Web.Api into Farm.Modules.SmartPlug, depending on Farm.Modules.Abstractions' IApiModule seam from #2035). Unlike Farm.Modules.Abstractions.Tests above, this project gets its own narrow select-dotnet-tests.sh buckets (smartplug/tests_smartplug) rather than full-safe, since it is a concrete leaf module with a single dependent test project -- the pattern later Farm.Modules.* phases (9-18) should copy. The retained CustomWebApplicationFactory-based integration test for /api/admin/power-monitors (AdminPowerMonitorsControllerTests) and RouteTableSnapshotTests both stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's smartplug bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module)."
     },
     {
+      "name": "Farm.Modules.PrintQueue.Tests",
+      "testProject": "tests/Farm.Modules.PrintQueue.Tests/Farm.Modules.PrintQueue.Tests.csproj",
+      "productionProject": "modules/Farm.Modules.PrintQueue/Farm.Modules.PrintQueue.csproj",
+      "pathPrefixes": ["src/tests/Farm.Modules.PrintQueue.Tests/"],
+      "dependsOnProjects": [
+        "src/modules/Farm.Modules.PrintQueue/",
+        "src/modules/Farm.Modules.Abstractions/",
+        "src/infra/",
+        "src/slicer/Farm.Slicer.Module/",
+        "src/backends/Farm.Backend.Plugin.OctoPrint/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Modules.PrintQueue.Tests",
+      "notes": "New in issue #2040 (Phase 12: PrintJobManagementService and its 8 dependent controllers -- including SlicePrintBridgeController -- moved out of Farm.Web.Api into Farm.Modules.PrintQueue, as-is/no internal decomposition, per the SmartPlug/#2036 vertical-slice pattern). Unlike SmartPlug, this module also references Farm.Slicer.Module directly (SlicePrintBridgeController consumes IArtifactsService/ISliceJobRepository) and Farm.Backend.Plugin.OctoPrint directly from its test project (PrintJobManagementServiceHistorySeedingTests), so select-dotnet-tests.sh's slicer and backend-plugin buckets also select this project, in addition to its own narrow printqueue/tests_printqueue buckets. The retained CustomWebApplicationFactory-based Dispatch/ integration suite and RouteTableSnapshotTests both stay in Farm.Web.Api.Tests, so the printqueue bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg)."
+    },
+    {
       "name": "Farm.Modules.Maintenance.Tests",
       "testProject": "tests/Farm.Modules.Maintenance.Tests/Farm.Modules.Maintenance.Tests.csproj",
       "productionProject": "modules/Farm.Modules.Maintenance/Farm.Modules.Maintenance.csproj",

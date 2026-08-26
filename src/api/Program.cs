@@ -201,12 +201,15 @@ IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 // Vertical-slice API module discovery/registration seam (issue #2035, epic #2019). Discovery
 // only scans assemblies explicitly listed here. Farm.Modules.SmartPlug is the pilot module
 // (issue #2036) -- the first assembly to move a controller + services out of the monolith.
+// Farm.Modules.PrintQueue (issue #2040, Phase 12) is the second, and
+// Farm.Modules.Calibration (issue #2038, Phase 10) is the third.
 // Farm.Modules.Maintenance (issue #2037) is the first to also move a SignalR hub -- see its
 // MapEndpoints for the MapHub<MaintenanceHub> call that used to live here.
 builder.Services.AddApiModules(
     mvcBuilder,
     builder.Configuration,
     typeof(Farm.Modules.SmartPlug.SmartPlugApiModule).Assembly,
+    typeof(Farm.Modules.PrintQueue.PrintQueueApiModule).Assembly,
     typeof(Farm.Modules.Maintenance.MaintenanceApiModule).Assembly,
     typeof(Farm.Modules.Calibration.CalibrationApiModule).Assembly,
     typeof(Farm.Modules.Identity.IdentityApiModule).Assembly);

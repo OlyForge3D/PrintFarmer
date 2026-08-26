@@ -408,6 +408,7 @@ case_infra_change() {
   assert_contains "matrix orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
   assert_contains "matrix smartplug" "$matrix" "Farm.Modules.SmartPlug.Tests" || return 1
+  assert_contains "matrix printqueue" "$matrix" "Farm.Modules.PrintQueue.Tests" || return 1
   assert_contains "matrix maintenance" "$matrix" "Farm.Modules.Maintenance.Tests" || return 1
   assert_contains "matrix calibration" "$matrix" "Farm.Modules.Calibration.Tests" || return 1
   assert_contains "matrix identity" "$matrix" "Farm.Modules.Identity.Tests" || return 1
@@ -443,6 +444,9 @@ case_backend_plugin_change() {
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
   assert_contains "integration opt-in" "$matrix" '"run_integration":"true"' || return 1
+  # Farm.Modules.PrintQueue.Tests (issue #2040) references Farm.Backend.Plugin.OctoPrint
+  # directly, so any backend-plugin edit must also select it.
+  assert_contains "matrix printqueue" "$matrix" "Farm.Modules.PrintQueue.Tests" || return 1
   # Backends do not appear as a direct ProjectReference of Slicer.Module.Tests.
   assert_not_contains "matrix slicer absent" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   local reason ; reason="$(get_output "$out" reason)"
@@ -580,6 +584,7 @@ case_slicer_change() {
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   assert_contains "matrix orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  assert_contains "matrix printqueue" "$matrix" "Farm.Modules.PrintQueue.Tests" || return 1
   assert_contains "matrix calibration" "$matrix" "Farm.Modules.Calibration.Tests" || return 1
   local mig ; mig="$(get_output "$out" mig_matrix)"
   assert_contains "mig slicer pg" "$mig" "SlicerPg" || return 1
@@ -644,6 +649,50 @@ case_smartplug_mixed_with_unrelated_backend() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix smartplug" "$matrix" "Farm.Modules.SmartPlug.Tests" || return 1
+}
+
+case_printqueue_change() {
+  local out="$1"
+  CHANGED_FILES="src/modules/Farm.Modules.PrintQueue/Services/PrintQueue/PrintJobManagementService.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix printqueue" "$matrix" "Farm.Modules.PrintQueue.Tests" || return 1
+  # The Dispatch/ integration suite and RouteTableSnapshotTests intentionally
+  # stayed in Farm.Web.Api.Tests (see docs/MODULE_MIGRATION_PATTERN.md), so a
+  # controller-owning module must select it too.
+  assert_contains "api covers controller" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason printqueue" "$reason" "printqueue" || return 1
+}
+
+case_test_only_printqueue() {
+  local out="$1"
+  CHANGED_FILES="src/tests/Farm.Modules.PrintQueue.Tests/Controllers/JobQueueControllerTests.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix printqueue" "$matrix" "Farm.Modules.PrintQueue.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+}
+
+case_printqueue_mixed_with_unrelated_backend() {
+  local out="$1"
+  CHANGED_FILES=$'src/modules/Farm.Modules.PrintQueue/Controllers/JobQueueController.cs\nsrc/backends/Farm.Backends.SomePlugin/SomeFile.cs'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix printqueue" "$matrix" "Farm.Modules.PrintQueue.Tests" || return 1
 }
 
 case_maintenance_change() {
@@ -2981,6 +3030,9 @@ TESTS=(
   case_smartplug_change
   case_test_only_smartplug
   case_smartplug_mixed_with_unrelated_backend
+  case_printqueue_change
+  case_test_only_printqueue
+  case_printqueue_mixed_with_unrelated_backend
   case_maintenance_change
   case_test_only_maintenance
   case_maintenance_mixed_with_unrelated_backend

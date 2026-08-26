@@ -80,6 +80,12 @@ public sealed class PermissionGrantPathTests
         typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
         typeof(Farm.Infrastructure.Services.SignalR.HarvestHub).Assembly,
         typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly,
+        // Issue #2040: Farm.Modules.PrintQueue controllers (JobQueueController,
+        // SlicePrintBridgeController, PrintApprovalsController, DispatchSettingsController, etc.)
+        // moved out of Farm.Web.Api and must be scanned here explicitly, or their
+        // [RequirePermission] sites — including the AdminOnlyAllowlist entries for
+        // Queue.Reconcile and DispatchSettings.Manage above — silently drop out of this guard.
+        typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
         typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
     ];

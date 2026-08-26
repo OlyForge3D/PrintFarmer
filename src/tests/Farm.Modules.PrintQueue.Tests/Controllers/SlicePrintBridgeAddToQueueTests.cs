@@ -14,7 +14,6 @@ using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
-using Farm.Web.Api.Services.Gcode;
 using Farm.Web.Api.Services.Gcode.Safety;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -41,7 +40,7 @@ public sealed class SlicePrintBridgeAddToQueueTests
     private readonly Mock<IJobQueueService> _queueMock = new();
     private readonly Mock<ISliceGcodeImportService> _importMock = new();
     private readonly Mock<ISpoolmanService> _spoolmanMock = new();
-    private readonly Mock<IGcodeFilesService> _gcodeFilesServiceMock = new();
+    private readonly Mock<IGcodeFileDeleter> _gcodeFilesServiceMock = new();
     private readonly Mock<IGcodeSafetyValidator> _safetyValidatorMock = new();
 
     private SlicePrintBridgeController BuildController(bool slicerEnabled = true) =>
