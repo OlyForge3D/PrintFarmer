@@ -2,24 +2,29 @@
 using Farm.Web.Api.Services.Calibration;
 using FluentAssertions;
 
-namespace Farm.Web.Api.Tests.Calibration;
+namespace Farm.Modules.Calibration.Tests.Calibration;
 
 /// <summary>
-/// Guards the binding service-boundary decision from #1613 §5: <c>src/api</c> must reach
+/// Defensive extension of the binding service-boundary decision from #1613 §5 to the
+/// <c>Farm.Modules.Calibration</c> module (Phase 10, #2038): the module must reach
 /// machine-profile data exclusively through <c>ICalibrationProfileResolver</c>, with zero
 /// compile-time or runtime dependency on the OrcaSlicer worker or its profile-cache types
-/// (#1614 AC-5, test plan item 5).
+/// (#1614 AC-5, test plan item 5). The original guard against <c>Farm.Web.Api</c> itself
+/// stays in <c>Farm.Web.Api.Tests</c> (see
+/// <c>FarmWebApiHostAssemblyBoundaryTests</c>) — the host assembly is a distinct
+/// compile-time closure from this module and must be checked independently.
 /// </summary>
 public sealed class CalibrationProfileServiceBoundaryTests
 {
     /// <summary>
-    /// Assembly names that must never appear in <c>Farm.Web.Api</c>'s referenced-assembly
-    /// closure. <c>Farm.OrcaSlicer.Worker</c> hosts <c>ProfileCacheDb</c>; <c>Farm.Slicer.Worker.Core</c>
-    /// (the <c>worker-shared</c> project) hosts <c>ISlicerProfilesService</c>. <c>Farm.Slicer.ProfileParsing</c>
-    /// (#1615 PR-2) is the new shared Orca JSON field-extraction library; nothing in this plan
-    /// causes <c>src/api</c> to reference it directly (typed facts arrive pre-populated on
-    /// <c>ResolvedCalibrationProfile</c>), but the guard is extended defensively per the issue's
-    /// test plan.
+    /// Assembly names that must never appear in <c>Farm.Modules.Calibration</c>'s
+    /// referenced-assembly closure. <c>Farm.OrcaSlicer.Worker</c> hosts <c>ProfileCacheDb</c>;
+    /// <c>Farm.Slicer.Worker.Core</c> (the <c>worker-shared</c> project) hosts
+    /// <c>ISlicerProfilesService</c>. <c>Farm.Slicer.ProfileParsing</c> (#1615 PR-2) is the
+    /// shared Orca JSON field-extraction library; nothing in this plan causes the calibration
+    /// module to reference it directly (typed facts arrive pre-populated on
+    /// <c>ResolvedCalibrationProfile</c>), but the guard is extended defensively per the
+    /// issue's test plan.
     /// </summary>
     private static readonly string[] ForbiddenAssemblyNames =
     [
@@ -29,27 +34,27 @@ public sealed class CalibrationProfileServiceBoundaryTests
     ];
 
     [Fact]
-    public void FarmWebApiAssembly_DoesNotReferenceOrcaSlicerWorkerOrWorkerSharedAssemblies()
+    public void CalibrationModuleAssembly_DoesNotReferenceOrcaSlicerWorkerOrWorkerSharedAssemblies()
     {
-        Assembly apiAssembly = typeof(CalibrationProjectService).Assembly;
+        Assembly moduleAssembly = typeof(CalibrationProjectService).Assembly;
 
-        IEnumerable<string> referencedAssemblyNames = apiAssembly
+        IEnumerable<string> referencedAssemblyNames = moduleAssembly
             .GetReferencedAssemblies()
             .Select(name => name.Name ?? string.Empty);
 
         _ = referencedAssemblyNames.Should().NotContain(
             name => ForbiddenAssemblyNames.Contains(name, StringComparer.Ordinal),
-            "src/api must reach machine-profile data exclusively through " +
+            "Farm.Modules.Calibration must reach machine-profile data exclusively through " +
             "ICalibrationProfileResolver (#1613 §5), never a direct assembly dependency on " +
             "the OrcaSlicer worker or its profile-cache types");
     }
 
     [Fact]
-    public void FarmWebApiAssembly_HasNoLoadableSlicerProfilesServiceOrProfileCacheDbType()
+    public void CalibrationModuleAssembly_HasNoLoadableSlicerProfilesServiceOrProfileCacheDbType()
     {
-        Assembly apiAssembly = typeof(CalibrationProjectService).Assembly;
+        Assembly moduleAssembly = typeof(CalibrationProjectService).Assembly;
 
-        IEnumerable<Type> loadedTypes = apiAssembly.GetTypes();
+        IEnumerable<Type> loadedTypes = moduleAssembly.GetTypes();
 
         _ = loadedTypes.Should().NotContain(type =>
             type.FullName == "Farm.Slicer.Worker.Core.ISlicerProfilesService" ||
