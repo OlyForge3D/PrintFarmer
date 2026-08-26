@@ -53,6 +53,14 @@ public sealed class AnonymousEndpointArchitectureTests
                 "POST /api/internal/discovery/events/printer-found - authenticates discovery agents with the shared discovery key.",
             ["Farm.Web.Api.Controllers.InternalDiscoveryEventsController.CompletedAsync [api/internal/discovery/events/completed]"] =
                 "POST /api/internal/discovery/events/completed - authenticates discovery agents with the shared discovery key.",
+            ["Farm.Web.Api.Controllers.InternalSlicerHostLookupsController.GetManufacturersAsync [api/internal/slicer-host/catalog/manufacturers]"] =
+                "GET /api/internal/slicer-host/catalog/manufacturers - serves the standalone slicer host only after the configured shared service key is accepted; missing configuration fails with 503 and a missing or invalid key fails with 401 before catalog access.",
+            ["Farm.Web.Api.Controllers.InternalSlicerHostLookupsController.GetPrinterModelAsync [api/internal/slicer-host/catalog/printer-models/{modelId:guid}]"] =
+                "GET /api/internal/slicer-host/catalog/printer-models/{modelId} - serves the standalone slicer host only after the configured shared service key is accepted; missing configuration fails with 503 and a missing or invalid key fails with 401 before catalog access.",
+            ["Farm.Web.Api.Controllers.InternalSlicerHostLookupsController.GetModelAliasesAsync [api/internal/slicer-host/catalog/printer-models/{modelId:guid}/aliases]"] =
+                "GET /api/internal/slicer-host/catalog/printer-models/{modelId}/aliases - serves the standalone slicer host only after the configured shared service key is accepted; missing configuration fails with 503 and a missing or invalid key fails with 401 before catalog access.",
+            ["Farm.Web.Api.Controllers.InternalSlicerHostLookupsController.GetPrinterAsync [api/internal/slicer-host/printers/{printerId:guid}]"] =
+                "GET /api/internal/slicer-host/printers/{printerId} - returns only the slicer's minimal printer projection after the configured shared service key is accepted; missing configuration fails with 503 and a missing or invalid key fails with 401 before printer access.",
             ["Farm.Web.Api.Controllers.UnifiedSettingsController.GetSettingsByKeyName [api/settings/{keyName}]"] =
                 "GET /api/settings/{keyName} - exposes only the discovery agent's fail-closed section allowlist.",
             ["Farm.Web.Api.Controllers.UnifiedSettingsController.SendHeartbeat [api/settings/{keyName}/heartbeat]"] =

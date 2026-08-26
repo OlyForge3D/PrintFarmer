@@ -36,6 +36,7 @@ x-orca-previous-volumes: &orca-previous-volumes
   - ${EXTERNAL_ORCA_WORKER_PREVIOUS_TEMP:-.volumes/printfarmer-orcaslicer-previous-temp}:/app/temp
   - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models:ro
   - ${EXTERNAL_GCODE_PATH:-.volumes/printfarmer-gcode-storage}:/app/gcode:ro
+  - orcaslicer-custom-profiles-previous:/app/custom-profiles
 
 x-orca-previous-security: &orca-previous-security {}
 
@@ -47,6 +48,10 @@ x-orca-previous-deployment: &orca-previous-deployment
     reservations:
       cpus: '${ORCA_WORKER_PREVIOUS_CPU_REQUEST:-0.5}'
       memory: ${ORCA_WORKER_PREVIOUS_MEMORY_REQUEST:-512m}
+
+volumes:
+  orcaslicer-custom-profiles-previous:
+    name: printfarmer-custom-profiles-${ORCASLICER_VERSION_PREVIOUS:-2.3.1}
 
 services:
   orcaslicer-worker-previous:
@@ -66,6 +71,11 @@ services:
       - Worker__StorageEndpoint=${WORKER_API_BASE_URL:-http://slicer-host:5246}
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
+      - ORCA_STOCK_PROFILES_PATH=/opt/orcaslicer/resources/profiles
+      - ORCA_CUSTOM_PROFILES_PATH=/app/custom-profiles
+      - ORCA_PROFILES_PATH=/app/profiles
+      - PROFILE_CACHE_PATH=/app/cache
+      - CustomProfiles__ReconciliationIntervalSeconds=${CUSTOM_PROFILE_RECONCILIATION_INTERVAL_SECONDS:-1}
       # Stable identity across redeploys: RegisterAsync upserts on this ID so a
       # redeploy updates the existing worker/service record instead of creating
       # a duplicate. Fresh credentials are still issued on every registration.

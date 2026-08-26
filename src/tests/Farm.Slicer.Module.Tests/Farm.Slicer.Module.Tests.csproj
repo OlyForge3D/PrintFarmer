@@ -48,6 +48,8 @@
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
     <ProjectReference Include="..\..\migrations\Farm.Migrations.Sqlite\Farm.Migrations.Sqlite.csproj" />
     <ProjectReference Include="..\..\migrations\Farm.Slicer.Migrations.Sqlite\Farm.Slicer.Migrations.Sqlite.csproj" />
+    <ProjectReference Include="..\..\orcaslicer-worker\Farm.OrcaSlicer.Worker.csproj" Aliases="OrcaWorker" />
+    <ProjectReference Include="..\..\worker-shared\Farm.Slicer.Worker.Core.csproj" Aliases="OrcaWorker" />
     <ProjectReference Include="..\..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
     <ProjectReference Include="..\..\slicer\Farm.Slicer.Module.Api\Farm.Slicer.Module.Api.csproj" />
     <ProjectReference Include="..\..\slicer\Farm.Slicer.Host\Farm.Slicer.Host.csproj" Aliases="SlicerHost" />

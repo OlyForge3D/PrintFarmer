@@ -111,10 +111,6 @@ vi.mock('@/features/models3d/components/3d/ViewerSkeleton', () => ({
   ViewerSkeleton: () => <div>Loading...</div>,
 }));
 
-vi.mock('@/features/slicer/components/CloneProfilesModal', () => ({
-  CloneProfilesModal: () => null,
-}));
-
 vi.mock('@/features/slicer/components/ProfileEditorModal', () => ({
   ProfileEditorModal: () => null,
 }));

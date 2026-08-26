@@ -161,7 +161,16 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 { appCreator.CreateTables(); }
                 catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
             }
+
+            ConfigureTestServices(services);
         });
+    }
+
+    /// <summary>
+    /// Allows specialized integration fixtures to replace narrowly scoped services.
+    /// </summary>
+    protected virtual void ConfigureTestServices(IServiceCollection services)
+    {
     }
 
     /// <summary>

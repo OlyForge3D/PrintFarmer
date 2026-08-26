@@ -30,6 +30,7 @@ public class OrcaProfilesService : ISlicerProfilesService
 {
     private readonly ILogger _logger;
     private readonly string _orcaProfilesPath;
+    private readonly string? _customProfilesPath;
 
     // Cache for loaded profile JSON as strings to minimize disk I/O
     // Key: full file path, Value: JSON string
@@ -57,6 +58,9 @@ public class OrcaProfilesService : ISlicerProfilesService
     private List<ProcessProfileDto>? _allProcessProfilesCache;
     private readonly Lock _profilesCacheLock = new();
 
+    private readonly Dictionary<string, CustomProfileLoadFailure> _customProfileLoadFailures = new(StringComparer.Ordinal);
+    private readonly Lock _customProfileLoadFailuresLock = new();
+
     /// <summary>
     /// Creates an OrcaProfilesService with the default profile path (from ORCA_PROFILES_PATH env var or /opt/orcaslicer/resources/profiles).
     /// </summary>
@@ -70,9 +74,19 @@ public class OrcaProfilesService : ISlicerProfilesService
     /// </summary>
     /// <param name="logger">Logging service for diagnostics.</param>
     /// <param name="profilesPath">Custom path to profiles directory. If null, uses ORCA_PROFILES_PATH env var or default.</param>
-    public OrcaProfilesService(ILogger logger, string? profilesPath)
+    /// <param name="customProfilesPath">
+    /// Writable custom-profile source directory. If null, uses
+    /// ORCA_CUSTOM_PROFILES_PATH. A missing value preserves tolerant stock
+    /// profile behavior.
+    /// </param>
+    public OrcaProfilesService(
+        ILogger logger,
+        string? profilesPath,
+        string? customProfilesPath = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _customProfilesPath = customProfilesPath
+            ?? Environment.GetEnvironmentVariable("ORCA_CUSTOM_PROFILES_PATH");
 
         if (!string.IsNullOrWhiteSpace(profilesPath) && Directory.Exists(profilesPath))
         {
@@ -91,6 +105,60 @@ public class OrcaProfilesService : ISlicerProfilesService
                 // In container environment, use the system installation profiles directly
                 // OrcaSlicer AppImage extracts to /opt/orcaslicer/resources/profiles
                 _orcaProfilesPath = "/opt/orcaslicer/resources/profiles";
+            }
+        }
+    }
+
+    /// <summary>
+    /// Clears every process-lifetime profile lookup and parsed-profile cache.
+    /// </summary>
+    public void ClearCaches()
+    {
+        lock (_cacheLock)
+        {
+            _profileJsonCache.Clear();
+        }
+
+        lock (_machineCacheLock)
+        {
+            _machinesByManufacturerCache = null;
+        }
+
+        lock (_pathLookupCacheLock)
+        {
+            _profilePathLookupCache.Clear();
+        }
+
+        lock (_filesystemLookupCacheLock)
+        {
+            _filesystemLookupCache.Clear();
+        }
+
+        lock (_profilesCacheLock)
+        {
+            _allMachineModelProfilesCache = null;
+            _allMachineProfilesCache = null;
+            _allFilamentProfilesCache = null;
+            _allProcessProfilesCache = null;
+        }
+
+        lock (_customProfileLoadFailuresLock)
+        {
+            _customProfileLoadFailures.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Returns custom profiles excluded because their inheritance chain could
+    /// not be fully resolved.
+    /// </summary>
+    public IReadOnlyList<CustomProfileLoadFailure> CustomProfileLoadFailures
+    {
+        get
+        {
+            lock (_customProfileLoadFailuresLock)
+            {
+                return [.. _customProfileLoadFailures.Values];
             }
         }
     }
@@ -650,8 +718,19 @@ public class OrcaProfilesService : ISlicerProfilesService
             // Collect all profiles in the inheritance chain (parent -> child order)
             List<string> inheritanceChain = [];
             HashSet<string> visited = [];
+            string? customBundleName = TryGetCustomBundleName(filePath);
+            string rootProfileName = ResolveProfileName(filePath);
+            string familyName = customBundleName is null
+                ? rootProfileName
+                : ResolveCustomFamilyName(customBundleName, filePath, rootProfileName);
 
-            if (!CollectInheritanceChainAsJson(filePath, inheritanceChain, visited))
+            if (!CollectInheritanceChainAsJson(
+                    filePath,
+                    inheritanceChain,
+                    visited,
+                    customBundleName,
+                    familyName,
+                    rootProfileName))
             {
                 return null;
             }
@@ -670,7 +749,13 @@ public class OrcaProfilesService : ISlicerProfilesService
     /// Collect all profiles in the inheritance chain from top-level parent to the current profile.
     /// Returns false if profile can't be loaded.
     /// </summary>
-    private bool CollectInheritanceChainAsJson(string filePath, List<string> chain, HashSet<string> visited)
+    private bool CollectInheritanceChainAsJson(
+        string filePath,
+        List<string> chain,
+        HashSet<string> visited,
+        string? customBundleName,
+        string familyName,
+        string rootProfileName)
     {
         // Prevent infinite loops
         if (visited.Contains(filePath))
@@ -709,16 +794,42 @@ public class OrcaProfilesService : ISlicerProfilesService
                         _logger.LogInformation("Resolving inheritance: '{InheritedProfileName}' → '{ParentProfilePath}'", inheritedProfileName, parentProfilePath);
 
                         // Recursively load parent chain first (so parents are added before children)
-                        if (!CollectInheritanceChainAsJson(parentProfilePath, chain, visited))
+                        if (!CollectInheritanceChainAsJson(
+                                parentProfilePath,
+                                chain,
+                                visited,
+                                customBundleName,
+                                familyName,
+                                rootProfileName))
                         {
-                            _logger.LogWarning("Failed to load parent profile '{InheritedProfileName}' for '{FilePath}'", inheritedProfileName, filePath);
+                            if (customBundleName is not null)
+                            {
+                                return false;
+                            }
 
-                            // Don't fail - continue with what we have
+                            _logger.LogWarning(
+                                "Failed to load parent profile '{InheritedProfileName}' for '{FilePath}'",
+                                inheritedProfileName,
+                                filePath);
                         }
                     }
                     else
                     {
-                        _logger.LogWarning("Parent profile '{InheritedProfileName}' not found for '{FilePath}' (resolved to: {ParentProfilePath})", inheritedProfileName, filePath, parentProfilePath ?? "null");
+                        if (customBundleName is not null)
+                        {
+                            RecordMissingCustomParent(
+                                customBundleName,
+                                familyName,
+                                rootProfileName,
+                                inheritedProfileName);
+                            return false;
+                        }
+
+                        _logger.LogWarning(
+                            "Parent profile '{InheritedProfileName}' not found for '{FilePath}' (resolved to: {ParentProfilePath})",
+                            inheritedProfileName,
+                            filePath,
+                            parentProfilePath ?? "null");
                     }
                 }
             }
@@ -732,6 +843,122 @@ public class OrcaProfilesService : ISlicerProfilesService
         // Add this profile JSON to the chain (after parents, so it can override)
         chain.Add(profileJson);
         return true;
+    }
+
+    private string ResolveProfileName(string filePath)
+    {
+        string fallbackName = Path.GetFileNameWithoutExtension(filePath);
+        string? profileJson = LoadProfileJsonFromDisk(filePath);
+        if (profileJson is null)
+        {
+            return fallbackName;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(profileJson);
+            return document.RootElement.TryGetProperty(
+                    "name",
+                    out JsonElement nameElement)
+                && nameElement.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(nameElement.GetString())
+                    ? nameElement.GetString()!
+                    : fallbackName;
+        }
+        catch (JsonException)
+        {
+            return fallbackName;
+        }
+    }
+
+    private string? TryGetCustomBundleName(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(_customProfilesPath))
+        {
+            return null;
+        }
+
+        string? manufacturerDirectory = GetManufacturerDirectory(filePath);
+        if (manufacturerDirectory is null)
+        {
+            return null;
+        }
+
+        string bundleName = Path.GetFileName(manufacturerDirectory);
+        return File.Exists(Path.Join(_customProfilesPath, $"{bundleName}.json"))
+            ? bundleName
+            : null;
+    }
+
+    private string ResolveCustomFamilyName(
+        string bundleName,
+        string filePath,
+        string fallbackProfileName)
+    {
+        if (string.IsNullOrWhiteSpace(_customProfilesPath))
+        {
+            return fallbackProfileName;
+        }
+
+        try
+        {
+            string? manufacturerDirectory = GetManufacturerDirectory(filePath);
+            if (manufacturerDirectory is null)
+            {
+                return fallbackProfileName;
+            }
+
+            string relativePath = Path.GetRelativePath(manufacturerDirectory, filePath)
+                .Replace(Path.DirectorySeparatorChar, '/');
+            string metadataPath = Path.Join(
+                _customProfilesPath,
+                ".printfarmer",
+                $"{bundleName}.families.json");
+            if (!File.Exists(metadataPath))
+            {
+                return fallbackProfileName;
+            }
+
+            Dictionary<string, string>? familyNames =
+                JsonSerializer.Deserialize<Dictionary<string, string>>(
+                    File.ReadAllText(metadataPath));
+            return familyNames?.GetValueOrDefault(relativePath)
+                ?? fallbackProfileName;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "Failed to read custom profile family metadata for bundle {BundleName}: {Message}",
+                bundleName,
+                ex.Message);
+            return fallbackProfileName;
+        }
+    }
+
+    private void RecordMissingCustomParent(
+        string bundleName,
+        string familyName,
+        string profileName,
+        string missingParent)
+    {
+        var failure = new CustomProfileLoadFailure(
+            bundleName,
+            familyName,
+            profileName,
+            missingParent);
+        string key = $"{bundleName}\0{profileName}\0{missingParent}";
+
+        lock (_customProfileLoadFailuresLock)
+        {
+            _customProfileLoadFailures[key] = failure;
+        }
+
+        _logger.LogError(
+            "Custom profile family '{FamilyName}' in bundle '{BundleName}' was excluded: profile '{ProfileName}' requires missing parent '{MissingParent}'",
+            familyName,
+            bundleName,
+            profileName,
+            missingParent);
     }
 
     /// <summary>

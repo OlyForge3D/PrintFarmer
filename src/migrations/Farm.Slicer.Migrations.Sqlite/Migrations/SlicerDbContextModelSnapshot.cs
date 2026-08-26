@@ -222,8 +222,14 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Description")
                         .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FamilyOverridesJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Hash")
@@ -238,6 +244,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
 
+                    b.Property<DateTime?>("LastRenderedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Manufacturer")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -248,10 +257,30 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("NameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("PrinterModelId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("RawJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RenderStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("'NotApplicable'");
+
+                    b.Property<string>("RenderedForOrcaVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlicerDistribution")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("SlicerType")
@@ -261,10 +290,16 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("SourceMachineModelName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("Hash")
                         .IsUnique();
@@ -275,8 +310,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
 
                     b.HasIndex("PrinterModelId");
 
-                    b.HasIndex("Name", "SlicerType")
-                        .IsUnique();
+                    b.HasIndex("NameNormalized", "SlicerType")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MachineModelProfiles_Name_SlicerType");
 
                     b.ToTable("MachineModelProfiles");
                 });
@@ -325,6 +361,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("OverridesJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("PrinterModelId")
                         .HasColumnType("TEXT");
 
@@ -344,6 +383,10 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("SlicerVersion")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceSystemPresetName")
+                        .HasMaxLength(255)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedAt")

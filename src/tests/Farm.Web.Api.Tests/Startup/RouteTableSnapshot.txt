@@ -210,6 +210,10 @@ GET /api/gcode-library/{id} -> Farm.Web.Api::Farm.Web.Api.Controllers.GcodeLibra
 GET /api/gcode-library/{id}/download -> Farm.Web.Api::Farm.Web.Api.Controllers.GcodeLibraryController.DownloadFileAsync
 GET /api/gcode-promotions/{operationId} -> Farm.Web.Api::Farm.Web.Api.Controllers.GcodePromotionsController.GetPromotionAsync
 GET /api/internal/capabilities/worker-compatibility -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Calibration.WorkerCompatibilityController.GetWorkerCompatibilityAsync
+GET /api/internal/slicer-host/catalog/manufacturers -> Farm.Web.Api::Farm.Web.Api.Controllers.InternalSlicerHostLookupsController.GetManufacturersAsync
+GET /api/internal/slicer-host/catalog/printer-models/{modelId:guid} -> Farm.Web.Api::Farm.Web.Api.Controllers.InternalSlicerHostLookupsController.GetPrinterModelAsync
+GET /api/internal/slicer-host/catalog/printer-models/{modelId:guid}/aliases -> Farm.Web.Api::Farm.Web.Api.Controllers.InternalSlicerHostLookupsController.GetModelAliasesAsync
+GET /api/internal/slicer-host/printers/{printerId:guid} -> Farm.Web.Api::Farm.Web.Api.Controllers.InternalSlicerHostLookupsController.GetPrinterAsync
 GET /api/job-queue -> Farm.Web.Api::Farm.Web.Api.Controllers.JobQueueController.GetQueueAsync
 GET /api/job-queue-analytics -> Farm.Web.Api::Farm.Api.Controllers.JobQueueAnalyticsController.GetAllQueueAsync
 GET /api/job-queue-analytics/duration-analytics -> Farm.Web.Api::Farm.Api.Controllers.JobQueueAnalyticsController.GetDurationAnalyticsAsync
@@ -732,6 +736,7 @@ POST /api/slicer/profiles/bulk-delete -> Farm.Slicer.Module.Api::Farm.Slicer.Mod
 POST /api/slicer/profiles/bulk-import-for-printer/{printerId} -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.BulkImportProfilesForPrinterAsync
 POST /api/slicer/profiles/bulk-import-from-worker/{printerId} -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.BulkImportFromWorkerAsync
 POST /api/slicer/profiles/clone -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.CloneSingleProfileAsync
+POST /api/slicer/profiles/clone-family -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfileFamiliesController.CloneFamilyAsync
 POST /api/slicer/profiles/clone-from-template -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.CloneFromTemplateAsync
 POST /api/slicer/profiles/export/orca -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.ExportOrcaBundleAsync
 POST /api/slicer/profiles/filament/for-machines -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.GetFilamentProfilesForMachinesAsync

@@ -387,11 +387,6 @@ vi.mock('@/features/models3d/components/3d/ViewerSkeleton', () => ({
   ViewerSkeleton: () => <div data-testid="viewer-skeleton">Loading...</div>
 }));
 
-// Mock CloneProfilesModal
-vi.mock('@/features/slicer/components/CloneProfilesModal', () => ({
-  CloneProfilesModal: ({ isOpen }: { isOpen: boolean }) => isOpen ? <div data-testid="clone-profiles-modal" /> : null
-}));
-
 // Mock SlicerSettingsPanel
 vi.mock('@/features/slicer/components/settings', () => ({
   SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
@@ -900,6 +895,67 @@ describe('NewSliceJobPage', () => {
       expect(screen.getByLabelText('Machine profile options menu')).toBeEnabled();
     });
 
+    it('explains missing OrcaSlicer coverage and exposes the disabled profile-family action', async () => {
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockRejectedValue({
+        message: 'No profiles for this model',
+        statusCode: 404,
+        data: {
+          code: 'no_profiles_for_model',
+          detail: "OrcaSlicer ships no machine profiles for model 'MK4'.",
+        },
+      });
+      vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+        profiles: [],
+        totalCount: 0,
+        machineProfileCount: 0,
+        processProfileCount: 0,
+        filamentProfileCount: 0,
+      });
+
+      renderWithProviders(<NewSliceJobPage />);
+      fireEvent.change(await screen.findByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      expect(await screen.findByRole('heading', { name: 'No OrcaSlicer profiles for MK4' })).toBeInTheDocument();
+      expect(screen.getByText(/doesn't ship profiles for this printer model/i)).toBeInTheDocument();
+
+      const createFamilyButton = screen.getByRole('button', { name: 'Create profile family' });
+      expect(createFamilyButton).toHaveAttribute('aria-disabled', 'true');
+      expect(createFamilyButton).toHaveAttribute('aria-describedby', 'create-profile-family-help');
+      expect(screen.getByText('Coming soon')).toBeInTheDocument();
+    });
+
+    it('identifies an alias that returned no profiles without offering family creation', async () => {
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockRejectedValue({
+        message: 'Alias matched no profiles',
+        statusCode: 404,
+        data: {
+          code: 'alias_matched_no_profiles',
+          detail: "Tried OrcaSlicer model name 'MK4'; the slicer worker has no matching profiles.",
+        },
+      });
+
+      renderWithProviders(<NewSliceJobPage />);
+      fireEvent.change(await screen.findByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      expect(await screen.findByRole('heading', { name: 'No matching OrcaSlicer profiles for MK4' })).toBeInTheDocument();
+      expect(screen.getByText(/profile-coverage or slicer-engine-version issue/i)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Create profile family' })).not.toBeInTheDocument();
+    });
+
+    it('falls back to a generic machine-profile error when the backend omits a reason code', async () => {
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockRejectedValue({
+        message: 'Not Found',
+        statusCode: 404,
+      });
+
+      renderWithProviders(<NewSliceJobPage />);
+      fireEvent.change(await screen.findByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      expect(await screen.findByRole('heading', { name: 'Machine profiles unavailable for MK4' })).toBeInTheDocument();
+      expect(screen.getByText(/could not load machine profiles/i)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Create profile family' })).not.toBeInTheDocument();
+    });
+
     it('should keep custom machine profiles selectable when system profiles are unavailable', async () => {
       vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValueOnce([]);
       vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValueOnce({
@@ -941,11 +997,6 @@ describe('NewSliceJobPage', () => {
       fireEvent.keyDown(document, { key: 'Escape' });
 
       expect(screen.queryByText(/No machine profiles available/)).not.toBeInTheDocument();
-
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 600));
-      });
-      expect(screen.queryByTestId('clone-profiles-modal')).not.toBeInTheDocument();
     });
   });
 

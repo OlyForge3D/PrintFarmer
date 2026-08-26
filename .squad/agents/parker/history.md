@@ -193,3 +193,119 @@ Status: Backlog item cleared. Beta trigger gated on PR stack merge.
 - The branch-matching main-checkout session had no active session ID and was classified inactive. Its 20 Markdown records had no same-name canonical collisions, no exact duplicates, and no local secret-pattern flags; recovery remains coordinator-owned because all are unique.
 - Retained `/decisions/`; removed absent `/decisions.md`, `/agents/`, `/orchestration-log/`, and `/log/`; left out-of-scope `/memory/` unchanged. Canonical `.squad/decisions.md` and Parker history remain tracked, while canonical generated logs keep their separate explicit ignores.
 - Focused state-root tests passed 2/2. Bishop, Hicks, and Vasquez reached joint consensus APPROVE on exact SHA `429283d3870cd1553224a2f6e101547d657055b3`. PR #1204 targets `development` and closes #1135.
+
+
+### 2026-08-25: Custom Orca profile injection spike
+
+- **PASS:** an artifact-root `Custom.json` bundle was discovered by the unmodified worker;
+  `Custom/Micron 180 base` resolved across manufacturers to
+  `Voron/Voron 2.4 250 0.4 nozzle`, and the child resolved through the base. The worker API
+  returned inherited Klipper G-code/motion limits plus the 180 x 180 x 165 overrides.
+- Filesystem hash invalidation is startup-only. Live addition and live deletion both left
+  SQLite/in-memory results stale; restarting rebuilt 452 -> 453 machines on addition and
+  453 -> 452 on removal. Phase 2a still needs an explicit invalidate endpoint that also
+  clears every inner `OrcaProfilesService` cache.
+- No custom missing-parent warning occurred. An abstract `instantiation: false` base listed
+  in `machine_list` increments the loader's `failureCount` even though this is expected.
+- Existing DTO projection gotchas: `MachineProfileDto.Inherits` is not assigned by
+  `ParseMachineProfile` (the raw Settings bag is correct), and promoted printable X/Y do
+  not reflect the four-point area even though raw settings do.
+- Docker Desktop was unavailable, so the same worker code was run natively against an
+  isolated `ORCA_PROFILES_PATH`; Linux overlay/volume permissions remain untested. The live
+  farm and all databases were untouched. Evidence and the retained throwaway bundle are
+  under the session artifact `files\parker-injection-spike\` directory.
+
+
+### 2026-08-25: Vendor-generality extension to profile injection spike
+
+- Surveyed 11 installed manifests. Nine of ten machine vendors ship filament profiles;
+  Voron alone has zero. Qidi has 1,287 filament entries, Flashforge 570, and the separate
+  universal OrcaFilamentLibrary has 482, so Voron materially understates renderer volume.
+- Raw compatibility is vendor-diverse. Prusa has 151 condition-only process entries out of
+  334; explicit filament arrays dominate Prusa/Elegoo/Qidi. Many leaves declare neither
+  directly because compatibility can be inherited, so classification must use the
+  worker's resolved `CompatiblePrinters`, never raw leaf presence.
+- Worker runtime confirmed a condition-only Prusa process materializes to both CORE One HF
+  and non-HF 0.4 source variants. Conditions are evaluated only against machines from the
+  same manufacturer folder. Rendered Custom stubs must write an explicit custom-name array
+  and clear inherited `compatible_printers_condition` to prevent source conditions leaking.
+- A second additive machine probe inherited `Prusa CORE One 0.4 nozzle` across manufacturer
+  directories and returned resolved Prusa marlin2 settings, 270 mm height, start G-code,
+  and printer-note markers with zero missing-parent warnings. The vendor-neutral mechanism
+  remains PASS. The probe was removed and worker stopped; source artifacts were retained
+  under `files\parker-injection-spike\vendor-generality-bundle\`.
+
+
+### 2026-08-25: Orca custom-profile worker foundation (Phase 2a)
+
+- Selected a symlink-composed `/app/profiles` root after a .NET 10 Linux probe confirmed top-level manifests, linked manufacturer directories, and recursive JSON traversal all work. Stock stays immutable; custom source lives in `/app/custom-profiles` on Orca-version-keyed named volumes.
+- Added authenticated install/replace, remove, and reconciliation reload routes using the existing `WorkerAuth:SharedKey` / `X-Slicer-Api-Key` convention. Bundle writes are staged and atomically promoted with collision, traversal, and size validation.
+- Implemented restart-free reload that clears SQLite and every inner `OrcaProfilesService` process cache. Worker tests pass 372/372, including missing-parent failure followed by successful same-process reload after the parent chain is installed.
+- Custom missing parents now exclude affected profiles and return structured HTTP 422 details; stock missing-parent behavior remains tolerant. The overlay deployment test passes in the full deployment runner.
+- Full solution build passed. The captured full test and format gates remain red from concurrent/unrelated slicer migration and baseline formatting work; full deployment remained 6/11 because Docker/Python were unavailable and an existing TLS trap check failed. Details are in `decisions/inbox/parker-phase2a-impl.md`.
+
+### 2026-08-25: Phase 2a security and replica-consistency revision
+
+- Fixed Vasquez's three blockers: canonical root containment plus all-dot name
+  rejection; periodic shared-volume reconciliation with readiness, zero-slot
+  error heartbeats, and per-claim fingerprint fencing; and a
+  writer-preferring async reader/writer cache gate that prevents torn SQLite
+  reads during restart-free reload.
+- Fixed Bishop's worker follow-ups: PUT/DELETE 422 decisions are scoped to the
+  named bundle, and a PUT rejected for its own missing parent removes the
+  installed bundle and reloads before responding.
+- Added traversal, two-worker shared-volume, concurrent read/reload,
+  claim/readiness, rollback, and status-scoping regressions. Worker validation
+  passed 383/383 plus the two later focused tests; final full solution build and
+  scoped format passed. The profile-overlay deployment suite passed; unrelated
+  deployment groups remain blocked by the unavailable local Docker daemon and
+  existing environment/baseline conditions.
+
+### 2026-08-25: Bishop B2/B3 test strengthening
+
+- Confirmed all worker fixes were committed in `cfce2e7f3`.
+- Replaced the helper-only B2 test with a real controller flow: a broken bundle
+  is resident and failing, a healthy bundle installs, and the endpoint returns
+  200 while preserving the unrelated diagnostic.
+- Extended B3 rollback coverage to enumerate both custom storage and the
+  process overlay, proving neither rejected manifest nor directory remains.
+  Both focused tests pass; no full suite was run per coordinator request.
+
+### 2026-08-25: Internal bundle namespace hardening
+
+- Reserved `.printfarmer`, `.install-*`, and `.backup-*` bundle names
+  case-insensitively so API callers cannot collide with metadata, staging, or
+  backup paths that discovery/fingerprinting intentionally treats specially.
+- Added no-side-effect rejection coverage for nine all-dot/reserved/case
+  variants and stubbed fingerprint mismatch/recovery claim-gate coverage.
+  Targeted tests pass 10/10; targeted build and scoped format pass.
+
+### 2026-08-25: Replica coordination coverage
+
+- Extracted the hosted reconciler's deterministic single-poll production path.
+  The two-worker test now exercises fingerprint detection and stable-change
+  reconciliation rather than calling the store reconciliation method directly.
+- First changed observation marks readiness unavailable; the second stable
+  observation installs worker-local links and reloads its independent caches.
+- Added direct readiness recovery and the registration heartbeat calculation
+  regression requiring `Error` plus zero slots while unsynchronized. Together
+  with claim mismatch/recovery, targeted coordination tests pass 4/4.
+- Kept transactions as guarded siblings inside the versioned volume so
+  staging/backup/target remain on one filesystem for atomic moves; documented
+  that every future internal marker must extend the explicit denylist.
+
+### 2026-08-25: Custom bundle failure isolation
+
+- Closed Bishop B5 by keeping workers ready and registered when strict custom
+  inheritance excludes a broken profile. The failure remains diagnostic, stock
+  plus healthy custom profiles remain queryable, and DELETE remediation stays
+  reachable. Controller mutation/reload paths follow the same rule.
+- Replica observation now logs and skips incomplete custom bundles rather than
+  making partial promotion or crash residue process-fatal.
+- Closed N10 by treating `.install-*`/`.backup-*` as transient on every path
+  segment, avoiding traversal into transient directories, and tolerating
+  entries that vanish during fingerprinting. Persistent family metadata still
+  changes the fingerprint.
+- Added real-store fingerprint coverage and a boot/reconcile/register/serve/
+  delete regression. Focused tests passed 5/5 in one captured run; the final
+  targeted build and scoped format passed.
