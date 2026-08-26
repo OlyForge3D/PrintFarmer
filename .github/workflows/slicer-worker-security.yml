@@ -13,7 +13,7 @@ on:
       - 'src/worker-shared/**'
       - '.github/workflows/slicer-worker-security.yml'
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'scripts/docker/dockerfiles/Dockerfile.multistage'
       - 'scripts/docker/dockerfiles/**'
@@ -23,7 +23,7 @@ on:
 
 permissions:
   contents: read
-  security-events: write # For uploading SARIF results to GitHub Security
+  security-events: write  # For uploading SARIF results to GitHub Security
 
 env:
   ORCASLICER_VERSION: "2.4.2"
@@ -87,7 +87,7 @@ jobs:
           # Pull dive image and run analysis against the built image
           docker pull wagoodman/dive:0.10.0 || true
           docker run --rm --privileged -v /var/run/docker.sock:/var/run/docker.sock -v "${{ github.workspace }}":/workspace wagoodman/dive:0.10.0 --json /workspace/dive-slicer-base.json ${{ steps.build-base.outputs.image }} || true
-        continue-on-error: true # Don't fail build on efficiency warnings initially
+        continue-on-error: true  # Don't fail build on efficiency warnings initially
 
       - name: Export image size metrics
         run: |

@@ -2,13 +2,13 @@ name: CI - Lint
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'scripts/**/*.sh'
       - '**/*.sh'
       - '.github/workflows/ci-lint.yml'
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'scripts/**/*.sh'
       - '**/*.sh'

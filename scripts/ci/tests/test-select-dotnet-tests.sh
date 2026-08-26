@@ -16,11 +16,26 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 SELECTOR="$REPO_ROOT/scripts/ci/select-dotnet-tests.sh"
+TEST_MANIFEST="$REPO_ROOT/scripts/ci/dotnet-test-manifest.json"
 
 if [[ ! -x "$SELECTOR" && ! -r "$SELECTOR" ]]; then
   echo "FATAL: selector not found at $SELECTOR" >&2
   exit 1
 fi
+
+PYTHON_BIN=""
+for candidate in python3 python; do
+  candidate_path="$(command -v "$candidate" 2>/dev/null || true)"
+  if [[ -n "$candidate_path" ]] && "$candidate_path" --version >/dev/null 2>&1; then
+    PYTHON_BIN="$candidate_path"
+    break
+  fi
+done
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "FATAL: no working python3/python interpreter found" >&2
+  exit 1
+fi
+readonly PYTHON_BIN
 
 PASSED=0
 FAILED=0
@@ -170,7 +185,9 @@ assert_full_mig_matrix_shape() {
 assert_required_matrix() {
   local matrix="$1" name
   for name in \
-      Farm.Web.Api.Tests \
+      Farm.Web.Api.Tests-core \
+      Farm.Web.Api.Tests-infra \
+      Farm.Web.Api.Tests-services \
       Farm.Slicer.Module.Tests \
       Farm.OrcaSlicer.Worker.Tests \
       Farm.Web.IntegrationTests; do
@@ -178,7 +195,116 @@ assert_required_matrix() {
   done
   assert_contains "integration opt-in" "$matrix" '"name":"Farm.Web.IntegrationTests"' || return 1
   assert_contains "integration run flag" "$matrix" '"run_integration":"true"' || return 1
-  assert_contains "default api filter" "$matrix" '"filter":"Category!=DbHeavy&Category!=Docker"' || return 1
+  assert_api_shard_matrix "required matrix" "$matrix" "$TEST_MANIFEST" || return 1
+  assert_non_sharded_matrix "required matrix" "$matrix" "$TEST_MANIFEST" || return 1
+}
+
+# assert_api_shard_matrix <label> <matrix_json> <manifest_path>
+#
+# The expected records are derived from the manifest but independently apply
+# the selector contract: one unique `<project>-<shard>` leg per shard, the
+# unchanged project path/runIntegration flag, and
+# `(shard filter)&(project default filter)`. Parsing JSON also catches a `|`
+# inside a shard filter being mistaken for the old shell record delimiter.
+assert_api_shard_matrix() {
+  local label="$1" matrix="$2" manifest="$3"
+  local matrix_file rc=0
+  matrix_file="$(mktemp)"
+  printf '%s' "$matrix" > "$matrix_file"
+  "$PYTHON_BIN" - "$label" "$matrix_file" "$manifest" <<'PYEOF' || rc=$?
+import json
+import sys
+
+label, matrix_path, manifest_path = sys.argv[1:]
+with open(matrix_path, encoding="utf-8") as f:
+    matrix = json.load(f)
+with open(manifest_path, encoding="utf-8") as f:
+    manifest = json.load(f)
+
+api = next(entry for entry in manifest["testProjects"]
+           if entry["name"] == "Farm.Web.Api.Tests")
+base_leg = api.get("leg") or api["name"]
+run_integration = "true" if api.get("runIntegration") else "false"
+expected = []
+for shard in api.get("shards") or []:
+    shard_filter = shard["filter"]
+    default_filter = api.get("defaultFilter") or ""
+    test_filter = (
+        f"({shard_filter})&({default_filter})"
+        if default_filter
+        else shard_filter
+    )
+    leg_name = f"{base_leg}-{shard['name']}"
+    expected.append({
+        "name": leg_name,
+        "project": api["testProject"],
+        "label": leg_name,
+        "run_integration": run_integration,
+        "filter": test_filter,
+    })
+
+actual = [
+    leg for leg in matrix["include"]
+    if leg.get("project") == api["testProject"]
+]
+names = [leg["name"] for leg in actual]
+if actual != expected or len(names) != len(set(names)):
+    print(f"  {label}: API shard matrix mismatch", file=sys.stderr)
+    print(f"    expected: {json.dumps(expected, sort_keys=True)}", file=sys.stderr)
+    print(f"    actual:   {json.dumps(actual, sort_keys=True)}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+  rm -f "$matrix_file"
+  return "$rc"
+}
+
+# assert_non_sharded_matrix <label> <matrix_json> <manifest_path>
+#
+# Full-safe output must retain exactly one byte-for-byte-compatible matrix
+# record for every project whose `shards` list is empty.
+assert_non_sharded_matrix() {
+  local label="$1" matrix="$2" manifest="$3"
+  local matrix_file rc=0
+  matrix_file="$(mktemp)"
+  printf '%s' "$matrix" > "$matrix_file"
+  "$PYTHON_BIN" - "$label" "$matrix_file" "$manifest" <<'PYEOF' || rc=$?
+import json
+import sys
+
+label, matrix_path, manifest_path = sys.argv[1:]
+with open(matrix_path, encoding="utf-8") as f:
+    matrix = json.load(f)
+with open(manifest_path, encoding="utf-8") as f:
+    manifest = json.load(f)
+
+expected = []
+non_sharded_projects = set()
+for entry in manifest["testProjects"]:
+    if entry.get("shards"):
+        continue
+    leg_name = entry.get("leg") or entry["name"]
+    project = entry["testProject"]
+    non_sharded_projects.add(project)
+    expected.append({
+        "name": leg_name,
+        "project": project,
+        "label": leg_name,
+        "run_integration": "true" if entry.get("runIntegration") else "false",
+        "filter": entry.get("defaultFilter") or "Category!=DbHeavy&Category!=Docker",
+    })
+
+actual = [
+    leg for leg in matrix["include"]
+    if leg.get("project") in non_sharded_projects
+]
+if actual != expected:
+    print(f"  {label}: non-sharded matrix mismatch", file=sys.stderr)
+    print(f"    expected: {json.dumps(expected, sort_keys=True)}", file=sys.stderr)
+    print(f"    actual:   {json.dumps(actual, sort_keys=True)}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+  rm -f "$matrix_file"
+  return "$rc"
 }
 
 # run_case <name> <function>
@@ -250,7 +376,7 @@ case_api_change() {
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
-  assert_contains "api filter" "$matrix" '"filter":"Category!=DbHeavy&Category!=Docker"' || return 1
+  assert_api_shard_matrix "api change" "$matrix" "$TEST_MANIFEST" || return 1
   assert_contains "integration opt-in" "$matrix" '"run_integration":"true"' || return 1
   assert_not_contains "no orca for api-only" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
 }
@@ -281,6 +407,7 @@ case_infra_change() {
   assert_contains "matrix orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
   assert_contains "matrix smartplug" "$matrix" "Farm.Modules.SmartPlug.Tests" || return 1
+  assert_contains "matrix maintenance" "$matrix" "Farm.Modules.Maintenance.Tests" || return 1
   assert_contains "matrix calibration" "$matrix" "Farm.Modules.Calibration.Tests" || return 1
   assert_contains "matrix gcode" "$matrix" "Farm.Modules.Gcode.Tests" || return 1
   assert_app_migration_drift "$out" || return 1
@@ -381,7 +508,7 @@ case_backend_core_nested_path_selects_both_tests() {
 
 # Mixed edit touching Core and a concrete plugin in the same PR must still
 # select both test suites (Core drives the slicer selection). Also verifies
-# dedup so Api.Tests appears exactly once in the matrix.
+# dedup so each Api.Tests shard appears exactly once in the matrix.
 case_backend_core_and_plugin_mixed() {
   local out="$1"
   CHANGED_FILES=$'src/backends/Farm.Backend.Plugin.Core/IBackendPlugin.cs\nsrc/backends/Farm.Backend.Plugin.Moonraker/MoonrakerClient.cs'
@@ -393,13 +520,9 @@ case_backend_core_and_plugin_mixed() {
   assert_contains "matrix slicer mixed" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   assert_contains "matrix orca mixed" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
   assert_contains "matrix integration mixed" "$matrix" "Farm.Web.IntegrationTests" || return 1
-  local api_count slicer_count
-  api_count="$(grep -o '"name":"Farm\.Web\.Api\.Tests"' <<< "$matrix" | wc -l | tr -d ' ')"
+  assert_api_shard_matrix "mixed backend selection" "$matrix" "$TEST_MANIFEST" || return 1
+  local slicer_count
   slicer_count="$(grep -o '"name":"Farm\.Slicer\.Module\.Tests"' <<< "$matrix" | wc -l | tr -d ' ')"
-  if [[ "$api_count" != "1" ]]; then
-    printf '  api appears %s times in mixed matrix: %s\n' "$api_count" "$matrix" >&2
-    return 1
-  fi
   if [[ "$slicer_count" != "1" ]]; then
     printf '  slicer appears %s times in mixed matrix: %s\n' "$slicer_count" "$matrix" >&2
     return 1
@@ -523,6 +646,26 @@ case_smartplug_mixed_with_unrelated_backend() {
   assert_contains "matrix smartplug" "$matrix" "Farm.Modules.SmartPlug.Tests" || return 1
 }
 
+case_maintenance_change() {
+  local out="$1"
+  CHANGED_FILES="src/modules/Farm.Modules.Maintenance/Services/Maintenance/PrintStatsSyncHostedService.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix maintenance" "$matrix" "Farm.Modules.Maintenance.Tests" || return 1
+  # MaintenanceHubAuthorizationIntegrationTests, RouteTableSnapshotTests, and
+  # MaintenanceScheduleDeploymentToolheadScopeTests intentionally stayed in
+  # Farm.Web.Api.Tests, so a controller/hub-owning module must select it too.
+  assert_contains "api covers controller/hub" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason maintenance" "$reason" "maintenance" || return 1
+}
+
 case_calibration_change() {
   local out="$1"
   CHANGED_FILES="src/modules/Farm.Modules.Calibration/Services/Calibration/CalibrationProjectService.cs"
@@ -544,6 +687,19 @@ case_calibration_change() {
   assert_contains "reason calibration" "$reason" "calibration" || return 1
 }
 
+case_test_only_maintenance() {
+  local out="$1"
+  CHANGED_FILES="src/tests/Farm.Modules.Maintenance.Tests/Hubs/MaintenanceHubTests.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix maintenance" "$matrix" "Farm.Modules.Maintenance.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+}
+
 case_test_only_calibration() {
   local out="$1"
   CHANGED_FILES="src/tests/Farm.Modules.Calibration.Tests/Services/Calibration/CalibrationProjectServiceTests.cs"
@@ -555,6 +711,17 @@ case_test_only_calibration() {
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix calibration" "$matrix" "Farm.Modules.Calibration.Tests" || return 1
   assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+}
+
+case_maintenance_mixed_with_unrelated_backend() {
+  local out="$1"
+  CHANGED_FILES=$'src/modules/Farm.Modules.Maintenance/Hubs/MaintenanceHub.cs\nsrc/backends/Farm.Backends.SomePlugin/SomeFile.cs'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix maintenance" "$matrix" "Farm.Modules.Maintenance.Tests" || return 1
 }
 
 case_calibration_mixed_with_unrelated_backend() {
@@ -658,7 +825,7 @@ case_test_only_api() {
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
-  assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_api_shard_matrix "API test-only change" "$matrix" "$TEST_MANIFEST" || return 1
   assert_not_contains "no slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
 }
 
@@ -670,7 +837,8 @@ case_test_only_slicer() {
     select_run >/dev/null 2>&1
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
-  assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  assert_eq "unchanged non-sharded slicer leg" "$matrix" \
+    '{"include":[{"name":"Farm.Slicer.Module.Tests","project":"tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj","label":"Farm.Slicer.Module.Tests","run_integration":"false","filter":"Category!=DbHeavy&Category!=Docker"}]}' || return 1
   assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
 }
 
@@ -1234,14 +1402,10 @@ case_multi_bucket_dedup() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
   local matrix ; matrix="$(get_output "$out" matrix)"
-  local api_count slicer_count
-  api_count="$(grep -o '"name":"Farm\.Web\.Api\.Tests"' <<< "$matrix" | wc -l | tr -d ' ')"
+  assert_api_shard_matrix "multi-bucket dedup" "$matrix" "$TEST_MANIFEST" || return 1
+  local slicer_count
   slicer_count="$(grep -o '"name":"Farm\.Slicer\.Module\.Tests"' <<< "$matrix" | wc -l | tr -d ' ')"
-  # Each name should appear exactly once as `"name":"..."` inside the JSON.
-  if [[ "$api_count" != "1" ]]; then
-    printf '  api appears %s times in matrix (expected 1): %s\n' "$api_count" "$matrix" >&2
-    return 1
-  fi
+  # Each non-sharded name should appear exactly once as `"name":"..."`.
   if [[ "$slicer_count" != "1" ]]; then
     printf '  slicer appears %s times in matrix (expected 1): %s\n' "$slicer_count" "$matrix" >&2
     return 1
@@ -1448,27 +1612,39 @@ case_workflow_publish_printf_option_safe() {
   fi
 }
 
-case_workflow_test_job_passes_integration_property() {
+case_workflow_builds_integration_before_assembly_test() {
   local workflow="$REPO_ROOT/.github/workflows/ci.yml"
-  local body
-  body="$(extract_job_block "$workflow" "dotnet-test")"
-  if [[ -z "$body" ]]; then
-    printf '  could not locate dotnet-test job body\n' >&2
+  local build_body test_body
+  build_body="$(extract_job_block "$workflow" "dotnet-build")"
+  test_body="$(extract_job_block "$workflow" "dotnet-test")"
+  if [[ -z "$build_body" || -z "$test_body" ]]; then
+    printf '  could not locate dotnet-build/dotnet-test job bodies\n' >&2
     return 1
   fi
-  assert_contains "matrix run flag env" "$body" 'RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}' || return 1
-  assert_contains "restore integration property" "$body" 'dotnet restore "./$MATRIX_PROJECT" ${integration_args[@]+"${integration_args[@]}"}' || return 1
-  assert_contains "build integration property" "$body" 'dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore ${integration_args[@]+"${integration_args[@]}"}' || return 1
-  assert_contains "test integration property" "$body" 'dotnet test "./$MATRIX_PROJECT" -c Debug --no-build \' || return 1
-  assert_contains "test includes integration args" "$body" '${integration_args[@]+"${integration_args[@]}"} \' || return 1
-  assert_contains "integration msbuild property" "$body" 'integration_args+=("-p:RunIntegrationTests=true")' || return 1
-  local unsafe
-  unsafe="$(printf '%s\n' "$body" \
-    | grep -nF '"${integration_args[@]}"' \
-    | grep -vF '${integration_args[@]+"${integration_args[@]}"}' \
-    || true)"
-  if [[ -n "$unsafe" ]]; then
-    printf '  dotnet-test has unguarded integration_args expansions:\n%s\n' "$unsafe" >&2
+  assert_contains "integration project selected from matrix" "$build_body" \
+    "contains(needs.select.outputs.matrix, 'Farm.Web.IntegrationTests.csproj')" || return 1
+  assert_contains "integration restore property" "$build_body" \
+    'dotnet restore "$project" -p:RunIntegrationTests=true' || return 1
+  assert_contains "integration build property" "$build_body" \
+    '-p:RunIntegrationTests=true' || return 1
+  assert_contains "test resolves artifact by matrix project" "$test_body" \
+    'MATRIX_PROJECT: ${{ matrix.project }}' || return 1
+  assert_contains "assembly-mode test" "$test_body" \
+    'dotnet test "$test_assembly" \' || return 1
+  if [[ "$test_body" == *"RUN_INTEGRATION_TESTS"* ]]; then
+    printf '  assembly-mode dotnet-test should not re-evaluate RunIntegrationTests\n' >&2
+    return 1
+  fi
+  if [[ "$build_body" != *'RunIntegrationTests=true'* ]]; then
+    printf '  dotnet-build does not opt the integration project into compilation\n' >&2
+    return 1
+  fi
+  if [[ "$test_body" != *'TEST_FILTER: ${{ matrix.filter'* ]]; then
+    printf '  could not locate matrix filter in dotnet-test job body\n' >&2
+    return 1
+  fi
+  if [[ "$test_body" != *'MATRIX_NAME: ${{ matrix.name }}'* ]]; then
+    printf '  could not locate dotnet-test job body\n' >&2
     return 1
   fi
 }
@@ -1698,7 +1874,7 @@ _check_drift_full_job_snapshot() {
   expected="$(cat <<'CANONICAL_MIGRATION_DRIFT_JOB'
   migration-drift:
     name: Migration drift (${{ matrix.label }})
-    needs: [select, ci-tools]
+    needs: [select, ci-tools, dotnet-build]
     if: ${{ needs.select.outputs.want_mig_drift == 'true' }}
     runs-on: ubuntu-latest
     strategy:
@@ -1718,22 +1894,45 @@ _check_drift_full_job_snapshot() {
           dotnet tool install -g dotnet-ef
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
-      # Restore + build the specific migration project so its
-      # `obj/project.assets.json` and compiled assemblies exist before
-      # `dotnet ef` reflects over them. Without this step EF fails with
-      # NETSDK1004 because the migration-drift job is isolated from
-      # dotnet-build and never restores the matrix project itself.
+      # Restore the specific migration project so its runner-local
+      # `obj/project.assets.json` exists before `dotnet ef` reflects over it.
+      # Without this step EF fails with NETSDK1004. We deliberately regenerate
+      # `obj/` here rather than transporting its absolute NuGet/MSBuild paths;
+      # the compiled assembly comes from dotnet-build below.
       - name: Restore migration project
         working-directory: src
         env:
           MATRIX_PROJECT: ${{ matrix.project }}
         run: dotnet restore "./$MATRIX_PROJECT"
 
-      - name: Build migration project
+      - name: Resolve migration build artifact
+        id: migration-build-artifact
+        env:
+          MATRIX_PROJECT: ${{ matrix.project }}
+        run: |
+          set -euo pipefail
+          project_name="${MATRIX_PROJECT##*/}"
+          printf 'name=%s.tgz\n' "$project_name" >> "$GITHUB_OUTPUT"
+
+      - name: Download migration build
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ steps.migration-build-artifact.outputs.name }}
+          path: ${{ runner.temp }}/dotnet-build
+          skip-decompress: true
+
+      - name: Extract migration build
         working-directory: src
         env:
           MATRIX_PROJECT: ${{ matrix.project }}
-        run: dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore
+        run: |
+          set -euo pipefail
+          project_dir="$MATRIX_PROJECT"
+          project_name="${MATRIX_PROJECT##*/}"
+          archive="$RUNNER_TEMP/dotnet-build/$project_name.tgz"
+          mkdir -p "$project_dir/bin/Debug"
+          tar -xzf "$archive" -C "$project_dir/bin/Debug"
+          test -f "$project_dir/bin/Debug/net10.0/$project_name.dll"
 
       - name: Check EF Core migration drift
         working-directory: src
@@ -1773,7 +1972,7 @@ _check_drift_full_job_snapshot() {
           fi
 
   # ---------------------------------------------------------------------------
-  # dotnet-test — one matrix leg per affected test project.
+  # dotnet-test — one or more matrix legs per affected test project.
   # ---------------------------------------------------------------------------
 CANONICAL_MIGRATION_DRIFT_JOB
 )"
@@ -1788,10 +1987,10 @@ CANONICAL_MIGRATION_DRIFT_JOB
 }
 
 
-# The migration-drift matrix job is isolated from `dotnet-build` and must
-# restore its own matrix project before invoking `dotnet ef`, otherwise
-# NETSDK1004 fires because `obj/project.assets.json` doesn't exist. This
-# test reads `.github/workflows/ci.yml` and delegates to
+# The migration-drift matrix job restores runner-local project metadata, then
+# consumes the compiled project artifact from `dotnet-build` before invoking
+# `dotnet ef --no-build`. This test reads `.github/workflows/ci.yml` and
+# delegates to
 # `_check_drift_full_job_snapshot`, which is a single-source assertion
 # covering every prior R11-R15 invariant:
 #   * exactly one canonical unquoted `  migration-drift:` job header
@@ -2654,6 +2853,107 @@ JSON
   assert_not_contains "no integration for 1-entry manifest" "$matrix" "Farm.Web.IntegrationTests" || return 1
 }
 
+case_manifest_shard_pipe_filter_preserved() {
+  # Regression: shard filters contain `|`, so the old pipe-delimited manifest
+  # record format would split the filter and silently truncate the matrix
+  # value. A custom two-prefix shard makes that hazard explicit.
+  local out="$1"
+  local custom_manifest ; custom_manifest="$(mktemp)"
+  cat > "$custom_manifest" <<'JSON'
+{
+  "testProjects": [
+    {
+      "name": "Farm.Web.Api.Tests",
+      "testProject": "tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj",
+      "runIntegration": false,
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [
+        {
+          "name": "pipe-probe",
+          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.One.|FullyQualifiedName~Farm.Web.Api.Tests.Two."
+        }
+      ]
+    }
+  ]
+}
+JSON
+  CHANGED_FILES="src/tests/Farm.Web.Api.Tests/ProbeTests.cs" \
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" \
+    TEST_MANIFEST_PATH="$custom_manifest" \
+    select_run >/dev/null 2>&1
+  local rc=$?
+  (( rc == 0 )) || { rm -f "$custom_manifest"; return 1; }
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_api_shard_matrix "pipe filter" "$matrix" "$custom_manifest" || {
+    rm -f "$custom_manifest"
+    return 1
+  }
+  assert_contains "pipe survives manifest parsing" "$matrix" \
+    'FullyQualifiedName~Farm.Web.Api.Tests.One.|FullyQualifiedName~Farm.Web.Api.Tests.Two.' || {
+    rm -f "$custom_manifest"
+    return 1
+  }
+  rm -f "$custom_manifest"
+}
+
+case_manifest_empty_selection_fallback_shards() {
+  # Select the slicer project while substituting a manifest that contains only
+  # a three-shard API project. The scoped lookup therefore produces an empty
+  # matrix and must exercise finish()'s defensive full-safe reconstruction,
+  # which must enumerate shard records rather than collapsing back to one leg.
+  local out="$1"
+  local custom_manifest ; custom_manifest="$(mktemp)"
+  cat > "$custom_manifest" <<'JSON'
+{
+  "testProjects": [
+    {
+      "name": "Farm.Web.Api.Tests",
+      "testProject": "tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj",
+      "runIntegration": false,
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [
+        {
+          "name": "core",
+          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Core.One|FullyQualifiedName~Farm.Web.Api.Tests.Core.Two"
+        },
+        {
+          "name": "infra",
+          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Infra.One|FullyQualifiedName~Farm.Web.Api.Tests.Infra.Two"
+        },
+        {
+          "name": "services",
+          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Services.One|FullyQualifiedName~Farm.Web.Api.Tests.Services.Two"
+        }
+      ]
+    }
+  ]
+}
+JSON
+  CHANGED_FILES="src/tests/Farm.Slicer.Module.Tests/ProbeTests.cs" \
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" \
+    TEST_MANIFEST_PATH="$custom_manifest" \
+    select_run >/dev/null 2>&1
+  local rc=$?
+  (( rc == 0 )) || { rm -f "$custom_manifest"; return 1; }
+  assert_eq "empty selection coerced full-safe" "$(get_output "$out" full_matrix)" "true" || {
+    rm -f "$custom_manifest"
+    return 1
+  }
+  assert_contains "fallback reason" "$(get_output "$out" reason)" \
+    "internal: empty test selection" || {
+    rm -f "$custom_manifest"
+    return 1
+  }
+  assert_api_shard_matrix "empty-selection fallback" \
+    "$(get_output "$out" matrix)" "$custom_manifest" || {
+    rm -f "$custom_manifest"
+    return 1
+  }
+  rm -f "$custom_manifest"
+}
+
 
 # =============================================================================
 # Runner
@@ -2678,6 +2978,9 @@ TESTS=(
   case_smartplug_change
   case_test_only_smartplug
   case_smartplug_mixed_with_unrelated_backend
+  case_maintenance_change
+  case_test_only_maintenance
+  case_maintenance_mixed_with_unrelated_backend
   case_calibration_change
   case_test_only_calibration
   case_calibration_mixed_with_unrelated_backend
@@ -2730,7 +3033,7 @@ TESTS=(
   case_selector_finish_tolerates_empty_args
   case_extract_event_block_crlf_tolerant
   case_workflow_publish_printf_option_safe
-  case_workflow_test_job_passes_integration_property
+  case_workflow_builds_integration_before_assembly_test
   case_workflow_migration_drift_restores_before_ef
   case_drift_full_block_extractor_crlf_tolerant
   case_drift_snapshot_rejects_step_continue_on_error
@@ -2756,6 +3059,8 @@ TESTS=(
   case_manifest_malformed_json_fails_closed
   case_manifest_partial_crash_fails_closed
   case_manifest_custom_projects_reflected_in_matrix
+  case_manifest_shard_pipe_filter_preserved
+  case_manifest_empty_selection_fallback_shards
 )
 
 printf '=== select-dotnet-tests.sh test suite ===\n'

@@ -201,10 +201,13 @@ IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 // Vertical-slice API module discovery/registration seam (issue #2035, epic #2019). Discovery
 // only scans assemblies explicitly listed here. Farm.Modules.SmartPlug is the pilot module
 // (issue #2036) -- the first assembly to move a controller + services out of the monolith.
+// Farm.Modules.Maintenance (issue #2037) is the first to also move a SignalR hub -- see its
+// MapEndpoints for the MapHub<MaintenanceHub> call that used to live here.
 builder.Services.AddApiModules(
     mvcBuilder,
     builder.Configuration,
     typeof(Farm.Modules.SmartPlug.SmartPlugApiModule).Assembly,
+    typeof(Farm.Modules.Maintenance.MaintenanceApiModule).Assembly,
     typeof(Farm.Modules.Calibration.CalibrationApiModule).Assembly,
     typeof(Farm.Modules.Gcode.GcodeApiModule).Assembly);
 
@@ -492,7 +495,9 @@ app.MapApiModules();
 // Public farm hubs require authenticated clients.
 app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
-app.MapHub<MaintenanceHub>("/hubs/maintenance");
+
+// MaintenanceHub is now mapped by MaintenanceApiModule.MapEndpoints() via MapApiModules()
+// above -- see Farm.Modules.Maintenance (issue #2037).
 
 // Requires an authenticated user — broadcasts carry farm-wide spool and printer identifiers.
 // NFC firmware never connects to this hub; devices ingest scans via a separate REST path

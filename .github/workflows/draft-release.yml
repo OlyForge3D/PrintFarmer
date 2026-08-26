@@ -54,4 +54,4 @@ jobs:
 
       - name: Output
         run: |
-          echo "Draft release ${{ github.event.inputs.version }} created. Check Releases tab on GitHub for the draft." 
+          echo "Draft release ${{ github.event.inputs.version }} created. Check Releases tab on GitHub for the draft."

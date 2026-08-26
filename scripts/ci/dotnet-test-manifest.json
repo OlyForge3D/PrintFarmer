@@ -1,5 +1,5 @@
 {
-  "$comment": "Checked CI test-selection manifest (issue #2031). One entry per .NET test project the CI matrix knows how to run. select-dotnet-tests.sh loads ALL_TEST_PROJECTS from this file instead of a hardcoded bash array. `pathPrefixes` and `dependsOnProjects` document (for scripts/ci/tests/test-dotnet-test-manifest.sh and human readers) the mapping already encoded in classify_path()/main() in select-dotnet-tests.sh; they are NOT re-interpreted at selection time, so changing them here has no effect on which tests run for a given change -- see docs/CI.md for the authoritative bucket table. `leg` names the CI matrix leg a project's tests execute in; several projects/shards may share one leg without adding a new required check, decoupling test-assembly count from CI-leg count.",
+  "$comment": "Checked CI test-selection manifest (issue #2031). One entry per .NET test project the CI matrix knows how to run. select-dotnet-tests.sh loads ALL_TEST_PROJECTS from this file instead of a hardcoded bash array. `pathPrefixes` and `dependsOnProjects` document (for scripts/ci/tests/test-dotnet-test-manifest.sh and human readers) the mapping already encoded in classify_path()/main() in select-dotnet-tests.sh; they are NOT re-interpreted at selection time, so changing them here has no effect on which tests run for a given change -- see docs/CI.md for the authoritative bucket table. Projects with `shards` emit one matrix leg per shard as `<leg>-<shard>`; projects with an empty `shards` list retain their single `leg`.",
   "testProjects": [
     {
       "name": "Farm.Web.Api.Tests",
@@ -24,17 +24,17 @@
         {
           "name": "core",
           "namespacePrefixes": ["Backends", "Builders", "Calibration", "Capabilities", "Controllers", "Data", "DataManagement", "Dispatch", "Domain", "Dtos"],
-          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Backends|FullyQualifiedName~Farm.Web.Api.Tests.Builders|FullyQualifiedName~Farm.Web.Api.Tests.Calibration|FullyQualifiedName~Farm.Web.Api.Tests.Capabilities|FullyQualifiedName~Farm.Web.Api.Tests.Controllers|FullyQualifiedName~Farm.Web.Api.Tests.Data|FullyQualifiedName~Farm.Web.Api.Tests.DataManagement|FullyQualifiedName~Farm.Web.Api.Tests.Dispatch|FullyQualifiedName~Farm.Web.Api.Tests.Domain|FullyQualifiedName~Farm.Web.Api.Tests.Dtos"
+          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Backends.|FullyQualifiedName~Farm.Web.Api.Tests.Builders.|FullyQualifiedName~Farm.Web.Api.Tests.Calibration.|FullyQualifiedName~Farm.Web.Api.Tests.Capabilities.|FullyQualifiedName~Farm.Web.Api.Tests.Controllers.|FullyQualifiedName~Farm.Web.Api.Tests.Data.|FullyQualifiedName~Farm.Web.Api.Tests.DataManagement.|FullyQualifiedName~Farm.Web.Api.Tests.Dispatch.|FullyQualifiedName~Farm.Web.Api.Tests.Domain.|FullyQualifiedName~Farm.Web.Api.Tests.Dtos."
         },
         {
           "name": "infra",
           "namespacePrefixes": ["Discovery", "Filters", "Gcode", "Health", "Hubs", "Infrastructure", "Integration", "Locations", "Logging", "Middleware", "Migrations", "Monitoring", "Network"],
-          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Discovery|FullyQualifiedName~Farm.Web.Api.Tests.Filters|FullyQualifiedName~Farm.Web.Api.Tests.Gcode|FullyQualifiedName~Farm.Web.Api.Tests.Health|FullyQualifiedName~Farm.Web.Api.Tests.Hubs|FullyQualifiedName~Farm.Web.Api.Tests.Infrastructure|FullyQualifiedName~Farm.Web.Api.Tests.Integration|FullyQualifiedName~Farm.Web.Api.Tests.Locations|FullyQualifiedName~Farm.Web.Api.Tests.Logging|FullyQualifiedName~Farm.Web.Api.Tests.Middleware|FullyQualifiedName~Farm.Web.Api.Tests.Migrations|FullyQualifiedName~Farm.Web.Api.Tests.Monitoring|FullyQualifiedName~Farm.Web.Api.Tests.Network"
+          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Discovery.|FullyQualifiedName~Farm.Web.Api.Tests.Filters.|FullyQualifiedName~Farm.Web.Api.Tests.Gcode.|FullyQualifiedName~Farm.Web.Api.Tests.Health.|FullyQualifiedName~Farm.Web.Api.Tests.Hubs.|FullyQualifiedName~Farm.Web.Api.Tests.Infrastructure.|FullyQualifiedName~Farm.Web.Api.Tests.Integration.|FullyQualifiedName~Farm.Web.Api.Tests.Locations.|FullyQualifiedName~Farm.Web.Api.Tests.Logging.|FullyQualifiedName~Farm.Web.Api.Tests.Middleware.|FullyQualifiedName~Farm.Web.Api.Tests.Migrations.|FullyQualifiedName~Farm.Web.Api.Tests.Monitoring.|FullyQualifiedName~Farm.Web.Api.Tests.Network.|FullyQualifiedName~Farm.Infrastructure.Settings.Tests.IAppSettingTests."
         },
         {
           "name": "services",
           "namespacePrefixes": ["Repositories", "Security", "Services", "Slicing", "Startup", "TestHelpers", "TestInfrastructure", "Util", "(root)"],
-          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Repositories|FullyQualifiedName~Farm.Web.Api.Tests.Security|FullyQualifiedName~Farm.Web.Api.Tests.Services|FullyQualifiedName~Farm.Web.Api.Tests.Slicing|FullyQualifiedName~Farm.Web.Api.Tests.Startup|FullyQualifiedName~Farm.Web.Api.Tests.TestHelpers|FullyQualifiedName~Farm.Web.Api.Tests.TestInfrastructure|FullyQualifiedName~Farm.Web.Api.Tests.Util"
+          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Repositories.|FullyQualifiedName~Farm.Web.Api.Tests.Security.|FullyQualifiedName~Farm.Web.Api.Tests.Services.|FullyQualifiedName~Farm.Web.Api.Tests.Slicing.|FullyQualifiedName~Farm.Web.Api.Tests.Startup.|FullyQualifiedName~Farm.Web.Api.Tests.TestHelpers.|FullyQualifiedName~Farm.Web.Api.Tests.TestInfrastructure.|FullyQualifiedName~Farm.Web.Api.Tests.Util.|FullyQualifiedName~Farm.Web.Api.Tests.BackendSelectionTests.|FullyQualifiedName~Farm.Web.Api.Tests.CameraContractClassifierTests.|FullyQualifiedName~Farm.Web.Api.Tests.DiscoveryDtoContractTests.|FullyQualifiedName~Farm.Web.Api.Tests.FileConsistencyIntegrationTests.|FullyQualifiedName~Farm.Web.Api.Tests.FlashForgeClientBusyTests.|FullyQualifiedName~Farm.Web.Api.Tests.GracefulShutdownServiceTests.|FullyQualifiedName~Farm.Web.Api.Tests.HealthCheckDiscoveryTests.|FullyQualifiedName~Farm.Web.Api.Tests.JobStateMachineTests.|FullyQualifiedName~Farm.Web.Api.Tests.MaintenanceSerializationTests.|FullyQualifiedName~Farm.Web.Api.Tests.MoonrakerClientBusyTests.|FullyQualifiedName~Farm.Web.Api.Tests.MoonrakerSnapmakerU1CameraTests.|FullyQualifiedName~Farm.Web.Api.Tests.NetworkDiscoveryServiceTests.|FullyQualifiedName~Farm.Web.Api.Tests.NotificationServiceDeliveryTests.|FullyQualifiedName~Farm.Web.Api.Tests.NotificationServicePushSubscriptionTests.|FullyQualifiedName~Farm.Web.Api.Tests.OctoPrintClientTests.|FullyQualifiedName~Farm.Web.Api.Tests.OpenApiDocumentTests.|FullyQualifiedName~Farm.Web.Api.Tests.PasswordPolicyControllerTests.|FullyQualifiedName~Farm.Web.Api.Tests.PasswordPolicyServiceTests.|FullyQualifiedName~Farm.Web.Api.Tests.PasswordSecurityTests.|FullyQualifiedName~Farm.Web.Api.Tests.SdcpClientBusyTests.|FullyQualifiedName~Farm.Web.Api.Tests.TelegramNotificationChannelTests.|FullyQualifiedName~Farm.Web.Api.Tests.TelegramNotificationSenderTests."
         }
       ],
       "requiresProviders": ["postgres", "sqlserver"],
@@ -140,6 +140,23 @@
       "runIntegration": false,
       "leg": "Farm.Modules.SmartPlug.Tests",
       "notes": "New in issue #2036 (Phase 8: the SmartPlug/PowerMonitor pilot vertical-slice module moved out of Farm.Web.Api into Farm.Modules.SmartPlug, depending on Farm.Modules.Abstractions' IApiModule seam from #2035). Unlike Farm.Modules.Abstractions.Tests above, this project gets its own narrow select-dotnet-tests.sh buckets (smartplug/tests_smartplug) rather than full-safe, since it is a concrete leaf module with a single dependent test project -- the pattern later Farm.Modules.* phases (9-18) should copy. The retained CustomWebApplicationFactory-based integration test for /api/admin/power-monitors (AdminPowerMonitorsControllerTests) and RouteTableSnapshotTests both stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's smartplug bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module)."
+    },
+    {
+      "name": "Farm.Modules.Maintenance.Tests",
+      "testProject": "tests/Farm.Modules.Maintenance.Tests/Farm.Modules.Maintenance.Tests.csproj",
+      "productionProject": "modules/Farm.Modules.Maintenance/Farm.Modules.Maintenance.csproj",
+      "pathPrefixes": ["src/tests/Farm.Modules.Maintenance.Tests/"],
+      "dependsOnProjects": [
+        "src/modules/Farm.Modules.Maintenance/",
+        "src/modules/Farm.Modules.Abstractions/",
+        "src/infra/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Modules.Maintenance.Tests",
+      "notes": "New in issue #2037 (Phase 9: the Maintenance vertical slice -- Services/Maintenance/**, MaintenanceHub, the 5 Maintenance*Controller attribute-routed controllers, and their DTOs/Requests -- moved out of Farm.Web.Api into Farm.Modules.Maintenance, depending on Farm.Modules.Abstractions' IApiModule seam from #2035). Follows the Farm.Modules.SmartPlug.Tests pattern above: its own narrow select-dotnet-tests.sh buckets (maintenance/tests_maintenance) rather than full-safe. This phase additionally proves a SignalR hub can map from a module (MaintenanceHub is the first hub to move out of the host, via endpoints.MapHub in MaintenanceApiModule.MapEndpoints). Several CustomWebApplicationFactory-based tests for maintenance surfaces that did not move (e.g. MaintenanceHubAuthorizationIntegrationTests, MaintenanceScheduleDeploymentToolheadScopeTests, RouteTableSnapshotTests) stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's maintenance bucket also selects Farm.Web.Api.Tests."
     },
     {
       "name": "Farm.Modules.Calibration.Tests",
