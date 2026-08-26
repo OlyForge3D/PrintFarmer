@@ -26,7 +26,10 @@
 #      path is left unchanged (would otherwise silently vanish from the CI
 #      matrix since select-dotnet-tests.sh looks entries up by name), and
 #   9. FAILs when an API shard filter drops a root-level test class even though
-#      the directory-level `(root)` ownership marker still exists.
+#      the directory-level `(root)` ownership marker still exists, and
+#  10. FAILs closed (rather than silently misattributing) when a test source
+#      file has two public classes at indentation levels that are neither
+#      equal nor a single clean 4-space nesting step apart.
 # =============================================================================
 
 set -uo pipefail
@@ -326,8 +329,50 @@ with open(out_path, "w", encoding="utf-8") as f:
     printf '  expected validator to fail when a shard filter drops a root test, but it passed\n' >&2
     return 1
   fi
-  if [[ "$report" != *"filter does not cover test source PasswordSecurityTests.cs"* ]]; then
+  if [[ "$report" != *"no shard filter covers test source PasswordSecurityTests.cs class PasswordSecurityTests"* ]]; then
     printf '  expected a shard-filter-coverage error, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_sibling_indentation_mismatch_fails() {
+  # Negative: two public classes in one file at indentation levels that are
+  # neither equal (both top-level) nor exactly one 4-space nesting step
+  # apart (top-level + its one nested fixture) must fail closed rather than
+  # silently treating the more-indented one as a nested fixture and
+  # dropping its facts from shard-coverage consideration. This is the
+  # scenario a stray extra space on a genuine second top-level class would
+  # produce -- the validator must refuse to guess, not misattribute.
+  local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/Controllers/_ScratchIndentGuardTests.cs"
+  cat >"$scratch" <<'EOF'
+namespace Farm.Web.Api.Tests.Controllers;
+
+public class ScratchIndentGuardTests
+{
+    [Fact]
+    public void Foo()
+    {
+    }
+}
+
+ public class ScratchIndentGuardSiblingTests
+{
+    [Fact]
+    public void Bar()
+    {
+    }
+}
+EOF
+  local rc=0
+  local report
+  report="$(bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$scratch"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail on mismatched sibling indentation, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"public class declarations at indentation levels"* ]]; then
+    printf '  expected an indentation-disambiguation error, got:\n%s\n' "$report" >&2
     return 1
   fi
 }
@@ -342,6 +387,7 @@ TESTS=(
   case_pinned_default_filter_narrowed_fails
   case_canonical_name_renamed_fails
   case_api_shard_filter_coverage_fails
+  case_sibling_indentation_mismatch_fails
 )
 
 printf '=== dotnet test manifest validator regression suite ===\n'

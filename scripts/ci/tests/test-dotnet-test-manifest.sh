@@ -446,7 +446,36 @@ for sharded_entry in entries:
                 line_start = text.rfind("\n", 0, pos) + 1
                 return pos - line_start
 
-            min_indent = min(_indent(m.start()) for m in class_matches)
+            # Guardrail against the indentation heuristic itself: a genuine
+            # sibling top-level class that is accidentally mis-indented by a
+            # stray space (a formatting slip, not real nesting) would
+            # otherwise be silently excluded as "nested" -- exactly the kind
+            # of false pass this validator exists to prevent, since a
+            # class-specific shard filter naming only the correctly-indented
+            # sibling would then wrongly appear to cover both. Rather than
+            # guess, require every observed indentation to be either the
+            # file's minimum (a top-level class) or exactly one 4-space
+            # nesting step above it (the one nested-fixture idiom this
+            # heuristic is designed to handle); anything else -- a third
+            # indentation level, or a gap that isn't a clean 4-space step --
+            # fails the validator closed instead of silently misattributing.
+            NESTED_INDENT_STEP = 4
+            indents = sorted({_indent(m.start()) for m in class_matches})
+            if len(indents) > 2 or (
+                len(indents) == 2 and indents[1] != indents[0] + NESTED_INDENT_STEP
+            ):
+                errors.append(
+                    f"{entry_name}: test source {relative} has public class "
+                    f"declarations at indentation levels {indents}, which the "
+                    "shard-coverage validator cannot safely disambiguate into "
+                    "top-level vs. nested fixture classes (expected either a "
+                    "single indentation level, or exactly two levels "
+                    f"{NESTED_INDENT_STEP} spaces apart) -- refusing to guess "
+                    "which class(es) own the [Fact]/[Theory] attributes here"
+                )
+                continue
+
+            min_indent = indents[0]
             class_positions = [
                 (m.start(), m.group(1))
                 for m in class_matches
