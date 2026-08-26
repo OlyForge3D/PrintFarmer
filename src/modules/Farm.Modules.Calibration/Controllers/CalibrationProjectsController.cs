@@ -5,6 +5,7 @@ using Farm.Web.Api.Contracts;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Services.Calibration;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
 

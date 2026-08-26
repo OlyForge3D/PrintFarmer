@@ -3,7 +3,9 @@ using System.Text.Json.Nodes;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Contracts;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Calibration;
 
