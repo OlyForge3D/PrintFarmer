@@ -60,6 +60,8 @@ public sealed class ProfileFamilyEndToEndHttpTests : IAsyncDisposable
     private const string SourceManufacturer = "Prusa";
     private const string SourceModel = "Prusa Test";
     private const string SourceMachine = "Prusa Test 0.4 nozzle";
+    private const string SourceFilament = "Generic PLA @Prusa Test";
+    private const string SourceProcess = "0.20mm Standard @Prusa Test 0.4";
     private const string FamilyName = "E2E Farm";
     private const string WorkerBaseUrl = "http://e2e-worker";
 
@@ -152,6 +154,59 @@ public sealed class ProfileFamilyEndToEndHttpTests : IAsyncDisposable
         profiles!.Should().ContainSingle(profile =>
             profile.Name == $"{FamilyName} 0.4 nozzle" &&
             profile.PrinterModel == FamilyName);
+
+        // Extend #2073 coverage beyond machine lookup: a real slice job also
+        // needs a compatible process and filament for the cloned printer.
+        // `POST process/for-machines` and `POST filament/for-machines` are
+        // exactly the endpoints slice submission uses to enumerate what's
+        // available, so if propagation broke for either axis (e.g., a future
+        // regression in BuildProcessClones / BuildFilamentClones or the
+        // machine_model parser fix that unblocks them), a slice couldn't
+        // proceed even though machine lookup returned 200. Assert both.
+        string clonedMachineName = $"{FamilyName} 0.4 nozzle";
+        var machinesRequest = new { MachineNames = new[] { clonedMachineName } };
+
+        using HttpResponseMessage processResponse = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/process/for-machines",
+            machinesRequest);
+        processResponse.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "immediately after the clone, POST process/for-machines MUST return " +
+            "200 for the cloned machine — a slice job selects a process next, " +
+            "and if this fails, the user still can't slice against the new family " +
+            "without a worker restart (the exact #2073 symptom, one axis over).");
+        List<ProcessProfileDto>? processes =
+            await processResponse.Content.ReadFromJsonAsync<List<ProcessProfileDto>>();
+        processes.Should().NotBeNullOrEmpty(
+            "the cloned family MUST expose at least one process profile compatible " +
+            "with the cloned machine; empty means BuildProcessClones dropped the " +
+            "source process or the reload didn't pick up the new custom bundle.");
+        processes!.Should().Contain(
+            profile => profile.CompatiblePrinters.Contains(clonedMachineName),
+            "at least one returned process must be marked compatible with the cloned " +
+            "machine so slice submission can select it without a manual reassignment.");
+
+        using HttpResponseMessage filamentResponse = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/filament/for-machines",
+            machinesRequest);
+        filamentResponse.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "immediately after the clone, POST filament/for-machines MUST return " +
+            "200 for the cloned machine — a slice job selects a filament last, " +
+            "and if this fails, the user still can't slice against the new family " +
+            "without a worker restart (the exact #2073 symptom, one axis over).");
+        List<FilamentProfileDto>? filaments =
+            await filamentResponse.Content.ReadFromJsonAsync<List<FilamentProfileDto>>();
+        filaments.Should().NotBeNullOrEmpty(
+            "the cloned family MUST expose at least one filament profile compatible " +
+            "with the cloned machine; empty means BuildFilamentClones dropped the " +
+            "source filament (e.g., because Manufacturer resolved to " +
+            "OrcaFilamentLibrary and was filtered) or the reload didn't pick up " +
+            "the new custom bundle.");
+        filaments!.Should().Contain(
+            profile => profile.CompatiblePrinters.Contains(clonedMachineName),
+            "at least one returned filament must be marked compatible with the cloned " +
+            "machine so slice submission can select it without a manual reassignment.");
     }
 
     /// <inheritdoc />
@@ -286,8 +341,15 @@ public sealed class ProfileFamilyEndToEndHttpTests : IAsyncDisposable
     /// bundle here declares one machine model and one machine, with the
     /// machine model file living at the referenced sub-path so
     /// <c>OrcaProfilesService.ListAvailableMachineModelProfilesAsync</c> picks
-    /// it up. The caller writes to both the stock root and the overlay root
-    /// so <c>CachedOrcaProfilesService</c> and <c>CustomProfileBundleStore</c>
+    /// it up. The bundle also includes one filament and one process profile
+    /// tied to the source machine — needed so <c>BuildFilamentClones</c> /
+    /// <c>BuildProcessClones</c> (which are downstream of the fix) actually
+    /// have material to clone. Without those, the immediate-slicing contract
+    /// (issue #2073) is only proven for the machine axis; a slice job also
+    /// needs a compatible filament and process to run, so this test now
+    /// asserts all three axes propagate through the real HTTP round-trip. The
+    /// caller writes to both the stock root and the overlay root so
+    /// <c>CachedOrcaProfilesService</c> and <c>CustomProfileBundleStore</c>
     /// see the same content without needing filesystem symlinks (which require
     /// elevated privileges on Windows).
     /// </summary>
@@ -296,8 +358,12 @@ public sealed class ProfileFamilyEndToEndHttpTests : IAsyncDisposable
         string machinePath = Path.Join(profilesPath, SourceManufacturer, "machine");
         string machineModelPath = Path.Join(
             profilesPath, SourceManufacturer, "machine_model");
+        string filamentPath = Path.Join(profilesPath, SourceManufacturer, "filament");
+        string processPath = Path.Join(profilesPath, SourceManufacturer, "process");
         Directory.CreateDirectory(machinePath);
         Directory.CreateDirectory(machineModelPath);
+        Directory.CreateDirectory(filamentPath);
+        Directory.CreateDirectory(processPath);
         File.WriteAllText(
             Path.Join(profilesPath, $"{SourceManufacturer}.json"),
             $$"""
@@ -316,8 +382,18 @@ public sealed class ProfileFamilyEndToEndHttpTests : IAsyncDisposable
                   "sub_path": "machine/{{SourceMachine}}.json"
                 }
               ],
-              "process_list": [],
-              "filament_list": []
+              "process_list": [
+                {
+                  "name": "{{SourceProcess}}",
+                  "sub_path": "process/{{SourceProcess}}.json"
+                }
+              ],
+              "filament_list": [
+                {
+                  "name": "{{SourceFilament}}",
+                  "sub_path": "filament/{{SourceFilament}}.json"
+                }
+              ]
             }
             """,
             Encoding.UTF8);
@@ -348,6 +424,33 @@ public sealed class ProfileFamilyEndToEndHttpTests : IAsyncDisposable
             }
             """,
             Encoding.UTF8);
+        File.WriteAllText(
+            Path.Join(filamentPath, $"{SourceFilament}.json"),
+            $$"""
+            {
+              "type": "filament",
+              "name": "{{SourceFilament}}",
+              "from": "system",
+              "instantiation": "true",
+              "filament_vendor": ["E2E Vendor"],
+              "filament_type": ["PLA"],
+              "compatible_printers": ["{{SourceMachine}}"]
+            }
+            """,
+            Encoding.UTF8);
+        File.WriteAllText(
+            Path.Join(processPath, $"{SourceProcess}.json"),
+            $$"""
+            {
+              "type": "process",
+              "name": "{{SourceProcess}}",
+              "from": "system",
+              "instantiation": "true",
+              "layer_height": "0.2",
+              "compatible_printers": ["{{SourceMachine}}"]
+            }
+            """,
+            Encoding.UTF8);
     }
 
     /// <summary>
@@ -361,6 +464,14 @@ public sealed class ProfileFamilyEndToEndHttpTests : IAsyncDisposable
         HttpMessageHandler innerHandler,
         List<string> recorder) : DelegatingHandler(innerHandler)
     {
+        // Defense-in-depth: the outer test calls the API sequentially, but
+        // nothing prevents a future refactor from firing concurrent worker
+        // requests behind a single API call — a concurrent Add on a
+        // List<string> can throw IndexOutOfRangeException or produce a
+        // corrupted diagnostic string. Serializing all recorder access under
+        // this lock keeps append + read-for-diagnostic both atomic.
+        private readonly Lock _recorderLock = new();
+
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
@@ -371,12 +482,20 @@ public sealed class ProfileFamilyEndToEndHttpTests : IAsyncDisposable
                 HttpResponseMessage response = await base
                     .SendAsync(request, cancellationToken)
                     .ConfigureAwait(false);
-                recorder.Add($"{request.Method} {uri} -> {(int)response.StatusCode}");
+                lock (_recorderLock)
+                {
+                    recorder.Add($"{request.Method} {uri} -> {(int)response.StatusCode}");
+                }
+
                 return response;
             }
             catch (Exception ex)
             {
-                recorder.Add($"{request.Method} {uri} -> EXCEPTION {ex.GetType().Name}: {ex.Message}");
+                lock (_recorderLock)
+                {
+                    recorder.Add($"{request.Method} {uri} -> EXCEPTION {ex.GetType().Name}: {ex.Message}");
+                }
+
                 throw;
             }
         }
