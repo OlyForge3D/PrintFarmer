@@ -68,7 +68,16 @@
 #      `dollar_count == 2` literal, a single '{' is literal text and only a
 #      genuine '{{' run opens a hole, the reverse of what the round-8 fix
 #      assumed; 37 files in this repository use two-dollar raw strings
-#      today, so this was a live gap, not a theoretical one).
+#      today, so this was a live gap, not a theoretical one), AND correctly
+#      attributes EXCESS braces in a longer-than-`dollar_count` run to the
+#      START of an opening run and the END of a closing run as literal
+#      content, per the C# 11 spec (round-10 reviewer finding: the round-9
+#      fix consumed the FIRST `dollar_count` braces of an opening run as the
+#      hole opener rather than the LAST `dollar_count`, mis-attributing any
+#      excess leading brace as a nested code brace and desyncing
+#      `hole_depth` whenever the matching closing run has no excess of its
+#      own to absorb it, which silently swallowed a following sibling class
+#      and left the file's overall brace count unbalanced at EOF).
 # =============================================================================
 
 set -uo pipefail
@@ -624,25 +633,29 @@ EOF
 }
 
 case_multi_dollar_raw_string_hole_requires_matching_brace_run() {
-  # Positive (round-9 fix, proves no misattribution): for a raw string opened
-  # with `dollar_count` leading '$' signs, C# 11 requires a run of exactly
-  # `dollar_count` consecutive '{' (not just one) to open an interpolation
-  # hole, and a matching run of `dollar_count` consecutive '}' to close it --
-  # a rule the round-8 fix did not yet implement (it special-cased a single
-  # '{' as "opens" and a doubled '{{' as "escaped literal", borrowing
-  # ordinary interpolated-string escaping semantics that do not apply to raw
-  # strings at all). That mismatch is not a rare corner case: 37 files in
-  # this repository use `$$"""` two-dollar raw strings today, and Hicks'
-  # round-9 finding gave a concrete, real-shaped adversarial construction
-  # using one -- `$$"""outer{{Build("""nested""")}}outer"""` -- where the
-  # single literal braces around ordinary text are NOT hole-openers (a lone
-  # '{' is fewer than the required two) while the doubled '{{'/'}}' pair
-  # genuinely does open/close a hole containing a nested raw string. Proving
-  # both classes below (the two-dollar hole case and its sibling) are still
-  # correctly separated and reported as coverage gaps -- with no
-  # "unbalanced braces" false pass -- confirms the fix generalizes correctly
-  # to `dollar_count >= 2`, not just the `dollar_count == 1` cases rounds 7
-  # and 8 exercised.
+  # Positive (round-10 fix, proves no misattribution): per the C# 11
+  # raw-string-interpolation spec, when a run of consecutive '{' is longer
+  # than the literal's own `dollar_count`, the EXCESS braces at the START
+  # of the run are literal content and only the LAST `dollar_count` braces
+  # of the run are the actual hole opener (mirrored on the closing side:
+  # excess trailing '}' beyond `dollar_count` are literal content that
+  # follows the hole). The round-9 fix got this backwards -- it consumed
+  # the FIRST `dollar_count` braces of the run as the opener and handed any
+  # excess brace to the hole's own code scan, which mis-attributes that
+  # excess brace as a real nested code brace and desyncs `hole_depth`
+  # whenever the matching close side has no excess of its own to absorb
+  # it. That is not a cosmetic difference: this fixture's open run is three
+  # '{' (dollar_count=2, one excess) but its close run is exactly two '}'
+  # (no excess), so under the round-9 fix the hole never closes via its
+  # intended matching run and the scanner runs on past the literal's true
+  # closing delimiter, swallowing the sibling class below entirely and
+  # leaving the file's overall brace count UNBALANCED at EOF -- proven by
+  # empirically running both the round-9 and round-10 tokenizers against
+  # this exact fixture. Proving both classes below are still correctly
+  # separated and reported as coverage gaps, with no "unbalanced braces"
+  # false pass, confirms the excess-brace attribution is now correct on
+  # both sides of the hole, not just the equal-run-length case rounds 8
+  # and 9 exercised.
   local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/_ScratchMultiDollarRawStringHoleTests.cs"
   cat >"$scratch" <<'EOF'
 namespace Farm.Web.Api.Tests;
@@ -654,7 +667,7 @@ public class ScratchMultiDollarRawStringHoleTests
     [Fact]
     public void Foo()
     {
-        string s = $$"""outer{{Build("""nested""")}}outer""";
+        string s = $$"""literal{{{Build("""nested""")}}outer""";
     }
 }
 
@@ -675,11 +688,11 @@ EOF
     return 1
   fi
   if [[ "$report" == *"unbalanced braces"* ]]; then
-    printf '  multi-dollar raw string hole desynced the brace count instead of being handled, got:\n%s\n' "$report" >&2
+    printf '  multi-dollar raw string hole with excess leading braces desynced the brace count instead of being handled, got:\n%s\n' "$report" >&2
     return 1
   fi
   if [[ "$report" != *"no shard filter covers test source _ScratchMultiDollarRawStringHoleTests.cs class ScratchMultiDollarRawStringHoleTests"* ]]; then
-    printf '  expected a coverage-gap error naming the two-dollar-hole class, got:\n%s\n' "$report" >&2
+    printf '  expected a coverage-gap error naming the multi-dollar-hole class, got:\n%s\n' "$report" >&2
     return 1
   fi
   if [[ "$report" != *"no shard filter covers test source _ScratchMultiDollarRawStringHoleTests.cs class ScratchMultiDollarRawStringHoleSiblingTests"* ]]; then

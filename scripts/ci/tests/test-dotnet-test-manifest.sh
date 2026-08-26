@@ -140,29 +140,38 @@ def _strip_noncode(text):
         interpolation hole -- per C# 11 raw-string-interpolation rules, the
         number of braces needed to open a hole is exactly the string's own
         dollar count, so e.g. a two-dollar-sign raw string literal needs
-        `{{` to open a hole (a lone
-        `{` is literal body text, not a hole -- unlike an ordinary
-        interpolated string or a single-`$` raw string, where one `{`
-        always opens). Only the first `dollar_count` characters of that run
-        are consumed as the opener (and blanked); any further consecutive
-        '{' beyond that are handed to the hole's own code scan as ordinary
-        code text (e.g. the start of a nested object-initializer or lambda
-        body), which is exactly correct since they are indeed code once the
-        hole itself has opened. The hole's contents are scanned by
+        `{{` to open a hole (a lone '{' is literal body text, not a hole --
+        unlike an ordinary interpolated string or a single-`$` raw string,
+        where one '{' always opens). When the run is LONGER than
+        `dollar_count`, the spec resolves the ambiguity by treating the
+        EXCESS braces at the START of the run as literal content and only
+        the LAST `dollar_count` braces of the run as the actual opener --
+        e.g. for `$$`, a run of three '{' is one literal '{' followed by
+        the two-brace opener '{{' (mirrored on the closing side: `}}}` is
+        the two-brace closer followed by one literal '}'). This is the
+        "excess braces are content, pushed to the outer edge away from the
+        hole" rule from the C# 11 spec (a run of `2*dollar_count - 1`
+        braces is the longest one where every brace is still content
+        adjacent to a hole of one fewer brace; `2*dollar_count` or more is
+        a compile error). Once the opener is consumed, the hole's contents
+        are scanned by
         `scan_code(..., stop_at_hole_close=True, hole_close_run=dollar_count)`
         -- the same recursive hole scanner `scan_string` already uses for
         ordinary interpolated strings, extended here to require a matching
         `dollar_count`-length run of '}' to actually close the hole at
-        brace-nesting depth zero, mirroring the open side. This means a
-        nested string literal (raw or otherwise) inside the hole is scanned
-        by its own dedicated call -- with its own independent
-        closing-delimiter search -- rather than being swallowed into this
-        literal's blunt "search body text for the next quote_run-or-more
-        run" search. That blunt search is exactly what let a hole
-        containing a nested raw string literal (of any quote-run length,
-        whether shorter, equal to, or longer than this literal's own
-        `quote_run`) be mistaken for this literal's own closer, since the
-        naive search has no concept of "inside a hole" vs. "in body text".
+        brace-nesting depth zero (consuming only the FIRST `hole_close_run`
+        of that run as the closer, leaving any excess '}' as literal body
+        text for this function to resume scanning, mirroring the open
+        side). This means a nested string literal (raw or otherwise) inside
+        the hole is scanned by its own dedicated call -- with its own
+        independent closing-delimiter search -- rather than being
+        swallowed into this literal's blunt "search body text for the next
+        quote_run-or-more run" search. That blunt search is exactly what
+        let a hole containing a nested raw string literal (of any
+        quote-run length, whether shorter, equal to, or longer than this
+        literal's own `quote_run`) be mistaken for this literal's own
+        closer, since the naive search has no concept of "inside a hole"
+        vs. "in body text".
 
         For `dollar_count == 0` (a non-interpolated raw string, no holes are
         possible), the body is blanked in one pass exactly as before.
@@ -184,10 +193,20 @@ def _strip_noncode(text):
                 while j < n and text[j] == "{":
                     j += 1
                 if j - i >= dollar_count:
-                    hole_open_end = i + dollar_count
-                    blanks.append((i, hole_open_end))
+                    # Per the C# 11 raw-string-interpolation spec, when a
+                    # run of consecutive '{' is longer than `dollar_count`,
+                    # the EXCESS braces at the START of the run are literal
+                    # content and the LAST `dollar_count` braces of the run
+                    # are the hole opener (the mirror image of the closing
+                    # side below, which keeps the FIRST `hole_close_run`
+                    # braces of its run as the closer and treats any excess
+                    # at the END of that run as literal content). E.g. for
+                    # `$$` (dollar_count=2), a run of three '{' is one
+                    # literal '{' followed by the two-brace opener '{{'.
+                    hole_open_start = j - dollar_count
+                    blanks.append((hole_open_start, j))
                     i = scan_code(
-                        hole_open_end,
+                        j,
                         stop_at_hole_close=True,
                         hole_close_run=dollar_count,
                     )
