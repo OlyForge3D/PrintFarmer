@@ -20,6 +20,8 @@ intentionally unchanged from their prior Farm.Web.Api location (move-first-renam
   <ItemGroup>
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
     <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
+    <!-- SlicePrintBridgeController bridges to IArtifactsService/Artifact/ISliceJobRepository/SliceJob. -->
+    <ProjectReference Include="..\..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
   </ItemGroup>
 
 </Project>

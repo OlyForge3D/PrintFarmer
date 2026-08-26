@@ -202,7 +202,12 @@ IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 // Vertical-slice API module discovery/registration seam (issue #2035, epic #2019). Discovery
 // only scans assemblies explicitly listed here. Farm.Modules.SmartPlug is the pilot module
 // (issue #2036) -- the first assembly to move a controller + services out of the monolith.
-builder.Services.AddApiModules(mvcBuilder, builder.Configuration, typeof(Farm.Modules.SmartPlug.SmartPlugApiModule).Assembly);
+// Farm.Modules.PrintQueue (issue #2040, Phase 12) is the second.
+builder.Services.AddApiModules(
+    mvcBuilder,
+    builder.Configuration,
+    typeof(Farm.Modules.SmartPlug.SmartPlugApiModule).Assembly,
+    typeof(Farm.Modules.PrintQueue.PrintQueueApiModule).Assembly);
 
 if (slicerModuleEnabled)
 {

@@ -13,7 +13,6 @@ using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
-using Farm.Web.Api.Services.Gcode;
 using Farm.Web.Api.Services.Gcode.Safety;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -45,7 +44,7 @@ public class SlicePrintBridgeController(
     IJobQueueService? jobQueueService = null,
     ISliceGcodeImportService? importService = null,
     ISpoolmanService? spoolmanService = null,
-    IGcodeFilesService? gcodeFilesService = null,
+    IGcodeFileDeleter? gcodeFilesService = null,
     IDispatchClaimService? dispatchClaimService = null,
     IQueueResourceAuthorizationService? resourceAuthorization = null) : ControllerBase
 {

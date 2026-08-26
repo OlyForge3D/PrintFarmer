@@ -728,6 +728,8 @@ public static class ServiceCollectionExtensions
             Services.Gcode.Safety.GcodeSafetyValidator>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeFileProcessingService>(sp =>
             (Farm.Infrastructure.Services.Gcode.IGcodeFileProcessingService)sp.GetRequiredService<Services.Gcode.IGcodeFilesService>());
+        _ = services.AddScoped<Farm.Infrastructure.Services.Interfaces.IGcodeFileDeleter>(sp =>
+            (Farm.Infrastructure.Services.Interfaces.IGcodeFileDeleter)sp.GetRequiredService<Services.Gcode.IGcodeFilesService>());
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IHarvestEventBroadcaster, Services.Gcode.SignalRHarvestEventBroadcaster>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeHarvestService, Farm.Infrastructure.Services.Gcode.GcodeHarvestService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.ISliceGcodeImportService, Farm.Infrastructure.Services.Gcode.SliceGcodeImportService>();
