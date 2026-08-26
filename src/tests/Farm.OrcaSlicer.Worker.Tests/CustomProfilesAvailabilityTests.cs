@@ -68,6 +68,51 @@ public sealed class CustomProfilesAvailabilityTests
         currentResponse.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(InvalidOperationException))]
+    public async Task ProfilesAreCurrent_WhenFingerprintThrows_FailsClosed(
+        Type exceptionType)
+    {
+        CustomProfilesReconciliationState state = new();
+        state.MarkReady("loaded");
+        int fingerprintCalls = 0;
+        SuccessHandler innerHandler = new();
+        using var handler = new CustomProfilesClaimAvailabilityHandler(
+            state,
+            () =>
+            {
+                fingerprintCalls++;
+                throw exceptionType == typeof(IOException)
+                    ? new IOException()
+                    : new InvalidOperationException();
+            })
+        {
+            InnerHandler = innerHandler,
+        };
+        using HttpMessageInvoker client = new(handler);
+        using HttpRequestMessage claim =
+            new(HttpMethod.Post, "http://api/api/slice/claim");
+        using HttpRequestMessage complete =
+            new(HttpMethod.Post, "http://api/api/slice/jobs/id/complete");
+
+        using HttpResponseMessage claimResponse =
+            await client.SendAsync(claim, CancellationToken.None);
+        using HttpResponseMessage completeResponse =
+            await client.SendAsync(complete, CancellationToken.None);
+
+        claimResponse.StatusCode.Should()
+            .Be(HttpStatusCode.ServiceUnavailable);
+        claimResponse.ReasonPhrase.Should()
+            .Be("Custom profiles are not synchronized");
+        state.IsReady.Should().BeFalse();
+        state.Failure.Should()
+            .Be("Shared custom profiles changed; local reconciliation is pending.");
+        completeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        fingerprintCalls.Should().Be(1);
+        innerHandler.RequestCount.Should().Be(1);
+    }
+
     [Fact]
     public async Task ReconciliationHealthCheck_StateChanges_TracksReadiness()
     {
@@ -109,9 +154,14 @@ public sealed class CustomProfilesAvailabilityTests
 
     private sealed class SuccessHandler : HttpMessageHandler
     {
+        public int RequestCount { get; private set; }
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            CancellationToken cancellationToken)
+        {
+            RequestCount++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }
     }
 }
