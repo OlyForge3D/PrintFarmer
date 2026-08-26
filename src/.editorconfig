@@ -719,7 +719,8 @@ dotnet_diagnostic.S5332.severity = none
 [api/Services/Discovery/DiscoveryProxyService.cs]
 dotnet_diagnostic.S5332.severity = none
 
-[api/Services/SmartPlug/*.cs]
+# SmartPlug providers talk to LAN devices that often only support HTTP (issue #2036).
+[modules/Farm.Modules.SmartPlug/Services/SmartPlug/*.cs]
 dotnet_diagnostic.S5332.severity = none
 
 # SignalR test helper generates local/private demo URLs only.

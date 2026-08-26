@@ -123,6 +123,23 @@
       "notes": "New in issue #2035 (Phase 7: Farm.Modules.Abstractions + IApiModule host seam). select-dotnet-tests.sh treats src/modules/** and src/tests/Farm.Modules.Abstractions.Tests/** as full-safe (modules/tests_modules buckets) rather than a narrower path-selection bucket, since the module host seam is foundational and every future Farm.Modules.* vertical slice will reference it."
     },
     {
+      "name": "Farm.Modules.SmartPlug.Tests",
+      "testProject": "tests/Farm.Modules.SmartPlug.Tests/Farm.Modules.SmartPlug.Tests.csproj",
+      "productionProject": "modules/Farm.Modules.SmartPlug/Farm.Modules.SmartPlug.csproj",
+      "pathPrefixes": ["src/tests/Farm.Modules.SmartPlug.Tests/"],
+      "dependsOnProjects": [
+        "src/modules/Farm.Modules.SmartPlug/",
+        "src/modules/Farm.Modules.Abstractions/",
+        "src/infra/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Modules.SmartPlug.Tests",
+      "notes": "New in issue #2036 (Phase 8: the SmartPlug/PowerMonitor pilot vertical-slice module moved out of Farm.Web.Api into Farm.Modules.SmartPlug, depending on Farm.Modules.Abstractions' IApiModule seam from #2035). Unlike Farm.Modules.Abstractions.Tests above, this project gets its own narrow select-dotnet-tests.sh buckets (smartplug/tests_smartplug) rather than full-safe, since it is a concrete leaf module with a single dependent test project -- the pattern later Farm.Modules.* phases (9-18) should copy. The retained CustomWebApplicationFactory-based integration test for /api/admin/power-monitors (AdminPowerMonitorsControllerTests) and RouteTableSnapshotTests both stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's smartplug bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module)."
+    },
+    {
       "name": "Farm.Web.IntegrationTests",
       "testProject": "tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj",
       "productionProject": "api/Farm.Web.Api.csproj",
