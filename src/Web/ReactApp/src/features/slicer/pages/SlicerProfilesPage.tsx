@@ -274,6 +274,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
       setAllowSystemOverride(false);
       setSetDefault(false);
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
     },
     onError: (err) => {
@@ -286,6 +287,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     onSuccess: () => {
       setMessage('Default profile updated.');
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
     },
     onError: (err) => setMessage(`Failed to set default: ${err.message}`)
@@ -297,6 +299,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
       setMessage(`Deleted ${result.totalDeleted} profiles (${result.machineProfilesDeleted} machine, ${result.processProfilesDeleted} process, ${result.filamentProfilesDeleted} filament)${result.notFound > 0 ? ` - ${result.notFound} not found` : ''}`);
       setSelectedProfileIds(new Set());
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
@@ -309,6 +312,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     onSuccess: (result) => {
       setMessage(`Created custom profile: ${result.name}`);
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
@@ -327,6 +331,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
       setUploadError(null);
       setIsUploadModalOpen(false);
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
@@ -342,6 +347,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
       setEditingProfile(null);
       setEditError(null);
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
@@ -354,6 +360,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     onSuccess: () => {
       setMessage('Profile deleted');
       qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
@@ -895,6 +902,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
           setReseedMessage(`✅ ${data.imported} profiles imported, ${data.skipped} skipped, ${data.deleted} deleted`);
           // Refresh the profiles list
           qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+          qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
           qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
         }
       });
@@ -1100,7 +1108,14 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                     <option value="100">100</option>
                   </Select>
                 </div>
-                <Button variant="secondary" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] })}>Refresh</Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
+                    qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
+                  }}
+                >Refresh</Button>
               </div>
               {(searchQuery || filterManufacturer !== 'all' || filterEngine !== 'all' || filterSource !== 'all' || selectedMachineProfileId || selectedFilamentProfileId || selectedProcessProfileId) && (
                 <Button
