@@ -124,7 +124,10 @@ public sealed class SqliteNativePushSchemaUpgradeTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            // Connection string already has Pooling=False, so no pool entries need
+            // releasing here. Avoid the process-wide ClearAllPools(), which would
+            // disrupt unrelated tests' pooled SQLite connections running concurrently
+            // now that this assembly is no longer fully serialized.
             File.Delete(databasePath);
             File.Delete(databasePath + "-shm");
             File.Delete(databasePath + "-wal");

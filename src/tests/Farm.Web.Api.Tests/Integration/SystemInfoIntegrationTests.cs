@@ -16,9 +16,20 @@ namespace Farm.Web.Api.Tests.Integration;
 /// <summary>
 /// Integration tests for the <c>/api/system/info</c> endpoint.
 /// </summary>
-public class SystemInfoIntegrationTests : IAsyncLifetime
+public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTests.Factory>, IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory;
+    public class Factory : CustomWebApplicationFactory
+    {
+        public Factory()
+            : base(new Dictionary<string, string?>
+            {
+                ["Security:DevModeBypassAuth"] = "false",
+            })
+        {
+        }
+    }
+
+    private readonly Factory _factory;
     private HttpClient? _adminClient;
     private HttpClient? _nonAdminClient;
 
@@ -29,17 +40,14 @@ public class SystemInfoIntegrationTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public SystemInfoIntegrationTests()
+    public SystemInfoIntegrationTests(Factory factory)
     {
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
-        {
-            ["Security:DevModeBypassAuth"] = "false",
-        });
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _adminClient = await _factory.CreateAdminClientAsync();
         _nonAdminClient = await _factory.CreateAuthenticatedClientAsync(
             username: "system-info-user",
@@ -48,11 +56,11 @@ public class SystemInfoIntegrationTests : IAsyncLifetime
         await SeedSystemInfoDataAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _adminClient?.Dispose();
         _nonAdminClient?.Dispose();
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     [Fact]

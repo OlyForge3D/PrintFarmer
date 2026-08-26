@@ -105,7 +105,7 @@ public sealed class DirectApnsNativePushSenderTests : IDisposable
         using var cts = new CancellationTokenSource();
         try
         {
-            await sut.JwtLockForTests.WaitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            await sut.JwtLockForTests.WaitAsync().WaitAsync(TimeSpan.FromSeconds(15));
             Task<NativePushDispatchResult> send = sut.SendAsync(Sample, transportStart, cts.Token);
             await Task.Yield();
             send.IsCompleted.Should().BeFalse(
@@ -113,7 +113,7 @@ public sealed class DirectApnsNativePushSenderTests : IDisposable
 
             cts.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                async () => await send.WaitAsync(TimeSpan.FromSeconds(5)));
+                async () => await send.WaitAsync(TimeSpan.FromSeconds(15)));
             transportStart.Calls.Should().Be(0);
         }
         finally
@@ -397,9 +397,9 @@ public sealed class DirectApnsNativePushSenderTests : IDisposable
         try
         {
             Task<NativePushDispatchResult> send = sut.SendAsync(Sample, CancellationToken.None);
-            await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
 
-            NativePushDispatchResult result = await send.WaitAsync(TimeSpan.FromSeconds(5));
+            NativePushDispatchResult result = await send.WaitAsync(TimeSpan.FromSeconds(15));
 
             result.IsTransient.Should().BeTrue();
             result.Reason.Should().Be("timeout");
@@ -422,11 +422,11 @@ public sealed class DirectApnsNativePushSenderTests : IDisposable
         try
         {
             Task<NativePushDispatchResult> send = sut.SendAsync(Sample, cts.Token);
-            await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
             cts.Cancel();
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                async () => await send.WaitAsync(TimeSpan.FromSeconds(5)));
+                async () => await send.WaitAsync(TimeSpan.FromSeconds(15)));
             handler.ObservedCancellation.Should().BeTrue();
         }
         finally
@@ -970,8 +970,8 @@ public sealed class DirectApnsNativePushSenderTests : IDisposable
             Task<NativePushDispatchResult> aTask = Task.Run(() => sut.SendAsync(Sample));
             Task<NativePushDispatchResult> bTask = Task.Run(() => sut.SendAsync(Sample));
 
-            DeterministicApnsHandler.PendingRequest req0 = await handler.ObserveRequestAsync(0).WaitAsync(TimeSpan.FromSeconds(5));
-            DeterministicApnsHandler.PendingRequest req1 = await handler.ObserveRequestAsync(1).WaitAsync(TimeSpan.FromSeconds(5));
+            DeterministicApnsHandler.PendingRequest req0 = await handler.ObserveRequestAsync(0).WaitAsync(TimeSpan.FromSeconds(15));
+            DeterministicApnsHandler.PendingRequest req1 = await handler.ObserveRequestAsync(1).WaitAsync(TimeSpan.FromSeconds(15));
 
             string jwt1 = req0.Authorization!;
             jwt1.Should().NotBeNullOrEmpty();
@@ -985,7 +985,7 @@ public sealed class DirectApnsNativePushSenderTests : IDisposable
             handler.RespondWith(0, Forbidden("InvalidProviderToken"));
 
             // Whichever task's HTTP was at idx 0 completes now. Identify it by WhenAny.
-            Task<NativePushDispatchResult> firstDone = await Task.WhenAny(aTask, bTask).WaitAsync(TimeSpan.FromSeconds(5));
+            Task<NativePushDispatchResult> firstDone = await Task.WhenAny(aTask, bTask).WaitAsync(TimeSpan.FromSeconds(15));
             NativePushDispatchResult resFirst = await firstDone;
             resFirst.IsTransient.Should().BeTrue();
             resFirst.Reason.Should().Be("invalid_provider_token");
@@ -994,7 +994,7 @@ public sealed class DirectApnsNativePushSenderTests : IDisposable
             // Step 4: C runs while req1's HTTP is still parked. C must sign a fresh JWT_2
             // that differs *by content* from JWT_1 (proves cache was cleared).
             handler.EnqueueAutoResponse(new HttpResponseMessage(HttpStatusCode.OK));
-            NativePushDispatchResult resC = await sut.SendAsync(Sample).WaitAsync(TimeSpan.FromSeconds(5));
+            NativePushDispatchResult resC = await sut.SendAsync(Sample).WaitAsync(TimeSpan.FromSeconds(15));
             resC.Success.Should().BeTrue();
 
             DeterministicApnsHandler.PendingRequest reqC = handler.RequestAt(2);
@@ -1005,13 +1005,13 @@ public sealed class DirectApnsNativePushSenderTests : IDisposable
             // Step 5: release req1's stale 403. Compare-and-clear must NOT clear the refreshed
             // cache (failedJwt=JWT_1, cachedJwt=JWT_2, they differ → cache stays).
             handler.RespondWith(1, Forbidden("InvalidProviderToken"));
-            NativePushDispatchResult resSecond = await stillPending.WaitAsync(TimeSpan.FromSeconds(5));
+            NativePushDispatchResult resSecond = await stillPending.WaitAsync(TimeSpan.FromSeconds(15));
             resSecond.IsTransient.Should().BeTrue();
             resSecond.Reason.Should().Be("invalid_provider_token");
 
             // Step 6: D must reuse JWT_2 — no third signing.
             handler.EnqueueAutoResponse(new HttpResponseMessage(HttpStatusCode.OK));
-            NativePushDispatchResult resD = await sut.SendAsync(Sample).WaitAsync(TimeSpan.FromSeconds(5));
+            NativePushDispatchResult resD = await sut.SendAsync(Sample).WaitAsync(TimeSpan.FromSeconds(15));
             resD.Success.Should().BeTrue();
 
             DeterministicApnsHandler.PendingRequest reqD = handler.RequestAt(3);
@@ -1063,13 +1063,13 @@ public sealed class DirectApnsNativePushSenderTests : IDisposable
         {
             // (1) Warm-up: seed the cache with JWT_1 via a straight 200.
             handler.EnqueueAutoResponse(new HttpResponseMessage(HttpStatusCode.OK));
-            NativePushDispatchResult warm = await sut.SendAsync(Sample).WaitAsync(TimeSpan.FromSeconds(5));
+            NativePushDispatchResult warm = await sut.SendAsync(Sample).WaitAsync(TimeSpan.FromSeconds(15));
             warm.Success.Should().BeTrue();
 
             // (2) External hold on the JWT semaphore. From this point any WaitAsync on
             //     _jwtLock blocks until we release. Semaphore is proven to be entered
             //     because InvalidateJwtCacheAsync's WaitAsync will never complete.
-            await sut.JwtLockForTests.WaitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            await sut.JwtLockForTests.WaitAsync().WaitAsync(TimeSpan.FromSeconds(15));
 
             // (3) Hook: signal deterministically when B reaches the point immediately
             //     before its InvalidateJwtCacheAsync WaitAsync. RunContinuationsAsynchronously
@@ -1096,7 +1096,7 @@ public sealed class DirectApnsNativePushSenderTests : IDisposable
             //     from step (2), that WaitAsync is guaranteed to block (or, if scheduling
             //     interleaves the cancel first, to observe cancellation at entry). Either
             //     way the caller's OCE is the mandated behavior.
-            await bAtInvalidateWait.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await bAtInvalidateWait.Task.WaitAsync(TimeSpan.FromSeconds(15));
 
             // (6) B must not have completed — proves it is not spinning or synchronously
             //     draining. Sanity-check: give it one yield to let any inline continuation
@@ -1110,7 +1110,7 @@ public sealed class DirectApnsNativePushSenderTests : IDisposable
             bCts.Cancel();
 
             OperationCanceledException oce = await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                async () => await bTask.WaitAsync(TimeSpan.FromSeconds(5)));
+                async () => await bTask.WaitAsync(TimeSpan.FromSeconds(15)));
 
             oce.Should().NotBeNull("WaitAsync must be interrupted by the caller's cancellation, not deadlock");
             // The thrown OCE's token should be the caller's (or a linked descendant carrying it);

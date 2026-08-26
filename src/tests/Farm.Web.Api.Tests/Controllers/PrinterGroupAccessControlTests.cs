@@ -19,25 +19,26 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// Integration tests for printer group access control endpoints.
 /// Tests GET/PUT access rules, backward compatibility, and pre-submission checks.
 /// </summary>
-public class PrinterGroupAccessControlTests : IAsyncLifetime
+public class PrinterGroupAccessControlTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient _adminClient = null!;
 
-    public PrinterGroupAccessControlTests()
+    public PrinterGroupAccessControlTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
+        await _factory.ResetDataAsync();
         _adminClient = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _adminClient?.Dispose();
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     private async Task<Guid> SeedPrinterGroupAsync(string name = "Test Group")

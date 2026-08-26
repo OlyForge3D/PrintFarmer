@@ -23,8 +23,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// so the next job dispatches immediately without the PendingReady gate.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class AutoDispatchPreClearTests : IAsyncLifetime
+public class AutoDispatchPreClearTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private const string CurrentRouteBase = "/api/auto-dispatch";
     private readonly CustomWebApplicationFactory _factory;
@@ -37,21 +36,20 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
-    public AutoDispatchPreClearTests()
+    public AutoDispatchPreClearTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
     public Task DisposeAsync()
     {
         _client?.Dispose();
-        _factory?.Dispose();
         return Task.CompletedTask;
     }
 

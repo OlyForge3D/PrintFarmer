@@ -27,8 +27,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// Tests cost calculation service logic, cost endpoints, and data persistence.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class JobCostCalculationTests : IAsyncLifetime
+public class JobCostCalculationTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
@@ -39,21 +38,21 @@ public class JobCostCalculationTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
-    public JobCostCalculationTests()
+    public JobCostCalculationTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _client?.Dispose();
-        _factory?.Dispose();
+        return Task.CompletedTask;
     }
 
     /// <summary>

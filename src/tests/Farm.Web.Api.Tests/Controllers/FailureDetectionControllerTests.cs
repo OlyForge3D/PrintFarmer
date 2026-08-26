@@ -21,8 +21,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// Tests monitoring status, manual analysis, and event history endpoints.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class FailureDetectionControllerTests : IAsyncLifetime
+public class FailureDetectionControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
@@ -33,21 +32,21 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
-    public FailureDetectionControllerTests()
+    public FailureDetectionControllerTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _client?.Dispose();
-        _factory?.Dispose();
+        return Task.CompletedTask;
     }
 
     [Fact(DisplayName = "GetStatus returns 200 with failure detection status")]
@@ -95,7 +94,7 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         {
             ["Obico:Enabled"] = "false"
         });
-        await disabledFactory.ResetDatabaseAsync();
+        await disabledFactory.ResetDataAsync();
         using HttpClient disabledClient = await disabledFactory.CreateAdminClientAsync();
 
         HttpResponseMessage disabledResponse = await disabledClient.GetAsync("/api/failure-detection/status");
@@ -110,7 +109,7 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         {
             ["Obico:Enabled"] = "true"
         });
-        await enabledFactory.ResetDatabaseAsync();
+        await enabledFactory.ResetDataAsync();
         using HttpClient enabledClient = await enabledFactory.CreateAdminClientAsync();
 
         HttpResponseMessage enabledResponse = await enabledClient.GetAsync("/api/failure-detection/status");

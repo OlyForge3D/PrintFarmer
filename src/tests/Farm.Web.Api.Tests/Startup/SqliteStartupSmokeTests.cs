@@ -49,7 +49,15 @@ public sealed class SqliteStartupSmokeTests
         finally
         {
             Environment.SetEnvironmentVariable(skipStartupVariable, originalSkipStartup);
-            SqliteConnection.ClearAllPools();
+            // Scope the pool clear to this test's own connection string instead of
+            // calling the process-wide ClearAllPools(), which would disrupt other
+            // tests' pooled SQLite connections running concurrently now that this
+            // assembly is no longer fully serialized.
+            using (var pooledConnection = new SqliteConnection($"Data Source={databasePath}"))
+            {
+                SqliteConnection.ClearPool(pooledConnection);
+            }
+
             Directory.Delete(tempDirectory, recursive: true);
         }
     }

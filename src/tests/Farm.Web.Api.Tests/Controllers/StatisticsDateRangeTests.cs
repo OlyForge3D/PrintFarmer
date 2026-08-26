@@ -19,8 +19,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// and 400 responses for invalid ranges.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class StatisticsDateRangeTests : IAsyncLifetime
+public class StatisticsDateRangeTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
@@ -31,21 +30,20 @@ public class StatisticsDateRangeTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    public StatisticsDateRangeTests()
+    public StatisticsDateRangeTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
     public Task DisposeAsync()
     {
         _client?.Dispose();
-        _factory?.Dispose();
         return Task.CompletedTask;
     }
 

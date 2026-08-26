@@ -20,28 +20,29 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// Tests CRUD operations, printer assignment/removal, authorization, and validation.
 /// Uses CustomWebApplicationFactory with in-memory SQLite for isolated test data.
 /// </summary>
-public class PrinterGroupsControllerTests : IAsyncLifetime
+public class PrinterGroupsControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient _authenticatedClient = null!;
     private HttpClient _unauthenticatedClient = null!;
 
-    public PrinterGroupsControllerTests()
+    public PrinterGroupsControllerTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
+        await _factory.ResetDataAsync();
         _authenticatedClient = await _factory.CreateAdminClientAsync();
         _unauthenticatedClient = _factory.CreateClient();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _authenticatedClient?.Dispose();
         _unauthenticatedClient?.Dispose();
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     private static string UniquePrinterServerUrl()

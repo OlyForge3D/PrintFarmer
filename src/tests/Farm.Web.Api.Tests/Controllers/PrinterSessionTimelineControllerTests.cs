@@ -12,8 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Farm.Web.Api.Tests.Controllers;
 
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public sealed class PrinterSessionTimelineControllerTests : IAsyncLifetime
+public sealed class PrinterSessionTimelineControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private static readonly JsonSerializerOptions _jsonOptions = new()
@@ -23,19 +22,18 @@ public sealed class PrinterSessionTimelineControllerTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public PrinterSessionTimelineControllerTests()
+    public PrinterSessionTimelineControllerTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
     }
 
     public Task DisposeAsync()
     {
-        _factory.Dispose();
         return Task.CompletedTask;
     }
 

@@ -25,8 +25,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// must surface PendingReady so the UI can render the confirmation prompt.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class AutoDispatchPendingReadyTests : IAsyncLifetime
+public class AutoDispatchPendingReadyTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private const string CurrentRouteBase = "/api/auto-dispatch";
 
@@ -40,21 +39,20 @@ public class AutoDispatchPendingReadyTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
-    public AutoDispatchPendingReadyTests()
+    public AutoDispatchPendingReadyTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
     public Task DisposeAsync()
     {
         _client?.Dispose();
-        _factory.Dispose();
         return Task.CompletedTask;
     }
 

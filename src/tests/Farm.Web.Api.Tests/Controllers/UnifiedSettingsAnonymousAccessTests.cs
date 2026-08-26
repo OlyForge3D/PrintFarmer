@@ -22,22 +22,33 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// anonymous paths are genuinely unauthenticated.
 /// </remarks>
 [Trait("Category", "Integration")]
-public class UnifiedSettingsAnonymousAccessTests : IAsyncLifetime
+public class UnifiedSettingsAnonymousAccessTests : IClassFixture<UnifiedSettingsAnonymousAccessTests.Factory>, IAsyncLifetime
 {
-    private CustomWebApplicationFactory _factory = null!;
-
-    public Task InitializeAsync()
+    public class Factory : CustomWebApplicationFactory
     {
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
+        public Factory() : base(new Dictionary<string, string?>
         {
             ["Security:DevModeBypassAuth"] = "false",
-        });
-        return _factory.ResetDatabaseAsync();
+        })
+        {
+        }
     }
 
-    public async Task DisposeAsync()
+    private readonly Factory _factory;
+
+    public UnifiedSettingsAnonymousAccessTests(Factory factory)
     {
-        await _factory.DisposeAsync();
+        _factory = factory;
+    }
+
+    public async Task InitializeAsync()
+    {
+        await _factory.ResetDataAsync();
+    }
+
+    public Task DisposeAsync()
+    {
+        return Task.CompletedTask;
     }
 
     // ─── Endpoint 1: GET /api/settings (aggregate read) ─────────────────────

@@ -110,9 +110,14 @@ public class PowerMonitorAggregationTests : IDisposable
             provider.GetRequiredService<IConfiguration>(),
             NullLogger<PowerMonitorPollingService>.Instance);
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+        // The service runs its first poll cycle immediately on StartAsync (PollIntervalSeconds
+        // only governs the delay *between* cycles), so 2s is normally ample headroom for one
+        // cycle to complete. Under full test-suite parallelism (dozens of concurrent hosts
+        // competing for the same thread pool/CPU), that cycle can occasionally be delayed past
+        // 2s, so both the wait and the overall CTS lifetime are widened proportionally.
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(15));
         await svc.StartAsync(cts.Token);
-        await Task.Delay(TimeSpan.FromSeconds(2));
+        await Task.Delay(TimeSpan.FromSeconds(8));
         await svc.StopAsync(CancellationToken.None);
 
         using AppDbContext assertContext = contextFactory();
@@ -418,9 +423,11 @@ public class PowerMonitorAggregationTests : IDisposable
             provider.GetRequiredService<IConfiguration>(),
             NullLogger<PowerMonitorPollingService>.Instance);
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+        // See RunAggregationCycleAsync above for why these timeouts are widened under full
+        // test-suite parallelism.
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(15));
         await svc.StartAsync(cts.Token);
-        await Task.Delay(TimeSpan.FromSeconds(2));
+        await Task.Delay(TimeSpan.FromSeconds(8));
         await svc.StopAsync(CancellationToken.None);
 
         using AppDbContext assertContext = CreateContext();

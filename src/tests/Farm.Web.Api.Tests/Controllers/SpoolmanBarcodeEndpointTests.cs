@@ -323,7 +323,7 @@ public class SpoolmanBarcodeEndpointTests
     public async Task GetBarcodeScanLogsAsync_Admin_ReturnsLogsNewestFirst()
     {
         await using CustomWebApplicationFactory factory = new(new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" });
-        await factory.ResetDatabaseAsync();
+        await factory.ResetDataAsync();
         await SeedScanLogsAsync(factory);
         using HttpClient client = await factory.CreateAdminClientAsync();
 
@@ -353,7 +353,7 @@ public class SpoolmanBarcodeEndpointTests
     public async Task GetBarcodeScanLogsAsync_NonAdmin_ReturnsForbidden()
     {
         await using CustomWebApplicationFactory factory = new(new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" });
-        await factory.ResetDatabaseAsync();
+        await factory.ResetDataAsync();
         using HttpClient client = await factory.CreateAuthenticatedClientAsync("barcode-user", "barcode-user@example.com");
 
         HttpResponseMessage response = await client.GetAsync("/api/spoolman/barcodes/scan-logs");
