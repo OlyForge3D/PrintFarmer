@@ -10,11 +10,9 @@ using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Slicer.Module.Domain;
+using Farm.Testing.Shared;
 using Farm.Web.Api.Services.Authentication;
-using Farm.Web.Api.Tests.TestInfrastructure;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -26,58 +24,40 @@ namespace Farm.Web.Api.Tests;
 
 // Provides isolated in-memory SQLite database for each test instance.
 // Uses SQLite in-memory with shared cache so each factory instance gets its own isolated database.
-public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyncDisposable
+public class CustomWebApplicationFactory : HostFixture<Program>
 {
     // Each test gets a unique in-memory database using named connection
-    private readonly string _connectionString;
-    private readonly string _modelStoragePath;
-    private readonly string _gcodeStoragePath;
-    private readonly SqliteConnection _keepAliveConnection;
     private readonly Dictionary<string, string?>? _configOverrides;
     private static int _databaseCounter = 0;
 
     public CustomWebApplicationFactory() : this(configOverrides: null) { }
 
+    // Use a named shared in-memory database and keep one connection open for the factory lifetime.
+    // This prevents SQLite from treating the string as a file path and avoids intermittent IO errors.
+    // "Default Timeout" sets SQLite's busy_timeout: this factory opens several independent
+    // connections against the same shared in-memory database during startup (a throwaway
+    // ServiceProvider that runs EnsureCreated/CreateTables here, and the real host's own
+    // SlicerDbInitializationHostedService migration once it starts). Under the heavy CPU
+    // contention this suite now runs under with the parallelism cap lifted, those can be
+    // slow enough to genuinely overlap, and SQLite's in-memory journal takes an exclusive
+    // write lock — without a busy timeout, a second writer fails immediately with
+    // "SQLite Error 5: database is locked" instead of waiting the (very short) real time it
+    // takes for the first writer's transaction to complete.
+    // "Pooling=False" disables Microsoft.Data.Sqlite's internal connection pool for this
+    // connection string. AppDbContext and SlicerDbContext are both configured with the exact
+    // same connection string, so with pooling enabled they draw from the same pool key; a
+    // pooled connection handed back to one context while a statement from the other context
+    // is still active (e.g. mid-migration) can make SQLite reject a subsequent collation
+    // registration with "SQLite Error 5: unable to delete/modify collation sequence due to
+    // active statements". Disabling pooling forces every Open() to create a genuinely
+    // distinct native connection handle (all still attached to the same shared in-memory
+    // database via cache=shared), which removes that cross-context reuse hazard.
     internal CustomWebApplicationFactory(Dictionary<string, string?>? configOverrides)
+        : base(
+            $"farm_test_{System.Threading.Interlocked.Increment(ref _databaseCounter)}",
+            "Default Timeout=30;Pooling=False")
     {
         _configOverrides = configOverrides;
-
-        // Create a unique in-memory database per factory instance
-        // Using auto-increment ID ensures complete isolation between tests
-        int dbId = System.Threading.Interlocked.Increment(ref _databaseCounter);
-        // Use a named shared in-memory database and keep one connection open for the factory lifetime.
-        // This prevents SQLite from treating the string as a file path and avoids intermittent IO errors.
-        // "Default Timeout" sets SQLite's busy_timeout: this factory opens several independent
-        // connections against the same shared in-memory database during startup (a throwaway
-        // ServiceProvider that runs EnsureCreated/CreateTables here, and the real host's own
-        // SlicerDbInitializationHostedService migration once it starts). Under the heavy CPU
-        // contention this suite now runs under with the parallelism cap lifted, those can be
-        // slow enough to genuinely overlap, and SQLite's in-memory journal takes an exclusive
-        // write lock — without a busy timeout, a second writer fails immediately with
-        // "SQLite Error 5: database is locked" instead of waiting the (very short) real time it
-        // takes for the first writer's transaction to complete.
-        // "Pooling=False" disables Microsoft.Data.Sqlite's internal connection pool for this
-        // connection string. AppDbContext and SlicerDbContext are both configured with the exact
-        // same connection string, so with pooling enabled they draw from the same pool key; a
-        // pooled connection handed back to one context while a statement from the other context
-        // is still active (e.g. mid-migration) can make SQLite reject a subsequent collation
-        // registration with "SQLite Error 5: unable to delete/modify collation sequence due to
-        // active statements". Disabling pooling forces every Open() to create a genuinely
-        // distinct native connection handle (all still attached to the same shared in-memory
-        // database via cache=shared), which removes that cross-context reuse hazard.
-        _keepAliveConnection = new SqliteConnection(
-            $"Data Source=file:farm_test_{dbId}?mode=memory&cache=shared;Default Timeout=30;Pooling=False");
-        _keepAliveConnection.Open();
-        _connectionString = _keepAliveConnection.ConnectionString;
-
-        // Create temp directories for file storage (isolated per test)
-        string tempDir = Path.Join(Path.GetTempPath(), $"farm_test_{Guid.NewGuid()}");
-        _modelStoragePath = Path.Join(tempDir, "models");
-        _gcodeStoragePath = Path.Join(tempDir, "gcode");
-
-        // Create the directories
-        Directory.CreateDirectory(_modelStoragePath);
-        Directory.CreateDirectory(_gcodeStoragePath);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -96,8 +76,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             Dictionary<string, string?> testConfig = new()
             {
                 ["WorkerAuth:SharedKey"] = "test-worker-key",
-                ["STORAGE_PATHS:UPLOADS"] = _modelStoragePath,
-                ["STORAGE_PATHS:GCODE"] = _gcodeStoragePath
+                ["STORAGE_PATHS:UPLOADS"] = ModelStoragePath,
+                ["STORAGE_PATHS:GCODE"] = GcodeStoragePath
             };
 
             // Merge any caller-supplied config overrides (e.g., "Slicer:Enabled" = "false")
@@ -161,14 +141,14 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             services.AddDbContext<AppDbContext>(options =>
             {
                 options.UseSqlite(
-                    _connectionString,
+                    ConnectionString,
                     sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
             });
 
             // Re-register DbContextFactory with the test SQLite connection (same pattern as production)
             DbContextOptionsBuilder<AppDbContext> optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
             optionsBuilder.UseSqlite(
-                _connectionString,
+                ConnectionString,
                 sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
             services.AddSingleton(optionsBuilder.Options);
             services.AddDbContextFactory<AppDbContext>();
@@ -242,13 +222,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 services.AddDbContext<Farm.Slicer.Module.Data.SlicerDbContext>(options =>
                 {
                     options.UseSqlite(
-                        _connectionString,
+                        ConnectionString,
                         sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
                 });
 
                 DbContextOptionsBuilder<Farm.Slicer.Module.Data.SlicerDbContext> slicerOptionsBuilder = new();
                 slicerOptionsBuilder.UseSqlite(
-                    _connectionString,
+                    ConnectionString,
                     sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
                 services.AddSingleton(slicerOptionsBuilder.Options);
                 services.AddDbContextFactory<Farm.Slicer.Module.Data.SlicerDbContext>();
@@ -323,39 +303,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     /// Connection string of this factory's isolated in-memory SQLite database. Split-deployment
     /// tests need it so a separate slicer-host test server can read the same profile tables.
     /// </summary>
-    internal string TestConnectionString => _connectionString;
-
-    /// <summary>
-    /// Cleans up temporary directories created during test setup.
-    /// </summary>
-    public override async ValueTask DisposeAsync()
-    {
-        // Clean up temporary storage directories
-        try
-        {
-            string? tempDir = Path.GetDirectoryName(_modelStoragePath);
-            if (!string.IsNullOrEmpty(tempDir) && Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
-        }
-        catch
-        {
-            // Ignore cleanup errors (files might be locked)
-        }
-
-        try
-        {
-            _keepAliveConnection.Close();
-            _keepAliveConnection.Dispose();
-        }
-        catch
-        {
-            // Ignore connection cleanup errors
-        }
-
-        await base.DisposeAsync();
-    }
+    internal string TestConnectionString => ConnectionString;
 
     /// <summary>
     /// Creates an authenticated HTTP client with a valid JWT bearer token.

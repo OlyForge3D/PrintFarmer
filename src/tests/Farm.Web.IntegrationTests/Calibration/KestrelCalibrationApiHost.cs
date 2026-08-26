@@ -3,7 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using Farm.Infrastructure.Data;
 using Farm.Slicer.Module.Data;
-using Farm.Web.Api.Tests.TestInfrastructure;
+using Farm.Testing.Shared;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
