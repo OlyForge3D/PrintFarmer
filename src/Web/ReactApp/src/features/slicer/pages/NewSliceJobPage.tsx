@@ -21,7 +21,6 @@ import { apiClient } from '@/services/api';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { getErrorMessage } from '@/common/utils/apiErrors';
 import { createSlicerRegistryConnection } from '@/services/slicerRegistryHubConnection';
-import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import { ProcessProfileEditorModal } from '@/features/slicer/components/ProcessProfileEditorModal';
 import { MachineProfileSelectorModal, type MachineProfileChoice } from '@/features/slicer/components/job/MachineProfileSelectorModal';
@@ -47,7 +46,7 @@ import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
 import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Alert, Input, Select, ColorPicker, ProgressBar } from '@/common/components/ui';
+import { Button, Alert, Card, Input, Select, ColorPicker, ProgressBar } from '@/common/components/ui';
 import { LayersIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon, SwapHorizontalIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
@@ -74,6 +73,26 @@ interface NozzleOption {
   value: string;
   diameter: number;
   label: string;
+}
+
+type MachineProfilesErrorCode = 'no_profiles_for_model' | 'alias_matched_no_profiles';
+
+interface MachineProfilesErrorBody {
+  code?: string;
+  detail?: string;
+}
+
+interface MachineProfilesQueryError {
+  message?: string;
+  statusCode?: number;
+  data?: MachineProfilesErrorBody;
+}
+
+function getMachineProfilesErrorCode(error: MachineProfilesQueryError | null): MachineProfilesErrorCode | undefined {
+  const code = error?.data?.code;
+  return code === 'no_profiles_for_model' || code === 'alias_matched_no_profiles'
+    ? code
+    : undefined;
 }
 
 /**
@@ -744,8 +763,6 @@ export const NewSliceJobPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isSTLPreviewOpen, setIsSTLPreviewOpen] = useState(false);
-  const [isCloneProfilesModalOpen, setIsCloneProfilesModalOpen] = useState(false);
-  const [cloneProfilesDismissed, setCloneProfilesDismissed] = useState(false);
   
   // Profile Editor Modal State
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
@@ -954,12 +971,17 @@ export const NewSliceJobPage: React.FC = () => {
   }, [selectedPrinterDetails]);
 
   // Fetch machine profiles for the selected printer's model
-  const { data: machineProfilesData = [], isLoading: isMachineProfilesLoading } = useQuery<OrcaMachineProfile[]>({
+  const {
+    data: machineProfilesData = [],
+    error: machineProfilesError,
+    isLoading: isMachineProfilesLoading,
+  } = useQuery<OrcaMachineProfile[], MachineProfilesQueryError>({
     queryKey: ['machineProfilesForModel', selectedPrinterModelId, selectedEngineVersion ?? latestAvailableForEngine ?? null],
     queryFn: () => slicerProfilesService.getMachineProfilesForModel(selectedPrinterModelId!, selectedEngineVersion ?? latestAvailableForEngine),
     enabled: !!selectedPrinterModelId,
     staleTime: 30_000
   });
+  const machineProfilesErrorCode = getMachineProfilesErrorCode(machineProfilesError);
 
   // === CUSTOM PROFILES (Hybrid Architecture) ===
   // Fetch user's custom profiles to merge with system profiles
@@ -1373,45 +1395,6 @@ export const NewSliceJobPage: React.FC = () => {
     processProfilesData,
     customProcessProfiles,
   ]);
-
-  // Check if printer has no profiles - show clone suggestion
-  // IMPORTANT: Only suggest clone AFTER machine profiles have loaded and we know there are none
-  // This prevents the modal from showing during loading states
-  const shouldSuggestCloneProfiles = useMemo(() => {
-    // Don't suggest if user already dismissed for this session
-    if (cloneProfilesDismissed) return false;
-    // Don't suggest if no printer selected
-    if (!selectedPrinterId) return false;
-    // Don't suggest if printer has no modelId (query won't run)
-    if (!selectedPrinterModelId) return false;
-    // Don't suggest while machine profiles are still loading
-    if (isMachineProfilesLoading) return false;
-    // Don't suggest while custom profiles are still loading
-    if (isCustomProfilesLoading) return false;
-    // Don't suggest if any system or custom machine profile is currently selectable
-    if (hasVisibleMachineProfiles) return false;
-    // Suggest if machine profiles query completed but returned empty
-    // (meaning OrcaSlicer has no profiles for this printer model)
-    if (machineProfilesData.length === 0) return true;
-    // Don't suggest if we have machine profiles (process profiles will load after machine selection)
-    return false;
-  }, [selectedPrinterId, selectedPrinterModelId, machineProfilesData.length, isMachineProfilesLoading, isCustomProfilesLoading, hasVisibleMachineProfiles, cloneProfilesDismissed]);
-
-  // Auto-open clone profiles modal if printer selected but has no profiles
-  // Only opens once per printer selection - user dismissal is respected
-  useEffect(() => {
-    if (shouldSuggestCloneProfiles && !isCloneProfilesModalOpen) {
-      const timer = setTimeout(() => {
-        setIsCloneProfilesModalOpen(true);
-      }, 500); // Increased delay to ensure profiles have time to load
-      return () => clearTimeout(timer);
-    }
-  }, [shouldSuggestCloneProfiles, isCloneProfilesModalOpen]);
-
-  // Reset dismissal state when printer changes
-  useEffect(() => {
-    queueMicrotask(() => setCloneProfilesDismissed(false));
-  }, [selectedPrinterId]);
 
   // Machine profiles for profile selection - use incremental machine profiles
   // Flat list of all available filament profiles for lookup
@@ -2223,9 +2206,8 @@ export const NewSliceJobPage: React.FC = () => {
   // worker directly), so it must never be treated the same as "unconfigured".
   // When a worker is registered but the *selected* printer's model has no
   // matching profile, that is a specific, actionable mismatch communicated
-  // inline further down the page (e.g. "No machine profiles available for
-  // this printer model" / the clone-profiles prompt) — not full onboarding
-  // (issue #1760).
+  // by the reason-specific empty state further down the page — not full
+  // onboarding (issue #1760).
   if (!isProfilesSummaryLoading && !isRegisteredEnginesLoading && !hasAnyMachineProfiles && !hasRegisteredEngine) {
     return (
       <PageTemplate
@@ -2509,8 +2491,69 @@ export const NewSliceJobPage: React.FC = () => {
                 No machine profiles available for the current nozzle. Open the machine profile picker to choose another.
               </p>
             )}
-            {selectedPrinterId && machineProfilesData.length === 0 && !hasVisibleMachineProfiles && selectedManufacturer && selectedPrinterModel && (
-              <p className="text-xs text-pf-warning mt-1">No machine profiles available for this printer model</p>
+            {selectedPrinterId
+              && machineProfilesData.length === 0
+              && !hasVisibleMachineProfiles
+              && !isMachineProfilesLoading
+              && !isCustomProfilesLoading
+              && selectedManufacturer
+              && selectedPrinterModel
+              && (
+              <section
+                className="mt-3"
+                aria-labelledby="machine-profiles-empty-heading"
+                aria-live="polite"
+              >
+                <Card className="border-pf-warning/40 bg-pf-warning/5">
+                  <Card.Body className="space-y-3">
+                    <div className="space-y-1">
+                      <h3 id="machine-profiles-empty-heading" className="text-sm font-semibold text-pf-text-primary">
+                        {machineProfilesErrorCode === 'no_profiles_for_model'
+                          ? `No OrcaSlicer profiles for ${selectedPrinterModel}`
+                          : machineProfilesErrorCode === 'alias_matched_no_profiles'
+                            ? `No matching OrcaSlicer profiles for ${selectedPrinterModel}`
+                            : `Machine profiles unavailable for ${selectedPrinterModel}`}
+                      </h3>
+                      {machineProfilesErrorCode === 'no_profiles_for_model' ? (
+                        <p className="text-sm text-pf-text-secondary">
+                          OrcaSlicer doesn't ship profiles for this printer model. A profile family will let you
+                          choose the closest supported machine and nozzle sizes, adjust shared settings such as
+                          build volume once, and generate matching machine, process, and filament profiles.
+                        </p>
+                      ) : machineProfilesErrorCode === 'alias_matched_no_profiles' ? (
+                        <p className="text-sm text-pf-text-secondary">
+                          PrintFarmer found an OrcaSlicer alias for this model, but the slicer returned no matching
+                          profiles. This is likely a profile-coverage or slicer-engine-version issue.
+                        </p>
+                      ) : (
+                        <p className="text-sm text-pf-text-secondary">
+                          {machineProfilesError
+                            ? 'PrintFarmer could not load machine profiles for this printer model. Check the slicer worker and try again.'
+                            : 'No machine profiles were returned for this printer model. Check the selected slicer engine version or manage profiles from the options menu.'}
+                        </p>
+                      )}
+                    </div>
+
+                    {machineProfilesErrorCode === 'no_profiles_for_model' && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="primary"
+                          disabled
+                          explainedDisabled
+                          aria-describedby="create-profile-family-help"
+                          title="Create profile family is coming soon"
+                        >
+                          Create profile family
+                        </Button>
+                        <span id="create-profile-family-help" className="text-xs text-pf-text-secondary">
+                          Coming soon
+                        </span>
+                      </div>
+                    )}
+                  </Card.Body>
+                </Card>
+              </section>
             )}
             {selectedPrinterId && !selectedManufacturer && (
               <p className="text-xs text-pf-warning mt-1">
@@ -3183,26 +3226,6 @@ export const NewSliceJobPage: React.FC = () => {
           onUseModel={() => {
             // Model is already selected, just close the modal
             setIsSTLPreviewOpen(false);
-          }}
-        />
-      )}
-      
-      {/* Clone Profiles Modal - shown when printer selected but has no profiles */}
-      {selectedPrinter && (
-        <CloneProfilesModal
-          isOpen={isCloneProfilesModalOpen}
-          onClose={() => {
-            setIsCloneProfilesModalOpen(false);
-            setCloneProfilesDismissed(true); // Prevent re-opening on cancel
-          }}
-          printerId={selectedPrinterId}
-          printerName={selectedPrinterModel || selectedPrinter.name}
-          onSuccess={() => {
-            // Invalidate profiles cache to reload when modal closes
-            qc.invalidateQueries({ queryKey: ['slicerProfiles'] });
-            qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
-            qc.invalidateQueries({ queryKey: ['machineProfilesForModel'] });
-            qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
           }}
         />
       )}
