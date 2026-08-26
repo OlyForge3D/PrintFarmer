@@ -41,7 +41,7 @@ public sealed class ProfileFamiliesController(
     {
         if (request is null)
         {
-            return BadRequest(new { code = "invalid_profile_family", message = "Request body is required." });
+            return BadRequest(new { code = "invalid_profile_family", detail = "Request body is required." });
         }
 
         if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
@@ -57,15 +57,15 @@ public sealed class ProfileFamiliesController(
         }
         catch (ProfileFamilyConflictException ex)
         {
-            return Conflict(new { code = "profile_family_name_conflict", message = ex.Message });
+            return Conflict(new { code = "profile_family_name_conflict", detail = ex.Message });
         }
         catch (ProfileFamilySourceException ex)
         {
-            return UnprocessableEntity(new { code = "source_preset_unavailable", message = ex.Message });
+            return UnprocessableEntity(new { code = "source_preset_unavailable", detail = ex.Message });
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(new { code = "invalid_profile_family", message = ex.Message });
+            return BadRequest(new { code = "invalid_profile_family", detail = ex.Message });
         }
         catch (HttpRequestException ex)
         {
@@ -75,7 +75,7 @@ public sealed class ProfileFamiliesController(
                 new
                 {
                     code = "profile_family_worker_unavailable",
-                    message = "OrcaSlicer worker unavailable."
+                    detail = "OrcaSlicer worker unavailable."
                 });
         }
         catch (Exception ex)
@@ -83,7 +83,7 @@ public sealed class ProfileFamiliesController(
             _logger.LogError(ex, "Profile-family creation failed");
             return StatusCode(
                 StatusCodes.Status500InternalServerError,
-                new { code = "profile_family_creation_failed", message = "Profile family creation failed." });
+                new { code = "profile_family_creation_failed", detail = "Profile family creation failed." });
         }
     }
 }

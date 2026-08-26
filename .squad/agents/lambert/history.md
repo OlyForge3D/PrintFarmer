@@ -147,3 +147,7 @@ Reconciled Parker's final custom-bundle mutation behavior: HTTP 422 `failures[]`
 ## 2026-08-25 — Final profile-family migration regression verification
 
 Confirmed Parker's 1,352-test SQLite cascade came from the transient enum-default mapping and no longer reproduces: explicit string conversion plus SQL string default passes the exact provider-aware SQLite migration test. Full suite now passes Slicer.Module 1,178/1,178 and exposes only six documented missing-server-environment tests plus two stale expected migration lists; added the PostgreSQL/SQL Server IDs and their focused contract passes 2/2. All three provider snapshots are clean, and custom family/variant hashes remain deterministic and non-null for SQL Server's unfiltered unique index.
+
+## 2026-08-25 — Unified profile-family error envelope
+
+Standardized every explicit Phase 1/Phase 2b API error on `code` + `detail`; clone-family no longer emits `message`, including preserved worker inheritance failures. Focused endpoint test passes and asserts `message` is absent; scoped format passes. Reconfirmed all PostgreSQL/SQL Server/SQLite migration files and clean snapshots, plus deterministic non-null family/child hashes for SQL Server's unfiltered unique index. Per coordinator request, did not rerun the full suite after this final field-name-only edit.

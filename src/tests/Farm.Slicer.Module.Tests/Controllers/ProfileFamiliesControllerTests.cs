@@ -51,6 +51,7 @@ public sealed class ProfileFamiliesControllerTests
             result.Should().BeOfType<UnprocessableEntityObjectResult>().Subject;
         JsonElement body = JsonSerializer.SerializeToElement(unprocessable.Value);
         body.GetProperty("code").GetString().Should().Be("source_preset_unavailable");
-        body.GetProperty("message").GetString().Should().Be(detail);
+        body.GetProperty("detail").GetString().Should().Be(detail);
+        body.TryGetProperty("message", out _).Should().BeFalse();
     }
 }
