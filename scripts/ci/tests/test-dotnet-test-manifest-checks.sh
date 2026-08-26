@@ -58,7 +58,17 @@
 #      interpolated strings already use, instead of blanking the whole body
 #      in one blunt, hole-unaware pass, so a nested literal inside the hole
 #      is scanned by its own dedicated, independent closing-delimiter search
-#      and can never be mistaken for the outer literal's own closer.
+#      and can never be mistaken for the outer literal's own closer, and
+#  15. correctly requires a run of exactly `dollar_count` consecutive braces
+#      (not just one) to open or close an interpolation hole in a raw string
+#      opened with two or more leading '$' signs (round-9 reviewer finding:
+#      the round-8 fix modeled hole-opening as "single '{' opens, doubled
+#      '{{' is an escaped literal", borrowing ordinary interpolated-string
+#      escaping semantics that do not exist in raw strings at all -- for a
+#      `dollar_count == 2` literal, a single '{' is literal text and only a
+#      genuine '{{' run opens a hole, the reverse of what the round-8 fix
+#      assumed; 37 files in this repository use two-dollar raw strings
+#      today, so this was a live gap, not a theoretical one).
 # =============================================================================
 
 set -uo pipefail
@@ -613,6 +623,71 @@ EOF
   fi
 }
 
+case_multi_dollar_raw_string_hole_requires_matching_brace_run() {
+  # Positive (round-9 fix, proves no misattribution): for a raw string opened
+  # with `dollar_count` leading '$' signs, C# 11 requires a run of exactly
+  # `dollar_count` consecutive '{' (not just one) to open an interpolation
+  # hole, and a matching run of `dollar_count` consecutive '}' to close it --
+  # a rule the round-8 fix did not yet implement (it special-cased a single
+  # '{' as "opens" and a doubled '{{' as "escaped literal", borrowing
+  # ordinary interpolated-string escaping semantics that do not apply to raw
+  # strings at all). That mismatch is not a rare corner case: 37 files in
+  # this repository use `$$"""` two-dollar raw strings today, and Hicks'
+  # round-9 finding gave a concrete, real-shaped adversarial construction
+  # using one -- `$$"""outer{{Build("""nested""")}}outer"""` -- where the
+  # single literal braces around ordinary text are NOT hole-openers (a lone
+  # '{' is fewer than the required two) while the doubled '{{'/'}}' pair
+  # genuinely does open/close a hole containing a nested raw string. Proving
+  # both classes below (the two-dollar hole case and its sibling) are still
+  # correctly separated and reported as coverage gaps -- with no
+  # "unbalanced braces" false pass -- confirms the fix generalizes correctly
+  # to `dollar_count >= 2`, not just the `dollar_count == 1` cases rounds 7
+  # and 8 exercised.
+  local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/_ScratchMultiDollarRawStringHoleTests.cs"
+  cat >"$scratch" <<'EOF'
+namespace Farm.Web.Api.Tests;
+
+public class ScratchMultiDollarRawStringHoleTests
+{
+    private static string Build(string inner) => inner;
+
+    [Fact]
+    public void Foo()
+    {
+        string s = $$"""outer{{Build("""nested""")}}outer""";
+    }
+}
+
+public class ScratchMultiDollarRawStringHoleSiblingTests
+{
+    [Fact]
+    public void Baz()
+    {
+    }
+}
+EOF
+  local rc=0
+  local report
+  report="$(bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$scratch"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail (both new classes are uncovered), but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" == *"unbalanced braces"* ]]; then
+    printf '  multi-dollar raw string hole desynced the brace count instead of being handled, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchMultiDollarRawStringHoleTests.cs class ScratchMultiDollarRawStringHoleTests"* ]]; then
+    printf '  expected a coverage-gap error naming the two-dollar-hole class, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchMultiDollarRawStringHoleTests.cs class ScratchMultiDollarRawStringHoleSiblingTests"* ]]; then
+    printf '  expected a coverage-gap error naming the sibling after the multi-dollar hole class too -- it must not have swallowed the rest of the file, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
 TESTS=(
   case_baseline_roundtrip_passes
   case_duplicate_test_project_path_fails
@@ -628,6 +703,7 @@ TESTS=(
   case_raw_string_literal_does_not_desync_brace_depth
   case_unbalanced_braces_fails_closed
   case_nested_raw_string_in_hole_does_not_desync_brace_depth
+  case_multi_dollar_raw_string_hole_requires_matching_brace_run
 )
 
 printf '=== dotnet test manifest validator regression suite ===\n'

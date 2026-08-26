@@ -135,23 +135,34 @@ def _strip_noncode(text):
         `open_start`) is essential, since the opening delimiter is itself
         such a run and must never be mistaken for its own closer.
 
-        For `dollar_count >= 1` (an interpolated raw string), a lone '{' in
-        body text -- one not immediately followed by another '{' -- opens an
-        interpolation hole: the brace itself is blanked and the hole's
-        contents are handed to `scan_code(..., stop_at_hole_close=True)`,
-        the same recursive hole scanner `scan_string` already uses for
-        ordinary interpolated strings. This means a nested string literal
-        (raw or otherwise) inside the hole is scanned by its own dedicated
-        call -- with its own independent closing-delimiter search -- rather
-        than being swallowed into this literal's blunt "search body text for
-        the next quote_run-or-more run" search. That blunt search is exactly
-        what let a hole containing a nested raw string literal (of any
-        quote-run length, whether shorter, equal to, or longer than this
-        literal's own `quote_run`) be mistaken for this literal's own
-        closer, since the naive search has no concept of "inside a hole" vs.
-        "in body text". Doubled `{{`/`}}` outside a hole are treated as
-        literal brace characters (mirroring `scan_string`'s escape handling)
-        and are skipped without opening or closing anything.
+        For `dollar_count >= 1` (an interpolated raw string), a run of at
+        least `dollar_count` consecutive '{' characters opens an
+        interpolation hole -- per C# 11 raw-string-interpolation rules, the
+        number of braces needed to open a hole is exactly the string's own
+        dollar count, so e.g. a two-dollar-sign raw string literal needs
+        `{{` to open a hole (a lone
+        `{` is literal body text, not a hole -- unlike an ordinary
+        interpolated string or a single-`$` raw string, where one `{`
+        always opens). Only the first `dollar_count` characters of that run
+        are consumed as the opener (and blanked); any further consecutive
+        '{' beyond that are handed to the hole's own code scan as ordinary
+        code text (e.g. the start of a nested object-initializer or lambda
+        body), which is exactly correct since they are indeed code once the
+        hole itself has opened. The hole's contents are scanned by
+        `scan_code(..., stop_at_hole_close=True, hole_close_run=dollar_count)`
+        -- the same recursive hole scanner `scan_string` already uses for
+        ordinary interpolated strings, extended here to require a matching
+        `dollar_count`-length run of '}' to actually close the hole at
+        brace-nesting depth zero, mirroring the open side. This means a
+        nested string literal (raw or otherwise) inside the hole is scanned
+        by its own dedicated call -- with its own independent
+        closing-delimiter search -- rather than being swallowed into this
+        literal's blunt "search body text for the next quote_run-or-more
+        run" search. That blunt search is exactly what let a hole
+        containing a nested raw string literal (of any quote-run length,
+        whether shorter, equal to, or longer than this literal's own
+        `quote_run`) be mistaken for this literal's own closer, since the
+        naive search has no concept of "inside a hole" vs. "in body text".
 
         For `dollar_count == 0` (a non-interpolated raw string, no holes are
         possible), the body is blanked in one pass exactly as before.
@@ -169,20 +180,28 @@ def _strip_noncode(text):
                 i = j
                 continue
             if dollar_count >= 1 and c == "{":
-                if i + 1 < n and text[i + 1] == "{":
-                    i += 2
+                j = i
+                while j < n and text[j] == "{":
+                    j += 1
+                if j - i >= dollar_count:
+                    hole_open_end = i + dollar_count
+                    blanks.append((i, hole_open_end))
+                    i = scan_code(
+                        hole_open_end,
+                        stop_at_hole_close=True,
+                        hole_close_run=dollar_count,
+                    )
                     continue
-                blanks.append((i, i + 1))
-                i = scan_code(i + 1, stop_at_hole_close=True)
-                continue
-            if dollar_count >= 1 and c == "}" and i + 1 < n and text[i + 1] == "}":
-                i += 2
+                # Fewer than dollar_count consecutive '{' is literal body
+                # text (not enough to open a hole per this literal's own
+                # dollar count) -- fall through untouched.
+                i = j
                 continue
             i += 1
         blanks.append((open_start, n))
         return n
 
-    def scan_code(i, stop_at_hole_close):
+    def scan_code(i, stop_at_hole_close, hole_close_run=1):
         hole_depth = 0
         while i < n:
             c = text[i]
@@ -246,8 +265,15 @@ def _strip_noncode(text):
                 continue
             if stop_at_hole_close and c == "}":
                 if hole_depth == 0:
-                    blanks.append((i, i + 1))
-                    return i + 1
+                    j = i
+                    while j < n and text[j] == "}":
+                        j += 1
+                    if j - i >= hole_close_run:
+                        close_end = i + hole_close_run
+                        blanks.append((i, close_end))
+                        return close_end
+                    i = j
+                    continue
                 hole_depth -= 1
                 i += 1
                 continue
