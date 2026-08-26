@@ -1,6 +1,6 @@
 ﻿using System.Runtime.CompilerServices;
 
-namespace Farm.Slicer.Module.Tests.TestInfrastructure;
+namespace Farm.Testing.Shared;
 
 /// <summary>
 /// Central helper for constructing test-local temporary paths that live inside the repository

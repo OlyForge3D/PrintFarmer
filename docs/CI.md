@@ -108,6 +108,7 @@ classify.
 | `tests_smartplug`: `src/tests/Farm.Modules.SmartPlug.Tests/**` | | ✓ | `Farm.Modules.SmartPlug.Tests` | | |
 | `tests_maintenance`: `src/tests/Farm.Modules.Maintenance.Tests/**` | | ✓ | `Farm.Modules.Maintenance.Tests` | | |
 | `tests_integration`: `src/tests/Farm.Web.IntegrationTests/**` | | ✓ | `Farm.Web.IntegrationTests` | | |
+| `tests_shared`: `src/tests/Farm.Testing.Shared/**` | ✓ | ✓ | all | all | ✓ |
 | `tests_other`: every other `src/tests/**` path | ✓ | ✓ | all | all | ✓ |
 | `discovery`: `src/discovery/**`, `src/printer-discovery/**` | ✓ | ✓ | all | all | ✓ |
 | `settings`: `src/settings/**` | ✓ | ✓ | all | all | ✓ |

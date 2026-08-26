@@ -2,13 +2,11 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
+using Xunit;
 using Xunit.Abstractions;
 using Xunit.Sdk;
 
-// Assembly-level registration of custom test framework that will emit a timing summary
-[assembly: TestFramework("Farm.Web.Api.Tests.TestInfrastructure.TimingReportingTestFramework", "Farm.Web.Api.Tests")]
-
-namespace Farm.Web.Api.Tests.TestInfrastructure;
+namespace Farm.Testing.Shared;
 
 /// <summary>
 /// Custom xUnit test framework hook that, on disposal (after all tests complete),
@@ -17,6 +15,12 @@ namespace Farm.Web.Api.Tests.TestInfrastructure;
 /// and a companion file "test-timings-summary.txt" in the same directory.
 /// Enabled by default when timing is enabled; can be disabled via PF_TIMING_SUMMARY=0.
 /// </summary>
+/// <remarks>
+/// This class is referenced by name from an <c>[assembly: TestFramework(...)]</c> attribute
+/// declared in the consuming test assembly (e.g. Farm.Web.Api.Tests) rather than here: xUnit
+/// only honors that attribute when it is present in the assembly being executed, so the
+/// attribute itself cannot live in this shared library.
+/// </remarks>
 public sealed class TimingReportingTestFramework : XunitTestFramework
 {
     private readonly IMessageSink _sink;

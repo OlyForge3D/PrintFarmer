@@ -6,10 +6,10 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
 
-namespace Farm.Web.Api.Tests.TestInfrastructure;
+namespace Farm.Testing.Shared;
 
 // A delegating handler that blocks outbound HTTP requests unless the host is localhost/127.0.0.1
-internal sealed class BlockingOutboundHandler : DelegatingHandler
+public sealed class BlockingOutboundHandler : DelegatingHandler
 {
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -40,7 +40,7 @@ internal sealed class BlockingOutboundHandler : DelegatingHandler
 }
 
 // IHttpMessageHandlerBuilderFilter to inject BlockingOutboundHandler into all HttpClient pipelines
-internal sealed class BlockOutboundHttpFilter : IHttpMessageHandlerBuilderFilter
+public sealed class BlockOutboundHttpFilter : IHttpMessageHandlerBuilderFilter
 {
     public Action<HttpMessageHandlerBuilder> Configure(Action<HttpMessageHandlerBuilder> next)
     {

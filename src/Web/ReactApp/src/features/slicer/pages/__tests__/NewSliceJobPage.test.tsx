@@ -138,6 +138,33 @@ const mockProfilesSummary = {
   processProfiles: mockProcessProfiles,
 };
 
+const mockWorkerHierarchy = {
+  byHierarchy: {
+    Voron: {
+      name: 'Voron',
+      models: {
+        'Voron 2.4 250': {
+          name: 'Voron 2.4 250',
+          machineProfiles: [
+            {
+              name: 'Voron 2.4 250 0.4 nozzle',
+              manufacturer: 'Voron',
+              nozzleDiameter: 0.4,
+              printerModel: 'Voron 2.4 250',
+              settings: {
+                printable_area: '0x0,250x0,250x250,0x250',
+                printable_height: 250,
+              },
+            },
+          ],
+          filamentProfiles: [],
+          processProfiles: [],
+        },
+      },
+    },
+  },
+};
+
 const mockModelList = [
   {
     id: 'model-3d-1',
@@ -197,6 +224,8 @@ vi.mock('@/services/slicerProfilesService', () => ({
     getFilamentProfilesForMachines: vi.fn(() => Promise.resolve(mockFilamentProfiles)),
     getProcessProfilesForMachines: vi.fn(() => Promise.resolve(mockProcessProfiles)),
     listCustomProfiles: vi.fn(() => Promise.resolve({ profiles: [], totalCount: 0 })),
+    getWorkerHierarchy: vi.fn(() => Promise.resolve(mockWorkerHierarchy)),
+    cloneFamily: vi.fn(),
   }
 }));
 
@@ -895,7 +924,7 @@ describe('NewSliceJobPage', () => {
       expect(screen.getByLabelText('Machine profile options menu')).toBeEnabled();
     });
 
-    it('explains missing OrcaSlicer coverage and exposes the disabled profile-family action', async () => {
+    it('explains missing OrcaSlicer coverage and opens the profile-family wizard', async () => {
       vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockRejectedValue({
         message: 'No profiles for this model',
         statusCode: 404,
@@ -918,10 +947,11 @@ describe('NewSliceJobPage', () => {
       expect(await screen.findByRole('heading', { name: 'No OrcaSlicer profiles for MK4' })).toBeInTheDocument();
       expect(screen.getByText(/doesn't ship profiles for this printer model/i)).toBeInTheDocument();
 
-      const createFamilyButton = screen.getByRole('button', { name: 'Create profile family' });
-      expect(createFamilyButton).toHaveAttribute('aria-disabled', 'true');
-      expect(createFamilyButton).toHaveAttribute('aria-describedby', 'create-profile-family-help');
-      expect(screen.getByText('Coming soon')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /Create profile family/i }));
+
+      expect(await screen.findByRole('dialog', { name: 'Create profile family' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Choose source machine model' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: /Voron 2.4 250/i })).toBeInTheDocument();
     });
 
     it('identifies an alias that returned no profiles without offering family creation', async () => {

@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using FluentAssertions;
@@ -30,6 +31,16 @@ public sealed class PrinterCollectionAuthorizationTests : IClassFixture<PrinterC
         }
     }
 
+    public class DevModeFactory : CustomWebApplicationFactory
+    {
+        public DevModeFactory() : base(new Dictionary<string, string?>
+        {
+            ["Security:DevModeBypassAuth"] = "true",
+        })
+        {
+        }
+    }
+
     private readonly Factory _factory;
 
     public PrinterCollectionAuthorizationTests(Factory factory)
@@ -54,6 +65,48 @@ public sealed class PrinterCollectionAuthorizationTests : IClassFixture<PrinterC
         string body = await response.Content.ReadAsStringAsync();
         body.Should().Contain(openId.ToString());
         body.Should().NotContain(restrictedId.ToString());
+    }
+
+    [Theory]
+    [InlineData("/api/printers")]
+    [InlineData("/api/printers/summary")]
+    [InlineData("/api/printers/camera-urls")]
+    [InlineData("/api/printers/backend-capabilities")]
+    public async Task CollectionEndpoint_WithoutAuthentication_ReturnsStableUnauthorizedProblem(string endpoint)
+    {
+        await using var factory = new DevModeFactory();
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response = await client.GetAsync(endpoint);
+        string body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, body);
+        using JsonDocument document = JsonDocument.Parse(body);
+        document.RootElement.GetProperty("code").GetString().Should().Be("authentication_required");
+    }
+
+    [Theory]
+    [InlineData("/api/printers")]
+    [InlineData("/api/printers/summary")]
+    [InlineData("/api/printers/camera-urls")]
+    [InlineData("/api/printers/backend-capabilities")]
+    public async Task CollectionEndpoint_WithValidBearer_ReturnsVisiblePrinters(string endpoint)
+    {
+        await using CustomWebApplicationFactory factory = new(new Dictionary<string, string?>
+        {
+            ["Security:DevModeBypassAuth"] = "false",
+        });
+        await factory.ResetDataAsync();
+        Guid openId = await SeedOpenPrinterAsync(factory);
+        using HttpClient client = await factory.CreateAuthenticatedClientAsync(
+            $"printer-list-user-{Guid.NewGuid():N}",
+            $"printer-list-user-{Guid.NewGuid():N}@example.com");
+
+        HttpResponseMessage response = await client.GetAsync(endpoint);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain(openId.ToString());
     }
 
     [Fact]
@@ -247,7 +300,12 @@ public sealed class PrinterCollectionAuthorizationTests : IClassFixture<PrinterC
 
     private async Task<Guid> SeedOpenPrinterAsync()
     {
-        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        return await SeedOpenPrinterAsync(_factory);
+    }
+
+    private static async Task<Guid> SeedOpenPrinterAsync(CustomWebApplicationFactory factory)
+    {
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var manufacturer = new Manufacturer
         {
