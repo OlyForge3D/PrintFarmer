@@ -205,13 +205,16 @@ IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 // Farm.Modules.Calibration (issue #2038, Phase 10) is the third.
 // Farm.Modules.Maintenance (issue #2037) is the first to also move a SignalR hub -- see its
 // MapEndpoints for the MapHub<MaintenanceHub> call that used to live here.
+// Farm.Modules.Devices (issue #2043, Phase 15) is the fifth -- OctoPrint API-key
+// authentication, NFC, cameras, and the admin Home Assistant controller.
 builder.Services.AddApiModules(
     mvcBuilder,
     builder.Configuration,
     typeof(Farm.Modules.SmartPlug.SmartPlugApiModule).Assembly,
     typeof(Farm.Modules.PrintQueue.PrintQueueApiModule).Assembly,
     typeof(Farm.Modules.Maintenance.MaintenanceApiModule).Assembly,
-    typeof(Farm.Modules.Calibration.CalibrationApiModule).Assembly);
+    typeof(Farm.Modules.Calibration.CalibrationApiModule).Assembly,
+    typeof(Farm.Modules.Devices.DevicesApiModule).Assembly);
 
 if (slicerModuleEnabled)
 {

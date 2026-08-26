@@ -19,6 +19,7 @@ namespaces are intentionally unchanged from their prior Farm.Web.Api location
 
   <ItemGroup>
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\discovery\Farm.Shared.Discovery.csproj" />
     <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
   </ItemGroup>
 
