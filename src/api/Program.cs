@@ -203,11 +203,14 @@ IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 // (issue #2036) -- the first assembly to move a controller + services out of the monolith.
 // Farm.Modules.PrintQueue (issue #2040, Phase 12) is the second, and
 // Farm.Modules.Calibration (issue #2038, Phase 10) is the third.
+// Farm.Modules.Maintenance (issue #2037) is the first to also move a SignalR hub -- see its
+// MapEndpoints for the MapHub<MaintenanceHub> call that used to live here.
 builder.Services.AddApiModules(
     mvcBuilder,
     builder.Configuration,
     typeof(Farm.Modules.SmartPlug.SmartPlugApiModule).Assembly,
     typeof(Farm.Modules.PrintQueue.PrintQueueApiModule).Assembly,
+    typeof(Farm.Modules.Maintenance.MaintenanceApiModule).Assembly,
     typeof(Farm.Modules.Calibration.CalibrationApiModule).Assembly);
 
 if (slicerModuleEnabled)
@@ -499,7 +502,9 @@ app.MapApiModules();
 // Public farm hubs require authenticated clients.
 app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
-app.MapHub<MaintenanceHub>("/hubs/maintenance");
+
+// MaintenanceHub is now mapped by MaintenanceApiModule.MapEndpoints() via MapApiModules()
+// above -- see Farm.Modules.Maintenance (issue #2037).
 
 // Requires an authenticated user — broadcasts carry farm-wide spool and printer identifiers.
 // NFC firmware never connects to this hub; devices ingest scans via a separate REST path

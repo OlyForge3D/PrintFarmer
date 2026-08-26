@@ -341,6 +341,11 @@ load_changed_files() {
 #                     carved out of Farm.Web.Api, following the smartplug
 #                     pattern above). Matched before the generic
 #                     `src/modules/*` case.
+#   maintenance     — src/modules/Farm.Modules.Maintenance/** (issue #2037,
+#                     Phase 9: the Maintenance vertical-slice module, including
+#                     the first hub -- MaintenanceHub -- to move out of the
+#                     host). Same narrow-bucket treatment as smartplug above.
+#                     Matched before the generic `src/modules/*` case.
 #   calibration     — src/modules/Farm.Modules.Calibration/** (issue #2038,
 #                     Phase 10: the calibration vertical-slice module carved
 #                     out of Farm.Web.Api, following the smartplug pattern
@@ -362,6 +367,8 @@ load_changed_files() {
 #                     Matched before the generic `src/tests/*` case.
 #   tests_printqueue — src/tests/Farm.Modules.PrintQueue.Tests/** (issue
 #                     #2040). Matched before the generic `src/tests/*` case.
+#   tests_maintenance — src/tests/Farm.Modules.Maintenance.Tests/** (issue
+#                     #2037). Matched before the generic `src/tests/*` case.
 #   tests_calibration — src/tests/Farm.Modules.Calibration.Tests/** (issue
 #                     #2038). Matched before the generic `src/tests/*` case.
 #   tests_other     — any other src/tests/**
@@ -453,6 +460,10 @@ classify_path() {
     # matched first so it gets its own narrow bucket instead of falling into
     # the full-safe `modules` bucket.
     src/modules/Farm.Modules.PrintQueue/*) printf 'printqueue' ; return ;;
+    # Farm.Modules.Maintenance is a concrete vertical-slice module (issue
+    # #2037, Phase 9), same rationale as Farm.Modules.SmartPlug above --
+    # match it before the generic `src/modules/*` case.
+    src/modules/Farm.Modules.Maintenance/*) printf 'maintenance' ; return ;;
     # Farm.Modules.Calibration is a concrete vertical-slice module (issue
     # #2038, Phase 10) following the same pattern as smartplug above --
     # matched first so it gets its own narrow bucket instead of falling into
@@ -469,6 +480,7 @@ classify_path() {
     src/tests/Farm.Testing.Shared/*)          printf 'tests_shared' ; return ;;
     src/tests/Farm.Modules.SmartPlug.Tests/*)   printf 'tests_smartplug' ; return ;;
     src/tests/Farm.Modules.PrintQueue.Tests/*)  printf 'tests_printqueue' ; return ;;
+    src/tests/Farm.Modules.Maintenance.Tests/*) printf 'tests_maintenance' ; return ;;
     src/tests/Farm.Modules.Calibration.Tests/*) printf 'tests_calibration' ; return ;;
     src/tests/*)             printf 'tests_other' ; return ;;
     src/tools/*)             printf 'tools' ; return ;;
@@ -656,11 +668,13 @@ main() {
   local has_api=0 has_infra=0 has_backend=0 has_backend_core=0 has_slicer=0
   local has_orca=0 has_discovery=0 has_settings=0 has_modules=0 has_smartplug=0
   local has_printqueue=0
+  local has_maintenance=0
   local has_calibration=0
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
   local has_tests_integration=0 has_tests_modules=0 has_tests_shared=0 has_tests_smartplug=0 has_tests_other=0
   local has_tests_printqueue=0
+  local has_tests_maintenance=0
   local has_tests_calibration=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
 
@@ -682,6 +696,7 @@ main() {
       modules)         has_modules=1 ;;
       smartplug)       has_smartplug=1 ;;
       printqueue)      has_printqueue=1 ;;
+      maintenance)     has_maintenance=1 ;;
       calibration)     has_calibration=1 ;;
       migrations_app)  has_mig_app=1 ;;
       migrations_slcr) has_mig_slcr=1 ;;
@@ -693,6 +708,7 @@ main() {
       tests_shared)    has_tests_shared=1 ;;
       tests_smartplug) has_tests_smartplug=1 ;;
       tests_printqueue) has_tests_printqueue=1 ;;
+      tests_maintenance) has_tests_maintenance=1 ;;
       tests_calibration) has_tests_calibration=1 ;;
       tests_other)     has_tests_other=1 ;;
       tools)           has_tools=1 ;;
@@ -761,10 +777,10 @@ main() {
   # Any .NET-relevant bucket forces a full solution build to preserve compile
   # coverage across the whole graph.
   if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
-        has_orca || has_smartplug || has_printqueue || has_calibration ||
+        has_orca || has_smartplug || has_printqueue || has_maintenance || has_calibration ||
         has_mig_app || has_mig_slcr ||
         has_tests_api || has_tests_slicer || has_tests_orca ||
-        has_tests_integration || has_tests_smartplug || has_tests_printqueue || has_tests_calibration || has_tools )); then
+        has_tests_integration || has_tests_smartplug || has_tests_printqueue || has_tests_maintenance || has_tests_calibration || has_tools )); then
     want_dotnet_build="true"
   fi
 
@@ -778,10 +794,10 @@ main() {
   if (( has_infra )); then
     # Farm.OrcaSlicer.Worker.Tests references infra through the worker graph.
     # Farm.Modules.SmartPlug (issue #2036), Farm.Modules.PrintQueue (issue
-    # #2040), and Farm.Modules.Calibration (issue #2038) also reference
-    # Farm.Infrastructure directly, so an infra change must re-run all three
-    # of their test projects too.
-    test_names+=("Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Calibration.Tests")
+    # #2040), Farm.Modules.Maintenance (issue #2037), and Farm.Modules.Calibration
+    # (issue #2038) also reference Farm.Infrastructure directly, so an infra
+    # change must re-run all four of their test projects too.
+    test_names+=("Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_backend )); then
@@ -838,6 +854,19 @@ main() {
     # controller-owning module must therefore also select Farm.Web.Api.Tests,
     # unlike a pure-service module such as Farm.OrcaSlicer.Worker.
     test_names+=("Farm.Modules.PrintQueue.Tests" "Farm.Web.Api.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_maintenance )); then
+    # Farm.Modules.Maintenance owns the 5 Maintenance*Controller endpoints and
+    # MaintenanceHub, but several tests that cover maintenance surfaces that
+    # did NOT move (MaintenanceHubAuthorizationIntegrationTests,
+    # MaintenanceScheduleDeploymentToolheadScopeTests, RouteTableSnapshotTests,
+    # and other CustomWebApplicationFactory-based tests) intentionally stayed
+    # behind in Farm.Web.Api.Tests -- see docs/MODULE_MIGRATION_PATTERN.md. A
+    # controller/hub-owning module must therefore also select
+    # Farm.Web.Api.Tests, unlike a pure-service module such as
+    # Farm.OrcaSlicer.Worker.
+    test_names+=("Farm.Modules.Maintenance.Tests" "Farm.Web.Api.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_calibration )); then
@@ -910,6 +939,10 @@ main() {
     test_names+=("Farm.Modules.PrintQueue.Tests")
     net_test_bucket_hit=1
   fi
+  if (( has_tests_maintenance )); then
+    test_names+=("Farm.Modules.Maintenance.Tests")
+    net_test_bucket_hit=1
+  fi
   if (( has_tests_calibration )); then
     test_names+=("Farm.Modules.Calibration.Tests")
     net_test_bucket_hit=1
@@ -929,6 +962,7 @@ main() {
   if (( has_orca )); then reason+="orcaslicer-worker "; fi
   if (( has_smartplug )); then reason+="smartplug "; fi
   if (( has_printqueue )); then reason+="printqueue "; fi
+  if (( has_maintenance )); then reason+="maintenance "; fi
   if (( has_calibration )); then reason+="calibration "; fi
   if (( has_mig_app )); then reason+="mig-app "; fi
   if (( has_mig_slcr )); then reason+="mig-slicer "; fi
@@ -938,6 +972,7 @@ main() {
   if (( has_tests_integration )); then reason+="tests-integration "; fi
   if (( has_tests_smartplug )); then reason+="tests-smartplug "; fi
   if (( has_tests_printqueue )); then reason+="tests-printqueue "; fi
+  if (( has_tests_maintenance )); then reason+="tests-maintenance "; fi
   if (( has_tests_calibration )); then reason+="tests-calibration "; fi
   if (( has_tools )); then reason+="tools "; fi
   if (( has_docs )); then reason+="docs "; fi

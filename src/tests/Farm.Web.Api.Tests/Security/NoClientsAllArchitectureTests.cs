@@ -7,8 +7,10 @@ namespace Farm.Web.Api.Tests.Security;
 /// authenticated connection to a farm-wide group, and <c>MaintenanceResolutionNotifier</c>
 /// broadcast maintenance-completion events via <c>Clients.All</c> — both bypassing the
 /// <c>maintenance:admin</c> gate enforced on the equivalent REST endpoints. This test scans every
-/// SignalR hub / hub-context consumer under <c>src/api</c> for <c>Clients.All</c> so this class of
-/// authorization bypass cannot silently reintroduce.
+/// SignalR hub / hub-context consumer under <c>src/api</c> and <c>src/modules</c> (module
+/// assemblies extracted by the module-decomposition epic #2019, starting with the
+/// <c>MaintenanceHub</c> move in #2037) for <c>Clients.All</c> so this class of authorization
+/// bypass cannot silently reintroduce, no matter which assembly the hub lives in.
 ///
 /// Companion to <see cref="QueueEnqueuePermissionArchitectureTests"/> (permission-gate
 /// completeness) and <see cref="AuthorizeRolesGateArchitectureTests"/> (role-name gate), which
@@ -50,49 +52,63 @@ public sealed class NoClientsAllArchitectureTests
         throw new InvalidOperationException("Repository root (.git) not found from current directory.");
     }
 
-    [Fact(DisplayName = "Presubmit: no SignalR hub or hub-context consumer in src/api calls Clients.All")]
+    [Fact(DisplayName = "Presubmit: no SignalR hub or hub-context consumer in src/api or src/modules calls Clients.All")]
     public void NoClientsAllBroadcastsInApi()
     {
         string repoRoot = FindRepoRoot();
-        string apiRoot = Path.Join(repoRoot, "src", "api");
-        Assert.True(Directory.Exists(apiRoot), $"Expected {apiRoot} to exist.");
+
+        // Module-decomposition epic (#2019): SignalR hubs and hub-context consumers can now live
+        // in src/modules/Farm.Modules.* rather than src/api. Scan both roots so a hub does not
+        // silently escape this guard the moment it moves out of the host — allowlist paths stay
+        // relative to whichever root the file was found under, matching how they were recorded
+        // before any module existed.
+        string[] scanRoots =
+        [
+            Path.Join(repoRoot, "src", "api"),
+            Path.Join(repoRoot, "src", "modules"),
+        ];
 
         Regex clientsAllPattern = new(@"\bClients\s*\.\s*All\b", RegexOptions.Compiled);
 
         List<string> offenders = [];
 
-        foreach (string file in Directory.GetFiles(apiRoot, "*.cs", SearchOption.AllDirectories))
+        foreach (string scanRoot in scanRoots)
         {
-            string relativePath = Path.GetRelativePath(apiRoot, file).Replace('\\', '/');
-            if (relativePath.Split('/') is [.., var segment] && (segment == "bin" || segment == "obj"))
-            {
-                continue;
-            }
-            if (relativePath.Contains("/bin/", StringComparison.Ordinal) || relativePath.Contains("/obj/", StringComparison.Ordinal))
-            {
-                continue;
-            }
+            Assert.True(Directory.Exists(scanRoot), $"Expected {scanRoot} to exist.");
 
-            string content = File.ReadAllText(file);
-            if (!clientsAllPattern.IsMatch(content))
+            foreach (string file in Directory.GetFiles(scanRoot, "*.cs", SearchOption.AllDirectories))
             {
-                continue;
-            }
+                string relativePath = Path.GetRelativePath(scanRoot, file).Replace('\\', '/');
+                if (relativePath.Split('/') is [.., var segment] && (segment == "bin" || segment == "obj"))
+                {
+                    continue;
+                }
+                if (relativePath.Contains("/bin/", StringComparison.Ordinal) || relativePath.Contains("/obj/", StringComparison.Ordinal))
+                {
+                    continue;
+                }
 
-            if (Allowlist.Contains(relativePath))
-            {
-                continue;
-            }
+                string content = File.ReadAllText(file);
+                if (!clientsAllPattern.IsMatch(content))
+                {
+                    continue;
+                }
 
-            offenders.Add(relativePath);
+                if (Allowlist.Contains(relativePath))
+                {
+                    continue;
+                }
+
+                offenders.Add(relativePath);
+            }
         }
 
         Assert.True(
             offenders.Count == 0,
-            "The following files under src/api broadcast via Clients.All, bypassing per-group " +
-            "authorization (see issue #1966). Scope the broadcast to an explicit, authorized " +
-            $"group (e.g. Clients.Group(...) / Clients.Groups(...)), or add a justified entry to " +
-            $"{nameof(Allowlist)} if a genuine exception applies. Offenders: " +
+            "The following files under src/api or src/modules broadcast via Clients.All, " +
+            "bypassing per-group authorization (see issue #1966). Scope the broadcast to an " +
+            "explicit, authorized group (e.g. Clients.Group(...) / Clients.Groups(...)), or add " +
+            $"a justified entry to {nameof(Allowlist)} if a genuine exception applies. Offenders: " +
             string.Join(", ", offenders));
     }
 }

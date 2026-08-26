@@ -161,6 +161,23 @@
       "notes": "New in issue #2040 (Phase 12: PrintJobManagementService and its 8 dependent controllers -- including SlicePrintBridgeController -- moved out of Farm.Web.Api into Farm.Modules.PrintQueue, as-is/no internal decomposition, per the SmartPlug/#2036 vertical-slice pattern). Unlike SmartPlug, this module also references Farm.Slicer.Module directly (SlicePrintBridgeController consumes IArtifactsService/ISliceJobRepository) and Farm.Backend.Plugin.OctoPrint directly from its test project (PrintJobManagementServiceHistorySeedingTests), so select-dotnet-tests.sh's slicer and backend-plugin buckets also select this project, in addition to its own narrow printqueue/tests_printqueue buckets. The retained CustomWebApplicationFactory-based Dispatch/ integration suite and RouteTableSnapshotTests both stay in Farm.Web.Api.Tests, so the printqueue bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg)."
     },
     {
+      "name": "Farm.Modules.Maintenance.Tests",
+      "testProject": "tests/Farm.Modules.Maintenance.Tests/Farm.Modules.Maintenance.Tests.csproj",
+      "productionProject": "modules/Farm.Modules.Maintenance/Farm.Modules.Maintenance.csproj",
+      "pathPrefixes": ["src/tests/Farm.Modules.Maintenance.Tests/"],
+      "dependsOnProjects": [
+        "src/modules/Farm.Modules.Maintenance/",
+        "src/modules/Farm.Modules.Abstractions/",
+        "src/infra/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Modules.Maintenance.Tests",
+      "notes": "New in issue #2037 (Phase 9: the Maintenance vertical slice -- Services/Maintenance/**, MaintenanceHub, the 5 Maintenance*Controller attribute-routed controllers, and their DTOs/Requests -- moved out of Farm.Web.Api into Farm.Modules.Maintenance, depending on Farm.Modules.Abstractions' IApiModule seam from #2035). Follows the Farm.Modules.SmartPlug.Tests pattern above: its own narrow select-dotnet-tests.sh buckets (maintenance/tests_maintenance) rather than full-safe. This phase additionally proves a SignalR hub can map from a module (MaintenanceHub is the first hub to move out of the host, via endpoints.MapHub in MaintenanceApiModule.MapEndpoints). Several CustomWebApplicationFactory-based tests for maintenance surfaces that did not move (e.g. MaintenanceHubAuthorizationIntegrationTests, MaintenanceScheduleDeploymentToolheadScopeTests, RouteTableSnapshotTests) stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's maintenance bucket also selects Farm.Web.Api.Tests."
+    },
+    {
       "name": "Farm.Modules.Calibration.Tests",
       "testProject": "tests/Farm.Modules.Calibration.Tests/Farm.Modules.Calibration.Tests.csproj",
       "productionProject": "modules/Farm.Modules.Calibration/Farm.Modules.Calibration.csproj",
