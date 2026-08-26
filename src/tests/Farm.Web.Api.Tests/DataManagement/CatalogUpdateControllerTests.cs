@@ -8,25 +8,33 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.DataManagement;
 
-[Collection(IntegrationTestCollection.Name)]
-public class CatalogUpdateControllerTests : IAsyncLifetime
+public class CatalogUpdateControllerTests : IClassFixture<CatalogUpdateControllerTests.Factory>, IAsyncLifetime
 {
-    private CustomWebApplicationFactory? _factory;
+    public class Factory : CustomWebApplicationFactory
+    {
+        public Factory() : base(new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" })
+        {
+        }
+    }
+
+    private readonly Factory _factory;
     private HttpClient? _client;
+
+    public CatalogUpdateControllerTests(Factory factory)
+    {
+        _factory = factory;
+    }
 
     public async Task InitializeAsync()
     {
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" });
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        if (_factory != null)
-        {
-            await _factory.DisposeAsync();
-        }
+        _client?.Dispose();
+        return Task.CompletedTask;
     }
 
     [Fact]

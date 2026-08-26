@@ -29,7 +29,7 @@ namespace Farm.Web.Api.Tests.Dispatch;
 /// - Enum serialization as strings (AutoDispatchMode)
 /// - Singleton constraint (only one row)
 /// </summary>
-public class DispatchSettingsControllerTests : IAsyncLifetime
+public class DispatchSettingsControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient _client = null!;
@@ -48,20 +48,21 @@ public class DispatchSettingsControllerTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public DispatchSettingsControllerTests()
+    public DispatchSettingsControllerTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _client?.Dispose();
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     // =========================================================================

@@ -30,7 +30,7 @@ namespace Farm.Web.Api.Tests.Dispatch;
 /// - Strategy change via DispatchSettings is respected
 /// - Invalid strategy value returns appropriate error
 /// </summary>
-public class LoadBalancingTests : IAsyncLifetime
+public class LoadBalancingTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient _client = null!;
@@ -41,20 +41,21 @@ public class LoadBalancingTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public LoadBalancingTests()
+    public LoadBalancingTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _client?.Dispose();
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     // =========================================================================

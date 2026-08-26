@@ -348,7 +348,10 @@ public class SdcpPollingServiceCacheTests
             _tryPublishCachedPrinter.Invoke(_service, [printerId, printer, capturedGeneration, state, (Action)OnGenerationCheckPassed]);
         });
 
-        insideCriticalSection.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue(
+        // Widened from 5s: under full test-suite parallelism (maxParallelThreads=0),
+        // thread-pool contention from dozens of concurrently-running hosts can legitimately
+        // delay the Task.Run scheduling this waits on past a short timeout.
+        insideCriticalSection.Wait(TimeSpan.FromSeconds(15)).Should().BeTrue(
             "the publish call must reach its paused callback inside the lock within the timeout");
 
         Task invalidateTask = Task.Run(() => _onPrinterInvalidated.Invoke(_service, [printerId]));

@@ -24,8 +24,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// Integration tests for <see cref="CameraSnapshotsController"/>.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class CameraSnapshotsControllerTests : IAsyncLifetime
+public class CameraSnapshotsControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
@@ -37,14 +36,14 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    public CameraSnapshotsControllerTests()
+    public CameraSnapshotsControllerTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAuthenticatedClientAsync();
 
         // DELETE now requires the queue:write permission (farm_admin), which the
@@ -55,11 +54,11 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
             email: "camera-snapshots-admin@example.com");
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _client?.Dispose();
         _adminClient?.Dispose();
-        _factory?.Dispose();
+        return Task.CompletedTask;
     }
 
     private async Task<(Guid PrinterId, Guid CameraId)> SeedPrinterAndCameraAsync()

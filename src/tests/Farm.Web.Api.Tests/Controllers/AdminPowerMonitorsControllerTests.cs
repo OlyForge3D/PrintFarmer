@@ -20,10 +20,19 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// Integration tests for <see cref="Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController"/>.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class AdminPowerMonitorsControllerTests : IAsyncLifetime
+public class AdminPowerMonitorsControllerTests : IClassFixture<AdminPowerMonitorsControllerTests.Factory>, IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory;
+    public class Factory : CustomWebApplicationFactory
+    {
+        public Factory() : base(new System.Collections.Generic.Dictionary<string, string?>
+        {
+            ["Security:DevModeBypassAuth"] = "false",
+        })
+        {
+        }
+    }
+
+    private readonly Factory _factory;
     private HttpClient _client = null!;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -33,24 +42,21 @@ public class AdminPowerMonitorsControllerTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    public AdminPowerMonitorsControllerTests()
+    public AdminPowerMonitorsControllerTests(Factory factory)
     {
-        _factory = new CustomWebApplicationFactory(new System.Collections.Generic.Dictionary<string, string?>
-        {
-            ["Security:DevModeBypassAuth"] = "false",
-        });
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _client?.Dispose();
-        _factory.Dispose();
+        return Task.CompletedTask;
     }
 
     // ─── helpers ────────────────────────────────────────────────────────────

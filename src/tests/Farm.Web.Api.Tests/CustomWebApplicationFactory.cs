@@ -7,6 +7,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Services.Authentication;
@@ -17,6 +18,8 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Moq;
 
 namespace Farm.Web.Api.Tests;
@@ -60,6 +63,14 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        // Program.cs registers process-wide logging providers (Windows EventLog, the
+        // SystemLog DB-table provider, console, etc.) that are unnecessary in tests and,
+        // for EventLog specifically, rely on shared native OS handles that are not safe
+        // to open/close concurrently across the many WebApplicationFactory hosts this
+        // suite now builds and tears down in parallel. Strip every provider Program.cs
+        // added and rely on xUnit's own test output instead.
+        builder.ConfigureLogging(logging => logging.ClearProviders());
+
         // Configure worker auth shared key and storage paths for testing
         builder.ConfigureAppConfiguration((context, config) =>
         {
@@ -84,6 +95,23 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
         builder.ConfigureServices((context, services) =>
         {
+            // Program.cs registers ~10 real IHostedService workers (maintenance pollers,
+            // catalog update detection, power-monitor polling, queue/history/audit
+            // background tasks, etc.), and at least one of them (PrintFailureMonitorService)
+            // is a genuine test dependency: FailureDetectionControllerTests asserts on state
+            // that only that background loop publishes. So these services must keep running
+            // — but with up to ProcessorCount hosts now alive concurrently, each running ~10
+            // pollers against a database that per-test ResetDataAsync() calls wipe mid-cycle,
+            // a poller occasionally hits a table another test just cleared and throws. .NET's
+            // default HostOptions.BackgroundServiceExceptionBehavior is StopHost, so that one
+            // unhandled exception tears down the ENTIRE host — which is exactly what surfaced
+            // as sporadic, single-class-wide ObjectDisposedException("IServiceProvider")
+            // failures once full parallelism was enabled. Switch to Ignore: a poller iteration
+            // that throws is logged and that background task stops, but the host (and every
+            // other service in it, including the DI container tests still need) survives.
+            services.Configure<HostOptions>(options =>
+                options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore);
+
             if (_configOverrides?.TryGetValue("Testing:UseTestAuthentication", out string? useTestAuth) == true &&
                 bool.TryParse(useTestAuth, out bool enabled) &&
                 enabled)
@@ -223,6 +251,35 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         });
     }
 
+    // WebApplicationFactory<Program> resolves the minimal-hosting entry point via reflection
+    // (HostFactoryResolver) and Program.cs's own startup performs reflection-based type scanning
+    // (backend plugin discovery — see BackendPluginExtensions.DiscoverAndLoadPlugins). Building
+    // many hosts concurrently — now that the assembly-level parallelism cap is lifted — makes
+    // this scan race (e.g. transient ReflectionTypeLoadException), which previously surfaced as
+    // sporadic missing DbContext registrations and, in the worst case, a faulted host whose
+    // IServiceProvider gets disposed before the test ever runs. A pre-load of the plugin
+    // assemblies ahead of the first host build was tried and rejected: it did not remove the
+    // race (still triggered widespread ObjectDisposedException/AggregateException failures) and
+    // did not improve wall-clock time either, since BackendPluginExtensions re-scans on every
+    // host build regardless of whether the assemblies are already resident. Serializing only the
+    // build step (not test execution) removes the race while keeping full cross-class
+    // parallelism: once a host is built, all of its requests/tests still run concurrently with
+    // every other class's.
+    private static readonly SemaphoreSlim HostBuildLock = new(1, 1);
+
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        HostBuildLock.Wait();
+        try
+        {
+            return base.CreateHost(builder);
+        }
+        finally
+        {
+            HostBuildLock.Release();
+        }
+    }
+
     public static CustomWebApplicationFactory CreateWithIsolatedDatabase(bool useInMemorySqlite = true)
     {
         _ = useInMemorySqlite;
@@ -321,34 +378,95 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     }
 
     /// <summary>
-    /// <summary>
-    /// Resets the database by deleting all tables and recreating schema.
-    /// Useful for tests that share a factory but need a fresh database state.
+    /// Clears all row data (but keeps the schema) across both <see cref="AppDbContext"/> and,
+    /// when registered, <see cref="Farm.Slicer.Module.Data.SlicerDbContext"/>, then reseeds the
+    /// baseline root folders. Intended for per-test isolation when a factory instance (and its
+    /// host/schema) is shared across every test in a class via <c>IClassFixture</c> — unlike the
+    /// old <c>ResetDatabaseAsync</c>, this does not drop/recreate the schema, so it is cheap
+    /// enough to call before every test.
     /// </summary>
-    public async Task ResetDatabaseAsync()
+    public async Task ResetDataAsync()
     {
-        AsyncServiceScope scope = Services.CreateAsyncScope();
+        await using AsyncServiceScope scope = Services.CreateAsyncScope();
+
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await ClearAllTablesAsync(context.Database);
+
+        // Slicer module may be disabled for this factory (no SlicerDbContext registered).
+        Farm.Slicer.Module.Data.SlicerDbContext? slicerContext =
+            scope.ServiceProvider.GetService<Farm.Slicer.Module.Data.SlicerDbContext>();
+        if (slicerContext != null)
+        {
+            await ClearAllTablesAsync(slicerContext.Database);
+        }
+
+        // Re-establish the singleton rows normally provided by EF's HasData model seeding
+        // (applied only once, at EnsureCreatedAsync/migration time) before re-seeding the
+        // root folders — ClearAllTablesAsync wipes these rows just like any other data.
+        await SeedSingletonModelDataAsync(context);
+
+        // ClearAllTablesAsync also wipes the imperative reference/catalog data that
+        // DatabaseInitializer.SeedAllAsync() establishes once at host startup (Resources,
+        // Roles, RolePermissions, UserActions, Manufacturers, FilamentTypes, etc. — see
+        // DatabaseInitializer.cs). Re-run it here so every test observes the same baseline
+        // reference data a freshly-built host would have. Every Seed*Async step checks for
+        // existing rows before inserting, so calling this repeatedly is safe.
+        IDatabaseInitializer dbInitializer = scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>();
+        await dbInitializer.SeedAllAsync();
+
+        // Seed root folders for gcode and models to match production behavior
+        await SeedRootFoldersAsync(context);
+    }
+
+    /// <summary>
+    /// Deletes every row from every user table on the given SQLite database facade, leaving the
+    /// schema intact. Table names come from <c>sqlite_master</c> (our own schema), not external
+    /// input, so building the DELETE statements via interpolation is safe here.
+    /// </summary>
+    private static async Task ClearAllTablesAsync(Microsoft.EntityFrameworkCore.Infrastructure.DatabaseFacade database)
+    {
+        System.Data.Common.DbConnection connection = database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync();
+        }
+
+        List<string> tables = new();
+        using (System.Data.Common.DbCommand listCmd = connection.CreateCommand())
+        {
+            listCmd.CommandText =
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name <> '__EFMigrationsHistory';";
+            using System.Data.Common.DbDataReader reader = await listCmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                tables.Add(reader.GetString(0));
+            }
+        }
+
+        if (tables.Count == 0)
+        {
+            return;
+        }
+
+        await database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
         try
         {
-            AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            await context.Database.EnsureDeletedAsync();
-            await context.Database.EnsureCreatedAsync();
+            foreach (string table in tables)
+            {
+                // Table names are read back from sqlite_master above (our own schema), never from
+                // external/user input, and EF's parameterized ExecuteSqlAsync cannot bind a table
+                // identifier as a parameter (it would quote it as a value, producing invalid SQL).
+                // Raw interpolation into the DELETE statement is safe in this specific context.
+#pragma warning disable EF1002
+                await database.ExecuteSqlRawAsync($"DELETE FROM \"{table}\";");
+#pragma warning restore EF1002
+            }
 
-            // EnsureCreated on a second context is a no-op if the DB already exists.
-            // Use CreateTables() to add SlicerDbContext tables to the shared DB.
-            Farm.Slicer.Module.Data.SlicerDbContext slicerContext = scope.ServiceProvider.GetRequiredService<Farm.Slicer.Module.Data.SlicerDbContext>();
-            var creator2 = ((Microsoft.EntityFrameworkCore.Infrastructure.IInfrastructure<IServiceProvider>)slicerContext).Instance
-                .GetRequiredService<Microsoft.EntityFrameworkCore.Storage.IRelationalDatabaseCreator>();
-            try
-            { creator2.CreateTables(); }
-            catch (Microsoft.Data.Sqlite.SqliteException) { /* tables may already exist */ }
-
-            // Seed root folders for gcode and models to match production behavior
-            await SeedRootFoldersAsync(context);
+            await database.ExecuteSqlRawAsync("DELETE FROM sqlite_sequence;");
         }
         finally
         {
-            await scope.DisposeAsync();
+            await database.ExecuteSqlRawAsync("PRAGMA foreign_keys = ON;");
         }
     }
 
@@ -389,6 +507,54 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             // Folders already exist - this is fine, just continue
             context.ChangeTracker.Clear();
         }
+    }
+
+    /// <summary>
+    /// Re-inserts the singleton rows that <c>AppDbContext.OnModelCreating</c> establishes via
+    /// EF's <c>HasData</c> model seeding (<see cref="OutboxSequenceState"/>,
+    /// <see cref="PasswordPolicyEntity"/>, <see cref="DispatchSettings"/>,
+    /// <see cref="CalibrationChangeFeedState"/>, and <see cref="MutationCounter"/>).
+    /// <c>HasData</c> seeding only runs once, at <c>EnsureCreatedAsync</c>/migration time, so
+    /// <see cref="ClearAllTablesAsync"/> — which deletes every row, including these — must
+    /// reseed them explicitly, matching each row's <c>HasData</c> values exactly.
+    /// </summary>
+    private async Task SeedSingletonModelDataAsync(AppDbContext context)
+    {
+        if (!await context.Set<OutboxSequenceState>().AsNoTracking().AnyAsync())
+        {
+            context.Set<OutboxSequenceState>().Add(new OutboxSequenceState { Id = 1, NextSequence = 0 });
+        }
+
+        if (!await context.Set<PasswordPolicyEntity>().AsNoTracking().AnyAsync())
+        {
+            context.Set<PasswordPolicyEntity>().Add(new PasswordPolicyEntity
+            {
+                Id = 1,
+                MinLength = 8,
+                RequireUppercase = false,
+                RequireLowercase = false,
+                RequireDigit = false,
+                RequireSymbol = false,
+                UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            });
+        }
+
+        if (!await context.Set<DispatchSettings>().AsNoTracking().AnyAsync())
+        {
+            context.Set<DispatchSettings>().Add(new DispatchSettings());
+        }
+
+        if (!await context.Set<CalibrationChangeFeedState>().AsNoTracking().AnyAsync())
+        {
+            context.Set<CalibrationChangeFeedState>().Add(new CalibrationChangeFeedState { Id = 1, LastSequence = 0 });
+        }
+
+        if (!await context.Set<MutationCounter>().AsNoTracking().AnyAsync())
+        {
+            context.Set<MutationCounter>().Add(new MutationCounter());
+        }
+
+        await context.SaveChangesAsync();
     }
 
     // Generic mock helpers: use generic type parameter so callers with

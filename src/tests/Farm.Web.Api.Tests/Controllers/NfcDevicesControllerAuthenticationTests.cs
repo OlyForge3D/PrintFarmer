@@ -16,33 +16,41 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// mapping) rather than the service layer directly, since the vulnerability and its fix
 /// both live at that boundary.
 /// </summary>
-public class NfcDevicesControllerAuthenticationTests : IAsyncLifetime
+public class NfcDevicesControllerAuthenticationTests : IClassFixture<NfcDevicesControllerAuthenticationTests.Factory>, IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory;
+    public class Factory : CustomWebApplicationFactory
+    {
+        public Factory() : base(new Dictionary<string, string?>
+        {
+            ["Security:DevModeBypassAuth"] = "false",
+        })
+        {
+        }
+    }
+
+    private readonly Factory _factory;
     private HttpClient? _adminClient;
     private HttpClient? _nonAdminClient;
 
-    public NfcDevicesControllerAuthenticationTests()
+    public NfcDevicesControllerAuthenticationTests(Factory factory)
     {
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
-        {
-            ["Security:DevModeBypassAuth"] = "false",
-        });
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
+        await _factory.ResetDataAsync();
         _adminClient = await _factory.CreateAdminClientAsync();
         _nonAdminClient = await _factory.CreateAuthenticatedClientAsync(
-            username: "nfc-devices-user",
-            email: "nfc-devices-user@example.com");
+        username: "nfc-devices-user",
+        email: "nfc-devices-user@example.com");
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _adminClient?.Dispose();
         _nonAdminClient?.Dispose();
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     // ─── /approve is a farm_admin-only, credential-issuing action ───────────

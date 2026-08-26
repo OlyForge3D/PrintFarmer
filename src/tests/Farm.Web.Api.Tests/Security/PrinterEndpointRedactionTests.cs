@@ -15,7 +15,7 @@ public sealed class PrinterEndpointRedactionTests
     public async Task PrinterConfigurationAndCameraRoutes_ExposePasswordOnlyInAdminDetails()
     {
         using var factory = new CustomWebApplicationFactory();
-        await factory.ResetDatabaseAsync();
+        await factory.ResetDataAsync();
         using HttpClient client = await factory.CreateAdminClientAsync();
         using HttpClient viewOnlyClient = await factory.CreateAuthenticatedClientAsync(
             username: "printer-viewer",
@@ -117,7 +117,7 @@ public sealed class PrinterEndpointRedactionTests
     public async Task PrinterConfiguration_RequiresFarmAdministrator()
     {
         using var factory = new CustomWebApplicationFactory();
-        await factory.ResetDatabaseAsync();
+        await factory.ResetDataAsync();
         using HttpClient client = await factory.CreateAuthenticatedClientAsync();
 
         HttpResponseMessage response =

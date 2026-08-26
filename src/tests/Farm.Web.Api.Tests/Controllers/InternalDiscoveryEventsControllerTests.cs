@@ -28,29 +28,39 @@ namespace Farm.Web.Api.Tests.Controllers;
 ///       <see cref="DiscoveryServiceAuthenticator"/>, but lacked [AllowAnonymous], so the
 ///       global JWT fallback policy returned 401 before the key authenticator could execute.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
-public class InternalDiscoveryEventsControllerTests : IAsyncLifetime
+public class InternalDiscoveryEventsControllerTests : IClassFixture<InternalDiscoveryEventsControllerTests.Factory>, IAsyncLifetime
 {
+    public class Factory : CustomWebApplicationFactory
+    {
+        public Factory() : base(new Dictionary<string, string?>
+        {
+            ["Security:DevModeBypassAuth"] = "false",
+            ["DiscoveryAuth:SharedKey"] = SharedKey,
+        })
+        {
+        }
+    }
+
     private const string SharedKeyHeaderName = "X-Discovery-Service-Key";
     private const string SharedKey = "test-discovery-shared-key";
 
-    private CustomWebApplicationFactory _factory = null!;
+    private readonly Factory _factory;
+
+    public InternalDiscoveryEventsControllerTests(Factory factory)
+    {
+        _factory = factory;
+    }
 
     public async Task InitializeAsync()
     {
         // DevModeBypassAuth=false ensures the real JWT fallback policy is active — this is
         // what caused B2 in the original bug (401 before the controller's key check ran).
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
-        {
-            ["Security:DevModeBypassAuth"] = "false",
-            ["DiscoveryAuth:SharedKey"] = SharedKey,
-        });
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

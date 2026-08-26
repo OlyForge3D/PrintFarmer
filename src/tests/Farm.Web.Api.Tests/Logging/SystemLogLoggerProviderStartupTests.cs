@@ -61,7 +61,11 @@ public sealed class SystemLogLoggerProviderStartupTests
             LogLevel.Warning);
         ILogger logger = provider.CreateLogger("Startup");
 
-        await schemaCheckObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        // Timeouts below are generous (10s, vs. a 3s baseline) because this suite now runs
+        // with full processor-count parallelism: dozens of test hosts can be alive and
+        // scheduling background work concurrently, so a background flush task here may
+        // legitimately wait longer for CPU time than it would in isolation.
+        await schemaCheckObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         for (int index = 0; index < 50; index++)
         {
@@ -79,14 +83,14 @@ public sealed class SystemLogLoggerProviderStartupTests
         logger.LogWarning("Warning emitted after schema initialization");
 
         settingsResolutionCount.Should().Be(1);
-        Task completed = await Task.WhenAny(dbResolved.Task, Task.Delay(TimeSpan.FromSeconds(3)));
+        Task completed = await Task.WhenAny(dbResolved.Task, Task.Delay(TimeSpan.FromSeconds(10)));
         completed.Should().Be(
             dbResolved.Task,
             "queued database log writes should resume once the schema-ready signal is set");
 
         await using var assertionContext = new AppDbContext(dbOptions);
         List<string> persistedPreSchemaLogs = [];
-        DateTime persistenceDeadline = DateTime.UtcNow.AddSeconds(3);
+        DateTime persistenceDeadline = DateTime.UtcNow.AddSeconds(10);
         while (persistedPreSchemaLogs.Count < 50 && DateTime.UtcNow < persistenceDeadline)
         {
             persistedPreSchemaLogs = await assertionContext.SystemLogs

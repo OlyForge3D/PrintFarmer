@@ -22,26 +22,25 @@ namespace Farm.Web.Api.Tests.Services.Cost;
 /// across toolheads, and edge cases (missing spool data, partial consumption).
 /// </summary>
 [Trait("Category", "Unit")]
-[Collection(IntegrationTestCollection.Name)]
-public class JobCostCalculationMultiToolheadTests : IAsyncLifetime
+public class JobCostCalculationMultiToolheadTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private Printer? _testPrinter;
 
-    public JobCostCalculationMultiToolheadTests()
+    public JobCostCalculationMultiToolheadTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _testPrinter = await CreateTestPrinterAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        _factory?.Dispose();
+        return Task.CompletedTask;
     }
 
     private async Task<Printer> CreateTestPrinterAsync()

@@ -7,24 +7,35 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Integration;
 
-[Collection(IntegrationTestCollection.Name)]
-public class MappedEndpointAnonymousAccessTests : IAsyncLifetime
+public class MappedEndpointAnonymousAccessTests : IClassFixture<MappedEndpointAnonymousAccessTests.Factory>, IAsyncLifetime
 {
-    private CustomWebApplicationFactory _factory = null!;
+    public class Factory : CustomWebApplicationFactory
+    {
+        public Factory()
+            : base(new Dictionary<string, string?>
+            {
+                ["Security:DevModeBypassAuth"] = "false",
+                ["DEPLOYMENT_MODE"] = "monolith"
+            })
+        {
+        }
+    }
+
+    private readonly Factory _factory;
+
+    public MappedEndpointAnonymousAccessTests(Factory factory)
+    {
+        _factory = factory;
+    }
 
     public async Task InitializeAsync()
     {
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
-        {
-            ["Security:DevModeBypassAuth"] = "false",
-            ["DEPLOYMENT_MODE"] = "monolith"
-        });
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     [Fact]

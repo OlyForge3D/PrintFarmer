@@ -10,33 +10,39 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.DataManagement;
 
-[Collection(IntegrationTestCollection.Name)]
-public class AdminDataControllerTests : IAsyncLifetime
+public class AdminDataControllerTests : IClassFixture<AdminDataControllerTests.Factory>, IAsyncLifetime
 {
+    public class Factory : CustomWebApplicationFactory
+    {
+        public Factory() : base(new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" })
+        {
+        }
+    }
+
     private const string ApiKeySentinel = "admin-data-api-key-sentinel";
     private const string UsernameSentinel = "admin-data-username-sentinel";
     private const string PasswordSentinel = "admin-data-password-sentinel";
 
-    private CustomWebApplicationFactory? _factory;
+    private readonly Factory _factory;
     private HttpClient? _client;
+
+    public AdminDataControllerTests(Factory factory)
+    {
+        _factory = factory;
+    }
 
     public async Task InitializeAsync()
     {
-        // Create a fresh factory for each test to ensure database isolation
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" });
-
         // Ensure database is reset to a known baseline state.
         // Note: the application seeds baseline catalog data on startup.
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        if (_factory != null)
-        {
-            await _factory.DisposeAsync();
-        }
+        _client?.Dispose();
+        return Task.CompletedTask;
     }
 
     [Theory]

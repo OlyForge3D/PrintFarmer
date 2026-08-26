@@ -32,30 +32,38 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// model-binding run at the pipeline level, not on direct method calls).
 /// </remarks>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class UnifiedSettingsPerKeyPostTests : IAsyncLifetime
+public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKeyPostTests.Factory>, IAsyncLifetime
 {
-    private CustomWebApplicationFactory _factory = null!;
+    public class Factory : CustomWebApplicationFactory
+    {
+        public Factory() : base(new Dictionary<string, string?>
+        {
+            ["Security:DevModeBypassAuth"] = "false",
+        })
+        {
+        }
+    }
+
+    private readonly Factory _factory;
+
+    public UnifiedSettingsPerKeyPostTests(Factory factory)
+    {
+        _factory = factory;
+    }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
     };
 
-    public Task InitializeAsync()
+    public async Task InitializeAsync()
     {
-        // Disable DevModeBypassAuth so auth actually runs — Development environment
-        // defaults would otherwise bypass authorization on GET and mask regressions.
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
-        {
-            ["Security:DevModeBypassAuth"] = "false",
-        });
-        return _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     // ─── Defect 1: farm_admin role required ─────────────────────────────────

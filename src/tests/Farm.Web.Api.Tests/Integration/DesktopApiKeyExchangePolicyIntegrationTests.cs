@@ -27,30 +27,41 @@ namespace Farm.Web.Api.Tests.Integration;
 /// are rejected, and that both success and failure exchanges are recorded in the audit log.
 /// </summary>
 [Trait("Category", "DbHeavy")]
-[Collection(IntegrationTestCollection.Name)]
 [TestTiming]
-public class DesktopApiKeyExchangePolicyIntegrationTests : IAsyncLifetime
+public class DesktopApiKeyExchangePolicyIntegrationTests : IClassFixture<DesktopApiKeyExchangePolicyIntegrationTests.Factory>, IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory;
+    public class Factory : CustomWebApplicationFactory
+    {
+        public Factory()
+            : base(new Dictionary<string, string?>
+            {
+                ["Security:DevModeBypassAuth"] = "false",
+                // This class's host (and its singleton in-memory rate limiter) is shared
+                // across every test via IClassFixture, and several tests here each exchange
+                // an API key once. Raise the ceiling well above what the shared-factory tests
+                // perform so their cumulative attempts never trip the default limit (5/minute)
+                // meant for a single client in production. The one test that specifically
+                // validates the default limit (RepeatedExchangeAttempts_ExceedingLimit_AreRateLimited)
+                // uses its own dedicated factory with the default rate-limit config instead.
+                ["RateLimiting:Authentication:MaxApiKeyExchangeAttemptsPerMinute"] = "1000"
+            })
+        {
+        }
+    }
+
+    private readonly Factory _factory;
     private HttpClient _anonymousClient = null!;
     private HttpClient _loginClient = null!;
     private Guid _ownerId;
 
-    public DesktopApiKeyExchangePolicyIntegrationTests()
+    public DesktopApiKeyExchangePolicyIntegrationTests(Factory factory)
     {
-        // The test host otherwise runs with Development-environment defaults, which include
-        // Security:DevModeBypassAuth=true (bypasses ALL authorization on GET requests). That
-        // bypass would mask the scope-policy assertions this test class exists to prove, so
-        // it is explicitly disabled here regardless of the ambient environment.
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
-        {
-            ["Security:DevModeBypassAuth"] = "false"
-        });
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _anonymousClient = _factory.CreateClient();
         _loginClient = await _factory.CreateAuthenticatedClientAsync(
             "desktop-policy-owner",
@@ -67,7 +78,6 @@ public class DesktopApiKeyExchangePolicyIntegrationTests : IAsyncLifetime
     {
         _anonymousClient?.Dispose();
         _loginClient?.Dispose();
-        _factory?.Dispose();
         return Task.CompletedTask;
     }
 
@@ -273,16 +283,57 @@ public class DesktopApiKeyExchangePolicyIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task RepeatedExchangeAttempts_ExceedingLimit_AreRateLimited()
     {
-        string rawKey = await SeedApiKeyAsync(ApiKeyPurpose.Desktop, ApiKeyScope.ModelRead);
-
-        // AuthenticationRateLimitOptions.MaxApiKeyExchangeAttemptsPerMinute defaults to 5.
-        for (int i = 0; i < 5; i++)
+        // The shared class Factory raises MaxApiKeyExchangeAttemptsPerMinute so the other
+        // tests in this class (which share its host/rate-limiter singleton) never trip the
+        // limit. Validating the actual default limit therefore needs its own dedicated
+        // factory/host with the default (unmodified) rate-limit config, isolated from every
+        // other test's exchange attempts.
+        await using var factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
         {
-            HttpResponseMessage response = await ExchangeAsync(rawKey);
-            response.StatusCode.Should().Be(HttpStatusCode.OK, $"attempt {i + 1} is within the per-minute limit");
-        }
+            ["Security:DevModeBypassAuth"] = "false"
+        });
+        await factory.ResetDataAsync();
 
-        HttpResponseMessage limitedResponse = await ExchangeAsync(rawKey);
-        limitedResponse.StatusCode.Should().Be((HttpStatusCode)429, "the 6th attempt within the same minute must be rate limited");
+        HttpClient loginClient = await factory.CreateAuthenticatedClientAsync(
+            "rate-limit-owner",
+            "rate-limit-owner@example.com",
+            "TestPassword123!");
+        loginClient.Dispose();
+
+        Guid ownerId;
+        using (AsyncServiceScope scope = factory.Services.CreateAsyncScope())
+        {
+            AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            User owner = await context.Users.SingleAsync(u => u.Username == "rate-limit-owner");
+            ownerId = owner.Id;
+
+            string rawKeySeed = $"raw-{Guid.NewGuid():N}";
+            context.ApiKeys.Add(new ApiKey
+            {
+                Id = Guid.NewGuid(),
+                UserId = ownerId,
+                Name = "rate-limit-test-key",
+                KeyHash = ComputeSha256Hash(rawKeySeed),
+                Purpose = ApiKeyPurpose.Desktop,
+                Scopes = ApiKeyScope.ModelRead,
+                IsActive = true,
+                ExpiresAt = DateTime.UtcNow.AddDays(30)
+            });
+            await context.SaveChangesAsync();
+
+            using HttpClient anonymousClient = factory.CreateClient();
+
+            // AuthenticationRateLimitOptions.MaxApiKeyExchangeAttemptsPerMinute defaults to 5.
+            for (int i = 0; i < 5; i++)
+            {
+                HttpResponseMessage response = await anonymousClient.PostAsJsonAsync(
+                    "/api/auth/api-key/exchange", new { apiKey = rawKeySeed });
+                response.StatusCode.Should().Be(HttpStatusCode.OK, $"attempt {i + 1} is within the per-minute limit");
+            }
+
+            HttpResponseMessage limitedResponse = await anonymousClient.PostAsJsonAsync(
+                "/api/auth/api-key/exchange", new { apiKey = rawKeySeed });
+            limitedResponse.StatusCode.Should().Be((HttpStatusCode)429, "the 6th attempt within the same minute must be rate limited");
+        }
     }
 }

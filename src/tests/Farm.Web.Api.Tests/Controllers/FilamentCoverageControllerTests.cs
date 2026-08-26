@@ -29,8 +29,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// <see cref="Services.FilamentCoverageServiceTests"/>.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class FilamentCoverageControllerTests : IAsyncLifetime
+public class FilamentCoverageControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private const string PerPrinterRoute = "/api/printers/{0}/filament-coverage";
     private const string FleetRoute = "/api/printers/filament-coverage";
@@ -38,24 +37,23 @@ public class FilamentCoverageControllerTests : IAsyncLifetime
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
 
-    public FilamentCoverageControllerTests()
+    public FilamentCoverageControllerTests(CustomWebApplicationFactory factory)
     {
         // No service overrides are needed: the coverage service degrades
         // gracefully when the (unconfigured) Spoolman client throws, and no
         // live-progress lookup is issued when there is no active job.
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAuthenticatedClientAsync();
     }
 
     public Task DisposeAsync()
     {
         _client?.Dispose();
-        _factory?.Dispose();
         return Task.CompletedTask;
     }
 
@@ -72,7 +70,7 @@ public class FilamentCoverageControllerTests : IAsyncLifetime
     public async Task GetFleet_WithoutAuth_Returns401()
     {
         await using CustomWebApplicationFactory strictFactory = new(new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" });
-        await strictFactory.ResetDatabaseAsync();
+        await strictFactory.ResetDataAsync();
         using HttpClient anon = strictFactory.CreateClient();
         HttpResponseMessage response = await anon.GetAsync(FleetRoute);
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -82,7 +80,7 @@ public class FilamentCoverageControllerTests : IAsyncLifetime
     public async Task GetForPrinter_WithoutAuth_Returns401()
     {
         await using CustomWebApplicationFactory strictFactory = new(new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" });
-        await strictFactory.ResetDatabaseAsync();
+        await strictFactory.ResetDataAsync();
         using HttpClient anon = strictFactory.CreateClient();
         HttpResponseMessage response = await anon.GetAsync(string.Format(PerPrinterRoute, Guid.NewGuid()));
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);

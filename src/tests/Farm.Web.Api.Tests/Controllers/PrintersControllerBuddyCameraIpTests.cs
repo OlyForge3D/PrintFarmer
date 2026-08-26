@@ -19,25 +19,26 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// against injection payloads and correctly handles the clear (empty-string) case.
 /// </summary>
 [Trait("Category", "Integration")]
-public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
+public class PrintersControllerBuddyCameraIpTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
 
-    public PrintersControllerBuddyCameraIpTests()
+    public PrintersControllerBuddyCameraIpTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _client?.Dispose();
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     private async Task<Guid> SeedPrinterAsync()

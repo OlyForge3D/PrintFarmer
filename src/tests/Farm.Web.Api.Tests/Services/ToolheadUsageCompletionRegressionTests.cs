@@ -26,28 +26,27 @@ namespace Farm.Web.Api.Tests.Services;
 /// (PrintJobId, ToolheadIndex) enforces Bug #1 at the schema level.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class ToolheadUsageCompletionRegressionTests : IAsyncLifetime
+public class ToolheadUsageCompletionRegressionTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private Printer _testPrinter = null!;
     private Toolhead _toolheadT0 = null!;
     private Toolhead _toolheadT1 = null!;
 
-    public ToolheadUsageCompletionRegressionTests()
+    public ToolheadUsageCompletionRegressionTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         await SeedPrinterWithToolheadsAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        _factory?.Dispose();
+        return Task.CompletedTask;
     }
 
     private async Task SeedPrinterWithToolheadsAsync()

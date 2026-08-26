@@ -30,13 +30,18 @@ namespace Farm.Web.Api.Tests.Security;
 /// (tests 2 and 3, whose owning user's permissions are read live from the database on every
 /// request — see <c>OctoPrintAuthService.ResolveApiKeyPrincipalAsync</c>).
 /// </remarks>
-public sealed class OctoPrintUploadAuthorizationTests : IAsyncLifetime
+public sealed class OctoPrintUploadAuthorizationTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory = new();
+    private readonly CustomWebApplicationFactory _factory;
 
-    public Task InitializeAsync() => _factory.ResetDatabaseAsync();
+    public OctoPrintUploadAuthorizationTests(CustomWebApplicationFactory factory)
+    {
+        _factory = factory;
+    }
 
-    public async Task DisposeAsync() => await _factory.DisposeAsync();
+    public Task InitializeAsync() => _factory.ResetDataAsync();
+
+    public Task DisposeAsync() => Task.CompletedTask;
 
     [Fact]
     public async Task Upload_UserWithNoQueuePermission_Returns403AndCreatesNoPrintJob()
