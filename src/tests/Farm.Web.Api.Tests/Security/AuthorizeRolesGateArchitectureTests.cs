@@ -67,6 +67,7 @@ public sealed class AuthorizeRolesGateArchitectureTests
         // of Farm.Web.Api into a module assembly silently drop out of an assembly-array-based
         // scan unless the new assembly is added explicitly.
         typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
+        typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
     ];
 
     [Fact]
@@ -144,9 +145,16 @@ public sealed class AuthorizeRolesGateArchitectureTests
 
         foreach (Assembly assembly in ScannedAssemblies)
         {
-            AuthorizationOptions options = assembly == typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly
-                ? slicerHostOptions
-                : mainApiOptions;
+            // PrintQueue and Calibration controllers physically live in module assemblies but are
+            // hosted in-process by the main API (Farm.Web.Api), so they must be evaluated against
+            // the main API's real AuthorizationOptions, not the slicer host's.
+            bool isMainApiAssembly =
+                assembly == typeof(Farm.Web.Api.Controllers.PrintersController).Assembly ||
+                assembly == typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly ||
+                assembly == typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly;
+            AuthorizationOptions options = isMainApiAssembly
+                ? mainApiOptions
+                : slicerHostOptions;
 
             foreach (Type type in assembly.GetTypes())
             {

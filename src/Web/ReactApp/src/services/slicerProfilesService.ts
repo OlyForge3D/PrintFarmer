@@ -348,6 +348,37 @@ export interface CustomProfilesListResponse {
   filamentProfileCount: number;
 }
 
+export interface CloneProfileFamilyRequest {
+  familyName: string;
+  targetPrinterModelId: string;
+  sourceManufacturer: string;
+  sourceMachineModelName: string;
+  nozzleDiameters: number[];
+  familyOverrides: Record<string, unknown>;
+  slicerEngineVersion?: string;
+  slicerDistribution: string;
+}
+
+export interface ProfileFamilyMachineVariant {
+  id: string;
+  name: string;
+  nozzleDiameter: number;
+  sourceSystemPresetName: string;
+}
+
+export type ProfileFamilyRenderStatus = 'NotApplicable' | 'Pending' | 'Healthy' | 'Failed' | 'Stale';
+
+export interface CloneProfileFamilyResponse {
+  familyId: string;
+  familyName: string;
+  targetPrinterModelId: string;
+  renderStatus: ProfileFamilyRenderStatus;
+  lastRenderedAt: string | null;
+  machineProfiles: ProfileFamilyMachineVariant[];
+  processProfileCount: number;
+  filamentProfileCount: number;
+}
+
 export const slicerProfilesService = {
   async listExtended(): Promise<ExtendedProfilesResponse> {
     const res = await apiClient.get<ExtendedProfilesResponse>('/slicer/profiles/extended');
@@ -463,6 +494,11 @@ export const slicerProfilesService = {
    */
   async cloneProfile(request: CloneSingleProfileRequest): Promise<CloneSingleProfileResponse> {
     const res = await apiClient.post<CloneSingleProfileResponse>('/slicer/profiles/clone', request);
+    return res.data;
+  },
+
+  async cloneFamily(request: CloneProfileFamilyRequest): Promise<CloneProfileFamilyResponse> {
+    const res = await apiClient.post<CloneProfileFamilyResponse>('/slicer/profiles/clone-family', request);
     return res.data;
   },
 
