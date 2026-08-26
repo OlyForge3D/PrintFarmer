@@ -391,6 +391,12 @@ load_changed_files() {
 #                     Phase 10: the calibration vertical-slice module carved
 #                     out of Farm.Web.Api, following the smartplug pattern
 #                     above). Matched before the generic `src/modules/*` case.
+#   devices         — src/modules/Farm.Modules.Devices/** (issue #2043,
+#                     Phase 15: the OctoPrint API-key auth service/handler/
+#                     filter and the NFC/camera/Home-Assistant device
+#                     controllers carved out of Farm.Web.Api, following the
+#                     smartplug pattern above). Matched before the generic
+#                     `src/modules/*` case.
 #   migrations_app  — src/migrations/Farm.Migrations.*/**
 #   migrations_slcr — src/migrations/Farm.Slicer.Migrations.*/**
 #   tests_api       — src/tests/Farm.Web.Api.Tests/**
@@ -412,6 +418,8 @@ load_changed_files() {
 #                     #2037). Matched before the generic `src/tests/*` case.
 #   tests_calibration — src/tests/Farm.Modules.Calibration.Tests/** (issue
 #                     #2038). Matched before the generic `src/tests/*` case.
+#   tests_devices   — src/tests/Farm.Modules.Devices.Tests/** (issue #2043).
+#                     Matched before the generic `src/tests/*` case.
 #   tests_other     — any other src/tests/**
 #   tools           — src/tools/**
 #   dotnet_config   — src/*.props, src/*.targets, src/.editorconfig
@@ -510,6 +518,11 @@ classify_path() {
     # matched first so it gets its own narrow bucket instead of falling into
     # the full-safe `modules` bucket.
     src/modules/Farm.Modules.Calibration/*) printf 'calibration' ; return ;;
+    # Farm.Modules.Devices is a concrete vertical-slice module (issue #2043,
+    # Phase 15) following the same pattern as smartplug above -- matched
+    # first so it gets its own narrow bucket instead of falling into the
+    # full-safe `modules` bucket.
+    src/modules/Farm.Modules.Devices/*) printf 'devices' ; return ;;
     src/modules/*)           printf 'modules' ; return ;;
     src/migrations/Farm.Migrations.*)         printf 'migrations_app' ; return ;;
     src/migrations/Farm.Slicer.Migrations.*)  printf 'migrations_slcr' ; return ;;
@@ -523,6 +536,7 @@ classify_path() {
     src/tests/Farm.Modules.PrintQueue.Tests/*)  printf 'tests_printqueue' ; return ;;
     src/tests/Farm.Modules.Maintenance.Tests/*) printf 'tests_maintenance' ; return ;;
     src/tests/Farm.Modules.Calibration.Tests/*) printf 'tests_calibration' ; return ;;
+    src/tests/Farm.Modules.Devices.Tests/*)     printf 'tests_devices' ; return ;;
     src/tests/*)             printf 'tests_other' ; return ;;
     src/tools/*)             printf 'tools' ; return ;;
   esac
@@ -717,12 +731,14 @@ main() {
   local has_printqueue=0
   local has_maintenance=0
   local has_calibration=0
+  local has_devices=0
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
   local has_tests_integration=0 has_tests_modules=0 has_tests_shared=0 has_tests_smartplug=0 has_tests_other=0
   local has_tests_printqueue=0
   local has_tests_maintenance=0
   local has_tests_calibration=0
+  local has_tests_devices=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
 
   local p category
@@ -745,6 +761,7 @@ main() {
       printqueue)      has_printqueue=1 ;;
       maintenance)     has_maintenance=1 ;;
       calibration)     has_calibration=1 ;;
+      devices)         has_devices=1 ;;
       migrations_app)  has_mig_app=1 ;;
       migrations_slcr) has_mig_slcr=1 ;;
       tests_api)       has_tests_api=1 ;;
@@ -757,6 +774,7 @@ main() {
       tests_printqueue) has_tests_printqueue=1 ;;
       tests_maintenance) has_tests_maintenance=1 ;;
       tests_calibration) has_tests_calibration=1 ;;
+      tests_devices)   has_tests_devices=1 ;;
       tests_other)     has_tests_other=1 ;;
       tools)           has_tools=1 ;;
       unknown_src)     has_unknown_src=1 ;;
@@ -826,10 +844,10 @@ main() {
   # migration-drift both depend on dotnet-build and consume its artifacts, so
   # every bucket that can request either consumer must also request the build.
   if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
-        has_orca || has_smartplug || has_printqueue || has_maintenance || has_calibration ||
+        has_orca || has_smartplug || has_printqueue || has_maintenance || has_calibration || has_devices ||
         has_mig_app || has_mig_slcr ||
         has_tests_api || has_tests_slicer || has_tests_orca ||
-        has_tests_integration || has_tests_smartplug || has_tests_printqueue || has_tests_maintenance || has_tests_calibration || has_tools )); then
+        has_tests_integration || has_tests_smartplug || has_tests_printqueue || has_tests_maintenance || has_tests_calibration || has_tests_devices || has_tools )); then
     want_dotnet_build="true"
   fi
 
@@ -843,10 +861,11 @@ main() {
   if (( has_infra )); then
     # Farm.OrcaSlicer.Worker.Tests references infra through the worker graph.
     # Farm.Modules.SmartPlug (issue #2036), Farm.Modules.PrintQueue (issue
-    # #2040), Farm.Modules.Maintenance (issue #2037), and Farm.Modules.Calibration
-    # (issue #2038) also reference Farm.Infrastructure directly, so an infra
-    # change must re-run all four of their test projects too.
-    test_names+=("Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests")
+    # #2040), Farm.Modules.Maintenance (issue #2037), Farm.Modules.Calibration
+    # (issue #2038), and Farm.Modules.Devices (issue #2043) also reference
+    # Farm.Infrastructure directly, so an infra change must re-run all five
+    # of their test projects too.
+    test_names+=("Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests" "Farm.Modules.Devices.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_backend )); then
@@ -929,6 +948,19 @@ main() {
     test_names+=("Farm.Modules.Calibration.Tests" "Farm.Web.Api.Tests")
     net_test_bucket_hit=1
   fi
+  if (( has_devices )); then
+    # Farm.Modules.Devices (issue #2043) owns the OctoPrint API-key auth
+    # service/handler/filter and the NFC/camera/Home-Assistant controllers,
+    # but the CustomWebApplicationFactory-based integration tests that cover
+    # camera snapshots, NFC device authentication, the admin Home Assistant
+    # controller, OctoPrint-compat routes, and the route-table snapshot
+    # intentionally stayed behind in Farm.Web.Api.Tests -- see
+    # docs/MODULE_MIGRATION_PATTERN.md. A controller-owning module must
+    # therefore also select Farm.Web.Api.Tests, unlike a pure-service module
+    # such as Farm.OrcaSlicer.Worker.
+    test_names+=("Farm.Modules.Devices.Tests" "Farm.Web.Api.Tests")
+    net_test_bucket_hit=1
+  fi
   if (( has_mig_app )); then
     # Api.Tests and IntegrationTests cover the assembled API graph that includes
     # the App migration projects.
@@ -996,6 +1028,10 @@ main() {
     test_names+=("Farm.Modules.Calibration.Tests")
     net_test_bucket_hit=1
   fi
+  if (( has_tests_devices )); then
+    test_names+=("Farm.Modules.Devices.Tests")
+    net_test_bucket_hit=1
+  fi
   if (( net_test_bucket_hit )); then
     want_dotnet_test="true"
   fi
@@ -1013,6 +1049,7 @@ main() {
   if (( has_printqueue )); then reason+="printqueue "; fi
   if (( has_maintenance )); then reason+="maintenance "; fi
   if (( has_calibration )); then reason+="calibration "; fi
+  if (( has_devices )); then reason+="devices "; fi
   if (( has_mig_app )); then reason+="mig-app "; fi
   if (( has_mig_slcr )); then reason+="mig-slicer "; fi
   if (( has_tests_api )); then reason+="tests-api "; fi
@@ -1023,6 +1060,7 @@ main() {
   if (( has_tests_printqueue )); then reason+="tests-printqueue "; fi
   if (( has_tests_maintenance )); then reason+="tests-maintenance "; fi
   if (( has_tests_calibration )); then reason+="tests-calibration "; fi
+  if (( has_tests_devices )); then reason+="tests-devices "; fi
   if (( has_tools )); then reason+="tools "; fi
   if (( has_docs )); then reason+="docs "; fi
   if (( has_mobile )); then reason+="mobile "; fi
