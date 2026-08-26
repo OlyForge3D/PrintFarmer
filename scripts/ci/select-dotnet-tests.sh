@@ -397,6 +397,13 @@ load_changed_files() {
 #                     carved out of Farm.Web.Api, following the calibration
 #                     pattern above). Matched before the generic
 #                     `src/modules/*` case.
+#   inventory       — src/modules/Farm.Modules.Inventory/** (issue #2044,
+#                     Phase 16: Spoolman/filament types/bins/parts inventory/
+#                     material clusters/tags/custom fields/model collections/
+#                     print projects/filament coverage/fallback groups vertical-
+#                     slice module carved out of Farm.Web.Api, following the
+#                     identity pattern above). Matched before the generic
+#                     `src/modules/*` case.
 #   migrations_app  — src/migrations/Farm.Migrations.*/**
 #   migrations_slcr — src/migrations/Farm.Slicer.Migrations.*/**
 #   tests_api       — src/tests/Farm.Web.Api.Tests/**
@@ -419,6 +426,8 @@ load_changed_files() {
 #   tests_calibration — src/tests/Farm.Modules.Calibration.Tests/** (issue
 #                     #2038). Matched before the generic `src/tests/*` case.
 #   tests_identity  — src/tests/Farm.Modules.Identity.Tests/** (issue #2041).
+#                     Matched before the generic `src/tests/*` case.
+#   tests_inventory — src/tests/Farm.Modules.Inventory.Tests/** (issue #2044).
 #                     Matched before the generic `src/tests/*` case.
 #   tests_other     — any other src/tests/**
 #   tools           — src/tools/**
@@ -523,6 +532,11 @@ classify_path() {
     # above -- matched first so it gets its own narrow bucket instead of
     # falling into the full-safe `modules` bucket.
     src/modules/Farm.Modules.Identity/*) printf 'identity' ; return ;;
+    # Farm.Modules.Inventory is a concrete vertical-slice module (issue #2044,
+    # Phase 16) following the same leaf-module pattern as identity above --
+    # matched first so it gets its own narrow bucket instead of falling into
+    # the full-safe `modules` bucket.
+    src/modules/Farm.Modules.Inventory/*) printf 'inventory' ; return ;;
     src/modules/*)           printf 'modules' ; return ;;
     src/migrations/Farm.Migrations.*)         printf 'migrations_app' ; return ;;
     src/migrations/Farm.Slicer.Migrations.*)  printf 'migrations_slcr' ; return ;;
@@ -537,6 +551,7 @@ classify_path() {
     src/tests/Farm.Modules.Maintenance.Tests/*) printf 'tests_maintenance' ; return ;;
     src/tests/Farm.Modules.Calibration.Tests/*) printf 'tests_calibration' ; return ;;
     src/tests/Farm.Modules.Identity.Tests/*)    printf 'tests_identity' ; return ;;
+    src/tests/Farm.Modules.Inventory.Tests/*)   printf 'tests_inventory' ; return ;;
     src/tests/*)             printf 'tests_other' ; return ;;
     src/tools/*)             printf 'tools' ; return ;;
   esac
@@ -729,12 +744,12 @@ main() {
   local has_api=0 has_infra=0 has_backend=0 has_backend_core=0 has_slicer=0
   local has_orca=0 has_discovery=0 has_settings=0 has_modules=0 has_smartplug=0
   local has_printqueue=0
-  local has_maintenance=0 has_calibration=0 has_identity=0
+  local has_maintenance=0 has_calibration=0 has_identity=0 has_inventory=0
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
   local has_tests_integration=0 has_tests_modules=0 has_tests_shared=0 has_tests_smartplug=0 has_tests_other=0
   local has_tests_printqueue=0
-  local has_tests_maintenance=0 has_tests_calibration=0 has_tests_identity=0
+  local has_tests_maintenance=0 has_tests_calibration=0 has_tests_identity=0 has_tests_inventory=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
 
   local p category
@@ -758,6 +773,7 @@ main() {
       maintenance)     has_maintenance=1 ;;
       calibration)     has_calibration=1 ;;
       identity)        has_identity=1 ;;
+      inventory)       has_inventory=1 ;;
       migrations_app)  has_mig_app=1 ;;
       migrations_slcr) has_mig_slcr=1 ;;
       tests_api)       has_tests_api=1 ;;
@@ -771,6 +787,7 @@ main() {
       tests_maintenance) has_tests_maintenance=1 ;;
       tests_calibration) has_tests_calibration=1 ;;
       tests_identity)  has_tests_identity=1 ;;
+      tests_inventory) has_tests_inventory=1 ;;
       tests_other)     has_tests_other=1 ;;
       tools)           has_tools=1 ;;
       unknown_src)     has_unknown_src=1 ;;
@@ -840,10 +857,10 @@ main() {
   # migration-drift both depend on dotnet-build and consume its artifacts, so
   # every bucket that can request either consumer must also request the build.
   if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
-        has_orca || has_smartplug || has_printqueue || has_maintenance || has_calibration || has_identity ||
+        has_orca || has_smartplug || has_printqueue || has_maintenance || has_calibration || has_identity || has_inventory ||
         has_mig_app || has_mig_slcr ||
         has_tests_api || has_tests_slicer || has_tests_orca ||
-        has_tests_integration || has_tests_smartplug || has_tests_printqueue || has_tests_maintenance || has_tests_calibration || has_tests_identity || has_tools )); then
+        has_tests_integration || has_tests_smartplug || has_tests_printqueue || has_tests_maintenance || has_tests_calibration || has_tests_identity || has_tests_inventory || has_tools )); then
     want_dotnet_build="true"
   fi
 
@@ -851,21 +868,23 @@ main() {
   local net_test_bucket_hit=0
   if (( has_api || has_infra )); then
     # api / infra sit under both tests. Both are affected. Farm.Modules.Identity.Tests
-    # is also affected by an api change: since SecurityAuditControllerTests.cs (moved
-    # from Farm.Web.Api.Tests) depends on CustomWebApplicationFactory<Program>, which
-    # lives in Farm.Web.Api.Tests and boots Farm.Web.Api's Program, an api-only change
-    # can alter that test's runtime behavior without touching any identity-owned path.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.Web.IntegrationTests" "Farm.Modules.Identity.Tests")
+    # and Farm.Modules.Inventory.Tests are also affected by an api change:
+    # moved tests in each project depend on CustomWebApplicationFactory<Program>,
+    # which lives in Farm.Web.Api.Tests and boots Farm.Web.Api's Program, so an
+    # api-only change can alter those tests' runtime behavior without touching
+    # any identity-/inventory-owned path.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.Web.IntegrationTests" "Farm.Modules.Identity.Tests" "Farm.Modules.Inventory.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_infra )); then
     # Farm.OrcaSlicer.Worker.Tests references infra through the worker graph.
     # Farm.Modules.SmartPlug (issue #2036), Farm.Modules.PrintQueue (issue
     # #2040), Farm.Modules.Maintenance (issue #2037), Farm.Modules.Calibration
-    # (issue #2038), and Farm.Modules.Identity (issue #2041) also reference
-    # Farm.Infrastructure directly, so an infra change must re-run all five
+    # (issue #2038), Farm.Modules.Identity (issue #2041), and
+    # Farm.Modules.Inventory (issue #2044) also reference Farm.Infrastructure
+    # directly, so an infra change must re-run all six
     # test projects too.
-    test_names+=("Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests" "Farm.Modules.Identity.Tests")
+    test_names+=("Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests" "Farm.Modules.Identity.Tests" "Farm.Modules.Inventory.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_backend )); then
@@ -962,6 +981,17 @@ main() {
     test_names+=("Farm.Modules.Identity.Tests" "Farm.Web.Api.Tests")
     net_test_bucket_hit=1
   fi
+  if (( has_inventory )); then
+    # Farm.Modules.Inventory (issue #2044) owns the 11 inventory controllers,
+    # but retained coverage that did NOT move (at minimum RouteTableSnapshotTests)
+    # intentionally stays behind in Farm.Web.Api.Tests -- see
+    # docs/MODULE_MIGRATION_PATTERN.md. Several relocated tests also reuse
+    # CustomWebApplicationFactory/TestInfrastructure from Farm.Web.Api.Tests via
+    # a direct ProjectReference, so a controller-owning inventory module must
+    # also select Farm.Web.Api.Tests.
+    test_names+=("Farm.Modules.Inventory.Tests" "Farm.Web.Api.Tests")
+    net_test_bucket_hit=1
+  fi
   if (( has_mig_app )); then
     # Api.Tests and IntegrationTests cover the assembled API graph that includes
     # the App migration projects.
@@ -998,10 +1028,11 @@ main() {
   # Test-project-only edits run just that test project, but still require the
   # central build whose compiled artifact the dotnet-test job downloads.
   if (( has_tests_api )); then
-    # Farm.Modules.Identity.Tests references Farm.Web.Api.Tests directly (for
-    # CustomWebApplicationFactory<Program>, used by SecurityAuditControllerTests.cs),
-    # so a Farm.Web.Api.Tests-only edit must also re-run it.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Modules.Identity.Tests")
+    # Farm.Modules.Identity.Tests and Farm.Modules.Inventory.Tests reference
+    # Farm.Web.Api.Tests directly (for CustomWebApplicationFactory<Program> and
+    # shared TestInfrastructure helpers), so a Farm.Web.Api.Tests-only edit
+    # must also re-run both.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Modules.Identity.Tests" "Farm.Modules.Inventory.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_tests_slicer )); then
@@ -1036,6 +1067,10 @@ main() {
     test_names+=("Farm.Modules.Identity.Tests")
     net_test_bucket_hit=1
   fi
+  if (( has_tests_inventory )); then
+    test_names+=("Farm.Modules.Inventory.Tests")
+    net_test_bucket_hit=1
+  fi
   if (( net_test_bucket_hit )); then
     want_dotnet_test="true"
   fi
@@ -1054,6 +1089,7 @@ main() {
   if (( has_maintenance )); then reason+="maintenance "; fi
   if (( has_calibration )); then reason+="calibration "; fi
   if (( has_identity )); then reason+="identity "; fi
+  if (( has_inventory )); then reason+="inventory "; fi
   if (( has_mig_app )); then reason+="mig-app "; fi
   if (( has_mig_slcr )); then reason+="mig-slicer "; fi
   if (( has_tests_api )); then reason+="tests-api "; fi
@@ -1065,6 +1101,7 @@ main() {
   if (( has_tests_maintenance )); then reason+="tests-maintenance "; fi
   if (( has_tests_calibration )); then reason+="tests-calibration "; fi
   if (( has_tests_identity )); then reason+="tests-identity "; fi
+  if (( has_tests_inventory )); then reason+="tests-inventory "; fi
   if (( has_tools )); then reason+="tools "; fi
   if (( has_docs )); then reason+="docs "; fi
   if (( has_mobile )); then reason+="mobile "; fi

@@ -1,4 +1,4 @@
-using Farm.Modules.Abstractions;
+﻿using Farm.Modules.Abstractions;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,7 +12,7 @@ namespace Farm.Modules.Inventory;
 /// <see cref="Farm.Web.Api.Controllers.BinsController"/>,
 /// <see cref="Farm.Web.Api.Controllers.PartsInventoryController"/>,
 /// <see cref="Farm.Web.Api.Controllers.MaterialClusterController"/>,
-/// <see cref="Farm.Web.Api.Controllers.TagsController"/>,
+/// <see cref="Farm.Api.Controllers.TagsController"/>,
 /// <see cref="Farm.Web.Api.Controllers.CustomFieldsController"/>,
 /// <see cref="Farm.Web.Api.Controllers.ModelCollectionsController"/>,
 /// <see cref="Farm.Web.Api.Controllers.PrintProjectsController"/>,

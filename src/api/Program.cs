@@ -204,7 +204,9 @@ IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 // Farm.Modules.PrintQueue (issue #2040, Phase 12) is the second, and
 // Farm.Modules.Calibration (issue #2038, Phase 10) is the third.
 // Farm.Modules.Maintenance (issue #2037) is the first to also move a SignalR hub -- see its
-// MapEndpoints for the MapHub<MaintenanceHub> call that used to live here.
+// MapEndpoints for the MapHub<MaintenanceHub> call that used to live here. Farm.Modules.Identity
+// (issue #2041, Phase 13) followed, and Farm.Modules.Inventory (issue #2044, Phase 16) adds the
+// inventory controller slice with no host-wide DI moves.
 builder.Services.AddApiModules(
     mvcBuilder,
     builder.Configuration,
@@ -212,7 +214,8 @@ builder.Services.AddApiModules(
     typeof(Farm.Modules.PrintQueue.PrintQueueApiModule).Assembly,
     typeof(Farm.Modules.Maintenance.MaintenanceApiModule).Assembly,
     typeof(Farm.Modules.Calibration.CalibrationApiModule).Assembly,
-    typeof(Farm.Modules.Identity.IdentityApiModule).Assembly);
+    typeof(Farm.Modules.Identity.IdentityApiModule).Assembly,
+    typeof(Farm.Modules.Inventory.InventoryApiModule).Assembly);
 
 if (slicerModuleEnabled)
 {
