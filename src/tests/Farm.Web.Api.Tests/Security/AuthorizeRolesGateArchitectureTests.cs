@@ -73,6 +73,26 @@ public sealed class AuthorizeRolesGateArchitectureTests
         typeof(Farm.Web.Api.Controllers.MaintenanceController).Assembly,
     ];
 
+    /// <summary>
+    /// Assemblies whose controllers are hosted by the MAIN API process (i.e. evaluated against
+    /// <see cref="BuildMainApiAuthorizationOptions"/> rather than
+    /// <see cref="BuildSlicerHostAuthorizationOptions"/> in
+    /// <see cref="NoApiController_HasPolicyBasedRoleGate"/>). This is deliberately a separate,
+    /// explicit set rather than "every assembly in <see cref="ScannedAssemblies"/> except the
+    /// slicer host one": a module assembly (<c>Farm.Modules.*</c>) is unambiguously main-API-
+    /// hosted regardless of how many other non-slicer-host assemblies get added here in future
+    /// module phases, so this must never be inferred by elimination against a two-entry list.
+    /// Every future <c>Farm.Modules.*</c> entry added to <see cref="ScannedAssemblies"/> MUST
+    /// also be added here, or its policy-alias check silently runs against the wrong host's
+    /// policy registry and can produce false negatives.
+    /// </summary>
+    private static readonly HashSet<Assembly> MainApiHostedAssemblies =
+    [
+        typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
+        typeof(Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController).Assembly,
+        typeof(Farm.Web.Api.Controllers.MaintenanceController).Assembly,
+    ];
+
     [Fact]
     public void NoApiController_HasRoleNameAuthorizationGate()
     {
@@ -131,12 +151,15 @@ public sealed class AuthorizeRolesGateArchitectureTests
     /// Issue #1467: guards against <em>policy-based</em> role aliases such as
     /// <c>[Authorize(Policy = "farm_admin")]</c> — functionally identical to a literal
     /// <c>Roles = "farm_admin"</c> gate, just spelled differently. Builds the real
-    /// <see cref="AuthorizationOptions"/> for each scanned assembly's host and flags any
-    /// <c>[Authorize(Policy = X)]</c> whose named policy <c>X</c> resolves to a requirement set
-    /// containing a <see cref="RolesAuthorizationRequirement"/>. An unrecognized policy name
-    /// (one that does not resolve via <see cref="AuthorizationOptions.GetPolicy(string)"/>) is
-    /// not flagged here — that is a wiring bug the app would surface at startup/runtime, not a
-    /// role-name-gate bypass.
+    /// <see cref="AuthorizationOptions"/> for each scanned assembly's host — main API (including
+    /// every <c>Farm.Modules.*</c> assembly per <see cref="MainApiHostedAssemblies"/>, since those
+    /// controllers execute inside the main API process regardless of which assembly they were
+    /// compiled into) or slicer host — and flags any <c>[Authorize(Policy = X)]</c> whose named
+    /// policy <c>X</c> resolves to a requirement set containing a
+    /// <see cref="RolesAuthorizationRequirement"/>. An unrecognized policy name (one that does
+    /// not resolve via <see cref="AuthorizationOptions.GetPolicy(string)"/>) is not flagged here
+    /// — that is a wiring bug the app would surface at startup/runtime, not a role-name-gate
+    /// bypass.
     /// </summary>
     [Fact]
     public void NoApiController_HasPolicyBasedRoleGate()
@@ -148,7 +171,7 @@ public sealed class AuthorizeRolesGateArchitectureTests
 
         foreach (Assembly assembly in ScannedAssemblies)
         {
-            AuthorizationOptions options = assembly == typeof(Farm.Web.Api.Controllers.PrintersController).Assembly
+            AuthorizationOptions options = MainApiHostedAssemblies.Contains(assembly)
                 ? mainApiOptions
                 : slicerHostOptions;
 
