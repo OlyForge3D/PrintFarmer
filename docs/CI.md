@@ -203,9 +203,10 @@ permissions without paying for a second artifact compression pass.
 
 ### Exclusions
 
-- Docker- and external-service-tagged test categories are excluded from ordinary
-  PR CI. Reintroduce them by setting `FORCE_FULL_SAFE=1` on the run or opening a
-  dedicated on-demand workflow.
+- Ordinary `dotnet-test` matrix legs exclude `DbHeavy` and `Docker` categories
+  through their `--filter`. The `dotnet-test-providers` job executes those
+  categories on the same ordinary .NET PR runs whenever
+  `want_dotnet_test=true`.
 
 ## Pre-push format gate
 

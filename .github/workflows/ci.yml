@@ -385,6 +385,8 @@ jobs:
               print(f"packaged {project}: {archive_path}")
           PY
 
+      # With `archive: false`, upload-artifact names the artifact from this
+      # file's basename and ignores the `name` input by documented design.
       - name: Upload Farm.Web.Api.Tests build
         if: ${{ needs.select.outputs.want_dotnet_test == 'true' }}
         uses: actions/upload-artifact@v7
