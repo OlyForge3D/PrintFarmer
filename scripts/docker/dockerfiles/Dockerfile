@@ -28,6 +28,7 @@ WORKDIR /src
 # Copy project files for dependency restoration
 COPY src/infra/*.csproj ./infra/
 COPY src/import/*.csproj ./import/
+COPY src/modules/Farm.Modules.Abstractions/*.csproj ./modules/Farm.Modules.Abstractions/
 COPY src/api/*.csproj ./api/
 COPY Directory.Build.props ./
 COPY global.json ./

@@ -18,6 +18,9 @@ install.sh text eol=lf
 # OrcaSlicer profile fixtures mirror upstream JSON byte formatting
 /sample_profiles/orcaslicer/**/*.json text eol=lf
 
+# CI tooling manifest is read by bash/python via process substitution; keep LF
+scripts/ci/dotnet-test-manifest.json text eol=lf
+
 # Git hooks must always use LF line endings
 .githooks/pre-commit text eol=lf
 .githooks/pre-push text eol=lf
