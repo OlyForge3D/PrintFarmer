@@ -188,7 +188,7 @@ public sealed class SpoolmanStatusCacheTests
         _ = settings
             .Setup(service => service.Get<SpoolmanSettings>())
             .Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
-        var service = new SpoolmanService(http, settings.Object, NullLogger<SpoolmanService>.Instance, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        var service = new SpoolmanService(http, settings.Object, NullLogger<SpoolmanService>.Instance, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
         using var memoryCache = new MemoryCache(new MemoryCacheOptions());
         using ServiceProvider services = BuildServices(service);
         var statusCache = new SpoolmanStatusCache(

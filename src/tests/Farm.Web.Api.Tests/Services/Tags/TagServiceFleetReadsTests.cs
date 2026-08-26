@@ -69,7 +69,7 @@ public class TagServiceFleetReadsTests
     [Fact]
     public async Task GetObjectsTagsAsync_Printer_GroupsTagsPerPrinterInOneRead()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
 
         TagDto red = await service.CreateTagAsync(new CreateTagDto { Name = "Red" }, CancellationToken.None);
@@ -101,7 +101,7 @@ public class TagServiceFleetReadsTests
     [Fact]
     public async Task GetObjectsTagsAsync_NoPrinters_ReturnsEmptyList()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
 
         IReadOnlyList<ObjectTagsDto> result = await service.GetObjectsTagsAsync("Printer", CancellationToken.None);
@@ -112,7 +112,7 @@ public class TagServiceFleetReadsTests
     [Fact]
     public async Task GetObjectsTagsAsync_GcodeFile_GroupsTagsPerFileInOneRead()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
 
         TagDto support = await service.CreateTagAsync(new CreateTagDto { Name = "Support" }, CancellationToken.None);
@@ -134,7 +134,7 @@ public class TagServiceFleetReadsTests
     [Fact]
     public async Task GetObjectsTagsAsync_Model3D_GroupsTagsPerModelViaJoinTableInOneRead()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         Guid model3DId = Guid.NewGuid();
         var model3DQuery = new Mock<IModel3DQueryProvider>();
         model3DQuery.Setup(q => q.GetAllIdsAsync(It.IsAny<CancellationToken>()))
@@ -155,7 +155,7 @@ public class TagServiceFleetReadsTests
     [Fact]
     public async Task GetObjectsTagsAsync_UnsupportedObjectType_ReturnsEmptyList()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
 
         IReadOnlyList<ObjectTagsDto> result = await service.GetObjectsTagsAsync("PrintJob", CancellationToken.None);

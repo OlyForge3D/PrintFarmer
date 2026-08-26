@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
-using Farm.Web.Api.Tests.Builders;
+using Farm.Infrastructure.Tests.Builders;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;

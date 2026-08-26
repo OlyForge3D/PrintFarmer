@@ -15,7 +15,7 @@ public class SystemLogServiceTests
 {
     private static AppDbContext CreateDbContext()
     {
-        return TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        return AppDbTestHelpers.CreateSqliteInMemoryDb();
     }
 
     [Fact]

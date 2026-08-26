@@ -28,7 +28,7 @@ public class TagServiceConcurrencyTests
     [Fact]
     public async Task Create_SeedsRevisionOne_AndConcurrencyToken()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
 
         TagDto created = await service.CreateTagAsync(new CreateTagDto { Name = "alpha" }, CancellationToken.None);
@@ -40,7 +40,7 @@ public class TagServiceConcurrencyTests
     [Fact]
     public async Task Update_BumpsRevision_AndRotatesToken()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
         TagDto created = await service.CreateTagAsync(new CreateTagDto { Name = "alpha" }, CancellationToken.None);
 
@@ -57,7 +57,7 @@ public class TagServiceConcurrencyTests
     [Fact]
     public async Task Update_WithStaleRevision_ThrowsConcurrency()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
         TagDto created = await service.CreateTagAsync(new CreateTagDto { Name = "alpha" }, CancellationToken.None);
 
@@ -74,7 +74,7 @@ public class TagServiceConcurrencyTests
     [Fact]
     public async Task Update_LostUpdate_SecondWriterRejected()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
         TagDto created = await service.CreateTagAsync(new CreateTagDto { Name = "alpha" }, CancellationToken.None);
 
@@ -98,7 +98,7 @@ public class TagServiceConcurrencyTests
     [Fact]
     public async Task Update_RenameToExistingName_ThrowsDuplicate()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
         _ = await service.CreateTagAsync(new CreateTagDto { Name = "alpha" }, CancellationToken.None);
         TagDto beta = await service.CreateTagAsync(new CreateTagDto { Name = "beta" }, CancellationToken.None);
@@ -113,7 +113,7 @@ public class TagServiceConcurrencyTests
     [Fact]
     public async Task Update_MissingTag_ThrowsNotFound()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
 
         _ = await Assert.ThrowsAsync<KeyNotFoundException>(() =>

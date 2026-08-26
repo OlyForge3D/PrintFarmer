@@ -20,6 +20,7 @@ using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
+using Farm.Infrastructure.Tests.Dispatch;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Controllers.Requests;
 using FluentAssertions;
@@ -1216,7 +1217,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             printerBackendCapabilitiesService: Mock.Of<IPrinterBackendCapabilitiesService>(),
             backendClientFactory: Mock.Of<IBackendClientFactory>(),
             httpClientFactory: Mock.Of<IHttpClientFactory>(),
-            egressGuard: Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard(),
+            egressGuard: Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard(),
             obicoServerAssignment: Mock.Of<
                 Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService>(),
             settingsService: Mock.Of<Farm.Infrastructure.Settings.ISettingsService>(),

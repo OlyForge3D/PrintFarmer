@@ -297,7 +297,7 @@ public class FilamentCoverageControllerTests : IClassFixture<CustomWebApplicatio
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         AppDbContext ctx = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        (Guid manufacturerId, Guid modelId) = await TestInfrastructure.TestHelpers.GetUnknownCatalogIdsAsync(ctx);
+        (Guid manufacturerId, Guid modelId) = await AppDbTestHelpers.GetUnknownCatalogIdsAsync(ctx);
 
         Printer printer = new()
         {

@@ -43,6 +43,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\api\Farm.Web.Api.csproj" />
     <ProjectReference Include="..\Farm.Testing.Shared\Farm.Testing.Shared.csproj" />
+    <!-- Test-only reference (issue #2033): a handful of Dispatch/Maintenance tests still
+         staying in this project use Builders that moved to Farm.Infrastructure.Tests. -->
+    <ProjectReference Include="..\Farm.Infrastructure.Tests\Farm.Infrastructure.Tests.csproj" />
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
     <ProjectReference Include="..\..\migrations\Farm.Migrations.Sqlite\Farm.Migrations.Sqlite.csproj" />
     <ProjectReference Include="..\..\migrations\Farm.Slicer.Migrations.PostgreSQL\Farm.Slicer.Migrations.PostgreSQL.csproj" />
