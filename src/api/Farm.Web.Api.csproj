@@ -149,6 +149,7 @@
     <!-- Pre-generated stubs are in GeneratedProtos/ directory -->
     <ProjectReference Include="..\modules\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
     <ProjectReference Include="..\modules\Farm.Modules.SmartPlug\Farm.Modules.SmartPlug.csproj" />
+    <ProjectReference Include="..\modules\Farm.Modules.Maintenance\Farm.Modules.Maintenance.csproj" />
     <ProjectReference Include="..\modules\Farm.Modules.Calibration\Farm.Modules.Calibration.csproj" />
   </ItemGroup>
 

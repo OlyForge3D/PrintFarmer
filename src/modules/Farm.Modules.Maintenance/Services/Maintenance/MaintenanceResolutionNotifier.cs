@@ -5,6 +5,7 @@ using Farm.Infrastructure.Services.Webhooks;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Hubs;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Services.Maintenance;

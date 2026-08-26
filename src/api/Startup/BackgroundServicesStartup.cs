@@ -26,9 +26,9 @@ public static class BackgroundServicesStartup
         services.AddHostedService(serviceProvider =>
             serviceProvider.GetRequiredService<MoonrakerEmulatorSeeder>());
 
-        // Maintenance Module - Print Statistics Sync Service
-        services.Configure<Farm.Infrastructure.Services.Maintenance.PrintStatsSyncSettings>(configuration.GetSection(Farm.Infrastructure.Services.Maintenance.PrintStatsSyncSettings.SectionName));
-        services.AddHostedService<Farm.Web.Api.Services.Maintenance.PrintStatsSyncHostedService>();
+        // Maintenance Module - Print Statistics Sync Service is registered by
+        // MaintenanceApiModule.ConfigureServices() -- moved to Farm.Modules.Maintenance
+        // (issue #2037).
 
         // Maintenance Module - Maintenance Alert Engine
         services.Configure<Farm.Infrastructure.Settings.MaintenanceAlertSettings>(configuration.GetSection(Farm.Infrastructure.Settings.MaintenanceAlertSettings.SectionName));

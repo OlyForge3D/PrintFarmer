@@ -3,6 +3,7 @@ using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Queue;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Hubs;
 
