@@ -327,13 +327,8 @@ public static class FeatureServicesStartup
         // health-check pipeline; does not run its own probes.
         services.AddScoped<Farm.Web.Api.Services.Admin.IAdminOverviewService, Farm.Web.Api.Services.Admin.AdminOverviewService>();
 
-        // Permission catalog derived from EndpointDataSource (issue #1446). Read-only; does
-        // not seed or mutate the database catalog.
-        services.AddScoped<Farm.Web.Api.Services.Admin.IPermissionCatalogService, Farm.Web.Api.Services.Admin.PermissionCatalogService>();
-
-        // Role permission grant read/write API (issue #1449). Reads/writes RolePermission
-        // rows, validated against the permission catalog above.
-        services.AddScoped<Farm.Web.Api.Services.Admin.IRolePermissionService, Farm.Web.Api.Services.Admin.RolePermissionService>();
+        // Permission catalog and role permission grant services (issues #1446/#1449) moved to
+        // Farm.Modules.Identity's IApiModule registration (issue #2041).
         services.AddHttpClient("MonitoringHealth", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(5);

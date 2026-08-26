@@ -525,6 +525,21 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Upload Farm.Modules.Identity.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Modules.Identity.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Modules.Identity.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Upload Farm.Web.IntegrationTests build
         if: >-
           ${{

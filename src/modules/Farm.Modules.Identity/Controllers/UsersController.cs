@@ -1,10 +1,11 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
-using Farm.Web.Api.Services.Authentication;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 

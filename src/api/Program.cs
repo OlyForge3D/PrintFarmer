@@ -207,6 +207,8 @@ IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 // MapEndpoints for the MapHub<MaintenanceHub> call that used to live here.
 // Farm.Modules.Devices (issue #2043, Phase 15) is the fifth -- OctoPrint API-key
 // authentication, NFC, cameras, and the admin Home Assistant controller.
+// Farm.Modules.Identity (issue #2041, Phase 13) is the sixth -- user/role/auth
+// management moved out of the monolith.
 builder.Services.AddApiModules(
     mvcBuilder,
     builder.Configuration,
@@ -214,7 +216,8 @@ builder.Services.AddApiModules(
     typeof(Farm.Modules.PrintQueue.PrintQueueApiModule).Assembly,
     typeof(Farm.Modules.Maintenance.MaintenanceApiModule).Assembly,
     typeof(Farm.Modules.Calibration.CalibrationApiModule).Assembly,
-    typeof(Farm.Modules.Devices.DevicesApiModule).Assembly);
+    typeof(Farm.Modules.Devices.DevicesApiModule).Assembly,
+    typeof(Farm.Modules.Identity.IdentityApiModule).Assembly);
 
 if (slicerModuleEnabled)
 {

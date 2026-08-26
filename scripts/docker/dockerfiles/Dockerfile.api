@@ -27,6 +27,7 @@ COPY src/modules/Farm.Modules.PrintQueue/*.csproj ./modules/Farm.Modules.PrintQu
 COPY src/modules/Farm.Modules.Maintenance/*.csproj ./modules/Farm.Modules.Maintenance/
 COPY src/modules/Farm.Modules.Calibration/*.csproj ./modules/Farm.Modules.Calibration/
 COPY src/modules/Farm.Modules.Devices/*.csproj ./modules/Farm.Modules.Devices/
+COPY src/modules/Farm.Modules.Identity/*.csproj ./modules/Farm.Modules.Identity/
 COPY src/api/*.csproj ./api/
 # Place proto at filesystem root so ../../proto from /src/api resolves
 COPY proto /proto

@@ -214,6 +214,25 @@
       "notes": "New in issue #2043 (Phase 15: the OctoPrint API-key auth service/handler/filter and 5 device-integration controllers -- NfcController, NfcDevicesController, CamerasController, CameraSnapshotsController, and Admin/AdminHomeAssistantController -- moved out of Farm.Web.Api into Farm.Modules.Devices, following the Farm.Modules.SmartPlug (#2036) leaf-module pattern rather than the full-safe Farm.Modules.Abstractions treatment). Depends on Farm.Infrastructure and Farm.Shared.Discovery (CamerasController's endpoint-detection dependency lives in the standalone discovery project, not Farm.Infrastructure). Gets its own narrow select-dotnet-tests.sh buckets (devices/tests_devices). The retained CustomWebApplicationFactory-based integration tests for camera snapshots, NFC device auth, the admin Home Assistant controller, and RouteTableSnapshotTests all stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's devices bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module). OctoPrintCompatController is explicitly out of scope and unchanged."
     },
     {
+      "name": "Farm.Modules.Identity.Tests",
+      "testProject": "tests/Farm.Modules.Identity.Tests/Farm.Modules.Identity.Tests.csproj",
+      "productionProject": "modules/Farm.Modules.Identity/Farm.Modules.Identity.csproj",
+      "pathPrefixes": ["src/tests/Farm.Modules.Identity.Tests/"],
+      "dependsOnProjects": [
+        "src/modules/Farm.Modules.Identity/",
+        "src/modules/Farm.Modules.Abstractions/",
+        "src/infra/",
+        "src/api/",
+        "src/tests/Farm.Web.Api.Tests/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Modules.Identity.Tests",
+      "notes": "New in issue #2041 (Phase 13: Auth, users, API keys, quotas, roles, permissions, security audit, and password policy -- the 9 auth/admin controllers plus PermissionCatalogService/RolePermissionService/TokenRevocationCleanupService -- moved out of Farm.Web.Api into Farm.Modules.Identity, depending on Farm.Modules.Abstractions' IApiModule seam from #2035). Follows the Farm.Modules.Calibration.Tests pattern above: its own narrow select-dotnet-tests.sh buckets (identity/tests_identity) rather than full-safe. The 4 reflection-based architecture tests (AuthorizeRolesGateArchitectureTests, AnonymousEndpointArchitectureTests, NoClientsAllArchitectureTests, OpenApiAuthorizationTests), RouteTableSnapshotTests, and the genuine CustomWebApplicationFactory integration tests that exercise the assembled host (AuthenticationServiceIntegrationTests, AuthAuditServiceIntegrationTests, plus the Farm.Infrastructure-resident auth service unit tests under Services/Authentication/) all stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's identity bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module)."
+    },
+    {
       "name": "Farm.Web.IntegrationTests",
       "testProject": "tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj",
       "productionProject": "api/Farm.Web.Api.csproj",

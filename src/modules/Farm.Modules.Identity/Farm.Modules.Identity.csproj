@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Matches Farm.Web.Api.csproj's prior suppressions for the moved
+         controllers/services: 1591 (missing XML doc comment on a public
+         member) and S6960 ("controller has multiple responsibilities") fire
+         on some of the moved auth/admin controllers, which were already
+         suppressing them in their prior host location. This is a move-only
+         refactor, so no new warning should surface as a result of relocating
+         unmodified code. -->
+    <NoWarn>$(NoWarn);1591;S6960</NoWarn>
+    <Description>Vertical-slice module for identity: authentication, users, API
+keys, print quotas, roles, permissions, security audit, and password policy.
+Moves AuthController, UsersController, UserApiKeysController, QuotaController,
+PasswordPolicyController, Controllers/Admin/{RolesController,
+PermissionCatalogController, RolePermissionsController,
+SecurityAuditController}, plus PermissionCatalogService/RolePermissionService
+and TokenRevocationCleanupService out of Farm.Web.Api. Registers via
+IApiModule (see Farm.Modules.Abstractions, issue #2035). Phase 13 of the
+module-decomposition epic #2019 -- namespaces are intentionally unchanged from
+their prior Farm.Web.Api location (move-first-rename-last). Depends on
+Farm.Infrastructure for the underlying authentication/authorization services
+(AuthenticationService, TokenRevocationService, AccountLockoutService,
+ApiKeyExchangeService, PasskeyService, RoleManagementService, etc.), which are
+not part of this move.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Required for IServiceCollection/IMvcBuilder/IEndpointRouteBuilder/ControllerBase/IHostedService -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
+    <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -153,6 +153,7 @@
     <ProjectReference Include="..\modules\Farm.Modules.Maintenance\Farm.Modules.Maintenance.csproj" />
     <ProjectReference Include="..\modules\Farm.Modules.Calibration\Farm.Modules.Calibration.csproj" />
     <ProjectReference Include="..\modules\Farm.Modules.Devices\Farm.Modules.Devices.csproj" />
+    <ProjectReference Include="..\modules\Farm.Modules.Identity\Farm.Modules.Identity.csproj" />
   </ItemGroup>
 
   <!-- Copy backend plugin DLLs (runtime-loaded, not compile-time referenced)
