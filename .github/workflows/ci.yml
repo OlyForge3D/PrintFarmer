@@ -285,7 +285,12 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # dotnet-build — full solution restore + build. Runs whenever any .NET
-  # input changed (including tools). Preserves compile coverage.
+  # input changed (including tools). Preserves compile coverage and packages
+  # each selected consumer project separately so matrix legs download only
+  # their own dependency closure. A measured full bin tree was ~4 GiB, while
+  # one monolithic archive would transfer ~8.4 GiB across a full-safe fan-out.
+  # `obj/` is deliberately never transported: NuGet-generated assets embed
+  # runner-absolute paths and are not a portable inter-job contract.
   # ---------------------------------------------------------------------------
   dotnet-build:
     name: .NET build
@@ -309,12 +314,270 @@ jobs:
         working-directory: src
         run: dotnet build ./farm-web.sln -c Debug --no-restore
 
+      # Farm.Web.IntegrationTests is intentionally absent from farm-web.sln and
+      # disables itself unless RunIntegrationTests=true. Restore it first, then
+      # build it explicitly after the solution; the incremental pass does not
+      # change shared referenced-project binaries.
+      - name: Build integration test project
+        if: ${{ contains(needs.select.outputs.matrix, 'Farm.Web.IntegrationTests.csproj') }}
+        working-directory: src
+        run: |
+          set -euo pipefail
+          project=tests/Farm.Web.IntegrationTests/
+          project+=Farm.Web.IntegrationTests.csproj
+          dotnet restore "$project" -p:RunIntegrationTests=true
+          dotnet build "$project" -c Debug --no-restore \
+            -p:RunIntegrationTests=true
+
+      # Tar turns thousands of output files into one transfer object per
+      # project. upload-artifact@v7 sends each pre-compressed tarball directly
+      # (`archive: false`), avoiding a second compression pass. Selection is
+      # keyed by project path and deduplicated, so 1..N shard legs for the same
+      # test project share exactly one build artifact.
+      - name: Package selected .NET outputs
+        working-directory: src
+        env:
+          TEST_MATRIX: ${{ needs.select.outputs.matrix }}
+          MIG_MATRIX: ${{ needs.select.outputs.mig_matrix }}
+          WANT_DOTNET_TEST: ${{ needs.select.outputs.want_dotnet_test }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import tarfile
+
+          selected_projects = {
+              entry["project"]
+              for matrix_name in ("TEST_MATRIX", "MIG_MATRIX")
+              for entry in json.loads(os.environ[matrix_name])["include"]
+          }
+          projects = set()
+          for selected_project in selected_projects:
+              project_path = pathlib.Path(selected_project)
+              if project_path.suffix != ".csproj":
+                  project_path /= f"{project_path.name}.csproj"
+              projects.add(str(project_path))
+          if os.environ["WANT_DOTNET_TEST"] == "true":
+              projects.update({
+                  "tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj",
+                  (
+                      "migrations/Farm.Migrations.PostgreSQL/"
+                      "Farm.Migrations.PostgreSQL.csproj"
+                  ),
+                  (
+                      "migrations/Farm.Migrations.SqlServer/"
+                      "Farm.Migrations.SqlServer.csproj"
+                  ),
+              })
+
+          artifact_dir = pathlib.Path("../.artifacts/dotnet-build")
+          artifact_dir.mkdir(parents=True, exist_ok=True)
+          for project in sorted(projects):
+              project_path = pathlib.Path(project)
+              output_dir = project_path.parent / "bin/Debug/net10.0"
+              if not output_dir.is_dir():
+                  raise SystemExit(f"missing compiled output: {output_dir}")
+              archive_path = artifact_dir / f"{project_path.stem}.tgz"
+              with tarfile.open(archive_path, "w:gz") as archive:
+                  archive.add(output_dir, arcname="net10.0")
+              print(f"packaged {project}: {archive_path}")
+          PY
+
+      # With `archive: false`, upload-artifact names the artifact from this
+      # file's basename and ignores the `name` input by documented design.
+      - name: Upload Farm.Web.Api.Tests build
+        if: ${{ needs.select.outputs.want_dotnet_test == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Web.Api.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Slicer.Module.Tests build
+        if: ${{ contains(needs.select.outputs.matrix, 'Farm.Slicer.Module.Tests.csproj') }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Slicer.Module.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.OrcaSlicer.Worker.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.OrcaSlicer.Worker.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.OrcaSlicer.Worker.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Moonraker.Emulator.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Moonraker.Emulator.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Moonraker.Emulator.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Slicer.ProfileParsing.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Slicer.ProfileParsing.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Slicer.ProfileParsing.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Modules.Abstractions.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Modules.Abstractions.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Modules.Abstractions.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Modules.SmartPlug.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Modules.SmartPlug.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Modules.SmartPlug.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Modules.Calibration.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Modules.Calibration.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Modules.Calibration.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Web.IntegrationTests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Web.IntegrationTests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Web.IntegrationTests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Migrations.PostgreSQL build
+        if: >-
+          ${{
+            needs.select.outputs.want_dotnet_test == 'true' ||
+            contains(
+              needs.select.outputs.mig_matrix,
+              'Farm.Migrations.PostgreSQL'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Migrations.PostgreSQL.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Migrations.SqlServer build
+        if: >-
+          ${{
+            needs.select.outputs.want_dotnet_test == 'true' ||
+            contains(
+              needs.select.outputs.mig_matrix,
+              'Farm.Migrations.SqlServer'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Migrations.SqlServer.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Slicer.Migrations.PostgreSQL build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.mig_matrix,
+              'Farm.Slicer.Migrations.PostgreSQL'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Slicer.Migrations.PostgreSQL.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Slicer.Migrations.SqlServer build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.mig_matrix,
+              'Farm.Slicer.Migrations.SqlServer'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Slicer.Migrations.SqlServer.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
   # ---------------------------------------------------------------------------
   # migration-drift — affected App/Slicer context+provider pairs.
   # ---------------------------------------------------------------------------
   migration-drift:
     name: Migration drift (${{ matrix.label }})
-    needs: [select, ci-tools]
+    needs: [select, ci-tools, dotnet-build]
     if: ${{ needs.select.outputs.want_mig_drift == 'true' }}
     runs-on: ubuntu-latest
     strategy:
@@ -334,22 +597,45 @@ jobs:
           dotnet tool install -g dotnet-ef
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
-      # Restore + build the specific migration project so its
-      # `obj/project.assets.json` and compiled assemblies exist before
-      # `dotnet ef` reflects over them. Without this step EF fails with
-      # NETSDK1004 because the migration-drift job is isolated from
-      # dotnet-build and never restores the matrix project itself.
+      # Restore the specific migration project so its runner-local
+      # `obj/project.assets.json` exists before `dotnet ef` reflects over it.
+      # Without this step EF fails with NETSDK1004. We deliberately regenerate
+      # `obj/` here rather than transporting its absolute NuGet/MSBuild paths;
+      # the compiled assembly comes from dotnet-build below.
       - name: Restore migration project
         working-directory: src
         env:
           MATRIX_PROJECT: ${{ matrix.project }}
         run: dotnet restore "./$MATRIX_PROJECT"
 
-      - name: Build migration project
+      - name: Resolve migration build artifact
+        id: migration-build-artifact
+        env:
+          MATRIX_PROJECT: ${{ matrix.project }}
+        run: |
+          set -euo pipefail
+          project_name="${MATRIX_PROJECT##*/}"
+          printf 'name=%s.tgz\n' "$project_name" >> "$GITHUB_OUTPUT"
+
+      - name: Download migration build
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ steps.migration-build-artifact.outputs.name }}
+          path: ${{ runner.temp }}/dotnet-build
+          skip-decompress: true
+
+      - name: Extract migration build
         working-directory: src
         env:
           MATRIX_PROJECT: ${{ matrix.project }}
-        run: dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore
+        run: |
+          set -euo pipefail
+          project_dir="$MATRIX_PROJECT"
+          project_name="${MATRIX_PROJECT##*/}"
+          archive="$RUNNER_TEMP/dotnet-build/$project_name.tgz"
+          mkdir -p "$project_dir/bin/Debug"
+          tar -xzf "$archive" -C "$project_dir/bin/Debug"
+          test -f "$project_dir/bin/Debug/net10.0/$project_name.dll"
 
       - name: Check EF Core migration drift
         working-directory: src
@@ -389,11 +675,11 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # dotnet-test — one matrix leg per affected test project.
+  # dotnet-test — one or more matrix legs per affected test project.
   # ---------------------------------------------------------------------------
   dotnet-test:
     name: .NET test (${{ matrix.name }})
-    needs: [select, ci-tools]
+    needs: [select, ci-tools, dotnet-build]
     if: ${{ needs.select.outputs.want_dotnet_test == 'true' }}
     runs-on: ubuntu-latest
     strategy:
@@ -408,38 +694,42 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Restore test project
-        working-directory: src
+      - name: Resolve test build artifact
+        id: test-build-artifact
         env:
           MATRIX_PROJECT: ${{ matrix.project }}
-          RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}
         run: |
           set -euo pipefail
-          integration_args=()
-          if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then
-            integration_args+=("-p:RunIntegrationTests=true")
-          fi
-          dotnet restore "./$MATRIX_PROJECT" ${integration_args[@]+"${integration_args[@]}"}
+          project_file="${MATRIX_PROJECT##*/}"
+          project_name="${project_file%.csproj}"
+          printf 'name=%s.tgz\n' "$project_name" >> "$GITHUB_OUTPUT"
 
-      - name: Build test project
+      - name: Download test build
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ steps.test-build-artifact.outputs.name }}
+          path: ${{ runner.temp }}/dotnet-build
+          skip-decompress: true
+
+      - name: Extract test build
         working-directory: src
         env:
           MATRIX_PROJECT: ${{ matrix.project }}
-          RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}
         run: |
           set -euo pipefail
-          integration_args=()
-          if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then
-            integration_args+=("-p:RunIntegrationTests=true")
-          fi
-          dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore ${integration_args[@]+"${integration_args[@]}"}
+          project_dir="${MATRIX_PROJECT%/*}"
+          project_file="${MATRIX_PROJECT##*/}"
+          project_name="${project_file%.csproj}"
+          archive="$RUNNER_TEMP/dotnet-build/$project_name.tgz"
+          mkdir -p "$project_dir/bin/Debug"
+          tar -xzf "$archive" -C "$project_dir/bin/Debug"
+          test -f "$project_dir/bin/Debug/net10.0/$project_name.dll"
 
       - name: Test
         working-directory: src
         env:
           MATRIX_NAME: ${{ matrix.name }}
           MATRIX_PROJECT: ${{ matrix.project }}
-          RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}
           TEST_FILTER: ${{ matrix.filter || 'Category!=DbHeavy&Category!=Docker' }}
         # The selector emits each matrix leg's xUnit category filter so the PR
         # gate can stay narrow without hardcoding the same filter in one job.
@@ -448,12 +738,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p TestResults
-          integration_args=()
-          if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then
-            integration_args+=("-p:RunIntegrationTests=true")
-          fi
-          dotnet test "./$MATRIX_PROJECT" -c Debug --no-build \
-            ${integration_args[@]+"${integration_args[@]}"} \
+          project_dir="${MATRIX_PROJECT%/*}"
+          project_file="${MATRIX_PROJECT##*/}"
+          project_name="${project_file%.csproj}"
+          test_assembly="$project_dir/bin/Debug/net10.0/$project_name.dll"
+          dotnet test "$test_assembly" \
             --logger "trx;LogFileName=$MATRIX_NAME.trx" \
             --results-directory TestResults \
             --filter "$TEST_FILTER"
@@ -511,7 +800,7 @@ jobs:
   # ---------------------------------------------------------------------------
   dotnet-test-providers:
     name: .NET provider tests (DbHeavy)
-    needs: [select, ci-tools]
+    needs: [select, ci-tools, dotnet-build]
     if: ${{ needs.select.outputs.want_dotnet_test == 'true' }}
     runs-on: ubuntu-latest
     services:
@@ -562,9 +851,46 @@ jobs:
         working-directory: src
         run: dotnet restore ./farm-web.sln
 
-      - name: Build solution
+      - name: Download Farm.Web.Api.Tests build
+        uses: actions/download-artifact@v8
+        with:
+          name: Farm.Web.Api.Tests.tgz
+          path: ${{ runner.temp }}/dotnet-build
+          skip-decompress: true
+
+      - name: Download Farm.Migrations.PostgreSQL build
+        uses: actions/download-artifact@v8
+        with:
+          name: Farm.Migrations.PostgreSQL.tgz
+          path: ${{ runner.temp }}/dotnet-build
+          skip-decompress: true
+
+      - name: Download Farm.Migrations.SqlServer build
+        uses: actions/download-artifact@v8
+        with:
+          name: Farm.Migrations.SqlServer.tgz
+          path: ${{ runner.temp }}/dotnet-build
+          skip-decompress: true
+
+      # The local restore above regenerates portable `obj/` metadata for EF.
+      # These project-scoped archives supply only the compiled outputs; no
+      # consumer downloads the measured ~4 GiB full solution bin tree.
+      - name: Extract provider builds
         working-directory: src
-        run: dotnet build ./farm-web.sln -c Debug --no-restore
+        run: |
+          set -euo pipefail
+          projects=(
+            "tests/Farm.Web.Api.Tests"
+            "migrations/Farm.Migrations.PostgreSQL"
+            "migrations/Farm.Migrations.SqlServer"
+          )
+          for project_dir in "${projects[@]}"; do
+            project_name="${project_dir##*/}"
+            archive="$RUNNER_TEMP/dotnet-build/$project_name.tgz"
+            mkdir -p "$project_dir/bin/Debug"
+            tar -xzf "$archive" -C "$project_dir/bin/Debug"
+            test -f "$project_dir/bin/Debug/net10.0/$project_name.dll"
+          done
 
       - name: Verify PostgreSQL is reachable
         run: |
@@ -610,8 +936,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p TestResults
-          dotnet test tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj \
-            -c Debug --no-build \
+          assembly=tests/Farm.Web.Api.Tests/bin/Debug/net10.0/
+          assembly+=Farm.Web.Api.Tests.dll
+          dotnet test "$assembly" \
             --filter "Category=DbHeavy|Category=Docker" \
             --logger "trx;LogFileName=provider-tests.trx" \
             --results-directory TestResults

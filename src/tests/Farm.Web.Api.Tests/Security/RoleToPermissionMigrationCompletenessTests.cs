@@ -21,6 +21,7 @@ public sealed class RoleToPermissionMigrationCompletenessTests
         typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
         typeof(Farm.Infrastructure.Services.SignalR.HarvestHub).Assembly,
         typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly,
+        typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
     ];
 
     [Fact]

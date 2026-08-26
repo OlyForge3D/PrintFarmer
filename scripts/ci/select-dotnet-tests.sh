@@ -36,9 +36,10 @@
 #   full_matrix
 #         — "true" when the full safe fallback was chosen.
 #   matrix
-#         — JSON object with `include` list of {name, project, label} for the
-#           .NET test matrix. Always contains at least one element (or
-#           want_dotnet_test=false).
+#         — JSON object with `include` list of
+#           {name, project, label, run_integration, filter} for the .NET test
+#           matrix. Sharded projects contribute one entry per shard. Always
+#           contains at least one element (or want_dotnet_test=false).
 #   mig_matrix
 #         — JSON object with `include` list of {name, project, context,
 #           provider} for the migration-drift matrix. May be empty when
@@ -52,7 +53,7 @@
 
 set -uo pipefail
 
-SCRIPT_VERSION="1.4.0"
+SCRIPT_VERSION="1.5.0"
 
 # ---------------------------------------------------------------------------
 # Required CI test projects, loaded from the checked manifest
@@ -61,22 +62,25 @@ SCRIPT_VERSION="1.4.0"
 # truth that scripts/ci/tests/test-dotnet-test-manifest.sh can validate for
 # completeness (every `*.Tests.csproj` on disk registered exactly once).
 #
-# Each loaded entry keeps the same 4-field `name|project|run_integration|filter`
-# shape the rest of this script already expects: the test-project opt-in flag
-# for integration-only build properties and the xUnit category filter used by
-# PR CI. Keeping the filter in the selector matrix makes the default API gate
-# explicit and reusable by both local commands and the GitHub Actions matrix,
-# rather than hardcoding it in one workflow leg only. Farm.Web.IntegrationTests
-# intentionally lives outside farm-web.sln and must be invoked directly with
-# RunIntegrationTests=true because its csproj disables test discovery
-# otherwise.
+# Each loaded record has five fields: selection name, unique matrix-leg name,
+# project, run_integration, and filter. A project without shards contributes
+# one record whose selection and leg names are identical. A sharded project
+# contributes one record per shard while retaining the project name as its
+# selection key, so classify_path()/main() continue selecting projects exactly
+# as before. Farm.Web.IntegrationTests intentionally lives outside
+# farm-web.sln and must be invoked directly with RunIntegrationTests=true
+# because its csproj disables test discovery otherwise.
 #
-# The manifest's `pathPrefixes`/`dependsOnProjects`/`shards` fields are
-# declarative documentation validated by test-dotnet-test-manifest.sh; they are
-# NOT read here and have no effect on classify_path()/main() below, which
-# continue to encode the actual bucket→test-selection mapping (see docs/CI.md).
+# The manifest's `shards` are expanded here into matrix legs. `pathPrefixes`
+# and `dependsOnProjects` remain declarative documentation validated by
+# test-dotnet-test-manifest.sh; they have no effect on classify_path()/main(),
+# which continue to encode the bucket→test-selection mapping (see docs/CI.md).
 # ---------------------------------------------------------------------------
 readonly DEFAULT_TEST_FILTER='Category!=DbHeavy&Category!=Docker'
+# Shard filters contain literal `|` operators, so the legacy pipe-delimited
+# record format would corrupt them. ASCII Unit Separator is rejected inside
+# every manifest field by the reader before Bash parses any record.
+readonly MANIFEST_FIELD_SEPARATOR=$'\x1f'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly TEST_MANIFEST="${TEST_MANIFEST_PATH:-$SCRIPT_DIR/dotnet-test-manifest.json}"
@@ -114,17 +118,54 @@ fi
 # produce a partial ALL_TEST_PROJECTS array instead of failing closed.
 manifest_output="$("$PYTHON_BIN" - "$TEST_MANIFEST" <<'PYEOF'
 import json
+import re
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as f:
     data = json.load(f)
 
+separator = "\x1f"
+safe_leg_name = re.compile(r"^[A-Za-z0-9._-]+$")
+seen_leg_names = set()
+
+def emit_record(fields):
+    for field in fields:
+        if not isinstance(field, str):
+            raise TypeError("manifest record fields must be strings")
+        if separator in field or "\n" in field or "\r" in field:
+            raise ValueError("manifest record field contains a reserved separator or newline")
+    print(separator.join(fields))
+
 for entry in data["testProjects"]:
     name = entry["name"]
+    base_leg = entry.get("leg") or name
     project = entry["testProject"]
     run_integration = "true" if entry.get("runIntegration") else "false"
-    test_filter = entry.get("defaultFilter") or ""
-    print(f"{name}|{project}|{run_integration}|{test_filter}")
+    default_filter = entry.get("defaultFilter") or ""
+    shards = entry.get("shards") or []
+
+    if shards:
+        for shard in shards:
+            leg_name = f"{base_leg}-{shard['name']}"
+            shard_filter = shard["filter"]
+            test_filter = (
+                f"({shard_filter})&({default_filter})"
+                if default_filter
+                else shard_filter
+            )
+            if not safe_leg_name.fullmatch(leg_name):
+                raise ValueError(f"matrix leg name is not filesystem-safe: {leg_name!r}")
+            if leg_name in seen_leg_names:
+                raise ValueError(f"duplicate matrix leg name: {leg_name}")
+            seen_leg_names.add(leg_name)
+            emit_record((name, leg_name, project, run_integration, test_filter))
+    else:
+        if not safe_leg_name.fullmatch(base_leg):
+            raise ValueError(f"matrix leg name is not filesystem-safe: {base_leg!r}")
+        if base_leg in seen_leg_names:
+            raise ValueError(f"duplicate matrix leg name: {base_leg}")
+        seen_leg_names.add(base_leg)
+        emit_record((name, base_leg, project, run_integration, default_filter))
 PYEOF
 )"
 manifest_reader_rc=$?
@@ -342,6 +383,15 @@ load_changed_files() {
 #                     path-selection bucket instead of full-safe -- this is
 #                     the pattern later Farm.Modules.* phases (9-18) should
 #                     copy. Matched before the generic `src/modules/*` case.
+#   maintenance     — src/modules/Farm.Modules.Maintenance/** (issue #2037,
+#                     Phase 9: the Maintenance vertical-slice module, including
+#                     the first hub -- MaintenanceHub -- to move out of the
+#                     host). Same narrow-bucket treatment as smartplug above.
+#                     Matched before the generic `src/modules/*` case.
+#   calibration     — src/modules/Farm.Modules.Calibration/** (issue #2038,
+#                     Phase 10: the calibration vertical-slice module carved
+#                     out of Farm.Web.Api, following the smartplug pattern
+#                     above). Matched before the generic `src/modules/*` case.
 #   migrations_app  — src/migrations/Farm.Migrations.*/**
 #   migrations_slcr — src/migrations/Farm.Slicer.Migrations.*/**
 #   tests_api       — src/tests/Farm.Web.Api.Tests/**
@@ -361,6 +411,10 @@ load_changed_files() {
 #                     rather than attempting to enumerate every consumer.)
 #   tests_smartplug — src/tests/Farm.Modules.SmartPlug.Tests/** (issue #2036).
 #                     Matched before the generic `src/tests/*` case.
+#   tests_maintenance — src/tests/Farm.Modules.Maintenance.Tests/** (issue
+#                     #2037). Matched before the generic `src/tests/*` case.
+#   tests_calibration — src/tests/Farm.Modules.Calibration.Tests/** (issue
+#                     #2038). Matched before the generic `src/tests/*` case.
 #   tests_other     — any other src/tests/**
 #   tools           — src/tools/**
 #   dotnet_config   — src/*.props, src/*.targets, src/.editorconfig
@@ -445,6 +499,15 @@ classify_path() {
     # full-safe `modules` bucket. Future Farm.Modules.* phases (9-18) should
     # add their own case here, above the generic `src/modules/*` line.
     src/modules/Farm.Modules.SmartPlug/*) printf 'smartplug' ; return ;;
+    # Farm.Modules.Maintenance is a concrete vertical-slice module (issue
+    # #2037, Phase 9), same rationale as Farm.Modules.SmartPlug above --
+    # match it before the generic `src/modules/*` case.
+    src/modules/Farm.Modules.Maintenance/*) printf 'maintenance' ; return ;;
+    # Farm.Modules.Calibration is a concrete vertical-slice module (issue
+    # #2038, Phase 10) following the same pattern as smartplug above --
+    # matched first so it gets its own narrow bucket instead of falling into
+    # the full-safe `modules` bucket.
+    src/modules/Farm.Modules.Calibration/*) printf 'calibration' ; return ;;
     src/modules/*)           printf 'modules' ; return ;;
     src/migrations/Farm.Migrations.*)         printf 'migrations_app' ; return ;;
     src/migrations/Farm.Slicer.Migrations.*)  printf 'migrations_slcr' ; return ;;
@@ -456,6 +519,8 @@ classify_path() {
     src/tests/Farm.Modules.Abstractions.Tests/*) printf 'tests_modules' ; return ;;
     src/tests/Farm.Testing.Shared/*)          printf 'tests_shared' ; return ;;
     src/tests/Farm.Modules.SmartPlug.Tests/*)   printf 'tests_smartplug' ; return ;;
+    src/tests/Farm.Modules.Maintenance.Tests/*) printf 'tests_maintenance' ; return ;;
+    src/tests/Farm.Modules.Calibration.Tests/*) printf 'tests_calibration' ; return ;;
     src/tests/*)             printf 'tests_other' ; return ;;
     src/tools/*)             printf 'tools' ; return ;;
   esac
@@ -491,31 +556,24 @@ finish() {
   # Build test matrix JSON.
   local matrix_json='{"include":[]}'
   if (( ${#test_selected[@]} > 0 )); then
-    local items="" first=1 entry name project run_integration test_filter
-    for name in "${test_selected[@]}"; do
-      # Look up project from ALL_TEST_PROJECTS.
-      project=""
-      run_integration="false"
-      test_filter="$DEFAULT_TEST_FILTER"
+    local items="" first=1 entry selected_name
+    for selected_name in "${test_selected[@]}"; do
+      # A selected project may match one manifest record or several shard
+      # records. Every matching record becomes its own matrix leg.
       for entry in "${ALL_TEST_PROJECTS[@]}"; do
-        local entry_name entry_project entry_integration entry_filter
-        IFS='|' read -r entry_name entry_project entry_integration entry_filter <<< "$entry"
-        if [[ "$entry_name" == "$name" ]]; then
-          project="$entry_project"
-          run_integration="$entry_integration"
-          if [[ -n "$entry_filter" ]]; then
-            test_filter="$entry_filter"
-          fi
-          break
+        local entry_name leg_name project run_integration test_filter
+        IFS="$MANIFEST_FIELD_SEPARATOR" read -r \
+          entry_name leg_name project run_integration test_filter <<< "$entry"
+        if [[ "$entry_name" != "$selected_name" ]]; then
+          continue
         fi
+        if [[ -z "$test_filter" ]]; then
+          test_filter="$DEFAULT_TEST_FILTER"
+        fi
+        if (( first == 0 )); then items+=","; fi
+        first=0
+        items+='{"name":"'"$leg_name"'","project":"'"$project"'","label":"'"$leg_name"'","run_integration":"'"$run_integration"'","filter":"'"$test_filter"'"}'
       done
-      if [[ -z "$project" ]]; then
-        continue
-      fi
-      local label="$name"
-      if (( first == 0 )); then items+=","; fi
-      first=0
-      items+='{"name":"'"$name"'","project":"'"$project"'","label":"'"$label"'","run_integration":"'"$run_integration"'","filter":"'"$test_filter"'"}'
     done
     matrix_json='{"include":['"$items"']}'
   fi
@@ -542,9 +600,10 @@ finish() {
   if [[ "$want_dotnet_test" == "true" && "$matrix_json" == '{"include":[]}' ]]; then
     reason_raw="internal: empty test selection with want_dotnet_test=true — coercing full safe"
     full_matrix="true"
-    local items="" first=1 entry name project run_integration test_filter
+    local items="" first=1 entry entry_name name project run_integration test_filter
     for entry in "${ALL_TEST_PROJECTS[@]}"; do
-      IFS='|' read -r name project run_integration test_filter <<< "$entry"
+      IFS="$MANIFEST_FIELD_SEPARATOR" read -r \
+        entry_name name project run_integration test_filter <<< "$entry"
       if [[ -z "$test_filter" ]]; then
         test_filter="$DEFAULT_TEST_FILTER"
       fi
@@ -591,8 +650,20 @@ finish() {
 # ---------------------------------------------------------------------------
 emit_full_safe() {
   local reason="$1"
-  local all_tests=() all_migs=() entry
-  for entry in "${ALL_TEST_PROJECTS[@]}"; do all_tests+=("${entry%%|*}"); done
+  local all_tests=() all_migs=() entry selection_name existing duplicate
+  for entry in "${ALL_TEST_PROJECTS[@]}"; do
+    IFS="$MANIFEST_FIELD_SEPARATOR" read -r selection_name _ <<< "$entry"
+    duplicate=0
+    for existing in ${all_tests[@]+"${all_tests[@]}"}; do
+      if [[ "$existing" == "$selection_name" ]]; then
+        duplicate=1
+        break
+      fi
+    done
+    if (( duplicate == 0 )); then
+      all_tests+=("$selection_name")
+    fi
+  done
   for entry in "${ALL_MIG_ENTRIES[@]}"; do all_migs+=("${entry%%|*}"); done
   finish "true" "true" "true" "true" "true" "$reason" \
     ${all_tests[@]+"${all_tests[@]}"} "---" ${all_migs[@]+"${all_migs[@]}"}
@@ -641,9 +712,11 @@ main() {
   local has_shared_config=0 has_ci_selector=0 has_frontend=0
   local has_api=0 has_infra=0 has_backend=0 has_backend_core=0 has_slicer=0
   local has_orca=0 has_discovery=0 has_settings=0 has_modules=0 has_smartplug=0
+  local has_maintenance=0 has_calibration=0
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
   local has_tests_integration=0 has_tests_modules=0 has_tests_shared=0 has_tests_smartplug=0 has_tests_infra=0 has_tests_other=0
+  local has_tests_maintenance=0 has_tests_calibration=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
 
   local p category
@@ -663,6 +736,8 @@ main() {
       settings)        has_settings=1 ;;
       modules)         has_modules=1 ;;
       smartplug)       has_smartplug=1 ;;
+      maintenance)     has_maintenance=1 ;;
+      calibration)     has_calibration=1 ;;
       migrations_app)  has_mig_app=1 ;;
       migrations_slcr) has_mig_slcr=1 ;;
       tests_api)       has_tests_api=1 ;;
@@ -673,6 +748,8 @@ main() {
       tests_modules)   has_tests_modules=1 ;;
       tests_shared)    has_tests_shared=1 ;;
       tests_smartplug) has_tests_smartplug=1 ;;
+      tests_maintenance) has_tests_maintenance=1 ;;
+      tests_calibration) has_tests_calibration=1 ;;
       tests_other)     has_tests_other=1 ;;
       tools)           has_tools=1 ;;
       unknown_src)     has_unknown_src=1 ;;
@@ -738,12 +815,15 @@ main() {
   fi
 
   # Any .NET-relevant bucket forces a full solution build to preserve compile
-  # coverage across the whole graph.
+  # coverage across the whole graph. This is load-bearing: dotnet-test and
+  # migration-drift both depend on dotnet-build and consume its artifacts, so
+  # every bucket that can request either consumer must also request the build.
   if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
-        has_orca || has_smartplug ||
+        has_orca || has_smartplug || has_maintenance || has_calibration ||
         has_mig_app || has_mig_slcr ||
         has_tests_api || has_tests_slicer || has_tests_orca ||
-        has_tests_integration || has_tests_smartplug || has_tests_infra || has_tools )); then
+        has_tests_integration || has_tests_smartplug || has_tests_infra ||
+        has_tests_maintenance || has_tests_calibration || has_tools )); then
     want_dotnet_build="true"
   fi
 
@@ -766,9 +846,12 @@ main() {
     # for the web-host test suite. Farm.Slicer.Module.Tests IS kept, though --
     # Farm.Slicer.Module.csproj itself has a ProjectReference straight to
     # Farm.Infrastructure.csproj (independent of Farm.Web.Api), so an infra
-    # change can break it too. Farm.OrcaSlicer.Worker.Tests and
-    # Farm.Modules.SmartPlug.Tests reference Farm.Infrastructure directly too.
-    test_names+=("Farm.Infrastructure.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests")
+    # change can break it too. Farm.OrcaSlicer.Worker.Tests references infra
+    # through the worker graph. Farm.Modules.SmartPlug (issue #2036),
+    # Farm.Modules.Maintenance (issue #2037), and Farm.Modules.Calibration
+    # (issue #2038) also reference Farm.Infrastructure directly, so an infra
+    # change must re-run all three test projects too.
+    test_names+=("Farm.Infrastructure.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_backend )); then
@@ -793,7 +876,10 @@ main() {
   if (( has_slicer )); then
     # slicer projects are referenced by both test suites, and directly by
     # Farm.Infrastructure.Tests (issue #2033) through Farm.Slicer.Module.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests")
+    # Farm.Modules.Calibration (issue #2038) references Farm.Slicer.Module
+    # directly (slicer-host calibration profile resolution), so a slicer
+    # change must re-run it too.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests" "Farm.Modules.Calibration.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_orca )); then
@@ -809,6 +895,30 @@ main() {
     # therefore also select Farm.Web.Api.Tests, unlike a pure-service module
     # such as Farm.OrcaSlicer.Worker.
     test_names+=("Farm.Modules.SmartPlug.Tests" "Farm.Web.Api.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_maintenance )); then
+    # Farm.Modules.Maintenance owns the 5 Maintenance*Controller endpoints and
+    # MaintenanceHub, but several tests that cover maintenance surfaces that
+    # did NOT move (MaintenanceHubAuthorizationIntegrationTests,
+    # MaintenanceScheduleDeploymentToolheadScopeTests, RouteTableSnapshotTests,
+    # and other CustomWebApplicationFactory-based tests) intentionally stayed
+    # behind in Farm.Web.Api.Tests -- see docs/MODULE_MIGRATION_PATTERN.md. A
+    # controller/hub-owning module must therefore also select
+    # Farm.Web.Api.Tests, unlike a pure-service module such as
+    # Farm.OrcaSlicer.Worker.
+    test_names+=("Farm.Modules.Maintenance.Tests" "Farm.Web.Api.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_calibration )); then
+    # Farm.Modules.Calibration (issue #2038) owns the calibration controllers,
+    # but the tests that actually cover the retained contract-negotiation,
+    # health-check, and route-table surface (RouteTableSnapshotTests,
+    # CalibrationProfileResolutionContractTests, and friends) intentionally
+    # stayed behind in Farm.Web.Api.Tests -- see docs/MODULE_MIGRATION_PATTERN.md.
+    # A controller-owning module must therefore also select Farm.Web.Api.Tests,
+    # unlike a pure-service module such as Farm.OrcaSlicer.Worker.
+    test_names+=("Farm.Modules.Calibration.Tests" "Farm.Web.Api.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_mig_app )); then
@@ -847,8 +957,8 @@ main() {
     mig_names+=("SlicerPg" "SlicerSqlServer")
     want_mig_drift="true"
   fi
-  # Test-project-only edits: run just that test project. Skip a full sln build
-  # in the future — for now we still build to keep --no-build safe.
+  # Test-project-only edits run just that test project, but still require the
+  # central build whose compiled artifact the dotnet-test job downloads.
   if (( has_tests_api )); then
     test_names+=("Farm.Web.Api.Tests")
     net_test_bucket_hit=1
@@ -873,6 +983,14 @@ main() {
     test_names+=("Farm.Modules.SmartPlug.Tests")
     net_test_bucket_hit=1
   fi
+  if (( has_tests_maintenance )); then
+    test_names+=("Farm.Modules.Maintenance.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_tests_calibration )); then
+    test_names+=("Farm.Modules.Calibration.Tests")
+    net_test_bucket_hit=1
+  fi
   if (( net_test_bucket_hit )); then
     want_dotnet_test="true"
   fi
@@ -887,6 +1005,8 @@ main() {
   if (( has_slicer )); then reason+="slicer "; fi
   if (( has_orca )); then reason+="orcaslicer-worker "; fi
   if (( has_smartplug )); then reason+="smartplug "; fi
+  if (( has_maintenance )); then reason+="maintenance "; fi
+  if (( has_calibration )); then reason+="calibration "; fi
   if (( has_mig_app )); then reason+="mig-app "; fi
   if (( has_mig_slcr )); then reason+="mig-slicer "; fi
   if (( has_tests_api )); then reason+="tests-api "; fi
@@ -895,6 +1015,8 @@ main() {
   if (( has_tests_orca )); then reason+="tests-orca "; fi
   if (( has_tests_integration )); then reason+="tests-integration "; fi
   if (( has_tests_smartplug )); then reason+="tests-smartplug "; fi
+  if (( has_tests_maintenance )); then reason+="tests-maintenance "; fi
+  if (( has_tests_calibration )); then reason+="tests-calibration "; fi
   if (( has_tools )); then reason+="tools "; fi
   if (( has_docs )); then reason+="docs "; fi
   if (( has_mobile )); then reason+="mobile "; fi

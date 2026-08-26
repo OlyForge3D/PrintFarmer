@@ -24,7 +24,9 @@
 #      productionProject/runIntegration is silently narrowed or swapped, and
 #   8. FAILs when a known project's 'name' is renamed while its testProject
 #      path is left unchanged (would otherwise silently vanish from the CI
-#      matrix since select-dotnet-tests.sh looks entries up by name).
+#      matrix since select-dotnet-tests.sh looks entries up by name), and
+#   9. FAILs when an API shard filter drops a root-level test class even though
+#      the directory-level `(root)` ownership marker still exists.
 # =============================================================================
 
 set -uo pipefail
@@ -295,6 +297,41 @@ with open(out_path, "w", encoding="utf-8") as f:
   fi
 }
 
+case_api_shard_filter_coverage_fails() {
+  # Negative: directory ownership still says `(root)` belongs to services, but
+  # removing one root class from the actual VSTest filter would silently skip
+  # that class once the project is sharded.
+  local mutant ; mutant="$(mktemp)"
+  build_mutant "$mutant" '
+import json, sys
+out_path, src_path = sys.argv[1], sys.argv[2]
+with open(src_path, encoding="utf-8") as f:
+    data = json.load(f)
+for entry in data["testProjects"]:
+    if entry.get("name") != "Farm.Web.Api.Tests":
+        continue
+    for shard in entry["shards"]:
+        if shard.get("name") == "services":
+            token = "|FullyQualifiedName~Farm.Web.Api.Tests.PasswordSecurityTests."
+            shard["filter"] = shard["filter"].replace(token, "")
+            break
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump(data, f)
+'
+  local rc=0
+  local report
+  report="$(TEST_MANIFEST_PATH="$mutant" bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$mutant"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail when a shard filter drops a root test, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"filter does not cover test source PasswordSecurityTests.cs"* ]]; then
+    printf '  expected a shard-filter-coverage error, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
 TESTS=(
   case_baseline_roundtrip_passes
   case_duplicate_test_project_path_fails
@@ -304,6 +341,7 @@ TESTS=(
   case_invalid_name_fails
   case_pinned_default_filter_narrowed_fails
   case_canonical_name_renamed_fails
+  case_api_shard_filter_coverage_fails
 )
 
 printf '=== dotnet test manifest validator regression suite ===\n'
