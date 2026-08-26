@@ -32,12 +32,12 @@ public class MachineModelProfile
         set
         {
             _name = value ?? string.Empty;
-            NameNormalized = NormalizeName(_name);
+            NameNormalized = NormalizeNameKey(_name);
         }
     }
 
     /// <summary>
-    /// Trimmed, case-folded model name used to enforce portable uniqueness.
+    /// Trimmed, Unicode case-folded model-name key used to enforce portable uniqueness.
     /// </summary>
     [Required]
     [MaxLength(256)]
@@ -105,7 +105,7 @@ public class MachineModelProfile
 
     internal bool RefreshNormalizedName()
     {
-        string normalizedName = NormalizeName(_name);
+        string normalizedName = NormalizeNameKey(_name);
         if (string.Equals(NameNormalized, normalizedName, StringComparison.Ordinal))
         {
             return false;
@@ -115,6 +115,11 @@ public class MachineModelProfile
         return true;
     }
 
-    internal static string NormalizeName(string value) =>
+    /// <summary>
+    /// Builds a provider-independent equality key for persisted profile-family names.
+    /// This deliberately does not use CatalogNameNormalizer, which formats display casing
+    /// without making differently-cased names equal.
+    /// </summary>
+    internal static string NormalizeNameKey(string value) =>
         value.Trim().ToUpperInvariant();
 }

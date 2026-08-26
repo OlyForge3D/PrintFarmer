@@ -206,7 +206,7 @@ public sealed class ProfileFamilyService(
         CloneProfileFamilyRequestDto request,
         CancellationToken ct)
     {
-        string normalizedName = MachineModelProfile.NormalizeName(request.FamilyName);
+        string normalizedName = MachineModelProfile.NormalizeNameKey(request.FamilyName);
         List<MachineModelProfile> matchingFamilies = await _dbContext.MachineModelProfiles
             .Where(profile =>
                 profile.SlicerType == SlicerType.OrcaSlicer
