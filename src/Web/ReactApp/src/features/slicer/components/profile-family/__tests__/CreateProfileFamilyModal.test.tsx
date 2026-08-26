@@ -226,6 +226,7 @@ describe('CreateProfileFamilyModal', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['machineProfilesForModel', 'target-model-1', '2.4.2'] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['slicerProfilesExtended'] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['slicerProfilesHierarchy'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['slicerProfilesWorkerHierarchy'] });
     expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("Family 'My Voron Family' created"));
   });
 

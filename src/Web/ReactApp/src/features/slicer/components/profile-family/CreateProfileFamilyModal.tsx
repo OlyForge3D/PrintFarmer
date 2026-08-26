@@ -163,7 +163,7 @@ export function CreateProfileFamilyModal({
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   const { data: hierarchy, isLoading: hierarchyLoading, error: hierarchyError } = useQuery({
-    queryKey: ['slicerProfilesHierarchy'],
+    queryKey: ['slicerProfilesWorkerHierarchy'],
     queryFn: () => slicerProfilesService.getWorkerHierarchy(),
     enabled: isOpen,
     staleTime: 60_000,
@@ -386,6 +386,7 @@ export function CreateProfileFamilyModal({
         queryClient.invalidateQueries({ queryKey: ['machineProfilesForModel', targetPrinterModelId, slicerEngineVersion ?? null] }),
         queryClient.invalidateQueries({ queryKey: ['slicerProfilesExtended'] }),
         queryClient.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] }),
+        queryClient.invalidateQueries({ queryKey: ['slicerProfilesWorkerHierarchy'] }),
       ]);
       toast.success(`Family '${response.familyName}' created with ${response.machineProfiles.length} machine variant(s), ${response.processProfileCount} process profile(s), and ${response.filamentProfileCount} filament profile(s).`);
       dirtyRef.current = false;
