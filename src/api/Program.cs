@@ -213,7 +213,8 @@ builder.Services.AddApiModules(
     typeof(Farm.Modules.Maintenance.MaintenanceApiModule).Assembly,
     typeof(Farm.Modules.Calibration.CalibrationApiModule).Assembly,
     typeof(Farm.Modules.Gcode.GcodeApiModule).Assembly,
-    typeof(Farm.Modules.Identity.IdentityApiModule).Assembly);
+    typeof(Farm.Modules.Identity.IdentityApiModule).Assembly,
+    typeof(Farm.Modules.Administration.AdministrationApiModule).Assembly);
 
 if (slicerModuleEnabled)
 {
