@@ -914,8 +914,10 @@ public class ProfilesController(
     /// (see #2049).
     /// </param>
     [HttpPost("process/for-machines")]
-    [ProducesResponseType(typeof(List<ProcessProfileDto>), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(List<ProcessProfileSummaryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(
+        typeof(List<ProcessProfileDto>),
+        StatusCodes.Status200OK,
+        Description = "Full process profiles by default. With ?view=summary, returns List<ProcessProfileSummaryDto> instead (no Settings).")]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetProcessProfilesForMachinesAsync(
         [FromServices] HttpClient httpClient,
@@ -961,8 +963,10 @@ public class ProfilesController(
     /// slice submission, export, and clone still need (see #2049).
     /// </param>
     [HttpPost("filament/for-machines")]
-    [ProducesResponseType(typeof(List<FilamentProfileDto>), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(List<FilamentProfileSummaryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(
+        typeof(List<FilamentProfileDto>),
+        StatusCodes.Status200OK,
+        Description = "Full filament profiles by default. With ?view=summary, returns List<FilamentProfileSummaryDto> instead (no Settings/StartGcode/EndGcode).")]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetFilamentProfilesForMachinesAsync(
         [FromServices] HttpClient httpClient,

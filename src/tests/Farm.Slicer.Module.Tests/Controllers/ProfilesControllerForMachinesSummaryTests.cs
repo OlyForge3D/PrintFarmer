@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
+using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,6 +10,7 @@ using Farm.Infrastructure.Dtos;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -24,6 +27,31 @@ namespace Farm.Slicer.Module.Tests.Controllers;
 /// </summary>
 public class ProfilesControllerForMachinesSummaryTests
 {
+    [Theory]
+    [InlineData(nameof(ProfilesController.GetFilamentProfilesForMachinesAsync))]
+    [InlineData(nameof(ProfilesController.GetProcessProfilesForMachinesAsync))]
+    public void ForMachinesEndpoint_200Metadata_DocumentsBothResponseShapes(string methodName)
+    {
+        // ASP.NET Core on net10.0 collapses multiple [ProducesResponseType] attributes for the
+        // same status code down to a single declared type (this behavior only changes in .NET
+        // 11 - see https://learn.microsoft.com/aspnet/core/breaking-changes/11/openapi-multiple-produces-per-status).
+        // A second [ProducesResponseType(..., 200)] attribute for the summary DTO would therefore
+        // be silently dropped from the generated OpenAPI document rather than exposing a real
+        // oneOf/anyOf schema. Until the app targets a runtime that supports declaring multiple
+        // response shapes per status code, the alternate ?view=summary shape must instead be
+        // called out via the Description on the single 200 attribute, so at least the
+        // human-/tool-readable metadata isn't silently wrong. This test pins that contract.
+        MethodInfo method = typeof(ProfilesController).GetMethod(methodName)
+            ?? throw new InvalidOperationException($"Method {methodName} not found on ProfilesController.");
+
+        ProducesResponseTypeAttribute[] okAttributes = [.. method
+            .GetCustomAttributes<ProducesResponseTypeAttribute>()
+            .Where(a => a.StatusCode == StatusCodes.Status200OK)];
+
+        ProducesResponseTypeAttribute okAttribute = Assert.Single(okAttributes);
+        Assert.Contains("view=summary", okAttribute.Description, StringComparison.Ordinal);
+        Assert.Contains("Summary", okAttribute.Description, StringComparison.Ordinal);
+    }
     [Fact]
     public async Task GetFilamentProfilesForMachinesAsync_DefaultView_ReturnsFullDtoWithSettingsAndGcode()
     {
