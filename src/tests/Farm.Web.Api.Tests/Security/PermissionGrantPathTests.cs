@@ -87,6 +87,7 @@ public sealed class PermissionGrantPathTests
         // Queue.Reconcile and DispatchSettings.Manage above — silently drop out of this guard.
         typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
+        typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
     ];
 
     [Fact]

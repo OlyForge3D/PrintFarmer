@@ -78,6 +78,7 @@ public sealed class AuthorizeRolesGateArchitectureTests
         typeof(Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController).Assembly,
         typeof(Farm.Web.Api.Controllers.MaintenanceController).Assembly,
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
+        typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly,
     ];
 
     /// <summary>
@@ -100,6 +101,7 @@ public sealed class AuthorizeRolesGateArchitectureTests
         typeof(Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController).Assembly,
         typeof(Farm.Web.Api.Controllers.MaintenanceController).Assembly,
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
+        typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly,
     ];
 
     [Fact]

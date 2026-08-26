@@ -8,7 +8,6 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Services.OctoPrint;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

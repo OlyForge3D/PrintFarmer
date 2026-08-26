@@ -26,6 +26,7 @@ public sealed class RoleToPermissionMigrationCompletenessTests
         // would silently escape this guard.
         typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
+        typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
     ];
 
     [Fact]
