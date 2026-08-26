@@ -736,7 +736,9 @@ main() {
   fi
 
   # Any .NET-relevant bucket forces a full solution build to preserve compile
-  # coverage across the whole graph.
+  # coverage across the whole graph. This is load-bearing: dotnet-test and
+  # migration-drift both depend on dotnet-build and consume its artifacts, so
+  # every bucket that can request either consumer must also request the build.
   if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
         has_orca ||
         has_mig_app || has_mig_slcr ||
@@ -816,8 +818,8 @@ main() {
     mig_names+=("SlicerPg" "SlicerSqlServer")
     want_mig_drift="true"
   fi
-  # Test-project-only edits: run just that test project. Skip a full sln build
-  # in the future — for now we still build to keep --no-build safe.
+  # Test-project-only edits run just that test project, but still require the
+  # central build whose compiled artifact the dotnet-test job downloads.
   if (( has_tests_api )); then
     test_names+=("Farm.Web.Api.Tests")
     net_test_bucket_hit=1
