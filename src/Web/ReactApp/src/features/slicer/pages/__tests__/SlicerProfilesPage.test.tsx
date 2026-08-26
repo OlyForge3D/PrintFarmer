@@ -103,17 +103,35 @@ function renderPage(queryClient: QueryClient) {
 describe('SlicerProfilesPage — filtered cache invalidation (issue #2067)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // listHierarchical is called both unfiltered (main hierarchy query) and
+    // filtered (['slicerProfilesHierarchyFiltered', selectedMachineProfileId]);
+    // both call sites go through the same service method, distinguished by the
+    // first argument. Return the same fixture for both — the assertion below
+    // pins the *filtered* call by argument identity, so the mount contract is
+    // verified without ambiguity.
     vi.mocked(slicerProfilesService.listHierarchical).mockResolvedValue(hierarchyFixture);
   });
 
-  // Regression guard for issue #2067: every mutation on this page must
-  // invalidate the `slicerProfilesHierarchyFiltered` prefix key so the
-  // machine-profile-filtered hierarchy view refetches immediately after any
-  // mutation, not on the next `staleTime` expiry. `setDefaultMutation` is one
-  // representative of the seven mutation onSuccess handlers listed in the
-  // issue; the fix applies the same prefix invalidation across all nine sites
-  // (seven mutations + one SignalR handler + the manual Refresh button).
-  it('invalidates the slicerProfilesHierarchyFiltered prefix key after setDefault', async () => {
+  // Regression guard for issue #2067: when a machine-profile filter is
+  // active, every mutation on this page must invalidate the
+  // `slicerProfilesHierarchyFiltered` prefix key so the filtered hierarchy
+  // view refetches immediately — not on the next `staleTime` expiry.
+  //
+  // The bug scenario the test drives end-to-end:
+  //  1. User picks Manufacturer=Prusa → Machine Model=machine-1, which
+  //     mounts the filtered query (`listHierarchical('machine-1')` is called).
+  //  2. User clicks "Set Default" on that same machine profile.
+  //  3. The mutation's `onSuccess` must fire prefix invalidation, or the
+  //     filtered view stays stale until `staleTime` elapses.
+  //
+  // `setDefaultMutation` is one representative of the seven mutation
+  // onSuccess handlers listed in the issue; the fix applies the same prefix
+  // invalidation across all nine sites (seven mutations + one SignalR
+  // handler + the manual Refresh button). The assertion uses an
+  // `objectContaining` prefix match (no `selectedMachineProfileId` element),
+  // which is exactly what mismatches a regression that reverts to a
+  // specific-key or filter-guarded invalidation.
+  it('invalidates the slicerProfilesHierarchyFiltered prefix key after setDefault when a machine filter is active', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false, gcTime: 0, staleTime: 0 },
@@ -124,6 +142,33 @@ describe('SlicerProfilesPage — filtered cache invalidation (issue #2067)', () 
 
     renderPage(queryClient);
 
+    // Wait for the initial (unfiltered) hierarchy to resolve so the filter
+    // dropdowns populate.
+    await waitFor(() => {
+      expect(slicerProfilesService.listHierarchical).toHaveBeenCalledWith();
+    });
+
+    // Drive the manufacturer -> machine model selection that mounts the
+    // filtered query.
+    const manufacturerSelect = await screen.findByLabelText<HTMLSelectElement>('Select manufacturer');
+    await userEvent.selectOptions(manufacturerSelect, 'Prusa');
+
+    const machineModelSelect = await screen.findByLabelText<HTMLSelectElement>('Select machine model');
+    await waitFor(() => {
+      expect(machineModelSelect).not.toBeDisabled();
+    });
+    await userEvent.selectOptions(machineModelSelect, 'machine-1');
+
+    // Prove the filtered query is actually mounted before we trigger the
+    // mutation. Without this, a "invalidateQueries called with the prefix
+    // key" assertion could pass on code that never wires the filtered query
+    // to real user flow.
+    await waitFor(() => {
+      expect(slicerProfilesService.listHierarchical).toHaveBeenCalledWith('machine-1');
+    });
+
+    // The setDefault button lives on the machine profile row that is still
+    // visible in the machines table.
     const setDefaultButton = await screen.findByRole('button', { name: /set default/i });
     await userEvent.click(setDefaultButton);
 
