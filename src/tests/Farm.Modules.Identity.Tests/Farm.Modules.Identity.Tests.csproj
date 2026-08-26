@@ -29,5 +29,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
     <ProjectReference Include="..\..\modules\Farm.Modules.Identity\Farm.Modules.Identity.csproj" />
+    <!-- SecurityAuditControllerTests is a full-host integration test that needs
+         CustomWebApplicationFactory (spins up the real Program host). Referencing
+         Farm.Web.Api.Tests here is not circular: Farm.Web.Api.Tests -> Farm.Web.Api ->
+         Farm.Modules.Identity, and this test project is a leaf that nothing else depends on. -->
+    <ProjectReference Include="..\Farm.Web.Api.Tests\Farm.Web.Api.Tests.csproj" />
   </ItemGroup>
 </Project>
