@@ -46,13 +46,19 @@
 #  13. FAILs closed (rather than silently using a desynced depth) when any
 #      construct -- not just an unhandled string form -- leaves the file's
 #      overall code-brace depth unbalanced at EOF, and
-#  14. FAILs closed (same EOF-balance backstop as #13) when a raw string
-#      literal's own interpolation hole contains a NESTED raw string whose
-#      opening quote run is as long as, or longer than, the outer literal's
-#      own -- a documented, out-of-scope limitation of the wholesale
-#      hole-blanking in `scan_raw_string` (round-7 reviewer finding) that is
-#      unreachable by any raw string literal actually in this codebase, but
-#      must never silently misattribute a class if it is ever introduced.
+#  14. does NOT desync its brace-depth count when a raw string literal's own
+#      interpolation hole contains a NESTED raw string literal whose opening
+#      quote run is LONGER than the outer literal's own (round-7 reviewer
+#      finding) OR EQUAL to it (round-8 reviewer finding, the more dangerous
+#      case: the hole's open/close braces are swallowed symmetrically, so
+#      the file's overall brace count happens to stay balanced at EOF and
+#      the #13 EOF-balance guard alone cannot catch it) -- `scan_raw_string`
+#      now recursively hands an interpolated raw string's hole to the same
+#      `scan_code(..., stop_at_hole_close=True)` hole scanner ordinary
+#      interpolated strings already use, instead of blanking the whole body
+#      in one blunt, hole-unaware pass, so a nested literal inside the hole
+#      is scanned by its own dedicated, independent closing-delimiter search
+#      and can never be mistaken for the outer literal's own closer.
 # =============================================================================
 
 set -uo pipefail
@@ -529,26 +535,29 @@ EOF
   fi
 }
 
-case_nested_raw_string_in_hole_fails_closed() {
-  # Negative (documents a known, accepted limitation): `scan_raw_string`
-  # blanks an interpolation hole's contents wholesale rather than
-  # hole-scanning them (see its docstring), so a raw string literal nested
-  # inside another raw string literal's hole, whose own opening quote run
-  # is at least as long as the outer's, is mistaken for the outer literal's
-  # own closing delimiter. This is a real gap (round-7 reviewer finding),
-  # but it is unreachable by any raw string literal actually in this
-  # codebase (verified: every interpolation hole in every `$"""`/`$$"""`
-  # usage under src/ interpolates only plain identifiers/format
-  # specifiers, never a nested raw string) and, when it does occur, the
-  # EOF-balance guard (`case_unbalanced_braces_fails_closed` above) fails
-  # the validator closed rather than silently misattributing a class's
-  # facts -- this test proves that backstop actually fires for this exact
-  # construct, not just for a bare stray brace.
+case_nested_raw_string_in_hole_does_not_desync_brace_depth() {
+  # Positive (round-8 fix, proves no misattribution): `scan_raw_string` now
+  # recursively hands an interpolated raw string's hole to
+  # `scan_code(..., stop_at_hole_close=True)` instead of blanking the whole
+  # body in one blunt, hole-unaware pass. This closes two related false-close
+  # scenarios reviewers identified across rounds 7 and 8: a nested raw string
+  # literal inside the hole whose own opening quote run is LONGER than the
+  # outer literal's (4 vs 3, round 7) or EQUAL to it (3 vs 3, round 8) must
+  # not be mistaken for the outer literal's own closing delimiter. The
+  # equal-length case is the more dangerous of the two -- before this fix, it
+  # happened to leave the file's overall brace count balanced at EOF (the
+  # hole's open and close braces were both swallowed symmetrically), so the
+  # `case_unbalanced_braces_fails_closed` EOF-balance guard alone could not
+  # catch it. Proving all three classes below (both nested-raw-string cases
+  # plus their sibling) are still correctly separated and reported as
+  # coverage gaps -- and that no "unbalanced braces" error fires at all -- is
+  # the only way to confirm this construct is now handled correctly at the
+  # source, rather than merely backstopped.
   local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/_ScratchNestedRawStringHoleTests.cs"
   cat >"$scratch" <<'EOF'
 namespace Farm.Web.Api.Tests;
 
-public class ScratchNestedRawStringHoleTests
+public class ScratchNestedRawStringHoleLongerTests
 {
     private static string Build(string inner) => inner;
 
@@ -559,10 +568,21 @@ public class ScratchNestedRawStringHoleTests
     }
 }
 
+public class ScratchNestedRawStringHoleEqualTests
+{
+    private static string Build(string inner) => inner;
+
+    [Fact]
+    public void Bar()
+    {
+        string s = $"""outer{Build("""nested""")}outer""";
+    }
+}
+
 public class ScratchNestedRawStringHoleSiblingTests
 {
     [Fact]
-    public void Bar()
+    public void Baz()
     {
     }
 }
@@ -572,11 +592,23 @@ EOF
   report="$(bash "$VALIDATOR" 2>&1)" || rc=$?
   rm -f "$scratch"
   if (( rc == 0 )); then
-    printf '  expected validator to fail closed on a nested-raw-string-in-hole file, but it passed\n' >&2
+    printf '  expected validator to fail (all three new classes are uncovered), but it passed\n' >&2
     return 1
   fi
-  if [[ "$report" != *"has unbalanced braces after comment/string stripping"* ]]; then
-    printf '  expected the EOF-balance guard to fire (fail closed), got:\n%s\n' "$report" >&2
+  if [[ "$report" == *"unbalanced braces"* ]]; then
+    printf '  nested raw string in a hole desynced the brace count instead of being handled, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchNestedRawStringHoleTests.cs class ScratchNestedRawStringHoleLongerTests"* ]]; then
+    printf '  expected a coverage-gap error naming the longer-nested-quote-run class, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchNestedRawStringHoleTests.cs class ScratchNestedRawStringHoleEqualTests"* ]]; then
+    printf '  expected a coverage-gap error naming the equal-nested-quote-run class, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchNestedRawStringHoleTests.cs class ScratchNestedRawStringHoleSiblingTests"* ]]; then
+    printf '  expected a coverage-gap error naming the sibling after both nested-raw-string classes too -- neither must have swallowed the rest of the file, got:\n%s\n' "$report" >&2
     return 1
   fi
 }
@@ -595,7 +627,7 @@ TESTS=(
   case_block_scoped_namespace_fails_closed
   case_raw_string_literal_does_not_desync_brace_depth
   case_unbalanced_braces_fails_closed
-  case_nested_raw_string_in_hole_fails_closed
+  case_nested_raw_string_in_hole_does_not_desync_brace_depth
 )
 
 printf '=== dotnet test manifest validator regression suite ===\n'

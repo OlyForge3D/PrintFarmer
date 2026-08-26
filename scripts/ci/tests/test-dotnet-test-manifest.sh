@@ -122,45 +122,44 @@ def _strip_noncode(text):
         blanks.append((start, n))
         return n
 
-    def scan_raw_string(open_start, body_start, quote_run):
+    def scan_raw_string(open_start, body_start, quote_run, dollar_count):
         """Scan a C# 11 raw string literal's body, starting right after its
-        opening delimiter (`open_start..body_start`, the run of any leading
-        `$` interpolation markers plus the opening `quote_run`-length run of
-        '"' characters), and blank the entire literal -- opening delimiter,
-        body, and closing delimiter alike. The closing delimiter is the
-        first run of at least `quote_run` consecutive '"' characters found
-        at or after `body_start`; searching from `body_start` (not
+        opening delimiter (`open_start..body_start`, the run of `dollar_count`
+        leading `$` interpolation markers plus the opening `quote_run`-length
+        run of '"' characters), and blank the literal's punctuation --
+        opening delimiter, closing delimiter, and (for `dollar_count == 0`,
+        a non-interpolated raw string) the entire body. The closing
+        delimiter is the first run of at least `quote_run` consecutive '"'
+        characters found at or after `body_start` that is not consumed by a
+        nested hole scan (see below); searching from `body_start` (not
         `open_start`) is essential, since the opening delimiter is itself
         such a run and must never be mistaken for its own closer.
 
-        Unlike ordinary interpolated strings, interpolation holes inside a
-        raw string literal are NOT specially unblanked here: the whole body
-        -- hole braces included -- is blanked. This is deliberately blunter
-        than `scan_string`'s hole handling, and it is safe for brace-depth
-        purposes for every raw string literal actually in this codebase: a
-        hole's braces never contribute to the code-side count either way
-        (blanked or exposed-then-immediately-rebalanced), so they cannot
-        desynchronize `_code_brace_depths` UNLESS a hole's own code itself
-        contains a NESTED raw string literal whose own opening quote run is
-        as long as, or longer than, `quote_run` -- e.g. an interpolated raw
-        string opened with a 3-quote delimiter whose hole calls a method
-        with a 4-quote-delimited raw string argument. Such a nested run
-        would be mistaken for this literal's own closer, since this scanner
-        has no concept of "inside a hole" vs. "in body text" and searches
-        for the closing run unconditionally. This is a known, deliberately
-        out-of-scope limitation (fully closing it needs a dollar-count-
-        aware hole scanner mirroring `scan_string`'s, which is
-        disproportionate machinery for a CI shard-selection validator); no
-        file under `src/` triggers it as of this writing (every raw string
-        interpolation found in this codebase interpolates only plain
-        identifiers/format specifiers in its holes, never a nested raw
-        string), and the EOF-balance guard in the caller (see below) fails
-        the validator loudly rather than silently misattributing if this
-        ever changes.
+        For `dollar_count >= 1` (an interpolated raw string), a lone '{' in
+        body text -- one not immediately followed by another '{' -- opens an
+        interpolation hole: the brace itself is blanked and the hole's
+        contents are handed to `scan_code(..., stop_at_hole_close=True)`,
+        the same recursive hole scanner `scan_string` already uses for
+        ordinary interpolated strings. This means a nested string literal
+        (raw or otherwise) inside the hole is scanned by its own dedicated
+        call -- with its own independent closing-delimiter search -- rather
+        than being swallowed into this literal's blunt "search body text for
+        the next quote_run-or-more run" search. That blunt search is exactly
+        what let a hole containing a nested raw string literal (of any
+        quote-run length, whether shorter, equal to, or longer than this
+        literal's own `quote_run`) be mistaken for this literal's own
+        closer, since the naive search has no concept of "inside a hole" vs.
+        "in body text". Doubled `{{`/`}}` outside a hole are treated as
+        literal brace characters (mirroring `scan_string`'s escape handling)
+        and are skipped without opening or closing anything.
+
+        For `dollar_count == 0` (a non-interpolated raw string, no holes are
+        possible), the body is blanked in one pass exactly as before.
         """
         i = body_start
         while i < n:
-            if text[i] == '"':
+            c = text[i]
+            if c == '"':
                 j = i
                 while j < n and text[j] == '"':
                     j += 1
@@ -168,6 +167,16 @@ def _strip_noncode(text):
                     blanks.append((open_start, j))
                     return j
                 i = j
+                continue
+            if dollar_count >= 1 and c == "{":
+                if i + 1 < n and text[i + 1] == "{":
+                    i += 2
+                    continue
+                blanks.append((i, i + 1))
+                i = scan_code(i + 1, stop_at_hole_close=True)
+                continue
+            if dollar_count >= 1 and c == "}" and i + 1 < n and text[i + 1] == "}":
+                i += 2
                 continue
             i += 1
         blanks.append((open_start, n))
@@ -207,12 +216,13 @@ def _strip_noncode(text):
                 j = i
                 while j < n and text[j] == "$":
                     j += 1
+                dollar_count = j - i
                 k = j
                 while k < n and text[k] == '"':
                     k += 1
                 quote_run = k - j
                 if quote_run >= 3:
-                    i = scan_raw_string(i, k, quote_run)
+                    i = scan_raw_string(i, k, quote_run, dollar_count)
                     continue
             if text[i:i + 3] in ("$@\"", "@$\""):
                 blanks.append((i, i + 3))
