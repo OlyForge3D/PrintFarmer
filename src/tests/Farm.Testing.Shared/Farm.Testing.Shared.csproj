@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- This is a shared test-support library referenced by test projects, not a test
+         project itself: it contains no [Fact]/[Theory] test cases, so it deliberately
+         omits xunit.runner.visualstudio / Microsoft.NET.Test.Sdk (no VSTest discovery
+         is needed here). The xunit package reference below implicitly sets
+         IsTestProject=true; force it back to false so 'dotnet test' does not try to
+         launch this assembly as a testhost (it has no Microsoft.NET.Test.Sdk/vstest
+         runner and would fail to load). -->
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.11" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+</Project>

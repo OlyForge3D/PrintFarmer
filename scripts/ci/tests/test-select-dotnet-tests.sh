@@ -1256,6 +1256,19 @@ case_tests_modules_full_safe() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
 }
 
+case_tests_shared_full_safe() {
+  # src/tests/Farm.Testing.Shared/** (issue #2032) is the shared
+  # HostFixture base + fixture library referenced by Farm.Web.Api.Tests,
+  # Farm.Slicer.Module.Tests and Farm.Web.IntegrationTests -- foundational
+  # like Farm.Modules.Abstractions, so treated as full-safe.
+  local out="$1"
+  CHANGED_FILES="src/tests/Farm.Testing.Shared/HostFixture.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+}
+
 case_mixed_react_and_dotnet() {
   local out="$1"
   CHANGED_FILES=$'src/Web/ReactApp/src/App.tsx\nsrc/api/Foo.cs'
@@ -2661,6 +2674,7 @@ TESTS=(
   case_settings_full_safe
   case_modules_full_safe
   case_tests_modules_full_safe
+  case_tests_shared_full_safe
   case_mixed_react_and_dotnet
   case_selector_uses_bash32_compatible_dedup
   case_selector_dedup_safe_for_empty_arrays

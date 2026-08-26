@@ -3,12 +3,12 @@ using System.Data.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
-namespace Farm.Web.Api.Tests.TestInfrastructure;
+namespace Farm.Testing.Shared;
 
 // Minimal interceptor used in tests to ensure SQLite PRAGMA settings (foreign_keys)
 // This implementation is defensive and best-effort so tests don't fail when run
 // in environments without full SQLite support.
-internal sealed class TestSqlitePragmaEnforcer : DbCommandInterceptor
+public sealed class TestSqlitePragmaEnforcer : DbCommandInterceptor
 {
     public TestSqlitePragmaEnforcer()
     {

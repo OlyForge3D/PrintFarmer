@@ -357,7 +357,7 @@ public sealed class MaintenanceHubAuthorizationIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>    /// Wraps every outgoing SignalR HTTP request (negotiate + long-polling send/receive) with the
-    /// header shape <see cref="TestInfrastructure.TestAuthHandler"/> expects, so each real HTTP
+    /// header shape <see cref="TestAuthHandler"/> expects, so each real HTTP
     /// round-trip authenticates as the given user/roles - mirroring how a real browser would carry
     /// its auth on every request, without needing a real JWT/cookie for this scenario.
     /// </summary>
