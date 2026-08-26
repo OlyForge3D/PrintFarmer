@@ -4,6 +4,12 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Matches Farm.Web.Api.csproj's suppression for the moved controllers: S6960
+         ("controller has multiple responsibilities") fires on MaintenanceComponentController,
+         MaintenancePlanController, and MaintenanceTasksController, which were already
+         suppressing it in their prior host location. This is a move-only refactor, so no
+         new warning should surface as a result of relocating unmodified code. -->
+    <NoWarn>$(NoWarn);S6960</NoWarn>
     <Description>Vertical-slice module for printer maintenance: the V3 maintenance-deployment
 alert engine, resolution notifier, print-stats sync hosted service, the MaintenanceHub
 SignalR hub (the first hub to move out of the host), and the maintenance
