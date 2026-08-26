@@ -61,6 +61,7 @@ public sealed class AuthorizeRolesGateArchitectureTests
     [
         typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
         typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly,
+        typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
     ];
 
     [Fact]
@@ -138,7 +139,13 @@ public sealed class AuthorizeRolesGateArchitectureTests
 
         foreach (Assembly assembly in ScannedAssemblies)
         {
-            AuthorizationOptions options = assembly == typeof(Farm.Web.Api.Controllers.PrintersController).Assembly
+            // Calibration controllers physically live in Farm.Modules.Calibration but are hosted
+            // in-process by the main API (Farm.Web.Api), so they must be evaluated against the
+            // main API's real AuthorizationOptions, not the slicer host's.
+            bool isMainApiAssembly =
+                assembly == typeof(Farm.Web.Api.Controllers.PrintersController).Assembly ||
+                assembly == typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly;
+            AuthorizationOptions options = isMainApiAssembly
                 ? mainApiOptions
                 : slicerHostOptions;
 
