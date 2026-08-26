@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Vertical-slice module for the print job queue: PrintJobManagementService
+(moved as-is, no internal decomposition), job queue/analytics/scheduling controllers,
+dispatch/auto-dispatch/retry controllers, the slice-to-print bridge controller, and their
+retry/SignalR/queue DTOs. Registers via IApiModule (see Farm.Modules.Abstractions,
+issue #2035). Phase 12 of the module-decomposition epic #2019 -- namespaces are
+intentionally unchanged from their prior Farm.Web.Api location (move-first-rename-last).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Required for IServiceCollection/IMvcBuilder/IEndpointRouteBuilder/ControllerBase/HttpClient -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
+    <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
