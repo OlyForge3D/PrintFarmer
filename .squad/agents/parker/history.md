@@ -193,3 +193,10 @@ Status: Backlog item cleared. Beta trigger gated on PR stack merge.
 - The branch-matching main-checkout session had no active session ID and was classified inactive. Its 20 Markdown records had no same-name canonical collisions, no exact duplicates, and no local secret-pattern flags; recovery remains coordinator-owned because all are unique.
 - Retained `/decisions/`; removed absent `/decisions.md`, `/agents/`, `/orchestration-log/`, and `/log/`; left out-of-scope `/memory/` unchanged. Canonical `.squad/decisions.md` and Parker history remain tracked, while canonical generated logs keep their separate explicit ignores.
 - Focused state-root tests passed 2/2. Bishop, Hicks, and Vasquez reached joint consensus APPROVE on exact SHA `429283d3870cd1553224a2f6e101547d657055b3`. PR #1204 targets `development` and closes #1135.
+
+## 2026-08-26: Phase 2 shared .NET build
+
+- Replaced duplicated per-leg .NET builds with one solution build and project-scoped `.tgz` artifacts; API test shards share the same `matrix.project` artifact while retaining unique `matrix.name` TRX/result artifacts.
+- Never transport `obj/`: NuGet assets embed absolute runner/package paths. Test consumers use assembly-mode `dotnet test <dll>`; EF migration/provider consumers perform a cheap local restore and use downloaded binaries with `--no-build`.
+- `Farm.Web.IntegrationTests` remains outside the solution and requires an explicit restore/build pass with `-p:RunIntegrationTests=true` after the solution build.
+- Cost choice: all seven test projects consume artifacts, including the 15 s ProfileParsing and 19 s Modules legs, because the user prioritized runner minutes and splitting local-build legs would duplicate matrix topology. Expected full-safe savings are about 1,640 runner-seconds, with roughly 60–90 seconds added wall time.

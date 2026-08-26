@@ -21,13 +21,15 @@ flowchart LR
   A[PR opened] --> B[select job]
   B -->|frontend inputs or full-safe| C[frontend job]
   B -->|dotnet inputs or full-safe| D[dotnet-build full sln]
-  D --> E[dotnet-test matrix]
-  D --> F[migration-drift]
+  D -->|project tarballs| E[dotnet-test matrix]
+  D -->|project tarballs| F[migration-drift]
+  D -->|API test + App migration tarballs| J[dotnet-test-providers]
   B --> G[ci-tools]
   B -->|dotnet inputs or full-safe| I[dependency-compliance]
   C --> H[summary]
   E --> H
   F --> H
+  J --> H
   G --> H
   I --> H
 ```
@@ -45,9 +47,10 @@ docs-only PR.
 | `ci-tools`              | always                                                       | Runs `bash -n` + selector + hook tests + `node --test` compliance/squad-tooling suites; no .NET restore. |
 | `dependency-compliance` | any .NET input changed OR full-safe (same as `want_dotnet_build`) | `dotnet restore` + `node scripts/compliance/validate-compliance.mjs` — dependency-license/provenance inventory. See #1395. |
 | `frontend`              | React inputs changed OR full-safe                            | `npm ci`, lint, build, `npm run test:coverage` in `src/Web/ReactApp/`. |
-| `dotnet-build`          | any .NET input changed OR full-safe                          | `dotnet restore && dotnet build` on the whole solution.               |
-| `migration-drift`       | App or Slicer schema-relevant inputs changed OR full-safe    | `has-pending-model-changes` per provider (App×Pg/SqlServer, Slicer×Pg/SqlServer). |
-| `dotnet-test`           | .NET test-relevant inputs changed OR full-safe               | **Matrix** — one leg per affected test project.                       |
+| `dotnet-build`          | any .NET input changed OR full-safe                          | Restores/builds once, explicitly builds IntegrationTests when selected, and uploads one compressed tarball per selected project. |
+| `migration-drift`       | App or Slicer schema-relevant inputs changed OR full-safe    | Restores runner-local project metadata, downloads its compiled project, then runs `has-pending-model-changes --no-build`. |
+| `dotnet-test`           | .NET test-relevant inputs changed OR full-safe               | **Matrix** — one leg per project/shard; downloads the archive keyed by `matrix.project`, then executes the test DLL directly. |
+| `dotnet-test-providers` | .NET test-relevant inputs changed OR full-safe               | Restores locally for EF metadata, downloads API-test and App-migration outputs, applies both providers, and executes the API test DLL. |
 | `summary`               | always (`if: always()`)                                      | Aggregates gates; hard-fails on required check regression.            |
 
 ### `dependency-compliance` gating (#1395)
@@ -137,16 +140,66 @@ The workflow intentionally has no `push.paths` filter. Every push to `main` or
 the changed-path set.
 
 `Farm.Web.IntegrationTests` is invoked as a project-scoped matrix leg, not via
-`farm-web.sln`. The selector emits `run_integration=true` for that leg and the
-workflow passes `-p:RunIntegrationTests=true` during restore, build, and test so
-the project compiles and executes its tests instead of disabling itself.
+`farm-web.sln`. The selector emits `run_integration=true` for that leg. When it
+is selected, `dotnet-build` restores and builds it explicitly with
+`-p:RunIntegrationTests=true` after the solution build. Its consumer then runs
+the compiled DLL in assembly mode, where project-evaluation properties no
+longer apply.
 
 Each matrix leg also carries a `filter` field. The default PR gate uses
 `Category!=DbHeavy&Category!=Docker`, and `dotnet-test` passes that value through
-to `dotnet test --filter` so the selector and workflow stay aligned without re-
-encoding the same category rule in one branch only. This keeps the ordinary PR
-path narrow while leaving provider-heavy `DbHeavy` / `Docker` runs to the
-separate out-of-band provider job and the fail-closed full-safe matrix.
+to assembly-mode `dotnet test <test.dll> --filter`, so the selector and workflow
+stay aligned without re-encoding the same category rule in one branch only.
+VSTest applies the same `=`, `!=`, `~`, `|`, and `&` filter grammar in assembly
+mode. This keeps the ordinary PR path narrow while leaving provider-heavy
+`DbHeavy` / `Docker` runs to the separate provider job and the fail-closed
+full-safe matrix.
+
+Projects with manifest `shards` expand into one leg per shard. Leg names use
+`<leg>-<shard>` (for example, `Farm.Web.Api.Tests-core`), which is readable in
+the checks UI and safe for the leg's TRX filename and artifact name. Every
+shard keeps the same project path and `run_integration` value. Its effective
+filter is:
+
+```text
+(<shard FullyQualifiedName filter>)&(<project defaultFilter>)
+```
+
+The parentheses are required because shard namespace clauses use `|`, while
+the category exclusions use `&`. Thus `Farm.Web.Api.Tests` runs as `core`,
+`infra`, and `services` in parallel without reintroducing provider-heavy tests.
+Projects whose `shards` list is empty retain their previous single matrix leg
+unchanged.
+
+### Shared build artifacts
+
+The workflow compiles the solution once in `dotnet-build`. It packages only
+each selected runnable project's `bin/Debug/net10.0` directory as a
+pre-compressed `.tgz`, then uploads that single file with
+`actions/upload-artifact@v7` and `archive: false`. Consumers use
+`actions/download-artifact@v8` and fetch only the project archives they need.
+Artifacts are keyed by `matrix.project`, not `matrix.name`: multiple matrix
+shards can execute the same assembly without rebuilding or publishing duplicate
+outputs.
+
+The workflow deliberately does **not** transport `obj/`. Generated
+`project.assets.json` and `*.nuget.g.props` files embed absolute workspace,
+package-cache, and source-root paths. Those paths commonly match between two
+GitHub-hosted Ubuntu runners, but they are not contractual, especially while
+the workflow selects a floating `10.0.x` SDK patch. Tests avoid project
+evaluation entirely by executing the compiled DLL. EF consumers still need
+project metadata, so each migration leg performs a measured 7–9 second local
+restore before running `dotnet ef --no-build`; the provider job similarly
+restores locally before consuming the API-test and App-migration binaries.
+
+Per-project archives are also an economic constraint, not just organization.
+A measured build produced about 4 GiB under all `bin/Debug` trees; even the 11
+relevant output directories were about 1.8 GiB raw. One 714 MiB compressed
+monolith downloaded by every consumer would transfer roughly 8.4 GiB per
+full-safe run. Project archives preserve dependency closures but prevent each
+leg from downloading unrelated test and migration outputs. Tar also turns
+hundreds of filesystem entries into one transfer object and preserves
+permissions without paying for a second artifact compression pass.
 
 ### Exclusions
 
@@ -250,16 +303,27 @@ manually on host-native checkouts.
 
 ## Timing (order-of-magnitude)
 
-Baselines are approximate and depend on runner load, warm caches, and PR size.
+Baselines depend on runner load, artifact-service throughput, and PR size.
+Run 32928133031 measured the duplicated restore/build work that this topology
+removes:
 
-| Scenario                                             | Before (single job)          | After (this workflow)          |
-| ---------------------------------------------------- | ---------------------------- | ------------------------------ |
-| React-only PR                                        | ~20-30 min (built everything) | ~2-3 min (frontend only)       |
-| Docs-only PR                                         | ~20-30 min                    | ~1-2 min (select + ci-tools + summary) |
-| Single-project .NET change (api or slicer only)      | ~20-30 min                    | ~8-12 min (build + 1 test leg) |
-| Two-project .NET change (both test projects)         | ~20-30 min                    | ~10-14 min (build + 2 test legs parallel) |
-| Shared config / selector / unknown-path change       | ~20-30 min                    | ~20-30 min (full-safe)         |
-| Push to `main` / `development`                       | ~20-30 min                    | ~20-30 min (full-safe)         |
+| Full-safe duplicated work | Measured before | Shared-build shape |
+| --- | ---: | ---: |
+| Seven ordinary test legs | 1,081 runner-seconds | One project archive download/extract per leg |
+| Four migration legs | 577 runner-seconds | 7–9 second local restore per leg plus one project archive |
+| Provider job | 242 runner-seconds | Local restore plus three project archives |
+| Total restore/build duplication | about 1,900 runner-seconds | One roughly 296-second solution build plus packaging and consumers |
+
+The pre-change experiment projected about **1,640 runner-seconds (27
+runner-minutes) saved per full-safe run even with a monolithic archive**.
+Per-project archives reduce transfer below that conservative model, although
+API sharding downloads the same API-project archive once per shard. This is a
+billing optimization: the central build becomes a fan-out barrier, so expect a
+roughly **60–90 second fan-out delay** before test execution. In exchange, API
+test sharding targets the measured 26-minute long tail at roughly **12 minutes
+wall-clock** by running its three partitions concurrently. Narrow .NET
+selections can see a smaller version of the shared-build tradeoff. React-only
+and docs-only runs are unchanged because `dotnet-build` remains selector-gated.
 
 The pre-push hook shifts ~15-90 s of `dotnet format` out of CI onto the
 committer's machine — cached after the first successful verification of any
@@ -278,8 +342,8 @@ given tree.
   `cd src && dotnet restore ./farm-web.sln && cd .. && node scripts/compliance/validate-compliance.mjs`.
   If it unexpectedly ran (or was skipped) for a given PR, check
   `want_dotnet_build` in the `select` job summary — it mirrors `dotnet-build`.
-- `dotnet-test` matrix leg failed → per-project `TestResults/*.trx` is uploaded
-  as `dotnet-test-results-<project>` artifact. Download and inspect. The
+- `dotnet-test` matrix leg failed → per-leg `TestResults/*.trx` is uploaded
+  as `dotnet-test-results-<leg>` artifact. Download and inspect. The
   workflow also asserts that the TRX reports non-zero executed tests, so an
   empty test run is a hard failure rather than a silent pass.
 - `migration-drift` failed → `dotnet ef migrations has-pending-model-changes`
@@ -315,9 +379,11 @@ given tree.
   `testProject`, `pathPrefixes`, `dependsOnProjects`, `defaultFilter`,
   `shards`, `requiresProviders`, `runIntegration`, `leg`) and (as needed)
   the classification map in `select-dotnet-tests.sh`, then add a matching
-  test case in the selector suite. Add it to `farm-web.sln` when
-  appropriate, but CI also supports required projects that intentionally
-  live outside the solution. Run
+  test case in the selector suite. Add the project's direct-upload step to
+  `dotnet-build`; consumers derive the matching archive name from
+  `matrix.project`. Add the project to `farm-web.sln` when appropriate, but
+  CI also supports required projects that intentionally live outside the
+  solution. Run
   `bash scripts/ci/tests/test-dotnet-test-manifest.sh` to confirm the
   manifest still registers every `*.Tests.csproj` on disk exactly once (and,
   for `Farm.Web.Api.Tests`, that its `shards` remain exhaustive, mutually
@@ -343,16 +409,16 @@ Per-entry fields:
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Matrix leg/test-project identifier, matched by literal string in `classify_path()`/`main()`. |
+| `name` | Test-project identifier used to select a manifest entry; emitted shard legs derive unique names from it. |
 | `productionProject` | The `.csproj` under `src/` whose changes this test project primarily covers. Documentation only. |
 | `testProject` | Path to the test `.csproj`, relative to `src/`. Consumed by the selector and the CI matrix. |
 | `pathPrefixes` | Repo paths whose changes should select this project. Documents the existing `classify_path()` bucket mapping; not re-interpreted at runtime — see the bucket table above for the authoritative mapping. |
 | `dependsOnProjects` | Additional production paths this test project's coverage depends on (declarative documentation, validated by eye, not enforced). |
 | `defaultFilter` | The `dotnet test --filter` expression used by the ordinary PR gate. |
-| `shards` | Optional `{name, namespacePrefixes, filter}` partitions of a large test project's namespaces, for a possible future parallel-shard matrix. Declared and validated (exhaustive, mutually exclusive, non-empty) but **not** wired into `ci.yml` execution today — adding shard-level matrix legs would multiply required checks, which is out of scope; `CI summary` continues to be the only aggregate required check. |
+| `shards` | Optional `{name, namespacePrefixes, filter}` partitions. Each shard becomes a unique matrix leg while retaining the same `matrix.project`, so all shards consume one compiled project artifact. |
 | `requiresProviders` | Non-empty only for projects with `DbHeavy`/`Docker`-tagged tests exercised by the separate `dotnet-test-providers` job (e.g. `["postgres", "sqlserver"]`). |
 | `runIntegration` | `true` only for `Farm.Web.IntegrationTests`; passed through as `-p:RunIntegrationTests=true`. |
-| `leg` | CI matrix leg the project's tests execute in. Several test projects (or shards of the same project) may share one `leg` without adding a new required check — this decouples test-assembly count from CI-leg count. |
+| `leg` | Base CI matrix-leg name. Shards add a unique suffix while `matrix.project` remains the stable build-artifact identity. `CI summary` remains the only aggregate required check. |
 
 `Farm.Moonraker.Emulator.Tests` and `Farm.Slicer.ProfileParsing.Tests` are
 registered in the manifest (see #2022) but have no dedicated bucket in
@@ -375,4 +441,3 @@ regression suite, run against mutated copies of the real manifest:
 ```bash
 bash scripts/ci/tests/test-dotnet-test-manifest-checks.sh
 ```
-
