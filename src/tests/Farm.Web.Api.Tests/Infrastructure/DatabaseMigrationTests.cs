@@ -57,10 +57,58 @@ public sealed class DatabaseMigrationTests
             "20260825110105_RemoveDeprecatedCalibrationPrinterColumns",
             "20260825141109_DropGeneratedProfileRevisionTables",
             "20260825150550_DeletePrinterConfigurationSnapshot",
-            "20260825185839_DropDeadCalibrationOrchestrationColumns");
+            "20260825185839_DropDeadCalibrationOrchestrationColumns",
+            "20260826051847_AddPrinterModelAliasNormalizedLookup");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CoreMigration_BackfillsNormalizedPrinterModelAliasLookupColumns()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.Database.GetService<IMigrator>();
+        await migrator.MigrateAsync("20260825185839_DropDeadCalibrationOrchestrationColumns");
+
+        Guid manufacturerId = Guid.NewGuid();
+        Guid printerModelId = Guid.NewGuid();
+        Guid aliasId = Guid.NewGuid();
+        context.Manufacturers.Add(new Manufacturer
+        {
+            Id = manufacturerId,
+            Name = "Prusa Research",
+        });
+        context.PrinterModels.Add(new PrinterModel
+        {
+            Id = printerModelId,
+            ManufacturerId = manufacturerId,
+            Name = "CORE One",
+        });
+        _ = await context.SaveChangesAsync();
+        _ = await context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+             INSERT INTO "PrinterModelAliases"
+                 ("Id", "PrinterModelId", "SlicerModelName", "SlicerType", "CreatedAt")
+             VALUES
+                 ({aliasId}, {printerModelId}, {"  Prusa Core One  "}, {"  OrcaSlicer  "}, {DateTime.UtcNow});
+             """);
+
+        await migrator.MigrateAsync();
+
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT "SlicerModelNameNormalized", "SlicerTypeNormalized"
+            FROM "PrinterModelAliases"
+            WHERE "Id" = $id;
+            """;
+        _ = command.Parameters.AddWithValue("$id", aliasId);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        (await reader.ReadAsync()).Should().BeTrue();
+        reader.GetString(0).Should().Be("PRUSA CORE ONE");
+        reader.GetString(1).Should().Be("ORCASLICER");
     }
 
     [Fact]
@@ -418,7 +466,8 @@ public sealed class DatabaseMigrationTests
             "20260825110105_RemoveDeprecatedCalibrationPrinterColumns",
             "20260825141109_DropGeneratedProfileRevisionTables",
             "20260825150550_DeletePrinterConfigurationSnapshot",
-            "20260825185839_DropDeadCalibrationOrchestrationColumns");
+            "20260825185839_DropDeadCalibrationOrchestrationColumns",
+            "20260826051847_AddPrinterModelAliasNormalizedLookup");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -949,6 +998,7 @@ public sealed class DatabaseMigrationTests
                 "20260825141045_DropGeneratedProfileRevisionTables",
                 "20260825150521_DeletePrinterConfigurationSnapshot",
                 "20260825185802_DropDeadCalibrationOrchestrationColumns",
+                "20260826051825_AddPrinterModelAliasNormalizedLookup",
             ]
             :
             [
@@ -971,6 +1021,7 @@ public sealed class DatabaseMigrationTests
                 "20260825141057_DropGeneratedProfileRevisionTables",
                 "20260825150540_DeletePrinterConfigurationSnapshot",
                 "20260825185812_DropDeadCalibrationOrchestrationColumns",
+                "20260826051836_AddPrinterModelAliasNormalizedLookup",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");

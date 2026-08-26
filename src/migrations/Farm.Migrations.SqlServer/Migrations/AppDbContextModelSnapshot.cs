@@ -6472,11 +6472,23 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<string>("SlicerModelNameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
                     b.Property<string>("SlicerType")
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<string>("SlicerTypeNormalized")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("SlicerModelNameNormalized", "SlicerTypeNormalized")
+                        .HasDatabaseName("IX_PrinterModelAliases_NormalizedLookup");
 
                     b.HasIndex("PrinterModelId", "SlicerModelName", "SlicerType")
                         .IsUnique()
