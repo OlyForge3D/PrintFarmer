@@ -65,7 +65,10 @@ public sealed class ProfileFamilyCloneLookupAcceptanceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            string cacheDatabasePath = Path.Join(root, "profile-cache.db");
+            using var pooledConnection = new SqliteConnection(
+                $"Data Source={cacheDatabasePath};Mode=ReadWriteCreate;Cache=Shared");
+            SqliteConnection.ClearPool(pooledConnection);
             if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);
