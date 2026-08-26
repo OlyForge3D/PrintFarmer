@@ -52,6 +52,7 @@ public sealed class QueueEnqueuePermissionArchitectureTests
         typeof(Farm.Web.Api.Controllers.PrintersController).Assembly, // Farm.Web.Api
         typeof(IJobQueueService).Assembly, // Farm.Infrastructure
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly, // Farm.Modules.Calibration
+        typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
     };
 
     private static readonly Dictionary<short, OpCode> OpCodesByValue = BuildOpCodeMap();
@@ -67,6 +68,7 @@ public sealed class QueueEnqueuePermissionArchitectureTests
         [
             typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
             typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly, // Farm.Modules.Calibration
+            typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
         ];
         List<string> offenders = [];
         int actionsReachingTarget = 0;

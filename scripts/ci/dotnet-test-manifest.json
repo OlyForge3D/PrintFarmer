@@ -184,7 +184,9 @@
       "dependsOnProjects": [
         "src/modules/Farm.Modules.Identity/",
         "src/modules/Farm.Modules.Abstractions/",
-        "src/infra/"
+        "src/infra/",
+        "src/api/",
+        "src/tests/Farm.Web.Api.Tests/"
       ],
       "defaultFilter": "Category!=DbHeavy&Category!=Docker",
       "shards": [],

@@ -832,8 +832,12 @@ main() {
   # tools alone → build only, no tests.
   local net_test_bucket_hit=0
   if (( has_api || has_infra )); then
-    # api / infra sit under both tests. Both are affected.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.Web.IntegrationTests")
+    # api / infra sit under both tests. Both are affected. Farm.Modules.Identity.Tests
+    # is also affected by an api change: since SecurityAuditControllerTests.cs (moved
+    # from Farm.Web.Api.Tests) depends on CustomWebApplicationFactory<Program>, which
+    # lives in Farm.Web.Api.Tests and boots Farm.Web.Api's Program, an api-only change
+    # can alter that test's runtime behavior without touching any identity-owned path.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.Web.IntegrationTests" "Farm.Modules.Identity.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_infra )); then
@@ -958,7 +962,10 @@ main() {
   # Test-project-only edits run just that test project, but still require the
   # central build whose compiled artifact the dotnet-test job downloads.
   if (( has_tests_api )); then
-    test_names+=("Farm.Web.Api.Tests")
+    # Farm.Modules.Identity.Tests references Farm.Web.Api.Tests directly (for
+    # CustomWebApplicationFactory<Program>, used by SecurityAuditControllerTests.cs),
+    # so a Farm.Web.Api.Tests-only edit must also re-run it.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Modules.Identity.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_tests_slicer )); then

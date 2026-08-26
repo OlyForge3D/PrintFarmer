@@ -81,6 +81,7 @@ public sealed class PermissionGrantPathTests
         typeof(Farm.Infrastructure.Services.SignalR.HarvestHub).Assembly,
         typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly,
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
+        typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
     ];
 
     [Fact]

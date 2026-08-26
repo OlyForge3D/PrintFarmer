@@ -376,6 +376,7 @@ case_api_change() {
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  assert_contains "matrix identity" "$matrix" "Farm.Modules.Identity.Tests" || return 1
   assert_api_shard_matrix "api change" "$matrix" "$TEST_MANIFEST" || return 1
   assert_contains "integration opt-in" "$matrix" '"run_integration":"true"' || return 1
   assert_not_contains "no orca for api-only" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
@@ -828,6 +829,7 @@ case_test_only_api() {
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_api_shard_matrix "API test-only change" "$matrix" "$TEST_MANIFEST" || return 1
   assert_not_contains "no slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  assert_contains "matrix identity" "$matrix" "Farm.Modules.Identity.Tests" || return 1
 }
 
 case_test_only_slicer() {
