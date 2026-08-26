@@ -25,6 +25,10 @@
 #   GITHUB_OUTPUT         path to the step outputs file (required). Failure to
 #                         write to it exits with rc=3 rather than silently
 #                         producing no outputs.
+#   TEST_MANIFEST_PATH    override path to the checked test-project manifest
+#                         (default: dotnet-test-manifest.json next to this
+#                         script). Used by test-select-dotnet-tests.sh and
+#                         test-dotnet-test-manifest.sh to point at fixtures.
 #
 # Outputs (GITHUB_OUTPUT):
 #   want_frontend, want_dotnet_build, want_dotnet_test, want_mig_drift
@@ -48,27 +52,88 @@
 
 set -uo pipefail
 
-SCRIPT_VERSION="1.3.0"
+SCRIPT_VERSION="1.4.0"
 
 # ---------------------------------------------------------------------------
-# Required CI test projects. The final two fields are the test-project
-# opt-in flag for integration-only build properties and the xUnit category
-# filter used by PR CI. Keeping the filter in the selector matrix makes the
-# default API gate explicit and reusable by both local commands and the
-# GitHub Actions matrix, rather than hardcoding it in one workflow leg only.
-# Farm.Web.IntegrationTests intentionally lives outside farm-web.sln and must
-# be invoked directly with RunIntegrationTests=true because its csproj disables
-# test discovery otherwise.
+# Required CI test projects, loaded from the checked manifest
+# scripts/ci/dotnet-test-manifest.json (issue #2031) rather than a hardcoded
+# array, so the set of registered test projects has exactly one source of
+# truth that scripts/ci/tests/test-dotnet-test-manifest.sh can validate for
+# completeness (every `*.Tests.csproj` on disk registered exactly once).
+#
+# Each loaded entry keeps the same 4-field `name|project|run_integration|filter`
+# shape the rest of this script already expects: the test-project opt-in flag
+# for integration-only build properties and the xUnit category filter used by
+# PR CI. Keeping the filter in the selector matrix makes the default API gate
+# explicit and reusable by both local commands and the GitHub Actions matrix,
+# rather than hardcoding it in one workflow leg only. Farm.Web.IntegrationTests
+# intentionally lives outside farm-web.sln and must be invoked directly with
+# RunIntegrationTests=true because its csproj disables test discovery
+# otherwise.
+#
+# The manifest's `pathPrefixes`/`dependsOnProjects`/`shards` fields are
+# declarative documentation validated by test-dotnet-test-manifest.sh; they are
+# NOT read here and have no effect on classify_path()/main() below, which
+# continue to encode the actual bucket→test-selection mapping (see docs/CI.md).
 # ---------------------------------------------------------------------------
 readonly DEFAULT_TEST_FILTER='Category!=DbHeavy&Category!=Docker'
-readonly ALL_TEST_PROJECTS=(
-  "Farm.Web.Api.Tests|tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj|false|$DEFAULT_TEST_FILTER"
-  "Farm.Slicer.Module.Tests|tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj|false|$DEFAULT_TEST_FILTER"
-  "Farm.OrcaSlicer.Worker.Tests|tests/Farm.OrcaSlicer.Worker.Tests/Farm.OrcaSlicer.Worker.Tests.csproj|false|$DEFAULT_TEST_FILTER"
-  "Farm.Moonraker.Emulator.Tests|tests/Farm.Moonraker.Emulator.Tests/Farm.Moonraker.Emulator.Tests.csproj|false|$DEFAULT_TEST_FILTER"
-  "Farm.Slicer.ProfileParsing.Tests|tests/Farm.Slicer.ProfileParsing.Tests/Farm.Slicer.ProfileParsing.Tests.csproj|false|$DEFAULT_TEST_FILTER"
-  "Farm.Web.IntegrationTests|tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj|true|$DEFAULT_TEST_FILTER"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly TEST_MANIFEST="${TEST_MANIFEST_PATH:-$SCRIPT_DIR/dotnet-test-manifest.json}"
+
+if [[ ! -r "$TEST_MANIFEST" ]]; then
+  printf 'select-dotnet-tests: manifest not readable at %s\n' "$TEST_MANIFEST" >&2
+  exit 3
+fi
+
+# Prefer python3 (what ci.yml's TRX-parsing steps already require on
+# ubuntu-latest runners); fall back to `python` for local dev shells. A plain
+# `command -v python3` is not sufficient: on Windows, `python3` can resolve to
+# a Microsoft Store execution-alias stub that exists on PATH but exits
+# non-zero with no real interpreter behind it, so each candidate is probed
+# with `--version` before being accepted.
+PYTHON_BIN=""
+for candidate in python3 python; do
+  candidate_path="$(command -v "$candidate" 2>/dev/null || true)"
+  if [[ -n "$candidate_path" ]] && "$candidate_path" --version >/dev/null 2>&1; then
+    PYTHON_BIN="$candidate_path"
+    break
+  fi
+done
+if [[ -z "$PYTHON_BIN" ]]; then
+  printf 'select-dotnet-tests: no working python3/python interpreter found to read manifest\n' >&2
+  exit 3
+fi
+
+ALL_TEST_PROJECTS=()
+while IFS= read -r manifest_line; do
+  # Strip a trailing CR: some local Windows Python interpreters translate
+  # stdout newlines to CRLF even when the script only ever prints "\n".
+  # `command -v python3` may legitimately return one of these on a dev
+  # machine, so tolerate CRLF here rather than assuming LF-only output.
+  manifest_line="${manifest_line%$'\r'}"
+  [[ -z "$manifest_line" ]] && continue
+  ALL_TEST_PROJECTS+=("$manifest_line")
+done < <("$PYTHON_BIN" - "$TEST_MANIFEST" <<'PYEOF'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    data = json.load(f)
+
+for entry in data["testProjects"]:
+    name = entry["name"]
+    project = entry["testProject"]
+    run_integration = "true" if entry.get("runIntegration") else "false"
+    test_filter = entry.get("defaultFilter") or ""
+    print(f"{name}|{project}|{run_integration}|{test_filter}")
+PYEOF
 )
+if [[ ${#ALL_TEST_PROJECTS[@]} -eq 0 ]]; then
+  printf 'select-dotnet-tests: manifest at %s produced zero test projects\n' "$TEST_MANIFEST" >&2
+  exit 3
+fi
+readonly ALL_TEST_PROJECTS
 
 # All migration context/provider pairs (matches the ci.yml legacy drift block).
 readonly ALL_MIG_ENTRIES=(

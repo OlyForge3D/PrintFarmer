@@ -127,6 +127,7 @@ jobs:
           shellcheck -x -s bash -S warning \
             scripts/ci/select-dotnet-tests.sh \
             scripts/ci/tests/test-select-dotnet-tests.sh \
+            scripts/ci/tests/test-dotnet-test-manifest.sh \
             scripts/ci/select-ios-build.sh \
             scripts/ci/tests/test-select-ios-build.sh \
             scripts/ci/generate-codeql-slnf.sh \
@@ -141,6 +142,7 @@ jobs:
           for f in \
               scripts/ci/select-dotnet-tests.sh \
               scripts/ci/tests/test-select-dotnet-tests.sh \
+              scripts/ci/tests/test-dotnet-test-manifest.sh \
               scripts/ci/select-ios-build.sh \
               scripts/ci/tests/test-select-ios-build.sh \
               scripts/ci/generate-codeql-slnf.sh \
@@ -153,6 +155,9 @@ jobs:
 
       - name: Selector tests
         run: bash scripts/ci/tests/test-select-dotnet-tests.sh
+
+      - name: Dotnet test manifest completeness
+        run: bash scripts/ci/tests/test-dotnet-test-manifest.sh
 
       - name: iOS build selector tests
         run: bash scripts/ci/tests/test-select-ios-build.sh
