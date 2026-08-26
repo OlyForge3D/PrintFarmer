@@ -17,4 +17,25 @@ public sealed class EfPrinterProfileCheckRepository(AppDbContext dbContext) : IP
     /// <inheritdoc />
     public Task<List<Printer>> GetAllAsync(CancellationToken ct) =>
         _dbContext.Printers.AsNoTracking().ToListAsync(ct);
+
+    /// <inheritdoc />
+    public async Task<Printer?> FindByTemplateMachineProfileIdsAsync(
+        IReadOnlyCollection<Guid> machineProfileIds,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(machineProfileIds);
+        if (machineProfileIds.Count == 0)
+        {
+            return null;
+        }
+
+        HashSet<Guid> ids = [.. machineProfileIds];
+        return await _dbContext.Printers
+            .AsNoTracking()
+            .Where(printer =>
+                printer.TemplateMachineProfileId != null
+                && ids.Contains(printer.TemplateMachineProfileId.Value))
+            .OrderBy(printer => printer.Name)
+            .FirstOrDefaultAsync(ct);
+    }
 }

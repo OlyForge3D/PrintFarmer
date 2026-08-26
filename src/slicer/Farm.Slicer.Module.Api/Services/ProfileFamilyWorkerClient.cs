@@ -100,6 +100,39 @@ public sealed class ProfileFamilyWorkerClient(
         }
     }
 
+    /// <inheritdoc />
+    public async Task DeleteBundleAsync(
+        string? orcaVersion,
+        Guid familyId,
+        CancellationToken ct)
+    {
+        ProfileFamilyWorkerTarget target = await SelectWorkerAsync(orcaVersion, ct);
+        string bundleName = $"PrintFarmer-{familyId:N}";
+        string requestUri =
+            $"{target.BaseUrl.TrimEnd('/')}/api/profiles/custom-bundles/{bundleName}";
+        using HttpRequestMessage request = CreateAuthenticatedRequest(
+            HttpMethod.Delete,
+            requestUri,
+            content: null);
+        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+
+        // Idempotent by contract: the worker returns 404 when the bundle is already gone, which is
+        // an acceptable terminal state for a delete. Any other non-success status is a genuine
+        // failure and must abort the caller before it removes authoritative DB rows.
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                $"OrcaSlicer worker bundle delete failed with HTTP {(int)response.StatusCode}.",
+                null,
+                response.StatusCode);
+        }
+    }
+
     private static ProfileFamilySourceException CreateSourcePresetException(
         string requestedBundleName,
         string responseBody)
@@ -194,7 +227,7 @@ public sealed class ProfileFamilyWorkerClient(
     private HttpRequestMessage CreateAuthenticatedRequest(
         HttpMethod method,
         string requestUri,
-        HttpContent content)
+        HttpContent? content)
     {
         string sharedKey = WorkerAuthConfiguration.ResolveSharedKey(_configuration)?.Value
             ?? throw new InvalidOperationException(

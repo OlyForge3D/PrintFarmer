@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure.Services.Gcode;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Gcode;
+using Farm.Slicer.Module.Api.Repositories;
 using Farm.Slicer.Module.Api.Services;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
@@ -82,6 +84,7 @@ public sealed class ProfileFamilyServiceTests
             aliasService.Object,
             renderer.Object,
             workerClient.Object,
+            PrinterRefs().Object,
             NullLogger<ProfileFamilyService>.Instance);
 
         CloneProfileFamilyResponseDto response =
@@ -134,6 +137,7 @@ public sealed class ProfileFamilyServiceTests
             new Mock<IPrinterModelAliasService>(MockBehavior.Strict).Object,
             new Mock<IProfileFamilyRenderer>(MockBehavior.Strict).Object,
             workerClient.Object,
+            PrinterRefs().Object,
             NullLogger<ProfileFamilyService>.Instance);
 
         Func<Task> act = () =>
@@ -433,6 +437,375 @@ public sealed class ProfileFamilyServiceTests
             Times.Once);
     }
 
+    [Fact]
+    public async Task ListFamiliesAsync_ReturnsOnlyCustomOrcaFamilies_ExcludingSystemAndOtherSlicers()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        _ = SeedHealthyFamily(dbContext, modelId, name: "Custom Family");
+        dbContext.MachineModelProfiles.Add(new MachineModelProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Stock Model",
+            Manufacturer = "Prusa",
+            SlicerType = SlicerType.OrcaSlicer,
+            Hash = new string('C', 64),
+            IsSystem = true,
+            RenderStatus = ProfileFamilyRenderStatus.NotApplicable,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        dbContext.MachineModelProfiles.Add(new MachineModelProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Prusa Family",
+            Manufacturer = "Custom",
+            SlicerType = SlicerType.PrusaSlicer,
+            Hash = new string('D', 64),
+            IsSystem = false,
+            RenderStatus = ProfileFamilyRenderStatus.Healthy,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        _ = await dbContext.SaveChangesAsync();
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), Aliases(modelId), Renderer(), Worker());
+
+        IReadOnlyList<ProfileFamilySummaryDto> families =
+            await service.ListFamiliesAsync(null, CancellationToken.None);
+
+        _ = families.Should().ContainSingle();
+        ProfileFamilySummaryDto only = families[0];
+        only.FamilyName.Should().Be("Custom Family");
+        only.TargetPrinterModelId.Should().Be(modelId);
+        only.SourceMachineModelName.Should().Be("Prusa Test");
+        only.SourceManufacturer.Should().BeNull("manufacturer is not persisted and is not recoverable");
+        only.ProcessProfileCount.Should().BeNull("derived counts are not persisted post-render");
+        only.FilamentProfileCount.Should().BeNull();
+        _ = only.Variants.Should().ContainSingle();
+        only.Variants[0].NozzleDiameter.Should().Be(0.4);
+        only.Variants[0].SourceSystemPresetName.Should().Be("Prusa Test 0.4 nozzle");
+    }
+
+    [Fact]
+    public async Task ListFamiliesAsync_FiltersByRenderStatus()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        _ = SeedHealthyFamily(dbContext, modelId, name: "Healthy One");
+        _ = SeedHealthyFamily(
+            dbContext,
+            Guid.NewGuid(),
+            name: "Failed One",
+            status: ProfileFamilyRenderStatus.Failed);
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), Aliases(modelId), Renderer(), Worker());
+
+        IReadOnlyList<ProfileFamilySummaryDto> failed =
+            await service.ListFamiliesAsync(ProfileFamilyRenderStatus.Failed, CancellationToken.None);
+
+        _ = failed.Should().ContainSingle();
+        failed[0].FamilyName.Should().Be("Failed One");
+        failed[0].RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed);
+    }
+
+    [Fact]
+    public async Task GetFamilyAsync_UnknownId_ThrowsNotFound()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), Aliases(modelId), Renderer(), Worker());
+
+        Func<Task> act = () => service.GetFamilyAsync(Guid.NewGuid(), CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ProfileFamilyNotFoundException>();
+    }
+
+    [Fact]
+    public async Task GetFamilyAsync_SystemRow_ThrowsNotFound()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        Guid stockId = Guid.NewGuid();
+        dbContext.MachineModelProfiles.Add(new MachineModelProfile
+        {
+            Id = stockId,
+            Name = "Stock Model",
+            Manufacturer = "Prusa",
+            SlicerType = SlicerType.OrcaSlicer,
+            Hash = new string('C', 64),
+            IsSystem = true,
+            RenderStatus = ProfileFamilyRenderStatus.NotApplicable,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        _ = await dbContext.SaveChangesAsync();
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), Aliases(modelId), Renderer(), Worker());
+
+        Func<Task> act = () => service.GetFamilyAsync(stockId, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ProfileFamilyNotFoundException>();
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_RemovesFamilyVariantsBundleAndAlias()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        Mock<ICatalogServiceAdapter> catalog = Catalog(modelId);
+        Mock<IPrinterModelAliasService> aliases = DeleteAliases(modelId);
+        Mock<IProfileFamilyWorkerClient> worker = DeleteWorker();
+        ProfileFamilyService service = CreateService(
+            dbContext, catalog, aliases, Renderer(), worker);
+
+        await service.DeleteFamilyAsync(familyId, CancellationToken.None);
+
+        (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(0);
+        (await dbContext.MachineProfiles.CountAsync()).Should().Be(0);
+        worker.Verify(
+            client => client.DeleteBundleAsync("2.4.2", familyId, It.IsAny<CancellationToken>()),
+            Times.Once);
+        aliases.Verify(
+            service => service.RemoveModelAliasAsync(
+                modelId, "Farm Test", "OrcaSlicer", It.IsAny<CancellationToken>()),
+            Times.Once);
+        catalog.Verify(
+            service => service.InvalidateModelAliasesAsync(modelId, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_UnknownId_ThrowsNotFound_WithoutWorkerCall()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        Mock<IProfileFamilyWorkerClient> worker = DeleteWorker();
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), DeleteAliases(modelId), Renderer(), worker);
+
+        Func<Task> act = () => service.DeleteFamilyAsync(Guid.NewGuid(), CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ProfileFamilyNotFoundException>();
+        worker.Verify(
+            client => client.DeleteBundleAsync(
+                It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_NonTerminalSliceJob_ThrowsInUse_BeforeWorkerCall()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, Guid variantId) = SeedHealthyFamily(dbContext, modelId);
+        Guid jobId = Guid.NewGuid();
+        dbContext.SliceJobs.Add(new SliceJob
+        {
+            Id = jobId,
+            UserId = Guid.NewGuid(),
+            MachineProfileId = variantId,
+            Status = SliceJobStatus.Queued,
+            CreatedAt = DateTime.UtcNow
+        });
+        _ = await dbContext.SaveChangesAsync();
+        Mock<IProfileFamilyWorkerClient> worker = DeleteWorker();
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), DeleteAliases(modelId), Renderer(), worker);
+
+        Func<Task> act = () => service.DeleteFamilyAsync(familyId, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ProfileFamilyInUseException>())
+            .Which.Message.Should().Contain(jobId.ToString());
+        (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(1);
+        worker.Verify(
+            client => client.DeleteBundleAsync(
+                It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_TerminalSliceJob_DoesNotBlockDeletion()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, Guid variantId) = SeedHealthyFamily(dbContext, modelId);
+        dbContext.SliceJobs.Add(new SliceJob
+        {
+            Id = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            MachineProfileId = variantId,
+            Status = SliceJobStatus.Completed,
+            CreatedAt = DateTime.UtcNow
+        });
+        _ = await dbContext.SaveChangesAsync();
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), DeleteAliases(modelId), Renderer(), DeleteWorker());
+
+        await service.DeleteFamilyAsync(familyId, CancellationToken.None);
+
+        (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_PrinterReference_ThrowsInUse_BeforeWorkerCall()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, Guid variantId) = SeedHealthyFamily(dbContext, modelId);
+        var blockingPrinter = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Bench Printer",
+            TemplateMachineProfileId = variantId
+        };
+        Mock<IProfileFamilyWorkerClient> worker = DeleteWorker();
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            Catalog(modelId),
+            DeleteAliases(modelId),
+            Renderer(),
+            worker,
+            PrinterRefs(blockingPrinter));
+
+        Func<Task> act = () => service.DeleteFamilyAsync(familyId, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ProfileFamilyInUseException>())
+            .Which.Message.Should().Contain("Bench Printer");
+        (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(1);
+        worker.Verify(
+            client => client.DeleteBundleAsync(
+                It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_WorkerDeleteFails_AbortsBeforeDbAndAliasMutation()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        Mock<ICatalogServiceAdapter> catalog = Catalog(modelId);
+        Mock<IPrinterModelAliasService> aliases = new(MockBehavior.Strict);
+        Mock<IProfileFamilyWorkerClient> worker =
+            DeleteWorker(new HttpRequestException("worker unavailable"));
+        ProfileFamilyService service = CreateService(
+            dbContext, catalog, aliases, Renderer(), worker);
+
+        Func<Task> act = () => service.DeleteFamilyAsync(familyId, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<HttpRequestException>();
+        (await dbContext.MachineModelProfiles.CountAsync())
+            .Should().Be(1, "the family must remain listed when the worker bundle delete fails");
+        (await dbContext.MachineProfiles.CountAsync()).Should().Be(1);
+        aliases.Verify(
+            service => service.RemoveModelAliasAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        catalog.Verify(
+            service => service.InvalidateModelAliasesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    private static (Guid FamilyId, Guid VariantId) SeedHealthyFamily(
+        SlicerDbContext dbContext,
+        Guid modelId,
+        string name = "Farm Test",
+        ProfileFamilyRenderStatus status = ProfileFamilyRenderStatus.Healthy)
+    {
+        Guid familyId = Guid.NewGuid();
+        Guid variantId = Guid.NewGuid();
+        dbContext.MachineModelProfiles.Add(new MachineModelProfile
+        {
+            Id = familyId,
+            Name = name,
+            Manufacturer = "Custom",
+            SlicerType = SlicerType.OrcaSlicer,
+            PrinterModelId = modelId,
+            Hash = familyId.ToString("N") + familyId.ToString("N"),
+            IsSystem = false,
+            RenderStatus = status,
+            SourceMachineModelName = "Prusa Test",
+            SlicerDistribution = "orca",
+            RenderedForOrcaVersion = "2.4.2",
+            LastRenderedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            MachineProfiles =
+            {
+                new MachineProfile
+                {
+                    Id = variantId,
+                    Name = $"{name} 0.4 nozzle",
+                    Manufacturer = "Custom",
+                    SlicerType = SlicerType.OrcaSlicer,
+                    MachineModelProfileId = familyId,
+                    Hash = variantId.ToString("N") + variantId.ToString("N"),
+                    SourceSystemPresetName = "Prusa Test 0.4 nozzle",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                }
+            }
+        });
+        _ = dbContext.SaveChanges();
+        return (familyId, variantId);
+    }
+
+    private static Mock<IPrinterModelAliasService> DeleteAliases(
+        Guid modelId,
+        string familyName = "Farm Test")
+    {
+        Mock<IPrinterModelAliasService> aliases = new(MockBehavior.Strict);
+        _ = aliases
+            .Setup(service => service.RemoveModelAliasAsync(
+                modelId, familyName, "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        return aliases;
+    }
+
+    private static Mock<IProfileFamilyWorkerClient> DeleteWorker(Exception? deleteFailure = null)
+    {
+        Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Strict);
+        if (deleteFailure is null)
+        {
+            _ = worker
+                .Setup(client => client.DeleteBundleAsync(
+                    It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+        }
+        else
+        {
+            _ = worker
+                .Setup(client => client.DeleteBundleAsync(
+                    It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(deleteFailure);
+        }
+
+        return worker;
+    }
+
     private static CloneProfileFamilyRequestDto Request(Guid modelId) =>
         new()
         {
@@ -564,7 +937,8 @@ public sealed class ProfileFamilyServiceTests
         Mock<ICatalogServiceAdapter> catalog,
         Mock<IPrinterModelAliasService> aliases,
         Mock<IProfileFamilyRenderer> renderer,
-        Mock<IProfileFamilyWorkerClient> worker)
+        Mock<IProfileFamilyWorkerClient> worker,
+        Mock<IPrinterProfileCheckRepository>? printerRefs = null)
     {
         return new ProfileFamilyService(
             dbContext,
@@ -572,7 +946,23 @@ public sealed class ProfileFamilyServiceTests
             aliases.Object,
             renderer.Object,
             worker.Object,
+            (printerRefs ?? PrinterRefs()).Object,
             NullLogger<ProfileFamilyService>.Instance);
+    }
+
+    /// <summary>
+    /// A printer-reference repository that reports no printer bound to any variant, i.e. deletion
+    /// is not blocked by a printer. Pass a configured mock to exercise the blocking path.
+    /// </summary>
+    private static Mock<IPrinterProfileCheckRepository> PrinterRefs(Printer? blockingPrinter = null)
+    {
+        Mock<IPrinterProfileCheckRepository> printerRefs = new();
+        _ = printerRefs
+            .Setup(repository => repository.FindByTemplateMachineProfileIdsAsync(
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(blockingPrinter);
+        return printerRefs;
     }
 
     private static IEnumerable<Guid> WorkerBundleFamilyIds(

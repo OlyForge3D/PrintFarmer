@@ -41,3 +41,48 @@ public sealed class ProfileFamilySourceException : Exception
     {
     }
 }
+
+/// <summary>Indicates that a requested custom profile family does not exist.</summary>
+public sealed class ProfileFamilyNotFoundException : Exception
+{
+    /// <summary>Creates an empty not-found exception.</summary>
+    public ProfileFamilyNotFoundException()
+    {
+    }
+
+    /// <summary>Creates a not-found exception with a descriptive message.</summary>
+    public ProfileFamilyNotFoundException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Creates a not-found exception with an underlying error.</summary>
+    public ProfileFamilyNotFoundException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
+/// <summary>
+/// Indicates that a family cannot be deleted because a live reference still holds it
+/// (a registered printer's template profile, or a non-terminal slice job).
+/// </summary>
+public sealed class ProfileFamilyInUseException : Exception
+{
+    /// <summary>Creates an empty in-use exception.</summary>
+    public ProfileFamilyInUseException()
+    {
+    }
+
+    /// <summary>Creates an in-use exception with a descriptive message naming the holder.</summary>
+    public ProfileFamilyInUseException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Creates an in-use exception with an underlying error.</summary>
+    public ProfileFamilyInUseException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}

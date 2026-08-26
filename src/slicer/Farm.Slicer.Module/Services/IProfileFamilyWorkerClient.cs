@@ -18,4 +18,19 @@ public interface IProfileFamilyWorkerClient
         ProfileFamilyWorkerTarget target,
         ProfileFamilyBundleDto bundle,
         CancellationToken ct);
+
+    /// <summary>
+    /// Removes the derived Custom bundle for one family from the worker and triggers its in-process
+    /// profile reload. Idempotent: a worker <c>404</c> (bundle already absent) is treated as success.
+    /// Selects a fresh online worker (optionally pinned to <paramref name="orcaVersion"/>) exactly as
+    /// catalog reads and bundle writes do. Throws <see cref="HttpRequestException"/> when no worker can
+    /// be selected or reached, or when the worker returns any other non-success status.
+    /// </summary>
+    /// <param name="orcaVersion">Version hint to pin worker selection, or <see langword="null"/> for any.</param>
+    /// <param name="familyId">Family whose bundle (<c>PrintFarmer-{familyId:N}</c>) is removed.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task DeleteBundleAsync(
+        string? orcaVersion,
+        Guid familyId,
+        CancellationToken ct);
 }

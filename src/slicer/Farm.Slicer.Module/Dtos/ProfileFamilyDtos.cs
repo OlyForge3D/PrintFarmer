@@ -57,6 +57,65 @@ public sealed record CloneProfileFamilyResponseDto(
     int FilamentProfileCount);
 
 /// <summary>
+/// One variant row of a persisted profile family, as surfaced by list/get.
+/// </summary>
+/// <param name="MachineProfileId">Identity of the derived <c>MachineProfile</c> variant row.</param>
+/// <param name="Name">Variant display name, e.g. <c>"Sovol SV08 0.4 nozzle"</c>.</param>
+/// <param name="NozzleDiameter">
+/// Nozzle diameter in millimetres. This is not a persisted column; it is recovered from the
+/// variant name suffix (see <c>ProfileFamilyRenderer.BuildMachineName</c>). <see langword="null"/>
+/// when it cannot be parsed — never a fabricated <c>0</c>.
+/// </param>
+/// <param name="SourceSystemPresetName">The pinned upstream preset the variant was cloned from.</param>
+public sealed record ProfileFamilyVariantSummaryDto(
+    Guid MachineProfileId,
+    string Name,
+    double? NozzleDiameter,
+    string? SourceSystemPresetName);
+
+/// <summary>
+/// Read model describing one persisted custom OrcaSlicer profile family, returned by the
+/// list and get-by-id endpoints. All wire members are camelCase and enums serialize as strings.
+/// </summary>
+/// <param name="FamilyId">Family (machine model profile) identity.</param>
+/// <param name="FamilyName">Family display name.</param>
+/// <param name="TargetPrinterModelId">Soft reference to the bound catalog printer model.</param>
+/// <param name="RenderStatus">Health of the derived worker bundle.</param>
+/// <param name="LastRenderedAt">Most recent successful render timestamp, if any.</param>
+/// <param name="RenderedForOrcaVersion">OrcaSlicer version the current bundle was rendered for.</param>
+/// <param name="SourceManufacturer">
+/// Deliberately <see langword="null"/>: the source manufacturer is not persisted (the family's
+/// <c>Manufacturer</c> column is the literal <c>"Custom"</c>) and cannot be recovered without a
+/// schema column, which is out of scope for this slice (no migration). Use
+/// <paramref name="SourceMachineModelName"/> instead.
+/// </param>
+/// <param name="SourceMachineModelName">Exact upstream machine-model name the family was cloned from.</param>
+/// <param name="SlicerDistribution">Distribution owning the pinned source preset (normally OrcaSlicer).</param>
+/// <param name="Variants">The derived nozzle variants.</param>
+/// <param name="ProcessProfileCount">
+/// Deliberately <see langword="null"/>: derived process-profile counts are produced only by the
+/// renderer at create time and live solely inside the worker bundle — they are not persisted.
+/// Reporting them here would force a worker round-trip on a read endpoint that must degrade, so a
+/// nullable value communicates "not tracked post-render" rather than a fabricated <c>0</c>.
+/// </param>
+/// <param name="FilamentProfileCount">
+/// Deliberately <see langword="null"/> for the same reason as <paramref name="ProcessProfileCount"/>.
+/// </param>
+public sealed record ProfileFamilySummaryDto(
+    Guid FamilyId,
+    string FamilyName,
+    Guid? TargetPrinterModelId,
+    ProfileFamilyRenderStatus RenderStatus,
+    DateTime? LastRenderedAt,
+    string? RenderedForOrcaVersion,
+    string? SourceManufacturer,
+    string? SourceMachineModelName,
+    string? SlicerDistribution,
+    IReadOnlyList<ProfileFamilyVariantSummaryDto> Variants,
+    int? ProcessProfileCount,
+    int? FilamentProfileCount);
+
+/// <summary>
 /// One generated OrcaSlicer JSON file, relative to the worker's Custom directory.
 /// </summary>
 public sealed record RenderedProfileFileDto(string RelativePath, string Content);

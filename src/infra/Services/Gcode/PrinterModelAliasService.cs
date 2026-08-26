@@ -34,6 +34,21 @@ public interface IPrinterModelAliasService
         string slicerModelName,
         string slicerType,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Removes the exact slicer alias mapping the given model name (for the given slicer engine)
+    /// to the specified catalog model. Idempotent: removing an absent alias is a no-op. Aliases
+    /// mapped to a different catalog model, or generic (slicer-agnostic) aliases, are left untouched.
+    /// </summary>
+    /// <param name="printerModelId">Catalog printer model the alias must currently map to.</param>
+    /// <param name="slicerModelName">Exact slicer-native model name.</param>
+    /// <param name="slicerType">Slicer engine owning the alias.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task RemoveModelAliasAsync(
+        Guid printerModelId,
+        string slicerModelName,
+        string slicerType,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -117,6 +132,38 @@ public class PrinterModelAliasService(AppDbContext dbContext) : IPrinterModelAli
             SlicerType = slicerType.Trim(),
             CreatedAt = DateTime.UtcNow
         });
+        _ = await _dbContext.SaveChangesAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public async Task RemoveModelAliasAsync(
+        Guid printerModelId,
+        string slicerModelName,
+        string slicerType,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(slicerModelName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(slicerType);
+
+        string normalizedModelName = PrinterModelAlias.NormalizeLookupValue(slicerModelName);
+        string normalizedSlicerType = PrinterModelAlias.NormalizeLookupValue(slicerType);
+
+        // Tracked query (not AsNoTracking) so the matches can be removed. Only exact
+        // slicer-type aliases for this catalog model are eligible; generic aliases and aliases
+        // pointing elsewhere are intentionally preserved.
+        List<PrinterModelAlias> matches = await _dbContext.PrinterModelAliases
+            .Where(alias =>
+                alias.PrinterModelId == printerModelId
+                && alias.SlicerModelNameNormalized == normalizedModelName
+                && alias.SlicerTypeNormalized == normalizedSlicerType)
+            .ToListAsync(ct);
+
+        if (matches.Count == 0)
+        {
+            return;
+        }
+
+        _dbContext.PrinterModelAliases.RemoveRange(matches);
         _ = await _dbContext.SaveChangesAsync(ct);
     }
 

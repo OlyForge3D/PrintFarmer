@@ -209,6 +209,99 @@ public sealed class ProfileFamilyEndToEndHttpTests : IAsyncDisposable
             "machine so slice submission can select it without a manual reassignment.");
     }
 
+    /// <summary>
+    /// End-to-end proof for issue #2079: after cloning a family, DELETE
+    /// <c>/api/slicer/profiles/families/{familyId}</c> MUST remove the rendered
+    /// worker bundle and the OrcaSlicer model alias over real HTTP, so an
+    /// immediate <c>GET machine/for-model/{modelId}</c> once again reports
+    /// <c>no_profiles_for_model</c> — with no worker restart, reload, or
+    /// reconciliation tick. This mirrors the #2073/#2077 assertion style in
+    /// reverse: the clone makes the model resolve; the delete makes it stop.
+    /// </summary>
+    [Fact]
+    public async Task DeleteFamily_RemovesWorkerBundleAndAlias_ForModelLookupNoLongerResolves()
+    {
+        string stockRoot = Path.Join(_testRoot, "stock");
+        string overlayRoot = Path.Join(_testRoot, "overlay");
+        string customRoot = Path.Join(_testRoot, "custom");
+        string dbPath = Path.Join(_testRoot, "profile-cache.db");
+        Directory.CreateDirectory(stockRoot);
+        Directory.CreateDirectory(overlayRoot);
+        Directory.CreateDirectory(customRoot);
+        WriteStockProfiles(stockRoot);
+        WriteStockProfiles(overlayRoot);
+
+        HttpMessageHandler workerHandler = await StartWorkerAsync(
+            stockRoot,
+            overlayRoot,
+            customRoot,
+            dbPath);
+        var recorder = new List<string>();
+        var recordingHandler = new RecordingDelegatingHandler(workerHandler, recorder);
+
+        _factory = new E2EFactory(recordingHandler);
+        await _factory.ResetDatabaseAsync();
+
+        Guid targetModelId = Guid.NewGuid();
+        await SeedTargetModelAndWorkerAsync(_factory, targetModelId);
+
+        using HttpClient client = await _factory.CreateAdminClientAsync(
+            "profile-family-e2e-delete-admin",
+            "profile-family-e2e-delete@example.com");
+
+        var request = new CloneProfileFamilyRequestDto
+        {
+            FamilyName = FamilyName,
+            TargetPrinterModelId = targetModelId,
+            SourceManufacturer = SourceManufacturer,
+            SourceMachineModelName = SourceModel,
+            NozzleDiameters = [0.4]
+        };
+        using HttpResponseMessage clone = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/clone-family",
+            request);
+        string cloneBody = await clone.Content.ReadAsStringAsync();
+        clone.StatusCode.Should().Be(
+            HttpStatusCode.Created,
+            $"the clone must succeed before delete can be exercised. Body: {cloneBody}");
+        CloneProfileFamilyResponseDto? cloneResult =
+            await clone.Content.ReadFromJsonAsync<CloneProfileFamilyResponseDto>();
+        cloneResult.Should().NotBeNull();
+
+        using HttpResponseMessage afterClone = await client.GetAsync(
+            $"/api/slicer/profiles/machine/for-model/{targetModelId}");
+        afterClone.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "sanity check: the clone must make the model resolve before the delete " +
+            "is meaningful.");
+
+        using HttpResponseMessage delete = await client.DeleteAsync(
+            $"/api/slicer/profiles/families/{cloneResult!.FamilyId}");
+        delete.StatusCode.Should().Be(
+            HttpStatusCode.NoContent,
+            "DELETE families/{id} must remove the worker bundle over real HTTP and " +
+            "the OrcaSlicer alias, returning 204. Recorded worker requests:\n  " +
+            string.Join("\n  ", recorder));
+
+        using HttpResponseMessage afterDelete = await client.GetAsync(
+            $"/api/slicer/profiles/machine/for-model/{targetModelId}");
+        afterDelete.StatusCode.Should().Be(
+            HttpStatusCode.NotFound,
+            "immediately after delete, GET machine/for-model MUST report " +
+            "'no_profiles_for_model' again — proving the worker bundle was removed " +
+            "and the alias invalidated over real HTTP without any worker restart.");
+        using JsonDocument afterDeleteBody = JsonDocument.Parse(
+            await afterDelete.Content.ReadAsStringAsync());
+        afterDeleteBody.RootElement.GetProperty("code").GetString()
+            .Should().Be("no_profiles_for_model");
+
+        recorder.Should().Contain(
+            entry => entry.Contains("DELETE", StringComparison.Ordinal) &&
+                     entry.Contains("custom-bundles", StringComparison.Ordinal),
+            "the API must have issued a real HTTP DELETE to the worker's " +
+            "custom-bundles endpoint.");
+    }
+
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {

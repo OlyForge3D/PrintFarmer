@@ -17,4 +17,16 @@ public interface IPrinterProfileCheckRepository
     /// which models are missing imported slicer profiles.
     /// </summary>
     Task<List<Printer>> GetAllAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Returns the first registered printer whose <see cref="Printer.TemplateMachineProfileId"/>
+    /// references any of the supplied machine-profile identities, or <see langword="null"/> when
+    /// none do. Used by profile-family deletion to refuse removing a family whose derived variant
+    /// is still bound as a printer's template profile.
+    /// </summary>
+    /// <param name="machineProfileIds">Candidate machine-profile identities to match against.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<Printer?> FindByTemplateMachineProfileIdsAsync(
+        IReadOnlyCollection<Guid> machineProfileIds,
+        CancellationToken ct);
 }

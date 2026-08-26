@@ -319,6 +319,18 @@ public sealed class ProfileFamilyCloneLookupAcceptanceTests
                     $"Worker rejected {reload.Failures.Count} rendered profile(s).");
             }
         }
+
+        public async Task DeleteBundleAsync(
+            string? orcaVersion,
+            Guid familyId,
+            CancellationToken ct)
+        {
+            // Mirrors the real worker's DELETE contract: removing an absent bundle is idempotent,
+            // and the in-process reload makes the removal visible to subsequent lookups without a
+            // worker restart — the exact property the delete lifecycle test asserts.
+            _ = await bundleStore.RemoveAsync($"PrintFarmer-{familyId:N}", ct);
+            _ = await profilesService.ReloadProfilesAsync(ct);
+        }
     }
 
     private sealed class WorkerLookupHandler(
