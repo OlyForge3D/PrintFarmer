@@ -17,6 +17,7 @@ public class MachineModelProfileConfiguration : IEntityTypeConfiguration<Machine
 
         // Properties
         _ = builder.Property(m => m.Name).IsRequired().HasMaxLength(256);
+        _ = builder.Property(m => m.NameNormalized).IsRequired().HasMaxLength(256);
         _ = builder.Property(m => m.Manufacturer).IsRequired().HasMaxLength(128);
         _ = builder.Property(m => m.Description).HasMaxLength(1024);
         _ = builder.Property(m => m.SlicerType).HasConversion<int>();
@@ -40,7 +41,9 @@ public class MachineModelProfileConfiguration : IEntityTypeConfiguration<Machine
         _ = builder.HasIndex(m => m.CreatedByUserId);
 
         // Indexes
-        _ = builder.HasIndex(m => new { m.Name, m.SlicerType }).IsUnique();
+        _ = builder.HasIndex(m => new { m.NameNormalized, m.SlicerType })
+            .IsUnique()
+            .HasDatabaseName("IX_MachineModelProfiles_Name_SlicerType");
         _ = builder.HasIndex(m => m.Manufacturer);
         _ = builder.HasIndex(m => m.Hash).IsUnique();
         _ = builder.HasIndex(m => m.IsSystem);

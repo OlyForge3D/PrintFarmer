@@ -146,6 +146,140 @@ public sealed class ProfileFamilyServiceTests
     }
 
     [Fact]
+    public async Task CloneFamilyAsync_TwoContextsRaceWithCaseVariantNames_DatabaseEnforcesConflict()
+    {
+        string databaseName = $"ProfileFamilyConcurrency{Guid.NewGuid():N}";
+        string connectionString = $"Data Source={databaseName};Mode=Memory;Cache=Shared";
+        await using SqliteConnection keeper = new(connectionString);
+        await keeper.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>()
+                .UseSqlite(connectionString)
+                .Options;
+        await using SlicerDbContext firstContext = new(options);
+        await using SlicerDbContext secondContext = new(options);
+        await firstContext.Database.EnsureCreatedAsync();
+
+        Guid modelId = Guid.NewGuid();
+        var target = new ProfileFamilyWorkerTarget("http://worker", "2.3.0");
+        var secondRequestPassedPrecheck =
+            new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstRequestCommitted =
+            new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Mock<IProfileFamilyWorkerClient> firstWorker = new(MockBehavior.Strict);
+        _ = firstWorker
+            .Setup(service => service.GetCatalogAsync(
+                "Prusa",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(async (string _, string? _, CancellationToken ct) =>
+            {
+                _ = await secondRequestPassedPrecheck.Task.WaitAsync(ct);
+                return (target, new AllProfilesResponseDto());
+            });
+        _ = firstWorker
+            .Setup(service => service.WriteBundleAsync(
+                target,
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        Mock<IProfileFamilyWorkerClient> secondWorker = new(MockBehavior.Strict);
+        _ = secondWorker
+            .Setup(service => service.GetCatalogAsync(
+                "Prusa",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(async (string _, string? _, CancellationToken ct) =>
+            {
+                _ = secondRequestPassedPrecheck.TrySetResult(true);
+                _ = await firstRequestCommitted.Task.WaitAsync(ct);
+                return (target, new AllProfilesResponseDto());
+            });
+
+        Mock<IPrinterModelAliasService> secondAliases = new(MockBehavior.Strict);
+        _ = secondAliases
+            .Setup(service => service.ResolveModelAliasAsync("mîcron 180", "OrcaSlicer"))
+            .ReturnsAsync((Guid?)null);
+        CloneProfileFamilyRequestDto firstRequest = Request(modelId);
+        firstRequest.FamilyName = "Mîcron 180";
+        var firstService = CreateService(
+            firstContext,
+            Catalog(modelId),
+            Aliases(modelId, slicerModelName: firstRequest.FamilyName),
+            Renderer(),
+            firstWorker);
+        var secondService = CreateService(
+            secondContext,
+            Catalog(modelId),
+            secondAliases,
+            Renderer(),
+            secondWorker);
+        CloneProfileFamilyRequestDto secondRequest = Request(modelId);
+        secondRequest.FamilyName = "mîcron 180";
+
+        Task<CloneProfileFamilyResponseDto> firstClone =
+            firstService.CloneFamilyAsync(firstRequest, Guid.NewGuid(), CancellationToken.None);
+        Task<CloneProfileFamilyResponseDto> secondClone =
+            secondService.CloneFamilyAsync(secondRequest, Guid.NewGuid(), CancellationToken.None);
+        try
+        {
+            CloneProfileFamilyResponseDto firstResponse = await firstClone;
+            firstResponse.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
+        }
+        finally
+        {
+            _ = firstRequestCommitted.TrySetResult(true);
+        }
+
+        Func<Task> act = async () => _ = await secondClone;
+
+        await act.Should()
+            .ThrowAsync<ProfileFamilyConflictException>()
+            .WithMessage("*mîcron 180*already exists*");
+        await using SlicerDbContext verificationContext = new(options);
+        (await verificationContext.MachineModelProfiles.CountAsync())
+            .Should().Be(1);
+        (await verificationContext.MachineModelProfiles
+                .Select(profile => profile.NameNormalized)
+                .SingleAsync())
+            .Should().Be("MÎCRON 180");
+        (await verificationContext.MachineModelProfiles
+                .CountAsync(profile => profile.Name == "mîcron 180"))
+            .Should().Be(0, "SQLite's raw text equality is case-sensitive");
+    }
+
+    [Fact]
+    public async Task NormalizeMachineModelProfileNamesAsync_LegacyNonAsciiName_UsesCSharpNormalization()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        dbContext.MachineModelProfiles.Add(new MachineModelProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = " Mîcron 180 ",
+            Manufacturer = "Existing",
+            SlicerType = SlicerType.OrcaSlicer,
+            Hash = new string('A', 64),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        _ = await dbContext.SaveChangesAsync();
+        _ = await dbContext.Database.ExecuteSqlRawAsync(
+            """UPDATE "MachineModelProfiles" SET "NameNormalized" = "Name";""");
+        dbContext.ChangeTracker.Clear();
+
+        await dbContext.NormalizeMachineModelProfileNamesAsync(CancellationToken.None);
+
+        (await dbContext.MachineModelProfiles
+                .Select(profile => profile.NameNormalized)
+                .SingleAsync())
+            .Should().Be("MÎCRON 180");
+    }
+
+    [Fact]
     public async Task CloneFamilyAsync_WorkerFailure_RetryReusesFailedFamilyAndBundle()
     {
         await using SqliteConnection connection = new("Data Source=:memory:");
@@ -338,18 +472,19 @@ public sealed class ProfileFamilyServiceTests
 
     private static Mock<IPrinterModelAliasService> Aliases(
         Guid modelId,
-        Exception? firstEnsureFailure = null)
+        Exception? firstEnsureFailure = null,
+        string slicerModelName = "Farm Test")
     {
         Mock<IPrinterModelAliasService> aliases = new(MockBehavior.Strict);
         _ = aliases
-            .Setup(service => service.ResolveModelAliasAsync("Farm Test", "OrcaSlicer"))
+            .Setup(service => service.ResolveModelAliasAsync(slicerModelName, "OrcaSlicer"))
             .ReturnsAsync((Guid?)null);
         if (firstEnsureFailure is null)
         {
             _ = aliases
                 .Setup(service => service.EnsureModelAliasAsync(
                     modelId,
-                    "Farm Test",
+                    slicerModelName,
                     "OrcaSlicer",
                     It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
@@ -359,7 +494,7 @@ public sealed class ProfileFamilyServiceTests
             _ = aliases
                 .SetupSequence(service => service.EnsureModelAliasAsync(
                     modelId,
-                    "Farm Test",
+                    slicerModelName,
                     "OrcaSlicer",
                     It.IsAny<CancellationToken>()))
                 .ThrowsAsync(firstEnsureFailure)

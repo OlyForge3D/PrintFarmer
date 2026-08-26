@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace Farm.Slicer.Module.HostedServices;
 
 /// <summary>
-/// One-shot hosted service that applies and validates slicer database migrations on startup.
+/// One-shot hosted service that applies migrations and reconciles persisted normalized values.
 /// </summary>
 public sealed class SlicerDbInitializationHostedService(
     IServiceProvider serviceProvider,
@@ -22,6 +22,7 @@ public sealed class SlicerDbInitializationHostedService(
             DatabaseMigrationTarget.Slicer,
             logger,
             cancellationToken);
+        await db.NormalizeMachineModelProfileNamesAsync(cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

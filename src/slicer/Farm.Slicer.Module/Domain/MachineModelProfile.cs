@@ -17,6 +17,8 @@ namespace Farm.Slicer.Module.Domain;
 /// </remarks>
 public class MachineModelProfile
 {
+    private string _name = string.Empty;
+
     public Guid Id { get; set; }
 
     /// <summary>
@@ -24,7 +26,22 @@ public class MachineModelProfile
     /// </summary>
     [Required]
     [MaxLength(256)]
-    public string Name { get; set; } = string.Empty;
+    public string Name
+    {
+        get => _name;
+        set
+        {
+            _name = value ?? string.Empty;
+            NameNormalized = NormalizeName(_name);
+        }
+    }
+
+    /// <summary>
+    /// Trimmed, case-folded model name used to enforce portable uniqueness.
+    /// </summary>
+    [Required]
+    [MaxLength(256)]
+    public string NameNormalized { get; private set; } = string.Empty;
 
     /// <summary>
     /// The manufacturer name (e.g., "Sovol", "Prusa").
@@ -85,4 +102,19 @@ public class MachineModelProfile
     /// Navigation property for machine profiles that inherit from this model (slicer-internal relationship).
     /// </summary>
     public ICollection<MachineProfile> MachineProfiles { get; set; } = [];
+
+    internal bool RefreshNormalizedName()
+    {
+        string normalizedName = NormalizeName(_name);
+        if (string.Equals(NameNormalized, normalizedName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        NameNormalized = normalizedName;
+        return true;
+    }
+
+    internal static string NormalizeName(string value) =>
+        value.Trim().ToUpperInvariant();
 }

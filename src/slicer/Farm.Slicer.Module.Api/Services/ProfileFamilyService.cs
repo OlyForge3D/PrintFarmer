@@ -206,15 +206,13 @@ public sealed class ProfileFamilyService(
         CloneProfileFamilyRequestDto request,
         CancellationToken ct)
     {
-        string normalizedName = request.FamilyName.ToUpperInvariant();
-#pragma warning disable CA1862 // StringComparison overloads are not portable across EF providers.
+        string normalizedName = MachineModelProfile.NormalizeName(request.FamilyName);
         List<MachineModelProfile> matchingFamilies = await _dbContext.MachineModelProfiles
             .Where(profile =>
                 profile.SlicerType == SlicerType.OrcaSlicer
-                && profile.Name.ToUpper() == normalizedName)
+                && profile.NameNormalized == normalizedName)
             .Take(2)
             .ToListAsync(ct);
-#pragma warning restore CA1862
 
         if (matchingFamilies.Count > 1)
         {
@@ -313,7 +311,7 @@ public sealed class ProfileFamilyService(
                 && sqlite.SqliteExtendedErrorCode is 1555 or 2067)
             {
                 return sqlite.Message.Contains(
-                    "MachineModelProfiles.Name, MachineModelProfiles.SlicerType",
+                    "MachineModelProfiles.NameNormalized, MachineModelProfiles.SlicerType",
                     StringComparison.OrdinalIgnoreCase);
             }
 

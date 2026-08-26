@@ -257,6 +257,11 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("NameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("PrinterModelId")
                         .HasColumnType("TEXT");
 
@@ -305,8 +310,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
 
                     b.HasIndex("PrinterModelId");
 
-                    b.HasIndex("Name", "SlicerType")
-                        .IsUnique();
+                    b.HasIndex("NameNormalized", "SlicerType")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MachineModelProfiles_Name_SlicerType");
 
                     b.ToTable("MachineModelProfiles");
                 });

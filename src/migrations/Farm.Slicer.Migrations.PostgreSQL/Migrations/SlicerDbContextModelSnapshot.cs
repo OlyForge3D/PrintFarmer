@@ -263,6 +263,11 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<string>("NameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<Guid?>("PrinterModelId")
                         .HasColumnType("uuid");
 
@@ -311,8 +316,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("PrinterModelId");
 
-                    b.HasIndex("Name", "SlicerType")
-                        .IsUnique();
+                    b.HasIndex("NameNormalized", "SlicerType")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MachineModelProfiles_Name_SlicerType");
 
                     b.ToTable("MachineModelProfiles", "slicer");
                 });
