@@ -16,3 +16,4 @@ global using Farm.Slicer.Module.Models;
 global using Farm.Slicer.Module.Services;
 // Test infrastructure
 global using Farm.Slicer.Module.Tests.TestInfrastructure;
+global using Worker = Farm.Slicer.Module.Domain.Worker;
