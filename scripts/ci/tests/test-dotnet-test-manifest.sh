@@ -67,6 +67,7 @@ fi
 manifest_report="$("$PYTHON_BIN" - "$MANIFEST" "$SRC_ROOT" <<'PYEOF'
 import json
 import os
+import re
 import sys
 
 manifest_path, src_root = sys.argv[1], sys.argv[2]
@@ -334,6 +335,57 @@ else:
     unexpected = covered - expected
     if unexpected:
         errors.append(f"Farm.Web.Api.Tests shards reference nonexistent namespaces: {', '.join(sorted(unexpected))}")
+
+    # Directory ownership alone cannot prove the VSTest FullyQualifiedName
+    # expressions select every test. Root-level classes share the base
+    # namespace, and a file may deliberately use a namespace that differs from
+    # its directory (IAppSettingTests does). Check every source file containing
+    # xUnit facts/theories against the positive filter prefixes of its owning
+    # shard. A trailing dot is required so `Data` cannot accidentally match
+    # `DataManagement`, or a root class whose name starts with a directory.
+    shard_by_name = {shard.get("name"): shard for shard in shards}
+    for root, dirs, files in os.walk(api_test_dir):
+        dirs[:] = [d for d in dirs if d not in BUILD_OUTPUT_DIRS]
+        for file_name in files:
+            if not file_name.endswith(".cs"):
+                continue
+            path = os.path.join(root, file_name)
+            with open(path, encoding="utf-8-sig") as source:
+                text = source.read()
+            if not re.search(r"\[\s*(?:Fact|Theory)\b", text):
+                continue
+
+            relative = os.path.relpath(path, api_test_dir)
+            parts = relative.split(os.sep)
+            prefix = "(root)" if len(parts) == 1 else parts[0]
+            owners = seen_prefixes.get(prefix, [])
+            if len(owners) != 1:
+                continue
+
+            namespace_match = re.search(
+                r"^\s*namespace\s+([A-Za-z_][A-Za-z0-9_.]*)",
+                text,
+                re.MULTILINE,
+            )
+            if namespace_match is None:
+                errors.append(f"Farm.Web.Api.Tests test source has no namespace: {relative}")
+                continue
+            namespace = namespace_match.group(1)
+            candidate = f"{namespace}.{os.path.splitext(file_name)[0]}."
+            owner_filter = shard_by_name[owners[0]].get("filter", "")
+            positive_prefixes = re.findall(
+                r"FullyQualifiedName~([^|&()]+)",
+                owner_filter,
+            )
+            if not any(
+                token.endswith(".") and candidate.startswith(token)
+                for token in positive_prefixes
+            ):
+                errors.append(
+                    "Farm.Web.Api.Tests shard "
+                    f"'{owners[0]}' filter does not cover test source {relative} "
+                    f"(expected a prefix matching {candidate})"
+                )
 
 for e in errors:
     print(f"ERROR: {e}")
