@@ -136,10 +136,27 @@ def _strip_noncode(text):
         Unlike ordinary interpolated strings, interpolation holes inside a
         raw string literal are NOT specially unblanked here: the whole body
         -- hole braces included -- is blanked. This is deliberately blunter
-        than `scan_string`'s hole handling, but safe for brace-depth
-        purposes, since a hole's braces never contribute to the code-side
-        count either way (blanked or exposed-then-immediately-rebalanced),
-        so they cannot desynchronize `_code_brace_depths`.
+        than `scan_string`'s hole handling, and it is safe for brace-depth
+        purposes for every raw string literal actually in this codebase: a
+        hole's braces never contribute to the code-side count either way
+        (blanked or exposed-then-immediately-rebalanced), so they cannot
+        desynchronize `_code_brace_depths` UNLESS a hole's own code itself
+        contains a NESTED raw string literal whose own opening quote run is
+        as long as, or longer than, `quote_run` -- e.g. an interpolated raw
+        string opened with a 3-quote delimiter whose hole calls a method
+        with a 4-quote-delimited raw string argument. Such a nested run
+        would be mistaken for this literal's own closer, since this scanner
+        has no concept of "inside a hole" vs. "in body text" and searches
+        for the closing run unconditionally. This is a known, deliberately
+        out-of-scope limitation (fully closing it needs a dollar-count-
+        aware hole scanner mirroring `scan_string`'s, which is
+        disproportionate machinery for a CI shard-selection validator); no
+        file under `src/` triggers it as of this writing (every raw string
+        interpolation found in this codebase interpolates only plain
+        identifiers/format specifiers in its holes, never a nested raw
+        string), and the EOF-balance guard in the caller (see below) fails
+        the validator loudly rather than silently misattributing if this
+        ever changes.
         """
         i = body_start
         while i < n:

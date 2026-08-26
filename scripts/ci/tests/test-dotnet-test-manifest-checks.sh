@@ -45,7 +45,14 @@
 #      or line-comment match, and
 #  13. FAILs closed (rather than silently using a desynced depth) when any
 #      construct -- not just an unhandled string form -- leaves the file's
-#      overall code-brace depth unbalanced at EOF.
+#      overall code-brace depth unbalanced at EOF, and
+#  14. FAILs closed (same EOF-balance backstop as #13) when a raw string
+#      literal's own interpolation hole contains a NESTED raw string whose
+#      opening quote run is as long as, or longer than, the outer literal's
+#      own -- a documented, out-of-scope limitation of the wholesale
+#      hole-blanking in `scan_raw_string` (round-7 reviewer finding) that is
+#      unreachable by any raw string literal actually in this codebase, but
+#      must never silently misattribute a class if it is ever introduced.
 # =============================================================================
 
 set -uo pipefail
@@ -522,6 +529,58 @@ EOF
   fi
 }
 
+case_nested_raw_string_in_hole_fails_closed() {
+  # Negative (documents a known, accepted limitation): `scan_raw_string`
+  # blanks an interpolation hole's contents wholesale rather than
+  # hole-scanning them (see its docstring), so a raw string literal nested
+  # inside another raw string literal's hole, whose own opening quote run
+  # is at least as long as the outer's, is mistaken for the outer literal's
+  # own closing delimiter. This is a real gap (round-7 reviewer finding),
+  # but it is unreachable by any raw string literal actually in this
+  # codebase (verified: every interpolation hole in every `$"""`/`$$"""`
+  # usage under src/ interpolates only plain identifiers/format
+  # specifiers, never a nested raw string) and, when it does occur, the
+  # EOF-balance guard (`case_unbalanced_braces_fails_closed` above) fails
+  # the validator closed rather than silently misattributing a class's
+  # facts -- this test proves that backstop actually fires for this exact
+  # construct, not just for a bare stray brace.
+  local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/_ScratchNestedRawStringHoleTests.cs"
+  cat >"$scratch" <<'EOF'
+namespace Farm.Web.Api.Tests;
+
+public class ScratchNestedRawStringHoleTests
+{
+    private static string Build(string inner) => inner;
+
+    [Fact]
+    public void Foo()
+    {
+        string s = $"""outer{Build(""""nested"""")}outer""";
+    }
+}
+
+public class ScratchNestedRawStringHoleSiblingTests
+{
+    [Fact]
+    public void Bar()
+    {
+    }
+}
+EOF
+  local rc=0
+  local report
+  report="$(bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$scratch"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail closed on a nested-raw-string-in-hole file, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"has unbalanced braces after comment/string stripping"* ]]; then
+    printf '  expected the EOF-balance guard to fire (fail closed), got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
 TESTS=(
   case_baseline_roundtrip_passes
   case_duplicate_test_project_path_fails
@@ -536,6 +595,7 @@ TESTS=(
   case_block_scoped_namespace_fails_closed
   case_raw_string_literal_does_not_desync_brace_depth
   case_unbalanced_braces_fails_closed
+  case_nested_raw_string_in_hole_fails_closed
 )
 
 printf '=== dotnet test manifest validator regression suite ===\n'
