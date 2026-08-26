@@ -391,6 +391,11 @@ load_changed_files() {
 #                     Phase 10: the calibration vertical-slice module carved
 #                     out of Farm.Web.Api, following the smartplug pattern
 #                     above). Matched before the generic `src/modules/*` case.
+#   gcode           — src/modules/Farm.Modules.Gcode/** (issue #2039, Phase
+#                     11: the gcode/file-management vertical-slice module
+#                     carved out of Farm.Web.Api, following the smartplug/
+#                     calibration pattern above). Matched before the generic
+#                     `src/modules/*` case.
 #   identity        — src/modules/Farm.Modules.Identity/** (issue #2041,
 #                     Phase 13: Auth/users/API keys/quotas/roles/permissions/
 #                     security-audit/password-policy vertical-slice module
@@ -425,6 +430,7 @@ load_changed_files() {
 #                     #2037). Matched before the generic `src/tests/*` case.
 #   tests_calibration — src/tests/Farm.Modules.Calibration.Tests/** (issue
 #                     #2038). Matched before the generic `src/tests/*` case.
+#   tests_gcode     — src/tests/Farm.Modules.Gcode.Tests/** (issue #2039).
 #   tests_identity  — src/tests/Farm.Modules.Identity.Tests/** (issue #2041).
 #                     Matched before the generic `src/tests/*` case.
 #   tests_administration — src/tests/Farm.Modules.Administration.Tests/**
@@ -528,6 +534,11 @@ classify_path() {
     # matched first so it gets its own narrow bucket instead of falling into
     # the full-safe `modules` bucket.
     src/modules/Farm.Modules.Calibration/*) printf 'calibration' ; return ;;
+    # Farm.Modules.Gcode is a concrete vertical-slice module (issue #2039,
+    # Phase 11) following the same pattern as smartplug/calibration above --
+    # matched first so it gets its own narrow bucket instead of falling into
+    # the full-safe `modules` bucket.
+    src/modules/Farm.Modules.Gcode/*) printf 'gcode' ; return ;;
     # Farm.Modules.Identity is a concrete vertical-slice module (issue #2041,
     # Phase 13) following the same pattern as smartplug/maintenance/calibration
     # above -- matched first so it gets its own narrow bucket instead of
@@ -552,6 +563,7 @@ classify_path() {
     src/tests/Farm.Modules.PrintQueue.Tests/*)  printf 'tests_printqueue' ; return ;;
     src/tests/Farm.Modules.Maintenance.Tests/*) printf 'tests_maintenance' ; return ;;
     src/tests/Farm.Modules.Calibration.Tests/*) printf 'tests_calibration' ; return ;;
+    src/tests/Farm.Modules.Gcode.Tests/*)       printf 'tests_gcode' ; return ;;
     src/tests/Farm.Modules.Identity.Tests/*)    printf 'tests_identity' ; return ;;
     src/tests/Farm.Modules.Administration.Tests/*) printf 'tests_administration' ; return ;;
     src/tests/*)             printf 'tests_other' ; return ;;
@@ -746,12 +758,12 @@ main() {
   local has_api=0 has_infra=0 has_backend=0 has_backend_core=0 has_slicer=0
   local has_orca=0 has_discovery=0 has_settings=0 has_modules=0 has_smartplug=0
   local has_printqueue=0
-  local has_maintenance=0 has_calibration=0 has_identity=0 has_administration=0
+  local has_maintenance=0 has_calibration=0 has_gcode=0 has_identity=0 has_administration=0
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
   local has_tests_integration=0 has_tests_modules=0 has_tests_shared=0 has_tests_smartplug=0 has_tests_other=0
   local has_tests_printqueue=0
-  local has_tests_maintenance=0 has_tests_calibration=0 has_tests_identity=0 has_tests_administration=0
+  local has_tests_maintenance=0 has_tests_calibration=0 has_tests_gcode=0 has_tests_identity=0 has_tests_administration=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
 
   local p category
@@ -774,6 +786,7 @@ main() {
       printqueue)      has_printqueue=1 ;;
       maintenance)     has_maintenance=1 ;;
       calibration)     has_calibration=1 ;;
+      gcode)           has_gcode=1 ;;
       identity)        has_identity=1 ;;
       administration)  has_administration=1 ;;
       migrations_app)  has_mig_app=1 ;;
@@ -788,6 +801,7 @@ main() {
       tests_printqueue) has_tests_printqueue=1 ;;
       tests_maintenance) has_tests_maintenance=1 ;;
       tests_calibration) has_tests_calibration=1 ;;
+      tests_gcode)     has_tests_gcode=1 ;;
       tests_identity)  has_tests_identity=1 ;;
       tests_administration) has_tests_administration=1 ;;
       tests_other)     has_tests_other=1 ;;
@@ -859,10 +873,10 @@ main() {
   # migration-drift both depend on dotnet-build and consume its artifacts, so
   # every bucket that can request either consumer must also request the build.
   if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
-        has_orca || has_smartplug || has_printqueue || has_maintenance || has_calibration || has_identity || has_administration ||
+        has_orca || has_smartplug || has_printqueue || has_maintenance || has_calibration || has_gcode || has_identity || has_administration ||
         has_mig_app || has_mig_slcr ||
         has_tests_api || has_tests_slicer || has_tests_orca ||
-        has_tests_integration || has_tests_smartplug || has_tests_printqueue || has_tests_maintenance || has_tests_calibration || has_tests_identity || has_tests_administration || has_tools )); then
+        has_tests_integration || has_tests_smartplug || has_tests_printqueue || has_tests_maintenance || has_tests_calibration || has_tests_gcode || has_tests_identity || has_tests_administration || has_tools )); then
     want_dotnet_build="true"
   fi
 
@@ -885,11 +899,11 @@ main() {
     # Farm.OrcaSlicer.Worker.Tests references infra through the worker graph.
     # Farm.Modules.SmartPlug (issue #2036), Farm.Modules.PrintQueue (issue
     # #2040), Farm.Modules.Maintenance (issue #2037), Farm.Modules.Calibration
-    # (issue #2038), Farm.Modules.Identity (issue #2041), and
-    # Farm.Modules.Administration (issue #2042) also reference
-    # Farm.Infrastructure directly, so an infra change must re-run all six
-    # test projects too.
-    test_names+=("Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests" "Farm.Modules.Identity.Tests" "Farm.Modules.Administration.Tests")
+    # (issue #2038), Farm.Modules.Gcode (issue #2039), Farm.Modules.Identity
+    # (issue #2041), and Farm.Modules.Administration (issue #2042) also
+    # reference Farm.Infrastructure directly, so an infra change must re-run
+    # all seven test projects too.
+    test_names+=("Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests" "Farm.Modules.Gcode.Tests" "Farm.Modules.Identity.Tests" "Farm.Modules.Administration.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_backend )); then
@@ -915,10 +929,13 @@ main() {
   if (( has_slicer )); then
     # slicer projects are referenced by both test suites. Farm.Modules.PrintQueue
     # (issue #2040) references Farm.Slicer.Module directly (SlicePrintBridgeController
-    # consumes IArtifactsService/ISliceJobRepository), and Farm.Modules.Calibration
-    # (issue #2038) also references Farm.Slicer.Module directly (slicer-host
-    # calibration profile resolution), so a slicer change must re-run both too.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Calibration.Tests")
+    # consumes IArtifactsService/ISliceJobRepository), Farm.Modules.Calibration
+    # (issue #2038) references Farm.Slicer.Module directly (slicer-host
+    # calibration profile resolution), and Farm.Modules.Gcode (issue #2039)
+    # references Farm.Slicer.Module/Farm.Slicer.Module.Api directly too
+    # (AddSlicerModule is on for this module), so a slicer change must
+    # re-run all three of their test projects.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Calibration.Tests" "Farm.Modules.Gcode.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_orca )); then
@@ -969,7 +986,22 @@ main() {
     # stayed behind in Farm.Web.Api.Tests -- see docs/MODULE_MIGRATION_PATTERN.md.
     # A controller-owning module must therefore also select Farm.Web.Api.Tests,
     # unlike a pure-service module such as Farm.OrcaSlicer.Worker.
-    test_names+=("Farm.Modules.Calibration.Tests" "Farm.Web.Api.Tests")
+    # Farm.Modules.Gcode project-references Farm.Modules.Calibration directly
+    # (GcodeArtifactPromoter's IGcodeArtifactPromoter contract moved there in
+    # Phase 10, #2038), so a Calibration-only change must also select
+    # Farm.Modules.Gcode.Tests or a Calibration API break can silently reach
+    # Gcode with CI green.
+    test_names+=("Farm.Modules.Calibration.Tests" "Farm.Modules.Gcode.Tests" "Farm.Web.Api.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_gcode )); then
+    # Farm.Modules.Gcode (issue #2039) owns the gcode/harvest/promotion
+    # controllers, but RouteTableSnapshotTests -- the retained coverage of
+    # its route-table surface -- intentionally stayed behind in
+    # Farm.Web.Api.Tests -- see docs/MODULE_MIGRATION_PATTERN.md. A
+    # controller-owning module must therefore also select Farm.Web.Api.Tests,
+    # unlike a pure-service module such as Farm.OrcaSlicer.Worker.
+    test_names+=("Farm.Modules.Gcode.Tests" "Farm.Web.Api.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_identity )); then
@@ -1073,6 +1105,10 @@ main() {
     test_names+=("Farm.Modules.Calibration.Tests")
     net_test_bucket_hit=1
   fi
+  if (( has_tests_gcode )); then
+    test_names+=("Farm.Modules.Gcode.Tests")
+    net_test_bucket_hit=1
+  fi
   if (( has_tests_identity )); then
     test_names+=("Farm.Modules.Identity.Tests")
     net_test_bucket_hit=1
@@ -1098,6 +1134,7 @@ main() {
   if (( has_printqueue )); then reason+="printqueue "; fi
   if (( has_maintenance )); then reason+="maintenance "; fi
   if (( has_calibration )); then reason+="calibration "; fi
+  if (( has_gcode )); then reason+="gcode "; fi
   if (( has_identity )); then reason+="identity "; fi
   if (( has_administration )); then reason+="administration "; fi
   if (( has_mig_app )); then reason+="mig-app "; fi
@@ -1110,6 +1147,7 @@ main() {
   if (( has_tests_printqueue )); then reason+="tests-printqueue "; fi
   if (( has_tests_maintenance )); then reason+="tests-maintenance "; fi
   if (( has_tests_calibration )); then reason+="tests-calibration "; fi
+  if (( has_tests_gcode )); then reason+="tests-gcode "; fi
   if (( has_tests_identity )); then reason+="tests-identity "; fi
   if (( has_tests_administration )); then reason+="tests-administration "; fi
   if (( has_tools )); then reason+="tools "; fi

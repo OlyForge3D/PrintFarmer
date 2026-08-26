@@ -18,6 +18,7 @@ using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Services.Calibration;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Gcode;
 

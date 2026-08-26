@@ -152,6 +152,7 @@
     <ProjectReference Include="..\modules\Farm.Modules.PrintQueue\Farm.Modules.PrintQueue.csproj" />
     <ProjectReference Include="..\modules\Farm.Modules.Maintenance\Farm.Modules.Maintenance.csproj" />
     <ProjectReference Include="..\modules\Farm.Modules.Calibration\Farm.Modules.Calibration.csproj" />
+    <ProjectReference Include="..\modules\Farm.Modules.Gcode\Farm.Modules.Gcode.csproj" />
     <ProjectReference Include="..\modules\Farm.Modules.Identity\Farm.Modules.Identity.csproj" />
     <ProjectReference Include="..\modules\Farm.Modules.Administration\Farm.Modules.Administration.csproj" />
   </ItemGroup>
