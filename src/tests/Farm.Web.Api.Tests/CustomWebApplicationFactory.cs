@@ -56,8 +56,17 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         // write lock — without a busy timeout, a second writer fails immediately with
         // "SQLite Error 5: database is locked" instead of waiting the (very short) real time it
         // takes for the first writer's transaction to complete.
+        // "Pooling=False" disables Microsoft.Data.Sqlite's internal connection pool for this
+        // connection string. AppDbContext and SlicerDbContext are both configured with the exact
+        // same connection string, so with pooling enabled they draw from the same pool key; a
+        // pooled connection handed back to one context while a statement from the other context
+        // is still active (e.g. mid-migration) can make SQLite reject a subsequent collation
+        // registration with "SQLite Error 5: unable to delete/modify collation sequence due to
+        // active statements". Disabling pooling forces every Open() to create a genuinely
+        // distinct native connection handle (all still attached to the same shared in-memory
+        // database via cache=shared), which removes that cross-context reuse hazard.
         _keepAliveConnection = new SqliteConnection(
-            $"Data Source=file:farm_test_{dbId}?mode=memory&cache=shared;Default Timeout=30");
+            $"Data Source=file:farm_test_{dbId}?mode=memory&cache=shared;Default Timeout=30;Pooling=False");
         _keepAliveConnection.Open();
         _connectionString = _keepAliveConnection.ConnectionString;
 
@@ -275,7 +284,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     // build step (not test execution) removes the race while keeping full cross-class
     // parallelism: once a host is built, all of its requests/tests still run concurrently with
     // every other class's.
-    private static readonly SemaphoreSlim HostBuildLock = new(1, 1);
+    //
+    // The permit count was tuned empirically, not chosen arbitrarily: 1 (fully serial builds)
+    // reliably passed but left the suite around 12 minutes; 2 concurrent builds cut that to
+    // ~11m15s with zero new failures across repeated runs; 3 concurrent builds saved only
+    // ~10 more seconds but introduced a new, unrelated timing-sensitive flake
+    // (MoonrakerSnapmakerU1CameraTests) under the extra CPU contention. 2 is the value that
+    // measurably helps wall-clock without reintroducing any flake — do not raise this further
+    // without re-running the 3-consecutive-green flake check to confirm it stays stable.
+    private static readonly SemaphoreSlim HostBuildLock = new(2, 2);
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -400,20 +417,49 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         await using AsyncServiceScope scope = Services.CreateAsyncScope();
 
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await ClearAllTablesAsync(context.Database);
+
+        // Tables backing the singleton config/state rows normally provided by EF's HasData
+        // model seeding (applied once, at EnsureCreatedAsync/migration time). These are
+        // excluded from the blanket DELETE below and reset in place instead — see
+        // ResetSingletonModelDataAsync for why.
+        await ClearAllTablesAsync(context.Database, excludedTables: SingletonTableNames);
+
+        // The ~20 hosted services this factory keeps alive across an entire test class
+        // (AutoDispatchBackgroundService, CatalogUpdateDetectionService, etc. — see the
+        // BackgroundServiceExceptionBehavior.Ignore comment in ConfigureWebHost) query
+        // singleton config rows like DispatchSettings on every poll cycle, often with no
+        // defensive try/catch around a plain FirstAsync()/SingleAsync() (e.g.
+        // AutoDispatchBackgroundService.ReconcileStartupEligiblePrintersAsync). An earlier
+        // version of this method deleted every row (including these singletons) via
+        // ClearAllTablesAsync and then re-inserted them via a separate SaveChangesAsync call,
+        // leaving a genuine window where such a query could observe an empty table and throw
+        // — an exception that BackgroundServiceExceptionBehavior.Ignore then treats as fatal
+        // to that ONE hosted service for the rest of the shared host's lifetime, silently
+        // degrading every later test in the class. Wrapping that delete-then-reinsert in a
+        // single transaction was tried and rejected: SQLite's shared-cache locking (this
+        // factory's databases all use `cache=shared`) does not always retry lock conflicts
+        // via the busy-timeout handler the way file-level BUSY locks do, so holding one
+        // connection's write lock across every table for the whole clear+reseed measurably
+        // increased 500s from concurrent requests/background services hitting SQLITE_LOCKED.
+        // Excluding these tables from the DELETE and resetting each row to its default values
+        // in place (UPDATE, or INSERT only on the very first call before any row exists)
+        // removes the window entirely — the row is simply never absent — without holding any
+        // lock longer than a single-row write.
+        await ResetSingletonModelDataAsync(context);
 
         // Slicer module may be disabled for this factory (no SlicerDbContext registered).
+        // Both contexts point at the SAME physical shared-cache SQLite database (see the
+        // `cache=shared` connection string in the constructor), so sqlite_master — and
+        // therefore ClearAllTablesAsync's table enumeration — sees every table regardless of
+        // which DbContext's connection queries it. The singleton tables must be excluded here
+        // too, or this call silently re-deletes the very rows ResetSingletonModelDataAsync
+        // already reset above.
         Farm.Slicer.Module.Data.SlicerDbContext? slicerContext =
             scope.ServiceProvider.GetService<Farm.Slicer.Module.Data.SlicerDbContext>();
         if (slicerContext != null)
         {
-            await ClearAllTablesAsync(slicerContext.Database);
+            await ClearAllTablesAsync(slicerContext.Database, excludedTables: SingletonTableNames);
         }
-
-        // Re-establish the singleton rows normally provided by EF's HasData model seeding
-        // (applied only once, at EnsureCreatedAsync/migration time) before re-seeding the
-        // root folders — ClearAllTablesAsync wipes these rows just like any other data.
-        await SeedSingletonModelDataAsync(context);
 
         // ClearAllTablesAsync also wipes the imperative reference/catalog data that
         // DatabaseInitializer.SeedAllAsync() establishes once at host startup (Resources,
@@ -429,11 +475,32 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     }
 
     /// <summary>
-    /// Deletes every row from every user table on the given SQLite database facade, leaving the
-    /// schema intact. Table names come from <c>sqlite_master</c> (our own schema), not external
-    /// input, so building the DELETE statements via interpolation is safe here.
+    /// Table names backing singleton config/state rows established once by EF's HasData model
+    /// seeding. <see cref="ClearAllTablesAsync"/> excludes these from its blanket per-table
+    /// DELETE for <see cref="AppDbContext"/>; <see cref="ResetSingletonModelDataAsync"/> resets
+    /// each row to its default values in place instead of deleting and re-inserting it, so no
+    /// concurrent reader (e.g. a hosted background service) ever observes the table empty. See
+    /// the comment in <see cref="ResetDataAsync"/> for the concurrency hazard this avoids.
     /// </summary>
-    private static async Task ClearAllTablesAsync(Microsoft.EntityFrameworkCore.Infrastructure.DatabaseFacade database)
+    private static readonly IReadOnlySet<string> SingletonTableNames = new HashSet<string>(
+        StringComparer.OrdinalIgnoreCase)
+    {
+        "OutboxSequenceStates",
+        "PasswordPolicies",
+        "DispatchSettings",
+        "CalibrationChangeFeedStates",
+        "MutationCounters",
+    };
+
+    /// <summary>
+    /// Deletes every row from every user table on the given SQLite database facade (except any
+    /// named in <paramref name="excludedTables"/>), leaving the schema intact. Table names come
+    /// from <c>sqlite_master</c> (our own schema), not external input, so building the DELETE
+    /// statements via interpolation is safe here.
+    /// </summary>
+    private static async Task ClearAllTablesAsync(
+        Microsoft.EntityFrameworkCore.Infrastructure.DatabaseFacade database,
+        IReadOnlySet<string>? excludedTables = null)
     {
         System.Data.Common.DbConnection connection = database.GetDbConnection();
         if (connection.State != System.Data.ConnectionState.Open)
@@ -449,7 +516,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             using System.Data.Common.DbDataReader reader = await listCmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
-                tables.Add(reader.GetString(0));
+                string table = reader.GetString(0);
+                if (excludedTables == null || !excludedTables.Contains(table))
+                {
+                    tables.Add(table);
+                }
             }
         }
 
@@ -479,6 +550,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             await database.ExecuteSqlRawAsync("PRAGMA foreign_keys = ON;");
         }
     }
+
 
     private async Task SeedRootFoldersAsync(AppDbContext context)
     {
@@ -520,51 +592,56 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     }
 
     /// <summary>
-    /// Re-inserts the singleton rows that <c>AppDbContext.OnModelCreating</c> establishes via
-    /// EF's <c>HasData</c> model seeding (<see cref="OutboxSequenceState"/>,
+    /// Resets the singleton rows that <c>AppDbContext.OnModelCreating</c> establishes via EF's
+    /// <c>HasData</c> model seeding (<see cref="OutboxSequenceState"/>,
     /// <see cref="PasswordPolicyEntity"/>, <see cref="DispatchSettings"/>,
-    /// <see cref="CalibrationChangeFeedState"/>, and <see cref="MutationCounter"/>).
-    /// <c>HasData</c> seeding only runs once, at <c>EnsureCreatedAsync</c>/migration time, so
-    /// <see cref="ClearAllTablesAsync"/> — which deletes every row, including these — must
-    /// reseed them explicitly, matching each row's <c>HasData</c> values exactly.
+    /// <see cref="CalibrationChangeFeedState"/>, and <see cref="MutationCounter"/>) to their
+    /// default values, in place. <see cref="ClearAllTablesAsync"/> excludes each of these
+    /// tables (see <see cref="SingletonTableNames"/>) from its blanket DELETE specifically so
+    /// this method can reset the existing row via UPDATE rather than delete-then-reinsert — see
+    /// <see cref="ResetDataAsync"/> for why an empty-table window here is a real hazard, not a
+    /// theoretical one. A row is only ever inserted here on the very first call against a fresh
+    /// database, before <c>HasData</c>'s own seeding would otherwise apply.
     /// </summary>
-    private async Task SeedSingletonModelDataAsync(AppDbContext context)
+    private static async Task ResetSingletonModelDataAsync(AppDbContext context)
     {
-        if (!await context.Set<OutboxSequenceState>().AsNoTracking().AnyAsync())
+        await ResetSingletonRowAsync(context, new OutboxSequenceState { Id = 1, NextSequence = 0 });
+        await ResetSingletonRowAsync(context, new PasswordPolicyEntity
         {
-            context.Set<OutboxSequenceState>().Add(new OutboxSequenceState { Id = 1, NextSequence = 0 });
-        }
-
-        if (!await context.Set<PasswordPolicyEntity>().AsNoTracking().AnyAsync())
-        {
-            context.Set<PasswordPolicyEntity>().Add(new PasswordPolicyEntity
-            {
-                Id = 1,
-                MinLength = 8,
-                RequireUppercase = false,
-                RequireLowercase = false,
-                RequireDigit = false,
-                RequireSymbol = false,
-                UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            });
-        }
-
-        if (!await context.Set<DispatchSettings>().AsNoTracking().AnyAsync())
-        {
-            context.Set<DispatchSettings>().Add(new DispatchSettings());
-        }
-
-        if (!await context.Set<CalibrationChangeFeedState>().AsNoTracking().AnyAsync())
-        {
-            context.Set<CalibrationChangeFeedState>().Add(new CalibrationChangeFeedState { Id = 1, LastSequence = 0 });
-        }
-
-        if (!await context.Set<MutationCounter>().AsNoTracking().AnyAsync())
-        {
-            context.Set<MutationCounter>().Add(new MutationCounter());
-        }
+            Id = 1,
+            MinLength = 8,
+            RequireUppercase = false,
+            RequireLowercase = false,
+            RequireDigit = false,
+            RequireSymbol = false,
+            UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+        });
+        await ResetSingletonRowAsync(context, new DispatchSettings());
+        await ResetSingletonRowAsync(context, new CalibrationChangeFeedState { Id = 1, LastSequence = 0 });
+        await ResetSingletonRowAsync(context, new MutationCounter());
 
         await context.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Resets the single row of a singleton entity type to <paramref name="defaults"/>: updates
+    /// every scalar property of the existing tracked row in place if one exists, or inserts
+    /// <paramref name="defaults"/> as a new row otherwise. Using <c>CurrentValues.SetValues</c>
+    /// (rather than restating each property assignment by hand) keeps this in sync automatically
+    /// as each entity type gains or loses properties.
+    /// </summary>
+    private static async Task ResetSingletonRowAsync<TEntity>(AppDbContext context, TEntity defaults)
+        where TEntity : class
+    {
+        TEntity? existing = await context.Set<TEntity>().FirstOrDefaultAsync();
+        if (existing == null)
+        {
+            context.Set<TEntity>().Add(defaults);
+        }
+        else
+        {
+            context.Entry(existing).CurrentValues.SetValues(defaults);
+        }
     }
 
     // Generic mock helpers: use generic type parameter so callers with
