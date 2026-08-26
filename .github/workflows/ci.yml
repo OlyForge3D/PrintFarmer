@@ -495,6 +495,36 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Upload Farm.Modules.Maintenance.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Modules.Maintenance.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Modules.Maintenance.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Modules.PrintQueue.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Modules.PrintQueue.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Modules.PrintQueue.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Upload Farm.Modules.Gcode.Tests build
         if: >-
           ${{

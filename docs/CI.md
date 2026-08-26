@@ -96,12 +96,13 @@ classify.
 | --- | :---: | :---: | --- | --- | :---: |
 | `frontend`: `src/Web/**` | ✓ | | | | |
 | `api`: `src/api/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests` | `AppPg`, `AppSqlServer` | |
-| `infra`: `src/infra/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.SmartPlug.Tests`, `Farm.Modules.Maintenance.Tests`, `Farm.Modules.Calibration.Tests`, `Farm.Modules.Gcode.Tests` | `AppPg`, `AppSqlServer` | |
+| `infra`: `src/infra/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.SmartPlug.Tests`, `Farm.Modules.PrintQueue.Tests`, `Farm.Modules.Maintenance.Tests`, `Farm.Modules.Calibration.Tests`, `Farm.Modules.Gcode.Tests` | `AppPg`, `AppSqlServer` | |
 | `backend_core`: `src/backends/Farm.Backend.Plugin.Core/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests` | | |
-| `backend_plugin`: every other `src/backends/**` path (concrete plugin projects) | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests` | | |
-| `slicer`: `src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.Calibration.Tests`, `Farm.Modules.Gcode.Tests` | `SlicerPg`, `SlicerSqlServer` | |
+| `backend_plugin`: every other `src/backends/**` path (concrete plugin projects) | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.PrintQueue.Tests` | | |
+| `slicer`: `src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.PrintQueue.Tests`, `Farm.Modules.Calibration.Tests`, `Farm.Modules.Gcode.Tests` | `SlicerPg`, `SlicerSqlServer` | |
 | `orca_worker`: `src/orcaslicer-worker/**` | | ✓ | `Farm.OrcaSlicer.Worker.Tests` | | |
 | `smartplug`: `src/modules/Farm.Modules.SmartPlug/**` | | ✓ | `Farm.Modules.SmartPlug.Tests`, `Farm.Web.Api.Tests` | | |
+| `printqueue`: `src/modules/Farm.Modules.PrintQueue/**` | | ✓ | `Farm.Modules.PrintQueue.Tests`, `Farm.Web.Api.Tests` | | |
 | `maintenance`: `src/modules/Farm.Modules.Maintenance/**` | | ✓ | `Farm.Modules.Maintenance.Tests`, `Farm.Web.Api.Tests` | | |
 | `calibration`: `src/modules/Farm.Modules.Calibration/**` | | ✓ | `Farm.Modules.Calibration.Tests`, `Farm.Modules.Gcode.Tests`, `Farm.Web.Api.Tests` | | |
 | `gcode`: `src/modules/Farm.Modules.Gcode/**` | | ✓ | `Farm.Modules.Gcode.Tests`, `Farm.Web.Api.Tests` | | |
@@ -111,6 +112,7 @@ classify.
 | `tests_slicer`: `src/tests/Farm.Slicer.Module.Tests/**` | | ✓ | `Farm.Slicer.Module.Tests` | | |
 | `tests_orca`: `src/tests/Farm.OrcaSlicer.Worker.Tests/**` | | ✓ | `Farm.OrcaSlicer.Worker.Tests` | | |
 | `tests_smartplug`: `src/tests/Farm.Modules.SmartPlug.Tests/**` | | ✓ | `Farm.Modules.SmartPlug.Tests` | | |
+| `tests_printqueue`: `src/tests/Farm.Modules.PrintQueue.Tests/**` | | ✓ | `Farm.Modules.PrintQueue.Tests` | | |
 | `tests_maintenance`: `src/tests/Farm.Modules.Maintenance.Tests/**` | | ✓ | `Farm.Modules.Maintenance.Tests` | | |
 | `tests_calibration`: `src/tests/Farm.Modules.Calibration.Tests/**` | | ✓ | `Farm.Modules.Calibration.Tests` | | |
 | `tests_gcode`: `src/tests/Farm.Modules.Gcode.Tests/**` | | ✓ | `Farm.Modules.Gcode.Tests` | | |
@@ -144,6 +146,19 @@ moved into `Farm.Modules.SmartPlug`, but its own coverage
 `Farm.Modules.*` phase (9-18) that owns a controller must add its API-tests
 project the same way; a phase that moves only services (no controller) can
 stay as narrow as `orca_worker`.
+
+`printqueue` (issue #2040, Phase 12) follows the same controller-owning
+pattern as `smartplug`: `PrintJobManagementService` and its 8 dependent
+controllers (including `SlicePrintBridgeController`) moved into
+`Farm.Modules.PrintQueue`, but the `Dispatch/` `CustomWebApplicationFactory`
+integration suite and `RouteTableSnapshotTests` intentionally stayed behind
+in `Farm.Web.Api.Tests`, so `printqueue` also selects it. Unlike
+`smartplug`, `Farm.Modules.PrintQueue` also references `Farm.Slicer.Module`
+directly (`SlicePrintBridgeController` consumes `IArtifactsService`/
+`ISliceJobRepository`) and its test project references
+`Farm.Backend.Plugin.OctoPrint` directly (`PrintJobManagementService`
+`History`-seeding tests), so the `slicer` and `backend_plugin` rows above
+also list `Farm.Modules.PrintQueue.Tests` as a dependent.
 
 Similarly, `maintenance` selects `Farm.Web.Api.Tests`: five controllers plus
 `MaintenanceHub` (the first SignalR hub extracted into a module) moved into

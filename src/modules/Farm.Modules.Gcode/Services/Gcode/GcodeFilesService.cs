@@ -75,7 +75,7 @@ public class GcodeFilesService(
     IGcodeThumbnailExtractorService thumbnailExtractor,
     IFolderManagementService folderService,
     IStoredFileOperationsService fileOperations,
-    IPrintFarmerTelemetryService telemetry) : IGcodeFilesService, IGcodeFileProcessingService
+    IPrintFarmerTelemetryService telemetry) : IGcodeFilesService, IGcodeFileProcessingService, IGcodeFileDeleter
 {
     private readonly IGcodeRepository _gcodeRepo = gcodeRepo ?? throw new ArgumentNullException(nameof(gcodeRepo));
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));

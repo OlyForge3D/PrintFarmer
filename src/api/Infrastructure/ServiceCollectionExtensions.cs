@@ -722,9 +722,10 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<IGcodeMetadataExtractorService, GcodeMetadataExtractorService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IPrinterModelAliasService, Farm.Infrastructure.Services.Gcode.PrinterModelAliasService>();
 
-        // IGcodeFilesService, IGcodeSafetyValidator, the IGcodeFileProcessingService bridge, and
-        // IHarvestEventBroadcaster are now registered by Farm.Modules.Gcode's GcodeApiModule
-        // (issue #2039, epic #2019) since their concrete implementations moved into that module.
+        // IGcodeFilesService, IGcodeSafetyValidator, the IGcodeFileProcessingService and
+        // IGcodeFileDeleter bridges, and IHarvestEventBroadcaster are now registered by
+        // Farm.Modules.Gcode's GcodeApiModule (issue #2039, epic #2019) since their concrete
+        // implementations moved into that module.
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeHarvestService, Farm.Infrastructure.Services.Gcode.GcodeHarvestService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.ISliceGcodeImportService, Farm.Infrastructure.Services.Gcode.SliceGcodeImportService>();
 

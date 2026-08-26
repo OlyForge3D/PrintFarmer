@@ -44,6 +44,13 @@ public sealed class GcodeApiModule : IApiModule
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeFileProcessingService>(sp =>
             (Farm.Infrastructure.Services.Gcode.IGcodeFileProcessingService)sp.GetRequiredService<IGcodeFilesService>());
 
+        // Infrastructure-owned deletion seam: bridges the infra IGcodeFileDeleter abstraction to
+        // this module's concrete IGcodeFilesService so callers outside this module (e.g.
+        // Farm.Modules.PrintQueue) can delete gcode files without a compile-time reference into
+        // Farm.Modules.Gcode.
+        _ = services.AddScoped<Farm.Infrastructure.Services.Interfaces.IGcodeFileDeleter>(sp =>
+            (Farm.Infrastructure.Services.Interfaces.IGcodeFileDeleter)sp.GetRequiredService<IGcodeFilesService>());
+
         // Harvest completion event broadcasting over SignalR.
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IHarvestEventBroadcaster, SignalRHarvestEventBroadcaster>();
 
