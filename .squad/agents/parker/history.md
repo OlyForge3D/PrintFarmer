@@ -326,7 +326,10 @@ Status: Backlog item cleared. Beta trigger gated on PR stack merge.
   `development` and future supported targets.
 - Sampling two files with `git ls-files --eol` and generalizing to the directory
   hid genuine CRLF blobs in `codeql.yml` and `squad-main-guard.yml`. Inventory
-  every gated file and pin `.github/workflows/*.yml text eol=lf`.
+  every gated file and pin both workflow YAML extensions to LF.
+- GitHub Actions accepts both `*.yml` and `*.yaml`. A Bash `nullglob` array
+  covers both without passing an unmatched literal when one extension is absent;
+  an explicit empty-array guard keeps a missing workflow set fail-closed.
 - With yamllint 1.38.0, `truthy: {check-keys: false}` exempts GitHub Actions'
   `on:` key while retaining value checks. A 120-character warning threshold
   keeps 111 exceptionally long expression/shell lines visible without making
