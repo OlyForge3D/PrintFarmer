@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Farm.Modules.Abstractions</RootNamespace>
+    <Description>Host seam for vertical-slice API modules: the IApiModule contract, module
+discovery/registration extensions, and the shared ProblemDetails/attribute shapes future
+Farm.Modules.* assemblies build on. No dependencies beyond ASP.NET Core -- no module exists
+yet, so nothing in the host references these types until a later phase moves a controller
+here (see epic #2019).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Required for IServiceCollection/IMvcBuilder/IEndpointRouteBuilder/ProblemDetails/IFilterFactory -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

@@ -21,6 +21,7 @@ WORKDIR /src
 # Copy project files
 COPY src/infra/*.csproj ./infra/
 COPY src/import/*.csproj ./import/
+COPY src/modules/Farm.Modules.Abstractions/*.csproj ./modules/Farm.Modules.Abstractions/
 COPY src/api/*.csproj ./api/
 # Place proto at filesystem root so ../../proto from /src/api resolves
 COPY proto /proto

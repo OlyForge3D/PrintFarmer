@@ -321,12 +321,19 @@ load_changed_files() {
 #   orca_worker     — src/orcaslicer-worker/**
 #   discovery       — src/discovery/**, src/printer-discovery/**
 #   settings        — src/settings/**
+#   modules         — src/modules/** (Farm.Modules.Abstractions — the
+#                     IApiModule host-seam contract, issue #2035. Foundational
+#                     like discovery/settings: Farm.Web.Api references it
+#                     directly and every future Farm.Modules.* vertical slice
+#                     will too, so treat any change as full-safe rather than
+#                     attempting to enumerate dependents.
 #   migrations_app  — src/migrations/Farm.Migrations.*/**
 #   migrations_slcr — src/migrations/Farm.Slicer.Migrations.*/**
 #   tests_api       — src/tests/Farm.Web.Api.Tests/**
 #   tests_slicer    — src/tests/Farm.Slicer.Module.Tests/**
 #   tests_orca      — src/tests/Farm.OrcaSlicer.Worker.Tests/**
 #   tests_integration — src/tests/Farm.Web.IntegrationTests/**
+#   tests_modules   — src/tests/Farm.Modules.Abstractions.Tests/**
 #   tests_other     — any other src/tests/**
 #   tools           — src/tools/**
 #   dotnet_config   — src/*.props, src/*.targets, src/.editorconfig
@@ -404,12 +411,14 @@ classify_path() {
     src/discovery/*)         printf 'discovery' ; return ;;
     src/printer-discovery/*) printf 'discovery' ; return ;;
     src/settings/*)          printf 'settings' ; return ;;
+    src/modules/*)           printf 'modules' ; return ;;
     src/migrations/Farm.Migrations.*)         printf 'migrations_app' ; return ;;
     src/migrations/Farm.Slicer.Migrations.*)  printf 'migrations_slcr' ; return ;;
     src/tests/Farm.Web.Api.Tests/*)             printf 'tests_api' ; return ;;
     src/tests/Farm.Slicer.Module.Tests/*)       printf 'tests_slicer' ; return ;;
     src/tests/Farm.OrcaSlicer.Worker.Tests/*)   printf 'tests_orca' ; return ;;
     src/tests/Farm.Web.IntegrationTests/*)      printf 'tests_integration' ; return ;;
+    src/tests/Farm.Modules.Abstractions.Tests/*) printf 'tests_modules' ; return ;;
     src/tests/*)             printf 'tests_other' ; return ;;
     src/tools/*)             printf 'tools' ; return ;;
   esac
@@ -594,10 +603,10 @@ main() {
   # Bucket flags.
   local has_shared_config=0 has_ci_selector=0 has_frontend=0
   local has_api=0 has_infra=0 has_backend=0 has_backend_core=0 has_slicer=0
-  local has_orca=0 has_discovery=0 has_settings=0
+  local has_orca=0 has_discovery=0 has_settings=0 has_modules=0
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
-  local has_tests_integration=0 has_tests_other=0
+  local has_tests_integration=0 has_tests_modules=0 has_tests_other=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
 
   local p category
@@ -615,12 +624,14 @@ main() {
       orca_worker)     has_orca=1 ;;
       discovery)       has_discovery=1 ;;
       settings)        has_settings=1 ;;
+      modules)         has_modules=1 ;;
       migrations_app)  has_mig_app=1 ;;
       migrations_slcr) has_mig_slcr=1 ;;
       tests_api)       has_tests_api=1 ;;
       tests_slicer)    has_tests_slicer=1 ;;
       tests_orca)      has_tests_orca=1 ;;
       tests_integration) has_tests_integration=1 ;;
+      tests_modules)   has_tests_modules=1 ;;
       tests_other)     has_tests_other=1 ;;
       tools)           has_tools=1 ;;
       unknown_src)     has_unknown_src=1 ;;
@@ -651,9 +662,21 @@ main() {
   if (( has_settings )); then
     emit_full_safe "full-safe: settings abstractions changed"
   fi
+  # Farm.Modules.Abstractions is the IApiModule host-seam contract (issue
+  # #2035) — foundational like discovery/settings, so treat any change as
+  # full-safe rather than attempting to enumerate dependents.
+  if (( has_modules )); then
+    emit_full_safe "full-safe: module host seam (Farm.Modules.Abstractions) changed"
+  fi
   # tests_other = a future unmapped test project. Do not silently ignore.
   if (( has_tests_other )); then
     emit_full_safe "full-safe: unmapped test project changed"
+  fi
+  # tests_modules: Farm.Modules.Abstractions.Tests is not yet wired into a
+  # narrower path-selection bucket (mirrors Farm.Slicer.ProfileParsing.Tests
+  # and Farm.Moonraker.Emulator.Tests above) — full-safe until it is.
+  if (( has_tests_modules )); then
+    emit_full_safe "full-safe: Farm.Modules.Abstractions.Tests changed"
   fi
 
   # From here, we're in scoped-selection territory.

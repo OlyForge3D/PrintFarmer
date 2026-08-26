@@ -108,6 +108,21 @@
       "notes": "Registered but not yet wired into a path-selection bucket (issue #2022) -- currently only exercised via the tests_other/full-safe fallback in select-dotnet-tests.sh. This manifest entry preserves that behavior; it does not change selection."
     },
     {
+      "name": "Farm.Modules.Abstractions.Tests",
+      "testProject": "tests/Farm.Modules.Abstractions.Tests/Farm.Modules.Abstractions.Tests.csproj",
+      "productionProject": "modules/Farm.Modules.Abstractions/Farm.Modules.Abstractions.csproj",
+      "pathPrefixes": ["src/tests/Farm.Modules.Abstractions.Tests/"],
+      "dependsOnProjects": [
+        "src/modules/Farm.Modules.Abstractions/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Modules.Abstractions.Tests",
+      "notes": "New in issue #2035 (Phase 7: Farm.Modules.Abstractions + IApiModule host seam). select-dotnet-tests.sh treats src/modules/** and src/tests/Farm.Modules.Abstractions.Tests/** as full-safe (modules/tests_modules buckets) rather than a narrower path-selection bucket, since the module host seam is foundational and every future Farm.Modules.* vertical slice will reference it."
+    },
+    {
       "name": "Farm.Web.IntegrationTests",
       "testProject": "tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj",
       "productionProject": "api/Farm.Web.Api.csproj",

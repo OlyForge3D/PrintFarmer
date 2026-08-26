@@ -15,6 +15,7 @@ using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
+using Farm.Modules.Abstractions;
 using Farm.Slicer.Integration;
 using Farm.Web.Api;
 using Farm.Web.Api.Authorization;
@@ -197,6 +198,12 @@ catch
 
 // Add API services (returns mvcBuilder so the slicer integration shim can add ApplicationParts)
 IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
+
+// Vertical-slice API module discovery/registration seam (issue #2035, epic #2019). No
+// Farm.Modules.* assembly implements IApiModule yet, so this is a guaranteed no-op today: zero
+// ApplicationParts added, zero routes changed. Registering the call now means the host wiring
+// itself -- not just the abstraction -- is exercised before the first module lands.
+builder.Services.AddApiModules(mvcBuilder, builder.Configuration);
 
 if (slicerModuleEnabled)
 {
@@ -537,6 +544,10 @@ app.UseAuthorization();
 
 // Configure API routing and SignalR hubs
 app.MapControllers();
+
+// Map endpoints for any discovered IApiModule (issue #2035, epic #2019). No-op today -- no
+// module assembly exists yet -- until a later phase moves a controller into one.
+app.MapApiModules();
 
 // Public farm hubs require authenticated clients.
 app.MapHub<PrinterHub>("/hubs/printers");
