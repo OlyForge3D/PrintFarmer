@@ -118,7 +118,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Modules.PrintQueue", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Modules.PrintQueue.Tests", "tests\Farm.Modules.PrintQueue.Tests\Farm.Modules.PrintQueue.Tests.csproj", "{9907E47C-EC5C-47FC-AE2E-90F2326C51AA}"
 EndProject
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Modules.Maintenance", "modules\Farm.Modules.Maintenance\Farm.Modules.Maintenance.csproj", "{6AF14968-7EB3-4D70-92E8-2466B2087042}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Farm.Modules.Maintenance.Tests", "tests\Farm.Modules.Maintenance.Tests\Farm.Modules.Maintenance.Tests.csproj", "{A0C3984B-1D4A-44A7-B8CF-841944E875FC}"

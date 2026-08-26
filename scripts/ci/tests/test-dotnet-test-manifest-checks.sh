@@ -36,7 +36,16 @@
 #      class(es) are all nested at a non-zero code-brace depth (e.g. wrapped
 #      in a block-scoped `namespace X { ... }` instead of this codebase's
 #      usual file-scoped `namespace X;`), so there is no class at namespace
-#      scope to safely treat as the owner of its [Fact]/[Theory] attributes.
+#      scope to safely treat as the owner of its [Fact]/[Theory] attributes,
+#  12. does NOT desync its brace-depth count on a C# 11 raw string literal
+#      (`"""..."""`) containing an embedded `"` character and a `//`-looking
+#      substring -- both classes in the file must still be correctly
+#      attributed and reported as coverage gaps, proving the raw string's
+#      own closing delimiter was not swallowed by a mistaken ordinary-string
+#      or line-comment match, and
+#  13. FAILs closed (rather than silently using a desynced depth) when any
+#      construct -- not just an unhandled string form -- leaves the file's
+#      overall code-brace depth unbalanced at EOF.
 # =============================================================================
 
 set -uo pipefail
@@ -424,6 +433,95 @@ EOF
   fi
 }
 
+case_raw_string_literal_does_not_desync_brace_depth() {
+  # Negative (proves no misattribution): a C# 11 raw string literal
+  # (`"""..."""`) containing an embedded `"` character and a `//`-looking
+  # substring must not be mistaken for an ordinary string terminator or a
+  # line comment -- either mistake would blank past the raw string's own
+  # closing delimiter and desync the brace count for the rest of the file,
+  # potentially hiding or misattributing the second sibling class below it.
+  # (This reproduces the exact false-pass mechanism a round-6 reviewer
+  # demonstrated against `PerToolAttributionDtoSerializationTests.cs`.)
+  local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/_ScratchRawStringTests.cs"
+  cat >"$scratch" <<'EOF'
+namespace Farm.Web.Api.Tests;
+
+public class ScratchRawStringTests
+{
+    private const string Payload = """
+        {"legacy": "http://old.example" // not a real comment
+        """;
+
+    [Fact]
+    public void Foo()
+    {
+    }
+}
+
+public class ScratchRawStringSiblingTests
+{
+    [Fact]
+    public void Bar()
+    {
+    }
+}
+EOF
+  local rc=0
+  local report
+  report="$(bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$scratch"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail (both new classes are uncovered), but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" == *"unbalanced braces"* ]]; then
+    printf '  raw string literal desynced the brace count instead of being handled, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchRawStringTests.cs class ScratchRawStringTests"* ]]; then
+    printf '  expected a coverage-gap error naming the first class, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchRawStringTests.cs class ScratchRawStringSiblingTests"* ]]; then
+    printf '  expected a coverage-gap error naming the sibling after the raw string too -- the raw string must not have swallowed its closing delimiter, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_unbalanced_braces_fails_closed() {
+  # Negative: a stray, unmatched brace anywhere in the file (simulating any
+  # future C# construct `_strip_noncode` does not yet understand) must make
+  # the file's overall code-brace depth fail to return to 0 at EOF. The
+  # validator must refuse to guess class ownership in that case rather than
+  # silently using a desynced depth, regardless of what specific construct
+  # caused the desync.
+  local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/_ScratchUnbalancedBraceTests.cs"
+  cat >"$scratch" <<'EOF'
+namespace Farm.Web.Api.Tests;
+
+public class ScratchUnbalancedBraceTests
+{
+    [Fact]
+    public void Foo()
+    {
+    }
+}
+{
+EOF
+  local rc=0
+  local report
+  report="$(bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$scratch"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail closed on an unbalanced-brace file, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"has unbalanced braces after comment/string stripping"* ]]; then
+    printf '  expected an unbalanced-braces error, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
 TESTS=(
   case_baseline_roundtrip_passes
   case_duplicate_test_project_path_fails
@@ -436,6 +534,8 @@ TESTS=(
   case_api_shard_filter_coverage_fails
   case_sibling_mismatched_indentation_both_flagged_uncovered_fails
   case_block_scoped_namespace_fails_closed
+  case_raw_string_literal_does_not_desync_brace_depth
+  case_unbalanced_braces_fails_closed
 )
 
 printf '=== dotnet test manifest validator regression suite ===\n'

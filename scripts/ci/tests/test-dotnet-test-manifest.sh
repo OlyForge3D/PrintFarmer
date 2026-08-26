@@ -122,6 +122,40 @@ def _strip_noncode(text):
         blanks.append((start, n))
         return n
 
+    def scan_raw_string(open_start, body_start, quote_run):
+        """Scan a C# 11 raw string literal's body, starting right after its
+        opening delimiter (`open_start..body_start`, the run of any leading
+        `$` interpolation markers plus the opening `quote_run`-length run of
+        '"' characters), and blank the entire literal -- opening delimiter,
+        body, and closing delimiter alike. The closing delimiter is the
+        first run of at least `quote_run` consecutive '"' characters found
+        at or after `body_start`; searching from `body_start` (not
+        `open_start`) is essential, since the opening delimiter is itself
+        such a run and must never be mistaken for its own closer.
+
+        Unlike ordinary interpolated strings, interpolation holes inside a
+        raw string literal are NOT specially unblanked here: the whole body
+        -- hole braces included -- is blanked. This is deliberately blunter
+        than `scan_string`'s hole handling, but safe for brace-depth
+        purposes, since a hole's braces never contribute to the code-side
+        count either way (blanked or exposed-then-immediately-rebalanced),
+        so they cannot desynchronize `_code_brace_depths`.
+        """
+        i = body_start
+        while i < n:
+            if text[i] == '"':
+                j = i
+                while j < n and text[j] == '"':
+                    j += 1
+                if j - i >= quote_run:
+                    blanks.append((open_start, j))
+                    return j
+                i = j
+                continue
+            i += 1
+        blanks.append((open_start, n))
+        return n
+
     def scan_code(i, stop_at_hole_close):
         hole_depth = 0
         while i < n:
@@ -147,6 +181,22 @@ def _strip_noncode(text):
                 blanks.append((i, j))
                 i = j
                 continue
+            if c == '"' or c == "$":
+                # C# 11 raw string literal: zero or more '$' (interpolation
+                # markers), followed by a run of 3-or-more '"' characters.
+                # A run of only 1-2 quotes (an ordinary/empty string, or the
+                # `$"`/`@"`/`$@"`/`@$"` prefixes handled below) is not a raw
+                # string and falls through untouched.
+                j = i
+                while j < n and text[j] == "$":
+                    j += 1
+                k = j
+                while k < n and text[k] == '"':
+                    k += 1
+                quote_run = k - j
+                if quote_run >= 3:
+                    i = scan_raw_string(i, k, quote_run)
+                    continue
             if text[i:i + 3] in ("$@\"", "@$\""):
                 blanks.append((i, i + 3))
                 i = scan_string(i + 3, verbatim=True, interpolated=True)
@@ -557,7 +607,7 @@ for sharded_entry in entries:
             # the contents of every string/char literal (including
             # interpolation-hole delimiters and any string nested inside a
             # hole) before brace-counting, so `_code_brace_depths` gives the
-            # exact, syntactically-grounded nesting depth of each class
+            # syntactically-grounded nesting depth of each class
             # declaration: a class at namespace scope (this codebase uses
             # file-scoped namespaces exclusively) sits at depth 0, and a
             # class nested inside another class's body (e.g. the
@@ -567,7 +617,11 @@ for sharded_entry in entries:
             # happens to be indented, so a genuine top-level sibling that is
             # accidentally mis-indented can never be misattributed as
             # nested, and a genuinely nested class can never be mistaken for
-            # top-level.
+            # top-level. If `_strip_noncode` ever fails to recognize some
+            # C# construct (e.g. an unhandled string-literal form), the
+            # resulting depth desync cannot silently misattribute a class:
+            # the brace-balance check below fails closed the moment the
+            # file's overall code-brace depth does not return to 0 at EOF.
             class_matches = list(
                 re.finditer(
                     r"\bpublic\s+(?:(?:sealed|abstract|static|partial)\s+)*class\s+"
@@ -583,6 +637,18 @@ for sharded_entry in entries:
                 continue
 
             code_depths = _code_brace_depths(_strip_noncode(text))
+            if code_depths[-1] != 0:
+                errors.append(
+                    f"{entry_name}: test source {relative} has unbalanced "
+                    f"braces after comment/string stripping (ends at code "
+                    f"depth {code_depths[-1]} instead of 0) -- the "
+                    "shard-coverage validator's C# tokenizer may not "
+                    "understand a construct in this file; refusing to guess "
+                    "class ownership rather than risk a silent "
+                    "misattribution"
+                )
+                continue
+
             class_depths = {m.start(): code_depths[m.start()] for m in class_matches}
             min_depth = min(class_depths.values())
             if min_depth != 0:
