@@ -368,3 +368,11 @@ Validate the manifest itself with:
 bash scripts/ci/tests/test-dotnet-test-manifest.sh
 ```
 
+The validator's own logic (duplicate-`testProject`-path detection, full
+schema enforcement, fail-closed behavior on a crashed reader) has its own
+regression suite, run against mutated copies of the real manifest:
+
+```bash
+bash scripts/ci/tests/test-dotnet-test-manifest-checks.sh
+```
+

@@ -105,16 +105,14 @@ if [[ -z "$PYTHON_BIN" ]]; then
   exit 3
 fi
 
-ALL_TEST_PROJECTS=()
-while IFS= read -r manifest_line; do
-  # Strip a trailing CR: some local Windows Python interpreters translate
-  # stdout newlines to CRLF even when the script only ever prints "\n".
-  # `command -v python3` may legitimately return one of these on a dev
-  # machine, so tolerate CRLF here rather than assuming LF-only output.
-  manifest_line="${manifest_line%$'\r'}"
-  [[ -z "$manifest_line" ]] && continue
-  ALL_TEST_PROJECTS+=("$manifest_line")
-done < <("$PYTHON_BIN" - "$TEST_MANIFEST" <<'PYEOF'
+# Read the manifest via a plain command substitution (not a `< <(...)`
+# process substitution): bash propagates the exit status of a `var="$(cmd)"`
+# assignment to `$?`, which lets us fail closed below if the interpreter
+# crashes partway through (e.g. a malformed entry raises a KeyError after
+# already printing a few valid lines). A process-substitution pipeline does
+# not expose that exit status at all, so a partial crash would silently
+# produce a partial ALL_TEST_PROJECTS array instead of failing closed.
+manifest_output="$("$PYTHON_BIN" - "$TEST_MANIFEST" <<'PYEOF'
 import json
 import sys
 
@@ -128,7 +126,24 @@ for entry in data["testProjects"]:
     test_filter = entry.get("defaultFilter") or ""
     print(f"{name}|{project}|{run_integration}|{test_filter}")
 PYEOF
-)
+)"
+manifest_reader_rc=$?
+if [[ $manifest_reader_rc -ne 0 ]]; then
+  printf 'select-dotnet-tests: manifest reader failed (rc=%d) for %s -- treating as fail-closed\n' \
+    "$manifest_reader_rc" "$TEST_MANIFEST" >&2
+  exit 3
+fi
+
+ALL_TEST_PROJECTS=()
+while IFS= read -r manifest_line; do
+  # Strip a trailing CR: some local Windows Python interpreters translate
+  # stdout newlines to CRLF even when the script only ever prints "\n".
+  # `command -v python3` may legitimately return one of these on a dev
+  # machine, so tolerate CRLF here rather than assuming LF-only output.
+  manifest_line="${manifest_line%$'\r'}"
+  [[ -z "$manifest_line" ]] && continue
+  ALL_TEST_PROJECTS+=("$manifest_line")
+done <<< "$manifest_output"
 if [[ ${#ALL_TEST_PROJECTS[@]} -eq 0 ]]; then
   printf 'select-dotnet-tests: manifest at %s produced zero test projects\n' "$TEST_MANIFEST" >&2
   exit 3

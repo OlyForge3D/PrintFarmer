@@ -91,6 +91,22 @@ for name, count in seen_names.items():
     if count > 1:
         errors.append(f"duplicate manifest entry for {name} ({count} occurrences)")
 
+# 1b. Two entries with *different* names but the same testProject path would
+# still register one physical .csproj twice in the CI matrix -- de-duping by
+# 'name' alone does not catch this, so also de-dupe by normalized path.
+seen_test_project_paths = {}
+for entry in entries:
+    rel = entry.get("testProject")
+    if not rel:
+        continue
+    norm = os.path.normpath(rel)
+    seen_test_project_paths.setdefault(norm, []).append(entry.get("name", "<unnamed>"))
+for norm, owners in seen_test_project_paths.items():
+    if len(owners) > 1:
+        errors.append(
+            f"duplicate testProject path {norm} registered under multiple names: {', '.join(owners)}"
+        )
+
 # 2. Every manifest testProject file must exist under src/.
 for entry in entries:
     name = entry.get("name", "<unnamed>")
@@ -101,6 +117,35 @@ for entry in entries:
     abs_path = os.path.join(src_root, rel)
     if not os.path.isfile(abs_path):
         errors.append(f"{name}: testProject path does not exist on disk: {rel}")
+
+# 2b. Schema: every entry must declare all fields the manifest contract
+# promises (see docs/CI.md), with the expected JSON type. A missing or
+# mistyped field (e.g. requiresProviders as a string instead of a list, or
+# runIntegration as "true" instead of true) would silently break downstream
+# consumers without this check.
+REQUIRED_STRING_FIELDS = ("productionProject", "testProject", "defaultFilter", "leg")
+REQUIRED_LIST_FIELDS = ("pathPrefixes", "dependsOnProjects", "shards", "requiresProviders")
+REQUIRED_BOOL_FIELDS = ("runIntegration",)
+for entry in entries:
+    name = entry.get("name", "<unnamed>")
+    for field in REQUIRED_STRING_FIELDS:
+        value = entry.get(field)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(f"{name}: field '{field}' must be a non-empty string, got {value!r}")
+    for field in REQUIRED_LIST_FIELDS:
+        if field not in entry:
+            errors.append(f"{name}: missing required field '{field}'")
+            continue
+        value = entry[field]
+        if not isinstance(value, list):
+            errors.append(f"{name}: field '{field}' must be a list, got {type(value).__name__}")
+    for field in REQUIRED_BOOL_FIELDS:
+        if field not in entry:
+            errors.append(f"{name}: missing required field '{field}'")
+            continue
+        value = entry[field]
+        if not isinstance(value, bool):
+            errors.append(f"{name}: field '{field}' must be a boolean, got {value!r}")
 
 # 3. Farm.Web.IntegrationTests must be explicitly registered (it never
 # matches the '*.Tests.csproj' glob used for auto-discovery below).
@@ -200,6 +245,18 @@ for e in errors:
     print(f"ERROR: {e}")
 PYEOF
 )"
+manifest_reader_rc=$?
+
+# A nonzero exit here means the Python subprocess crashed (e.g. an uncaught
+# exception from malformed JSON structure that json.load() itself accepted
+# but the schema checks above did not anticipate) rather than completing and
+# reporting zero or more "ERROR: ..." lines. Ignoring this would let a
+# validator crash look identical to "no problems found" -- fail closed
+# instead of falling through to the empty-report PASS path below.
+if [[ $manifest_reader_rc -ne 0 ]]; then
+  echo "FAIL: dotnet test manifest validator crashed (python exit code $manifest_reader_rc); see stderr above for the traceback" >&2
+  exit 1
+fi
 
 if [[ -n "$manifest_report" ]]; then
   while IFS= read -r line; do

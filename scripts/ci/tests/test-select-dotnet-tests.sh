@@ -2406,6 +2406,44 @@ case_manifest_malformed_json_fails_closed() {
   fi
 }
 
+case_manifest_partial_crash_fails_closed() {
+  # Negative: a manifest that is valid JSON but whose second entry is
+  # missing the required 'name' key makes the Python reader print one valid
+  # line and then crash with a KeyError. The selector must fail closed
+  # (rc=3) on this partial-output crash rather than silently proceeding with
+  # only the first entry, which would look like an innocuous, intentionally
+  # small manifest instead of a broken one.
+  local rc=0
+  local partial_manifest ; partial_manifest="$(mktemp)"
+  cat > "$partial_manifest" <<'JSON'
+{
+  "testProjects": [
+    {
+      "name": "Farm.Web.Api.Tests",
+      "testProject": "tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj",
+      "runIntegration": false,
+      "defaultFilter": "Category!=DbHeavy"
+    },
+    {
+      "testProject": "tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj",
+      "runIntegration": false,
+      "defaultFilter": "Category!=DbHeavy"
+    }
+  ]
+}
+JSON
+  CHANGED_FILES="src/api/Foo.cs" \
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" \
+    TEST_MANIFEST_PATH="$partial_manifest" \
+    bash "$SELECTOR" >/dev/null 2>&1 || rc=$?
+  rm -f "$partial_manifest"
+  if (( rc != 3 )); then
+    printf '  expected rc=3 for a manifest reader crash after partial output, got %d\n' "$rc" >&2
+    return 1
+  fi
+}
+
 case_manifest_custom_projects_reflected_in_matrix() {
   # Mixed-path: point at a custom single-project manifest (fabricated
   # project name, still routed through the unchanged api bucket) and prove
@@ -2530,6 +2568,7 @@ TESTS=(
   case_manifest_missing_file_fails_closed
   case_manifest_empty_test_projects_fails_closed
   case_manifest_malformed_json_fails_closed
+  case_manifest_partial_crash_fails_closed
   case_manifest_custom_projects_reflected_in_matrix
 )
 
