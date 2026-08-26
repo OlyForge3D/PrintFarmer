@@ -4,3 +4,8 @@
 // needs CustomWebApplicationFactory's internal configOverrides constructor to spin up the
 // real host for per-endpoint auth-behaviour testing.
 [assembly: InternalsVisibleTo("Farm.Modules.Identity.Tests")]
+// SpoolmanBarcodeEndpointTests and FilamentCoverageControllerTests (moved to
+// Farm.Modules.Inventory.Tests as part of issue #2044) reuse
+// CustomWebApplicationFactory's internal configOverrides constructor to spin up
+// the real host for inventory endpoint testing.
+[assembly: InternalsVisibleTo("Farm.Modules.Inventory.Tests")]
