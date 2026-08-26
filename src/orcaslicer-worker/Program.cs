@@ -45,9 +45,11 @@ public sealed class Program
 
         // HTTP clients (for API communication, artifact upload, and slicing pipeline)
         _ = builder.Services.AddTransient<WorkerApiAuthenticationHandler>();
+        _ = builder.Services.AddTransient<CustomProfilesClaimAvailabilityHandler>();
         _ = builder.Services
             .AddHttpClient(WorkerApiHttpClient.Name)
-            .AddHttpMessageHandler<WorkerApiAuthenticationHandler>();
+            .AddHttpMessageHandler<WorkerApiAuthenticationHandler>()
+            .AddHttpMessageHandler<CustomProfilesClaimAvailabilityHandler>();
         _ = builder.Services
             .AddHttpClient<IProgressReporter, HttpProgressReporter>()
             .AddHttpMessageHandler<WorkerApiAuthenticationHandler>();
@@ -66,12 +68,14 @@ public sealed class Program
             return new CachedOrcaProfilesService(logger);
         });
         _ = builder.Services.AddSingleton<CustomProfileBundleStore>();
+        _ = builder.Services.AddSingleton<CustomProfilesReconciliationState>();
         _ = builder.Services.AddSingleton<WorkerSharedKeyValidator>();
         _ = builder.Services.AddSingleton<ISlicerProfilesService>(sp => sp.GetRequiredService<CachedOrcaProfilesService>());
         _ = builder.Services.AddSingleton<IProfilePreloadService, ProfilePreloadService>(); // profile preload before readiness
 
         // Background services (shared graceful shutdown + queue consumer derived)
         _ = builder.Services.AddHostedService<GracefulShutdownService>(); // shared
+        _ = builder.Services.AddHostedService<CustomProfilesReconciliationService>();
         _ = builder.Services.AddHostedService<QueueConsumerService>(); // derived
         _ = builder.Services.AddHostedService<RegistrationBackgroundService>(); // registration & heartbeat
 
@@ -79,6 +83,7 @@ public sealed class Program
         _ = builder.Services.AddHealthChecks()
             .AddCheck<WorkerLivenessHealthCheck>("liveness")
             .AddCheck<WorkerReadinessHealthCheck>("readiness")
+            .AddCheck<CustomProfilesReconciliationHealthCheck>("custom_profiles")
             .AddCheck<OrcaBinaryHealthCheck>("orca_binary");
 
         WebApplication app = builder.Build();
@@ -120,7 +125,10 @@ public sealed class Program
 
         _ = app.MapHealthChecks("/health/ready", new HealthCheckOptions
         {
-            Predicate = c => (c.Name == "readiness" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary"),
+            Predicate = c => (c.Name == "readiness"
+                || c.Name == "orca_binary"
+                || c.Name == "custom_profiles")
+                && (!relaxedReadiness || c.Name != "orca_binary"),
             ResponseWriter = async (context, report) =>
             {
                 context.Response.ContentType = "application/json";
@@ -138,7 +146,10 @@ public sealed class Program
 
         _ = app.MapHealthChecks("/ready", new HealthCheckOptions
         {
-            Predicate = c => (c.Name == "readiness" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary")
+            Predicate = c => (c.Name == "readiness"
+                || c.Name == "orca_binary"
+                || c.Name == "custom_profiles")
+                && (!relaxedReadiness || c.Name != "orca_binary")
         });
 
         _ = app.MapGet("/", (IOrcaBinaryDetector detector, WorkerCapabilityProvider capabilityProvider) => Results.Ok(new

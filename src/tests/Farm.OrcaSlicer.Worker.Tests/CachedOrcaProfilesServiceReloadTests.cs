@@ -1,6 +1,8 @@
 ﻿using System.Text.Json;
+using Farm.OrcaSlicer.Worker.Controllers;
 using Farm.OrcaSlicer.Worker.Services;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -139,6 +141,249 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
                 exception.Code == "stock_bundle_conflict");
     }
 
+    [Theory]
+    [InlineData(".")]
+    [InlineData("..")]
+    [InlineData("...")]
+    public async Task InstallAsync_AllDotBundleName_RejectsPath(
+        string bundleName)
+    {
+        string stockRoot = Path.Join(_testRoot, "stock");
+        string overlayRoot = Path.Join(_testRoot, "overlay");
+        string customRoot = Path.Join(_testRoot, "custom");
+        Directory.CreateDirectory(stockRoot);
+        Directory.CreateDirectory(overlayRoot);
+        Directory.CreateDirectory(customRoot);
+        string sentinelPath = Path.Join(_testRoot, "sentinel.txt");
+        await File.WriteAllTextAsync(sentinelPath, "unchanged");
+        await using var store = new CustomProfileBundleStore(
+            NullLogger<CustomProfileBundleStore>.Instance,
+            stockRoot,
+            overlayRoot,
+            customRoot);
+
+        Func<Task> act = () => store.InstallAsync(
+            bundleName,
+            Bundle([], []));
+
+        await act.Should().ThrowAsync<CustomProfileBundleException>()
+            .Where(exception =>
+                exception.Code == "invalid_bundle_name");
+        (await File.ReadAllTextAsync(sentinelPath)).Should().Be("unchanged");
+    }
+
+    [Theory]
+    [InlineData("../../etc/foo.json")]
+    [InlineData("/etc/foo.json")]
+    [InlineData("C:/etc/foo.json")]
+    [InlineData(@"C:\etc\foo.json")]
+    public async Task InstallAsync_UnsafeRelativePath_RejectsPath(
+        string relativePath)
+    {
+        string stockRoot = Path.Join(_testRoot, "stock");
+        string overlayRoot = Path.Join(_testRoot, "overlay");
+        string customRoot = Path.Join(_testRoot, "custom");
+        Directory.CreateDirectory(stockRoot);
+        Directory.CreateDirectory(overlayRoot);
+        Directory.CreateDirectory(customRoot);
+        string escapedPath = Path.Join(_testRoot, "etc", "foo.json");
+        await using var store = new CustomProfileBundleStore(
+            NullLogger<CustomProfileBundleStore>.Instance,
+            stockRoot,
+            overlayRoot,
+            customRoot);
+
+        Func<Task> act = () => store.InstallAsync(
+            "Custom",
+            Bundle(
+                [],
+                [
+                    new CustomProfileFileRequest(
+                        relativePath,
+                        "Family",
+                        Json("""{"name":"Escaped"}""")),
+                ]));
+
+        await act.Should().ThrowAsync<CustomProfileBundleException>()
+            .Where(exception =>
+                exception.Code == "invalid_profile_path");
+        File.Exists(escapedPath).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task MutateAndReloadProfilesAsync_ConcurrentRead_WaitsForWriter()
+    {
+        string stockRoot = Path.Join(_testRoot, "stock");
+        string overlayRoot = Path.Join(_testRoot, "overlay");
+        string customRoot = Path.Join(_testRoot, "custom");
+        string dbPath = Path.Join(_testRoot, "cache", "profiles.db");
+        Directory.CreateDirectory(stockRoot);
+        Directory.CreateDirectory(overlayRoot);
+        Directory.CreateDirectory(customRoot);
+        WriteStockProfile(stockRoot, overlayRoot);
+        await using var service = new CachedOrcaProfilesService(
+            NullLogger<CachedOrcaProfilesService>.Instance,
+            overlayRoot,
+            dbPath,
+            customRoot);
+        _ = await service.ListAvailableMachineProfilesAsync();
+
+        TaskCompletionSource mutationEntered =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource releaseMutation =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task mutation = service.MutateAndReloadProfilesAsync(
+            async cancellationToken =>
+            {
+                mutationEntered.SetResult();
+                await releaseMutation.Task.WaitAsync(cancellationToken);
+                return true;
+            });
+        await mutationEntered.Task;
+
+        var read = service.ListAvailableMachineProfilesAsync();
+        await Task.Delay(TimeSpan.FromMilliseconds(100));
+
+        read.IsCompleted.Should().BeFalse();
+        releaseMutation.SetResult();
+        await mutation;
+        (await read).Should().ContainSingle(
+            profile => profile.Name == "Stock Parent");
+    }
+
+    [Fact]
+    public async Task ReconcileOverlayAsync_SharedVolume_LoadsSiblingBundle()
+    {
+        string stockRoot = Path.Join(_testRoot, "stock");
+        string overlayRootA = Path.Join(_testRoot, "overlay-a");
+        string overlayRootB = Path.Join(_testRoot, "overlay-b");
+        string customRoot = Path.Join(_testRoot, "custom");
+        Directory.CreateDirectory(stockRoot);
+        Directory.CreateDirectory(overlayRootA);
+        Directory.CreateDirectory(overlayRootB);
+        Directory.CreateDirectory(customRoot);
+        WriteStockProfile(stockRoot, overlayRootA);
+        LinkStockProfile(stockRoot, overlayRootB);
+
+        await using var storeA = new CustomProfileBundleStore(
+            NullLogger<CustomProfileBundleStore>.Instance,
+            stockRoot,
+            overlayRootA,
+            customRoot);
+        await using var storeB = new CustomProfileBundleStore(
+            NullLogger<CustomProfileBundleStore>.Instance,
+            stockRoot,
+            overlayRootB,
+            customRoot);
+        await using var serviceA = new CachedOrcaProfilesService(
+            NullLogger<CachedOrcaProfilesService>.Instance,
+            overlayRootA,
+            Path.Join(_testRoot, "cache-a", "profiles.db"),
+            customRoot);
+        await using var serviceB = new CachedOrcaProfilesService(
+            NullLogger<CachedOrcaProfilesService>.Instance,
+            overlayRootB,
+            Path.Join(_testRoot, "cache-b", "profiles.db"),
+            customRoot);
+        _ = await serviceA.ListAvailableMachineProfilesAsync();
+        _ = await serviceB.ListAvailableMachineProfilesAsync();
+
+        _ = await serviceA.MutateAndReloadProfilesAsync(
+            async cancellationToken =>
+            {
+                await storeA.InstallAsync(
+                    "Custom",
+                    CompleteBundle(),
+                    cancellationToken);
+                return true;
+            });
+        (_, ProfileReloadResult siblingReload) =
+            await serviceB.MutateAndReloadProfilesAsync(
+                storeB.ReconcileOverlayAsync);
+
+        siblingReload.Failures.Should().BeEmpty();
+        (await serviceB.GetMachineProfilesByPrinterModelAsync(
+            "Voron 2.4 180"))
+            .Should().ContainSingle()
+            .Which.Name.Should().Be("Micron 180 0.4 nozzle");
+    }
+
+    [Fact]
+    public async Task InstallAsync_MissingParent_RollsBackRejectedBundle()
+    {
+        string stockRoot = Path.Join(_testRoot, "stock");
+        string overlayRoot = Path.Join(_testRoot, "overlay");
+        string customRoot = Path.Join(_testRoot, "custom");
+        string dbPath = Path.Join(_testRoot, "cache", "profiles.db");
+        Directory.CreateDirectory(stockRoot);
+        Directory.CreateDirectory(overlayRoot);
+        Directory.CreateDirectory(customRoot);
+        WriteStockProfile(stockRoot, overlayRoot);
+        await using var store = new CustomProfileBundleStore(
+            NullLogger<CustomProfileBundleStore>.Instance,
+            stockRoot,
+            overlayRoot,
+            customRoot);
+        await using var service = new CachedOrcaProfilesService(
+            NullLogger<CachedOrcaProfilesService>.Instance,
+            overlayRoot,
+            dbPath,
+            customRoot);
+        CustomProfilesReconciliationState state = new();
+        CustomProfilesController controller = new(
+            store,
+            service,
+            state,
+            NullLogger<CustomProfilesController>.Instance);
+
+        ActionResult<CustomProfileMutationResponse> result =
+            await controller.InstallAsync(
+                "Broken",
+                Bundle(
+                    [("Broken Child", "machine/broken.json")],
+                    [
+                        new CustomProfileFileRequest(
+                            "machine/broken.json",
+                            "Broken Family",
+                            Json("""
+                                {
+                                  "name": "Broken Child",
+                                  "inherits": "Unavailable Parent",
+                                  "instantiation": "true",
+                                  "printer_model": "Broken Model",
+                                  "nozzle_diameter": ["0.4"]
+                                }
+                                """)),
+                    ]),
+                CancellationToken.None);
+
+        result.Result.Should()
+            .BeOfType<UnprocessableEntityObjectResult>();
+        File.Exists(Path.Join(customRoot, "Broken.json")).Should().BeFalse();
+        Directory.Exists(Path.Join(customRoot, "Broken")).Should().BeFalse();
+        state.IsReady.Should().BeTrue();
+    }
+
+    [Fact]
+    public void HasBlockingFailures_UnrelatedBundle_ReturnsFalse()
+    {
+        CustomProfileLoadFailure failure = new(
+            "Broken",
+            "Family",
+            "Profile",
+            "Parent");
+
+        CustomProfilesController.HasBlockingFailures(
+            [failure],
+            "Healthy").Should().BeFalse();
+        CustomProfilesController.HasBlockingFailures(
+            [failure],
+            "Broken").Should().BeTrue();
+        CustomProfilesController.HasBlockingFailures(
+            [failure],
+            affectedBundleName: null).Should().BeTrue();
+    }
+
     /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
@@ -211,6 +456,13 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
               "gcode_flavor": "klipper"
             }
             """);
+        LinkStockProfile(stockRoot, overlayRoot);
+    }
+
+    private static void LinkStockProfile(
+        string stockRoot,
+        string overlayRoot)
+    {
         _ = File.CreateSymbolicLink(
             Path.Join(overlayRoot, "Stock.json"),
             Path.Join(stockRoot, "Stock.json"));
@@ -218,4 +470,36 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
             Path.Join(overlayRoot, "Stock"),
             Path.Join(stockRoot, "Stock"));
     }
+
+    private static CustomProfileBundleRequest CompleteBundle() =>
+        Bundle(
+            [
+                ("Micron 180 base", "machine/base.json"),
+                ("Micron 180 0.4 nozzle", "machine/micron.json"),
+            ],
+            [
+                new CustomProfileFileRequest(
+                    "machine/base.json",
+                    "Micron 180",
+                    Json("""
+                        {
+                          "name": "Micron 180 base",
+                          "inherits": "Stock Parent",
+                          "instantiation": "false",
+                          "printable_height": "165"
+                        }
+                        """)),
+                new CustomProfileFileRequest(
+                    "machine/micron.json",
+                    "Micron 180",
+                    Json("""
+                        {
+                          "name": "Micron 180 0.4 nozzle",
+                          "inherits": "Micron 180 base",
+                          "instantiation": "true",
+                          "printer_model": "Voron 2.4 180",
+                          "nozzle_diameter": ["0.4"]
+                        }
+                        """)),
+            ]);
 }

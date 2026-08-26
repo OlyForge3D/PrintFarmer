@@ -1,4 +1,6 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
@@ -11,7 +13,7 @@ namespace Farm.OrcaSlicer.Worker.Services;
 [SuppressMessage(
     "Security",
     "CA3003:Review code for file path injection vulnerabilities",
-    Justification = "Bundle names and every relative path segment are allowlist-validated before paths are combined with fixed canonical roots.")]
+    Justification = "Names are allowlist-validated and every resolved path is canonicalized and containment-checked against a fixed root.")]
 public sealed partial class CustomProfileBundleStore : IAsyncDisposable
 {
     private const int MaxFiles = 10_000;
@@ -23,6 +25,13 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
     private readonly string _overlayProfilesPath;
     private readonly string _customProfilesPath;
     private readonly SemaphoreSlim _mutationLock = new(1, 1);
+    private readonly HashSet<string> _knownCustomBundles;
+    private readonly object _fingerprintSync = new();
+    private readonly Dictionary<string, FingerprintFileState>
+        _fingerprintFiles = new(
+            OperatingSystem.IsWindows()
+                ? StringComparer.OrdinalIgnoreCase
+                : StringComparer.Ordinal);
 
     /// <summary>
     /// Creates a custom profile bundle store from the worker's profile-path
@@ -51,6 +60,8 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             customProfilesPath
             ?? Environment.GetEnvironmentVariable("ORCA_CUSTOM_PROFILES_PATH")
             ?? "/app/custom-profiles");
+        _knownCustomBundles = DiscoverCompleteBundleNames(
+            failOnIncomplete: false);
     }
 
     /// <summary>
@@ -67,27 +78,32 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(request);
         ValidateConfiguration();
         ValidateBundleName(bundleName);
-        PreparedBundle prepared = PrepareBundle(request);
+        PreparedBundle prepared = PrepareBundle(bundleName, request);
 
         await _mutationLock.WaitAsync(ct);
         try
         {
             EnsureStockBundleDoesNotExist(bundleName);
             Directory.CreateDirectory(_customProfilesPath);
-            Directory.CreateDirectory(Path.Join(_customProfilesPath, ".printfarmer"));
+            Directory.CreateDirectory(GetMetadataDirectoryPath());
             Directory.CreateDirectory(_overlayProfilesPath);
 
             string operationId = Guid.NewGuid().ToString("N");
-            string stagingDirectory = Path.Join(
+            string stagingDirectory = ResolveContainedPath(
                 _customProfilesPath,
-                $".install-{operationId}");
-            string stagingManifest = Path.Join(
+                $".install-{operationId}",
+                "invalid_bundle_path",
+                "The bundle staging directory escaped the custom profile root.");
+            string stagingManifest = ResolveContainedPath(
                 _customProfilesPath,
-                $".install-{operationId}.json");
-            string stagingMetadata = Path.Join(
-                _customProfilesPath,
-                ".printfarmer",
-                $".install-{operationId}.families.json");
+                $".install-{operationId}.json",
+                "invalid_bundle_path",
+                "The bundle staging manifest escaped the custom profile root.");
+            string stagingMetadata = ResolveContainedPath(
+                GetMetadataDirectoryPath(),
+                $".install-{operationId}.families.json",
+                "invalid_bundle_path",
+                "The bundle staging metadata escaped the custom metadata root.");
 
             try
             {
@@ -107,6 +123,7 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
                 {
                     EnsureOverlayLinks(bundleName);
                     DeletePromotionBackup(backup);
+                    _ = _knownCustomBundles.Add(bundleName);
                 }
                 catch
                 {
@@ -161,14 +178,17 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             }
 
             RemoveOverlayLink(
-                Path.Join(_overlayProfilesPath, $"{bundleName}.json"),
-                manifestPath);
+                GetOverlayManifestPath(bundleName),
+                manifestPath,
+                isDirectory: false);
             RemoveOverlayLink(
-                Path.Join(_overlayProfilesPath, bundleName),
-                directoryPath);
+                GetOverlayDirectoryPath(bundleName),
+                directoryPath,
+                isDirectory: true);
             DeletePathIfPresent(manifestPath);
             DeletePathIfPresent(directoryPath);
             DeletePathIfPresent(metadataPath);
+            _ = _knownCustomBundles.Remove(bundleName);
 
             _logger.LogInformation(
                 "Removed custom OrcaSlicer bundle {BundleName}",
@@ -178,6 +198,127 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         finally
         {
             _mutationLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Reconciles this process's ephemeral overlay links with the shared custom
+    /// profile volume.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><see langword="true"/> when the visible bundle set changed.</returns>
+    public async Task<bool> ReconcileOverlayAsync(
+        CancellationToken ct = default)
+    {
+        ValidateConfiguration();
+        await _mutationLock.WaitAsync(ct);
+        try
+        {
+            Directory.CreateDirectory(_customProfilesPath);
+            Directory.CreateDirectory(GetMetadataDirectoryPath());
+            Directory.CreateDirectory(_overlayProfilesPath);
+
+            HashSet<string> currentBundles = DiscoverCompleteBundleNames(
+                failOnIncomplete: true);
+            bool changed = !_knownCustomBundles.SetEquals(currentBundles);
+
+            foreach (string removedBundle in
+                _knownCustomBundles.Except(currentBundles).ToArray())
+            {
+                RemoveOverlayLink(
+                    GetOverlayManifestPath(removedBundle),
+                    GetCustomManifestPath(removedBundle),
+                    isDirectory: false);
+                RemoveOverlayLink(
+                    GetOverlayDirectoryPath(removedBundle),
+                    GetCustomDirectoryPath(removedBundle),
+                    isDirectory: true);
+            }
+
+            foreach (string bundleName in currentBundles)
+            {
+                EnsureOverlayLinks(bundleName);
+            }
+
+            _knownCustomBundles.Clear();
+            _knownCustomBundles.UnionWith(currentBundles);
+
+            if (changed)
+            {
+                _logger.LogInformation(
+                    "Reconciled {BundleCount} custom OrcaSlicer bundles from the shared volume",
+                    currentBundles.Count);
+            }
+
+            return changed;
+        }
+        finally
+        {
+            _mutationLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Calculates a stable fingerprint of installed custom bundle source files.
+    /// </summary>
+    /// <returns>Fingerprint used to detect changes made by sibling workers.</returns>
+    public string CalculateCustomProfilesFingerprint()
+    {
+        ValidateConfiguration();
+        if (!Directory.Exists(_customProfilesPath))
+        {
+            return "empty";
+        }
+
+        lock (_fingerprintSync)
+        {
+            StringBuilder fingerprintSource = new();
+            HashSet<string> currentPaths = new(
+                _fingerprintFiles.Comparer);
+            foreach (string path in Directory
+                .EnumerateFiles(
+                    _customProfilesPath,
+                    "*",
+                    SearchOption.AllDirectories)
+                .Where(path => !IsTransientCustomPath(path))
+                .OrderBy(path => path, StringComparer.Ordinal))
+            {
+                _ = currentPaths.Add(path);
+                FileInfo file = new(path);
+                if (!_fingerprintFiles.TryGetValue(
+                        path,
+                        out FingerprintFileState? cached)
+                    || cached is null
+                    || cached.Length != file.Length
+                    || cached.LastWriteTicks
+                        != file.LastWriteTimeUtc.Ticks)
+                {
+                    using FileStream stream = File.OpenRead(path);
+                    cached = new FingerprintFileState(
+                        file.Length,
+                        file.LastWriteTimeUtc.Ticks,
+                        Convert.ToHexString(SHA256.HashData(stream)));
+                    _fingerprintFiles[path] = cached;
+                }
+
+                _ = fingerprintSource
+                    .Append(Path.GetRelativePath(
+                        _customProfilesPath,
+                        path))
+                    .Append(':')
+                    .Append(cached.ContentHash)
+                    .Append(';');
+            }
+
+            foreach (string removedPath in
+                _fingerprintFiles.Keys.Except(currentPaths).ToArray())
+            {
+                _ = _fingerprintFiles.Remove(removedPath);
+            }
+
+            byte[] hash = SHA256.HashData(
+                Encoding.UTF8.GetBytes(fingerprintSource.ToString()));
+            return Convert.ToHexString(hash);
         }
     }
 
@@ -216,6 +357,7 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(bundleName)
             || bundleName.Length > 128
+            || bundleName.All(character => character == '.')
             || !BundleNameRegex().IsMatch(bundleName))
         {
             throw new CustomProfileBundleException(
@@ -224,7 +366,9 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         }
     }
 
-    private PreparedBundle PrepareBundle(CustomProfileBundleRequest request)
+    private PreparedBundle PrepareBundle(
+        string bundleName,
+        CustomProfileBundleRequest request)
     {
         if (request.Manifest.ValueKind != JsonValueKind.Object)
         {
@@ -253,6 +397,13 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         foreach (CustomProfileFileRequest file in files)
         {
             string relativePath = NormalizeRelativePath(file.RelativePath);
+            _ = ResolveContainedPath(
+                GetCustomDirectoryPath(bundleName),
+                relativePath.Replace(
+                    '/',
+                    Path.DirectorySeparatorChar),
+                "invalid_profile_path",
+                "A profile path escaped its custom bundle root.");
             if (!relativePaths.Add(relativePath))
             {
                 throw new CustomProfileBundleException(
@@ -298,6 +449,8 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(relativePath)
             || Path.IsPathRooted(relativePath)
+            || Path.IsPathFullyQualified(relativePath)
+            || DriveQualifiedPathRegex().IsMatch(relativePath)
             || relativePath.Contains('\\', StringComparison.Ordinal)
             || !relativePath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
         {
@@ -335,9 +488,11 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
 
         foreach (PreparedFile file in prepared.Files)
         {
-            string destination = Path.Join(
+            string destination = ResolveContainedPath(
                 stagingDirectory,
-                file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+                file.RelativePath.Replace('/', Path.DirectorySeparatorChar),
+                "invalid_profile_path",
+                "A profile path escaped its staging bundle root.");
             Directory.CreateDirectory(
                 Path.GetDirectoryName(destination)
                 ?? throw new InvalidOperationException("Profile destination has no directory."));
@@ -358,16 +513,21 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         string targetDirectory = GetCustomDirectoryPath(bundleName);
         string targetManifest = GetCustomManifestPath(bundleName);
         string targetMetadata = GetMetadataPath(bundleName);
-        string backupDirectory = Path.Join(
+        string backupDirectory = ResolveContainedPath(
             _customProfilesPath,
-            $".backup-{operationId}");
-        string backupManifest = Path.Join(
+            $".backup-{operationId}",
+            "invalid_bundle_path",
+            "The bundle backup directory escaped the custom profile root.");
+        string backupManifest = ResolveContainedPath(
             _customProfilesPath,
-            $".backup-{operationId}.json");
-        string backupMetadata = Path.Join(
-            _customProfilesPath,
-            ".printfarmer",
-            $".backup-{operationId}.families.json");
+            $".backup-{operationId}.json",
+            "invalid_bundle_path",
+            "The bundle backup manifest escaped the custom profile root.");
+        string backupMetadata = ResolveContainedPath(
+            GetMetadataDirectoryPath(),
+            $".backup-{operationId}.families.json",
+            "invalid_bundle_path",
+            "The bundle backup metadata escaped the custom metadata root.");
 
         MoveIfPresent(targetDirectory, backupDirectory);
         MoveIfPresent(targetManifest, backupManifest);
@@ -398,8 +558,8 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
 
     private void EnsureStockBundleDoesNotExist(string bundleName)
     {
-        if (File.Exists(Path.Join(_stockProfilesPath, $"{bundleName}.json"))
-            || Directory.Exists(Path.Join(_stockProfilesPath, bundleName)))
+        if (File.Exists(GetStockManifestPath(bundleName))
+            || Directory.Exists(GetStockDirectoryPath(bundleName)))
         {
             throw new CustomProfileBundleException(
                 "stock_bundle_conflict",
@@ -409,12 +569,8 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
 
     private void EnsureOverlayLinks(string bundleName)
     {
-        string manifestLink = Path.Join(
-            _overlayProfilesPath,
-            $"{bundleName}.json");
-        string directoryLink = Path.Join(
-            _overlayProfilesPath,
-            bundleName);
+        string manifestLink = GetOverlayManifestPath(bundleName);
+        string directoryLink = GetOverlayDirectoryPath(bundleName);
         bool manifestCreated = false;
         bool directoryCreated = false;
 
@@ -447,7 +603,7 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
     {
         if (File.Exists(linkPath))
         {
-            EnsureExpectedLink(linkPath, targetPath);
+            EnsureExpectedLink(linkPath, targetPath, isDirectory: false);
             return false;
         }
 
@@ -459,7 +615,7 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
     {
         if (Directory.Exists(linkPath))
         {
-            EnsureExpectedLink(linkPath, targetPath);
+            EnsureExpectedLink(linkPath, targetPath, isDirectory: true);
             return false;
         }
 
@@ -492,18 +648,28 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         DeletePathIfPresent(backup.MetadataPath);
     }
 
-    private static void EnsureExpectedLink(string linkPath, string targetPath)
+    private static void EnsureExpectedLink(
+        string linkPath,
+        string targetPath,
+        bool isDirectory)
     {
-        FileSystemInfo link = Directory.Exists(linkPath)
+        FileSystemInfo link = isDirectory
             ? new DirectoryInfo(linkPath)
             : new FileInfo(linkPath);
-        FileSystemInfo? resolved = link.ResolveLinkTarget(returnFinalTarget: true);
+        string? rawTarget = link.LinkTarget;
         StringComparison comparison = OperatingSystem.IsWindows()
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
-        if (resolved is null
+        string? linkDirectory = Path.GetDirectoryName(linkPath);
+        string? resolvedTarget = rawTarget is null
+            ? null
+            : Path.GetFullPath(
+                Path.IsPathRooted(rawTarget)
+                    ? rawTarget
+                    : Path.Join(linkDirectory, rawTarget));
+        if (resolvedTarget is null
             || !string.Equals(
-                Path.GetFullPath(resolved.FullName),
+                resolvedTarget,
                 Path.GetFullPath(targetPath),
                 comparison))
         {
@@ -513,35 +679,195 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         }
     }
 
-    private static void RemoveOverlayLink(string linkPath, string targetPath)
+    private static void RemoveOverlayLink(
+        string linkPath,
+        string targetPath,
+        bool isDirectory)
     {
-        if (!File.Exists(linkPath) && !Directory.Exists(linkPath))
+        FileSystemInfo link = isDirectory
+            ? new DirectoryInfo(linkPath)
+            : new FileInfo(linkPath);
+        if (!File.Exists(linkPath)
+            && !Directory.Exists(linkPath)
+            && link.LinkTarget is null)
         {
             return;
         }
 
-        EnsureExpectedLink(linkPath, targetPath);
-        if (Directory.Exists(linkPath))
-        {
-            Directory.Delete(linkPath);
-        }
-        else
-        {
-            File.Delete(linkPath);
-        }
+        EnsureExpectedLink(linkPath, targetPath, isDirectory);
+        link.Delete();
     }
 
     private string GetCustomManifestPath(string bundleName) =>
-        Path.Join(_customProfilesPath, $"{bundleName}.json");
+        ResolveContainedPath(
+            _customProfilesPath,
+            $"{bundleName}.json",
+            "invalid_bundle_path",
+            "The custom manifest path escaped the custom profile root.");
 
     private string GetCustomDirectoryPath(string bundleName) =>
-        Path.Join(_customProfilesPath, bundleName);
+        ResolveContainedPath(
+            _customProfilesPath,
+            bundleName,
+            "invalid_bundle_path",
+            "The custom bundle path escaped the custom profile root.");
 
     private string GetMetadataPath(string bundleName) =>
-        Path.Join(
+        ResolveContainedPath(
+            GetMetadataDirectoryPath(),
+            $"{bundleName}.families.json",
+            "invalid_bundle_path",
+            "The family metadata path escaped the custom metadata root.");
+
+    private string GetMetadataDirectoryPath() =>
+        ResolveContainedPath(
             _customProfilesPath,
             ".printfarmer",
-            $"{bundleName}.families.json");
+            "invalid_bundle_path",
+            "The metadata directory escaped the custom profile root.");
+
+    private string GetOverlayManifestPath(string bundleName) =>
+        ResolveContainedPath(
+            _overlayProfilesPath,
+            $"{bundleName}.json",
+            "invalid_bundle_path",
+            "The overlay manifest path escaped the overlay root.");
+
+    private string GetOverlayDirectoryPath(string bundleName) =>
+        ResolveContainedPath(
+            _overlayProfilesPath,
+            bundleName,
+            "invalid_bundle_path",
+            "The overlay bundle path escaped the overlay root.");
+
+    private string GetStockManifestPath(string bundleName) =>
+        ResolveContainedPath(
+            _stockProfilesPath,
+            $"{bundleName}.json",
+            "invalid_bundle_path",
+            "The stock manifest path escaped the stock profile root.");
+
+    private string GetStockDirectoryPath(string bundleName) =>
+        ResolveContainedPath(
+            _stockProfilesPath,
+            bundleName,
+            "invalid_bundle_path",
+            "The stock bundle path escaped the stock profile root.");
+
+    private HashSet<string> DiscoverCompleteBundleNames(
+        bool failOnIncomplete)
+    {
+        HashSet<string> bundleNames = new(StringComparer.Ordinal);
+        if (!Directory.Exists(_customProfilesPath))
+        {
+            return bundleNames;
+        }
+
+        foreach (string manifestPath in Directory.EnumerateFiles(
+            _customProfilesPath,
+            "*.json",
+            SearchOption.TopDirectoryOnly))
+        {
+            string bundleName = Path.GetFileNameWithoutExtension(manifestPath);
+            if (bundleName.StartsWith(
+                    ".install-",
+                    StringComparison.Ordinal)
+                || bundleName.StartsWith(
+                    ".backup-",
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            ValidateBundleName(bundleName);
+            if (!Directory.Exists(GetCustomDirectoryPath(bundleName)))
+            {
+                if (!failOnIncomplete)
+                {
+                    continue;
+                }
+
+                throw new CustomProfileBundleException(
+                    "incomplete_custom_bundle",
+                    $"Custom bundle '{bundleName}' has a manifest but no profile directory.");
+            }
+
+            _ = bundleNames.Add(bundleName);
+        }
+
+        foreach (string directoryPath in Directory.EnumerateDirectories(
+            _customProfilesPath,
+            "*",
+            SearchOption.TopDirectoryOnly))
+        {
+            string bundleName = Path.GetFileName(directoryPath);
+            if (string.Equals(
+                    bundleName,
+                    ".printfarmer",
+                    StringComparison.Ordinal)
+                || bundleName.StartsWith(
+                    ".install-",
+                    StringComparison.Ordinal)
+                || bundleName.StartsWith(
+                    ".backup-",
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            ValidateBundleName(bundleName);
+            if (!File.Exists(GetCustomManifestPath(bundleName))
+                && failOnIncomplete)
+            {
+                throw new CustomProfileBundleException(
+                    "incomplete_custom_bundle",
+                    $"Custom bundle '{bundleName}' has a profile directory but no manifest.");
+            }
+        }
+
+        return bundleNames;
+    }
+
+    private bool IsTransientCustomPath(string path)
+    {
+        string relativePath = Path.GetRelativePath(
+            _customProfilesPath,
+            path);
+        string firstSegment = relativePath.Split(
+            Path.DirectorySeparatorChar,
+            2)[0];
+        return firstSegment.StartsWith(
+            ".install-",
+            StringComparison.Ordinal)
+            || firstSegment.StartsWith(
+                ".backup-",
+                StringComparison.Ordinal);
+    }
+
+    private static string ResolveContainedPath(
+        string root,
+        string relativePath,
+        string errorCode,
+        string errorMessage)
+    {
+        string canonicalRoot = Path.GetFullPath(root);
+        string rootPrefix = Path.EndsInDirectorySeparator(canonicalRoot)
+            ? canonicalRoot
+            : canonicalRoot + Path.DirectorySeparatorChar;
+        string candidate = Path.GetFullPath(
+            Path.Combine(canonicalRoot, relativePath));
+        StringComparison comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (!candidate.StartsWith(rootPrefix, comparison))
+        {
+            throw new CustomProfileBundleException(
+                errorCode,
+                errorMessage);
+        }
+
+        return candidate;
+    }
 
     private static void MoveIfPresent(string source, string destination)
     {
@@ -570,12 +896,20 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
     [GeneratedRegex("^[A-Za-z0-9._-]+$", RegexOptions.CultureInvariant)]
     private static partial Regex BundleNameRegex();
 
+    [GeneratedRegex("^[A-Za-z]:", RegexOptions.CultureInvariant)]
+    private static partial Regex DriveQualifiedPathRegex();
+
     private sealed record PreparedBundle(
         string Manifest,
         IReadOnlyList<PreparedFile> Files,
         IReadOnlyDictionary<string, string> FamilyNames);
 
     private sealed record PreparedFile(string RelativePath, string Document);
+
+    private sealed record FingerprintFileState(
+        long Length,
+        long LastWriteTicks,
+        string ContentHash);
 
     private sealed record PromotionBackup(
         string DirectoryPath,

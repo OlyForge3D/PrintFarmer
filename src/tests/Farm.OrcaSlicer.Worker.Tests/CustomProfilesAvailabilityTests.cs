@@ -1,0 +1,60 @@
+﻿using System.Net;
+using Farm.OrcaSlicer.Worker.Health;
+using Farm.OrcaSlicer.Worker.Services;
+using FluentAssertions;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Xunit;
+
+namespace Farm.OrcaSlicer.Worker.Tests;
+
+public sealed class CustomProfilesAvailabilityTests
+{
+    [Fact]
+    public async Task ClaimHandler_ReconciliationPending_RejectsOnlyClaim()
+    {
+        CustomProfilesReconciliationState state = new();
+        using var handler = new CustomProfilesClaimAvailabilityHandler(
+            state,
+            () => "unused")
+        {
+            InnerHandler = new SuccessHandler(),
+        };
+        using HttpMessageInvoker client = new(handler);
+        using HttpRequestMessage claim =
+            new(HttpMethod.Post, "http://api/api/slice/claim");
+        using HttpRequestMessage complete =
+            new(HttpMethod.Post, "http://api/api/slice/jobs/id/complete");
+
+        using HttpResponseMessage claimResponse =
+            await client.SendAsync(claim, CancellationToken.None);
+        using HttpResponseMessage completeResponse =
+            await client.SendAsync(complete, CancellationToken.None);
+
+        claimResponse.StatusCode.Should()
+            .Be(HttpStatusCode.ServiceUnavailable);
+        completeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task ReconciliationHealthCheck_Failure_IsUnhealthy()
+    {
+        CustomProfilesReconciliationState state = new();
+        state.MarkUnavailable("shared profile volume is inconsistent");
+        CustomProfilesReconciliationHealthCheck healthCheck = new(state);
+
+        HealthCheckResult result = await healthCheck.CheckHealthAsync(
+            new HealthCheckContext());
+
+        result.Status.Should().Be(HealthStatus.Unhealthy);
+        result.Description.Should()
+            .Be("shared profile volume is inconsistent");
+    }
+
+    private sealed class SuccessHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+    }
+}

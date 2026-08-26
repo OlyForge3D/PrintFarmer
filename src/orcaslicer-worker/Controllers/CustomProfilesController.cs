@@ -13,6 +13,7 @@ namespace Farm.OrcaSlicer.Worker.Controllers;
 public sealed class CustomProfilesController(
     CustomProfileBundleStore bundleStore,
     CachedOrcaProfilesService profilesService,
+    CustomProfilesReconciliationState reconciliationState,
     ILogger<CustomProfilesController> logger) : ControllerBase
 {
     private readonly CustomProfileBundleStore _bundleStore =
@@ -20,6 +21,10 @@ public sealed class CustomProfilesController(
 
     private readonly CachedOrcaProfilesService _profilesService =
         profilesService ?? throw new ArgumentNullException(nameof(profilesService));
+
+    private readonly CustomProfilesReconciliationState _reconciliationState =
+        reconciliationState
+        ?? throw new ArgumentNullException(nameof(reconciliationState));
 
     private readonly ILogger<CustomProfilesController> _logger =
         logger ?? throw new ArgumentNullException(nameof(logger));
@@ -46,8 +51,37 @@ public sealed class CustomProfilesController(
     {
         try
         {
-            await _bundleStore.InstallAsync(bundleName, request, ct);
-            ProfileReloadResult reload = await _profilesService.ReloadProfilesAsync(ct);
+            (_, ProfileReloadResult reload) =
+                await _profilesService.MutateAndReloadProfilesAsync(
+                    async cancellationToken =>
+                    {
+                        await _bundleStore.InstallAsync(
+                            bundleName,
+                            request,
+                            cancellationToken);
+                        return true;
+                    },
+                    ct);
+            ProfileReloadResult activeReload = reload;
+            if (HasBlockingFailures(reload.Failures, bundleName))
+            {
+                (bool removed, ProfileReloadResult rollbackReload) =
+                    await _profilesService.MutateAndReloadProfilesAsync(
+                        cancellationToken =>
+                            _bundleStore.RemoveAsync(
+                                bundleName,
+                                cancellationToken),
+                        ct);
+                if (!removed)
+                {
+                    throw new InvalidOperationException(
+                        $"Rejected custom bundle '{bundleName}' could not be rolled back.");
+                }
+
+                activeReload = rollbackReload;
+            }
+
+            UpdateReconciliationState(activeReload);
             return ReloadResult(
                 new CustomProfileMutationResponse(
                     "installed",
@@ -55,11 +89,18 @@ public sealed class CustomProfilesController(
                     reload.MachineCount,
                     reload.FilamentCount,
                     reload.ProcessCount,
-                    reload.Failures));
+                    reload.Failures),
+                bundleName);
         }
         catch (CustomProfileBundleException ex)
         {
             return BundleProblem(ex);
+        }
+        catch
+        {
+            _reconciliationState.MarkUnavailable(
+                "Custom profile installation failed; inspect worker logs.");
+            throw;
         }
     }
 
@@ -82,7 +123,15 @@ public sealed class CustomProfilesController(
     {
         try
         {
-            if (!await _bundleStore.RemoveAsync(bundleName, ct))
+            (bool removed, ProfileReloadResult reload) =
+                await _profilesService.MutateAndReloadProfilesAsync(
+                    cancellationToken =>
+                        _bundleStore.RemoveAsync(
+                            bundleName,
+                            cancellationToken),
+                    ct);
+            UpdateReconciliationState(reload);
+            if (!removed)
             {
                 return Problem(
                     statusCode: StatusCodes.Status404NotFound,
@@ -90,7 +139,6 @@ public sealed class CustomProfilesController(
                     detail: $"Custom bundle '{bundleName}' is not installed.");
             }
 
-            ProfileReloadResult reload = await _profilesService.ReloadProfilesAsync(ct);
             return ReloadResult(
                 new CustomProfileMutationResponse(
                     "removed",
@@ -98,11 +146,18 @@ public sealed class CustomProfilesController(
                     reload.MachineCount,
                     reload.FilamentCount,
                     reload.ProcessCount,
-                    reload.Failures));
+                    reload.Failures),
+                bundleName);
         }
         catch (CustomProfileBundleException ex)
         {
             return BundleProblem(ex);
+        }
+        catch
+        {
+            _reconciliationState.MarkUnavailable(
+                "Custom profile removal failed; inspect worker logs.");
+            throw;
         }
     }
 
@@ -119,21 +174,36 @@ public sealed class CustomProfilesController(
     public async Task<ActionResult<CustomProfileMutationResponse>> ReloadAsync(
         CancellationToken ct)
     {
-        ProfileReloadResult reload = await _profilesService.ReloadProfilesAsync(ct);
-        return ReloadResult(
-            new CustomProfileMutationResponse(
-                "reloaded",
-                null,
-                reload.MachineCount,
-                reload.FilamentCount,
-                reload.ProcessCount,
-                reload.Failures));
+        try
+        {
+            ProfileReloadResult reload =
+                await _profilesService.ReloadProfilesAsync(ct);
+            UpdateReconciliationState(reload);
+            return ReloadResult(
+                new CustomProfileMutationResponse(
+                    "reloaded",
+                    null,
+                    reload.MachineCount,
+                    reload.FilamentCount,
+                    reload.ProcessCount,
+                    reload.Failures),
+                affectedBundleName: null);
+        }
+        catch
+        {
+            _reconciliationState.MarkUnavailable(
+                "Custom profile reload failed; inspect worker logs.");
+            throw;
+        }
     }
 
     private ActionResult<CustomProfileMutationResponse> ReloadResult(
-        CustomProfileMutationResponse response)
+        CustomProfileMutationResponse response,
+        string? affectedBundleName)
     {
-        if (response.Failures.Count == 0)
+        if (!HasBlockingFailures(
+            response.Failures,
+            affectedBundleName))
         {
             return Ok(response);
         }
@@ -143,6 +213,17 @@ public sealed class CustomProfilesController(
             response.Failures.Count);
         return UnprocessableEntity(response);
     }
+
+    internal static bool HasBlockingFailures(
+        IReadOnlyList<CustomProfileLoadFailure> failures,
+        string? affectedBundleName) =>
+        affectedBundleName is null
+            ? failures.Count > 0
+            : failures.Any(failure =>
+                string.Equals(
+                    failure.BundleName,
+                    affectedBundleName,
+                    StringComparison.Ordinal));
 
     private ActionResult<CustomProfileMutationResponse> BundleProblem(
         CustomProfileBundleException exception)
@@ -165,6 +246,22 @@ public sealed class CustomProfilesController(
                 ["code"] = exception.Code,
             },
         });
+    }
+
+    private void UpdateReconciliationState(ProfileReloadResult reload)
+    {
+        if (reload.Failures.Count == 0)
+        {
+            _reconciliationState.MarkReady(
+                _bundleStore.CalculateCustomProfilesFingerprint());
+            return;
+        }
+
+        CustomProfileLoadFailure failure = reload.Failures[0];
+        _reconciliationState.MarkUnavailable(
+            $"Custom profile '{failure.ProfileName}' in bundle " +
+            $"'{failure.BundleName}' cannot resolve parent " +
+            $"'{failure.MissingParent}'.");
     }
 }
 

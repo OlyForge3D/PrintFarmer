@@ -75,6 +75,7 @@ services:
       - ORCA_CUSTOM_PROFILES_PATH=/app/custom-profiles
       - ORCA_PROFILES_PATH=/app/profiles
       - PROFILE_CACHE_PATH=/app/cache
+      - CustomProfiles__ReconciliationIntervalSeconds=${CUSTOM_PROFILE_RECONCILIATION_INTERVAL_SECONDS:-1}
       # Stable identity across redeploys: RegisterAsync upserts on this ID so a
       # redeploy updates the existing worker/service record instead of creating
       # a duplicate. Fresh credentials are still issued on every registration.

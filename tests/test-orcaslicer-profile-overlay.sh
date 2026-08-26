@@ -128,3 +128,10 @@ grep -Fq \
     "$previous_compose" \
     || fail "Previous worker volume should be keyed by its OrcaSlicer version"
 pass "Previous worker volume is keyed by its OrcaSlicer version"
+for compose_file in "$current_compose" "$previous_compose"; do
+    grep -Fq \
+        'CustomProfiles__ReconciliationIntervalSeconds=${CUSTOM_PROFILE_RECONCILIATION_INTERVAL_SECONDS:-1}' \
+        "$compose_file" \
+        || fail "$(basename "$compose_file") should configure custom-profile reconciliation"
+done
+pass "Versioned workers configure shared-volume custom-profile reconciliation"

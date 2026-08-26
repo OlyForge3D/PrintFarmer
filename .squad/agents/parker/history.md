@@ -243,3 +243,20 @@ Status: Backlog item cleared. Beta trigger gated on PR stack merge.
 - Implemented restart-free reload that clears SQLite and every inner `OrcaProfilesService` process cache. Worker tests pass 372/372, including missing-parent failure followed by successful same-process reload after the parent chain is installed.
 - Custom missing parents now exclude affected profiles and return structured HTTP 422 details; stock missing-parent behavior remains tolerant. The overlay deployment test passes in the full deployment runner.
 - Full solution build passed. The captured full test and format gates remain red from concurrent/unrelated slicer migration and baseline formatting work; full deployment remained 6/11 because Docker/Python were unavailable and an existing TLS trap check failed. Details are in `decisions/inbox/parker-phase2a-impl.md`.
+
+### 2026-08-25: Phase 2a security and replica-consistency revision
+
+- Fixed Vasquez's three blockers: canonical root containment plus all-dot name
+  rejection; periodic shared-volume reconciliation with readiness, zero-slot
+  error heartbeats, and per-claim fingerprint fencing; and a
+  writer-preferring async reader/writer cache gate that prevents torn SQLite
+  reads during restart-free reload.
+- Fixed Bishop's worker follow-ups: PUT/DELETE 422 decisions are scoped to the
+  named bundle, and a PUT rejected for its own missing parent removes the
+  installed bundle and reloads before responding.
+- Added traversal, two-worker shared-volume, concurrent read/reload,
+  claim/readiness, rollback, and status-scoping regressions. Worker validation
+  passed 383/383 plus the two later focused tests; final full solution build and
+  scoped format passed. The profile-overlay deployment suite passed; unrelated
+  deployment groups remain blocked by the unavailable local Docker daemon and
+  existing environment/baseline conditions.

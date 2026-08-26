@@ -22,13 +22,14 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     private bool _cacheInitialized;
     private bool _databaseInitialized;
     private readonly SemaphoreSlim _initLock = new(1, 1);
+    private readonly AsyncReaderWriterLock _cacheAccessLock = new();
     private readonly TaskCompletionSource _cacheReadyTcs = new();
 
     /// <summary>
     /// Gets whether the cache is ready and the service can handle requests.
     /// This is used by RegistrationBackgroundService to delay registration until cache is populated.
     /// </summary>
-    public bool IsCacheReady => _cacheInitialized;
+    public bool IsCacheReady => Volatile.Read(ref _cacheInitialized);
 
     /// <summary>
     /// Task that completes when the cache is ready. Use this to await cache initialization.
@@ -65,9 +66,21 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     /// </summary>
     public async Task InitializeAsync(CancellationToken ct = default)
     {
+        if (Volatile.Read(ref _cacheInitialized))
+        {
+            return;
+        }
+
         await _initLock.WaitAsync(ct);
         try
         {
+            if (Volatile.Read(ref _cacheInitialized))
+            {
+                return;
+            }
+
+            await using AsyncReaderWriterLock.Releaser access =
+                await _cacheAccessLock.AcquireWriteAsync(ct);
             await InitializeCoreAsync(ct);
         }
         finally
@@ -78,7 +91,7 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
 
     private async Task InitializeCoreAsync(CancellationToken ct)
     {
-        if (_cacheInitialized)
+        if (Volatile.Read(ref _cacheInitialized))
         {
             return;
         }
@@ -98,7 +111,7 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
         {
             (int m, int f, int p) = await _cacheDb.GetCountsAsync(ct);
             _logger.LogInformation("SQLite cache is valid. Loaded {M} machines, {F} filaments, {P} processes in {SwElapsedMilliseconds}ms", m, f, p, sw.ElapsedMilliseconds);
-            _cacheInitialized = true;
+            Volatile.Write(ref _cacheInitialized, true);
             _cacheReadyTcs.TrySetResult();
             return;
         }
@@ -130,7 +143,7 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
 
         _logger.LogInformation("Stored {MachinesCount} machines, {FilamentsCount} filaments, {ProcessesCount} processes in SQLite in {StoreWatchElapsedMilliseconds}ms", machines.Count, filaments.Count, processes.Count, storeWatch.ElapsedMilliseconds);
 
-        _cacheInitialized = true;
+        Volatile.Write(ref _cacheInitialized, true);
 
         _logger.LogInformation("Total cache initialization: {SwElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
         _cacheReadyTcs.TrySetResult();
@@ -172,7 +185,7 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
 
     private async Task EnsureInitializedAsync(CancellationToken ct)
     {
-        if (!_cacheInitialized)
+        if (!Volatile.Read(ref _cacheInitialized))
         {
             await InitializeAsync(ct);
         }
@@ -180,27 +193,30 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
 
     public async Task<IList<MachineModelProfileDto>> ListAvailableMachineModelProfilesAsync(CancellationToken ct = default)
     {
-        // Machine models are less frequently used - delegate to inner service
-        // Could add caching later if needed
-        return await _innerService.ListAvailableMachineModelProfilesAsync(ct);
+        return await ReadCacheAsync(
+            token => _innerService.ListAvailableMachineModelProfilesAsync(token),
+            ct);
     }
 
     public async Task<IList<MachineProfileDto>> ListAvailableMachineProfilesAsync(CancellationToken ct = default)
     {
-        await EnsureInitializedAsync(ct);
-        return await _cacheDb.GetMachineProfilesAsync(ct);
+        return await ReadCacheAsync(
+            token => _cacheDb.GetMachineProfilesAsync(token),
+            ct);
     }
 
     public async Task<IList<FilamentProfileDto>> ListAvailableFilamentProfilesAsync(CancellationToken ct = default)
     {
-        await EnsureInitializedAsync(ct);
-        return await _cacheDb.GetFilamentProfilesAsync(ct);
+        return await ReadCacheAsync(
+            token => _cacheDb.GetFilamentProfilesAsync(token),
+            ct);
     }
 
     public async Task<IList<ProcessProfileDto>> ListAvailableProcessProfilesAsync(CancellationToken ct = default)
     {
-        await EnsureInitializedAsync(ct);
-        return await _cacheDb.GetProcessProfilesAsync(ct);
+        return await ReadCacheAsync(
+            token => _cacheDb.GetProcessProfilesAsync(token),
+            ct);
     }
 
     /// <summary>
@@ -208,8 +224,11 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     /// </summary>
     public async Task<List<MachineProfileDto>> GetMachineProfilesByManufacturerAsync(string manufacturer, CancellationToken ct = default)
     {
-        await EnsureInitializedAsync(ct);
-        return await _cacheDb.GetMachineProfilesByManufacturerAsync(manufacturer, ct);
+        return await ReadCacheAsync(
+            token => _cacheDb.GetMachineProfilesByManufacturerAsync(
+                manufacturer,
+                token),
+            ct);
     }
 
     /// <summary>
@@ -218,8 +237,11 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     /// </summary>
     public async Task<List<MachineProfileDto>> GetMachineProfilesByPrinterModelAsync(string printerModel, CancellationToken ct = default)
     {
-        await EnsureInitializedAsync(ct);
-        return await _cacheDb.GetMachineProfilesByPrinterModelAsync(printerModel, ct);
+        return await ReadCacheAsync(
+            token => _cacheDb.GetMachineProfilesByPrinterModelAsync(
+                printerModel,
+                token),
+            ct);
     }
 
     /// <summary>
@@ -230,8 +252,12 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
         string printerModel,
         CancellationToken ct = default)
     {
-        await EnsureInitializedAsync(ct);
-        return await _cacheDb.GetMachineProfilesByModelAsync(manufacturer, printerModel, ct);
+        return await ReadCacheAsync(
+            token => _cacheDb.GetMachineProfilesByModelAsync(
+                manufacturer,
+                printerModel,
+                token),
+            ct);
     }
 
     /// <summary>
@@ -239,8 +265,9 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     /// </summary>
     public async Task<List<string>> GetPrinterModelsAsync(string manufacturer, CancellationToken ct = default)
     {
-        await EnsureInitializedAsync(ct);
-        return await _cacheDb.GetPrinterModelsAsync(manufacturer, ct);
+        return await ReadCacheAsync(
+            token => _cacheDb.GetPrinterModelsAsync(manufacturer, token),
+            ct);
     }
 
     /// <summary>
@@ -248,8 +275,11 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     /// </summary>
     public async Task<List<FilamentProfileDto>> GetFilamentProfilesByManufacturerAsync(string manufacturer, CancellationToken ct = default)
     {
-        await EnsureInitializedAsync(ct);
-        return await _cacheDb.GetFilamentProfilesByManufacturerAsync(manufacturer, ct);
+        return await ReadCacheAsync(
+            token => _cacheDb.GetFilamentProfilesByManufacturerAsync(
+                manufacturer,
+                token),
+            ct);
     }
 
     /// <summary>
@@ -257,8 +287,11 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     /// </summary>
     public async Task<List<ProcessProfileDto>> GetProcessProfilesByManufacturerAsync(string manufacturer, CancellationToken ct = default)
     {
-        await EnsureInitializedAsync(ct);
-        return await _cacheDb.GetProcessProfilesByManufacturerAsync(manufacturer, ct);
+        return await ReadCacheAsync(
+            token => _cacheDb.GetProcessProfilesByManufacturerAsync(
+                manufacturer,
+                token),
+            ct);
     }
 
     /// <summary>
@@ -266,8 +299,9 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     /// </summary>
     public async Task<List<string>> GetManufacturersAsync(CancellationToken ct = default)
     {
-        await EnsureInitializedAsync(ct);
-        return await _cacheDb.GetManufacturersAsync(ct);
+        return await ReadCacheAsync(
+            token => _cacheDb.GetManufacturersAsync(token),
+            ct);
     }
 
     /// <summary>
@@ -275,8 +309,9 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     /// </summary>
     public async Task<List<string>> GetMaterialsAsync(CancellationToken ct = default)
     {
-        await EnsureInitializedAsync(ct);
-        return await _cacheDb.GetMaterialsAsync(ct);
+        return await ReadCacheAsync(
+            token => _cacheDb.GetMaterialsAsync(token),
+            ct);
     }
 
     /// <summary>
@@ -284,8 +319,9 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     /// </summary>
     public async Task<(int machineCount, int filamentCount, int processCount)> GetCacheStatsAsync(CancellationToken ct = default)
     {
-        await EnsureInitializedAsync(ct);
-        return await _cacheDb.GetCountsAsync(ct);
+        return await ReadCacheAsync(
+            token => _cacheDb.GetCountsAsync(token),
+            ct);
     }
 
     /// <summary>
@@ -293,17 +329,7 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
     /// </summary>
     public async Task InvalidateCacheAsync(CancellationToken ct = default)
     {
-        await _initLock.WaitAsync(ct);
-        try
-        {
-            _cacheInitialized = false;
-            _innerService.ClearCaches();
-            await _cacheDb.ClearCacheAsync(ct);
-        }
-        finally
-        {
-            _initLock.Release();
-        }
+        _ = await ReloadProfilesAsync(ct);
     }
 
     /// <summary>
@@ -317,22 +343,9 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
         await _initLock.WaitAsync(ct);
         try
         {
-            _cacheInitialized = false;
-            _innerService.ClearCaches();
-
-            if (_databaseInitialized)
-            {
-                await _cacheDb.ClearCacheAsync(ct);
-            }
-
-            await InitializeCoreAsync(ct);
-            (int machineCount, int filamentCount, int processCount) =
-                await _cacheDb.GetCountsAsync(ct);
-            return new ProfileReloadResult(
-                machineCount,
-                filamentCount,
-                processCount,
-                _innerService.CustomProfileLoadFailures);
+            await using AsyncReaderWriterLock.Releaser access =
+                await _cacheAccessLock.AcquireWriteAsync(ct);
+            return await ReloadProfilesCoreAsync(ct);
         }
         finally
         {
@@ -340,9 +353,74 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
         }
     }
 
+    internal async Task<(T MutationResult, ProfileReloadResult ReloadResult)>
+        MutateAndReloadProfilesAsync<T>(
+            Func<CancellationToken, Task<T>> mutation,
+            CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(mutation);
+
+        await _initLock.WaitAsync(ct);
+        try
+        {
+            await using AsyncReaderWriterLock.Releaser access =
+                await _cacheAccessLock.AcquireWriteAsync(ct);
+            T mutationResult = await mutation(ct);
+            ProfileReloadResult reloadResult =
+                await ReloadProfilesCoreAsync(ct);
+            return (mutationResult, reloadResult);
+        }
+        finally
+        {
+            _initLock.Release();
+        }
+    }
+
+    private async Task<ProfileReloadResult> ReloadProfilesCoreAsync(
+        CancellationToken ct)
+    {
+        Volatile.Write(ref _cacheInitialized, false);
+        _innerService.ClearCaches();
+
+        if (_databaseInitialized)
+        {
+            await _cacheDb.ClearCacheAsync(ct);
+        }
+
+        await InitializeCoreAsync(ct);
+        (int machineCount, int filamentCount, int processCount) =
+            await _cacheDb.GetCountsAsync(ct);
+        return new ProfileReloadResult(
+            machineCount,
+            filamentCount,
+            processCount,
+            _innerService.CustomProfileLoadFailures);
+    }
+
+    private async Task<T> ReadCacheAsync<T>(
+        Func<CancellationToken, Task<T>> read,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+
+        while (true)
+        {
+            await EnsureInitializedAsync(ct);
+            await using AsyncReaderWriterLock.Releaser access =
+                await _cacheAccessLock.AcquireReadAsync(ct);
+            if (!Volatile.Read(ref _cacheInitialized))
+            {
+                continue;
+            }
+
+            return await read(ct);
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         _initLock.Dispose();
+        _cacheAccessLock.Dispose();
         _cacheDb.Dispose();
         await Task.CompletedTask;
     }

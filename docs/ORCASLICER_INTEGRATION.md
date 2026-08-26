@@ -118,6 +118,16 @@ the equivalent `ORCASLICER_VERSION_PREVIOUS` volume for the drain worker. All
 replicas of one version share its volume; different versions never share
 rendered families.
 
+Each replica fingerprints that shared volume and reconciles its process-local
+overlay links and SQLite/in-memory caches after the changed fingerprint is
+stable across two polls. The default poll interval is one second and can be
+changed with `CUSTOM_PROFILE_RECONCILIATION_INTERVAL_SECONDS`. Until initial
+reconciliation succeeds, or whenever reconciliation fails, readiness reports
+`custom_profiles` as unhealthy, registration is deferred (or heartbeats report
+`Error` with zero free slots), and only new `/api/slice/claim` calls are refused.
+Existing leased-job completion and artifact traffic remains available. This
+prevents a scaled sibling from silently accepting a family it has not loaded.
+
 The API installs complete rendered bundles through authenticated worker routes:
 
 ```http
@@ -152,11 +162,20 @@ Content-Type: application/json
 remove already perform that reload; callers do not need a second request.
 
 Reload clears SQLite plus every `OrcaProfilesService` JSON, manifest,
-filesystem, machine, and resolved-list cache. A custom profile with an
+filesystem, machine, and resolved-list cache. Reads and reloads use a
+writer-preferring asynchronous reader/writer gate, so a request sees either
+the complete old cache or the complete rebuilt cache, never a cleared
+intermediate SQLite state. A custom profile with an
 unresolved parent is excluded and returns HTTP 422 with its bundle, family,
 profile, and missing parent. Stock bundles retain their existing tolerant
-behavior. Invalid paths, stock-bundle name collisions, and unconfigured
-distinct roots are rejected without exposing filesystem paths.
+behavior. A PUT rejected for a parent missing from that named bundle removes the
+bundle and reloads again before returning, so 422 means it is not installed.
+PUT and DELETE response bodies retain all custom failure diagnostics, but their
+HTTP status is scoped to the named bundle; an unrelated broken bundle does not
+turn a successful mutation into 422. Bundle names reject all-dot values, and
+both bundle and profile paths are allowlist-validated, canonicalized, and
+containment-checked. Invalid paths, stock-bundle name collisions, and
+unconfigured distinct roots are rejected without exposing filesystem paths.
 
 ### Lifecycle policy
 
