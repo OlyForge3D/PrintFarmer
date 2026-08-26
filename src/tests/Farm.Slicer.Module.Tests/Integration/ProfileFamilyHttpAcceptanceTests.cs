@@ -331,6 +331,11 @@ public sealed class ProfileFamilyCloneLookupAcceptanceTests
             _ = await bundleStore.RemoveAsync($"PrintFarmer-{familyId:N}", ct);
             _ = await profilesService.ReloadProfilesAsync(ct);
         }
+
+        // The in-process worker serves a single OrcaSlicer version; reporting it keeps staleness
+        // detection consistent with the version stamped on rendered families in this harness.
+        public Task<string?> GetActiveOrcaVersionAsync(CancellationToken ct) =>
+            Task.FromResult<string?>("2.4.2");
     }
 
     private sealed class WorkerLookupHandler(

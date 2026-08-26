@@ -13,6 +13,15 @@ public interface IProfileFamilyWorkerClient
         string? orcaVersion,
         CancellationToken ct);
 
+    /// <summary>
+    /// Reports the OrcaSlicer engine version of a fresh online worker, or <see langword="null"/> when
+    /// no worker can currently be selected. Unlike <see cref="GetCatalogAsync"/> this never throws for
+    /// an absent worker: staleness detection must degrade safely (leave statuses alone) when the farm
+    /// cannot currently be reached, rather than guessing a version.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    Task<string?> GetActiveOrcaVersionAsync(CancellationToken ct);
+
     /// <summary>Atomically writes or replaces one family inside the worker's Custom bundle.</summary>
     Task WriteBundleAsync(
         ProfileFamilyWorkerTarget target,

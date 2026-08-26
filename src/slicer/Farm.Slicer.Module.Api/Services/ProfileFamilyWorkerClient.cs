@@ -177,7 +177,31 @@ public sealed class ProfileFamilyWorkerClient(
     private static string Display(string? value, string fallback = "unknown") =>
         string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
 
+    /// <inheritdoc />
+    public async Task<string?> GetActiveOrcaVersionAsync(CancellationToken ct)
+    {
+        ProfileFamilyWorkerTarget? target = await TrySelectWorkerAsync(null, ct);
+        return target?.OrcaVersion;
+    }
+
     private async Task<ProfileFamilyWorkerTarget> SelectWorkerAsync(
+        string? requestedVersion,
+        CancellationToken ct)
+    {
+        ProfileFamilyWorkerTarget? selected = await TrySelectWorkerAsync(requestedVersion, ct);
+        if (selected is null)
+        {
+            string versionSuffix = string.IsNullOrWhiteSpace(requestedVersion)
+                ? string.Empty
+                : $" for version '{requestedVersion.Trim()}'";
+            throw new HttpRequestException(
+                $"No fresh online OrcaSlicer worker is available{versionSuffix}.");
+        }
+
+        return selected;
+    }
+
+    private async Task<ProfileFamilyWorkerTarget?> TrySelectWorkerAsync(
         string? requestedVersion,
         CancellationToken ct)
     {
@@ -208,11 +232,7 @@ public sealed class ProfileFamilyWorkerClient(
         SlicerService? selected = candidates.FirstOrDefault();
         if (selected is null)
         {
-            string versionSuffix = normalizedVersion is null
-                ? string.Empty
-                : $" for version '{normalizedVersion}'";
-            throw new HttpRequestException(
-                $"No fresh online OrcaSlicer worker is available{versionSuffix}.");
+            return null;
         }
 
         _logger.LogInformation(

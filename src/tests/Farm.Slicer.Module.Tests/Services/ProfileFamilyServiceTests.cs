@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using System.Globalization;
+using System.Text.Json;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Repositories;
 using Farm.Slicer.Module.Api.Services;
@@ -729,11 +731,396 @@ public sealed class ProfileFamilyServiceTests
             Times.Never);
     }
 
+    [Fact]
+    public async Task EditFamilyAsync_OverridesChange_ReRendersAndUpdatesRenderedVersion()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, Guid variantId) = SeedHealthyFamily(dbContext, modelId);
+        Mock<IProfileFamilyWorkerClient> worker = EditWorker();
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
+
+        EditProfileFamilyRequestDto request = new()
+        {
+            FamilyOverrides = Overrides("""{"printable_height":"250"}""")
+        };
+
+        ProfileFamilySummaryDto result = await service.EditFamilyAsync(familyId, request, CancellationToken.None);
+
+        result.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
+        result.RenderedForOrcaVersion.Should().Be("2.5.0");
+        MachineModelProfile persisted = await dbContext.MachineModelProfiles
+            .AsNoTracking().SingleAsync(family => family.Id == familyId);
+        persisted.FamilyOverridesJson.Should().Contain("printable_height");
+        (await dbContext.MachineProfiles.AsNoTracking()
+            .SingleAsync(variant => variant.MachineModelProfileId == familyId)).Id
+            .Should().Be(variantId, "an overrides-only edit preserves the surviving variant id");
+    }
+
+    [Fact]
+    public async Task EditFamilyAsync_Rename_MovesAliasAndPreservesVariantId()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, Guid variantId) = SeedHealthyFamily(dbContext, modelId);
+        Mock<IProfileFamilyWorkerClient> worker = EditWorker();
+        Mock<IPrinterModelAliasService> aliases = EditAliases(modelId, "Renamed", renameFrom: "Farm Test");
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), aliases, EchoRenderer(), worker);
+
+        ProfileFamilySummaryDto result = await service.EditFamilyAsync(
+            familyId, new EditProfileFamilyRequestDto { Name = "Renamed" }, CancellationToken.None);
+
+        result.FamilyName.Should().Be("Renamed");
+        aliases.Verify(
+            s => s.EnsureModelAliasAsync(modelId, "Renamed", "OrcaSlicer", It.IsAny<CancellationToken>()),
+            Times.Once);
+        aliases.Verify(
+            s => s.RemoveModelAliasAsync(modelId, "Farm Test", "OrcaSlicer", It.IsAny<CancellationToken>()),
+            Times.Once);
+        (await dbContext.MachineProfiles.AsNoTracking()
+            .SingleAsync(variant => variant.MachineModelProfileId == familyId)).Id
+            .Should().Be(variantId, "a rename preserves the surviving variant id");
+    }
+
+    [Fact]
+    public async Task EditFamilyAsync_RenameToExistingName_Throws409()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        _ = SeedHealthyFamily(dbContext, Guid.NewGuid(), name: "Taken");
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            new Mock<ICatalogServiceAdapter>(MockBehavior.Strict),
+            new Mock<IPrinterModelAliasService>(MockBehavior.Strict),
+            new Mock<IProfileFamilyRenderer>(MockBehavior.Strict),
+            new Mock<IProfileFamilyWorkerClient>(MockBehavior.Strict));
+
+        Func<Task> act = () => service.EditFamilyAsync(
+            familyId, new EditProfileFamilyRequestDto { Name = "Taken" }, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ProfileFamilyConflictException>();
+    }
+
+    [Fact]
+    public async Task EditFamilyAsync_AddNozzle_MaterializesNewVariantAndPreservesExistingId()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, Guid variantId) = SeedHealthyFamily(dbContext, modelId);
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), EditWorker());
+
+        _ = await service.EditFamilyAsync(
+            familyId,
+            new EditProfileFamilyRequestDto { NozzleDiameters = [0.4, 0.8] },
+            CancellationToken.None);
+
+        List<MachineProfile> variants = await dbContext.MachineProfiles.AsNoTracking()
+            .Where(variant => variant.MachineModelProfileId == familyId).ToListAsync();
+        variants.Should().HaveCount(2);
+        variants.Select(variant => variant.Id).Should().Contain(variantId);
+        variants.Should().Contain(variant => variant.Name.Contains("0.8"));
+    }
+
+    [Fact]
+    public async Task EditFamilyAsync_RemoveUnreferencedNozzle_Succeeds()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, Guid keptId, _) = SeedFamilyWithTwoNozzles(dbContext, modelId);
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), EditWorker());
+
+        _ = await service.EditFamilyAsync(
+            familyId,
+            new EditProfileFamilyRequestDto { NozzleDiameters = [0.4] },
+            CancellationToken.None);
+
+        List<MachineProfile> variants = await dbContext.MachineProfiles.AsNoTracking()
+            .Where(variant => variant.MachineModelProfileId == familyId).ToListAsync();
+        variants.Should().ContainSingle().Which.Id.Should().Be(keptId);
+    }
+
+    [Fact]
+    public async Task EditFamilyAsync_RemoveNozzleReferencedByPrinter_Throws409()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _, Guid removedId) = SeedFamilyWithTwoNozzles(dbContext, modelId);
+        Mock<IPrinterProfileCheckRepository> printerRefs = PrinterRefs(new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Bench Printer",
+            TemplateMachineProfileId = removedId
+        });
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            new Mock<ICatalogServiceAdapter>(MockBehavior.Strict),
+            new Mock<IPrinterModelAliasService>(MockBehavior.Strict),
+            new Mock<IProfileFamilyRenderer>(MockBehavior.Strict),
+            new Mock<IProfileFamilyWorkerClient>(MockBehavior.Strict),
+            printerRefs);
+
+        Func<Task> act = () => service.EditFamilyAsync(
+            familyId, new EditProfileFamilyRequestDto { NozzleDiameters = [0.4] }, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ProfileFamilyInUseException>();
+        (await dbContext.MachineProfiles.CountAsync(variant => variant.MachineModelProfileId == familyId))
+            .Should().Be(2, "a blocked removal must not mutate the variant set");
+    }
+
+    [Fact]
+    public async Task EditFamilyAsync_RemoveNozzleReferencedByActiveJob_Throws409()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _, Guid removedId) = SeedFamilyWithTwoNozzles(dbContext, modelId);
+        dbContext.SliceJobs.Add(new SliceJob
+        {
+            Id = Guid.NewGuid(),
+            Status = SliceJobStatus.Processing,
+            MachineProfileId = removedId,
+            CreatedAt = DateTime.UtcNow
+        });
+        _ = await dbContext.SaveChangesAsync();
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            new Mock<ICatalogServiceAdapter>(MockBehavior.Strict),
+            new Mock<IPrinterModelAliasService>(MockBehavior.Strict),
+            new Mock<IProfileFamilyRenderer>(MockBehavior.Strict),
+            new Mock<IProfileFamilyWorkerClient>(MockBehavior.Strict));
+
+        Func<Task> act = () => service.EditFamilyAsync(
+            familyId, new EditProfileFamilyRequestDto { NozzleDiameters = [0.4] }, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ProfileFamilyInUseException>();
+    }
+
+    [Fact]
+    public async Task EditFamilyAsync_EmptyNozzleArray_Throws400()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            new Mock<ICatalogServiceAdapter>(MockBehavior.Strict),
+            new Mock<IPrinterModelAliasService>(MockBehavior.Strict),
+            new Mock<IProfileFamilyRenderer>(MockBehavior.Strict),
+            new Mock<IProfileFamilyWorkerClient>(MockBehavior.Strict));
+
+        Func<Task> act = () => service.EditFamilyAsync(
+            familyId, new EditProfileFamilyRequestDto { NozzleDiameters = [] }, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task EditFamilyAsync_SourceModelUnavailable_Throws422()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        // Catalog offers only "Prusa Test"; the requested re-bind target is absent.
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), EditWorker());
+
+        Func<Task> act = () => service.EditFamilyAsync(
+            familyId,
+            new EditProfileFamilyRequestDto { SourceMachineModelName = "Removed Model" },
+            CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ProfileFamilySourceException>();
+        (await dbContext.MachineModelProfiles.AsNoTracking().SingleAsync(f => f.Id == familyId))
+            .RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy,
+                "a source failure is detected before any mutation");
+    }
+
+    [Fact]
+    public async Task RenderFamilyAsync_StaleFamily_BecomesHealthyAndUpdatesVersion()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(
+            dbContext, modelId, status: ProfileFamilyRenderStatus.Stale);
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), EditWorker());
+
+        ProfileFamilySummaryDto result = await service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        result.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
+        result.RenderedForOrcaVersion.Should().Be("2.5.0");
+        result.LastRenderedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task RenderFamilyAsync_FailedFamily_Recovers()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(
+            dbContext, modelId, status: ProfileFamilyRenderStatus.Failed);
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), EditWorker());
+
+        ProfileFamilySummaryDto result = await service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        result.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
+    }
+
+    [Fact]
+    public async Task RenderFamilyAsync_CalledTwice_IsIdempotent()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, Guid variantId) = SeedHealthyFamily(dbContext, modelId);
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), EditWorker());
+
+        _ = await service.RenderFamilyAsync(familyId, CancellationToken.None);
+        _ = await service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        List<MachineProfile> variants = await dbContext.MachineProfiles.AsNoTracking()
+            .Where(variant => variant.MachineModelProfileId == familyId).ToListAsync();
+        variants.Should().ContainSingle().Which.Id
+            .Should().Be(variantId, "a repeated re-render neither duplicates nor churns variants");
+    }
+
+    [Fact]
+    public async Task RenderFamilyAsync_WriteFails_MarksFailedAndRestoresPreviousBundle()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        // The first WriteBundleAsync (the new bundle) fails; the second (the restore) succeeds.
+        Mock<IProfileFamilyWorkerClient> worker = EditWorker(
+            firstWriteFailure: new HttpRequestException("worker load rejected the new bundle"));
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
+
+        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<HttpRequestException>();
+        (await dbContext.MachineModelProfiles.AsNoTracking().SingleAsync(f => f.Id == familyId))
+            .RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed);
+        worker.Verify(
+            s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(2),
+            "the previous good bundle must be re-installed after a failed re-render");
+    }
+
+    [Fact]
+    public async Task RenderStaleFamiliesAsync_ReturnsPerFamilyResults_WithPartialFailureSurfaced()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid healthyId, _) = SeedHealthyFamily(
+            dbContext, modelId, name: "Renderable", status: ProfileFamilyRenderStatus.Stale);
+        (Guid brokenId, _) = SeedHealthyFamily(
+            dbContext, Guid.NewGuid(), name: "Broken", status: ProfileFamilyRenderStatus.Stale,
+            sourceMachineModelName: "Removed Model");
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Renderable"), EchoRenderer(), EditWorker());
+
+        IReadOnlyList<ProfileFamilyRenderResultDto> results =
+            await service.RenderStaleFamiliesAsync(CancellationToken.None);
+
+        results.Should().HaveCount(2);
+        results.Single(r => r.FamilyId == healthyId).RenderStatus
+            .Should().Be(ProfileFamilyRenderStatus.Healthy);
+        ProfileFamilyRenderResultDto broken = results.Single(r => r.FamilyId == brokenId);
+        broken.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed);
+        broken.Code.Should().Be("source_preset_unavailable");
+        broken.Detail.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task ListFamiliesAsync_MarksHealthyFamilyStale_WhenLiveVersionDiffers()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId); // RenderedForOrcaVersion = 2.4.2
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            new Mock<ICatalogServiceAdapter>(MockBehavior.Strict),
+            new Mock<IPrinterModelAliasService>(MockBehavior.Strict),
+            new Mock<IProfileFamilyRenderer>(MockBehavior.Strict),
+            StalenessWorker("2.5.0"));
+
+        IReadOnlyList<ProfileFamilySummaryDto> families =
+            await service.ListFamiliesAsync(null, CancellationToken.None);
+
+        families.Single(f => f.FamilyId == familyId).RenderStatus
+            .Should().Be(ProfileFamilyRenderStatus.Stale);
+    }
+
+    [Fact]
+    public async Task ListFamiliesAsync_DoesNotMarkNeverRenderedFamilyStale()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(
+            dbContext, modelId, status: ProfileFamilyRenderStatus.Failed, renderedForOrcaVersion: null);
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            new Mock<ICatalogServiceAdapter>(MockBehavior.Strict),
+            new Mock<IPrinterModelAliasService>(MockBehavior.Strict),
+            new Mock<IProfileFamilyRenderer>(MockBehavior.Strict),
+            StalenessWorker("2.5.0"));
+
+        IReadOnlyList<ProfileFamilySummaryDto> families =
+            await service.ListFamiliesAsync(null, CancellationToken.None);
+
+        families.Single(f => f.FamilyId == familyId).RenderStatus
+            .Should().Be(ProfileFamilyRenderStatus.Failed,
+                "a family that never rendered (RenderedForOrcaVersion null) must not be flipped to Stale");
+    }
+
     private static (Guid FamilyId, Guid VariantId) SeedHealthyFamily(
         SlicerDbContext dbContext,
         Guid modelId,
         string name = "Farm Test",
-        ProfileFamilyRenderStatus status = ProfileFamilyRenderStatus.Healthy)
+        ProfileFamilyRenderStatus status = ProfileFamilyRenderStatus.Healthy,
+        string sourceMachineModelName = "Prusa Test",
+        string? renderedForOrcaVersion = "2.4.2")
     {
         Guid familyId = Guid.NewGuid();
         Guid variantId = Guid.NewGuid();
@@ -747,9 +1134,9 @@ public sealed class ProfileFamilyServiceTests
             Hash = familyId.ToString("N") + familyId.ToString("N"),
             IsSystem = false,
             RenderStatus = status,
-            SourceMachineModelName = "Prusa Test",
+            SourceMachineModelName = sourceMachineModelName,
             SlicerDistribution = "orca",
-            RenderedForOrcaVersion = "2.4.2",
+            RenderedForOrcaVersion = renderedForOrcaVersion,
             LastRenderedAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -772,6 +1159,226 @@ public sealed class ProfileFamilyServiceTests
         _ = dbContext.SaveChanges();
         return (familyId, variantId);
     }
+
+    /// <summary>
+    /// Seeds a Healthy family owning two nozzle variants (0.4 and 0.8), returning the family id, the
+    /// 0.4 variant id (kept in the remove tests) and the 0.8 variant id (removed/referenced).
+    /// </summary>
+    private static (Guid FamilyId, Guid KeptVariantId, Guid RemovedVariantId) SeedFamilyWithTwoNozzles(
+        SlicerDbContext dbContext,
+        Guid modelId,
+        string name = "Farm Test")
+    {
+        Guid familyId = Guid.NewGuid();
+        Guid keptId = Guid.NewGuid();
+        Guid removedId = Guid.NewGuid();
+        dbContext.MachineModelProfiles.Add(new MachineModelProfile
+        {
+            Id = familyId,
+            Name = name,
+            Manufacturer = "Custom",
+            SlicerType = SlicerType.OrcaSlicer,
+            PrinterModelId = modelId,
+            Hash = familyId.ToString("N") + familyId.ToString("N"),
+            IsSystem = false,
+            RenderStatus = ProfileFamilyRenderStatus.Healthy,
+            SourceMachineModelName = "Prusa Test",
+            SlicerDistribution = "orca",
+            RenderedForOrcaVersion = "2.4.2",
+            LastRenderedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            MachineProfiles =
+            {
+                new MachineProfile
+                {
+                    Id = keptId,
+                    Name = $"{name} 0.4 nozzle",
+                    Manufacturer = "Custom",
+                    SlicerType = SlicerType.OrcaSlicer,
+                    MachineModelProfileId = familyId,
+                    Hash = keptId.ToString("N") + keptId.ToString("N"),
+                    SourceSystemPresetName = "Prusa Test 0.4 nozzle",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new MachineProfile
+                {
+                    Id = removedId,
+                    Name = $"{name} 0.8 nozzle",
+                    Manufacturer = "Custom",
+                    SlicerType = SlicerType.OrcaSlicer,
+                    MachineModelProfileId = familyId,
+                    Hash = removedId.ToString("N") + removedId.ToString("N"),
+                    SourceSystemPresetName = "Prusa Test 0.8 nozzle",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                }
+            }
+        });
+        _ = dbContext.SaveChanges();
+        return (familyId, keptId, removedId);
+    }
+
+    /// <summary>
+    /// Builds a family-shared overrides dictionary from a JSON object literal, mirroring how the
+    /// controller binds the request DTO's <c>FamilyOverrides</c>.
+    /// </summary>
+    private static Dictionary<string, JsonElement> Overrides(string json)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        Dictionary<string, JsonElement> overrides = new(StringComparer.Ordinal);
+        foreach (JsonProperty property in document.RootElement.EnumerateObject())
+        {
+            overrides[property.Name] = property.Value.Clone();
+        }
+
+        return overrides;
+    }
+
+    /// <summary>
+    /// A renderer that echoes the request: it produces one variant per requested nozzle, named
+    /// <c>"{family} {nozzle} nozzle"</c> (so <c>ParseNozzleDiameter</c> recovers it), and serialises the
+    /// requested family overrides as the canonical overrides JSON so a re-render is observable.
+    /// </summary>
+    private static Mock<IProfileFamilyRenderer> EchoRenderer()
+    {
+        Mock<IProfileFamilyRenderer> renderer = new(MockBehavior.Strict);
+        _ = renderer
+            .Setup(service => service.Render(
+                It.IsAny<Guid>(),
+                It.IsAny<CloneProfileFamilyRequestDto>(),
+                It.IsAny<AllProfilesResponseDto>()))
+            .Returns((Guid familyId, CloneProfileFamilyRequestDto request, AllProfilesResponseDto _) =>
+            {
+                List<RenderedMachineVariant> variants = request.NozzleDiameters
+                    .Select(nozzle =>
+                    {
+                        string formatted = nozzle.ToString("0.###", CultureInfo.InvariantCulture);
+                        return new RenderedMachineVariant(
+                            $"{request.FamilyName} {formatted} nozzle",
+                            nozzle,
+                            $"{request.SourceMachineModelName} {formatted} nozzle",
+                            $$"""{"nozzle_diameter":["{{formatted}}"]}""");
+                    })
+                    .ToList();
+                string canonicalOverrides = JsonSerializer.Serialize(request.FamilyOverrides);
+                return new ProfileFamilyRenderResult(
+                    new ProfileFamilyBundleDto(familyId, request.FamilyName, "{}", []),
+                    canonicalOverrides,
+                    variants,
+                    3,
+                    2);
+            });
+        return renderer;
+    }
+
+    /// <summary>
+    /// A worker client for the edit/re-render path: the full catalog contains the given source models
+    /// (default <c>"Prusa Test"</c>), the selected worker reports OrcaSlicer <paramref name="activeVersion"/>,
+    /// and <c>WriteBundleAsync</c> succeeds unless <paramref name="firstWriteFailure"/> forces the first
+    /// write to throw (the second — the restore — then succeeds).
+    /// </summary>
+    private static Mock<IProfileFamilyWorkerClient> EditWorker(
+        Exception? firstWriteFailure = null,
+        string activeVersion = "2.5.0",
+        params string[] sourceModelNames)
+    {
+        string[] models = sourceModelNames.Length == 0 ? ["Prusa Test"] : sourceModelNames;
+        ProfileFamilyWorkerTarget target = new("http://worker", activeVersion);
+        AllProfilesResponseDto catalog = WorkerCatalog(models);
+        Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Strict);
+        _ = worker
+            .Setup(service => service.GetCatalogAsync(
+                string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((target, catalog));
+        _ = worker
+            .Setup(service => service.GetActiveOrcaVersionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(activeVersion);
+        if (firstWriteFailure is null)
+        {
+            _ = worker
+                .Setup(service => service.WriteBundleAsync(
+                    It.IsAny<ProfileFamilyWorkerTarget>(),
+                    It.IsAny<ProfileFamilyBundleDto>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+        }
+        else
+        {
+            _ = worker
+                .SetupSequence(service => service.WriteBundleAsync(
+                    It.IsAny<ProfileFamilyWorkerTarget>(),
+                    It.IsAny<ProfileFamilyBundleDto>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(firstWriteFailure)
+                .Returns(Task.CompletedTask);
+        }
+
+        return worker;
+    }
+
+    /// <summary>
+    /// A worker client used by the staleness-detection tests: it only reports the live OrcaSlicer
+    /// version (or none, when <paramref name="activeVersion"/> is <see langword="null"/>).
+    /// </summary>
+    private static Mock<IProfileFamilyWorkerClient> StalenessWorker(string? activeVersion)
+    {
+        Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Strict);
+        _ = worker
+            .Setup(service => service.GetActiveOrcaVersionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(activeVersion);
+        return worker;
+    }
+
+    /// <summary>
+    /// An alias service for the edit/re-render path: the (possibly new) name resolves to no existing
+    /// mapping, ensuring the alias succeeds, and the old name is removed on a rename.
+    /// </summary>
+    private static Mock<IPrinterModelAliasService> EditAliases(
+        Guid modelId,
+        string name,
+        string? renameFrom = null)
+    {
+        Mock<IPrinterModelAliasService> aliases = new(MockBehavior.Strict);
+        _ = aliases
+            .Setup(service => service.ResolveModelAliasAsync(name, "OrcaSlicer"))
+            .ReturnsAsync((Guid?)null);
+        _ = aliases
+            .Setup(service => service.EnsureModelAliasAsync(
+                modelId, name, "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = aliases
+            .Setup(service => service.RemoveModelAliasAsync(
+                modelId, renameFrom ?? name, "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        return aliases;
+    }
+
+    /// <summary>
+    /// Builds a worker catalog whose single manufacturer ("Prusa") exposes the given human-readable
+    /// source machine-model names, so <c>DeriveSourceManufacturer</c> can resolve them.
+    /// </summary>
+    private static AllProfilesResponseDto WorkerCatalog(params string[] modelNames)
+    {
+        ManufacturerProfilesDto manufacturer = new() { Name = "Prusa" };
+        int index = 0;
+        foreach (string modelName in modelNames)
+        {
+            manufacturer.Models[$"model_{index++}"] = new PrinterModelProfilesDto
+            {
+                Name = modelName,
+                ModelId = $"Prusa_{index}"
+            };
+        }
+
+        return new AllProfilesResponseDto
+        {
+            ByHierarchy = { ["Prusa"] = manufacturer }
+        };
+    }
+
+
 
     private static Mock<IPrinterModelAliasService> DeleteAliases(
         Guid modelId,
@@ -903,6 +1510,11 @@ public sealed class ProfileFamilyServiceTests
     {
         var target = new ProfileFamilyWorkerTarget("http://worker", "2.3.0");
         Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Strict);
+        // List/get now run detection-on-read; returning no live version makes staleness detection a
+        // safe no-op so these clone/list/get tests keep their seeded statuses.
+        _ = worker
+            .Setup(service => service.GetActiveOrcaVersionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
         _ = worker
             .Setup(service => service.GetCatalogAsync(
                 "Prusa",

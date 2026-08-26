@@ -1,6 +1,7 @@
 ﻿using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Repositories;
@@ -214,6 +215,14 @@ public sealed class ProfileFamilyService(
         ProfileFamilyRenderStatus? renderStatus,
         CancellationToken ct)
     {
+        // Staleness detection trigger (chosen: detection-on-read). Marking runs here, on the list read,
+        // rather than via a scheduled sweep or an engine-version-change hook, because it needs no new
+        // hosted-service infrastructure and guarantees the ?renderStatus=Stale filter and the bulk
+        // render-stale endpoint observe up-to-date statuses. The cost is that a family is only marked
+        // when someone looks; that is acceptable because staleness only matters at the moment an admin
+        // inspects or re-renders families. Detection degrades safely when no worker is online.
+        await DetectAndMarkStaleAsync(null, ct);
+
         IQueryable<MachineModelProfile> query = _dbContext.MachineModelProfiles
             .AsNoTracking()
             .Where(family => !family.IsSystem && family.SlicerType == SlicerType.OrcaSlicer);
@@ -234,6 +243,10 @@ public sealed class ProfileFamilyService(
     /// <inheritdoc />
     public async Task<ProfileFamilySummaryDto> GetFamilyAsync(Guid familyId, CancellationToken ct)
     {
+        // Detection-on-read, scoped to this family (see ListFamiliesAsync for the trigger rationale), so
+        // a single GET reflects post-upgrade staleness without a worker round-trip on the read shape.
+        await DetectAndMarkStaleAsync(familyId, ct);
+
         MachineModelProfile? family = await _dbContext.MachineModelProfiles
             .AsNoTracking()
             .Include(candidate => candidate.MachineProfiles)
@@ -263,7 +276,7 @@ public sealed class ProfileFamilyService(
 
         List<Guid> variantIds = family!.MachineProfiles.Select(variant => variant.Id).ToList();
 
-        await EnsureNoBlockingReferencesAsync(family, variantIds, ct);
+        await EnsureNoBlockingReferencesAsync(family, variantIds, "deleted", ct);
 
         // Ordering (partial-failure safety): remove the worker bundle first. A worker failure throws
         // (HttpRequestException -> 503) before any DB or alias mutation, so the family remains fully
@@ -290,9 +303,637 @@ public sealed class ProfileFamilyService(
         await transaction.CommitAsync(ct);
     }
 
+    /// <inheritdoc />
+    public async Task<ProfileFamilySummaryDto> EditFamilyAsync(
+        Guid familyId,
+        EditProfileFamilyRequestDto request,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        MachineModelProfile family = await LoadTrackedFamilyAsync(familyId, ct);
+        List<MachineProfile> existingVariants = family.MachineProfiles.ToList();
+
+        // Resolve each facet: an absent (null) facet leaves the persisted value unchanged.
+        string targetName = request.Name is null
+            ? family.Name
+            : NormalizeEditedName(request.Name);
+
+        string targetSource = request.SourceMachineModelName is null
+            ? family.SourceMachineModelName ?? string.Empty
+            : NormalizeEditedSource(request.SourceMachineModelName);
+
+        Dictionary<string, JsonElement> targetOverrides = request.FamilyOverrides is null
+            ? ParseFamilyOverrides(family.FamilyOverridesJson)
+            : new Dictionary<string, JsonElement>(request.FamilyOverrides, StringComparer.Ordinal);
+
+        List<double> targetNozzles = request.NozzleDiameters is null
+            ? DeriveNozzleDiameters(existingVariants)
+            : NormalizeEditedNozzles(request.NozzleDiameters);
+
+        bool isRename = !string.Equals(
+            MachineModelProfile.NormalizeNameKey(targetName),
+            MachineModelProfile.NormalizeNameKey(family.Name),
+            StringComparison.Ordinal);
+
+        // Fail fast on a rename collision (409) before any catalog fetch, worker call, or mutation.
+        if (isRename)
+        {
+            await EnsureRenameAvailableAsync(family, targetName, ct);
+        }
+
+        // A nozzle-set edit that drops a variant is a scoped delete and must honour the same live
+        // reference check as family deletion. Match by nozzle diameter so a surviving variant is never
+        // treated as removed.
+        if (request.NozzleDiameters is not null)
+        {
+            List<Guid> removedVariantIds = existingVariants
+                .Where(variant => !targetNozzles.Any(nozzle =>
+                    NozzleMatches(ParseNozzleDiameter(variant.Name), nozzle)))
+                .Select(variant => variant.Id)
+                .ToList();
+            await EnsureNoBlockingReferencesAsync(family, removedVariantIds, "edited", ct);
+        }
+
+        await RenderAndInstallAsync(
+            family,
+            existingVariants,
+            targetName,
+            targetSource,
+            targetNozzles,
+            targetOverrides,
+            isRename,
+            ct);
+
+        return MapToSummary(family);
+    }
+
+    /// <inheritdoc />
+    public async Task<ProfileFamilySummaryDto> RenderFamilyAsync(Guid familyId, CancellationToken ct)
+    {
+        MachineModelProfile family = await LoadTrackedFamilyAsync(familyId, ct);
+        List<MachineProfile> existingVariants = family.MachineProfiles.ToList();
+
+        // A pure re-render reconstructs an equivalent request from the persisted family state, so no
+        // facet changes and no rename occurs. Idempotent: the reconstructed nozzle set equals the
+        // existing variant set, so the id-preserving merge updates every variant in place.
+        await RenderAndInstallAsync(
+            family,
+            existingVariants,
+            family.Name,
+            family.SourceMachineModelName ?? string.Empty,
+            DeriveNozzleDiameters(existingVariants),
+            ParseFamilyOverrides(family.FamilyOverridesJson),
+            isRename: false,
+            ct);
+
+        return MapToSummary(family);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ProfileFamilyRenderResultDto>> RenderStaleFamiliesAsync(
+        CancellationToken ct)
+    {
+        // Ensure post-upgrade staleness is detected before selecting the batch, so a bulk re-render run
+        // picks up families that became stale since the last read.
+        await DetectAndMarkStaleAsync(null, ct);
+
+        // Re-render both Stale (post-upgrade drift) and Failed (recover a family whose last render or
+        // install failed) families. Ordered oldest-first for a stable, bounded pass.
+        List<Guid> targetIds = await _dbContext.MachineModelProfiles
+            .AsNoTracking()
+            .Where(family =>
+                !family.IsSystem
+                && family.SlicerType == SlicerType.OrcaSlicer
+                && (family.RenderStatus == ProfileFamilyRenderStatus.Stale
+                    || family.RenderStatus == ProfileFamilyRenderStatus.Failed))
+            .OrderBy(family => family.CreatedAt)
+            .Select(family => family.Id)
+            .ToListAsync(ct);
+
+        List<ProfileFamilyRenderResultDto> results = new(targetIds.Count);
+        foreach (Guid targetId in targetIds)
+        {
+            // One bad family must never abort the batch: capture each outcome and continue.
+            try
+            {
+                ProfileFamilySummaryDto rendered = await RenderFamilyAsync(targetId, ct);
+                results.Add(new ProfileFamilyRenderResultDto(
+                    rendered.FamilyId,
+                    rendered.FamilyName,
+                    rendered.RenderStatus,
+                    null,
+                    null));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                (string code, string detail) = ClassifyRenderFailure(ex);
+                string familyName = await _dbContext.MachineModelProfiles
+                    .AsNoTracking()
+                    .Where(family => family.Id == targetId)
+                    .Select(family => family.Name)
+                    .FirstOrDefaultAsync(ct) ?? targetId.ToString();
+                results.Add(new ProfileFamilyRenderResultDto(
+                    targetId,
+                    familyName,
+                    ProfileFamilyRenderStatus.Failed,
+                    code,
+                    detail));
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Marks Healthy families whose bundle was rendered for an OrcaSlicer version other than the live
+    /// engine version as <see cref="ProfileFamilyRenderStatus.Stale"/>. Never flips a family that has
+    /// never rendered (<c>RenderedForOrcaVersion</c> is null — i.e. Pending/Failed): <c>Stale</c> means
+    /// "rendered, but for an older version". Degrades safely when no worker is online (the live version
+    /// is unknowable) by leaving all statuses untouched rather than guessing.
+    /// </summary>
+    private async Task DetectAndMarkStaleAsync(Guid? scopeFamilyId, CancellationToken ct)
+    {
+        string? liveVersion = await _workerClient.GetActiveOrcaVersionAsync(ct);
+        if (string.IsNullOrWhiteSpace(liveVersion))
+        {
+            return;
+        }
+
+        IQueryable<MachineModelProfile> query = _dbContext.MachineModelProfiles
+            .Where(family =>
+                !family.IsSystem
+                && family.SlicerType == SlicerType.OrcaSlicer
+                && family.RenderStatus == ProfileFamilyRenderStatus.Healthy
+                && family.RenderedForOrcaVersion != null
+                && family.RenderedForOrcaVersion != liveVersion);
+
+        if (scopeFamilyId is Guid id)
+        {
+            query = query.Where(family => family.Id == id);
+        }
+
+        List<MachineModelProfile> stale = await query.ToListAsync(ct);
+        if (stale.Count == 0)
+        {
+            return;
+        }
+
+        DateTime now = DateTime.UtcNow;
+        foreach (MachineModelProfile family in stale)
+        {
+            family.RenderStatus = ProfileFamilyRenderStatus.Stale;
+            family.UpdatedAt = now;
+        }
+
+        _ = await _dbContext.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Shared render-and-install core for edit and re-render. Renders the target state against the live
+    /// worker, persists an id-preserving variant merge, installs the new bundle, and moves the alias on
+    /// rename. Validation/source failures are raised before any mutation, leaving the family and its
+    /// live bundle untouched. An install failure marks the family <c>Failed</c> and restores the
+    /// previous good bundle so the farm is never left worse off.
+    /// </summary>
+    private async Task RenderAndInstallAsync(
+        MachineModelProfile family,
+        List<MachineProfile> existingVariants,
+        string targetName,
+        string targetSource,
+        IReadOnlyList<double> targetNozzles,
+        Dictionary<string, JsonElement> targetOverrides,
+        bool isRename,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(targetSource))
+        {
+            throw new ProfileFamilySourceException(
+                $"Profile family '{family.Name}' has no source machine model to render from; " +
+                "re-bind it to a valid source machine model.");
+        }
+
+        string previousName = family.Name;
+
+        // Select a fresh worker and download its full catalog (empty manufacturer = every manufacturer)
+        // for the CURRENT live OrcaSlicer version. A missing worker throws HttpRequestException (503)
+        // before any mutation.
+        (ProfileFamilyWorkerTarget worker, AllProfilesResponseDto catalog) =
+            await _workerClient.GetCatalogAsync(string.Empty, null, ct);
+
+        // Capture the previous good bundle by rendering the CURRENT persisted state against the same
+        // catalog, so a failed install can restore it. Best-effort: if the previous source no longer
+        // resolves, there is nothing to restore (null) and the pre-mutation ordering below still keeps
+        // the live bundle intact for the common case.
+        ProfileFamilyBundleDto? previousBundle = TryRenderPreviousBundle(family, existingVariants, catalog);
+
+        // Derive the source manufacturer from the catalog (it is not persisted). A source that no longer
+        // resolves throws ProfileFamilySourceException (422) with an actionable detail — this also
+        // covers the §5 "source preset gone after upgrade" case. Thrown BEFORE any DB or worker
+        // mutation, so the family and its installed bundle are left exactly as they were.
+        string sourceManufacturer = DeriveSourceManufacturer(catalog, targetSource);
+
+        CloneProfileFamilyRequestDto renderRequest = BuildRenderRequest(
+            family,
+            targetName,
+            sourceManufacturer,
+            targetSource,
+            targetNozzles,
+            targetOverrides);
+
+        // Render the new bundle in memory. Bad overrides/nozzles throw ArgumentException (400); a
+        // missing source preset/nozzle throws ProfileFamilySourceException (422). Both fire before any
+        // mutation, so a validation failure preserves the family and its live bundle.
+        ProfileFamilyRenderResult rendered = _renderer.Render(family.Id, renderRequest, catalog);
+
+        string familyHash = ComputeHash(
+            targetName,
+            $"{sourceManufacturer}/{targetSource}",
+            rendered.CanonicalFamilyOverridesJson);
+        DateTime now = DateTime.UtcNow;
+
+        // Persist the authoritative state as Pending with an id-preserving variant merge before touching
+        // the worker, mirroring CloneFamilyAsync's persist-then-install ordering.
+        family.Name = targetName;
+        family.Hash = familyHash;
+        family.SlicerVersion = worker.OrcaVersion;
+        family.SourceMachineModelName = targetSource;
+        family.FamilyOverridesJson = rendered.CanonicalFamilyOverridesJson;
+        family.RenderStatus = ProfileFamilyRenderStatus.Pending;
+        family.UpdatedAt = now;
+
+        MergeVariants(family, existingVariants, rendered, worker.OrcaVersion, familyHash, now);
+
+        try
+        {
+            _ = await _dbContext.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsFamilyNameUniqueConstraintViolation(ex))
+        {
+            throw new ProfileFamilyConflictException(
+                $"A slicer profile family named '{targetName}' already exists.",
+                ex);
+        }
+
+        try
+        {
+            await _workerClient.WriteBundleAsync(worker, rendered.Bundle, ct);
+
+            if (family.PrinterModelId is Guid printerModelId)
+            {
+                try
+                {
+                    // Add the alias for the (possibly new) name first so lookups keep resolving, then
+                    // drop the stale old-name alias on a rename. Ordering guarantees no lookup gap.
+                    await _aliasService.EnsureModelAliasAsync(printerModelId, targetName, "OrcaSlicer", ct);
+                    if (isRename)
+                    {
+                        await _aliasService.RemoveModelAliasAsync(printerModelId, previousName, "OrcaSlicer", ct);
+                    }
+
+                    await _catalogService.InvalidateModelAliasesAsync(printerModelId, ct);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    throw new ProfileFamilyConflictException(ex.Message, ex);
+                }
+            }
+
+            family.RenderStatus = ProfileFamilyRenderStatus.Healthy;
+            family.LastRenderedAt = DateTime.UtcNow;
+            family.RenderedForOrcaVersion = worker.OrcaVersion;
+            family.UpdatedAt = family.LastRenderedAt.Value;
+            _ = await _dbContext.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            family.RenderStatus = ProfileFamilyRenderStatus.Failed;
+            family.UpdatedAt = DateTime.UtcNow;
+            _ = await _dbContext.SaveChangesAsync(CancellationToken.None);
+
+            // Previous-good-bundle preservation. The worker's InstallAsync removes a bundle on a
+            // blocking install failure rather than restoring the prior one, so a failed re-render can
+            // leave the family with no bundle. Re-install the captured previous good bundle (best-effort)
+            // so the family still slices via GET /api/slicer/profiles/machine/for-model/{modelId}. This
+            // runs only for the narrow window where the render succeeded but the install did not; a
+            // source/validation failure never reaches here, having thrown before the worker was touched.
+            if (previousBundle is not null)
+            {
+                try
+                {
+                    await _workerClient.WriteBundleAsync(worker, previousBundle, CancellationToken.None);
+                    if (family.PrinterModelId is Guid restoreModelId)
+                    {
+                        await _catalogService.InvalidateModelAliasesAsync(restoreModelId, CancellationToken.None);
+                    }
+                }
+                catch (Exception restoreEx)
+                {
+                    _logger.LogError(
+                        restoreEx,
+                        "Failed to restore the previous good bundle for profile family {FamilyId} after a failed re-render",
+                        family.Id);
+                }
+            }
+
+            _logger.LogError(
+                ex,
+                "Failed to re-render profile family {FamilyId} for OrcaSlicer {Version}",
+                family.Id,
+                worker.OrcaVersion);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Renders the family's CURRENT persisted state into a bundle for restore-on-failure, or returns
+    /// <see langword="null"/> when it cannot be reproduced (e.g. its source preset is already gone).
+    /// </summary>
+    private ProfileFamilyBundleDto? TryRenderPreviousBundle(
+        MachineModelProfile family,
+        List<MachineProfile> existingVariants,
+        AllProfilesResponseDto catalog)
+    {
+        try
+        {
+            List<double> previousNozzles = DeriveNozzleDiameters(existingVariants);
+            if (previousNozzles.Count == 0 || string.IsNullOrWhiteSpace(family.SourceMachineModelName))
+            {
+                return null;
+            }
+
+            string previousManufacturer = DeriveSourceManufacturer(catalog, family.SourceMachineModelName);
+            CloneProfileFamilyRequestDto previousRequest = BuildRenderRequest(
+                family,
+                family.Name,
+                previousManufacturer,
+                family.SourceMachineModelName,
+                previousNozzles,
+                ParseFamilyOverrides(family.FamilyOverridesJson));
+
+            return _renderer.Render(family.Id, previousRequest, catalog).Bundle;
+        }
+        catch (Exception ex) when (ex is ProfileFamilySourceException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Merges rendered variants into the tracked family in place: a surviving variant (matched by nozzle
+    /// diameter) keeps its <c>MachineProfile.Id</c> so printer/job references are never orphaned by an
+    /// unrelated edit; a new nozzle materialises a new row; a dropped nozzle's row is removed (its
+    /// reference check having already passed).
+    /// </summary>
+    private void MergeVariants(
+        MachineModelProfile family,
+        List<MachineProfile> existingVariants,
+        ProfileFamilyRenderResult rendered,
+        string orcaVersion,
+        string familyHash,
+        DateTime now)
+    {
+        List<MachineProfile> unmatched = existingVariants.ToList();
+
+        foreach (RenderedMachineVariant variant in rendered.MachineVariants)
+        {
+            MachineProfile? match = unmatched.FirstOrDefault(existing =>
+                NozzleMatches(ParseNozzleDiameter(existing.Name), variant.NozzleDiameter));
+
+            if (match is not null)
+            {
+                _ = unmatched.Remove(match);
+                match.Name = variant.Name;
+                match.Description = $"Generated {FormatNozzle(variant.NozzleDiameter)} mm variant for {family.Name}";
+                match.PrinterModelId = family.PrinterModelId;
+                match.Hash = ComputeHash(familyHash, variant.SourceSystemPresetName, variant.OverridesJson);
+                match.SlicerVersion = orcaVersion;
+                match.SlicerDistribution = family.SlicerDistribution;
+                match.SourceSystemPresetName = variant.SourceSystemPresetName;
+                match.OverridesJson = variant.OverridesJson;
+                match.UpdatedAt = now;
+                continue;
+            }
+
+            MachineProfile created = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = variant.Name,
+                Manufacturer = "Custom",
+                Description = $"Generated {FormatNozzle(variant.NozzleDiameter)} mm variant for {family.Name}",
+                SlicerType = SlicerType.OrcaSlicer,
+                PrinterModelId = family.PrinterModelId,
+                MachineModelProfileId = family.Id,
+                Hash = ComputeHash(familyHash, variant.SourceSystemPresetName, variant.OverridesJson),
+                IsSystem = false,
+                IsDefault = false,
+                IsPublic = true,
+                SlicerVersion = orcaVersion,
+                SlicerDistribution = family.SlicerDistribution,
+                SourceSystemPresetName = variant.SourceSystemPresetName,
+                OverridesJson = variant.OverridesJson,
+                CreatedByUserId = family.CreatedByUserId,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            _ = _dbContext.MachineProfiles.Add(created);
+        }
+
+        if (unmatched.Count > 0)
+        {
+            _dbContext.MachineProfiles.RemoveRange(unmatched);
+        }
+    }
+
+    /// <summary>
+    /// Re-checks the global name and alias collision rules for a rename, mirroring the create-time
+    /// checks. Throws <see cref="ProfileFamilyConflictException"/> (409) on a normalized-name clash with
+    /// another family or an OrcaSlicer alias already mapped to a different printer model.
+    /// </summary>
+    private async Task EnsureRenameAvailableAsync(
+        MachineModelProfile family,
+        string targetName,
+        CancellationToken ct)
+    {
+        string normalized = MachineModelProfile.NormalizeNameKey(targetName);
+        bool nameTaken = await _dbContext.MachineModelProfiles
+            .AnyAsync(
+                candidate =>
+                    candidate.Id != family.Id
+                    && candidate.SlicerType == SlicerType.OrcaSlicer
+                    && candidate.NameNormalized == normalized,
+                ct);
+        if (nameTaken)
+        {
+            throw new ProfileFamilyConflictException(
+                $"A slicer profile family named '{targetName}' already exists.");
+        }
+
+        Guid? aliasTarget = await _aliasService.ResolveModelAliasAsync(targetName, "OrcaSlicer");
+        if (aliasTarget.HasValue && aliasTarget.Value != family.PrinterModelId)
+        {
+            throw new ProfileFamilyConflictException(
+                $"OrcaSlicer model name '{targetName}' is already mapped to another printer model.");
+        }
+    }
+
+    private async Task<MachineModelProfile> LoadTrackedFamilyAsync(Guid familyId, CancellationToken ct)
+    {
+        MachineModelProfile? family = await _dbContext.MachineModelProfiles
+            .Include(candidate => candidate.MachineProfiles)
+            .FirstOrDefaultAsync(candidate => candidate.Id == familyId, ct);
+
+        if (!IsCustomFamily(family))
+        {
+            throw new ProfileFamilyNotFoundException(
+                $"Custom profile family '{familyId}' was not found.");
+        }
+
+        return family!;
+    }
+
+    private static CloneProfileFamilyRequestDto BuildRenderRequest(
+        MachineModelProfile family,
+        string familyName,
+        string sourceManufacturer,
+        string sourceMachineModelName,
+        IReadOnlyList<double> nozzleDiameters,
+        Dictionary<string, JsonElement> familyOverrides)
+    {
+        return new CloneProfileFamilyRequestDto
+        {
+            FamilyName = familyName,
+            TargetPrinterModelId = family.PrinterModelId ?? Guid.Empty,
+            SourceManufacturer = sourceManufacturer,
+            SourceMachineModelName = sourceMachineModelName,
+            NozzleDiameters = [.. nozzleDiameters],
+            FamilyOverrides = familyOverrides,
+            SlicerEngineVersion = null,
+            SlicerDistribution = string.IsNullOrWhiteSpace(family.SlicerDistribution)
+                ? "OrcaSlicer"
+                : family.SlicerDistribution
+        };
+    }
+
+    /// <summary>
+    /// Derives the source manufacturer for a family from the live catalog by locating the manufacturer
+    /// whose models include the family's source machine-model name. The manufacturer is not persisted
+    /// (§ slice-1 decision), so it is recovered here. Throws <see cref="ProfileFamilySourceException"/>
+    /// (422) with an actionable detail when the source model can no longer be found — the §5
+    /// source-preset-gone case.
+    /// </summary>
+    private static string DeriveSourceManufacturer(
+        AllProfilesResponseDto catalog,
+        string sourceMachineModelName)
+    {
+        foreach (KeyValuePair<string, ManufacturerProfilesDto> pair in catalog.ByHierarchy)
+        {
+            if (pair.Value.Models.Values.Any(model => string.Equals(
+                    model.Name,
+                    sourceMachineModelName,
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                return pair.Key;
+            }
+        }
+
+        throw new ProfileFamilySourceException(
+            $"Source machine model '{sourceMachineModelName}' is unavailable on the selected OrcaSlicer " +
+            "worker; its source preset may have been removed by a bundle upgrade. Re-bind the family to " +
+            "an available source machine model.");
+    }
+
+    private static List<double> DeriveNozzleDiameters(IEnumerable<MachineProfile> variants)
+    {
+        return variants
+            .Select(variant => ParseNozzleDiameter(variant.Name))
+            .Where(nozzle => nozzle is > 0)
+            .Select(nozzle => nozzle!.Value)
+            .Distinct()
+            .Order()
+            .ToList();
+    }
+
+    private static Dictionary<string, JsonElement> ParseFamilyOverrides(string? canonicalJson)
+    {
+        Dictionary<string, JsonElement> overrides = new(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(canonicalJson))
+        {
+            return overrides;
+        }
+
+        using JsonDocument document = JsonDocument.Parse(canonicalJson);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            return overrides;
+        }
+
+        foreach (JsonProperty property in document.RootElement.EnumerateObject())
+        {
+            overrides[property.Name] = property.Value.Clone();
+        }
+
+        return overrides;
+    }
+
+    private static string NormalizeEditedName(string name)
+    {
+        string trimmed = name.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            throw new ArgumentException("name must not be empty.", nameof(name));
+        }
+
+        return trimmed;
+    }
+
+    private static string NormalizeEditedSource(string sourceMachineModelName)
+    {
+        string trimmed = sourceMachineModelName.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            throw new ArgumentException(
+                "sourceMachineModelName must not be empty.",
+                nameof(sourceMachineModelName));
+        }
+
+        return trimmed;
+    }
+
+    private static List<double> NormalizeEditedNozzles(IReadOnlyList<double> nozzleDiameters)
+    {
+        if (nozzleDiameters.Count == 0)
+        {
+            throw new ArgumentException(
+                "nozzleDiameters must contain at least one nozzle; a family cannot have every variant removed.",
+                nameof(nozzleDiameters));
+        }
+
+        return nozzleDiameters
+            .Where(double.IsFinite)
+            .Where(value => value > 0)
+            .Distinct()
+            .Order()
+            .ToList();
+    }
+
+    private static (string Code, string Detail) ClassifyRenderFailure(Exception exception) => exception switch
+    {
+        ProfileFamilySourceException => ("source_preset_unavailable", exception.Message),
+        ProfileFamilyConflictException => ("profile_family_name_conflict", exception.Message),
+        ProfileFamilyInUseException => ("profile_family_in_use", exception.Message),
+        ArgumentException => ("invalid_profile_family", exception.Message),
+        HttpRequestException => ("profile_family_worker_unavailable", exception.Message),
+        _ => ("profile_family_render_failed", exception.Message)
+    };
+
+    private static bool NozzleMatches(double? candidate, double target) =>
+        candidate is double value && Math.Abs(value - target) < 1e-6;
+
     private async Task EnsureNoBlockingReferencesAsync(
         MachineModelProfile family,
         List<Guid> variantIds,
+        string blockedAction,
         CancellationToken ct)
     {
         if (variantIds.Count == 0)
@@ -317,7 +958,7 @@ public sealed class ProfileFamilyService(
         if (blockingJob is not null)
         {
             throw new ProfileFamilyInUseException(
-                $"Profile family '{family.Name}' cannot be deleted because slice job " +
+                $"Profile family '{family.Name}' cannot be {blockedAction} because slice job " +
                 $"'{blockingJob.Id}' (status {blockingJob.Status}) references one of its machine profiles.");
         }
 
@@ -331,7 +972,7 @@ public sealed class ProfileFamilyService(
         if (blockingPrinter is not null)
         {
             throw new ProfileFamilyInUseException(
-                $"Profile family '{family.Name}' cannot be deleted because printer " +
+                $"Profile family '{family.Name}' cannot be {blockedAction} because printer " +
                 $"'{blockingPrinter.Name}' ({blockingPrinter.Id}) references one of its machine profiles.");
         }
     }

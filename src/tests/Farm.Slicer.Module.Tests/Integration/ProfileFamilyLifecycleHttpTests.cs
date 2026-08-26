@@ -300,6 +300,115 @@ public sealed class ProfileFamilyLifecycleHttpTests
         family.Variants.Should().ContainSingle();
     }
 
+    [Fact]
+    public async Task EditFamily_UnknownId_Returns404FeatureErrorEnvelope()
+    {
+        var worker = new RecordingWorkerClient();
+        await using var factory = new LifecycleFactory(worker);
+        await factory.ResetDatabaseAsync();
+
+        using HttpClient client = await factory.CreateAdminClientAsync(
+            "profile-family-edit404-admin", "profile-family-edit404@example.com");
+
+        using HttpResponseMessage response = await client.PatchAsJsonAsync(
+            $"/api/slicer/profiles/families/{Guid.NewGuid()}",
+            new { name = "Renamed Family" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("code").GetString().Should().Be("profile_family_not_found");
+        body.RootElement.GetProperty("detail").GetString().Should().NotBeNullOrWhiteSpace();
+        body.RootElement.TryGetProperty("errors", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task EditFamily_RenameToExistingName_Returns409FeatureErrorEnvelope()
+    {
+        var worker = new RecordingWorkerClient();
+        await using var factory = new LifecycleFactory(worker);
+        await factory.ResetDatabaseAsync();
+        (Guid familyId, _) = await SeedFamilyAsync(factory, "Original Family", Guid.NewGuid());
+        _ = await SeedFamilyAsync(factory, "Taken Family", Guid.NewGuid());
+
+        using HttpClient client = await factory.CreateAdminClientAsync(
+            "profile-family-rename409-admin", "profile-family-rename409@example.com");
+
+        using HttpResponseMessage response = await client.PatchAsJsonAsync(
+            $"/api/slicer/profiles/families/{familyId}",
+            new { name = "Taken Family" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("code").GetString().Should().Be("profile_family_name_conflict");
+        body.RootElement.GetProperty("detail").GetString().Should().NotBeNullOrWhiteSpace();
+        body.RootElement.TryGetProperty("errors", out _).Should().BeFalse();
+        worker.DeletedFamilyIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task EditFamily_EmptyNozzleArray_Returns400FeatureErrorEnvelope()
+    {
+        var worker = new RecordingWorkerClient();
+        await using var factory = new LifecycleFactory(worker);
+        await factory.ResetDatabaseAsync();
+        (Guid familyId, _) = await SeedFamilyAsync(factory, "Nozzle Guard Family", Guid.NewGuid());
+
+        using HttpClient client = await factory.CreateAdminClientAsync(
+            "profile-family-emptynozzle-admin", "profile-family-emptynozzle@example.com");
+
+        using HttpResponseMessage response = await client.PatchAsJsonAsync(
+            $"/api/slicer/profiles/families/{familyId}",
+            new { nozzleDiameters = Array.Empty<double>() });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("code").GetString().Should().Be("invalid_profile_family");
+        body.RootElement.GetProperty("detail").GetString().Should().NotBeNullOrWhiteSpace();
+        body.RootElement.TryGetProperty("errors", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RenderFamily_UnknownId_Returns404FeatureErrorEnvelope()
+    {
+        var worker = new RecordingWorkerClient();
+        await using var factory = new LifecycleFactory(worker);
+        await factory.ResetDatabaseAsync();
+
+        using HttpClient client = await factory.CreateAdminClientAsync(
+            "profile-family-render404-admin", "profile-family-render404@example.com");
+
+        using HttpResponseMessage response = await client.PostAsync(
+            $"/api/slicer/profiles/families/{Guid.NewGuid()}/render", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("code").GetString().Should().Be("profile_family_not_found");
+        body.RootElement.TryGetProperty("errors", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RenderStaleFamilies_NoStaleOrFailedFamilies_ReturnsEmptyArray()
+    {
+        // No worker version is available (GetActiveOrcaVersionAsync returns null), so detection-on-read
+        // safely no-ops and a Healthy family is never swept into the batch: the result is an empty array.
+        var worker = new RecordingWorkerClient();
+        await using var factory = new LifecycleFactory(worker);
+        await factory.ResetDatabaseAsync();
+        _ = await SeedFamilyAsync(factory, "Healthy Batch Family", Guid.NewGuid());
+
+        using HttpClient client = await factory.CreateAdminClientAsync(
+            "profile-family-renderstale-admin", "profile-family-renderstale@example.com");
+
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/slicer/profiles/families/render-stale", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        List<ProfileFamilyRenderResultDto>? results =
+            await response.Content.ReadFromJsonAsync<List<ProfileFamilyRenderResultDto>>();
+        results.Should().NotBeNull();
+        results!.Should().BeEmpty();
+    }
+
     private static async Task<(Guid FamilyId, Guid VariantId)> SeedFamilyAsync(
         CustomWebApplicationFactory factory,
         string name,
@@ -435,5 +544,10 @@ public sealed class ProfileFamilyLifecycleHttpTests
             DeletedFamilyIds.Add(familyId);
             return deleteFailure is null ? Task.CompletedTask : Task.FromException(deleteFailure);
         }
+
+        // Detection-on-read calls this on the list/get path; returning null means "no worker online",
+        // so staleness detection safely no-ops in the contract tests.
+        public Task<string?> GetActiveOrcaVersionAsync(CancellationToken ct) =>
+            Task.FromResult<string?>(null);
     }
 }

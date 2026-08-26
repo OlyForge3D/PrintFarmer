@@ -35,6 +35,68 @@ public sealed class CloneProfileFamilyRequestDto
 }
 
 /// <summary>
+/// Requests an in-place edit of an existing custom OrcaSlicer profile family. Every field is
+/// absent-aware: a <see langword="null"/> value means "leave this facet unchanged", so a caller can
+/// patch one facet without disturbing the others. Every accepted edit forces a re-render because the
+/// derived worker bundle embeds the family name, shared overrides, and variant set.
+/// </summary>
+public sealed class EditProfileFamilyRequestDto
+{
+    /// <summary>
+    /// New family display name, or <see langword="null"/> to leave unchanged. A rename re-checks the
+    /// same global name/alias collision rules as creation and moves the OrcaSlicer alias from the old
+    /// name to the new one. An empty/whitespace value is rejected (<c>400</c>).
+    /// </summary>
+    [MaxLength(256)]
+    public string? Name { get; set; }
+
+    /// <summary>
+    /// Replacement family-shared native overrides (<c>printable_area</c>, <c>printable_height</c>, …),
+    /// or <see langword="null"/> to leave unchanged. An empty object clears all shared overrides. The
+    /// renderer's existing identity-key validation rejects nozzle-specific/identity-bearing keys.
+    /// </summary>
+    public Dictionary<string, JsonElement>? FamilyOverrides { get; set; }
+
+    /// <summary>
+    /// Replacement nozzle-variant set, or <see langword="null"/> to leave the variant set unchanged.
+    /// An <em>empty</em> array is an error (<c>400</c>), not "remove all variants": a family must own
+    /// at least one variant. Adding a nozzle materialises a new variant; removing one is a scoped
+    /// delete that honours the same reference check as family deletion (refused <c>409</c> when a
+    /// printer template or a non-terminal slice job still points at the variant being removed).
+    /// Surviving variants keep their <c>MachineProfile.Id</c>.
+    /// </summary>
+    public IReadOnlyList<double>? NozzleDiameters { get; set; }
+
+    /// <summary>
+    /// New upstream source machine-model name to re-bind the family to (§5 source re-bind), or
+    /// <see langword="null"/> to leave the source binding unchanged. Re-binding re-derives the source
+    /// manufacturer from the live worker catalog and re-renders; if the new source cannot be resolved
+    /// the edit is rejected <c>422 source_preset_unavailable</c> with an actionable detail and the
+    /// family is left untouched.
+    /// </summary>
+    [MaxLength(256)]
+    public string? SourceMachineModelName { get; set; }
+}
+
+/// <summary>
+/// One family's outcome from a re-render, used by the bulk <c>render-stale</c> response so a single
+/// failure never hides the others. On success <paramref name="Code"/> and <paramref name="Detail"/>
+/// are <see langword="null"/>; on failure they carry the same <c>{code,detail}</c> envelope the
+/// single-family endpoints return.
+/// </summary>
+/// <param name="FamilyId">Family identity.</param>
+/// <param name="FamilyName">Family display name.</param>
+/// <param name="RenderStatus">Resulting render status (<c>Healthy</c> on success, else <c>Failed</c>).</param>
+/// <param name="Code">Machine-readable failure code, or <see langword="null"/> on success.</param>
+/// <param name="Detail">Actionable human-readable failure detail, or <see langword="null"/> on success.</param>
+public sealed record ProfileFamilyRenderResultDto(
+    Guid FamilyId,
+    string FamilyName,
+    ProfileFamilyRenderStatus RenderStatus,
+    string? Code,
+    string? Detail);
+
+/// <summary>
 /// Describes a machine variant created as part of a custom family.
 /// </summary>
 public sealed record ProfileFamilyMachineVariantDto(

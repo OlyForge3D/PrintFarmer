@@ -201,4 +201,137 @@ public sealed class ProfileFamiliesController(
                 });
         }
     }
+
+    /// <summary>
+    /// Edits one custom OrcaSlicer profile family in place (rename, family-shared overrides, nozzle
+    /// variant set, and/or source re-bind) and re-renders it. Admin action
+    /// (<c>slicer_engines:admin</c>). Returns the updated family in the same shape as
+    /// <c>GET families/{familyId}</c>.
+    /// </summary>
+    [HttpPatch("families/{familyId:guid}")]
+    [RequirePermission("slicer_engines:admin")]
+    [ProducesResponseType(typeof(ProfileFamilySummaryDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> EditFamilyAsync(
+        Guid familyId,
+        [FromBody] EditProfileFamilyRequestDto? request,
+        CancellationToken ct)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(new
+            {
+                code = "invalid_profile_family",
+                detail = "One or more profile family fields are invalid."
+            });
+        }
+
+        if (request is null)
+        {
+            return BadRequest(new { code = "invalid_profile_family", detail = "Request body is required." });
+        }
+
+        try
+        {
+            ProfileFamilySummaryDto family = await _profileFamilyService.EditFamilyAsync(familyId, request, ct);
+            return Ok(family);
+        }
+        catch (ProfileFamilyNotFoundException ex)
+        {
+            return NotFound(new { code = "profile_family_not_found", detail = ex.Message });
+        }
+        catch (ProfileFamilyConflictException ex)
+        {
+            return Conflict(new { code = "profile_family_name_conflict", detail = ex.Message });
+        }
+        catch (ProfileFamilyInUseException ex)
+        {
+            return Conflict(new { code = "profile_family_in_use", detail = ex.Message });
+        }
+        catch (ProfileFamilySourceException ex)
+        {
+            return UnprocessableEntity(new { code = "source_preset_unavailable", detail = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { code = "invalid_profile_family", detail = ex.Message });
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "OrcaSlicer worker unavailable during profile-family edit");
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new
+                {
+                    code = "profile_family_worker_unavailable",
+                    detail = "OrcaSlicer worker unavailable."
+                });
+        }
+    }
+
+    /// <summary>
+    /// Re-renders one custom OrcaSlicer profile family against the live worker (recovers a
+    /// <c>Stale</c>/<c>Failed</c> family, or forces a re-render of a <c>Healthy</c> one). Idempotent.
+    /// Admin action (<c>slicer_engines:admin</c>). Returns the updated family.
+    /// </summary>
+    [HttpPost("families/{familyId:guid}/render")]
+    [RequirePermission("slicer_engines:admin")]
+    [ProducesResponseType(typeof(ProfileFamilySummaryDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> RenderFamilyAsync(Guid familyId, CancellationToken ct)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(new { code = "invalid_profile_family", detail = "Invalid family id." });
+        }
+
+        try
+        {
+            ProfileFamilySummaryDto family = await _profileFamilyService.RenderFamilyAsync(familyId, ct);
+            return Ok(family);
+        }
+        catch (ProfileFamilyNotFoundException ex)
+        {
+            return NotFound(new { code = "profile_family_not_found", detail = ex.Message });
+        }
+        catch (ProfileFamilySourceException ex)
+        {
+            return UnprocessableEntity(new { code = "source_preset_unavailable", detail = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { code = "invalid_profile_family", detail = ex.Message });
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "OrcaSlicer worker unavailable during profile-family re-render");
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new
+                {
+                    code = "profile_family_worker_unavailable",
+                    detail = "OrcaSlicer worker unavailable."
+                });
+        }
+    }
+
+    /// <summary>
+    /// Re-renders every <c>Stale</c> or <c>Failed</c> custom family, returning one result per family so
+    /// a single failure never hides the others. Admin action (<c>slicer_engines:admin</c>).
+    /// </summary>
+    [HttpPost("families/render-stale")]
+    [RequirePermission("slicer_engines:admin")]
+    [ProducesResponseType(typeof(IReadOnlyList<ProfileFamilyRenderResultDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> RenderStaleFamiliesAsync(CancellationToken ct)
+    {
+        IReadOnlyList<ProfileFamilyRenderResultDto> results =
+            await _profileFamilyService.RenderStaleFamiliesAsync(ct);
+        return Ok(results);
+    }
 }
