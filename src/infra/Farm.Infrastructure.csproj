@@ -7,6 +7,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Required for Mvc.Filters.IFilterFactory/ProblemDetails/HttpContext used by the shared
+         Idempotency/PartsInventory/OperatorFeatures cross-cutting infrastructure (issue #2040:
+         these types moved here from Farm.Web.Api so Farm.Modules.PrintQueue can reference them
+         without a circular project reference back to the host). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
     <ProjectReference Include="../settings/Farm.Settings.Abstractions/Farm.Settings.Abstractions.csproj" />
   </ItemGroup>

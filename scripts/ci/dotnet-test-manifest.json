@@ -198,6 +198,25 @@
       "notes": "New in issue #2033 (Phase 5: cohort C moved out of Farm.Web.Api.Tests). shards[] here are a runtime partition for parallel wall-clock only (proven exhaustive/mutually-exclusive/non-empty across the 26 moved namespace groups), NOT a compile-time blast-radius split -- the whole project still builds and restores as one unit per CI leg. select-dotnet-tests.sh's has_infra/has_backend/has_backend_core/has_slicer/has_mig_app/has_mig_slcr buckets all select this project (see comments there) since Farm.Infrastructure.Tests.csproj references Farm.Infrastructure, every backend plugin, Farm.Slicer.Module(.Api), and every migration project directly. has_infra intentionally no longer also selects Farm.Web.Api.Tests/Farm.Web.IntegrationTests -- see select-dotnet-tests.sh for why the full-solution dotnet-build job still provides compile coverage for that combination."
     },
     {
+      "name": "Farm.Modules.PrintQueue.Tests",
+      "testProject": "tests/Farm.Modules.PrintQueue.Tests/Farm.Modules.PrintQueue.Tests.csproj",
+      "productionProject": "modules/Farm.Modules.PrintQueue/Farm.Modules.PrintQueue.csproj",
+      "pathPrefixes": ["src/tests/Farm.Modules.PrintQueue.Tests/"],
+      "dependsOnProjects": [
+        "src/modules/Farm.Modules.PrintQueue/",
+        "src/modules/Farm.Modules.Abstractions/",
+        "src/infra/",
+        "src/slicer/Farm.Slicer.Module/",
+        "src/backends/Farm.Backend.Plugin.OctoPrint/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Modules.PrintQueue.Tests",
+      "notes": "New in issue #2040 (Phase 12: PrintJobManagementService and its 8 dependent controllers -- including SlicePrintBridgeController -- moved out of Farm.Web.Api into Farm.Modules.PrintQueue, as-is/no internal decomposition, per the SmartPlug/#2036 vertical-slice pattern). Unlike SmartPlug, this module also references Farm.Slicer.Module directly (SlicePrintBridgeController consumes IArtifactsService/ISliceJobRepository) and Farm.Backend.Plugin.OctoPrint directly from its test project (PrintJobManagementServiceHistorySeedingTests), so select-dotnet-tests.sh's slicer and backend-plugin buckets also select this project, in addition to its own narrow printqueue/tests_printqueue buckets. The retained CustomWebApplicationFactory-based Dispatch/ integration suite and RouteTableSnapshotTests both stay in Farm.Web.Api.Tests, so the printqueue bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg)."
+    },
+    {
       "name": "Farm.Modules.Maintenance.Tests",
       "testProject": "tests/Farm.Modules.Maintenance.Tests/Farm.Modules.Maintenance.Tests.csproj",
       "productionProject": "modules/Farm.Modules.Maintenance/Farm.Modules.Maintenance.csproj",
