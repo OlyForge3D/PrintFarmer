@@ -170,7 +170,7 @@ public sealed class ProfileFamilyService(
             family.UpdatedAt = family.LastRenderedAt.Value;
             _ = await _dbContext.SaveChangesAsync(ct);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
             family.RenderStatus = ProfileFamilyRenderStatus.Failed;
             family.UpdatedAt = DateTime.UtcNow;
@@ -225,7 +225,8 @@ public sealed class ProfileFamilyService(
         MachineModelProfile? retryableFamily = matchingFamilies.SingleOrDefault();
         if (retryableFamily is not null
             && (retryableFamily.IsSystem
-                || retryableFamily.RenderStatus != ProfileFamilyRenderStatus.Failed
+                || retryableFamily.RenderStatus is not (
+                    ProfileFamilyRenderStatus.Failed or ProfileFamilyRenderStatus.Pending)
                 || retryableFamily.PrinterModelId != request.TargetPrinterModelId))
         {
             throw new ProfileFamilyConflictException(

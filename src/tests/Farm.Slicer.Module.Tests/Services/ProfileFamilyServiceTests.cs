@@ -188,6 +188,78 @@ public sealed class ProfileFamilyServiceTests
     }
 
     [Fact]
+    public async Task CloneFamilyAsync_WorkerCancellation_MarksFailedAndRetryReusesFamilyAndBundle()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        Guid userId = Guid.NewGuid();
+        Mock<ICatalogServiceAdapter> catalog = Catalog(modelId);
+        Mock<IPrinterModelAliasService> aliases = Aliases(modelId);
+        Mock<IProfileFamilyRenderer> renderer = Renderer();
+        Mock<IProfileFamilyWorkerClient> worker =
+            Worker(new TaskCanceledException("worker request timed out"));
+        var service = CreateService(dbContext, catalog, aliases, renderer, worker);
+        CloneProfileFamilyRequestDto request = Request(modelId);
+
+        Func<Task> firstAttempt = async () =>
+            await service.CloneFamilyAsync(request, userId, CancellationToken.None);
+
+        await firstAttempt.Should().ThrowAsync<TaskCanceledException>();
+        MachineModelProfile failedFamily = await dbContext.MachineModelProfiles
+            .AsNoTracking()
+            .SingleAsync();
+        failedFamily.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed);
+
+        CloneProfileFamilyResponseDto response =
+            await service.CloneFamilyAsync(request, userId, CancellationToken.None);
+
+        response.FamilyId.Should().Be(failedFamily.Id);
+        response.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
+        (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(1);
+        WorkerBundleFamilyIds(worker).Should().Equal(failedFamily.Id, failedFamily.Id);
+    }
+
+    [Fact]
+    public async Task CloneFamilyAsync_PendingFamily_RetryReusesFamilyAndBundle()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        Guid familyId = Guid.NewGuid();
+        Guid userId = Guid.NewGuid();
+        dbContext.MachineModelProfiles.Add(new MachineModelProfile
+        {
+            Id = familyId,
+            Name = "Farm Test",
+            Manufacturer = "Custom",
+            SlicerType = SlicerType.OrcaSlicer,
+            PrinterModelId = modelId,
+            Hash = new string('A', 64),
+            IsSystem = false,
+            RenderStatus = ProfileFamilyRenderStatus.Pending,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        _ = await dbContext.SaveChangesAsync();
+        Mock<ICatalogServiceAdapter> catalog = Catalog(modelId);
+        Mock<IPrinterModelAliasService> aliases = Aliases(modelId);
+        Mock<IProfileFamilyRenderer> renderer = Renderer();
+        Mock<IProfileFamilyWorkerClient> worker = Worker();
+        var service = CreateService(dbContext, catalog, aliases, renderer, worker);
+
+        CloneProfileFamilyResponseDto response =
+            await service.CloneFamilyAsync(Request(modelId), userId, CancellationToken.None);
+
+        response.FamilyId.Should().Be(familyId);
+        response.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
+        (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(1);
+        WorkerBundleFamilyIds(worker).Should().Equal(familyId);
+    }
+
+    [Fact]
     public async Task CloneFamilyAsync_AliasFailure_RetryReusesFailedFamilyAndBundle()
     {
         await using SqliteConnection connection = new("Data Source=:memory:");

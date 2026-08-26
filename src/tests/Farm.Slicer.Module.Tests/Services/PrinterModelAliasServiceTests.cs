@@ -9,7 +9,7 @@ namespace Farm.Slicer.Module.Tests.Services;
 public sealed class PrinterModelAliasServiceTests
 {
     [Fact]
-    public async Task ResolveAndEnsure_AreCaseInsensitive_OnNonSqliteProvider()
+    public async Task ResolveAndEnsure_AreCaseInsensitive_WithEfInMemoryProvider()
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())

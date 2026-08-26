@@ -166,3 +166,7 @@ Closed Vasquez's microservices blocker by introducing dedicated read-only Main A
 ## 2026-08-25 — Duplicate service-credential rejection
 
 Hardened the internal slicer-host authentication seam to reject duplicate `X-Slicer-Api-Key` values rather than selecting one. Added HTTP-pipeline coverage; internal route tests pass 4/4, targeted API build succeeds, and scoped format is clean. Full suite remains deferred to consolidated validation.
+
+## 2026-08-25 — Profile-family cancellation and crash retry recovery
+
+Closed Bishop B1-R: post-persistence cancellation now marks the family Failed using an uncancelled persistence token before propagating, and both Failed and crash-left Pending families retry in place. Added relational cancellation/Pending recovery tests (focused class 6/6), renamed an EF InMemory alias test to stop claiming SQL-provider portability, and verified its behavior 1/1. Targeted build and scoped format pass; no full-suite rerun.
