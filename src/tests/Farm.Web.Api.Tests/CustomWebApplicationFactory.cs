@@ -47,7 +47,17 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         int dbId = System.Threading.Interlocked.Increment(ref _databaseCounter);
         // Use a named shared in-memory database and keep one connection open for the factory lifetime.
         // This prevents SQLite from treating the string as a file path and avoids intermittent IO errors.
-        _keepAliveConnection = new SqliteConnection($"Data Source=file:farm_test_{dbId}?mode=memory&cache=shared");
+        // "Default Timeout" sets SQLite's busy_timeout: this factory opens several independent
+        // connections against the same shared in-memory database during startup (a throwaway
+        // ServiceProvider that runs EnsureCreated/CreateTables here, and the real host's own
+        // SlicerDbInitializationHostedService migration once it starts). Under the heavy CPU
+        // contention this suite now runs under with the parallelism cap lifted, those can be
+        // slow enough to genuinely overlap, and SQLite's in-memory journal takes an exclusive
+        // write lock — without a busy timeout, a second writer fails immediately with
+        // "SQLite Error 5: database is locked" instead of waiting the (very short) real time it
+        // takes for the first writer's transaction to complete.
+        _keepAliveConnection = new SqliteConnection(
+            $"Data Source=file:farm_test_{dbId}?mode=memory&cache=shared;Default Timeout=30");
         _keepAliveConnection.Open();
         _connectionString = _keepAliveConnection.ConnectionString;
 

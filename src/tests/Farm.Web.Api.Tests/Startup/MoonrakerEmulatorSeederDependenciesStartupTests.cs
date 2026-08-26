@@ -161,9 +161,16 @@ public sealed class MoonrakerEmulatorSeederDependenciesStartupTests
         }
         finally
         {
-            // Microsoft.Data.Sqlite pools connections by default, which keeps the file locked
-            // for a short while after disposal — clear the pool before deleting.
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            // Scope the pool clear to this test's own connection string instead of
+            // calling the process-wide ClearAllPools(), which would disrupt other
+            // tests' pooled SQLite connections running concurrently now that this
+            // assembly is no longer fully serialized.
+            using (var pooledConnection =
+                new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={dbPath}"))
+            {
+                Microsoft.Data.Sqlite.SqliteConnection.ClearPool(pooledConnection);
+            }
+
             File.Delete(dbPath);
         }
     }

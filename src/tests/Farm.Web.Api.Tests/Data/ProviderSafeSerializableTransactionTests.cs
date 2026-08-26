@@ -51,7 +51,15 @@ public sealed class ProviderSafeSerializableTransactionTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            // Scope the pool clear to this test's own connection string instead of
+            // calling the process-wide ClearAllPools(), which would disrupt other
+            // tests' pooled SQLite connections running concurrently now that this
+            // assembly is no longer fully serialized.
+            using (var pooledConnection = new SqliteConnection(connectionString))
+            {
+                SqliteConnection.ClearPool(pooledConnection);
+            }
+
             if (File.Exists(databasePath))
             {
                 File.Delete(databasePath);
