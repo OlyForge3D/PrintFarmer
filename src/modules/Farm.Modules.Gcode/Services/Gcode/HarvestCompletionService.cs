@@ -1,6 +1,8 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Gcode;

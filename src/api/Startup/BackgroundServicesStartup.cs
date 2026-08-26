@@ -1,8 +1,6 @@
 ﻿using Farm.Infrastructure.Services.Assets;
-using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Startup;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Startup;
 
@@ -55,22 +53,8 @@ public static class BackgroundServicesStartup
         // Register asset service for OrcaSlicer printer images and bed textures
         services.AddSingleton<IAssetService, AssetService>();
 
-        // Register file consistency audit background service
-        // Runs hourly to detect orphaned/missing/corrupted files
-        // Uses IFileAuditRepository from Farm.Slicer.Module.Repositories (registered by slicer integration)
-        services.AddHostedService(sp =>
-        {
-            IServiceScopeFactory scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
-            ILoggerFactory loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-            IConfiguration config = sp.GetRequiredService<IConfiguration>();
-            string modelStoragePath = config["ModelStorage:Path"] ?? Path.Join(Directory.GetCurrentDirectory(), "models");
-            string gcodeStoragePath = config["GcodeStorage:Path"] ?? Path.Join(Directory.GetCurrentDirectory(), "gcode-library");
-            return new Farm.Infrastructure.Services.FileManagement.FileConsistencyAuditService(
-                scopeFactory,
-                loggerFactory.CreateLogger<Farm.Infrastructure.Services.FileManagement.FileConsistencyAuditService>(),
-                modelStoragePath,
-                gcodeStoragePath);
-        });
+        // File consistency audit background service moved to Farm.Modules.Gcode's
+        // GcodeApiModule (issue #2039, epic #2019) alongside FileConsistencyAuditService itself.
 
         // Electricity Module - prune PowerReading rows older than 90 days, runs daily
         services.AddHostedService<Farm.Infrastructure.Services.Electricity.PowerReadingPruneService>();

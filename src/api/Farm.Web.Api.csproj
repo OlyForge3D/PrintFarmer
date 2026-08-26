@@ -150,6 +150,7 @@
     <ProjectReference Include="..\modules\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
     <ProjectReference Include="..\modules\Farm.Modules.SmartPlug\Farm.Modules.SmartPlug.csproj" />
     <ProjectReference Include="..\modules\Farm.Modules.Calibration\Farm.Modules.Calibration.csproj" />
+    <ProjectReference Include="..\modules\Farm.Modules.Gcode\Farm.Modules.Gcode.csproj" />
   </ItemGroup>
 
   <!-- Copy backend plugin DLLs (runtime-loaded, not compile-time referenced)

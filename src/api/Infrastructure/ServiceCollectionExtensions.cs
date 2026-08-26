@@ -32,7 +32,6 @@ using Farm.Web.Api.Extensions;
 using Farm.Web.Api.Infrastructure.Normalization;
 using Farm.Web.Api.Services.Authentication;
 using Farm.Web.Api.Services.Discovery;
-using Farm.Web.Api.Services.Gcode;
 using Farm.Web.Api.Services.SlicerHost;
 using Farm.Web.Api.Services.Startup;
 using Farm.Web.Api.Services.StorageManagement;
@@ -722,13 +721,10 @@ public static class ServiceCollectionExtensions
 
         _ = services.AddSingleton<IGcodeMetadataExtractorService, GcodeMetadataExtractorService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IPrinterModelAliasService, Farm.Infrastructure.Services.Gcode.PrinterModelAliasService>();
-        _ = services.AddScoped<Services.Gcode.IGcodeFilesService, Services.Gcode.GcodeFilesService>();
-        services.TryAddSingleton<
-            Services.Gcode.Safety.IGcodeSafetyValidator,
-            Services.Gcode.Safety.GcodeSafetyValidator>();
-        _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeFileProcessingService>(sp =>
-            (Farm.Infrastructure.Services.Gcode.IGcodeFileProcessingService)sp.GetRequiredService<Services.Gcode.IGcodeFilesService>());
-        _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IHarvestEventBroadcaster, Services.Gcode.SignalRHarvestEventBroadcaster>();
+
+        // IGcodeFilesService, IGcodeSafetyValidator, the IGcodeFileProcessingService bridge, and
+        // IHarvestEventBroadcaster are now registered by Farm.Modules.Gcode's GcodeApiModule
+        // (issue #2039, epic #2019) since their concrete implementations moved into that module.
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeHarvestService, Farm.Infrastructure.Services.Gcode.GcodeHarvestService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.ISliceGcodeImportService, Farm.Infrastructure.Services.Gcode.SliceGcodeImportService>();
 
@@ -739,8 +735,8 @@ public static class ServiceCollectionExtensions
             _ = services.AddHostedService<Farm.Infrastructure.Services.GcodeHarvest.GcodeHarvestQueueProcessorService>();
         }
 
-        // Gcode upload settings and quota - use persisted settings from ISettingsService
-        _ = services.AddScoped<IGcodeUploadSettings, PersistedGcodeUploadSettingsAdapter>();
+        // Gcode upload quota - IGcodeUploadSettings is now registered by Farm.Modules.Gcode's
+        // GcodeApiModule (issue #2039, epic #2019) since PersistedGcodeUploadSettingsAdapter moved.
         _ = services.AddScoped<IGcodeUploadQuotaService, InMemoryGcodeUploadQuotaService>();
 
         // Print quotas and user balances
