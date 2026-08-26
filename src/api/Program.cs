@@ -212,6 +212,7 @@ builder.Services.AddApiModules(
     typeof(Farm.Modules.PrintQueue.PrintQueueApiModule).Assembly,
     typeof(Farm.Modules.Maintenance.MaintenanceApiModule).Assembly,
     typeof(Farm.Modules.Calibration.CalibrationApiModule).Assembly,
+    typeof(Farm.Modules.Gcode.GcodeApiModule).Assembly,
     typeof(Farm.Modules.Identity.IdentityApiModule).Assembly);
 
 if (slicerModuleEnabled)
@@ -262,14 +263,9 @@ builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 // Feature services (OctoPrint, File Management, Print Jobs, Maintenance, SPA)
 builder.Services.AddPrintFarmerFeatureServices(builder.Configuration, builder.Environment);
 
-// Artifact -> GcodeFile promotion: scoped promoter plus the reconciler that resolves the unknown
-// outcomes a crash or a transient outage can leave between the slicer and core contexts.
-builder.Services.AddSingleton<Farm.Web.Api.Services.Gcode.GcodePromotionReconcilerState>();
-builder.Services.AddScoped<
-    Farm.Web.Api.Services.Gcode.IGcodeArtifactPromoter,
-    Farm.Web.Api.Services.Gcode.GcodeArtifactPromoter>();
-builder.Services.AddHostedService<
-    Farm.Web.Api.Services.Gcode.GcodePromotionReconciliationService>();
+// Artifact -> GcodeFile promotion (GcodePromotionReconcilerState, IGcodeArtifactPromoter,
+// GcodePromotionReconciliationService) is now registered by Farm.Modules.Gcode's
+// GcodeApiModule (issue #2039, epic #2019).
 
 // Register background services for distributed slicing
 builder.Services.AddPrintFarmerBackgroundServices(builder.Configuration);
