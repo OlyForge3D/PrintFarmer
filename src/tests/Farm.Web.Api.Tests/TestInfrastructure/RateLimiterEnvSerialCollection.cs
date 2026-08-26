@@ -14,11 +14,16 @@ namespace Farm.Web.Api.Tests.TestInfrastructure;
 /// other state with the other — the environment variable is the ONLY thing they share, and it
 /// is process-wide rather than scoped to either class's factory, so no per-class isolation
 /// (IClassFixture, a private in-memory database, etc.) can prevent the race on its own. Placing
-/// both classes in one DisableParallelization collection is the narrowest fix available from
-/// test code alone: it guarantees neither class's tests execute concurrently with the other's,
-/// while leaving both fully free to run in parallel with every other collection in the assembly.
+/// both classes in the same named collection is the narrowest fix available from test code
+/// alone: xUnit's <c>CollectionPerClass</c> assembly behavior (see
+/// <c>DisableTestParallelization.cs</c>) already guarantees that test classes sharing one
+/// explicit collection never run concurrently with each other, with no need for
+/// <c>DisableParallelization</c> on the definition itself — that flag would instead serialize
+/// this collection against every OTHER collection in the assembly too, reintroducing an
+/// assembly-wide parallelism cap this PR exists to remove. Omitting it keeps both classes free
+/// to run in parallel with every other collection while still never overlapping each other.
 /// </summary>
-[CollectionDefinition(Name, DisableParallelization = true)]
+[CollectionDefinition(Name)]
 public class RateLimiterEnvSerialCollection
 {
     /// <summary>Collection name constant for consistent referencing across test classes.</summary>
