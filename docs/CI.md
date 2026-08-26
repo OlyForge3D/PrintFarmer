@@ -387,8 +387,9 @@ given tree.
   `bash scripts/ci/tests/test-dotnet-test-manifest.sh` to confirm the
   manifest still registers every `*.Tests.csproj` on disk exactly once (and,
   for `Farm.Web.Api.Tests`, that its `shards` remain exhaustive, mutually
-  exclusive, and non-empty) before opening a PR — the same check also runs
-  in the `ci-tools` job.
+  exclusive, non-empty, and that each xUnit test source is covered by its
+  owning shard's `FullyQualifiedName` filter) before opening a PR — the same
+  check also runs in the `ci-tools` job.
 - **New bucket**: extend `classify_path()` and add a case in the selector suite.
 - **New full-safe trigger**: extend the trigger switch in `main()` of the
   selector and add a case.

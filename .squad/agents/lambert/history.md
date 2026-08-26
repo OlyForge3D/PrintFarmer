@@ -111,3 +111,11 @@ tool over whole-file PowerShell rewrites on BOM'd C# files.
 Added `PrinterListDtoRowVersionTests`: list DTO carries non-null base64 `RowVersion`
 (Revision > 0) and round-trips to the single-printer endpoint value. Build clean (no new
 warnings), all 1370 Farm.Web.Api.Tests pass.
+
+## CI API test sharding (2026-08-26)
+
+- Manifest shard validation by directory was not enough to prove VSTest coverage. The original filters selected 5,928 of 6,266 default-filtered discovery cases and missed 338 root/outlier-namespace cases. Adding namespace-boundary dots, explicit root test-class prefixes, and `Farm.Infrastructure.Settings.Tests.IAppSettingTests.` produced an exact 1,903 + 674 + 3,689 partition with zero count mismatches and zero cross-shard overlap.
+- Every API shard filter must be combined as `(<FullyQualifiedName OR expression>)&(<project defaultFilter>)`. The API assembly had 298 DbHeavy/Docker discovery cases; none appeared in the combined fast-shard results.
+- Never serialize shard records with `|`: VSTest OR filters contain that character. ASCII Unit Separator with reader-side reserved-character rejection preserves fail-closed parsing.
+- Matrix identity and build identity are deliberately separate: `<leg>-<shard>` is unique for checks/TRX/results artifacts, while all shards keep the same `.csproj` in `matrix.project` so they share one compiled-project artifact.
+- The manifest validator now scans API test sources containing `[Fact]`/`[Theory]` and requires each source's fully qualified prefix to be present in its owning shard filter; directory ownership alone is not sufficient.
