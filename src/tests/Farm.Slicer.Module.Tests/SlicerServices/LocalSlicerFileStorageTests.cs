@@ -23,7 +23,7 @@ public class LocalSlicerFileStorageTests : IDisposable
     public LocalSlicerFileStorageTests()
     {
         _testLogger = NullLogger<LocalSlicerFileStorage>.Instance;
-        _tempBasePath = Path.Join(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "slicer-storage-tests");
+        _tempBasePath = Path.Join(TestPaths.GetUniqueTempDirectory(), "slicer-storage-tests");
 
         _options = new LocalFileStorageOptions
         {
@@ -472,7 +472,7 @@ public class LocalSlicerFileStorageTests : IDisposable
     public void Constructor_ValidOptions_ShouldCreateBaseDirectory()
     {
         // Arrange
-        string newTempPath = Path.Join(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "test-directory-creation");
+        string newTempPath = Path.Join(TestPaths.GetUniqueTempDirectory(), "test-directory-creation");
         LocalFileStorageOptions options = new LocalFileStorageOptions { BasePath = newTempPath };
         IOptions<LocalFileStorageOptions> optionsWrapper = Options.Create(options);
 
