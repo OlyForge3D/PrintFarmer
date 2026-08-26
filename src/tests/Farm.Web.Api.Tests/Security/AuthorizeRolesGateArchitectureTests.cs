@@ -38,9 +38,15 @@ namespace Farm.Web.Api.Tests.Security;
 /// exactly what each running host would.
 ///
 /// <b>Scope, deliberately matching issue #1452's ask:</b> both guards check REST controllers in
-/// the main API (<c>Farm.Web.Api</c>) and slicer host (<c>Farm.Slicer.Module.Api</c>) assemblies.
-/// SignalR Hub methods (e.g. <c>HarvestHub</c>) are not <see cref="ControllerBase"/>-derived and
-/// are out of scope for "API controllers" as the issue describes them.
+/// the main API (<c>Farm.Web.Api</c>), slicer host (<c>Farm.Slicer.Module.Api</c>), and every
+/// <c>Farm.Modules.*</c> module assembly that hosts controllers moved out of the main API by the
+/// module-decomposition epic (#2019) — a controller does not stop being an "API controller" for
+/// this guard's purposes just because it now lives in its own assembly; each module phase MUST
+/// add its controller assembly here (see #2037 review of the Maintenance move, which found the
+/// SmartPlug module's <see cref="Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController"/>
+/// had been missed by phase 8). SignalR Hub methods (e.g. <c>HarvestHub</c>) are not
+/// <see cref="ControllerBase"/>-derived and are out of scope for "API controllers" as the issue
+/// describes them.
 /// </summary>
 public sealed class AuthorizeRolesGateArchitectureTests
 {
@@ -61,6 +67,10 @@ public sealed class AuthorizeRolesGateArchitectureTests
     [
         typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
         typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly,
+        // Module-decomposition epic (#2019): controllers that moved out of Farm.Web.Api into
+        // their own assembly are still "API controllers" for this guard's purposes.
+        typeof(Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController).Assembly,
+        typeof(Farm.Web.Api.Controllers.MaintenanceController).Assembly,
     ];
 
     [Fact]
