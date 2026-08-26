@@ -61,7 +61,7 @@ public sealed class ProfileFamiliesController(
         {
             CloneProfileFamilyResponseDto result =
                 await _profileFamilyService.CloneFamilyAsync(request, userId, ct);
-            return Created($"/api/slicer/profiles/families/{result.FamilyId:D}", result);
+            return StatusCode(StatusCodes.Status201Created, result);
         }
         catch (ProfileFamilyConflictException ex)
         {

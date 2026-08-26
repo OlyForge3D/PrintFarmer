@@ -56,12 +56,18 @@ public class PrinterModelAliasService(AppDbContext dbContext) : IPrinterModelAli
             return null;
         }
 
+        string normalizedModelName = Normalize(slicerModelName);
+
         // Try exact match with slicer type first (case-insensitive)
-        if (!string.IsNullOrEmpty(slicerType))
+        if (!string.IsNullOrWhiteSpace(slicerType))
         {
+            string normalizedSlicerType = Normalize(slicerType);
             Guid exactMatch = await _dbContext.PrinterModelAliases
                 .AsNoTracking()
-                .Where(a => EF.Functions.Collate(a.SlicerModelName, "NOCASE") == slicerModelName && a.SlicerType == slicerType)
+                .Where(a =>
+                    a.SlicerModelName.ToUpper() == normalizedModelName
+                    && a.SlicerType != null
+                    && a.SlicerType.ToUpper() == normalizedSlicerType)
                 .Select(a => a.PrinterModelId)
                 .FirstOrDefaultAsync();
 
@@ -74,7 +80,7 @@ public class PrinterModelAliasService(AppDbContext dbContext) : IPrinterModelAli
         // Fall back to slicer-agnostic alias (SlicerType is null, case-insensitive)
         Guid genericMatch = await _dbContext.PrinterModelAliases
             .AsNoTracking()
-            .Where(a => EF.Functions.Collate(a.SlicerModelName, "NOCASE") == slicerModelName && a.SlicerType == null)
+            .Where(a => a.SlicerModelName.ToUpper() == normalizedModelName && a.SlicerType == null)
             .Select(a => a.PrinterModelId)
             .FirstOrDefaultAsync();
 
@@ -91,10 +97,12 @@ public class PrinterModelAliasService(AppDbContext dbContext) : IPrinterModelAli
         ArgumentException.ThrowIfNullOrWhiteSpace(slicerModelName);
         ArgumentException.ThrowIfNullOrWhiteSpace(slicerType);
 
+        string normalizedModelName = Normalize(slicerModelName);
+        string normalizedSlicerType = Normalize(slicerType);
         List<PrinterModelAlias> existing = await _dbContext.PrinterModelAliases
             .Where(alias =>
-                alias.SlicerModelName == slicerModelName &&
-                alias.SlicerType == slicerType)
+                alias.SlicerModelName.ToUpper() == normalizedModelName
+                && (alias.SlicerType == null || alias.SlicerType.ToUpper() == normalizedSlicerType))
             .ToListAsync(ct);
         if (existing.Any(alias => alias.PrinterModelId != printerModelId))
         {
@@ -111,10 +119,12 @@ public class PrinterModelAliasService(AppDbContext dbContext) : IPrinterModelAli
         {
             Id = Guid.NewGuid(),
             PrinterModelId = printerModelId,
-            SlicerModelName = slicerModelName,
-            SlicerType = slicerType,
+            SlicerModelName = slicerModelName.Trim(),
+            SlicerType = slicerType.Trim(),
             CreatedAt = DateTime.UtcNow
         });
         _ = await _dbContext.SaveChangesAsync(ct);
     }
+
+    private static string Normalize(string value) => value.Trim().ToUpperInvariant();
 }

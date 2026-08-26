@@ -33,6 +33,7 @@ public sealed class ProfileFamilyServiceTests
         Guid modelId = Guid.NewGuid();
         Guid userId = Guid.NewGuid();
         CloneProfileFamilyRequestDto request = Request(modelId);
+        request.FamilyName = " Farm Test ";
         Mock<ICatalogServiceAdapter> catalogService = Catalog(modelId);
         Mock<IPrinterModelAliasService> aliasService = new(MockBehavior.Strict);
         _ = aliasService
@@ -50,7 +51,7 @@ public sealed class ProfileFamilyServiceTests
         _ = renderer
             .Setup(service => service.Render(
                 It.IsAny<Guid>(),
-                request,
+                It.Is<CloneProfileFamilyRequestDto>(candidate => candidate.FamilyName == "Farm Test"),
                 It.IsAny<AllProfilesResponseDto>()))
             .Returns((Guid familyId, CloneProfileFamilyRequestDto _, AllProfilesResponseDto _) =>
                 new ProfileFamilyRenderResult(
@@ -98,6 +99,7 @@ public sealed class ProfileFamilyServiceTests
         family.CreatedByUserId.Should().Be(userId);
         machine.SourceSystemPresetName.Should().Be("Stock 0.6 nozzle");
         response.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
+        request.FamilyName.Should().Be(" Farm Test ");
         aliasService.VerifyAll();
     }
 
@@ -143,6 +145,88 @@ public sealed class ProfileFamilyServiceTests
         workerClient.VerifyNoOtherCalls();
     }
 
+    [Fact]
+    public async Task CloneFamilyAsync_WorkerFailure_RetryReusesFailedFamilyAndBundle()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        Guid userId = Guid.NewGuid();
+        Mock<ICatalogServiceAdapter> catalog = Catalog(modelId);
+        Mock<IPrinterModelAliasService> aliases = Aliases(modelId);
+        Mock<IProfileFamilyRenderer> renderer = Renderer();
+        Mock<IProfileFamilyWorkerClient> worker =
+            Worker(new HttpRequestException("worker unavailable"));
+        var service = CreateService(dbContext, catalog, aliases, renderer, worker);
+        CloneProfileFamilyRequestDto request = Request(modelId);
+
+        Func<Task> firstAttempt = async () =>
+            await service.CloneFamilyAsync(request, userId, CancellationToken.None);
+
+        await firstAttempt.Should().ThrowAsync<HttpRequestException>();
+        MachineModelProfile failedFamily = await dbContext.MachineModelProfiles
+            .AsNoTracking()
+            .SingleAsync();
+        failedFamily.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed);
+
+        CloneProfileFamilyResponseDto response =
+            await service.CloneFamilyAsync(request, userId, CancellationToken.None);
+
+        response.FamilyId.Should().Be(failedFamily.Id);
+        response.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
+        (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(1);
+        (await dbContext.MachineProfiles.CountAsync()).Should().Be(1);
+        WorkerBundleFamilyIds(worker).Should().Equal(failedFamily.Id, failedFamily.Id);
+        aliases.Verify(
+            service => service.EnsureModelAliasAsync(
+                modelId,
+                "Farm Test",
+                "OrcaSlicer",
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task CloneFamilyAsync_AliasFailure_RetryReusesFailedFamilyAndBundle()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        Guid userId = Guid.NewGuid();
+        Mock<ICatalogServiceAdapter> catalog = Catalog(modelId);
+        Mock<IPrinterModelAliasService> aliases =
+            Aliases(modelId, new DbUpdateException("transient alias write failure"));
+        Mock<IProfileFamilyRenderer> renderer = Renderer();
+        Mock<IProfileFamilyWorkerClient> worker = Worker();
+        var service = CreateService(dbContext, catalog, aliases, renderer, worker);
+        CloneProfileFamilyRequestDto request = Request(modelId);
+
+        Func<Task> firstAttempt = async () =>
+            await service.CloneFamilyAsync(request, userId, CancellationToken.None);
+
+        await firstAttempt.Should().ThrowAsync<DbUpdateException>();
+        MachineModelProfile failedFamily = await dbContext.MachineModelProfiles
+            .AsNoTracking()
+            .SingleAsync();
+        failedFamily.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed);
+
+        CloneProfileFamilyResponseDto response =
+            await service.CloneFamilyAsync(request, userId, CancellationToken.None);
+
+        response.FamilyId.Should().Be(failedFamily.Id);
+        response.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
+        (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(1);
+        (await dbContext.MachineProfiles.CountAsync()).Should().Be(1);
+        WorkerBundleFamilyIds(worker).Should().Equal(failedFamily.Id, failedFamily.Id);
+        catalog.Verify(
+            service => service.InvalidateModelAliasesAsync(
+                modelId,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     private static CloneProfileFamilyRequestDto Request(Guid modelId) =>
         new()
         {
@@ -161,6 +245,134 @@ public sealed class ProfileFamilyServiceTests
                 modelId,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new CatalogModelInfo(modelId, "Target Model", "Target"));
+        _ = catalog
+            .Setup(service => service.InvalidateModelAliasesAsync(
+                modelId,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         return catalog;
+    }
+
+    private static SlicerDbContext CreateContext(SqliteConnection connection)
+    {
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>()
+                .UseSqlite(connection)
+                .Options;
+        var dbContext = new SlicerDbContext(options);
+        dbContext.Database.EnsureCreated();
+        return dbContext;
+    }
+
+    private static Mock<IPrinterModelAliasService> Aliases(
+        Guid modelId,
+        Exception? firstEnsureFailure = null)
+    {
+        Mock<IPrinterModelAliasService> aliases = new(MockBehavior.Strict);
+        _ = aliases
+            .Setup(service => service.ResolveModelAliasAsync("Farm Test", "OrcaSlicer"))
+            .ReturnsAsync((Guid?)null);
+        if (firstEnsureFailure is null)
+        {
+            _ = aliases
+                .Setup(service => service.EnsureModelAliasAsync(
+                    modelId,
+                    "Farm Test",
+                    "OrcaSlicer",
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+        }
+        else
+        {
+            _ = aliases
+                .SetupSequence(service => service.EnsureModelAliasAsync(
+                    modelId,
+                    "Farm Test",
+                    "OrcaSlicer",
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(firstEnsureFailure)
+                .Returns(Task.CompletedTask);
+        }
+
+        return aliases;
+    }
+
+    private static Mock<IProfileFamilyRenderer> Renderer()
+    {
+        Mock<IProfileFamilyRenderer> renderer = new(MockBehavior.Strict);
+        _ = renderer
+            .Setup(service => service.Render(
+                It.IsAny<Guid>(),
+                It.IsAny<CloneProfileFamilyRequestDto>(),
+                It.IsAny<AllProfilesResponseDto>()))
+            .Returns((Guid familyId, CloneProfileFamilyRequestDto _, AllProfilesResponseDto _) =>
+                new ProfileFamilyRenderResult(
+                    new ProfileFamilyBundleDto(familyId, "Farm Test", "{}", []),
+                    """{"speed":100}""",
+                    [new RenderedMachineVariant(
+                        "Farm Test 0.6 nozzle",
+                        0.6,
+                        "Stock 0.6 nozzle",
+                        """{"max_layer_height":["0.45"]}""")],
+                    3,
+                    0));
+        return renderer;
+    }
+
+    private static Mock<IProfileFamilyWorkerClient> Worker(Exception? firstWriteFailure = null)
+    {
+        var target = new ProfileFamilyWorkerTarget("http://worker", "2.3.0");
+        Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Strict);
+        _ = worker
+            .Setup(service => service.GetCatalogAsync(
+                "Prusa",
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((target, new AllProfilesResponseDto()));
+        if (firstWriteFailure is null)
+        {
+            _ = worker
+                .Setup(service => service.WriteBundleAsync(
+                    target,
+                    It.IsAny<ProfileFamilyBundleDto>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+        }
+        else
+        {
+            _ = worker
+                .SetupSequence(service => service.WriteBundleAsync(
+                    target,
+                    It.IsAny<ProfileFamilyBundleDto>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(firstWriteFailure)
+                .Returns(Task.CompletedTask);
+        }
+
+        return worker;
+    }
+
+    private static ProfileFamilyService CreateService(
+        SlicerDbContext dbContext,
+        Mock<ICatalogServiceAdapter> catalog,
+        Mock<IPrinterModelAliasService> aliases,
+        Mock<IProfileFamilyRenderer> renderer,
+        Mock<IProfileFamilyWorkerClient> worker)
+    {
+        return new ProfileFamilyService(
+            dbContext,
+            catalog.Object,
+            aliases.Object,
+            renderer.Object,
+            worker.Object,
+            NullLogger<ProfileFamilyService>.Instance);
+    }
+
+    private static IEnumerable<Guid> WorkerBundleFamilyIds(
+        Mock<IProfileFamilyWorkerClient> worker)
+    {
+        return worker.Invocations
+            .Where(invocation => invocation.Method.Name == nameof(IProfileFamilyWorkerClient.WriteBundleAsync))
+            .Select(invocation => ((ProfileFamilyBundleDto)invocation.Arguments[1]).FamilyId);
     }
 }

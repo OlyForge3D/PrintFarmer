@@ -47,4 +47,9 @@ public interface ICatalogServiceAdapter
     /// <param name="ct">Cancellation token.</param>
     /// <returns>List of slicer model aliases.</returns>
     Task<IReadOnlyList<SlicerModelAliasDto>> GetModelAliasesAsync(Guid modelId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Invalidates any cached aliases for a catalog model after an alias write.
+    /// </summary>
+    Task InvalidateModelAliasesAsync(Guid modelId, CancellationToken ct = default);
 }

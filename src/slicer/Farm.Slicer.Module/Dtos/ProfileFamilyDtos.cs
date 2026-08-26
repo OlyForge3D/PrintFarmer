@@ -63,7 +63,7 @@ public sealed record RenderedProfileFileDto(string RelativePath, string Content)
 
 /// <summary>
 /// A family-scoped manifest fragment and its generated source files.
-/// The worker merges this fragment into Custom.json atomically.
+/// The worker atomically installs this as one family-specific custom bundle.
 /// </summary>
 public sealed record ProfileFamilyBundleDto(
     Guid FamilyId,

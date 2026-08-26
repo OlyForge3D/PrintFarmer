@@ -133,7 +133,7 @@ public sealed class HttpCatalogServiceAdapter : ICatalogServiceAdapter
     /// <inheritdoc />
     public async Task<IReadOnlyList<SlicerModelAliasDto>> GetModelAliasesAsync(Guid modelId, CancellationToken ct = default)
     {
-        string cacheKey = $"catalog:aliases:{modelId}";
+        string cacheKey = GetAliasesCacheKey(modelId);
 
         if (_cache.TryGetValue(cacheKey, out IReadOnlyList<SlicerModelAliasDto>? cached) && cached is not null)
         {
@@ -156,6 +156,13 @@ public sealed class HttpCatalogServiceAdapter : ICatalogServiceAdapter
             _logger.LogWarning(ex, "Failed to fetch model aliases for {ModelId} from main API", modelId);
             return [];
         }
+    }
+
+    /// <inheritdoc />
+    public Task InvalidateModelAliasesAsync(Guid modelId, CancellationToken ct = default)
+    {
+        _cache.Remove(GetAliasesCacheKey(modelId));
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -185,4 +192,6 @@ public sealed class HttpCatalogServiceAdapter : ICatalogServiceAdapter
 
         return map is not null && map.TryGetValue(manufacturerId, out string? name) ? name : null;
     }
+
+    private static string GetAliasesCacheKey(Guid modelId) => $"catalog:aliases:{modelId}";
 }
