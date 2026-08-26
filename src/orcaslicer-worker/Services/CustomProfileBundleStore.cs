@@ -822,12 +822,13 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             _ = bundleNames.Add(bundleName);
         }
 
-        foreach (string directoryPath in Directory.EnumerateDirectories(
-            _customProfilesPath,
-            "*",
-            SearchOption.TopDirectoryOnly))
+        foreach (string bundleNameCandidate in Directory.EnumerateDirectories(
+                     _customProfilesPath,
+                     "*",
+                     SearchOption.TopDirectoryOnly)
+                 .Select(directoryPath => Path.GetFileName(directoryPath)))
         {
-            string bundleName = Path.GetFileName(directoryPath);
+            string bundleName = bundleNameCandidate;
             if (string.Equals(
                     bundleName,
                     ".printfarmer",
@@ -872,20 +873,15 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
                 continue;
             }
 
-            foreach (string file in files)
+            foreach (string file in files.Where(file => !IsTransientCustomPath(file)))
             {
-                if (!IsTransientCustomPath(file))
-                {
-                    yield return file;
-                }
+                yield return file;
             }
 
-            foreach (string childDirectory in childDirectories)
+            foreach (string childDirectory in childDirectories.Where(
+                         childDirectory => !IsTransientCustomPath(childDirectory)))
             {
-                if (!IsTransientCustomPath(childDirectory))
-                {
-                    pendingDirectories.Push(childDirectory);
-                }
+                pendingDirectories.Push(childDirectory);
             }
         }
     }

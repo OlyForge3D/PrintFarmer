@@ -449,12 +449,10 @@ public sealed class ProfileFamilyRenderer : IProfileFamilyRenderer
 
         foreach (string perNozzleKey in IdentityKeys.Where(key =>
                      key is "printer_notes" or "nozzle_type" or "printer_variant" or
-                         "min_layer_height" or "max_layer_height" or "default_print_profile"))
+                         "min_layer_height" or "max_layer_height" or "default_print_profile")
+                 .Where(variant.ContainsKey))
         {
-            if (variant.TryGetValue(perNozzleKey, out JsonElement value))
-            {
-                delta[perNozzleKey] = value.Clone();
-            }
+            delta[perNozzleKey] = variant[perNozzleKey].Clone();
         }
 
         return delta;
