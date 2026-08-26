@@ -759,7 +759,14 @@ main() {
     net_test_bucket_hit=1
   fi
   if (( has_smartplug )); then
-    test_names+=("Farm.Modules.SmartPlug.Tests")
+    # Farm.Modules.SmartPlug owns AdminPowerMonitorsController, but the tests
+    # that actually cover it (RouteTableSnapshotTests and
+    # AdminPowerMonitorsControllerTests, a CustomWebApplicationFactory
+    # integration test) intentionally stayed behind in Farm.Web.Api.Tests --
+    # see docs/MODULE_MIGRATION_PATTERN.md. A controller-owning module must
+    # therefore also select Farm.Web.Api.Tests, unlike a pure-service module
+    # such as Farm.OrcaSlicer.Worker.
+    test_names+=("Farm.Modules.SmartPlug.Tests" "Farm.Web.Api.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_mig_app )); then

@@ -486,7 +486,10 @@ case_smartplug_change() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix smartplug" "$matrix" "Farm.Modules.SmartPlug.Tests" || return 1
-  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  # AdminPowerMonitorsController's own coverage (RouteTableSnapshotTests,
+  # AdminPowerMonitorsControllerTests) intentionally stayed in
+  # Farm.Web.Api.Tests, so a controller-owning module must select it too.
+  assert_contains "api covers controller" "$matrix" "Farm.Web.Api.Tests" || return 1
   assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
   local reason ; reason="$(get_output "$out" reason)"
   assert_contains "reason smartplug" "$reason" "smartplug" || return 1

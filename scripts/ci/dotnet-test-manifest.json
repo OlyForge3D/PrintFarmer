@@ -129,6 +129,7 @@
       "pathPrefixes": ["src/tests/Farm.Modules.SmartPlug.Tests/"],
       "dependsOnProjects": [
         "src/modules/Farm.Modules.SmartPlug/",
+        "src/modules/Farm.Modules.Abstractions/",
         "src/infra/"
       ],
       "defaultFilter": "Category!=DbHeavy&Category!=Docker",
@@ -136,7 +137,7 @@
       "requiresProviders": [],
       "runIntegration": false,
       "leg": "Farm.Modules.SmartPlug.Tests",
-      "notes": "New in issue #2036 (Phase 8: the SmartPlug/PowerMonitor pilot vertical-slice module moved out of Farm.Web.Api into Farm.Modules.SmartPlug, depending on Farm.Modules.Abstractions' IApiModule seam from #2035). Unlike Farm.Modules.Abstractions.Tests above, this project gets its own narrow select-dotnet-tests.sh buckets (smartplug/tests_smartplug) rather than full-safe, since it is a concrete leaf module with a single dependent test project -- the pattern later Farm.Modules.* phases (9-18) should copy. The retained CustomWebApplicationFactory-based integration test for /api/admin/power-monitors (AdminPowerMonitorsControllerTests) stays in Farm.Web.Api.Tests and is unaffected by this entry."
+      "notes": "New in issue #2036 (Phase 8: the SmartPlug/PowerMonitor pilot vertical-slice module moved out of Farm.Web.Api into Farm.Modules.SmartPlug, depending on Farm.Modules.Abstractions' IApiModule seam from #2035). Unlike Farm.Modules.Abstractions.Tests above, this project gets its own narrow select-dotnet-tests.sh buckets (smartplug/tests_smartplug) rather than full-safe, since it is a concrete leaf module with a single dependent test project -- the pattern later Farm.Modules.* phases (9-18) should copy. The retained CustomWebApplicationFactory-based integration test for /api/admin/power-monitors (AdminPowerMonitorsControllerTests) and RouteTableSnapshotTests both stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's smartplug bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module)."
     },
     {
       "name": "Farm.Web.IntegrationTests",

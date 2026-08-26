@@ -27,11 +27,16 @@ public interface IApiModule
 }
 ```
 
-`Farm.Web.Api`'s `Program.cs` discovers modules via
-`AddApiModules(typeof(SomeModule).Assembly, ...)` /
-`MapApiModules(...)` calls that accept one assembly per module. Every new
-module adds its own `typeof(XyzApiModule).Assembly` argument at both call
-sites — it does not need its own bespoke host wiring.
+`Farm.Web.Api`'s `Program.cs` discovers modules via a single
+`builder.Services.AddApiModules(mvcBuilder, builder.Configuration,
+typeof(SomeModule).Assembly)` call that accepts one assembly per module and
+registers each module instance in DI. Routing later calls a bare
+`app.MapApiModules()` with **no assembly arguments** — it iterates the
+already-registered `IApiModule` instances from DI, so only the
+`AddApiModules(...)` call site needs a new assembly argument per module.
+Every new module therefore adds its own `typeof(XyzApiModule).Assembly`
+argument at the `AddApiModules` call site only — it does not need its own
+bespoke host wiring.
 
 ## Step-by-step
 
@@ -122,7 +127,8 @@ was, for SmartPlug) stays behind.
   (`SA1512`/`SA1515`) — the fix is to move the blank line to *before* the
   comment, not delete it.
 - `src/api/Program.cs`: add `typeof(<Name>ApiModule).Assembly` to the
-  existing `AddApiModules(...)` and `MapApiModules(...)` calls.
+  existing `AddApiModules(...)` call only — `MapApiModules()` takes no
+  assembly arguments and needs no change.
 
 ### 6. `src/farm-web.sln`
 
@@ -166,6 +172,14 @@ string substitution (not a blind re-dump) so the diff is auditable as
    "≤7 min, only its leg" acceptance criterion. If the module depends on
    `Farm.Infrastructure` (most will), also add its test project name to the
    existing `has_infra` block so an infra-only change doesn't miss it.
+   **If the module owns a controller** (as SmartPlug does), and that
+   controller's own coverage — `RouteTableSnapshotTests` and/or a
+   `CustomWebApplicationFactory`-based integration test — stays behind in
+   `Farm.Web.Api.Tests` rather than moving with the module (see step 7),
+   the new bucket must **also** select `Farm.Web.Api.Tests`, or a change to
+   that controller silently loses CI coverage of its own route/contract.
+   A module that moves only services with no owned controller (e.g. a
+   future pure-worker module) can stay as narrow as `orca_worker`.
 3. **`scripts/ci/tests/test-select-dotnet-tests.sh`**: add positive
    (production-path-only), test-path-only, and mixed-path (module path +
    unrelated path, confirming it does *not* go full-safe) cases, and extend
