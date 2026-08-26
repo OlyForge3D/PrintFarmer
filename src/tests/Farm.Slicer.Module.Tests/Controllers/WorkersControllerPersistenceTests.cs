@@ -158,7 +158,7 @@ public sealed class WorkersControllerPersistenceTests
             NullLogger<WorkersController>.Instance);
     }
 
-    private static Worker CreateWorker(Guid id)
+    private static Farm.Slicer.Module.Domain.Worker CreateWorker(Guid id)
     {
         DateTime now = DateTime.UtcNow;
         return new Worker

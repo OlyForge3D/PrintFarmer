@@ -344,7 +344,9 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
         _ = unchanged.ErrorMessage.Should().BeNull();
     }
 
-    private async Task<SliceJob> AddProcessingJobAsync(Worker worker, byte[]? modelBytes = null)
+    private async Task<SliceJob> AddProcessingJobAsync(
+        Farm.Slicer.Module.Domain.Worker worker,
+        byte[]? modelBytes = null)
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ISlicerFileStorage storage = scope.ServiceProvider.GetRequiredService<ISlicerFileStorage>();
@@ -389,7 +391,9 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
             job.LeaseFence.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
-    private async Task<Artifact> AddArtifactAsync(SliceJob job, Worker worker)
+    private async Task<Artifact> AddArtifactAsync(
+        SliceJob job,
+        Farm.Slicer.Module.Domain.Worker worker)
     {
         Artifact artifact = new()
         {
@@ -449,7 +453,7 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
         return request;
     }
 
-    private async Task<Worker> GetWorkerAsync(HttpClient client)
+    private async Task<Farm.Slicer.Module.Domain.Worker> GetWorkerAsync(HttpClient client)
     {
         string serviceId = GetServiceId(client).ToString();
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();

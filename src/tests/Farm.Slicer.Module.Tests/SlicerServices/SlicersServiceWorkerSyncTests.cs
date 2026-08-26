@@ -1176,7 +1176,7 @@ public class SlicersServiceWorkerSyncTests
         public void ClearTracking() => inner.ClearTracking();
     }
 
-    private static Worker CreateWorker(
+    private static Farm.Slicer.Module.Domain.Worker CreateWorker(
         string name,
         string status,
         int totalSlots,
