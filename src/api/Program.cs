@@ -199,10 +199,12 @@ catch
 // Add API services (returns mvcBuilder so the slicer integration shim can add ApplicationParts)
 IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 
-// Vertical-slice API module discovery/registration seam (issue #2035, epic #2019). No
-// Farm.Modules.* assembly implements IApiModule yet, so this is a guaranteed no-op today: zero
-// ApplicationParts added, zero routes changed. Registering the call now means the host wiring
-// itself -- not just the abstraction -- is exercised before the first module lands.
+// Vertical-slice API module discovery/registration seam (issue #2035, epic #2019). Discovery
+// only scans assemblies explicitly listed here -- no Farm.Modules.* assembly is listed yet, so
+// this is a guaranteed no-op today: zero ApplicationParts added, zero routes changed.
+// Registering the call now means the host wiring itself -- not just the abstraction -- is
+// exercised before the first module lands. A later phase adds that module's marker assembly
+// here, e.g.: AddApiModules(mvcBuilder, builder.Configuration, typeof(SomeModule).Assembly).
 builder.Services.AddApiModules(mvcBuilder, builder.Configuration);
 
 if (slicerModuleEnabled)

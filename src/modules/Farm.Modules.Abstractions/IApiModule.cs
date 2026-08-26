@@ -14,10 +14,11 @@ namespace Farm.Modules.Abstractions;
 /// <remarks>
 /// <para>
 /// Implementations are discovered via <see cref="ApiModuleHostExtensions.AddApiModules"/>,
-/// which adds the module's declaring assembly as an MVC <c>ApplicationPart</c> (so any
-/// controllers it contains are found by routing) and invokes
-/// <see cref="ConfigureServices"/> before the host builds its service provider.
-/// <see cref="MapEndpoints"/> runs afterward, once
+/// which the host calls with an explicit list of module assemblies -- discovery is never an
+/// implicit whole-process scan (see that method's remarks for why). Discovery adds the
+/// module's declaring assembly as an MVC <c>ApplicationPart</c> (so any controllers it
+/// contains are found by routing) and invokes <see cref="ConfigureServices"/> before the host
+/// builds its service provider. <see cref="MapEndpoints"/> runs afterward, once
 /// <see cref="ApiModuleHostExtensions.MapApiModules"/> is called during endpoint
 /// configuration -- controller actions are already routed via <c>MapControllers()</c> by
 /// that point, so this hook exists for modules that additionally expose minimal-API style

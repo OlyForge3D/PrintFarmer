@@ -10,12 +10,16 @@ namespace Farm.Web.Api.Tests.Startup;
 ///
 /// <para>
 /// Captures the full controller-action route table -- HTTP verb(s), attribute-route template,
-/// and controller/action identity -- and asserts it against a checked-in snapshot
-/// (<c>Startup/RouteTableSnapshot.txt</c>). Every subsequent phase that moves a controller into
-/// a <c>Farm.Modules.*</c> assembly (phases 8-18) must leave this snapshot byte-identical: a
-/// diff here means a route silently changed template, verb, or moved to a different
-/// controller/action pair during a "seam only" refactor, which is exactly the class of
-/// regression the module migration must never introduce.
+/// and assembly-qualified controller/action identity -- and asserts it against a checked-in
+/// snapshot (<c>Startup/RouteTableSnapshot.txt</c>). Every subsequent phase that moves a
+/// controller into a <c>Farm.Modules.*</c> assembly (phases 8-18) must leave this snapshot
+/// byte-identical: a diff here means a route silently changed template, verb, or moved to a
+/// different controller/action pair during a "seam only" refactor, which is exactly the class
+/// of regression the module migration must never introduce. The identity includes the
+/// declaring assembly's name (not just the controller's namespace-qualified type name) so a
+/// future move that accidentally leaves a stale copy of a controller behind in the old
+/// assembly, alongside the moved copy in the new one, produces two distinct lines instead of
+/// silently collapsing to one.
 /// </para>
 /// <para>
 /// Renaming a controller/action or intentionally changing a route requires regenerating the
@@ -50,7 +54,11 @@ public sealed class RouteTableSnapshotTests
     /// <summary>
     /// Builds the sorted, checked-in-snapshot line format: one line per controller action, each
     /// listing every HTTP verb it accepts, its attribute-route template, and its
-    /// <c>Controller.Action</c> identity.
+    /// <c>Assembly::Controller.Action</c> identity. The assembly qualifier deliberately makes
+    /// two identically-named controllers in different assemblies produce distinct lines (see
+    /// class remarks); no <c>Distinct()</c> is applied afterward, so a genuine duplicate route
+    /// registration -- which this format could otherwise mask -- instead surfaces as a real
+    /// diff against the snapshot rather than being silently deduplicated away.
     /// </summary>
     private static string[] BuildRouteTable(IActionDescriptorCollectionProvider actionProvider)
     {
@@ -72,10 +80,10 @@ public sealed class RouteTableSnapshotTests
                 }
 
                 string template = action.AttributeRouteInfo?.Template ?? string.Empty;
-                string identity = $"{action.ControllerTypeInfo.FullName}.{action.MethodInfo.Name}";
+                string assemblyName = action.ControllerTypeInfo.Assembly.GetName().Name ?? "?";
+                string identity = $"{assemblyName}::{action.ControllerTypeInfo.FullName}.{action.MethodInfo.Name}";
                 return $"{methods} /{template} -> {identity}";
             })
-            .Distinct(StringComparer.Ordinal)
             .OrderBy(line => line, StringComparer.Ordinal)
             .ToArray();
     }
