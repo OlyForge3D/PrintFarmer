@@ -44,6 +44,11 @@ public class DevModeAuthorizationHandler : IAuthorizationHandler
         {
             var method = httpContext.Request.Method;
 
+            if (!context.User.Identity?.IsAuthenticated ?? true)
+            {
+                return Task.CompletedTask;
+            }
+
             // Only bypass auth for safe/read-only methods
             if (HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method))
             {
