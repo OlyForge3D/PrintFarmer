@@ -7,4 +7,6 @@ namespace Farm.Slicer.Module.Dtos;
 /// </summary>
 public sealed record ProfileLookupErrorDto(
     [property: JsonPropertyName("code")] string Code,
-    [property: JsonPropertyName("message")] string Message);
+    [property: JsonPropertyName("detail")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Detail = null);

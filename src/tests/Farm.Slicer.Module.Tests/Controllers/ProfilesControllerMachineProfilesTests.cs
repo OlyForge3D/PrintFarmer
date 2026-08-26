@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Dtos;
@@ -63,7 +64,7 @@ public class ProfilesControllerMachineProfilesTests
         NotFoundObjectResult notFound = Assert.IsType<NotFoundObjectResult>(result);
         ProfileLookupErrorDto error = Assert.IsType<ProfileLookupErrorDto>(notFound.Value);
         Assert.Equal("no_profiles_for_model", error.Code);
-        Assert.Contains("Test Model", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Test Model", error.Detail, StringComparison.Ordinal);
         profilesService.Verify(
             s => s.GetMachineProfilesForCatalogModelAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()),
             Times.Never);
@@ -128,7 +129,7 @@ public class ProfilesControllerMachineProfilesTests
         NotFoundObjectResult notFound = Assert.IsType<NotFoundObjectResult>(result);
         ProfileLookupErrorDto error = Assert.IsType<ProfileLookupErrorDto>(notFound.Value);
         Assert.Equal("alias_matched_no_profiles", error.Code);
-        Assert.Contains("'Alias One'", error.Message, StringComparison.Ordinal);
+        Assert.Contains("'Alias One'", error.Detail, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -185,6 +186,22 @@ public class ProfilesControllerMachineProfilesTests
         NotFoundObjectResult notFound = Assert.IsType<NotFoundObjectResult>(result);
         ProfileLookupErrorDto error = Assert.IsType<ProfileLookupErrorDto>(notFound.Value);
         Assert.Equal(code, error.Code);
+        Assert.Equal("No matching profiles.", error.Detail);
+    }
+
+    [Fact]
+    public void ProfileLookupErrorDto_SerializesExactWireContract()
+    {
+        const string detail = "No matching profiles.";
+
+        string json = JsonSerializer.Serialize(new ProfileLookupErrorDto("no_profiles_for_model", detail));
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+
+        Assert.Equal(2, root.EnumerateObject().Count());
+        Assert.Equal("no_profiles_for_model", root.GetProperty("code").GetString());
+        Assert.Equal(detail, root.GetProperty("detail").GetString());
+        Assert.False(root.TryGetProperty("message", out _));
     }
 
     private static ProfilesController CreateController(

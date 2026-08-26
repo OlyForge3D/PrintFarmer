@@ -134,3 +134,8 @@ warnings), all 1370 Farm.Web.Api.Tests pass.
 ## 2026-08-25 — Machine profile family cloning Phase 1 + Phase 2b
 
 Implemented reason-coded 404s for both profile lookup gates, the SlicerDbContext family/variant metadata and render-state model, PostgreSQL/SQL Server/SQLite migrations, transactional `clone-family`, deterministic non-null hashes, native Orca family rendering with per-nozzle deltas and resolved compatibility, AppDbContext alias creation, and the atomic Parker worker bundle client. Added fidelity, Prusa-condition, empty/universal filament, missing-source, persistence/conflict, worker-contract, discovery, execution, migration, and Phase 1 tests. Full build passed; all three snapshots have no pending changes; Lambert-scoped format passed. The required full test run exposed and drove a fix for the string-converted enum default; all relevant post-fix targeted tests passed. See `decisions/inbox/lambert-phase2b-impl.md` for contracts and full evidence.
+
+
+## 2026-08-25 — Phase 1 frontend contract reconciliation
+
+Reconciled both profile lookup gates with Ripley's landed consumer: coded 404 bodies now serialize exactly `code` and optional `detail` (null detail omitted), replacing the initially implemented `message` field. Added a wire serialization test that rejects `message`; focused controller tests pass 8/8 and scoped formatting passes. Recorded the complete camelCase `POST /api/slicer/profiles/clone-family` request, 201 response, and error-code/status map in `decisions/inbox/lambert-phase2b-impl.md` for the Phase 3 wizard.
