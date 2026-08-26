@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using Farm.OrcaSlicer.Worker.Health;
 using Farm.OrcaSlicer.Worker.Services;
+using Farm.Slicer.Worker.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Xunit;
@@ -68,7 +69,7 @@ public sealed class CustomProfilesAvailabilityTests
     }
 
     [Fact]
-    public async Task ReconciliationHealthCheck_Failure_IsUnhealthy()
+    public async Task ReconciliationHealthCheck_StateChanges_TracksReadiness()
     {
         CustomProfilesReconciliationState state = new();
         state.MarkUnavailable("shared profile volume is inconsistent");
@@ -80,6 +81,30 @@ public sealed class CustomProfilesAvailabilityTests
         result.Status.Should().Be(HealthStatus.Unhealthy);
         result.Description.Should()
             .Be("shared profile volume is inconsistent");
+
+        state.MarkReady("loaded");
+        result = await healthCheck.CheckHealthAsync(
+            new HealthCheckContext());
+
+        result.Status.Should().Be(HealthStatus.Healthy);
+    }
+
+    [Fact]
+    public void HeartbeatAvailability_CustomProfilesUnavailable_IsErrorWithNoSlots()
+    {
+        WorkerState workerState = new()
+        {
+            ActiveJobs = 1,
+        };
+
+        (int freeSlots, string status) =
+            RegistrationBackgroundService.CalculateHeartbeatAvailability(
+                workerState,
+                maxConcurrentJobs: 4,
+                customProfilesReady: false);
+
+        freeSlots.Should().Be(0);
+        status.Should().Be("Error");
     }
 
     private sealed class SuccessHandler : HttpMessageHandler

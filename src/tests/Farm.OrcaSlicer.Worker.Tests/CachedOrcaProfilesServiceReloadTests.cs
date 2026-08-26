@@ -3,6 +3,7 @@ using Farm.OrcaSlicer.Worker.Controllers;
 using Farm.OrcaSlicer.Worker.Services;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -260,7 +261,7 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task ReconcileOverlayAsync_SharedVolume_LoadsSiblingBundle()
+    public async Task ReconciliationPoll_SharedVolume_LoadsSiblingBundle()
     {
         string stockRoot = Path.Join(_testRoot, "stock");
         string overlayRootA = Path.Join(_testRoot, "overlay-a");
@@ -294,7 +295,15 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
             Path.Join(_testRoot, "cache-b", "profiles.db"),
             customRoot);
         _ = await serviceA.ListAvailableMachineProfilesAsync();
-        _ = await serviceB.ListAvailableMachineProfilesAsync();
+        CustomProfilesReconciliationState stateB = new();
+        using CustomProfilesReconciliationService reconciliationB = new(
+            storeB,
+            serviceB,
+            stateB,
+            new ConfigurationBuilder().Build(),
+            NullLogger<CustomProfilesReconciliationService>.Instance);
+        await reconciliationB.CheckForChangesAsync(CancellationToken.None);
+        stateB.IsReady.Should().BeTrue();
 
         _ = await serviceA.MutateAndReloadProfilesAsync(
             async cancellationToken =>
@@ -305,11 +314,14 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
                     cancellationToken);
                 return true;
             });
-        (_, ProfileReloadResult siblingReload) =
-            await serviceB.MutateAndReloadProfilesAsync(
-                storeB.ReconcileOverlayAsync);
+        await reconciliationB.CheckForChangesAsync(CancellationToken.None);
+        stateB.IsReady.Should().BeFalse();
+        Directory.Exists(Path.Join(overlayRootB, "Custom"))
+            .Should().BeFalse();
 
-        siblingReload.Failures.Should().BeEmpty();
+        await reconciliationB.CheckForChangesAsync(CancellationToken.None);
+
+        stateB.IsReady.Should().BeTrue();
         (await serviceB.GetMachineProfilesByPrinterModelAsync(
             "Voron 2.4 180"))
             .Should().ContainSingle()

@@ -40,39 +40,18 @@ public sealed class CustomProfilesReconciliationService(
                 ?? throw new ArgumentNullException(nameof(configuration)))
             .GetValue("CustomProfiles:ReconciliationIntervalSeconds", 1)));
 
+    private string? _observedFingerprint;
+
+    private bool _firstAttempt = true;
+
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        string? observedFingerprint = null;
-        bool firstAttempt = true;
-
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                string fingerprint =
-                    _bundleStore.CalculateCustomProfilesFingerprint();
-                if (string.Equals(
-                    fingerprint,
-                    _state.AppliedFingerprint,
-                    StringComparison.Ordinal))
-                {
-                    observedFingerprint = null;
-                    _state.MarkReady(fingerprint);
-                }
-                else if (firstAttempt
-                    || string.Equals(
-                        fingerprint,
-                        observedFingerprint,
-                        StringComparison.Ordinal))
-                {
-                    await ReconcileAsync(fingerprint, stoppingToken);
-                    observedFingerprint = null;
-                }
-                else
-                {
-                    observedFingerprint = fingerprint;
-                }
+                await CheckForChangesAsync(stoppingToken);
             }
             catch (OperationCanceledException)
                 when (stoppingToken.IsCancellationRequested)
@@ -87,9 +66,42 @@ public sealed class CustomProfilesReconciliationService(
                 _logger.LogError(ex, "{Failure}", failure);
             }
 
-            firstAttempt = false;
             await Task.Delay(_pollInterval, stoppingToken);
         }
+    }
+
+    internal async Task CheckForChangesAsync(CancellationToken ct)
+    {
+        string fingerprint =
+            _bundleStore.CalculateCustomProfilesFingerprint();
+        if (string.Equals(
+            fingerprint,
+            _state.AppliedFingerprint,
+            StringComparison.Ordinal))
+        {
+            _firstAttempt = false;
+            _observedFingerprint = null;
+            _state.MarkReady(fingerprint);
+            return;
+        }
+
+        if (_firstAttempt
+            || string.Equals(
+                fingerprint,
+                _observedFingerprint,
+                StringComparison.Ordinal))
+        {
+            _firstAttempt = false;
+            _observedFingerprint = fingerprint;
+            await ReconcileAsync(fingerprint, ct);
+            _observedFingerprint = null;
+            return;
+        }
+
+        _firstAttempt = false;
+        _observedFingerprint = fingerprint;
+        _state.MarkUnavailable(
+            "Shared custom profiles changed; local reconciliation is pending.");
     }
 
     internal async Task ReconcileAsync(

@@ -179,6 +179,13 @@ canonicalized, and containment-checked. Invalid paths, stock-bundle name
 collisions, and unconfigured distinct roots are rejected without exposing
 filesystem paths.
 
+Staging and backup entries deliberately remain guarded siblings inside the
+version-keyed custom volume. Keeping source, staging, and rollback data on one
+filesystem preserves atomic `Directory.Move` promotion; moving transactions to
+an external root could cross a mount boundary and degrade to non-atomic copy
+semantics. The explicit reserved-name denylist is therefore the legible
+boundary, and must be extended whenever another internal marker is introduced.
+
 ### Lifecycle policy
 
 We ship **at most two** engine versions in-tree at any time: the current default and one prior. When a new default is promoted, retire the oldest plugin project and its Dockerfile restore stanza only after completing the drain gate below. This keeps the arm64 emulation cost, image size, and cache surface bounded, and matches the operational reality that operators rarely need more than one migration window overlap.

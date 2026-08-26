@@ -97,15 +97,11 @@ public class RegistrationBackgroundService : BackgroundService
 
                 // Send heartbeat with current capacity
                 WorkerState state = _workerState.GetWorkerState();
-                bool customProfilesReady = _customProfilesState.IsReady;
-                int freeSlots = customProfilesReady
-                    ? Math.Max(0, _maxConcurrentJobs - state.ActiveJobs)
-                    : 0;
-                string status = state.IsShuttingDown
-                    ? "Draining"
-                    : customProfilesReady
-                        ? "Online"
-                        : "Error";
+                (int freeSlots, string status) =
+                    CalculateHeartbeatAvailability(
+                        state,
+                        _maxConcurrentJobs,
+                        _customProfilesState.IsReady);
 
                 SlicerHeartbeatResult heartbeatResult = await _registrationClient.HeartbeatAsync(
                     _serviceId,
@@ -139,6 +135,24 @@ public class RegistrationBackgroundService : BackgroundService
         }
 
         _logger.LogInformation("RegistrationBackgroundService stopped.");
+    }
+
+    internal static (int FreeSlots, string Status)
+        CalculateHeartbeatAvailability(
+            WorkerState state,
+            int maxConcurrentJobs,
+            bool customProfilesReady)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        int freeSlots = customProfilesReady
+            ? Math.Max(0, maxConcurrentJobs - state.ActiveJobs)
+            : 0;
+        string status = state.IsShuttingDown
+            ? "Draining"
+            : customProfilesReady
+                ? "Online"
+                : "Error";
+        return (freeSlots, status);
     }
 
     private async Task<bool> TryRegisterAsync(CancellationToken cancellationToken)

@@ -279,3 +279,17 @@ Status: Backlog item cleared. Beta trigger gated on PR stack merge.
 - Added no-side-effect rejection coverage for nine all-dot/reserved/case
   variants and live fingerprint mismatch/recovery claim coverage. Targeted
   tests pass 10/10; targeted build and scoped format pass.
+
+### 2026-08-25: Replica coordination coverage
+
+- Extracted the hosted reconciler's deterministic single-poll production path.
+  The two-worker test now exercises fingerprint detection and stable-change
+  reconciliation rather than calling the store reconciliation method directly.
+- First changed observation marks readiness unavailable; the second stable
+  observation installs worker-local links and reloads its independent caches.
+- Added direct readiness recovery and the registration heartbeat calculation
+  regression requiring `Error` plus zero slots while unsynchronized. Together
+  with claim mismatch/recovery, targeted coordination tests pass 4/4.
+- Kept transactions as guarded siblings inside the versioned volume so
+  staging/backup/target remain on one filesystem for atomic moves; documented
+  that every future internal marker must extend the explicit denylist.
