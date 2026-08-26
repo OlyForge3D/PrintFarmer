@@ -2736,8 +2736,14 @@ public class ProfilesService(
 
         if (orcaAliases.Count == 0)
         {
+            PrinterModelDto? catalogModel = await _catalogService.GetModelByIdAsync(
+                printer.ModelId,
+                ct);
+            string modelName = catalogModel?.Name ?? printer.ModelId.ToString();
             _logger.LogWarning("[GetAvailableProfilesForPrinterAsync] No OrcaSlicer aliases for model {ModelId}", printer.ModelId);
-            return [];
+            throw new ProfileLookupNotFoundException(
+                "no_profiles_for_model",
+                $"OrcaSlicer ships no machine profiles for model '{modelName}', and no custom profile family exists for it.");
         }
 
         _logger.LogInformation("[GetAvailableProfilesForPrinterAsync] Using {AliasCount} OrcaSlicer aliases for printer {PrinterName}", orcaAliases.Count, printer.Name);
@@ -2751,7 +2757,12 @@ public class ProfilesService(
             if (machines.Count == 0)
             {
                 _logger.LogWarning("[GetAvailableProfilesForPrinterAsync] No machine profiles found for OrcaSlicer aliases {Aliases}", string.Join(", ", orcaAliases));
-                return [];
+                string attemptedAliases = string.Join(
+                    ", ",
+                    orcaAliases.Select(alias => $"'{alias}'"));
+                throw new ProfileLookupNotFoundException(
+                    "alias_matched_no_profiles",
+                    $"Tried OrcaSlicer model name(s) {attemptedAliases}; the slicer worker has no matching profiles.");
             }
 
             List<string> machineNames = machines.Select(m => m.Name).ToList();
@@ -2776,8 +2787,8 @@ public class ProfilesService(
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "[GetAvailableProfilesForPrinterAsync] Worker unavailable, returning no printer-scoped profiles");
-            return [];
+            _logger.LogWarning(ex, "[GetAvailableProfilesForPrinterAsync] Worker unavailable");
+            throw;
         }
     }
 

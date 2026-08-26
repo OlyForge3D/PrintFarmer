@@ -18,3 +18,4 @@ global using Farm.Slicer.Module.Services;
 global using Farm.Slicer.Module.Tests.TestInfrastructure;
 // TestPaths moved to Farm.Testing.Shared (issue #2032)
 global using Farm.Testing.Shared;
+global using Worker = Farm.Slicer.Module.Domain.Worker;

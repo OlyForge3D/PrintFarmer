@@ -56,4 +56,10 @@ public sealed class ModuleCatalogServiceAdapter(ICatalogService catalogService) 
             await _catalogService.GetModelAliasesAsync(modelId, ct);
         return aliases.ToList();
     }
+
+    /// <inheritdoc />
+    public Task InvalidateModelAliasesAsync(Guid modelId, CancellationToken ct = default)
+    {
+        return Task.CompletedTask;
+    }
 }

@@ -93,6 +93,25 @@ public class SlicerDbContext(DbContextOptions<SlicerDbContext> options) : DbCont
     }
 
     /// <summary>
+    /// Recomputes persisted machine-model lookup keys in C# after migrations copy legacy names.
+    /// </summary>
+    internal async Task NormalizeMachineModelProfileNamesAsync(CancellationToken cancellationToken)
+    {
+        List<MachineModelProfile> profiles =
+            await MachineModelProfiles.ToListAsync(cancellationToken);
+        bool changed = false;
+        foreach (MachineModelProfile profile in profiles)
+        {
+            changed |= profile.RefreshNormalizedName();
+        }
+
+        if (changed)
+        {
+            _ = await SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
     /// Keeps <see cref="SliceJob.NormalizedEngine"/> — the persisted column backing the
     /// (NormalizedEngine, Status) covering index used by queue-stat aggregation — in sync with
     /// <see cref="SliceJob.SlicerEngineName"/> on every insert/update.

@@ -316,6 +316,37 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
         profiles[0].RetractionLength.Should().Be(1.0);
     }
 
+    [Fact]
+    public async Task MissingParent_CustomBundle_ExcludesProfileAndReportsFailure()
+    {
+        WriteManufacturerBundle("Custom", machineEntries: [
+            ("Micron 180 0.4 nozzle", "machine/micron.json"),
+        ]);
+        WriteProfile("Custom", "machine/micron.json", """
+            {
+              "name": "Micron 180 0.4 nozzle",
+              "inherits": "missing Voron source",
+              "instantiation": "true",
+              "printer_model": "Voron 2.4 180",
+              "nozzle_diameter": ["0.4"]
+            }
+            """);
+        var service = new OrcaProfilesService(
+            NullLogger.Instance,
+            _profilesRoot,
+            _profilesRoot);
+
+        var profiles = await service.ListAvailableMachineProfilesAsync();
+
+        profiles.Should().BeEmpty();
+        service.CustomProfileLoadFailures.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new CustomProfileLoadFailure(
+                "Custom",
+                "Micron 180 0.4 nozzle",
+                "Micron 180 0.4 nozzle",
+                "missing Voron source"));
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // 7. Cycle detection: mutual inheritance should not infinite loop
     // ──────────────────────────────────────────────────────────────────────
