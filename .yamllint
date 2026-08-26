@@ -1,0 +1,20 @@
+---
+extends: default
+
+rules:
+  # GitHub Actions workflows conventionally omit an explicit document start.
+  document-start: disable
+
+  # GitHub Actions uses `on` as a mapping key; keep truthy checks for values.
+  truthy:
+    check-keys: false
+
+  # Expressions and shell commands are often unsafe to wrap. Report long lines
+  # without blocking CI so genuinely structural YAML defects remain the gate.
+  line-length:
+    max: 120
+    level: warning
+
+  # Comment spacing is mechanical and should be enforced for new changes.
+  comments:
+    level: error

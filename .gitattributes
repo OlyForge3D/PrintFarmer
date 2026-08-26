@@ -11,6 +11,10 @@
 *.sh text eol=lf
 install.sh text eol=lf
 
+# GitHub Actions workflows are linted on Linux and must remain LF-stable
+.github/workflows/*.yml text eol=lf
+.github/workflows/*.yaml text eol=lf
+
 # Embedded slicer assets must not be modified by line-ending conversion
 *.png binary
 *.stl binary
