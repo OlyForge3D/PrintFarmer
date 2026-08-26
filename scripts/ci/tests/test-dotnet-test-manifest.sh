@@ -364,6 +364,17 @@ for sharded_entry in entries:
     # trailing dot is required in every filter term so `Data` cannot
     # accidentally match `DataManagement`, or a root class whose name starts
     # with a directory/shard name.
+    #
+    # The candidate FullyQualifiedName is derived from the actual `class`
+    # declaration nearest above each [Fact]/[Theory] attribute, not from the
+    # file name: several files in this codebase legitimately declare more
+    # than one test class (e.g. a class under test plus its in-memory fake),
+    # and relying on the file name would either miss the non-eponymous
+    # classes entirely or produce a false failure once a class is renamed
+    # independently of its file. This line-position association assumes the
+    # conventional layout of "namespace, then top-level classes in
+    # declaration order, each followed by its own members" -- true throughout
+    # this codebase -- rather than attempting a full C# parse.
     for root, dirs, files in os.walk(entry_test_dir):
         dirs[:] = [d for d in dirs if d not in BUILD_OUTPUT_DIRS]
         for file_name in files:
@@ -385,31 +396,74 @@ for sharded_entry in entries:
                 errors.append(f"{entry_name}: test source has no namespace: {relative}")
                 continue
             namespace = namespace_match.group(1)
-            candidate = f"{namespace}.{os.path.splitext(file_name)[0]}."
 
-            matching_shards = []
-            for shard in shards:
-                positive_prefixes = re.findall(
-                    r"FullyQualifiedName~([^|&()]+)",
-                    shard.get("filter", ""),
+            # Restricted to `public` classes: xUnit only discovers [Fact]/
+            # [Theory] methods on a publicly reflectable type, so a private
+            # or internal nested helper/fake class (e.g. a local
+            # IHttpClientFactory stub) can never itself own a test and must
+            # not be picked up as the "nearest preceding class" -- otherwise
+            # a [Fact] declared in the outer class *after* such a helper
+            # would be mis-attributed to it.
+            class_positions = [
+                (m.start(), m.group(1))
+                for m in re.finditer(
+                    r"\bpublic\s+(?:(?:sealed|abstract|static|partial)\s+)*class\s+"
+                    r"([A-Za-z_][A-Za-z0-9_]*)",
+                    text,
                 )
-                if any(
-                    token.endswith(".") and candidate.startswith(token)
-                    for token in positive_prefixes
-                ):
-                    matching_shards.append(shard.get("name", "<unnamed shard>"))
+            ]
+            if not class_positions:
+                errors.append(
+                    f"{entry_name}: test source {relative} has [Fact]/[Theory] "
+                    "attributes but no class declaration"
+                )
+                continue
 
-            if not matching_shards:
-                errors.append(
-                    f"{entry_name}: no shard filter covers test source {relative} "
-                    f"(candidate FullyQualifiedName prefix {candidate})"
-                )
-            elif len(matching_shards) > 1:
-                errors.append(
-                    f"{entry_name}: test source {relative} is matched by multiple shard "
-                    f"filters: {', '.join(matching_shards)} (candidate FullyQualifiedName "
-                    f"prefix {candidate})"
-                )
+            active_classes = set()
+            for attr_match in re.finditer(r"\[\s*(?:Fact|Theory)\b", text):
+                attr_pos = attr_match.start()
+                owning_class = None
+                for class_pos, class_name in class_positions:
+                    if class_pos <= attr_pos:
+                        owning_class = class_name
+                    else:
+                        break
+                if owning_class is None:
+                    errors.append(
+                        f"{entry_name}: test source {relative} has a "
+                        "[Fact]/[Theory] attribute before any class declaration"
+                    )
+                    continue
+                active_classes.add(owning_class)
+
+            for class_name in sorted(active_classes):
+                candidate = f"{namespace}.{class_name}."
+
+                matching_shards = []
+                for shard in shards:
+                    positive_prefixes = re.findall(
+                        r"FullyQualifiedName~([^|&()]+)",
+                        shard.get("filter", ""),
+                    )
+                    if any(
+                        token.endswith(".") and candidate.startswith(token)
+                        for token in positive_prefixes
+                    ):
+                        matching_shards.append(shard.get("name", "<unnamed shard>"))
+
+                if not matching_shards:
+                    errors.append(
+                        f"{entry_name}: no shard filter covers test source {relative} "
+                        f"class {class_name} (candidate FullyQualifiedName prefix "
+                        f"{candidate})"
+                    )
+                elif len(matching_shards) > 1:
+                    errors.append(
+                        f"{entry_name}: test source {relative} class {class_name} is "
+                        f"matched by multiple shard filters: "
+                        f"{', '.join(matching_shards)} (candidate FullyQualifiedName "
+                        f"prefix {candidate})"
+                    )
 
 for e in errors:
     print(f"ERROR: {e}")
