@@ -365,16 +365,16 @@ for sharded_entry in entries:
     # accidentally match `DataManagement`, or a root class whose name starts
     # with a directory/shard name.
     #
-    # The candidate FullyQualifiedName is derived from the actual `class`
-    # declaration nearest above each [Fact]/[Theory] attribute, not from the
-    # file name: several files in this codebase legitimately declare more
-    # than one test class (e.g. a class under test plus its in-memory fake),
-    # and relying on the file name would either miss the non-eponymous
-    # classes entirely or produce a false failure once a class is renamed
-    # independently of its file. This line-position association assumes the
-    # conventional layout of "namespace, then top-level classes in
-    # declaration order, each followed by its own members" -- true throughout
-    # this codebase -- rather than attempting a full C# parse.
+    # The candidate FullyQualifiedName is derived from the actual top-level
+    # `class` declaration nearest above each [Fact]/[Theory] attribute, not
+    # from the file name: several files in this codebase legitimately
+    # declare more than one test class (e.g. a class under test plus its
+    # in-memory fake), and relying on the file name would either miss the
+    # non-eponymous classes entirely or produce a false failure once a class
+    # is renamed independently of its file. See the indentation-depth
+    # reasoning further below for how nested (non-owning) classes, such as
+    # an `IClassFixture` factory declared inside its test class, are
+    # excluded from this association.
     for root, dirs, files in os.walk(entry_test_dir):
         dirs[:] = [d for d in dirs if d not in BUILD_OUTPUT_DIRS]
         for file_name in files:
@@ -401,23 +401,57 @@ for sharded_entry in entries:
             # [Theory] methods on a publicly reflectable type, so a private
             # or internal nested helper/fake class (e.g. a local
             # IHttpClientFactory stub) can never itself own a test and must
-            # not be picked up as the "nearest preceding class" -- otherwise
-            # a [Fact] declared in the outer class *after* such a helper
-            # would be mis-attributed to it.
-            class_positions = [
-                (m.start(), m.group(1))
-                for m in re.finditer(
+            # not be picked up as an owning class.
+            #
+            # Public classes alone are not sufficient, though: this codebase
+            # also has a recurring xUnit fixture idiom --
+            #   public class FooTests : IClassFixture<FooTests.Factory>
+            #   {
+            #       public class Factory : CustomWebApplicationFactory { ... }
+            #       [Fact] public async Task Bar() { ... }
+            #   }
+            # -- where the nested `Factory` class is itself public. Treating
+            # every public class as a candidate and picking the "nearest
+            # preceding" one by raw text position mis-attributes facts
+            # declared in the outer class (after the nested class) to the
+            # nested class instead, because the nested class's own body has
+            # already closed by the time the fact appears.
+            #
+            # Distinguishing a true top-level test class from a nested one
+            # requires knowing where each class's body actually ends, which
+            # in general requires brace matching -- and C# interpolated
+            # strings (`$"...{expr}..."`) can contain braces that are not
+            # real code blocks, making naive brace counting unreliable
+            # without a full tokenizer. Instead, this codebase consistently
+            # indents nested classes deeper than the outer class that
+            # declares them, so indentation depth (of the line containing
+            # each `class` keyword) is used to tell top-level classes apart
+            # from nested ones: only classes at the shallowest indentation
+            # seen in the file are eligible to own a fact.
+            class_matches = list(
+                re.finditer(
                     r"\bpublic\s+(?:(?:sealed|abstract|static|partial)\s+)*class\s+"
                     r"([A-Za-z_][A-Za-z0-9_]*)",
                     text,
                 )
-            ]
-            if not class_positions:
+            )
+            if not class_matches:
                 errors.append(
                     f"{entry_name}: test source {relative} has [Fact]/[Theory] "
-                    "attributes but no class declaration"
+                    "attributes but no public class declaration"
                 )
                 continue
+
+            def _indent(pos: int) -> int:
+                line_start = text.rfind("\n", 0, pos) + 1
+                return pos - line_start
+
+            min_indent = min(_indent(m.start()) for m in class_matches)
+            class_positions = [
+                (m.start(), m.group(1))
+                for m in class_matches
+                if _indent(m.start()) == min_indent
+            ]
 
             active_classes = set()
             for attr_match in re.finditer(r"\[\s*(?:Fact|Theory)\b", text):
@@ -431,7 +465,8 @@ for sharded_entry in entries:
                 if owning_class is None:
                     errors.append(
                         f"{entry_name}: test source {relative} has a "
-                        "[Fact]/[Theory] attribute before any class declaration"
+                        "[Fact]/[Theory] attribute before any top-level class "
+                        "declaration"
                     )
                     continue
                 active_classes.add(owning_class)
