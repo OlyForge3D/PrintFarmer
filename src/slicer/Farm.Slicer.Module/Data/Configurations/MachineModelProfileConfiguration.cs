@@ -24,11 +24,20 @@ public class MachineModelProfileConfiguration : IEntityTypeConfiguration<Machine
         _ = builder.Property(m => m.Hash).HasMaxLength(64);
         _ = builder.Property(m => m.IsSystem).HasDefaultValue(false);
         _ = builder.Property(m => m.SlicerVersion).HasMaxLength(32);
+        _ = builder.Property(m => m.SlicerDistribution).HasMaxLength(64);
+        _ = builder.Property(m => m.SourceMachineModelName).HasMaxLength(256);
+        _ = builder.Property(m => m.FamilyOverridesJson).HasColumnType("TEXT");
+        _ = builder.Property(m => m.RenderedForOrcaVersion).HasMaxLength(32);
+        _ = builder.Property(m => m.RenderStatus)
+            .HasConversion<string>()
+            .HasMaxLength(32)
+            .HasDefaultValueSql("'NotApplicable'");
         _ = builder.Property(m => m.CreatedAt).IsRequired();
         _ = builder.Property(m => m.UpdatedAt).IsRequired();
 
-        // Soft-reference index (no FK constraint — PrinterModel lives in core)
+        // Soft-reference indexes (no FK constraints — PrinterModel/User live in core)
         _ = builder.HasIndex(m => m.PrinterModelId);
+        _ = builder.HasIndex(m => m.CreatedByUserId);
 
         // Indexes
         _ = builder.HasIndex(m => new { m.Name, m.SlicerType }).IsUnique();

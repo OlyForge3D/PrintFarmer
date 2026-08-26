@@ -111,3 +111,26 @@ tool over whole-file PowerShell rewrites on BOM'd C# files.
 Added `PrinterListDtoRowVersionTests`: list DTO carries non-null base64 `RowVersion`
 (Revision > 0) and round-trips to the single-printer endpoint value. Build clean (no new
 warnings), all 1370 Farm.Web.Api.Tests pass.
+
+
+## OrcaSlicer profile-family backend trace (2026-08-25)
+
+- Registered printers resolve Orca machine variants through `Printer.ModelId` -> `PrinterModelAlias.SlicerModelName` -> worker `printer_model`; the machine lookup never reads custom `SlicerDbContext` profiles.
+- Single-profile clone writes a user-owned DB `MachineProfile` but leaves raw `name`/`printer_model`/`inherits` unchanged and does not create an alias or worker entry. This data-source split is the definitive clone-loop cause; worker cache invalidation cannot help.
+- Backend has `MachineModelProfile` + child `MachineProfile.MachineModelProfileId`, but seeding does not populate the child FK and the family entity has no user owner.
+- A family clone must create one family plus all nozzle variants, rewrite exact variant names and shared `printer_model`, link every child, add/resolve target association, and materialize process/filament `compatible_printers` with the new exact names. Prefer computing family-editable fields as the invariant intersection across resolved variants with a per-nozzle denylist.
+- Detailed trace: `decisions/inbox/lambert-profile-family-backend.md`.
+
+
+## OrcaSlicer profile-family inheritance follow-up (2026-08-25)
+
+- Real Voron machine families do not inherit from a shared model-settings base: `machine_model` is metadata, while every nozzle child inherits `fdm_klipper_common` and repeats family geometry/identity. A custom family therefore still needs one child per nozzle.
+- Voron process compatibility is primarily exact system-preset names (`compatible_printers`), not `printer_model`. Preserve a custom child's exact source preset name as its compatibility identity while keeping custom family/child names for selection and display.
+- Orca's user-preset compatibility identity comes from `inherits`, but PrintFarmer's current `WithSystemPresetInherits` rewrites that value to the DTO display name. Genuine custom children need a separate path that preserves their source-system ancestor.
+- DB/custom profiles do not traverse the worker resource inheritance resolver: the API snapshots `RawJson` verbatim and workers expect complete flat settings. Small override-only inheritance requires a new resolver/materializer before slice-job snapshotting.
+- Recommended model: persist source preset identity + Orca provenance/version, small family overrides, and one child per nozzle; materialize against the worker catalog; use source preset identity for process/filament matching; use DB family/target-printer association for UI selection. This avoids duplicating all process/filament profiles.
+- `clone-from-template` clones process rows only and sets a soft printer pointer; it does not create a custom machine profile or family associated with the target catalog model.
+
+## 2026-08-25 — Machine profile family cloning Phase 1 + Phase 2b
+
+Implemented reason-coded 404s for both profile lookup gates, the SlicerDbContext family/variant metadata and render-state model, PostgreSQL/SQL Server/SQLite migrations, transactional `clone-family`, deterministic non-null hashes, native Orca family rendering with per-nozzle deltas and resolved compatibility, AppDbContext alias creation, and the atomic Parker worker bundle client. Added fidelity, Prusa-condition, empty/universal filament, missing-source, persistence/conflict, worker-contract, discovery, execution, migration, and Phase 1 tests. Full build passed; all three snapshots have no pending changes; Lambert-scoped format passed. The required full test run exposed and drove a fix for the string-converted enum default; all relevant post-fix targeted tests passed. See `decisions/inbox/lambert-phase2b-impl.md` for contracts and full evidence.

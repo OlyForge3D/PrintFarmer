@@ -230,9 +230,15 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("Description")
                         .HasMaxLength(1024)
                         .HasColumnType("nvarchar(1024)");
+
+                    b.Property<string>("FamilyOverridesJson")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Hash")
                         .HasMaxLength(64)
@@ -245,6 +251,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
+
+                    b.Property<DateTime?>("LastRenderedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Manufacturer")
                         .IsRequired()
@@ -262,6 +271,21 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("RenderStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)")
+                        .HasDefaultValueSql("'NotApplicable'");
+
+                    b.Property<string>("RenderedForOrcaVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("SlicerDistribution")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<int>("SlicerType")
                         .HasColumnType("int");
 
@@ -269,10 +293,16 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 
+                    b.Property<string>("SourceMachineModelName")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("Hash")
                         .IsUnique()
@@ -334,6 +364,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
+                    b.Property<string>("OverridesJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("PrinterModelId")
                         .HasColumnType("uniqueidentifier");
 
@@ -354,6 +387,10 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
 
                     b.Property<string>("SlicerVersion")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("SourceSystemPresetName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");

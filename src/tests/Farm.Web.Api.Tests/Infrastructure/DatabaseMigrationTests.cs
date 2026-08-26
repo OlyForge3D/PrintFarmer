@@ -689,7 +689,8 @@ public sealed class DatabaseMigrationTests
             "20260821071431_AddSliceJobLayoutDegradationReason",
             "20260821151953_AddSliceJobFailureReason",
             "20260822141641_AddWorkerDisableSource",
-            "20260824024658_AddSliceJobCalibrationFields");
+            "20260824024658_AddSliceJobCalibrationFields",
+            "20260826021050_AddCustomProfileFamilyRenderingState");
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 

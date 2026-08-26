@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Services.Gcode;
@@ -20,6 +21,19 @@ public interface IPrinterModelAliasService
     ///   If null, looks for alias that applies to all slicers.</param>
     /// <returns>PrinterModel ID if found, null if no matching alias exists.</returns>
     Task<Guid?> ResolveModelAliasAsync(string slicerModelName, string? slicerType = null);
+
+    /// <summary>
+    /// Ensures an exact slicer alias maps to the requested catalog model.
+    /// </summary>
+    /// <param name="printerModelId">Target catalog printer model.</param>
+    /// <param name="slicerModelName">Exact slicer-native model name.</param>
+    /// <param name="slicerType">Slicer engine owning the alias.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task EnsureModelAliasAsync(
+        Guid printerModelId,
+        string slicerModelName,
+        string slicerType,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -65,5 +79,42 @@ public class PrinterModelAliasService(AppDbContext dbContext) : IPrinterModelAli
             .FirstOrDefaultAsync();
 
         return genericMatch != Guid.Empty ? genericMatch : null;
+    }
+
+    /// <inheritdoc />
+    public async Task EnsureModelAliasAsync(
+        Guid printerModelId,
+        string slicerModelName,
+        string slicerType,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(slicerModelName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(slicerType);
+
+        List<PrinterModelAlias> existing = await _dbContext.PrinterModelAliases
+            .Where(alias =>
+                alias.SlicerModelName == slicerModelName &&
+                alias.SlicerType == slicerType)
+            .ToListAsync(ct);
+        if (existing.Any(alias => alias.PrinterModelId != printerModelId))
+        {
+            throw new InvalidOperationException(
+                $"Slicer alias '{slicerModelName}' is already mapped to another printer model.");
+        }
+
+        if (existing.Count > 0)
+        {
+            return;
+        }
+
+        _ = _dbContext.PrinterModelAliases.Add(new Domain.PrinterModelAlias
+        {
+            Id = Guid.NewGuid(),
+            PrinterModelId = printerModelId,
+            SlicerModelName = slicerModelName,
+            SlicerType = slicerType,
+            CreatedAt = DateTime.UtcNow
+        });
+        _ = await _dbContext.SaveChangesAsync(ct);
     }
 }

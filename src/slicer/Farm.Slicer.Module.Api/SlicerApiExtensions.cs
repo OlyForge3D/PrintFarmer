@@ -67,6 +67,12 @@ public static class SlicerApiExtensions
         // Core slicing services
         _ = services.AddScoped<ISlicersService, SlicersService>();
         _ = services.AddScoped<IProfilesService, ProfilesService>();
+        _ = services.AddScoped<IProfileFamilyRenderer, ProfileFamilyRenderer>();
+        _ = services.AddScoped<IProfileFamilyService, ProfileFamilyService>();
+        _ = services.AddHttpClient<IProfileFamilyWorkerClient, ProfileFamilyWorkerClient>(client =>
+        {
+            client.Timeout = TimeSpan.FromMinutes(2);
+        });
         _ = services.AddScoped<IWorkerAuthService, WorkerAuthService>();
         _ = services.AddScoped<ISlicerApiKeyValidator, SlicerApiKeyValidator>();
 

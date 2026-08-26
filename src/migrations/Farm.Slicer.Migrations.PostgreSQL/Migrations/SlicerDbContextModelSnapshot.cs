@@ -228,9 +228,15 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Description")
                         .HasMaxLength(1024)
                         .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("FamilyOverridesJson")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Hash")
                         .HasMaxLength(64)
@@ -243,6 +249,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
+
+                    b.Property<DateTime?>("LastRenderedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Manufacturer")
                         .IsRequired()
@@ -260,6 +269,21 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("RenderStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValueSql("'NotApplicable'");
+
+                    b.Property<string>("RenderedForOrcaVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("SlicerDistribution")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<int>("SlicerType")
                         .HasColumnType("integer");
 
@@ -267,10 +291,16 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
+                    b.Property<string>("SourceMachineModelName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("Hash")
                         .IsUnique();
@@ -331,6 +361,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<string>("OverridesJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("PrinterModelId")
                         .HasColumnType("uuid");
 
@@ -351,6 +384,10 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
 
                     b.Property<string>("SlicerVersion")
                         .HasColumnType("text");
+
+                    b.Property<string>("SourceSystemPresetName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
