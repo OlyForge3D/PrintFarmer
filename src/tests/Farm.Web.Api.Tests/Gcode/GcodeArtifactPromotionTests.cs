@@ -1663,7 +1663,10 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
 
         public void Dispose()
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            // Connection strings already have Pooling=false, so no pool entries need
+            // releasing here. Avoid the process-wide ClearAllPools(), which would
+            // disrupt unrelated tests' pooled SQLite connections running concurrently
+            // now that this assembly is no longer fully serialized.
             if (!Directory.Exists(_rootPath))
             {
                 return;

@@ -421,12 +421,14 @@ public class AutoDispatchConcurrencyTests : IDisposable
         try
         {
             startGate.TrySetResult();
-            await allCycles.WaitAsync(TimeSpan.FromSeconds(10));
+            // Widened from 10s: under full test-suite parallelism (dozens of concurrent
+            // hosts), these background cycles can be delayed waiting for CPU/thread-pool time.
+            await allCycles.WaitAsync(TimeSpan.FromSeconds(30));
         }
         finally
         {
             await shutdown.CancelAsync();
-            await allCycles.WaitAsync(TimeSpan.FromSeconds(10));
+            await allCycles.WaitAsync(TimeSpan.FromSeconds(30));
         }
 
         lock (_dispatchLock)

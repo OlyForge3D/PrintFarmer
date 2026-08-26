@@ -22,23 +22,23 @@ namespace Farm.Web.Api.Tests.Services;
 /// - Allows printers IN the group to proceed (score > 0)
 /// - Maintains backward compatibility (no group = all printers pass)
 /// </summary>
-public class DispatchScorerPrinterGroupTests : IAsyncLifetime
+public class DispatchScorerPrinterGroupTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
 
-    public DispatchScorerPrinterGroupTests()
+    public DispatchScorerPrinterGroupTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await Task.CompletedTask;
+        await _factory.ResetDataAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     // =========================================================================

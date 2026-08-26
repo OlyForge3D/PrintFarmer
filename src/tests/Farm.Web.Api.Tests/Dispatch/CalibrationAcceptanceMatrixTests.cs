@@ -598,7 +598,18 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            // Scope the pool clear to this test's own connection string instead of
+            // calling the process-wide ClearAllPools(), which would disrupt other
+            // tests' pooled SQLite connections running concurrently now that this
+            // assembly is no longer fully serialized (the process-wide clear could
+            // silently discard another concurrently-running test's per-connection
+            // PRAGMA foreign_keys state, surfacing as a spurious FK-constraint
+            // failure — see issue #2030).
+            using (var pooledConnection = new SqliteConnection(connectionString))
+            {
+                SqliteConnection.ClearPool(pooledConnection);
+            }
+
             File.Delete(databasePath);
         }
     }

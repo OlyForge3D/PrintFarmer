@@ -611,7 +611,10 @@ public class DiscoveryProbeValidationTests
 
         var probe = new TestableBaseProbe(server.Port, shouldValidate: true);
 
-        ProbeResult? result = await probe.ProbeAsync("127.0.0.1", timeoutMs: 2000, cancellationToken: default);
+        // Widened from 2000ms: this is a real HTTP round-trip over loopback, and under full
+        // test-suite parallelism (maxParallelThreads=0), thread-pool/CPU contention from dozens
+        // of concurrently-running hosts can legitimately delay it past a short timeout.
+        ProbeResult? result = await probe.ProbeAsync("127.0.0.1", timeoutMs: 10000, cancellationToken: default);
 
         result.Should().NotBeNull();
         result!.Printer.Backend.Should().Be(PrinterBackend.Moonraker);

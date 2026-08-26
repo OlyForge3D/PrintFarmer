@@ -5,27 +5,29 @@ using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Monitoring;
 
-[Collection(IntegrationTestCollection.Name)]
-public class MonitoringControllerTests : IAsyncLifetime
+public class MonitoringControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
-    private CustomWebApplicationFactory? _factory;
+    private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _adminClient;
     private HttpClient? _anonClient;
 
+    public MonitoringControllerTests(CustomWebApplicationFactory factory)
+    {
+        _factory = factory;
+    }
+
     public async Task InitializeAsync()
     {
-        _factory = new CustomWebApplicationFactory();
+        await _factory.ResetDataAsync();
         _anonClient = _factory.CreateClient();
-        await _factory.ResetDatabaseAsync();
         _adminClient = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        if (_factory is not null)
-        {
-            await _factory.DisposeAsync();
-        }
+        _adminClient?.Dispose();
+        _anonClient?.Dispose();
+        return Task.CompletedTask;
     }
 
     [Fact]

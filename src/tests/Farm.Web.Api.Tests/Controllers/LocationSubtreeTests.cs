@@ -20,29 +20,36 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// Verifies that the endpoint returns printers from a location and all its descendant locations.
 /// Uses CustomWebApplicationFactory with in-memory SQLite for isolated test data.
 /// </summary>
-public class LocationSubtreeTests : IAsyncLifetime
+public class LocationSubtreeTests : IClassFixture<LocationSubtreeTests.Factory>, IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory;
+    public class Factory : CustomWebApplicationFactory
+    {
+        public Factory() : base(new Dictionary<string, string?>
+        {
+            ["Testing:UseTestAuthentication"] = "true",
+        })
+        {
+        }
+    }
+
+    private readonly Factory _factory;
     private HttpClient _client = null!;
 
-    public LocationSubtreeTests()
+    public LocationSubtreeTests(Factory factory)
     {
-        _factory = new CustomWebApplicationFactory(
-            new Dictionary<string, string?>
-            {
-                ["Testing:UseTestAuthentication"] = "true",
-            });
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
+        await _factory.ResetDataAsync();
         _client = _factory.CreateClient();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _client?.Dispose();
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     private static string UniquePrinterServerUrl()

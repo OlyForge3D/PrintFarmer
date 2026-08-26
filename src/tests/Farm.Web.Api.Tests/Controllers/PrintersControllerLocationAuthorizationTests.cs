@@ -10,30 +10,42 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Controllers;
 
 [Trait("Category", "Integration")]
-public class PrintersControllerLocationAuthorizationTests : IAsyncLifetime
+public class PrintersControllerLocationAuthorizationTests : IClassFixture<PrintersControllerLocationAuthorizationTests.Factory>, IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory = new(new Dictionary<string, string?>
+    public class Factory : CustomWebApplicationFactory
     {
-        ["Security:DevModeBypassAuth"] = "false"
-    });
+        public Factory() : base(new Dictionary<string, string?>
+        {
+            ["Security:DevModeBypassAuth"] = "false"
+        })
+        {
+        }
+    }
+
+    private readonly Factory _factory;
 
     private HttpClient _adminClient = null!;
     private HttpClient _nonAdminClient = null!;
 
+    public PrintersControllerLocationAuthorizationTests(Factory factory)
+    {
+        _factory = factory;
+    }
+
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _adminClient = await _factory.CreateAdminClientAsync();
         _nonAdminClient = await _factory.CreateAuthenticatedClientAsync(
             username: "printer-location-operator",
             email: "printer-location-operator@example.com");
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _adminClient.Dispose();
         _nonAdminClient.Dispose();
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     [Fact]

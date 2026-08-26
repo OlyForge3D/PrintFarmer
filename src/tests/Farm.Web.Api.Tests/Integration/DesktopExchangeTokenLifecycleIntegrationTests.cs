@@ -35,35 +35,45 @@ namespace Farm.Web.Api.Tests.Integration;
 /// retry loop on an unrecoverable one.
 /// </remarks>
 [Trait("Category", "DbHeavy")]
-[Collection(IntegrationTestCollection.Name)]
 [TestTiming]
-public class DesktopExchangeTokenLifecycleIntegrationTests : IAsyncLifetime
+public class DesktopExchangeTokenLifecycleIntegrationTests : IClassFixture<DesktopExchangeTokenLifecycleIntegrationTests.Factory>, IAsyncLifetime
 {
     private const string SigningKey = "DesktopExchangeLifecycleIntegrationTestSigningKey-0123456789";
     private const string Issuer = "PrintFarmer";
     private const string Audience = "PrintFarmer";
 
-    private readonly CustomWebApplicationFactory _factory;
+    public class Factory : CustomWebApplicationFactory
+    {
+        public Factory()
+            : base(new Dictionary<string, string?>
+            {
+                ["Security:DevModeBypassAuth"] = "false",
+                ["Jwt:Key"] = SigningKey,
+                ["Jwt:Issuer"] = Issuer,
+                ["Jwt:Audience"] = Audience,
+                // This class's host (and its singleton in-memory rate limiter) is shared
+                // across every test via IClassFixture, and several tests here exchange an
+                // API key. Raise the ceiling well above what any single test performs so
+                // cumulative attempts across the whole class never trip the default limit
+                // (5/minute) meant for a single client in production.
+                ["RateLimiting:Authentication:MaxApiKeyExchangeAttemptsPerMinute"] = "1000"
+            })
+        {
+        }
+    }
+
+    private readonly Factory _factory;
     private HttpClient _anonymousClient = null!;
     private Guid _ownerId;
 
-    public DesktopExchangeTokenLifecycleIntegrationTests()
+    public DesktopExchangeTokenLifecycleIntegrationTests(Factory factory)
     {
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
-        {
-            // The GET bypass would mask the 401/403 distinction this class exists to pin.
-            ["Security:DevModeBypassAuth"] = "false",
-            // Pinned so the test can mint an already-expired token the host will accept as
-            // well-formed and reject only on lifetime.
-            ["Jwt:Key"] = SigningKey,
-            ["Jwt:Issuer"] = Issuer,
-            ["Jwt:Audience"] = Audience,
-        });
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _anonymousClient = _factory.CreateClient();
 
         using HttpClient seedLogin = await _factory.CreateAuthenticatedClientAsync(
@@ -80,7 +90,6 @@ public class DesktopExchangeTokenLifecycleIntegrationTests : IAsyncLifetime
     public Task DisposeAsync()
     {
         _anonymousClient?.Dispose();
-        _factory?.Dispose();
         return Task.CompletedTask;
     }
 

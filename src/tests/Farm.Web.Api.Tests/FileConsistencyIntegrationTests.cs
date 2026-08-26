@@ -27,8 +27,7 @@ namespace Farm.Web.Api.Tests;
 /// Integration tests for file consistency audit, verification, and health status endpoints.
 /// Tests the full stack: database persistence, audit service, API endpoints, and health checks.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
-public class FileConsistencyIntegrationTests : IAsyncLifetime
+public class FileConsistencyIntegrationTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient _client = null!;
@@ -37,15 +36,15 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     private string _modelStoragePath = null!;
     private string _gcodeStoragePath = null!;
 
-    public FileConsistencyIntegrationTests()
+    public FileConsistencyIntegrationTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
         // Reset database to ensure clean state for this test
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
 
         // Use admin client since FileConsistencyController requires farm_admin role
         _client = await _factory.CreateAdminClientAsync();
@@ -59,7 +58,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         _ = Directory.CreateDirectory(_gcodeStoragePath);
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _client?.Dispose();
         _slicerDbContext?.Dispose();
@@ -74,7 +73,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
             Directory.Delete(_gcodeStoragePath, recursive: true);
         }
 
-        _factory?.Dispose();
+        return Task.CompletedTask;
     }
 
     [Fact]

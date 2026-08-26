@@ -17,17 +17,29 @@ namespace Farm.Web.Api.Tests.Security;
 /// mocking) so the assertions exercise the production authorization + filtering path end to end.
 /// </summary>
 [Trait("Category", "Integration")]
-public sealed class PrinterCollectionAuthorizationTests : IAsyncLifetime
+public sealed class PrinterCollectionAuthorizationTests : IClassFixture<PrinterCollectionAuthorizationTests.Factory>, IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory = new(new Dictionary<string, string?>
+    public class Factory : CustomWebApplicationFactory
     {
-        ["Testing:UseTestAuthentication"] = "true",
-        ["Security:DevModeBypassAuth"] = "false",
-    });
+        public Factory() : base(new Dictionary<string, string?>
+        {
+            ["Testing:UseTestAuthentication"] = "true",
+            ["Security:DevModeBypassAuth"] = "false",
+        })
+        {
+        }
+    }
 
-    public async Task InitializeAsync() => await _factory.ResetDatabaseAsync();
+    private readonly Factory _factory;
 
-    public async Task DisposeAsync() => await _factory.DisposeAsync();
+    public PrinterCollectionAuthorizationTests(Factory factory)
+    {
+        _factory = factory;
+    }
+
+    public async Task InitializeAsync() => await _factory.ResetDataAsync();
+
+    public Task DisposeAsync() => Task.CompletedTask;
 
     [Fact]
     public async Task ListEndpoint_ExcludesPrinterFromRestrictedGroup()

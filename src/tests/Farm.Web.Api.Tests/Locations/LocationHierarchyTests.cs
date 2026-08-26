@@ -634,24 +634,23 @@ public class LocationHierarchyTests : IDisposable
 /// These use CustomWebApplicationFactory for full HTTP testing against the LocationsController.
 /// </summary>
 [Trait("Category", "Integration")]
-[Collection(IntegrationTestCollection.Name)]
-public class LocationHierarchyEndpointTests : IAsyncLifetime
+public class LocationHierarchyEndpointTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
 
-    public LocationHierarchyEndpointTests()
+    public LocationHierarchyEndpointTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        _factory?.Dispose();
+        return Task.CompletedTask;
     }
 
     [Fact]

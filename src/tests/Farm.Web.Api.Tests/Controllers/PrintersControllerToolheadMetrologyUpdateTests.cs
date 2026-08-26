@@ -24,25 +24,26 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// update path (<c>PrintersController.cs</c>) must keep working unchanged.
 /// </summary>
 [Trait("Category", "Integration")]
-public class PrintersControllerToolheadMetrologyUpdateTests : IAsyncLifetime
+public class PrintersControllerToolheadMetrologyUpdateTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
 
-    public PrintersControllerToolheadMetrologyUpdateTests()
+    public PrintersControllerToolheadMetrologyUpdateTests(CustomWebApplicationFactory factory)
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
+        await _factory.ResetDataAsync();
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _client?.Dispose();
-        await _factory.DisposeAsync();
+        return Task.CompletedTask;
     }
 
     private async Task<(Guid PrinterId, Guid ToolheadId)> SeedPrinterWithToolheadAsync()

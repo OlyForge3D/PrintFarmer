@@ -43,28 +43,39 @@ namespace Farm.Web.Api.Tests.Integration;
 /// </para>
 /// </remarks>
 [Trait("Category", "DbHeavy")]
-[Collection(IntegrationTestCollection.Name)]
 [TestTiming]
-public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
+public class DesktopScopeRouteMatrixIntegrationTests : IClassFixture<DesktopScopeRouteMatrixIntegrationTests.Factory>, IAsyncLifetime
 {
-    private readonly CustomWebApplicationFactory _factory;
+    public class Factory : CustomWebApplicationFactory
+    {
+        public Factory()
+            : base(new Dictionary<string, string?>
+            {
+                ["Security:DevModeBypassAuth"] = "false",
+                // This class's host (and its singleton in-memory rate limiter) is shared
+                // across every test via IClassFixture, and several tests here exchange the
+                // same API key more than once. Raise the ceiling well above what any single
+                // test performs so cumulative attempts across the whole class never trip the
+                // default limit (5/minute) meant for a single client in production.
+                ["RateLimiting:Authentication:MaxApiKeyExchangeAttemptsPerMinute"] = "1000"
+            })
+        {
+        }
+    }
+
+    private readonly Factory _factory;
     private HttpClient _anonymousClient = null!;
     private HttpClient _unscopedClient = null!;
     private Guid _ownerId;
 
-    public DesktopScopeRouteMatrixIntegrationTests()
+    public DesktopScopeRouteMatrixIntegrationTests(Factory factory)
     {
-        // DevModeBypassAuth succeeds every pending requirement on GET requests when enabled in
-        // Development, which would mask precisely the read-side denials asserted here.
-        _factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
-        {
-            ["Security:DevModeBypassAuth"] = "false"
-        });
+        _factory = factory;
     }
 
     public async Task InitializeAsync()
     {
-        await _factory.ResetDatabaseAsync();
+        await _factory.ResetDataAsync();
         _anonymousClient = _factory.CreateClient();
 
         using HttpClient loginClient = await _factory.CreateAuthenticatedClientAsync(
@@ -87,7 +98,6 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
     {
         _anonymousClient?.Dispose();
         _unscopedClient?.Dispose();
-        _factory?.Dispose();
         return Task.CompletedTask;
     }
 

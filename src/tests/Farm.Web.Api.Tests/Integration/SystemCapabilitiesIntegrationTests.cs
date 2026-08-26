@@ -10,24 +10,26 @@ namespace Farm.Web.Api.Tests.Integration;
 /// This endpoint controls frontend feature gating — if it reports
 /// <c>slicingEnabled = false</c>, the entire slicer UI is hidden.
 /// </summary>
-public class SystemCapabilitiesIntegrationTests : IAsyncLifetime
+public class SystemCapabilitiesIntegrationTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
-    private CustomWebApplicationFactory? _factory;
+    private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
+
+    public SystemCapabilitiesIntegrationTests(CustomWebApplicationFactory factory)
+    {
+        _factory = factory;
+    }
 
     public Task InitializeAsync()
     {
-        _factory = new CustomWebApplicationFactory();
         _client = _factory.CreateClient();
         return Task.CompletedTask;
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        if (_factory != null)
-        {
-            await _factory.DisposeAsync();
-        }
+        _client?.Dispose();
+        return Task.CompletedTask;
     }
 
     [Fact]

@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Web.Api.Middleware;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -19,6 +20,7 @@ namespace Farm.Web.Api.Tests.Middleware;
 /// <c>Connection.RemoteIpAddress</c> IS the effective client IP; a raw header must never
 /// change it.
 /// </summary>
+[Collection(RateLimiterEnvSerialCollection.Name)]
 public class AuthenticationRateLimitMiddlewareTests
 {
     private const string LoginPath = "/api/auth/login";
