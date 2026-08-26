@@ -260,3 +260,13 @@ Status: Backlog item cleared. Beta trigger gated on PR stack merge.
   scoped format passed. The profile-overlay deployment suite passed; unrelated
   deployment groups remain blocked by the unavailable local Docker daemon and
   existing environment/baseline conditions.
+
+### 2026-08-25: Bishop B2/B3 test strengthening
+
+- Confirmed all worker fixes were committed in `cfce2e7f3`.
+- Replaced the helper-only B2 test with a real controller flow: a broken bundle
+  is resident and failing, a healthy bundle installs, and the endpoint returns
+  200 while preserving the unrelated diagnostic.
+- Extended B3 rollback coverage to enumerate both custom storage and the
+  process overlay, proving neither rejected manifest nor directory remains.
+  Both focused tests pass; no full suite was run per coordinator request.

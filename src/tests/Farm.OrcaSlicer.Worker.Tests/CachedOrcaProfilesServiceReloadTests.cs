@@ -361,27 +361,82 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
             .BeOfType<UnprocessableEntityObjectResult>();
         File.Exists(Path.Join(customRoot, "Broken.json")).Should().BeFalse();
         Directory.Exists(Path.Join(customRoot, "Broken")).Should().BeFalse();
+        Directory.EnumerateFileSystemEntries(overlayRoot)
+            .Select(Path.GetFileName)
+            .Should().NotContain(["Broken.json", "Broken"]);
         state.IsReady.Should().BeTrue();
     }
 
     [Fact]
-    public void HasBlockingFailures_UnrelatedBundle_ReturnsFalse()
+    public async Task InstallAsync_UnrelatedBrokenBundle_InstallsHealthyBundle()
     {
-        CustomProfileLoadFailure failure = new(
+        string stockRoot = Path.Join(_testRoot, "stock");
+        string overlayRoot = Path.Join(_testRoot, "overlay");
+        string customRoot = Path.Join(_testRoot, "custom");
+        string dbPath = Path.Join(_testRoot, "cache", "profiles.db");
+        Directory.CreateDirectory(stockRoot);
+        Directory.CreateDirectory(overlayRoot);
+        Directory.CreateDirectory(customRoot);
+        WriteStockProfile(stockRoot, overlayRoot);
+        await using var store = new CustomProfileBundleStore(
+            NullLogger<CustomProfileBundleStore>.Instance,
+            stockRoot,
+            overlayRoot,
+            customRoot);
+        await using var service = new CachedOrcaProfilesService(
+            NullLogger<CachedOrcaProfilesService>.Instance,
+            overlayRoot,
+            dbPath,
+            customRoot);
+        await store.InstallAsync(
             "Broken",
-            "Family",
-            "Profile",
-            "Parent");
+            Bundle(
+                [("Broken Child", "machine/broken.json")],
+                [
+                    new CustomProfileFileRequest(
+                        "machine/broken.json",
+                        "Broken Family",
+                        Json("""
+                            {
+                              "name": "Broken Child",
+                              "inherits": "Unavailable Parent",
+                              "instantiation": "true",
+                              "printer_model": "Broken Model",
+                              "nozzle_diameter": ["0.4"]
+                            }
+                            """)),
+                ]));
+        ProfileReloadResult brokenReload =
+            await service.ReloadProfilesAsync();
+        brokenReload.Failures.Should().ContainSingle()
+            .Which.BundleName.Should().Be("Broken");
+        CustomProfilesReconciliationState state = new();
+        CustomProfilesController controller = new(
+            store,
+            service,
+            state,
+            NullLogger<CustomProfilesController>.Instance);
 
-        CustomProfilesController.HasBlockingFailures(
-            [failure],
-            "Healthy").Should().BeFalse();
-        CustomProfilesController.HasBlockingFailures(
-            [failure],
-            "Broken").Should().BeTrue();
-        CustomProfilesController.HasBlockingFailures(
-            [failure],
-            affectedBundleName: null).Should().BeTrue();
+        ActionResult<CustomProfileMutationResponse> result =
+            await controller.InstallAsync(
+                "Healthy",
+                CompleteBundle(),
+                CancellationToken.None);
+
+        OkObjectResult ok = result.Result.Should()
+            .BeOfType<OkObjectResult>().Subject;
+        CustomProfileMutationResponse response = ok.Value.Should()
+            .BeOfType<CustomProfileMutationResponse>().Subject;
+        response.Failures.Should().Contain(
+            failure => failure.BundleName == "Broken");
+        File.Exists(Path.Join(customRoot, "Healthy.json"))
+            .Should().BeTrue();
+        Directory.Exists(Path.Join(customRoot, "Healthy"))
+            .Should().BeTrue();
+        File.Exists(Path.Join(overlayRoot, "Healthy.json"))
+            .Should().BeTrue();
+        Directory.Exists(Path.Join(overlayRoot, "Healthy"))
+            .Should().BeTrue();
     }
 
     /// <inheritdoc />
