@@ -43,6 +43,39 @@ public sealed class SliceJobControllerCalibrationTests
         _ = problem.Detail.Should().Contain("flow_rate_pass_1").And.Contain("temperature_tower");
     }
 
+    [Theory]
+    [InlineData("flow_rate_yolo_recommended")]
+    [InlineData("flow_rate_yolo_perfectionist")]
+    public async Task SubmitAsync_CataloguedButNotYetSlicerSupportedMethod_ReturnsInvalidRequestBeforeQueueing(string wireName)
+    {
+        // Issue #2051: FlowRateYoloRecommended/FlowRateYoloPerfectionist parse successfully (their
+        // wire names/resource metadata are catalogued), but the worker cannot yet apply their
+        // delta-based per-object overrides. Rejecting here, at the API boundary, matters: without
+        // it the job would be queued, claimed by a worker, and only fail late in
+        // OrcaSlicingPipelineService.PrepareCalibrationModel — wasting a worker slot and a job
+        // record for a request that could never have succeeded.
+        SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out Mock<ISliceJobEventService> events);
+        var request = new SubmitSliceJobRequest
+        {
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            Priority = 1,
+            Calibration = new CalibrationRequest { Method = wireName },
+        };
+
+        IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
+
+        var objectResult = result.Should().BeOfType<ObjectResult>().Subject;
+        _ = objectResult.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        var problem = objectResult.Value.Should().BeOfType<ProblemDetails>().Subject;
+        _ = problem.Extensions["code"].Should().Be("calibration_method_not_yet_supported");
+        repository.Verify(
+            instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        events.Verify(
+            instance => instance.NotifyJobQueuedAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     [Fact]
     public async Task SubmitAsync_KnownCalibrationMethod_CreatesOrdinarySliceJobWithNoCalibrationSagaFields()
     {

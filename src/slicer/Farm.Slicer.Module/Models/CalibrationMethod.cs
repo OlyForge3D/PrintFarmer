@@ -116,6 +116,22 @@ public static class CalibrationMethods
     public static string ToWireName(CalibrationMethod method) => MethodToWireName[method];
 
     /// <summary>
+    /// Whether the worker can actually slice a job for <paramref name="method"/> today.
+    /// <see cref="CalibrationMethod.FlowRateYoloRecommended"/> and
+    /// <see cref="CalibrationMethod.FlowRateYoloPerfectionist"/> are catalogued (issue #2051) so
+    /// their wire names round-trip and their resource metadata is available, but the worker
+    /// cannot yet apply their delta-based per-object flow-ratio overrides (see the
+    /// <see cref="CalibrationMethod"/> type remarks) and would only fail late, after dispatch.
+    /// Callers that accept a client-supplied method — chiefly the slice-job submission
+    /// endpoint — must reject these methods with <see langword="false"/> here, at the API
+    /// boundary, instead of letting <see cref="TryParse"/> alone gate acceptance.
+    /// </summary>
+    /// <param name="method">A method that already parsed successfully via <see cref="TryParse"/>.</param>
+    /// <returns><see langword="true"/> when the worker can slice this method today.</returns>
+    public static bool IsSlicerSupported(CalibrationMethod method) => method is not (
+        CalibrationMethod.FlowRateYoloRecommended or CalibrationMethod.FlowRateYoloPerfectionist);
+
+    /// <summary>
     /// A descriptive placeholder model file name for a calibration job, used in place of a
     /// client-supplied upload since the worker resolves the actual calibration model from its own
     /// bundled OrcaSlicer resources.

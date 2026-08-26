@@ -474,7 +474,15 @@ public class CalibrationTests : IDisposable
 
         Action act = () => pipeline.PrepareCalibrationModel(job, workDir);
 
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain(
+                "not yet slicer-supported",
+                "the message must explain *why* the job failed (delta-based overrides are not yet " +
+                "supported), not just that it failed with some InvalidOperationException — a caller " +
+                "cannot otherwise distinguish this from an unrelated internal error")
+            .And.NotContain(
+                calibResourcesRoot,
+                "the exception message must not disclose internal worker filesystem paths");
     }
 
     [Fact]
