@@ -1,4 +1,5 @@
-﻿using System.Net.Http.Json;
+﻿using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
@@ -84,6 +85,12 @@ public sealed class ProfileFamilyWorkerClient(
             requestUri,
             JsonContent.Create(body, options: JsonOptions));
         using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+        if (response.StatusCode == HttpStatusCode.UnprocessableEntity)
+        {
+            string responseBody = await response.Content.ReadAsStringAsync(ct);
+            throw CreateSourcePresetException(bundleName, responseBody);
+        }
+
         if (!response.IsSuccessStatusCode)
         {
             throw new HttpRequestException(
@@ -92,6 +99,46 @@ public sealed class ProfileFamilyWorkerClient(
                 response.StatusCode);
         }
     }
+
+    private static ProfileFamilySourceException CreateSourcePresetException(
+        string requestedBundleName,
+        string responseBody)
+    {
+        WorkerBundleMutationResponse? mutationResponse;
+        try
+        {
+            mutationResponse = JsonSerializer.Deserialize<WorkerBundleMutationResponse>(
+                responseBody,
+                JsonOptions);
+        }
+        catch (JsonException ex)
+        {
+            return new ProfileFamilySourceException(
+                $"OrcaSlicer worker rejected custom bundle '{requestedBundleName}' because " +
+                "source preset inheritance was incomplete, but returned invalid failure details.",
+                ex);
+        }
+
+        if (mutationResponse?.Failures is not { Count: > 0 } failures)
+        {
+            return new ProfileFamilySourceException(
+                $"OrcaSlicer worker rejected custom bundle '{requestedBundleName}' because " +
+                "source preset inheritance was incomplete, but returned no failure details.");
+        }
+
+        string detail = string.Join(
+            "; ",
+            failures.Select(failure =>
+                $"bundle '{Display(failure.BundleName, requestedBundleName)}', " +
+                $"family '{Display(failure.FamilyName)}', " +
+                $"profile '{Display(failure.ProfileName)}' is missing parent " +
+                $"'{Display(failure.MissingParent)}'"));
+        return new ProfileFamilySourceException(
+            $"OrcaSlicer worker excluded generated profile(s) because source presets were unavailable: {detail}.");
+    }
+
+    private static string Display(string? value, string fallback = "unknown") =>
+        string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
 
     private async Task<ProfileFamilyWorkerTarget> SelectWorkerAsync(
         string? requestedVersion,
@@ -165,4 +212,13 @@ public sealed class ProfileFamilyWorkerClient(
         string RelativePath,
         string FamilyName,
         JsonElement Document);
+
+    private sealed record WorkerBundleMutationResponse(
+        IReadOnlyList<WorkerProfileLoadFailure>? Failures);
+
+    private sealed record WorkerProfileLoadFailure(
+        string? BundleName,
+        string? FamilyName,
+        string? ProfileName,
+        string? MissingParent);
 }

@@ -62,8 +62,73 @@ public sealed class ProfileFamilyWorkerClientTests
             .Should().Be("Farm Test 0.6 nozzle");
     }
 
+    [Fact]
+    public async Task WriteBundleAsync_IncompleteInheritance_PreservesWorkerFailureDetails()
+    {
+        Guid familyId = Guid.NewGuid();
+        var handler = new RecordingHandler(
+            HttpStatusCode.UnprocessableEntity,
+            """
+            {
+              "operation": "installed",
+              "bundleName": "PrintFarmer-worker-bundle",
+              "machineCount": 0,
+              "filamentCount": 0,
+              "processCount": 0,
+              "failures": [
+                {
+                  "bundleName": "Custom",
+                  "familyName": "Farm Test",
+                  "profileName": "Farm Test 0.6 nozzle",
+                  "missingParent": "Stock 0.6 nozzle"
+                }
+              ]
+            }
+            """);
+        using HttpClient httpClient = new(handler);
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["WorkerAuth:SharedKey"] = "test-worker-key"
+            })
+            .Build();
+        var client = new ProfileFamilyWorkerClient(
+            httpClient,
+            new Mock<ISlicersService>(MockBehavior.Strict).Object,
+            configuration,
+            NullLogger<ProfileFamilyWorkerClient>.Instance);
+        var bundle = new ProfileFamilyBundleDto(
+            familyId,
+            "Farm Test",
+            """{"name":"Custom","machine_list":[]}""",
+            []);
+
+        Func<Task> act = () => client.WriteBundleAsync(
+            new ProfileFamilyWorkerTarget("http://worker:5100", "2.3.0"),
+            bundle,
+            CancellationToken.None);
+
+        ProfileFamilySourceException exception = (await act.Should()
+            .ThrowAsync<ProfileFamilySourceException>()).Which;
+        exception.Message.Should().Contain("bundle 'Custom'");
+        exception.Message.Should().Contain("family 'Farm Test'");
+        exception.Message.Should().Contain("profile 'Farm Test 0.6 nozzle'");
+        exception.Message.Should().Contain("missing parent 'Stock 0.6 nozzle'");
+    }
+
     private sealed class RecordingHandler : HttpMessageHandler
     {
+        private readonly HttpStatusCode _statusCode;
+        private readonly string? _responseBody;
+
+        public RecordingHandler(
+            HttpStatusCode statusCode = HttpStatusCode.OK,
+            string? responseBody = null)
+        {
+            _statusCode = statusCode;
+            _responseBody = responseBody;
+        }
+
         public HttpMethod? Method { get; private set; }
 
         public Uri? Uri { get; private set; }
@@ -80,7 +145,12 @@ public sealed class ProfileFamilyWorkerClientTests
             Uri = request.RequestUri;
             SharedKey = request.Headers.GetValues("X-Slicer-Api-Key").Single();
             Body = await request.Content!.ReadAsStringAsync(cancellationToken);
-            return new HttpResponseMessage(HttpStatusCode.OK);
+            return new HttpResponseMessage(_statusCode)
+            {
+                Content = _responseBody is null
+                    ? null
+                    : new StringContent(_responseBody)
+            };
         }
     }
 }

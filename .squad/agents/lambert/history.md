@@ -139,3 +139,7 @@ Implemented reason-coded 404s for both profile lookup gates, the SlicerDbContext
 ## 2026-08-25 — Phase 1 frontend contract reconciliation
 
 Reconciled both profile lookup gates with Ripley's landed consumer: coded 404 bodies now serialize exactly `code` and optional `detail` (null detail omitted), replacing the initially implemented `message` field. Added a wire serialization test that rejects `message`; focused controller tests pass 8/8 and scoped formatting passes. Recorded the complete camelCase `POST /api/slicer/profiles/clone-family` request, 201 response, and error-code/status map in `decisions/inbox/lambert-phase2b-impl.md` for the Phase 3 wizard.
+
+## 2026-08-25 — Worker custom-inheritance 422 preservation
+
+Reconciled Parker's final custom-bundle mutation behavior: HTTP 422 `failures[]` is parsed by `ProfileFamilyWorkerClient`, preserving bundle/family/profile/missing-parent details in `ProfileFamilySourceException`. This keeps failed render state while allowing the clone-family controller to return `source_preset_unavailable` 422 rather than generic worker-unavailable 503. Added adapter and endpoint contract coverage; focused tests pass 3/3 and scoped formatting passes.
