@@ -107,11 +107,16 @@ public static class CalibrationMethods
         [.. WireNameToMethod.Where(pair => IsSlicerSupported(pair.Value)).Select(pair => pair.Key)];
 
     /// <summary>
-    /// Attempts to parse a client-supplied calibration method name. Only the methods currently
-    /// implemented by the worker are accepted — an unrecognized or not-yet-supported name (for
-    /// example <c>"pa_pattern"</c> or <c>"pa_line"</c>) returns <see langword="false"/> so the
-    /// caller can reject the request with a clear, actionable error instead of a generic slice
-    /// failure surfacing later on the worker.
+    /// Attempts to parse a client-supplied calibration method name against the full calibration
+    /// catalogue. A name that isn't catalogued at all (for example <c>"pa_pattern"</c> or
+    /// <c>"pa_line"</c>, both intentionally excluded — see the licensing note on
+    /// <see cref="CalibrationMethod"/>) returns <see langword="false"/>. Note this does
+    /// <em>not</em> mean the parsed method is ready for the worker to slice today: two
+    /// catalogued methods (<see cref="CalibrationMethod.FlowRateYoloRecommended"/> and
+    /// <see cref="CalibrationMethod.FlowRateYoloPerfectionist"/>) parse successfully but are
+    /// not yet slicer-supported — see <see cref="IsSlicerSupported"/> and
+    /// <see cref="ClientAcceptedWireNames"/> for the check that actually gates client
+    /// submission.
     /// </summary>
     /// <param name="wireName">The client-supplied method name.</param>
     /// <param name="method">The parsed method, when this returns <see langword="true"/>.</param>
