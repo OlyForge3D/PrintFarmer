@@ -23,7 +23,7 @@ jobs:
           script: |
             // Fetch all files changed - handles both PR and push events
             let files = [];
-            
+
             if (context.eventName === 'pull_request') {
               // PR event: use pulls.listFiles API
               let page = 1;
@@ -43,7 +43,7 @@ jobs:
               // Push event: compare against base branch
               const base = context.payload.before;
               const head = context.payload.after;
-              
+
               // If this is not a force push and base exists, compare commits
               if (base && base !== '0000000000000000000000000000000000000000') {
                 const comparison = await github.rest.repos.compareCommits({

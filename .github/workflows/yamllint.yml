@@ -3,7 +3,6 @@ name: yamllint (enforce)
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [ main ]
 
 permissions:
   contents: read
@@ -26,12 +25,20 @@ jobs:
       - name: Run yamllint
         id: lint
         run: |
-          python -m yamllint .github/workflows/*.yml > yamllint.out 2>&1 || true
-          rc=$?
-          cat yamllint.out || true
-          echo "lint_exit=${rc}" >> $GITHUB_OUTPUT
+          shopt -s nullglob
+          workflow_files=(.github/workflows/*.yml .github/workflows/*.yaml)
+          rc=0
+          if ((${#workflow_files[@]} == 0)); then
+            echo "No workflow YAML files found." > yamllint.out
+            rc=1
+          else
+            python -m yamllint "${workflow_files[@]}" > yamllint.out 2>&1 || rc=$?
+          fi
+          cat yamllint.out
+          printf 'lint_exit=%s\n' "$rc" >> "$GITHUB_OUTPUT"
 
       - name: Upload yamllint output
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: yamllint-report

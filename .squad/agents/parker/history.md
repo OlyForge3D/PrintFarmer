@@ -315,3 +315,22 @@ Status: Backlog item cleared. Beta trigger gated on PR stack merge.
 - Added real-store fingerprint coverage and a boot/reconcile/register/serve/
   delete regression. Focused tests passed 5/5 in one captured run; the final
   targeted build and scoped format passed.
+
+### 2026-08-26: Yamllint enforcement restoration
+
+- A shell command followed by `|| true` cannot be inspected with a subsequent
+  `$?`; that status belongs to `true`. Initialize the return code, assign it in
+  the `||` branch, upload diagnostics, then fail in a separate step.
+- Pull-request workflow branch filters must match the repository's actual flow.
+  PrintFarmer's canonical CI trigger has no PR branch filter, so it covers
+  `development` and future supported targets.
+- Sampling two files with `git ls-files --eol` and generalizing to the directory
+  hid genuine CRLF blobs in `codeql.yml` and `squad-main-guard.yml`. Inventory
+  every gated file and pin both workflow YAML extensions to LF.
+- GitHub Actions accepts both `*.yml` and `*.yaml`. A Bash `nullglob` array
+  covers both without passing an unmatched literal when one extension is absent;
+  an explicit empty-array guard keeps a missing workflow set fail-closed.
+- With yamllint 1.38.0, `truthy: {check-keys: false}` exempts GitHub Actions'
+  `on:` key while retaining value checks. A 120-character warning threshold
+  keeps 111 exceptionally long expression/shell lines visible without making
+  705 legacy line-length findings block structural YAML enforcement.
