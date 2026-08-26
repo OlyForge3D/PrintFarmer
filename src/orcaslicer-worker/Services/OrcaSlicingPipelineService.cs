@@ -295,6 +295,21 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             return FlowRateCalibrationConfigurator.ApplyPerObjectFlowRatios(sourcePath, workDir, _logger);
         }
 
+        if (method is CalibrationMethod.FlowRateYoloRecommended or CalibrationMethod.FlowRateYoloPerfectionist)
+        {
+            // The YOLO flow-ratio resources encode per-object flow ratios as baseline-relative
+            // deltas (e.g. "flowrate_0.01", "flowrate_m0.01"), not the absolute percentages (e.g.
+            // "flowrate_95") FlowRateCalibrationConfigurator parses for pass1/pass2. Reusing that
+            // parser here would silently mis-scale or skip every object, producing a job that
+            // "succeeds" while emitting near-identical, uncalibrated G-code for every block —
+            // see CalibrationMethod.cs for the full investigation (issue #2051). Fail loudly
+            // instead of slicing an uncalibrated result until a delta-aware configurator exists.
+            throw new InvalidOperationException(
+                $"Calibration method '{job.CalibrationMethod}' is catalogued but not yet slicer-supported: " +
+                "its bundled resource uses a delta-based per-object naming scheme the worker cannot apply " +
+                "overrides for. A dedicated configurator is required before this method can be used.");
+        }
+
         string destinationPath = Path.Combine(workDir, Path.GetFileName(sourcePath));
         File.Copy(sourcePath, destinationPath, overwrite: true);
         return destinationPath;

@@ -124,8 +124,20 @@ public partial class SliceJobController(
             if (!CalibrationMethods.TryParse(request.Calibration.Method, out CalibrationMethod parsedMethod))
             {
                 string message = $"Unsupported calibration method '{request.Calibration.Method}'. " +
-                    $"Supported methods: {string.Join(", ", CalibrationMethods.SupportedWireNames)}.";
+                    $"Supported methods: {string.Join(", ", CalibrationMethods.ClientAcceptedWireNames)}.";
                 return SlicerApiProblems.InvalidRequest(this, "unsupported_calibration_method", message);
+            }
+
+            // Issue #2051: the two YOLO methods are catalogued (their wire names/resource metadata
+            // are known) but the worker cannot yet slice them — see CalibrationMethod's remarks.
+            // Reject here, before the job reaches the queue/worker, so this fails the same way as
+            // an unknown method instead of only failing late, after a worker has already claimed
+            // the job and started work on it.
+            if (!CalibrationMethods.IsSlicerSupported(parsedMethod))
+            {
+                string message = $"Calibration method '{request.Calibration.Method}' is catalogued but not yet " +
+                    "slicer-supported by the worker.";
+                return SlicerApiProblems.InvalidRequest(this, "calibration_method_not_yet_supported", message);
             }
 
             calibrationMethod = parsedMethod;
