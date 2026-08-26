@@ -28,8 +28,8 @@
         },
         {
           "name": "infra",
-          "namespacePrefixes": ["Discovery", "Filters", "Gcode", "Health", "Hubs", "Infrastructure", "Integration", "Locations", "Logging", "Middleware", "Migrations", "Monitoring", "Network"],
-          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Discovery.|FullyQualifiedName~Farm.Web.Api.Tests.Filters.|FullyQualifiedName~Farm.Web.Api.Tests.Gcode.|FullyQualifiedName~Farm.Web.Api.Tests.Health.|FullyQualifiedName~Farm.Web.Api.Tests.Hubs.|FullyQualifiedName~Farm.Web.Api.Tests.Infrastructure.|FullyQualifiedName~Farm.Web.Api.Tests.Integration.|FullyQualifiedName~Farm.Web.Api.Tests.Locations.|FullyQualifiedName~Farm.Web.Api.Tests.Logging.|FullyQualifiedName~Farm.Web.Api.Tests.Middleware.|FullyQualifiedName~Farm.Web.Api.Tests.Migrations.|FullyQualifiedName~Farm.Web.Api.Tests.Monitoring.|FullyQualifiedName~Farm.Web.Api.Tests.Network.|FullyQualifiedName~Farm.Infrastructure.Settings.Tests.IAppSettingTests."
+          "namespacePrefixes": ["Discovery", "Gcode", "Health", "Hubs", "Infrastructure", "Integration", "Locations", "Logging", "Middleware", "Migrations", "Monitoring", "Network"],
+          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Discovery.|FullyQualifiedName~Farm.Web.Api.Tests.Gcode.|FullyQualifiedName~Farm.Web.Api.Tests.Health.|FullyQualifiedName~Farm.Web.Api.Tests.Hubs.|FullyQualifiedName~Farm.Web.Api.Tests.Infrastructure.|FullyQualifiedName~Farm.Web.Api.Tests.Integration.|FullyQualifiedName~Farm.Web.Api.Tests.Locations.|FullyQualifiedName~Farm.Web.Api.Tests.Logging.|FullyQualifiedName~Farm.Web.Api.Tests.Middleware.|FullyQualifiedName~Farm.Web.Api.Tests.Migrations.|FullyQualifiedName~Farm.Web.Api.Tests.Monitoring.|FullyQualifiedName~Farm.Web.Api.Tests.Network.|FullyQualifiedName~Farm.Infrastructure.Settings.Tests.IAppSettingTests."
         },
         {
           "name": "services",
