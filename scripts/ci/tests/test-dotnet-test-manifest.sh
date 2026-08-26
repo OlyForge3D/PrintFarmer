@@ -199,7 +199,26 @@ entries_by_name = {entry.get("name"): entry for entry in entries if entry.get("n
 for pinned_name, pinned_fields in EXPECTED_CANONICAL.items():
     entry = entries_by_name.get(pinned_name)
     if entry is None:
-        continue  # absence is already reported by the checks above/below.
+        # A missing canonical name is NOT already caught elsewhere: only
+        # Farm.Web.IntegrationTests and the two #2022 regression projects are
+        # separately hard-required by name below. select-dotnet-tests.sh's
+        # bucket-routing logic (classify_path) still hardcodes these exact
+        # canonical names, so a rename here -- even with testProject left
+        # unchanged, which would otherwise satisfy the auto-discovery check
+        # further down -- would make finish() silently drop the renamed
+        # project from every matrix it should appear in (it looks up entries
+        # by name, not by testProject path). Fail loudly instead.
+        errors.append(
+            f"canonical name '{pinned_name}' not found in manifest (was it "
+            "renamed? select-dotnet-tests.sh's bucket-routing logic "
+            "hardcodes this exact name and looks entries up by name, not by "
+            "testProject path, so a rename would silently drop this project "
+            "from the CI matrix even if its testProject path is unchanged -- "
+            "if this rename is intentional, update EXPECTED_CANONICAL and "
+            "the corresponding name literals in select-dotnet-tests.sh in "
+            "the same PR)"
+        )
+        continue
     for field, expected_value in pinned_fields.items():
         actual_value = entry.get(field)
         if actual_value != expected_value:

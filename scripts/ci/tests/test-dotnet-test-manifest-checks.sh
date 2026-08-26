@@ -18,7 +18,13 @@
 #   3. FAILs when a required schema field is missing from an entry,
 #   4. FAILs when a required schema field has the wrong JSON type, and
 #   5. FAILs closed (rc=1, not a silent PASS) when the embedded Python
-#      subprocess crashes outright rather than reporting itemized errors.
+#      subprocess crashes outright rather than reporting itemized errors,
+#   6. FAILs when the 'name' field is missing/blank/non-string,
+#   7. FAILs when a known project's pinned defaultFilter/testProject/
+#      productionProject/runIntegration is silently narrowed or swapped, and
+#   8. FAILs when a known project's 'name' is renamed while its testProject
+#      path is left unchanged (would otherwise silently vanish from the CI
+#      matrix since select-dotnet-tests.sh looks entries up by name).
 # =============================================================================
 
 set -uo pipefail
@@ -252,6 +258,43 @@ with open(out_path, "w", encoding="utf-8") as f:
   fi
 }
 
+case_canonical_name_renamed_fails() {
+  # Negative: renaming a known project's 'name' while leaving its
+  # 'testProject' path unchanged would still satisfy testProject-based
+  # auto-discovery and would leave EXPECTED_CANONICAL's per-field checks
+  # unreached (no entry is found under the old name to compare fields
+  # against). select-dotnet-tests.sh's bucket-routing logic hardcodes exact
+  # canonical names and looks entries up by name (not testProject path), so
+  # this rename would silently drop the project from the CI matrix. The
+  # validator must fail when an EXPECTED_CANONICAL name is missing, not just
+  # when a *found* entry's fields mismatch.
+  local mutant ; mutant="$(mktemp)"
+  build_mutant "$mutant" '
+import json, sys
+out_path, src_path = sys.argv[1], sys.argv[2]
+with open(src_path, encoding="utf-8") as f:
+    data = json.load(f)
+for entry in data["testProjects"]:
+    if entry.get("name") == "Farm.Web.Api.Tests":
+        entry["name"] = "Farm.Web.Api.UnitTests"
+        break
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump(data, f)
+'
+  local rc=0
+  local report
+  report="$(TEST_MANIFEST_PATH="$mutant" bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$mutant"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail when a canonical name is renamed, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"canonical name 'Farm.Web.Api.Tests' not found in manifest"* ]]; then
+    printf '  expected a missing-canonical-name error, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
 TESTS=(
   case_baseline_roundtrip_passes
   case_duplicate_test_project_path_fails
@@ -260,6 +303,7 @@ TESTS=(
   case_crash_fails_closed
   case_invalid_name_fails
   case_pinned_default_filter_narrowed_fails
+  case_canonical_name_renamed_fails
 )
 
 printf '=== dotnet test manifest validator regression suite ===\n'
