@@ -24,8 +24,8 @@ public sealed class DevicesApiModule : IApiModule
     public void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         // OctoPrint API-key authentication service. OctoPrintSettings itself remains bound in
-        // FeatureServicesStartup because Farm.Web.Api.Controllers.OctoPrintCompatController and
-        // UserApiKeysController (which are not part of this module) also depend on it.
+        // FeatureServicesStartup because Farm.Web.Api.Controllers.OctoPrintCompatController
+        // (which is not part of this module) injects IOptions<OctoPrintSettings> directly.
         _ = services.AddScoped<Farm.Web.Api.Services.OctoPrint.IOctoPrintAuthService, Farm.Web.Api.Services.OctoPrint.OctoPrintAuthService>();
     }
 

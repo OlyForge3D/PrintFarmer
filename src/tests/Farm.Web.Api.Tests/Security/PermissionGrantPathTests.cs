@@ -88,6 +88,10 @@ public sealed class PermissionGrantPathTests
         typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
         typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
+        // Issue #2043: Farm.Modules.Devices hosts AdminHomeAssistantController
+        // ([RequirePermission("home_assistant","admin")]) plus the NFC/camera controllers, moved
+        // out of Farm.Web.Api. Must be scanned here or those grant sites silently drop out.
+        typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
     ];
 
     [Fact]

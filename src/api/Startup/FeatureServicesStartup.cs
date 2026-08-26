@@ -18,8 +18,10 @@ public static class FeatureServicesStartup
         IWebHostEnvironment environment)
     {
         // OctoPrint compatibility settings. Bound here (rather than in Farm.Modules.Devices)
-        // because OctoPrintCompatController and UserApiKeysController, which remain in
-        // Farm.Web.Api, also depend on it. IOctoPrintAuthService itself is registered by
+        // because OctoPrintCompatController, which remains in Farm.Web.Api, injects
+        // IOptions<OctoPrintSettings> directly. (UserApiKeysController, also in Farm.Web.Api,
+        // reads the same settings via ISettingsService.Get<OctoPrintSettings>() instead, so it
+        // does not depend on this binding.) IOctoPrintAuthService itself is registered by
         // Farm.Modules.Devices.DevicesApiModule (issue #2043, Phase 15).
         services.Configure<Farm.Infrastructure.Settings.OctoPrintSettings>(configuration.GetSection("OctoPrint"));
 

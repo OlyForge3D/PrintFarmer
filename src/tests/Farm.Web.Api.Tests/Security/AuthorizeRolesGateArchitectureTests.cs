@@ -79,6 +79,11 @@ public sealed class AuthorizeRolesGateArchitectureTests
         typeof(Farm.Web.Api.Controllers.MaintenanceController).Assembly,
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
         typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly,
+        // Issue #2043: Farm.Modules.Devices hosts the OctoPrint-compat auth surface plus the
+        // NFC/camera/Home-Assistant device controllers (namespaces unchanged, so
+        // Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController now resolves from this
+        // module assembly). Must be scanned for the same reason PrintQueue/Identity are above.
+        typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
     ];
 
     /// <summary>
@@ -102,6 +107,7 @@ public sealed class AuthorizeRolesGateArchitectureTests
         typeof(Farm.Web.Api.Controllers.MaintenanceController).Assembly,
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
         typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly,
+        typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
     ];
 
     [Fact]

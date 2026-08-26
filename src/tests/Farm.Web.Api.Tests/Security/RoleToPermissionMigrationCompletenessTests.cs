@@ -27,6 +27,10 @@ public sealed class RoleToPermissionMigrationCompletenessTests
         typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
         typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
+        // Issue #2043: Farm.Modules.Devices controllers moved out of Farm.Web.Api and must be
+        // scanned here explicitly, or a reintroduced farm_admin role-name gate on one of them
+        // would silently escape this guard.
+        typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
     ];
 
     [Fact]

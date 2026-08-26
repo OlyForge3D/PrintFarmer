@@ -396,6 +396,7 @@ load_changed_files() {
 #                     filter and the NFC/camera/Home-Assistant device
 #                     controllers carved out of Farm.Web.Api, following the
 #                     smartplug pattern above). Matched before the generic
+#                     `src/modules/*` case.
 #   identity        — src/modules/Farm.Modules.Identity/** (issue #2041,
 #                     Phase 13: Auth/users/API keys/quotas/roles/permissions/
 #                     security-audit/password-policy vertical-slice module
@@ -424,6 +425,7 @@ load_changed_files() {
 #   tests_calibration — src/tests/Farm.Modules.Calibration.Tests/** (issue
 #                     #2038). Matched before the generic `src/tests/*` case.
 #   tests_devices   — src/tests/Farm.Modules.Devices.Tests/** (issue #2043).
+#                     Matched before the generic `src/tests/*` case.
 #   tests_identity  — src/tests/Farm.Modules.Identity.Tests/** (issue #2041).
 #                     Matched before the generic `src/tests/*` case.
 #   tests_other     — any other src/tests/**

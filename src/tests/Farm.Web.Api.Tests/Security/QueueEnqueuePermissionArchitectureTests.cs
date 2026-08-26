@@ -60,6 +60,7 @@ public sealed class QueueEnqueuePermissionArchitectureTests
         typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly, // Farm.Modules.PrintQueue
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly, // Farm.Modules.Calibration
         typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
+        typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly, // Farm.Modules.Devices
     };
 
     private static readonly Dictionary<short, OpCode> OpCodesByValue = BuildOpCodeMap();
