@@ -1,9 +1,11 @@
 ﻿using System.Text.Json;
 using Farm.OrcaSlicer.Worker.Controllers;
 using Farm.OrcaSlicer.Worker.Services;
+using Farm.Slicer.Worker.Core;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -329,6 +331,141 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task ReconciliationPoll_BrokenBundle_KeepsWorkerOnlineAndRemovable()
+    {
+        string stockRoot = Path.Join(_testRoot, "stock");
+        string writerOverlayRoot = Path.Join(_testRoot, "overlay-writer");
+        string workerOverlayRoot = Path.Join(_testRoot, "overlay-worker");
+        string customRoot = Path.Join(_testRoot, "custom");
+        Directory.CreateDirectory(stockRoot);
+        Directory.CreateDirectory(writerOverlayRoot);
+        Directory.CreateDirectory(workerOverlayRoot);
+        Directory.CreateDirectory(customRoot);
+        WriteStockProfile(stockRoot, writerOverlayRoot);
+        LinkStockProfile(stockRoot, workerOverlayRoot);
+
+        await using var writerStore = new CustomProfileBundleStore(
+            NullLogger<CustomProfileBundleStore>.Instance,
+            stockRoot,
+            writerOverlayRoot,
+            customRoot);
+        await writerStore.InstallAsync("Broken", BrokenBundle());
+        await writerStore.InstallAsync("Healthy", CompleteBundle());
+
+        await using var workerStore = new CustomProfileBundleStore(
+            NullLogger<CustomProfileBundleStore>.Instance,
+            stockRoot,
+            workerOverlayRoot,
+            customRoot);
+        await using var profilesService = new CachedOrcaProfilesService(
+            NullLogger<CachedOrcaProfilesService>.Instance,
+            workerOverlayRoot,
+            Path.Join(_testRoot, "cache-worker", "profiles.db"),
+            customRoot);
+        CustomProfilesReconciliationState state = new();
+        using CustomProfilesReconciliationService reconciliation = new(
+            workerStore,
+            profilesService,
+            state,
+            new ConfigurationBuilder().Build(),
+            NullLogger<CustomProfilesReconciliationService>.Instance);
+
+        await reconciliation.CheckForChangesAsync(CancellationToken.None);
+
+        state.IsReady.Should().BeTrue();
+        ProfileReloadResult diagnosticReload =
+            await profilesService.ReloadProfilesAsync();
+        diagnosticReload.Failures.Should().ContainSingle(
+            failure => failure.BundleName == "Broken");
+        (await profilesService.ListAvailableMachineProfilesAsync())
+            .Select(profile => profile.Name)
+            .Should()
+            .Contain(["Stock Parent", "Micron 180 0.4 nozzle"])
+            .And.NotContain("Broken Child");
+
+        StubRegistrationClient registrationClient = new();
+        WorkerStateService workerState = new();
+        RegistrationBackgroundService registration = new(
+            registrationClient,
+            workerState,
+            profilesService,
+            state,
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["Worker:MaxConcurrentJobs"] = "2",
+                    })
+                .Build(),
+            NullLogger<RegistrationBackgroundService>.Instance,
+            new StubHostApplicationLifetime());
+
+        (await registration.TryRegisterAsync(CancellationToken.None))
+            .Should().BeTrue();
+        registrationClient.RegistrationCount.Should().Be(1);
+        workerState.GetWorkerState().RegisteredServiceId.Should()
+            .Be(registrationClient.ServiceId);
+        RegistrationBackgroundService.CalculateHeartbeatAvailability(
+                workerState.GetWorkerState(),
+                maxConcurrentJobs: 2,
+                state.IsReady)
+            .Should().Be((2, "Online"));
+
+        CustomProfilesController controller = new(
+            workerStore,
+            profilesService,
+            state,
+            NullLogger<CustomProfilesController>.Instance);
+        ActionResult<CustomProfileMutationResponse> deleteResult =
+            await controller.RemoveAsync(
+                "Broken",
+                CancellationToken.None);
+
+        deleteResult.Result.Should().BeOfType<OkObjectResult>();
+        state.IsReady.Should().BeTrue();
+        File.Exists(Path.Join(customRoot, "Broken.json")).Should().BeFalse();
+        Directory.Exists(Path.Join(customRoot, "Broken")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CalculateCustomProfilesFingerprint_TransientNestedFiles_AreIgnored()
+    {
+        string stockRoot = Path.Join(_testRoot, "stock");
+        string overlayRoot = Path.Join(_testRoot, "overlay");
+        string customRoot = Path.Join(_testRoot, "custom");
+        Directory.CreateDirectory(stockRoot);
+        Directory.CreateDirectory(overlayRoot);
+        Directory.CreateDirectory(customRoot);
+        await using var store = new CustomProfileBundleStore(
+            NullLogger<CustomProfileBundleStore>.Instance,
+            stockRoot,
+            overlayRoot,
+            customRoot);
+        string baseline = store.CalculateCustomProfilesFingerprint();
+        string metadataRoot = Path.Join(customRoot, ".printfarmer");
+        string nestedTransaction =
+            Path.Join(customRoot, "nested", ".install-operation");
+        Directory.CreateDirectory(metadataRoot);
+        Directory.CreateDirectory(nestedTransaction);
+        File.WriteAllText(
+            Path.Join(metadataRoot, ".install-operation.families.json"),
+            "installing");
+        File.WriteAllText(
+            Path.Join(metadataRoot, ".backup-operation.families.json"),
+            "backing-up");
+        File.WriteAllText(
+            Path.Join(nestedTransaction, "profile.json"),
+            "transient");
+
+        store.CalculateCustomProfilesFingerprint().Should().Be(baseline);
+
+        File.WriteAllText(
+            Path.Join(metadataRoot, "Healthy.families.json"),
+            "persistent");
+        store.CalculateCustomProfilesFingerprint().Should().NotBe(baseline);
+    }
+
+    [Fact]
     public async Task InstallAsync_MissingParent_RollsBackRejectedBundle()
     {
         string stockRoot = Path.Join(_testRoot, "stock");
@@ -449,6 +586,7 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
             .BeOfType<CustomProfileMutationResponse>().Subject;
         response.Failures.Should().Contain(
             failure => failure.BundleName == "Broken");
+        state.IsReady.Should().BeTrue();
         File.Exists(Path.Join(customRoot, "Healthy.json"))
             .Should().BeTrue();
         Directory.Exists(Path.Join(customRoot, "Healthy"))
@@ -577,4 +715,67 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
                         }
                         """)),
             ]);
+
+    private static CustomProfileBundleRequest BrokenBundle() =>
+        Bundle(
+            [("Broken Child", "machine/broken.json")],
+            [
+                new CustomProfileFileRequest(
+                    "machine/broken.json",
+                    "Broken Family",
+                    Json("""
+                        {
+                          "name": "Broken Child",
+                          "inherits": "Unavailable Parent",
+                          "instantiation": "true",
+                          "printer_model": "Broken Model",
+                          "nozzle_diameter": ["0.4"]
+                        }
+                        """)),
+            ]);
+
+    private sealed class StubRegistrationClient : ISlicerRegistrationClient
+    {
+        public Guid ServiceId { get; } = Guid.NewGuid();
+
+        public int RegistrationCount { get; private set; }
+
+        public Task<(Guid ServiceId, string ApiKey)> RegisterAsync(
+            CancellationToken cancellationToken = default)
+        {
+            RegistrationCount++;
+            return Task.FromResult((ServiceId, "worker-api-key"));
+        }
+
+        public Task<SlicerHeartbeatResult> HeartbeatAsync(
+            Guid serviceId,
+            string apiKey,
+            int freeSlots,
+            string status = "Online",
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(SlicerHeartbeatResult.Succeeded);
+
+        public Task<bool> DeregisterAsync(
+            Guid serviceId,
+            string apiKey,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(true);
+    }
+
+    private sealed class StubHostApplicationLifetime
+        : IHostApplicationLifetime
+    {
+        public CancellationToken ApplicationStarted =>
+            CancellationToken.None;
+
+        public CancellationToken ApplicationStopping =>
+            CancellationToken.None;
+
+        public CancellationToken ApplicationStopped =>
+            CancellationToken.None;
+
+        public void StopApplication()
+        {
+        }
+    }
 }

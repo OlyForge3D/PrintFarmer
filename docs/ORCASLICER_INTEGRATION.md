@@ -128,6 +128,19 @@ reconciliation succeeds, or whenever reconciliation fails, readiness reports
 Existing leased-job completion and artifact traffic remains available. This
 prevents a scaled sibling from silently accepting a family it has not loaded.
 
+Invalid custom profiles do not make a worker unavailable. Profiles with missing
+parents are excluded from lookup results and logged with their bundle, profile,
+and missing-parent names; stock profiles and healthy custom bundles remain
+available, and the authenticated DELETE route can remove the broken bundle.
+Incomplete bundle residue is likewise logged and skipped during replica
+observation. Only infrastructure failures that prevent reconciliation itself
+affect readiness.
+
+Transaction files or directories whose name starts with `.install-` or
+`.backup-` are excluded from the shared fingerprint at any path depth.
+Persistent `.printfarmer/{bundle}.families.json` metadata remains part of the
+fingerprint so family metadata changes still propagate.
+
 The API installs complete rendered bundles through authenticated worker routes:
 
 ```http

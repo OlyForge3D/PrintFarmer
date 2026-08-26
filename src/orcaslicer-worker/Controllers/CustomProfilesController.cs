@@ -250,18 +250,16 @@ public sealed class CustomProfilesController(
 
     private void UpdateReconciliationState(ProfileReloadResult reload)
     {
-        if (reload.Failures.Count == 0)
+        _reconciliationState.MarkReady(
+            _bundleStore.CalculateCustomProfilesFingerprint());
+        foreach (CustomProfileLoadFailure failure in reload.Failures)
         {
-            _reconciliationState.MarkReady(
-                _bundleStore.CalculateCustomProfilesFingerprint());
-            return;
+            _logger.LogWarning(
+                "Custom profile {ProfileName} in bundle {BundleName} remains quarantined because parent {MissingParent} is unavailable",
+                failure.ProfileName,
+                failure.BundleName,
+                failure.MissingParent);
         }
-
-        CustomProfileLoadFailure failure = reload.Failures[0];
-        _reconciliationState.MarkUnavailable(
-            $"Custom profile '{failure.ProfileName}' in bundle " +
-            $"'{failure.BundleName}' cannot resolve parent " +
-            $"'{failure.MissingParent}'.");
     }
 }
 

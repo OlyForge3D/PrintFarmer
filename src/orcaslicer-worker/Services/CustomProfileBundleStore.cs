@@ -60,8 +60,7 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             customProfilesPath
             ?? Environment.GetEnvironmentVariable("ORCA_CUSTOM_PROFILES_PATH")
             ?? "/app/custom-profiles");
-        _knownCustomBundles = DiscoverCompleteBundleNames(
-            failOnIncomplete: false);
+        _knownCustomBundles = DiscoverCompleteBundleNames();
     }
 
     /// <summary>
@@ -218,8 +217,7 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             Directory.CreateDirectory(GetMetadataDirectoryPath());
             Directory.CreateDirectory(_overlayProfilesPath);
 
-            HashSet<string> currentBundles = DiscoverCompleteBundleNames(
-                failOnIncomplete: true);
+            HashSet<string> currentBundles = DiscoverCompleteBundleNames();
             bool changed = !_knownCustomBundles.SetEquals(currentBundles);
 
             foreach (string removedBundle in
@@ -275,39 +273,45 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             StringBuilder fingerprintSource = new();
             HashSet<string> currentPaths = new(
                 _fingerprintFiles.Comparer);
-            foreach (string path in Directory
-                .EnumerateFiles(
-                    _customProfilesPath,
-                    "*",
-                    SearchOption.AllDirectories)
-                .Where(path => !IsTransientCustomPath(path))
+            foreach (string path in EnumerateFingerprintFiles()
                 .OrderBy(path => path, StringComparer.Ordinal))
             {
-                _ = currentPaths.Add(path);
-                FileInfo file = new(path);
-                if (!_fingerprintFiles.TryGetValue(
-                        path,
-                        out FingerprintFileState? cached)
-                    || cached is null
-                    || cached.Length != file.Length
-                    || cached.LastWriteTicks
-                        != file.LastWriteTimeUtc.Ticks)
+                try
                 {
-                    using FileStream stream = File.OpenRead(path);
-                    cached = new FingerprintFileState(
-                        file.Length,
-                        file.LastWriteTimeUtc.Ticks,
-                        Convert.ToHexString(SHA256.HashData(stream)));
-                    _fingerprintFiles[path] = cached;
-                }
+                    FileInfo file = new(path);
+                    if (!_fingerprintFiles.TryGetValue(
+                            path,
+                            out FingerprintFileState? cached)
+                        || cached is null
+                        || cached.Length != file.Length
+                        || cached.LastWriteTicks
+                            != file.LastWriteTimeUtc.Ticks)
+                    {
+                        using FileStream stream = File.OpenRead(path);
+                        cached = new FingerprintFileState(
+                            file.Length,
+                            file.LastWriteTimeUtc.Ticks,
+                            Convert.ToHexString(SHA256.HashData(stream)));
+                        _fingerprintFiles[path] = cached;
+                    }
 
-                _ = fingerprintSource
-                    .Append(Path.GetRelativePath(
-                        _customProfilesPath,
-                        path))
-                    .Append(':')
-                    .Append(cached.ContentHash)
-                    .Append(';');
+                    _ = currentPaths.Add(path);
+                    _ = fingerprintSource
+                        .Append(Path.GetRelativePath(
+                            _customProfilesPath,
+                            path))
+                        .Append(':')
+                        .Append(cached.ContentHash)
+                        .Append(';');
+                }
+                catch (FileNotFoundException)
+                {
+                    _ = _fingerprintFiles.Remove(path);
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    _ = _fingerprintFiles.Remove(path);
+                }
             }
 
             foreach (string removedPath in
@@ -764,8 +768,7 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             "invalid_bundle_path",
             "The stock bundle path escaped the stock profile root.");
 
-    private HashSet<string> DiscoverCompleteBundleNames(
-        bool failOnIncomplete)
+    private HashSet<string> DiscoverCompleteBundleNames()
     {
         HashSet<string> bundleNames = new(StringComparer.Ordinal);
         if (!Directory.Exists(_customProfilesPath))
@@ -792,14 +795,10 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             ValidateBundleName(bundleName);
             if (!Directory.Exists(GetCustomDirectoryPath(bundleName)))
             {
-                if (!failOnIncomplete)
-                {
-                    continue;
-                }
-
-                throw new CustomProfileBundleException(
-                    "incomplete_custom_bundle",
-                    $"Custom bundle '{bundleName}' has a manifest but no profile directory.");
+                _logger.LogWarning(
+                    "Ignoring incomplete custom bundle {BundleName}: manifest has no profile directory",
+                    bundleName);
+                continue;
             }
 
             _ = bundleNames.Add(bundleName);
@@ -826,16 +825,51 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             }
 
             ValidateBundleName(bundleName);
-            if (!File.Exists(GetCustomManifestPath(bundleName))
-                && failOnIncomplete)
+            if (!File.Exists(GetCustomManifestPath(bundleName)))
             {
-                throw new CustomProfileBundleException(
-                    "incomplete_custom_bundle",
-                    $"Custom bundle '{bundleName}' has a profile directory but no manifest.");
+                _logger.LogWarning(
+                    "Ignoring incomplete custom bundle {BundleName}: profile directory has no manifest",
+                    bundleName);
             }
         }
 
         return bundleNames;
+    }
+
+    private IEnumerable<string> EnumerateFingerprintFiles()
+    {
+        Stack<string> pendingDirectories = new();
+        pendingDirectories.Push(_customProfilesPath);
+        while (pendingDirectories.TryPop(out string? directory))
+        {
+            string[] files;
+            string[] childDirectories;
+            try
+            {
+                files = Directory.GetFiles(directory);
+                childDirectories = Directory.GetDirectories(directory);
+            }
+            catch (DirectoryNotFoundException)
+            {
+                continue;
+            }
+
+            foreach (string file in files)
+            {
+                if (!IsTransientCustomPath(file))
+                {
+                    yield return file;
+                }
+            }
+
+            foreach (string childDirectory in childDirectories)
+            {
+                if (!IsTransientCustomPath(childDirectory))
+                {
+                    pendingDirectories.Push(childDirectory);
+                }
+            }
+        }
     }
 
     private bool IsTransientCustomPath(string path)
@@ -843,15 +877,17 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         string relativePath = Path.GetRelativePath(
             _customProfilesPath,
             path);
-        string firstSegment = relativePath.Split(
-            Path.DirectorySeparatorChar,
-            2)[0];
-        return firstSegment.StartsWith(
-            ".install-",
-            StringComparison.OrdinalIgnoreCase)
-            || firstSegment.StartsWith(
-                ".backup-",
-                StringComparison.OrdinalIgnoreCase);
+        return relativePath
+            .Split(
+                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries)
+            .Any(segment =>
+                segment.StartsWith(
+                    ".install-",
+                    StringComparison.OrdinalIgnoreCase)
+                || segment.StartsWith(
+                    ".backup-",
+                    StringComparison.OrdinalIgnoreCase));
     }
 
     private static string ResolveContainedPath(

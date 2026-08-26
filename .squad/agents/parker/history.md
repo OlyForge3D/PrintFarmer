@@ -277,8 +277,8 @@ Status: Backlog item cleared. Beta trigger gated on PR stack merge.
   case-insensitively so API callers cannot collide with metadata, staging, or
   backup paths that discovery/fingerprinting intentionally treats specially.
 - Added no-side-effect rejection coverage for nine all-dot/reserved/case
-  variants and live fingerprint mismatch/recovery claim coverage. Targeted
-  tests pass 10/10; targeted build and scoped format pass.
+  variants and stubbed fingerprint mismatch/recovery claim-gate coverage.
+  Targeted tests pass 10/10; targeted build and scoped format pass.
 
 ### 2026-08-25: Replica coordination coverage
 
@@ -293,3 +293,19 @@ Status: Backlog item cleared. Beta trigger gated on PR stack merge.
 - Kept transactions as guarded siblings inside the versioned volume so
   staging/backup/target remain on one filesystem for atomic moves; documented
   that every future internal marker must extend the explicit denylist.
+
+### 2026-08-25: Custom bundle failure isolation
+
+- Closed Bishop B5 by keeping workers ready and registered when strict custom
+  inheritance excludes a broken profile. The failure remains diagnostic, stock
+  plus healthy custom profiles remain queryable, and DELETE remediation stays
+  reachable. Controller mutation/reload paths follow the same rule.
+- Replica observation now logs and skips incomplete custom bundles rather than
+  making partial promotion or crash residue process-fatal.
+- Closed N10 by treating `.install-*`/`.backup-*` as transient on every path
+  segment, avoiding traversal into transient directories, and tolerating
+  entries that vanish during fingerprinting. Persistent family metadata still
+  changes the fingerprint.
+- Added real-store fingerprint coverage and a boot/reconcile/register/serve/
+  delete regression. Focused tests passed 5/5 in one captured run; the final
+  targeted build and scoped format passed.

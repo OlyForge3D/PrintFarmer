@@ -155,7 +155,7 @@ public class RegistrationBackgroundService : BackgroundService
         return (freeSlots, status);
     }
 
-    private async Task<bool> TryRegisterAsync(CancellationToken cancellationToken)
+    internal async Task<bool> TryRegisterAsync(CancellationToken cancellationToken)
     {
         try
         {

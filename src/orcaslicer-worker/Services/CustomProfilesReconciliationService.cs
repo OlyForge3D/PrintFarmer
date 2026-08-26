@@ -112,18 +112,19 @@ public sealed class CustomProfilesReconciliationService(
             await _profilesService.MutateAndReloadProfilesAsync(
                 _bundleStore.ReconcileOverlayAsync,
                 ct);
-        if (reload.Failures.Count > 0)
+        _state.MarkReady(fingerprint);
+        foreach (CustomProfileLoadFailure failure in reload.Failures)
         {
-            CustomProfileLoadFailure failure = reload.Failures[0];
-            throw new InvalidOperationException(
-                $"Custom profile '{failure.ProfileName}' in bundle " +
-                $"'{failure.BundleName}' cannot resolve parent " +
-                $"'{failure.MissingParent}'.");
+            _logger.LogWarning(
+                "Custom profile {ProfileName} in bundle {BundleName} remains quarantined because parent {MissingParent} is unavailable",
+                failure.ProfileName,
+                failure.BundleName,
+                failure.MissingParent);
         }
 
-        _state.MarkReady(fingerprint);
         _logger.LogInformation(
-            "Custom profile overlay and caches synchronized at {Fingerprint}",
-            fingerprint);
+            "Custom profile overlay and caches synchronized at {Fingerprint}; {FailureCount} invalid custom profiles remain quarantined",
+            fingerprint,
+            reload.Failures.Count);
     }
 }
