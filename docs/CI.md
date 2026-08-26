@@ -93,18 +93,20 @@ classify.
 | --- | :---: | :---: | --- | --- | :---: |
 | `frontend`: `src/Web/**` | ✓ | | | | |
 | `api`: `src/api/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests` | `AppPg`, `AppSqlServer` | |
-| `infra`: `src/infra/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.SmartPlug.Tests` | `AppPg`, `AppSqlServer` | |
+| `infra`: `src/infra/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.SmartPlug.Tests`, `Farm.Modules.PrintQueue.Tests` | `AppPg`, `AppSqlServer` | |
 | `backend_core`: `src/backends/Farm.Backend.Plugin.Core/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests` | | |
-| `backend_plugin`: every other `src/backends/**` path (concrete plugin projects) | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests` | | |
-| `slicer`: `src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests` | `SlicerPg`, `SlicerSqlServer` | |
+| `backend_plugin`: every other `src/backends/**` path (concrete plugin projects) | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.PrintQueue.Tests` | | |
+| `slicer`: `src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.PrintQueue.Tests` | `SlicerPg`, `SlicerSqlServer` | |
 | `orca_worker`: `src/orcaslicer-worker/**` | | ✓ | `Farm.OrcaSlicer.Worker.Tests` | | |
 | `smartplug`: `src/modules/Farm.Modules.SmartPlug/**` | | ✓ | `Farm.Modules.SmartPlug.Tests`, `Farm.Web.Api.Tests` | | |
+| `printqueue`: `src/modules/Farm.Modules.PrintQueue/**` | | ✓ | `Farm.Modules.PrintQueue.Tests`, `Farm.Web.Api.Tests` | | |
 | `migrations_app`: `src/migrations/Farm.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests` | `AppPg`, `AppSqlServer` | |
 | `migrations_slcr`: `src/migrations/Farm.Slicer.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests` | `SlicerPg`, `SlicerSqlServer` | |
 | `tests_api`: `src/tests/Farm.Web.Api.Tests/**` | | ✓ | `Farm.Web.Api.Tests` | | |
 | `tests_slicer`: `src/tests/Farm.Slicer.Module.Tests/**` | | ✓ | `Farm.Slicer.Module.Tests` | | |
 | `tests_orca`: `src/tests/Farm.OrcaSlicer.Worker.Tests/**` | | ✓ | `Farm.OrcaSlicer.Worker.Tests` | | |
 | `tests_smartplug`: `src/tests/Farm.Modules.SmartPlug.Tests/**` | | ✓ | `Farm.Modules.SmartPlug.Tests` | | |
+| `tests_printqueue`: `src/tests/Farm.Modules.PrintQueue.Tests/**` | | ✓ | `Farm.Modules.PrintQueue.Tests` | | |
 | `tests_integration`: `src/tests/Farm.Web.IntegrationTests/**` | | ✓ | `Farm.Web.IntegrationTests` | | |
 | `tests_other`: every other `src/tests/**` path | ✓ | ✓ | all | all | ✓ |
 | `discovery`: `src/discovery/**`, `src/printer-discovery/**` | ✓ | ✓ | all | all | ✓ |
@@ -134,6 +136,19 @@ moved into `Farm.Modules.SmartPlug`, but its own coverage
 `Farm.Modules.*` phase (9-18) that owns a controller must add its API-tests
 project the same way; a phase that moves only services (no controller) can
 stay as narrow as `orca_worker`.
+
+`printqueue` (issue #2040, Phase 12) follows the same controller-owning
+pattern as `smartplug`: `PrintJobManagementService` and its 8 dependent
+controllers (including `SlicePrintBridgeController`) moved into
+`Farm.Modules.PrintQueue`, but the `Dispatch/` `CustomWebApplicationFactory`
+integration suite and `RouteTableSnapshotTests` intentionally stayed behind
+in `Farm.Web.Api.Tests`, so `printqueue` also selects it. Unlike
+`smartplug`, `Farm.Modules.PrintQueue` also references `Farm.Slicer.Module`
+directly (`SlicePrintBridgeController` consumes `IArtifactsService`/
+`ISliceJobRepository`) and its test project references
+`Farm.Backend.Plugin.OctoPrint` directly (`PrintJobManagementService`
+`History`-seeding tests), so the `slicer` and `backend_plugin` rows above
+also list `Farm.Modules.PrintQueue.Tests` as a dependent.
 
 ### Full-safe (`full_matrix=1`) triggers
 
