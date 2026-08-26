@@ -13,6 +13,9 @@ using Farm.Slicer.Module.Services.Configuration;
 using Farm.Web.Api.Services.Calibration;
 using Farm.Web.Api.Services.Gcode;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Capabilities;
 
