@@ -280,6 +280,7 @@ case_infra_change() {
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   assert_contains "matrix orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  assert_contains "matrix smartplug" "$matrix" "Farm.Modules.SmartPlug.Tests" || return 1
   assert_app_migration_drift "$out" || return 1
 }
 
@@ -472,6 +473,47 @@ case_orca_worker_change() {
   assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
   local reason ; reason="$(get_output "$out" reason)"
   assert_contains "reason orca" "$reason" "orcaslicer-worker" || return 1
+}
+
+case_smartplug_change() {
+  local out="$1"
+  CHANGED_FILES="src/modules/Farm.Modules.SmartPlug/Services/SmartPlug/KasaSmartPlugProvider.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix smartplug" "$matrix" "Farm.Modules.SmartPlug.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason smartplug" "$reason" "smartplug" || return 1
+}
+
+case_test_only_smartplug() {
+  local out="$1"
+  CHANGED_FILES="src/tests/Farm.Modules.SmartPlug.Tests/Services/SmartPlug/KasaSmartPlugProviderTests.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix smartplug" "$matrix" "Farm.Modules.SmartPlug.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+}
+
+case_smartplug_mixed_with_unrelated_backend() {
+  local out="$1"
+  CHANGED_FILES=$'src/modules/Farm.Modules.SmartPlug/Services/PowerMonitor/PowerMonitorPollingService.cs\nsrc/backends/Farm.Backends.SomePlugin/SomeFile.cs'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix smartplug" "$matrix" "Farm.Modules.SmartPlug.Tests" || return 1
 }
 
 case_migration_app_change() {
@@ -2524,6 +2566,9 @@ TESTS=(
   case_selector_backend_core_pattern_precedes_plugin
   case_slicer_change
   case_orca_worker_change
+  case_smartplug_change
+  case_test_only_smartplug
+  case_smartplug_mixed_with_unrelated_backend
   case_migration_app_change
   case_migration_slicer_change
   case_test_only_api
