@@ -987,6 +987,7 @@ public sealed class DatabaseMigrationTests
                 "20260821151926_AddSliceJobFailureReason",
                 "20260822141629_AddWorkerDisableSource",
                 "20260824023212_AddSliceJobCalibrationFields",
+                "20260826021028_AddCustomProfileFamilyRenderingState",
             ]
             :
             [
@@ -998,6 +999,7 @@ public sealed class DatabaseMigrationTests
                 "20260821151939_AddSliceJobFailureReason",
                 "20260822141635_AddWorkerDisableSource",
                 "20260824023226_AddSliceJobCalibrationFields",
+                "20260826021040_AddCustomProfileFamilyRenderingState",
             ];
         _ = slicerMigrations.Should().Equal(expectedSlicerMigrations,
             $"the {provider} slicer migration set must apply in the exact recorded order");

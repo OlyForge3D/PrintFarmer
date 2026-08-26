@@ -143,3 +143,7 @@ Reconciled both profile lookup gates with Ripley's landed consumer: coded 404 bo
 ## 2026-08-25 — Worker custom-inheritance 422 preservation
 
 Reconciled Parker's final custom-bundle mutation behavior: HTTP 422 `failures[]` is parsed by `ProfileFamilyWorkerClient`, preserving bundle/family/profile/missing-parent details in `ProfileFamilySourceException`. This keeps failed render state while allowing the clone-family controller to return `source_preset_unavailable` 422 rather than generic worker-unavailable 503. Added adapter and endpoint contract coverage; focused tests pass 3/3 and scoped formatting passes.
+
+## 2026-08-25 — Final profile-family migration regression verification
+
+Confirmed Parker's 1,352-test SQLite cascade came from the transient enum-default mapping and no longer reproduces: explicit string conversion plus SQL string default passes the exact provider-aware SQLite migration test. Full suite now passes Slicer.Module 1,178/1,178 and exposes only six documented missing-server-environment tests plus two stale expected migration lists; added the PostgreSQL/SQL Server IDs and their focused contract passes 2/2. All three provider snapshots are clean, and custom family/variant hashes remain deterministic and non-null for SQL Server's unfiltered unique index.
