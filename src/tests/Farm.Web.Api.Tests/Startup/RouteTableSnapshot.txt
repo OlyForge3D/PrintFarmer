@@ -309,7 +309,7 @@ GET /api/predictions/stats/by-material -> Farm.Web.Api::Farm.Web.Api.Controllers
 GET /api/predictions/stats/model/{modelId:guid} -> Farm.Web.Api::Farm.Web.Api.Controllers.PredictionController.GetModelStatsAsync
 GET /api/predictive-analytics/active-alerts -> Farm.Web.Api::Farm.Web.Api.Controllers.PredictiveAnalyticsController.GetActiveAlertsAsync
 GET /api/predictive-analytics/maintenance-forecast -> Farm.Web.Api::Farm.Web.Api.Controllers.PredictiveAnalyticsController.GetMaintenanceForecastAsync
-GET /api/print-approvals -> Farm.Web.Api::Farm.Web.Api.Controllers.PrintApprovalsController.GetPendingAsync
+GET /api/print-approvals -> Farm.Modules.PrintQueue::Farm.Web.Api.Controllers.PrintApprovalsController.GetPendingAsync
 GET /api/printer-groups -> Farm.Web.Api::Farm.Web.Api.Controllers.PrinterGroupsController.ListGroupsAsync
 GET /api/printer-groups/{id:guid} -> Farm.Web.Api::Farm.Web.Api.Controllers.PrinterGroupsController.GetGroupAsync
 GET /api/printer-groups/{id:guid}/access -> Farm.Web.Api::Farm.Web.Api.Controllers.PrinterGroupsController.GetAccessRulesAsync
@@ -382,7 +382,7 @@ GET /api/setup/config-options -> Farm.Web.Api::Farm.Web.Api.Controllers.SetupCon
 GET /api/setup/status -> Farm.Web.Api::Farm.Web.Api.Controllers.SetupController.GetSetupStatusAsync
 GET /api/signalr-test/connection-stats -> Farm.Web.Api::Farm.Web.Api.Controllers.SignalRTestController.GetConnectionStats
 GET /api/slice -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.SliceJobController.ListAsync
-GET /api/slice-cost/per-gram -> Farm.Web.Api::Farm.Web.Api.Controllers.SliceCostController.GetCostPerGramAsync
+GET /api/slice-cost/per-gram -> Farm.Modules.PrintQueue::Farm.Web.Api.Controllers.SliceCostController.GetCostPerGramAsync
 GET /api/slice/circuit-breakers -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.SliceJobController.GetCircuitBreakerStates
 GET /api/slice/my-jobs -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.SliceJobController.GetMyJobsAsync
 GET /api/slice/{id} -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.SliceJobController.GetAsync
@@ -646,8 +646,8 @@ POST /api/parts-inventory/mappings -> Farm.Web.Api::Farm.Web.Api.Controllers.Par
 POST /api/parts-inventory/{sku:minlength(1):maxlength(64)}/adjust -> Farm.Web.Api::Farm.Web.Api.Controllers.PartsInventoryController.AdjustAsync
 POST /api/predictions/jobs/{jobId:guid}/record-completion -> Farm.Web.Api::Farm.Web.Api.Controllers.PredictionController.RecordCompletionAsync
 POST /api/predictive-analytics/predict-job-failure -> Farm.Web.Api::Farm.Web.Api.Controllers.PredictiveAnalyticsController.PredictJobFailureAsync
-POST /api/print-approvals/{id:guid}/approve -> Farm.Web.Api::Farm.Web.Api.Controllers.PrintApprovalsController.ApproveAsync
-POST /api/print-approvals/{id:guid}/reject -> Farm.Web.Api::Farm.Web.Api.Controllers.PrintApprovalsController.RejectAsync
+POST /api/print-approvals/{id:guid}/approve -> Farm.Modules.PrintQueue::Farm.Web.Api.Controllers.PrintApprovalsController.ApproveAsync
+POST /api/print-approvals/{id:guid}/reject -> Farm.Modules.PrintQueue::Farm.Web.Api.Controllers.PrintApprovalsController.RejectAsync
 POST /api/printer-groups -> Farm.Web.Api::Farm.Web.Api.Controllers.PrinterGroupsController.CreateGroupAsync
 POST /api/printers -> Farm.Web.Api::Farm.Web.Api.Controllers.PrintersController.CreateAsync
 POST /api/printers/apply-templates -> Farm.Web.Api::Farm.Web.Api.Controllers.PrintersController.ApplyModelTemplatesToAllAsync

@@ -25,7 +25,7 @@ namespace Farm.Web.Api.Controllers;
 /// or adding them to the print queue.
 /// </summary>
 /// <remarks>
-/// This controller lives in the API project (not the slicer module) because it needs
+/// This controller lives in Farm.Modules.PrintQueue (not the slicer module) because it needs
 /// access to both <see cref="IArtifactsService"/> from the slicer module and
 /// infrastructure services such as <see cref="IPrintersService"/> and
 /// <see cref="IJobQueueService"/>.

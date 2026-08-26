@@ -30,6 +30,7 @@ COPY src/infra/*.csproj ./infra/
 COPY src/import/*.csproj ./import/
 COPY src/modules/Farm.Modules.Abstractions/*.csproj ./modules/Farm.Modules.Abstractions/
 COPY src/modules/Farm.Modules.SmartPlug/*.csproj ./modules/Farm.Modules.SmartPlug/
+COPY src/modules/Farm.Modules.PrintQueue/*.csproj ./modules/Farm.Modules.PrintQueue/
 COPY src/api/*.csproj ./api/
 COPY Directory.Build.props ./
 COPY global.json ./
