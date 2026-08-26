@@ -761,7 +761,6 @@ main() {
   # Any .NET-relevant bucket forces a full solution build to preserve compile
   # coverage across the whole graph.
   if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
-  if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
         has_orca || has_smartplug || has_printqueue || has_calibration ||
         has_mig_app || has_mig_slcr ||
         has_tests_api || has_tests_slicer || has_tests_orca ||
