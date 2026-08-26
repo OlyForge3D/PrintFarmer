@@ -3,7 +3,6 @@ name: yamllint (enforce)
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [ main ]
 
 permissions:
   contents: read
@@ -26,10 +25,10 @@ jobs:
       - name: Run yamllint
         id: lint
         run: |
-          python -m yamllint .github/workflows/*.yml > yamllint.out 2>&1 || true
-          rc=$?
-          cat yamllint.out || true
-          echo "lint_exit=${rc}" >> $GITHUB_OUTPUT
+          rc=0
+          python -m yamllint .github/workflows/*.yml > yamllint.out 2>&1 || rc=$?
+          cat yamllint.out
+          printf 'lint_exit=%s\n' "$rc" >> "$GITHUB_OUTPUT"
 
       - name: Upload yamllint output
         uses: actions/upload-artifact@v7

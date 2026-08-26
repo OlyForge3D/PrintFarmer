@@ -253,14 +253,14 @@ jobs:
               }
             });
             console.log('Workflow dispatched - waiting for it to complete...');
-            
+
             // Wait and poll for completion (max 10 minutes)
             const maxWait = 10 * 60 * 1000;
             const startTime = Date.now();
-            
+
             while (Date.now() - startTime < maxWait) {
               await new Promise(r => setTimeout(r, 30000)); // Wait 30s
-              
+
               // Pull and attest the candidate without executing its entrypoint or shell.
               const { execFileSync } = require('child_process');
               try {
@@ -284,7 +284,7 @@ jobs:
                 console.log('Base image is unavailable or its attestation is stale; still waiting...');
               }
             }
-            
+
             core.setFailed('Timed out waiting for base image');
 
       - name: Verify OrcaSlicer base image metadata
@@ -385,7 +385,7 @@ jobs:
       - name: Create optimized Dockerfile
         run: |
           mkdir -p .github/dockerfiles
-          
+
           case "${{ matrix.image }}" in
             api)
               cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'EOF'
@@ -415,7 +415,7 @@ jobs:
           ENTRYPOINT ["dotnet", "Farm.Web.Api.dll"]
           EOF
               ;;
-            
+
             frontend)
               cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'EOF'
           FROM nginx:alpine
@@ -439,7 +439,7 @@ jobs:
           CMD ["nginx", "-g", "daemon off;"]
           EOF
               ;;
-            
+
             printer-discovery)
               cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'EOF'
           FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble
@@ -462,7 +462,7 @@ jobs:
           ENTRYPOINT ["dotnet", "PrinterDiscoveryService.dll"]
           EOF
               ;;
-            
+
             orcaslicer-worker)
               cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'DOCKERFILE'
           # Use OrcaSlicer base image with pre-extracted binaries
@@ -494,7 +494,7 @@ jobs:
               cp /opt/orcaslicer/orcaslicer.sha256 /etc/printfarmer/orcaslicer.sha256; \
               chmod 0644 /etc/printfarmer/orcaslicer.version /etc/printfarmer/orcaslicer.sha256; \
               ln -sf /opt/orcaslicer/AppRun /usr/local/bin/orcaslicer
-          
+
           # Install .NET runtime
           RUN apt-get update && apt-get install -y --no-install-recommends \
                   wget ca-certificates \
@@ -506,19 +506,19 @@ jobs:
               && apt-get remove -y wget \
               && apt-get autoremove -y \
               && rm -rf /var/lib/apt/lists/*
-          
+
           WORKDIR /app
           COPY artifact/ ./
           COPY LICENSE /usr/share/licenses/printfarmer/LICENSE
           COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
-          
+
           ENV ASPNETCORE_URLS=http://+:8080
           ENV Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
           ENV Worker__OrcaSlicerAttestationPath=/etc/printfarmer/orcaslicer.sha256
           ENV Worker__EngineVersion=${{ env.ORCA_VERSION }}
           ENV SlicerRegistry__Version=${{ env.ORCA_VERSION }}
           EXPOSE 8080
-          
+
           ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
           DOCKERFILE
               ;;
