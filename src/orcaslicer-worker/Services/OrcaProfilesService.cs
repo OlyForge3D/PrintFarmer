@@ -695,6 +695,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             return typeof(T).Name switch
             {
                 nameof(MachineProfileDto) => ParseMachineProfile(resolvedProfile, filePath) as T,
+                nameof(MachineModelProfileDto) => ParseMachineModelProfile(resolvedProfile) as T,
                 nameof(FilamentProfileDto) => ParseFilamentProfile(resolvedProfile) as T,
                 nameof(ProcessProfileDto) => ParseProcessProfile(resolvedProfile) as T,
                 _ => null
@@ -1528,6 +1529,43 @@ public class OrcaProfilesService : ISlicerProfilesService
         {
             profile.BuildVolumeZ = ParseDoubleValue(maxHeightElem);
         }
+    }
+
+    private static MachineModelProfileDto? ParseMachineModelProfile(JsonElement root)
+    {
+        MachineModelProfileDto profile = new MachineModelProfileDto();
+
+        if (root.TryGetProperty("name", out JsonElement nameElem))
+        {
+            profile.Name = nameElem.GetString() ?? string.Empty;
+        }
+
+        if (root.TryGetProperty("manufacturer", out JsonElement mfgElem))
+        {
+            profile.Manufacturer = mfgElem.GetString() ?? string.Empty;
+        }
+
+        if (root.TryGetProperty("description", out JsonElement descElem))
+        {
+            profile.Description = descElem.GetString();
+        }
+
+        if (root.TryGetProperty("instantiation", out JsonElement instElem))
+        {
+            profile.Instantiation = instElem.ValueKind == JsonValueKind.True
+                || (instElem.ValueKind == JsonValueKind.String
+                    && string.Equals(instElem.GetString(), "true", StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (root.TryGetProperty("inherits", out JsonElement inheritsElem))
+        {
+            profile.Inherits = inheritsElem.GetString();
+        }
+
+        // Store all fields for downstream consumers (e.g. ProfileFamilyRenderer.BuildMachineModelDocument).
+        profile.Settings = SerializeElementToDict(root);
+
+        return profile;
     }
 
     private FilamentProfileDto? ParseFilamentProfile(JsonElement root)

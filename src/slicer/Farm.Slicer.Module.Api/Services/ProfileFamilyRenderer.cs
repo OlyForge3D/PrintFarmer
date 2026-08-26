@@ -371,6 +371,23 @@ public sealed class ProfileFamilyRenderer : IProfileFamilyRenderer
         IReadOnlyList<double> selectedNozzles)
     {
         SortedDictionary<string, JsonElement> document = CopySettings(source.Settings);
+
+        // Defense-in-depth: strip lifecycle keys that this method overrides or
+        // that must not leak from the source. In particular, if a source
+        // machine_model ever declares `"instantiation": true` (boolean), the
+        // worker parser's SerializeElementToDict stores it as the string "1"
+        // (its canonical serialization for JsonValueKind.True), but the
+        // worker's LoadProfileFromFile only accepts boolean `true` or the
+        // string "true" as instantiatable — so the cloned bundle would silently
+        // drop on reload and reproduce the exact symptom of #2073. No real
+        // machine_model file today declares this field, but future bundle
+        // updates could, and closing the loop at the renderer boundary is
+        // cheaper than replaying it later.
+        foreach (string key in IdentityKeys)
+        {
+            _ = document.Remove(key);
+        }
+
         Set(document, "type", "machine_model");
         Set(document, "name", familyName);
         Set(document, "model_id", $"PrintFarmer_{familyId:N}");
