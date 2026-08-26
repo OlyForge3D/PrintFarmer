@@ -42,3 +42,30 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 - Mocking pattern for React-Query queries in JSDOM: `mockResolvedValue({ data: dto })` on `apiClient.get` works, but you MUST `waitFor` on the loading marker disappearing before asserting downstream DOM — otherwise the assertion runs in the loading state and fails. Pattern: `await waitFor(() => expect(screen.queryByLabelText('Loading X')).not.toBeInTheDocument())`.
 - Section-level search filter in `search-utils.ts` matches on `description` too — if you search a word that appears in the section description, ALL properties in that section stay visible even if they don't match. Landed me on `retention` matching everything. Use property-specific terms (`days`, not `retention`).
 - `getByLabelText` returns multiple hits when a checkbox has both `<label htmlFor>` and `aria-label` mapping to the same accessible name; if a duplicate `id` also exists (see above), it degrades further. Prefer `document.querySelector('[data-setting-property="Section.Property"] input')` for cross-section disambiguation.
+
+## 2026-08-25: Machine Profile Family Cloning — Authoritative Validation
+
+**HEAD:** `e377ad513`  
+**Verdict:** **READY FOR REVIEW**
+
+- Performed clean rebuild, then ran each requested backend/frontend build, test, format, and lint command exactly once.
+- Results: Slicer.Module 1,178/1,178; Orca worker 372/372; Web.Api 6,585/6,591; ProfileParsing 45/45; Moonraker 227/227; React 5,135/5,135.
+- Independently classified all six Web.Api failures as the documented unprovisioned PostgreSQL/SQL Server environment-variable category. No other failures and no enum-base `ArgumentException` regression.
+- PostgreSQL, SQL Server, and SQLite slicer migration-drift checks all passed; all three provider migration/designer/snapshot sets exist.
+- Solution format remains red only from 35 errors in 20 untouched files (19 charset, 16 whitespace); zero diagnostics intersect this seven-commit change set. Lint passes with one untouched pre-existing warning.
+- Confirmed strong required assertions for per-nozzle 0.45 fidelity, condition-array plus cleared condition, discovery and execution compatibility gates, loud missing-source failure, and non-null/different 64-character custom-family hashes.
+- Full report: `.squad/decisions/inbox/kane-validation.md`.
+
+
+## 2026-08-25: Machine Profile Family Cloning — Final Consolidated Validation
+
+**Requested HEAD:** `3ab66ac0e`  
+**Verdict:** **NOT READY**
+
+- Clean .NET build failed with 7 real CS0118 errors in `Farm.Slicer.Module.Tests` after the new worker project reference caused `Worker` namespace/type collisions; the entire Slicer.Module suite did not execute.
+- Five unique CA1862 warnings were introduced in `PrinterModelAliasService.cs` by `7336ca585`.
+- Executed .NET totals: 7,242 passed; six Web.Api failures independently verified as documented missing PostgreSQL/SQL Server environment variables; worker 385/385 with no hang. React build passed and tests were 5,135/5,135; lint had one untouched pre-existing warning.
+- PostgreSQL, SQL Server, and SQLite slicer migration drift checks were clean.
+- Required tests mostly exist and are strong, but malformed-worker-to-HTTP-422 coverage is split across unit tests rather than end-to-end, and the non-SQLite alias test uses EF InMemory rather than a relational provider.
+- HEAD unexpectedly advanced to `8c03b42e1` and `0aaf4d107` during the run, with additional uncommitted edits. Later format output was therefore not authoritative for the requested frozen commit.
+- Full report: `.squad/decisions/inbox/kane-validation-final.md`.

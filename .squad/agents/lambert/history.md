@@ -170,3 +170,47 @@ Hardened the internal slicer-host authentication seam to reject duplicate `X-Sli
 ## 2026-08-25 — Profile-family cancellation and crash retry recovery
 
 Closed Bishop B1-R: post-persistence cancellation now marks the family Failed using an uncancelled persistence token before propagating, and both Failed and crash-left Pending families retry in place. Added relational cancellation/Pending recovery tests (focused class 6/6), renamed an EF InMemory alias test to stop claiming SQL-provider portability, and verified its behavior 1/1. Targeted build and scoped format pass; no full-suite rerun.
+
+## 2026-08-26 — Portable indexed printer-model alias lookup
+
+Committed `7be1270b9ead6e17c4a256c6e721e38015e027a3` on `dev/jpapiez/machine-profile-family-cloning`.
+
+- Replaced provider-sensitive/non-sargable column-side `ToUpper()` alias comparisons with persisted normalized fields and `IX_PrinterModelAliases_NormalizedLookup`.
+- Added PostgreSQL, SQL Server, and SQLite AppDbContext migrations with provider-specific legacy-row backfills.
+- Replaced the misleading EF InMemory provider test with real relational SQLite execution; added all-provider `ToQueryString()` assertions proving the production query uses normalized columns and no `UPPER()`.
+- Added SQLite predecessor-to-latest migration coverage for normalized legacy aliases and updated exact migration-order contracts.
+- Fresh builds: `Farm.Slicer.Module.Tests` and `Farm.Web.Api.Tests` both succeeded with `0 Error(s)`; no CA1862 warnings from changed code.
+- Focused tests: 9/9 passed (1 relational service + 8 SQL translation/migration cases).
+- EF `has-pending-model-changes`: PostgreSQL, SQL Server, SQLite all reported no changes.
+- Scoped `dotnet format --verify-no-changes` passed.
+
+## 2026-08-26 — Restored real worker-backed family acceptance
+
+Restored the exact real-worker `ProfileFamilyHttpAcceptanceTests` path from `3c9004852`, re-added the `OrcaWorker`-aliased worker project reference, and added `global using Worker = Farm.Slicer.Module.Domain.Worker;` so all seven domain-model usages compile without losing worker integration coverage.
+
+BR-1 was already fixed in parent `95fa464bb0d82e926c0edfba672f8eb5e5a1b7dc`: all post-persistence exceptions, including `TaskCanceledException`, mark the family Failed using `CancellationToken.None`; Pending and Failed are retryable; cancellation and Pending crash-recovery tests exist.
+
+Validation: clean `Farm.Slicer.Module.Tests` build succeeded with 0 errors and no CS0118; no changed-file warnings; real worker-backed HTTP acceptance plus all `ProfileFamilyServiceTests` passed 7/7; scoped format and diff checks passed.
+
+## 2026-08-26 — Final warning-visible candidate
+
+Candidate `f6cdb4cc57a8738b4f06a778506a3ba8c3120724` isolates the transitive `Farm.Slicer.Worker.Core` project reference under a non-global alias while retaining the real `OrcaWorker` acceptance reference. One helper return type remains explicitly qualified because nested `Farm.Slicer.*` namespace lookup outranks the global using alias in that position.
+
+Authoritative serial validation on the exact staged content:
+- `dotnet build ./farm-web.sln -c Debug --no-incremental`: Build succeeded; 46 warnings; 0 errors. Captured log contained no CA1862, CS0118, errors, or changed-file warnings.
+- Alias/profile-family module tests: 17/17 passed.
+- MainApi adapter authentication tests: 4/4 passed.
+- All-provider alias SQL translation + internal lookup auth tests: 7/7 passed.
+- Scoped format verification passed.
+
+BR-1 confirmed: `ProfileFamilyService` catches cancellation after persistence, marks Failed with `CancellationToken.None`, and retries both Pending/Failed rows; TaskCanceled and Pending recovery tests ran within the passing profile-family suite. MainApi auth confirmed: both catalog and printer adapters use the authenticated named client; 401/403 propagate as `HttpRequestException` with distinguishable status rather than collapsing to empty/unknown results.
+
+## 2026-08-26 — Explicit Worker collision fix
+
+Final candidate `7463568ba75c243bc97a450e714ee42691887ebd` removes the empirically ineffective global Worker alias and explicitly qualifies all seven `Farm.Slicer.Module.Domain.Worker` signature sites. Parent `f6cdb4cc57a8738b4f06a778506a3ba8c3120724` retains real Orca worker acceptance and aliases the transitive Worker.Core assembly non-globally.
+
+Validation on the exact final content:
+- `dotnet build ./farm-web.sln -c Debug --no-incremental`: Build succeeded; 46 warnings; 0 errors.
+- Captured build contained no CA1862, CS0118, errors, PrinterModelAliasService warnings, or changed-file warnings.
+- Affected worker-domain + real profile-family acceptance/retry tests: 63/63 passed.
+- Scoped format verification and diff checks passed.
