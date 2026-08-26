@@ -11,6 +11,7 @@ import { slicerService, type SlicerEngineInfo } from '@/services/slicerService';
 import { 
   slicerProfilesService,
   type CustomProfile,
+  type CloneProfileFamilyResponse,
   type OrcaMachineProfile,
   type OrcaFilamentProfile,
   type OrcaProcessProfile
@@ -24,6 +25,7 @@ import { createSlicerRegistryConnection } from '@/services/slicerRegistryHubConn
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import { ProcessProfileEditorModal } from '@/features/slicer/components/ProcessProfileEditorModal';
 import { MachineProfileSelectorModal, type MachineProfileChoice } from '@/features/slicer/components/job/MachineProfileSelectorModal';
+import { CreateProfileFamilyModal } from '@/features/slicer/components/profile-family/CreateProfileFamilyModal';
 import { buildMachineProfileLabels, isProcessProfileCoreOneVariantCompatible, resolveHighFlow } from '@/features/slicer/utils/machineProfileLabels';
 import { buildSlicerProfileJson } from '@/features/slicer/utils/slicerProfilePayload';
 import {
@@ -393,6 +395,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [selectedPrinterModel, setSelectedPrinterModel] = useState<string>('');
   const [selectedMachineProfileId, setSelectedMachineProfileId] = useState<string>('');
   const [isMachinePickerOpen, setIsMachinePickerOpen] = useState(false);
+  const [isCreateProfileFamilyOpen, setIsCreateProfileFamilyOpen] = useState(false);
   const [selectedNozzleFilter, setSelectedNozzleFilter] = useState<string>('');
   const [selectedFilamentProfileId, setSelectedFilamentProfileId] = useState<string>('');
 
@@ -1193,6 +1196,23 @@ export const NewSliceJobPage: React.FC = () => {
       setSelectedNozzleFilter(formatNozzleDiameter(chosen.nozzleDiameter));
     }
   }, [machineProfileChoices]);
+
+  const handleProfileFamilyCreated = useCallback((response: CloneProfileFamilyResponse) => {
+    const variants = response.machineProfiles;
+    if (variants.length === 0) {
+      setIsCreateProfileFamilyOpen(false);
+      return;
+    }
+
+    const preferredNozzle = selectedPrinterForSlicing?.nozzleDiameter;
+    const preferred = variants.find((variant) => preferredNozzle !== undefined && Math.abs(variant.nozzleDiameter - preferredNozzle) <= NOZZLE_MATCH_TOLERANCE)
+      ?? variants.find((variant) => Math.abs(variant.nozzleDiameter - 0.4) <= NOZZLE_MATCH_TOLERANCE)
+      ?? variants[0];
+
+    setSelectedMachineProfileId(preferred.name);
+    setSelectedNozzleFilter(formatNozzleDiameter(preferred.nozzleDiameter));
+    setIsCreateProfileFamilyOpen(false);
+  }, [selectedPrinterForSlicing?.nozzleDiameter]);
 
   // Process profiles for the selected machine (from incremental query)
   const availableProcessProfiles = useMemo(() => {
@@ -2539,16 +2559,11 @@ export const NewSliceJobPage: React.FC = () => {
                         <Button
                           type="button"
                           variant="primary"
-                          disabled
-                          explainedDisabled
-                          aria-describedby="create-profile-family-help"
-                          title="Create profile family is coming soon"
+                          onClick={() => setIsCreateProfileFamilyOpen(true)}
+                          aria-label={`Create profile family for ${selectedPrinterModel}`}
                         >
                           Create profile family
                         </Button>
-                        <span id="create-profile-family-help" className="text-xs text-pf-text-secondary">
-                          Coming soon
-                        </span>
                       </div>
                     )}
                   </Card.Body>
@@ -2572,6 +2587,18 @@ export const NewSliceJobPage: React.FC = () => {
             onClose={() => setIsMachinePickerOpen(false)}
             printerLabel={selectedPrinterForSlicing?.modelName}
           />
+
+          {selectedPrinterModelId && selectedPrinterModel && (
+            <CreateProfileFamilyModal
+              isOpen={isCreateProfileFamilyOpen}
+              onClose={() => setIsCreateProfileFamilyOpen(false)}
+              targetPrinterModelId={selectedPrinterModelId}
+              targetPrinterModelName={selectedPrinterModel}
+              defaultNozzleDiameter={selectedPrinterForSlicing?.nozzleDiameter}
+              slicerEngineVersion={selectedEngineVersion ?? latestAvailableForEngine}
+              onSuccess={handleProfileFamilyCreated}
+            />
+          )}
 
           {/* FILAMENT PROFILE - cascading dropdown with manufacturer groups */}
           {/* Multi-toolhead: show per-extruder filament selectors */}
