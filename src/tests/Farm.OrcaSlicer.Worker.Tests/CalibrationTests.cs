@@ -47,6 +47,9 @@ public class CalibrationTests : IDisposable
     [InlineData("flow_rate_pass_2", CalibrationMethod.FlowRatePass2)]
     [InlineData("temperature_tower", CalibrationMethod.TemperatureTower)]
     [InlineData("FLOW_RATE_PASS_1", CalibrationMethod.FlowRatePass1)]
+    [InlineData("flow_rate_yolo_recommended", CalibrationMethod.FlowRateYoloRecommended)]
+    [InlineData("flow_rate_yolo_perfectionist", CalibrationMethod.FlowRateYoloPerfectionist)]
+    [InlineData("FLOW_RATE_YOLO_RECOMMENDED", CalibrationMethod.FlowRateYoloRecommended)]
     public void TryParse_SupportedWireName_ReturnsExpectedMethod(string wireName, CalibrationMethod expected)
     {
         bool parsed = CalibrationMethods.TryParse(wireName, out CalibrationMethod method);
@@ -59,13 +62,16 @@ public class CalibrationTests : IDisposable
     [InlineData("pa_pattern")]
     [InlineData("pa_line")]
     [InlineData("not_a_real_method")]
+    [InlineData("max_volumetric_speed")]
+    [InlineData("retraction")]
     [InlineData("")]
     [InlineData(null)]
     public void TryParse_UnsupportedOrMissingWireName_ReturnsFalse(string? wireName)
     {
         // PA Pattern (GPL-3.0 provenance) and PA Line (Bambu-specific) are deliberately not
-        // supported yet, and must fail clearly rather than silently degrading into a generic
-        // slice failure.
+        // supported yet, and max_volumetric_speed/retraction are simply not yet built (issue
+        // #2051 investigation) — all must fail clearly rather than silently degrading into a
+        // generic slice failure.
         bool parsed = CalibrationMethods.TryParse(wireName, out _);
 
         parsed.Should().BeFalse();
@@ -79,6 +85,22 @@ public class CalibrationTests : IDisposable
             CalibrationMethods.TryParse(wireName, out CalibrationMethod method).Should().BeTrue();
             CalibrationMethods.ToWireName(method).Should().Be(wireName);
         }
+    }
+
+    [Theory]
+    [InlineData(CalibrationMethod.FlowRateYoloRecommended, "Orca-LinearFlow.3mf")]
+    [InlineData(CalibrationMethod.FlowRateYoloPerfectionist, "Orca-LinearFlow_fine.3mf")]
+    public void DefaultModelFileName_YoloMethods_ReturnsExpectedFileName(CalibrationMethod method, string expected)
+    {
+        CalibrationMethods.DefaultModelFileName(method).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(CalibrationMethod.FlowRateYoloRecommended, "Orca-LinearFlow.3mf")]
+    [InlineData(CalibrationMethod.FlowRateYoloPerfectionist, "Orca-LinearFlow_fine.3mf")]
+    public void RelativeResourcePath_YoloMethods_ResolvesUnderFilamentFlowDirectory(CalibrationMethod method, string expectedFileName)
+    {
+        CalibrationMethods.RelativeResourcePath(method).Should().Be(Path.Combine("filament_flow", expectedFileName));
     }
 
     #endregion
@@ -423,6 +445,36 @@ public class CalibrationTests : IDisposable
 
         File.Exists(preparedPath).Should().BeTrue();
         File.ReadAllText(preparedPath).Should().Be("fake-tower-resource");
+    }
+
+    [Theory]
+    [InlineData(CalibrationMethod.FlowRateYoloRecommended, "Orca-LinearFlow.3mf")]
+    [InlineData(CalibrationMethod.FlowRateYoloPerfectionist, "Orca-LinearFlow_fine.3mf")]
+    public void PrepareCalibrationModel_YoloMethod_ThrowsBecauseDeltaOverridesAreNotYetSupported(
+        CalibrationMethod method,
+        string resourceFileName)
+    {
+        // The YOLO resources' per-object names encode baseline-relative deltas
+        // (e.g. "flowrate_0.01"), not the absolute percentages FlowRateCalibrationConfigurator
+        // parses for pass1/pass2. The worker must fail loudly here instead of silently copying
+        // the resource unmodified (which would slice an uncalibrated result) or misapplying the
+        // pass1/2 parser (see CalibrationMethod.cs remarks, issue #2051).
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-yolo-" + Guid.NewGuid().ToString("N"));
+        string resourcePath = Path.Combine(calibResourcesRoot, "filament_flow", resourceFileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(resourcePath)!);
+        CreateSynthetic3mfAt(resourcePath, [("1", "flowrate_0.01"), ("2", "flowrate_m0.01")]);
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(method),
+        };
+
+        Action act = () => pipeline.PrepareCalibrationModel(job, workDir);
+
+        act.Should().Throw<InvalidOperationException>();
     }
 
     [Fact]

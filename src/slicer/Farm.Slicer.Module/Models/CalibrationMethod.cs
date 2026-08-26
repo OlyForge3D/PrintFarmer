@@ -15,6 +15,24 @@
 /// PA Pattern (GPL-3.0 provenance concerns) and PA Line (Bambu-specific) are intentionally not
 /// supported yet; see the issue for the licensing decision they still need.
 /// </para>
+/// <para>
+/// Investigated as part of issue #2051: "max volumetric speed" and "retraction" calibration are
+/// not blocked by anything (upstream OrcaSlicer already implements both —
+/// <c>Plater::calib_max_vol_speed</c>/<c>Plater::calib_retraction</c> and their
+/// <c>CalibMode::Calib_Vol_speed_Tower</c>/<c>CalibMode::Calib_Retraction_tower</c> modes exist
+/// in <c>calib_dlg.cpp</c>); they simply have no resource resolver, configurator, or pipeline
+/// wiring in this repo yet, unlike temperature-tower and flow-rate.
+/// </para>
+/// <para>
+/// <see cref="FlowRateYoloRecommended"/>/<see cref="FlowRateYoloPerfectionist"/>'s bundled 3MF
+/// resources (<c>Orca-LinearFlow.3mf</c>/<c>Orca-LinearFlow_fine.3mf</c>) encode per-object flow
+/// ratios as baseline-relative deltas (for example <c>flowrate_0.01</c>, <c>flowrate_m0.01</c>),
+/// not the absolute percentages (<c>flowrate_95</c>) that <c>FlowRateCalibrationConfigurator</c>
+/// parses for <see cref="FlowRatePass1"/>/<see cref="FlowRatePass2"/>. Until a delta-aware
+/// configurator exists, the worker deliberately fails these two methods loudly (see
+/// <c>OrcaSlicingPipelineService.PrepareCalibrationModel</c>) rather than silently reusing the
+/// pass1/2 parser and producing near-identical, uncalibrated G-code for every block.
+/// </para>
 /// </remarks>
 public enum CalibrationMethod
 {
@@ -26,6 +44,20 @@ public enum CalibrationMethod
 
     /// <summary>Temperature tower calibration.</summary>
     TemperatureTower,
+
+    /// <summary>
+    /// Flow rate calibration using OrcaSlicer's linear-regression "YOLO (Recommended)" method
+    /// (coarse pass). See the type-level remarks for why the worker does not yet slice this
+    /// method's per-object overrides.
+    /// </summary>
+    FlowRateYoloRecommended,
+
+    /// <summary>
+    /// Flow rate calibration using OrcaSlicer's linear-regression "YOLO (Perfectionist)" method
+    /// (fine pass). See the type-level remarks for why the worker does not yet slice this
+    /// method's per-object overrides.
+    /// </summary>
+    FlowRateYoloPerfectionist,
 }
 
 /// <summary>
@@ -41,6 +73,8 @@ public static class CalibrationMethods
             ["flow_rate_pass_1"] = CalibrationMethod.FlowRatePass1,
             ["flow_rate_pass_2"] = CalibrationMethod.FlowRatePass2,
             ["temperature_tower"] = CalibrationMethod.TemperatureTower,
+            ["flow_rate_yolo_recommended"] = CalibrationMethod.FlowRateYoloRecommended,
+            ["flow_rate_yolo_perfectionist"] = CalibrationMethod.FlowRateYoloPerfectionist,
         };
 
     private static readonly Dictionary<CalibrationMethod, string> MethodToWireName =
@@ -49,6 +83,8 @@ public static class CalibrationMethods
             [CalibrationMethod.FlowRatePass1] = "flow_rate_pass_1",
             [CalibrationMethod.FlowRatePass2] = "flow_rate_pass_2",
             [CalibrationMethod.TemperatureTower] = "temperature_tower",
+            [CalibrationMethod.FlowRateYoloRecommended] = "flow_rate_yolo_recommended",
+            [CalibrationMethod.FlowRateYoloPerfectionist] = "flow_rate_yolo_perfectionist",
         };
 
     /// <summary>The wire names of every currently-supported calibration method.</summary>
@@ -89,6 +125,8 @@ public static class CalibrationMethods
         CalibrationMethod.FlowRatePass1 => "flowrate-test-pass1.3mf",
         CalibrationMethod.FlowRatePass2 => "flowrate-test-pass2.3mf",
         CalibrationMethod.TemperatureTower => "temperature_tower.drc",
+        CalibrationMethod.FlowRateYoloRecommended => "Orca-LinearFlow.3mf",
+        CalibrationMethod.FlowRateYoloPerfectionist => "Orca-LinearFlow_fine.3mf",
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 
@@ -101,6 +139,8 @@ public static class CalibrationMethods
         CalibrationMethod.FlowRatePass1 => Path.Combine("filament_flow", "flowrate-test-pass1.3mf"),
         CalibrationMethod.FlowRatePass2 => Path.Combine("filament_flow", "flowrate-test-pass2.3mf"),
         CalibrationMethod.TemperatureTower => Path.Combine("temperature_tower", "temperature_tower.drc"),
+        CalibrationMethod.FlowRateYoloRecommended => Path.Combine("filament_flow", "Orca-LinearFlow.3mf"),
+        CalibrationMethod.FlowRateYoloPerfectionist => Path.Combine("filament_flow", "Orca-LinearFlow_fine.3mf"),
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 }
