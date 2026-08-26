@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Vertical-slice module for filament calibration: calibration projects, attempts,
+    photos, orchestration saga, blob storage, capability negotiation, and profile-resolution
+    startup wiring. Registers via IApiModule (see Farm.Modules.Abstractions, issue #2035).
+    Phase 10 of the module-decomposition epic #2019 -- namespaces are intentionally unchanged
+    from their prior Farm.Web.Api location (move-first-rename-last).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Required for IServiceCollection/IMvcBuilder/IEndpointRouteBuilder/ControllerBase/HttpClient -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
+    <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
