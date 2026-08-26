@@ -465,6 +465,36 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Upload Farm.Modules.SmartPlug.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Modules.SmartPlug.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Modules.SmartPlug.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Modules.Calibration.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Modules.Calibration.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Modules.Calibration.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Upload Farm.Web.IntegrationTests build
         if: >-
           ${{
