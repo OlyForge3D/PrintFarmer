@@ -173,9 +173,11 @@ bundle and reloads again before returning, so 422 means it is not installed.
 PUT and DELETE response bodies retain all custom failure diagnostics, but their
 HTTP status is scoped to the named bundle; an unrelated broken bundle does not
 turn a successful mutation into 422. Bundle names reject all-dot values, and
-both bundle and profile paths are allowlist-validated, canonicalized, and
-containment-checked. Invalid paths, stock-bundle name collisions, and
-unconfigured distinct roots are rejected without exposing filesystem paths.
+reserve the internal `.printfarmer`, `.install-*`, and `.backup-*` namespaces
+case-insensitively. Both bundle and profile paths are allowlist-validated,
+canonicalized, and containment-checked. Invalid paths, stock-bundle name
+collisions, and unconfigured distinct roots are rejected without exposing
+filesystem paths.
 
 ### Lifecycle policy
 

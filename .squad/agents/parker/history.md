@@ -270,3 +270,12 @@ Status: Backlog item cleared. Beta trigger gated on PR stack merge.
 - Extended B3 rollback coverage to enumerate both custom storage and the
   process overlay, proving neither rejected manifest nor directory remains.
   Both focused tests pass; no full suite was run per coordinator request.
+
+### 2026-08-25: Internal bundle namespace hardening
+
+- Reserved `.printfarmer`, `.install-*`, and `.backup-*` bundle names
+  case-insensitively so API callers cannot collide with metadata, staging, or
+  backup paths that discovery/fingerprinting intentionally treats specially.
+- Added no-side-effect rejection coverage for nine all-dot/reserved/case
+  variants and live fingerprint mismatch/recovery claim coverage. Targeted
+  tests pass 10/10; targeted build and scoped format pass.

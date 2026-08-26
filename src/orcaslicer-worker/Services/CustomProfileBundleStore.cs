@@ -358,6 +358,16 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         if (string.IsNullOrWhiteSpace(bundleName)
             || bundleName.Length > 128
             || bundleName.All(character => character == '.')
+            || string.Equals(
+                bundleName,
+                ".printfarmer",
+                StringComparison.OrdinalIgnoreCase)
+            || bundleName.StartsWith(
+                ".install-",
+                StringComparison.OrdinalIgnoreCase)
+            || bundleName.StartsWith(
+                ".backup-",
+                StringComparison.OrdinalIgnoreCase)
             || !BundleNameRegex().IsMatch(bundleName))
         {
             throw new CustomProfileBundleException(
@@ -771,10 +781,10 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             string bundleName = Path.GetFileNameWithoutExtension(manifestPath);
             if (bundleName.StartsWith(
                     ".install-",
-                    StringComparison.Ordinal)
+                    StringComparison.OrdinalIgnoreCase)
                 || bundleName.StartsWith(
                     ".backup-",
-                    StringComparison.Ordinal))
+                    StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -804,13 +814,13 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             if (string.Equals(
                     bundleName,
                     ".printfarmer",
-                    StringComparison.Ordinal)
+                    StringComparison.OrdinalIgnoreCase)
                 || bundleName.StartsWith(
                     ".install-",
-                    StringComparison.Ordinal)
+                    StringComparison.OrdinalIgnoreCase)
                 || bundleName.StartsWith(
                     ".backup-",
-                    StringComparison.Ordinal))
+                    StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -838,10 +848,10 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             2)[0];
         return firstSegment.StartsWith(
             ".install-",
-            StringComparison.Ordinal)
+            StringComparison.OrdinalIgnoreCase)
             || firstSegment.StartsWith(
                 ".backup-",
-                StringComparison.Ordinal);
+                StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ResolveContainedPath(

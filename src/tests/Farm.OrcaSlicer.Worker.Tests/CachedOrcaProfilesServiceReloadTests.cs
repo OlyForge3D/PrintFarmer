@@ -145,7 +145,13 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
     [InlineData(".")]
     [InlineData("..")]
     [InlineData("...")]
-    public async Task InstallAsync_AllDotBundleName_RejectsPath(
+    [InlineData(".install-example")]
+    [InlineData(".INSTALL-example")]
+    [InlineData(".backup-example")]
+    [InlineData(".BACKUP-example")]
+    [InlineData(".printfarmer")]
+    [InlineData(".PRINTFARMER")]
+    public async Task InstallAsync_ReservedBundleName_RejectsWithoutSideEffects(
         string bundleName)
     {
         string stockRoot = Path.Join(_testRoot, "stock");
@@ -170,6 +176,8 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
             .Where(exception =>
                 exception.Code == "invalid_bundle_name");
         (await File.ReadAllTextAsync(sentinelPath)).Should().Be("unchanged");
+        Directory.EnumerateFileSystemEntries(customRoot).Should().BeEmpty();
+        Directory.EnumerateFileSystemEntries(overlayRoot).Should().BeEmpty();
     }
 
     [Theory]

@@ -36,6 +36,38 @@ public sealed class CustomProfilesAvailabilityTests
     }
 
     [Fact]
+    public async Task ClaimHandler_SharedFingerprintChanged_BlocksUntilLoaded()
+    {
+        CustomProfilesReconciliationState state = new();
+        state.MarkReady("loaded");
+        string sharedFingerprint = "changed";
+        using var handler = new CustomProfilesClaimAvailabilityHandler(
+            state,
+            () => sharedFingerprint)
+        {
+            InnerHandler = new SuccessHandler(),
+        };
+        using HttpMessageInvoker client = new(handler);
+        using HttpRequestMessage staleClaim =
+            new(HttpMethod.Post, "http://api/api/slice/claim");
+
+        using HttpResponseMessage staleResponse =
+            await client.SendAsync(staleClaim, CancellationToken.None);
+
+        staleResponse.StatusCode.Should()
+            .Be(HttpStatusCode.ServiceUnavailable);
+        state.IsReady.Should().BeFalse();
+
+        state.MarkReady(sharedFingerprint);
+        using HttpRequestMessage currentClaim =
+            new(HttpMethod.Post, "http://api/api/slice/claim");
+        using HttpResponseMessage currentResponse =
+            await client.SendAsync(currentClaim, CancellationToken.None);
+
+        currentResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task ReconciliationHealthCheck_Failure_IsUnhealthy()
     {
         CustomProfilesReconciliationState state = new();
