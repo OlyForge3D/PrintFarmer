@@ -521,7 +521,12 @@ given tree.
   for `Farm.Web.Api.Tests`, that its `shards` remain exhaustive, mutually
   exclusive, non-empty, and that each xUnit test source is covered by its
   owning shard's `FullyQualifiedName` filter) before opening a PR — the same
-  check also runs in the `ci-tools` job.
+  check also runs in the `ci-tools` job. `bash
+  scripts/ci/tests/test-select-dotnet-tests.sh` also fails closed
+  (`case_manifest_upload_artifact_sync`) if the new project's
+  `dotnet-build` upload step is missing, misspelled, or never added — see
+  "Upload-artifact/manifest sync guard" below — so a forgotten upload step
+  is caught locally and in `ci-tools` instead of silently drifting.
 - **New bucket**: extend `classify_path()` and add a case in the selector suite.
 - **New full-safe trigger**: extend the trigger switch in `main()` of the
   selector and add a case.
@@ -574,3 +579,39 @@ regression suite, run against mutated copies of the real manifest:
 ```bash
 bash scripts/ci/tests/test-dotnet-test-manifest-checks.sh
 ```
+
+### Upload-artifact/manifest sync guard
+
+The `dotnet-build` job's per-project `actions/upload-artifact@v7` steps are
+hardcoded (see "Extending" above) while the `select` job's `TEST_MATRIX`/
+`MIG_MATRIX` outputs are generated at runtime from
+`scripts/ci/dotnet-test-manifest.json` and `select-dotnet-tests.sh`'s
+`ALL_MIG_ENTRIES` migration list. Nothing enforced these two halves stay in
+sync until the manifest-upload-artifact guard was added (#2091): a test
+project added to the manifest with no matching upload step would silently
+fail every consuming test job with a missing-artifact error, and a stale
+upload step left behind after removing a project would silently upload
+nothing useful.
+
+`scripts/ci/tests/test-select-dotnet-tests.sh` now asserts, in both
+directions, that the set of `Upload <name> build` steps in the
+`dotnet-build` job of `.github/workflows/ci.yml` matches exactly the set of
+manifest `testProjects[].name` values plus the four migration project names
+parsed out of `select-dotnet-tests.sh`'s own `ALL_MIG_ENTRIES` array (so the
+guard cannot itself drift from the selector's canonical migration list):
+
+- `case_manifest_upload_artifact_sync` — the real `ci.yml` and the real
+  manifest/selector must currently agree.
+- `case_upload_artifact_guard_rejects_missing_upload_step` — a manifest/
+  migration project with no matching upload step in `dotnet-build` (e.g. a
+  new test project registered in the manifest but never wired into
+  `dotnet-build`) is rejected, naming both the project and
+  `.github/workflows/ci.yml`.
+- `case_upload_artifact_guard_rejects_orphaned_upload_step` — an upload
+  step naming a project that no longer exists in the manifest or migration
+  list is rejected, naming both the project and
+  `scripts/ci/dotnet-test-manifest.json`.
+
+This runs as part of `bash scripts/ci/tests/test-select-dotnet-tests.sh`,
+which the `ci-tools` job already runs on every PR — no separate opt-in step
+is required.
