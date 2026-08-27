@@ -531,11 +531,11 @@ final class ConnectionMonitorTests: XCTestCase {
         let plan = BackendReadinessPlan(
             capabilitiesService: capabilities,
             probes: [
+                BackendReadinessProbe(endpoint: .api) {},
                 BackendReadinessProbe(endpoint: .dispatch) {
                     throw ReadinessTestError.failed
                 },
-                BackendReadinessProbe(endpoint: .jobs) {},
-                BackendReadinessProbe(endpoint: .api) {
+                BackendReadinessProbe(endpoint: .jobs) {
                     throw ReadinessTestError.failed
                 },
             ]
@@ -543,7 +543,50 @@ final class ConnectionMonitorTests: XCTestCase {
 
         let result = await BackendReadinessChecker().check(plan: plan)
 
-        XCTAssertEqual(result.failures.map(\.endpoint), [.api, .dispatch])
+        XCTAssertEqual(result.failures.map(\.endpoint), [.jobs, .dispatch])
+    }
+
+    func testReadinessShortCircuitsWhenAPIIsUnavailable() async {
+        let recorder = BackendProbeRecorder()
+        let capabilities = TestCapabilitiesService()
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(endpoint: .api) {
+                    throw ReadinessTestError.failed
+                },
+                BackendReadinessProbe(endpoint: .jobs) {
+                    await recorder.record(.jobs)
+                },
+            ]
+        )
+
+        let result = await BackendReadinessChecker().check(plan: plan)
+
+        XCTAssertEqual(result.failures.map(\.endpoint), [.api])
+        XCTAssertEqual(capabilities.refreshCount, 0)
+        let recorded = await recorder.snapshot()
+        XCTAssertTrue(recorded.isEmpty)
+    }
+
+    func testReadinessTreatsUnsupportedEndpointAsAvailable() async {
+        let capabilities = TestCapabilitiesService()
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(endpoint: .api) {},
+                BackendReadinessProbe(endpoint: .attention) {
+                    throw NetworkError.notFound
+                },
+                BackendReadinessProbe(endpoint: .dispatch) {
+                    throw NetworkError.methodNotAllowed
+                },
+            ]
+        )
+
+        let result = await BackendReadinessChecker().check(plan: plan)
+
+        XCTAssertTrue(result.failures.isEmpty)
     }
 
     func testReadinessReportsCapabilitiesRefreshFailureButStillChecksFeatures() async {
@@ -591,6 +634,39 @@ final class ConnectionMonitorTests: XCTestCase {
         let result = await BackendReadinessChecker(timeout: .milliseconds(5)).check(plan: plan)
 
         XCTAssertEqual(result.failures.map(\.endpoint), [.signalR])
+    }
+
+    func testReadinessTimeoutReturnsWhenProbeIgnoresCancellation() async {
+        let blocker = AsyncBarrier()
+        let releaseTask = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            blocker.release()
+        }
+        defer {
+            blocker.close()
+            releaseTask.cancel()
+        }
+        let capabilities = TestCapabilitiesService()
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(endpoint: .maintenance) {
+                    await blocker.arriveAndWait()
+                },
+            ]
+        )
+        let clock = ContinuousClock()
+        let start = clock.now
+
+        let result = await BackendReadinessChecker(timeout: .milliseconds(100)).check(plan: plan)
+        let elapsed = start.duration(to: clock.now)
+
+        XCTAssertEqual(result.failures.map(\.endpoint), [.maintenance])
+        XCTAssertLessThan(
+            elapsed,
+            .milliseconds(300),
+            "Timeout must not wait for a cancellation-ignoring probe to finish"
+        )
     }
 
     func testReadinessCancellationDoesNotBecomeAServiceFailure() async {
@@ -643,7 +719,7 @@ final class ConnectionMonitorTests: XCTestCase {
         isCurrent = false
         await task.value
 
-        XCTAssertEqual(gate.state, .checking)
+        XCTAssertEqual(gate.state, .idle)
         XCTAssertFalse(gate.allowsMainContent)
     }
 
@@ -671,6 +747,37 @@ final class ConnectionMonitorTests: XCTestCase {
 
         XCTAssertEqual(gate.state, .idle)
         XCTAssertFalse(gate.allowsMainContent)
+    }
+
+    func testConnectionGateResetCancelsSignalRWorkRetainedAfterTimeout() async {
+        let cancelled = AsyncBarrier()
+        defer { cancelled.close() }
+        let capabilities = TestCapabilitiesService()
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(
+                    endpoint: .signalR,
+                    continuesAfterTimeout: true
+                ) {
+                    do {
+                        try await Task.sleep(for: .seconds(30))
+                    } catch {
+                        cancelled.signal()
+                        throw error
+                    }
+                },
+            ]
+        )
+        let gate = BackendConnectionGate(timeout: .milliseconds(5))
+
+        await gate.check(plan: plan, generation: 3) { true }
+        XCTAssertEqual(gate.failures?.map(\.endpoint), [.signalR])
+
+        gate.reset()
+        await cancelled.waitUntilArrived()
+
+        XCTAssertEqual(gate.state, .idle)
     }
 
     func testConnectionGateAcknowledgesFailureOnceAndAllowsOfflineUI() async {
@@ -739,6 +846,7 @@ private actor CallCounter {
 @MainActor
 private final class TestCapabilitiesService: SystemCapabilitiesServiceProtocol, @unchecked Sendable {
     private(set) var resolved: ResolvedSystemCapabilities
+    private(set) var refreshCount = 0
     private let outcome: SystemCapabilitiesRefreshOutcome
 
     init(
@@ -751,7 +859,8 @@ private final class TestCapabilitiesService: SystemCapabilitiesServiceProtocol, 
 
     @discardableResult
     func refresh() async -> SystemCapabilitiesRefreshOutcome {
-        outcome
+        refreshCount += 1
+        return outcome
     }
 }
 
