@@ -398,7 +398,7 @@ load_changed_files() {
 #                     Admin/AdminHomeAssistantController, also named in the
 #                     issue, ended up owned by Farm.Modules.Administration
 #                     instead -- Phase 14 landed first and already claimed it).
-#                     Matched before the generic
+#                     Matched before the generic `src/modules/*` case.
 #   gcode           — src/modules/Farm.Modules.Gcode/** (issue #2039, Phase
 #                     11: the gcode/file-management vertical-slice module
 #                     carved out of Farm.Web.Api, following the smartplug/
@@ -1029,14 +1029,16 @@ main() {
   fi
   if (( has_devices )); then
     # Farm.Modules.Devices (issue #2043) owns the OctoPrint API-key auth
-    # service/handler/filter and the NFC/camera/Home-Assistant controllers,
-    # but the CustomWebApplicationFactory-based integration tests that cover
-    # camera snapshots, NFC device authentication, the admin Home Assistant
-    # controller, OctoPrint-compat routes, and the route-table snapshot
-    # intentionally stayed behind in Farm.Web.Api.Tests -- see
-    # docs/MODULE_MIGRATION_PATTERN.md. A controller-owning module must
-    # therefore also select Farm.Web.Api.Tests, unlike a pure-service module
-    # such as Farm.OrcaSlicer.Worker.
+    # service/handler/filter and the NFC/camera controllers, but the
+    # CustomWebApplicationFactory-based integration tests that cover camera
+    # snapshots, NFC device authentication, OctoPrint-compat routes, and the
+    # route-table snapshot intentionally stayed behind in Farm.Web.Api.Tests --
+    # see docs/MODULE_MIGRATION_PATTERN.md. (The admin Home Assistant
+    # controller named in the issue ended up owned by Farm.Modules.
+    # Administration instead -- Phase 14 landed first and already claimed it;
+    # its own AdminHomeAssistantControllerTests moved with it.) A
+    # controller-owning module must therefore also select Farm.Web.Api.Tests,
+    # unlike a pure-service module such as Farm.OrcaSlicer.Worker.
     test_names+=("Farm.Modules.Devices.Tests" "Farm.Web.Api.Tests")
     net_test_bucket_hit=1
   fi

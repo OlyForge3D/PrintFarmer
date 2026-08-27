@@ -755,11 +755,12 @@ case_devices_change() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix devices" "$matrix" "Farm.Modules.Devices.Tests" || return 1
-  # The retained camera-snapshot/NFC-authentication/admin-Home-Assistant/
-  # route-table coverage (CameraSnapshotsControllerTests,
-  # NfcDevicesControllerAuthenticationTests, AdminHomeAssistantControllerTests,
+  # The retained camera-snapshot/NFC-authentication/route-table coverage
+  # (CameraSnapshotsControllerTests, NfcDevicesControllerAuthenticationTests,
   # RouteTableSnapshotTests) intentionally stayed in Farm.Web.Api.Tests, so a
-  # controller-owning module must select it too.
+  # controller-owning module must select it too. (AdminHomeAssistantController
+  # and its tests ended up owned by Farm.Modules.Administration instead --
+  # Phase 14 landed first and already claimed it.)
   assert_contains "api covers controller" "$matrix" "Farm.Web.Api.Tests" || return 1
   assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
   local reason ; reason="$(get_output "$out" reason)"

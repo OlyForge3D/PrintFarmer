@@ -9,10 +9,11 @@ namespace Farm.Modules.Devices;
 /// Vertical-slice module for device integrations (issue #2043, epic #2019). Owns the OctoPrint
 /// API-key authentication service (<see cref="Farm.Web.Api.Services.OctoPrint.IOctoPrintAuthService"/>),
 /// the NFC controllers (<see cref="Farm.Web.Api.Controllers.NfcController"/>,
-/// <see cref="Farm.Web.Api.Controllers.NfcDevicesController"/>), the camera controllers
+/// <see cref="Farm.Web.Api.Controllers.NfcDevicesController"/>), and the camera controllers
 /// (<see cref="Farm.Web.Api.Controllers.CamerasController"/>,
-/// <see cref="Farm.Web.Api.Controllers.CameraSnapshotsController"/>), and the admin Home
-/// Assistant controller (<see cref="Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController"/>).
+/// <see cref="Farm.Web.Api.Controllers.CameraSnapshotsController"/>). The admin Home Assistant
+/// controller named in the issue ended up owned by Farm.Modules.Administration instead
+/// (Phase 14, #2042, landed first and already claimed it).
 /// Phase 15 of the Farm.Web.Api decomposition epic -- see docs/MODULE_MIGRATION_PATTERN.md.
 /// </summary>
 public sealed class DevicesApiModule : IApiModule

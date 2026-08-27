@@ -33,6 +33,11 @@ public sealed class RoleToPermissionMigrationCompletenessTests
         // issue) ended up owned by Farm.Modules.Administration instead (Phase 14, #2042, landed
         // first), so NfcController anchors the Devices assembly here instead.
         typeof(Farm.Web.Api.Controllers.NfcController).Assembly,
+        // Phase 14 (#2042) never added its own anchor to this guard; the gap was masked
+        // pre-merge because AdminHomeAssistantController.Assembly happened to resolve to
+        // Farm.Web.Api like every other anchor here. Now that it resolves to
+        // Farm.Modules.Administration, added explicitly so that assembly stays scanned.
+        typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
     ];
 
     [Fact]

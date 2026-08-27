@@ -5,11 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Description>Vertical-slice module for device integrations: OctoPrint API-key authentication
-(handler, attribute, and auth service), NFC tag/device controllers, camera and camera-snapshot
-controllers, and the admin Home Assistant controller. Registers via IApiModule (see
-Farm.Modules.Abstractions, issue #2035). Phase 15 of the module-decomposition epic #2019 --
-namespaces are intentionally unchanged from their prior Farm.Web.Api location
-(move-first-rename-last).</Description>
+(handler, attribute, and auth service), NFC tag/device controllers, and camera and
+camera-snapshot controllers. Registers via IApiModule (see Farm.Modules.Abstractions, issue
+#2035). Phase 15 of the module-decomposition epic #2019 -- namespaces are intentionally
+unchanged from their prior Farm.Web.Api location (move-first-rename-last).</Description>
   </PropertyGroup>
 
   <ItemGroup>
