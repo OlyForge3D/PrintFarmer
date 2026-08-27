@@ -25,5 +25,11 @@ public class PrinterServiceStateConfiguration : IEntityTypeConfiguration<Printer
             .WithMany(o => o.PrinterServiceStates)
             .HasForeignKey(e => e.ObicoServerId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        // Supports the maintenance alert rotation cursor's keyset ordering (issue #2061).
+        builder.HasIndex(e => e.LastMaintenanceAlertEvaluatedAt);
+
+        // Supports the print-stats-sync rotation cursor's keyset ordering (issue #2061).
+        builder.HasIndex(e => e.LastStatsSyncAttemptedAt);
     }
 }

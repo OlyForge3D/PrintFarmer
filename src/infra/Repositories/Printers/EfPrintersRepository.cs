@@ -512,4 +512,86 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
     {
         _db.Set<Toolhead>().AddRange(toolheads);
     }
+
+    /// <inheritdoc/>
+    public async Task<List<Printer>> GetForStatsSyncRotationAsync(int maxCount, CancellationToken ct)
+    {
+        // Ordering uses a dedicated rotation cursor (PrinterServiceState.LastStatsSyncAttemptedAt)
+        // rather than PrinterStatistics.LastSyncTime, which only advances on an ACTUAL successful
+        // backend read and keeps its own meaning elsewhere for backend-history math (e.g.
+        // ExternalPrintHours attribution). Decoupling the two means a printer whose sync keeps
+        // failing (backend offline, auth error, ...) still rotates out of the front of the queue
+        // every tick instead of permanently starving everyone behind it — see
+        // MarkStatsSyncAttemptedAsync, called unconditionally (success or failure) by
+        // PrintStatsSyncHostedService (issue #2061 review finding).
+        //
+        // Never-attempted printers (no PrinterServiceState row yet, or a null
+        // LastStatsSyncAttemptedAt) sort first via an explicit has-value bucket rather than a
+        // DateTime.MinValue sentinel: DateTime.MinValue has Kind=Unspecified, and PostgreSQL's
+        // `timestamp with time zone` column type (this repository's column type) rejects
+        // Kind=Unspecified values at the Npgsql layer — a MinValue sentinel would throw on every
+        // tick against the primary deployment provider. The bucket flag needs no DateTime value at
+        // all for the "never attempted" case, so no sentinel is required.
+        //
+        // Id is a stable tiebreaker so printers sharing a timestamp still rotate instead of
+        // stalling on the same page every tick (issue #2061).
+        List<Printer> printers = await _db.Printers
+            .AsNoTracking()
+            .OrderBy(p => p.ServiceState == null || p.ServiceState.LastStatsSyncAttemptedAt == null ? 0 : 1)
+            .ThenBy(p => p.ServiceState == null ? (DateTime?)null : p.ServiceState.LastStatsSyncAttemptedAt)
+            .ThenBy(p => p.Id)
+            .Take(maxCount)
+            .ToListAsync(ct);
+        printers.ForEach(PopulateCredential);
+        return printers;
+    }
+
+    /// <inheritdoc/>
+    public async Task MarkStatsSyncAttemptedAsync(Guid printerId, DateTime attemptedAtUtc, CancellationToken ct)
+    {
+        PrinterServiceState? state = await _db.PrinterServiceStates
+            .FirstOrDefaultAsync(s => s.PrinterId == printerId, ct);
+
+        if (state == null)
+        {
+            state = new PrinterServiceState { PrinterId = printerId };
+            _db.PrinterServiceStates.Add(state);
+        }
+
+        state.LastStatsSyncAttemptedAt = attemptedAtUtc;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<List<PrinterRotationCandidate>> GetForMaintenanceAlertRotationAsync(int maxCount, CancellationToken ct)
+    {
+        // Same never-attempted/tiebreak/no-sentinel reasoning as GetForStatsSyncRotationAsync
+        // above, keyed off PrinterServiceState.LastMaintenanceAlertEvaluatedAt instead (issue
+        // #2061). No credential decryption here: maintenance evaluation only needs the printer's
+        // identity.
+        return await _db.Printers
+            .AsNoTracking()
+            .OrderBy(p => p.ServiceState == null || p.ServiceState.LastMaintenanceAlertEvaluatedAt == null ? 0 : 1)
+            .ThenBy(p => p.ServiceState == null ? (DateTime?)null : p.ServiceState.LastMaintenanceAlertEvaluatedAt)
+            .ThenBy(p => p.Id)
+            .Take(maxCount)
+            .Select(p => new PrinterRotationCandidate(p.Id, p.Name))
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task MarkMaintenanceAlertEvaluatedAsync(Guid printerId, DateTime evaluatedAtUtc, CancellationToken ct)
+    {
+        PrinterServiceState? state = await _db.PrinterServiceStates
+            .FirstOrDefaultAsync(s => s.PrinterId == printerId, ct);
+
+        if (state == null)
+        {
+            state = new PrinterServiceState { PrinterId = printerId };
+            _db.PrinterServiceStates.Add(state);
+        }
+
+        state.LastMaintenanceAlertEvaluatedAt = evaluatedAtUtc;
+        await _db.SaveChangesAsync(ct);
+    }
 }

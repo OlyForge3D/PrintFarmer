@@ -1,5 +1,4 @@
-﻿using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Repositories.Printers;
+﻿using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.DependencyInjection;
@@ -94,13 +93,22 @@ public class MaintenanceAlertHostedService(
     {
         try
         {
-            // Create a scope to get the scoped services
-            using IServiceScope scope = _serviceProvider.CreateScope();
-            IPrintersRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrintersRepository>();
-            IMaintenanceAlertService alertService = scope.ServiceProvider.GetRequiredService<IMaintenanceAlertService>();
+            // Create a scope to fetch the rotation page. Deliberately does NOT resolve
+            // IMaintenanceAlertService here — that is resolved per-printer below so each
+            // evaluation gets its own AppDbContext/unit of work (see the per-printer loop).
+            List<PrinterRotationCandidate> printers;
+            using (IServiceScope listScope = _serviceProvider.CreateScope())
+            {
+                IPrintersRepository printersRepo = listScope.ServiceProvider.GetRequiredService<IPrintersRepository>();
 
-            // Get all printers
-            List<Printer> printers = await printersRepo.GetAllAsync(ct);
+                // Keyset rotation query (issue #2061): materializes at most MaxPrintersPerIteration
+                // rows, ordered by staleness (PrinterServiceState.LastMaintenanceAlertEvaluatedAt
+                // ascending, never-evaluated first) with Id as a tiebreaker, so every printer is
+                // evaluated within a bounded number of intervals instead of only the first N ever
+                // advancing. Deliberately does NOT use GetAllAsync — other callers depend on its
+                // full-table, unordered semantics.
+                printers = await printersRepo.GetForMaintenanceAlertRotationAsync(settings.MaxPrintersPerIteration, ct);
+            }
 
             if (printers.Count == 0)
             {
@@ -108,23 +116,28 @@ public class MaintenanceAlertHostedService(
                 return;
             }
 
-            // Limit printers per iteration to avoid overload
-            int printersToEvaluate = Math.Min(printers.Count, settings.MaxPrintersPerIteration);
-
             _logger.LogInformation(
-                "Evaluating maintenance for {EvaluateCount} of {TotalCount} printers",
-                printersToEvaluate,
+                "Evaluating maintenance for {EvaluateCount} printers this iteration",
                 printers.Count);
 
             int totalAlertsGenerated = 0;
 
             // Evaluate each printer
-            for (int i = 0; i < printersToEvaluate; i++)
+            foreach (PrinterRotationCandidate printer in printers)
             {
-                Printer printer = printers[i];
-
                 try
                 {
+                    // A printer owns one scoped AppDbContext/unit of work, mirroring
+                    // PrintStatsSyncHostedService's per-printer scoping. If evaluation fails after
+                    // tracking (but not saving) a partial alert batch, disposing this scope
+                    // discards those pending changes instead of risking their accidental
+                    // persistence via an unrelated SaveChangesAsync later (issue #2061 review
+                    // finding: the previous single outer-scope design let the cursor update below
+                    // commit another printer's aborted, not-yet-saved alert additions).
+                    using IServiceScope printerScope = _serviceProvider.CreateScope();
+                    IMaintenanceAlertService alertService =
+                        printerScope.ServiceProvider.GetRequiredService<IMaintenanceAlertService>();
+
                     int alertsGenerated = await alertService.EvaluatePrinterMaintenanceAsync(
                         printer.Id,
                         ct);
@@ -138,6 +151,30 @@ public class MaintenanceAlertHostedService(
                         "Failed to evaluate maintenance for printer '{Name}' (ID: {Id})",
                         printer.Name,
                         printer.Id);
+                }
+                finally
+                {
+                    // Advance the rotation cursor even on failure: a printer whose evaluation
+                    // throws should not permanently monopolize the front of the queue and starve
+                    // every other printer behind it (issue #2061). This uses its own isolated
+                    // scope/DbContext, separate from the printer-evaluation scope above, so it can
+                    // never be affected by (or accidentally persist) whatever that scope left
+                    // tracked-but-unsaved after a failure.
+                    try
+                    {
+                        using IServiceScope cursorScope = _serviceProvider.CreateScope();
+                        IPrintersRepository cursorPrintersRepo =
+                            cursorScope.ServiceProvider.GetRequiredService<IPrintersRepository>();
+                        await cursorPrintersRepo.MarkMaintenanceAlertEvaluatedAsync(printer.Id, DateTime.UtcNow, ct);
+                    }
+                    catch (Exception markEx)
+                    {
+                        _logger.LogWarning(
+                            markEx,
+                            "Failed to advance maintenance alert rotation cursor for printer '{Name}' (ID: {Id})",
+                            printer.Name,
+                            printer.Id);
+                    }
                 }
             }
 
