@@ -578,8 +578,10 @@ public sealed class ProfileFamilyServiceTests
         (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(0);
         (await dbContext.MachineProfiles.CountAsync()).Should().Be(0);
         worker.Verify(
-            client => client.DeleteBundleAsync("2.4.2", familyId, It.IsAny<CancellationToken>()),
-            Times.Once);
+            client => client.DeleteBundleAsync(null, familyId, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "delete must target any fresh online worker (null version), never the render-time version, "
+            + "so a Stale family whose engine was upgraded in place can still be deleted (C1)");
         aliases.Verify(
             service => service.RemoveModelAliasAsync(
                 modelId, "Farm Test", "OrcaSlicer", It.IsAny<CancellationToken>()),
@@ -1056,9 +1058,11 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), EditAliases(modelId, "Renderable"), EchoRenderer(), EditWorker());
 
-        IReadOnlyList<ProfileFamilyRenderResultDto> results =
+        RenderStaleFamiliesResponseDto response =
             await service.RenderStaleFamiliesAsync(CancellationToken.None);
 
+        IReadOnlyList<ProfileFamilyRenderResultDto> results = response.Results;
+        response.RemainingCount.Should().Be(0);
         results.Should().HaveCount(2);
         results.Single(r => r.FamilyId == healthyId).RenderStatus
             .Should().Be(ProfileFamilyRenderStatus.Healthy);
@@ -1112,6 +1116,387 @@ public sealed class ProfileFamilyServiceTests
         families.Single(f => f.FamilyId == familyId).RenderStatus
             .Should().Be(ProfileFamilyRenderStatus.Failed,
                 "a family that never rendered (RenderedForOrcaVersion null) must not be flipped to Stale");
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_RenderedForDifferentVersionThanLiveWorker_DeletesUsingNullVersion()
+    {
+        // C1: a family rendered for 2.4.2 whose worker was upgraded in place to a different version must
+        // still be deletable. The delete must select any fresh online worker (null version), never the
+        // render-time version, or the version-exact worker selector throws 503 forever.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(
+            dbContext, modelId, status: ProfileFamilyRenderStatus.Stale, renderedForOrcaVersion: "2.4.2");
+        Mock<IProfileFamilyWorkerClient> worker = DeleteWorker();
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), DeleteAliases(modelId), Renderer(), worker);
+
+        await service.DeleteFamilyAsync(familyId, CancellationToken.None);
+
+        (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(0);
+        worker.Verify(
+            client => client.DeleteBundleAsync(null, familyId, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "a Stale family whose engine version differs from the live worker must delete via null version (C1)");
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_DbCleanupFailsAfterWorkerDelete_MarksFailedAndRethrows()
+    {
+        // C3: the worker bundle delete succeeds, then cache invalidation fails. Leaving the row Healthy
+        // would report a family whose bundle is gone. Compensate by marking it Failed (visibly broken and
+        // re-deletable) and rethrow, rather than a silent half-delete reported as Healthy.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        Mock<ICatalogServiceAdapter> catalog = new(MockBehavior.Strict);
+        _ = catalog
+            .Setup(service => service.InvalidateModelAliasesAsync(modelId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("alias cache is down"));
+        ProfileFamilyService service = CreateService(
+            dbContext, catalog, DeleteAliases(modelId), Renderer(), DeleteWorker());
+
+        Func<Task> act = () => service.DeleteFamilyAsync(familyId, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<InvalidOperationException>();
+        MachineModelProfile persisted = await dbContext.MachineModelProfiles
+            .AsNoTracking().SingleAsync(f => f.Id == familyId);
+        persisted.RenderStatus.Should().Be(
+            ProfileFamilyRenderStatus.Failed,
+            "a post-worker-delete cleanup failure must leave the row visibly broken, not Healthy (C3)");
+    }
+
+    [Fact]
+    public async Task EditFamilyAsync_WorkerWriteFails_RollsBackDbRowExceptRenderStatus()
+    {
+        // C2 (i): a failed edit must leave the DB row byte-identical to pre-edit except RenderStatus.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, Guid variantId) = SeedHealthyFamily(dbContext, modelId);
+        MachineModelProfile before = await dbContext.MachineModelProfiles
+            .AsNoTracking().SingleAsync(f => f.Id == familyId);
+        string? beforeName = before.Name;
+        string? beforeSource = before.SourceMachineModelName;
+        string? beforeOverrides = before.FamilyOverridesJson;
+        string? beforeRenderedVersion = before.RenderedForOrcaVersion;
+
+        Mock<IProfileFamilyWorkerClient> worker = EditWorker(
+            firstWriteFailure: new HttpRequestException("worker load rejected the new bundle"));
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
+
+        // Change BOTH an override and the nozzle set so multiple facets would mutate on success.
+        Func<Task> act = () => service.EditFamilyAsync(
+            familyId,
+            new EditProfileFamilyRequestDto
+            {
+                FamilyOverrides = Overrides("""{"printable_height":"250"}"""),
+                NozzleDiameters = [0.4, 0.8]
+            },
+            CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<HttpRequestException>();
+
+        MachineModelProfile after = await dbContext.MachineModelProfiles
+            .AsNoTracking().Include(f => f.MachineProfiles).SingleAsync(f => f.Id == familyId);
+        after.Name.Should().Be(beforeName);
+        after.SourceMachineModelName.Should().Be(beforeSource);
+        after.FamilyOverridesJson.Should().Be(beforeOverrides, "a failed edit must roll the overrides back");
+        after.RenderedForOrcaVersion.Should().Be(beforeRenderedVersion);
+        after.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed, "only the status may change");
+        after.MachineProfiles.Should().ContainSingle()
+            .Which.Id.Should().Be(variantId, "the added 0.8 variant must be rolled back with the transaction");
+    }
+
+    [Fact]
+    public async Task EditFamilyAsync_WorkerInstallFails_RestoresOldBundleContentNotNew()
+    {
+        // C2 (iii): force the failure at the worker install step and prove the RESTORED bundle content is
+        // the OLD one (previous name), never a re-PUT of the failed new bundle.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+
+        ProfileFamilyWorkerTarget target = new("http://worker", "2.5.0");
+        AllProfilesResponseDto catalog = WorkerCatalog("Prusa Test");
+        Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Strict);
+        _ = worker.Setup(s => s.GetCatalogAsync(string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((target, catalog));
+        _ = worker.Setup(s => s.GetActiveOrcaVersionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync("2.5.0");
+        // The worker rejects the NEW bundle ("Renamed") but accepts the previous good bundle ("Farm Test").
+        _ = worker.Setup(s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.Is<ProfileFamilyBundleDto>(b => b.FamilyName == "Renamed"),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("worker rejected the renamed bundle"));
+        _ = worker.Setup(s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.Is<ProfileFamilyBundleDto>(b => b.FamilyName == "Farm Test"),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IPrinterModelAliasService> aliases = RenameRestoreAliases(modelId, "Farm Test", "Renamed");
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), aliases, EchoRenderer(), worker);
+
+        Func<Task> act = () => service.EditFamilyAsync(
+            familyId, new EditProfileFamilyRequestDto { Name = "Renamed" }, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<HttpRequestException>();
+        // The restore re-installed the OLD bundle; the NEW bundle was never successfully installed.
+        worker.Verify(
+            s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.Is<ProfileFamilyBundleDto>(b => b.FamilyName == "Farm Test"),
+                It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the previous good (old-name) bundle must be re-installed after a failed rename edit");
+        MachineModelProfile after = await dbContext.MachineModelProfiles
+            .AsNoTracking().SingleAsync(f => f.Id == familyId);
+        after.Name.Should().Be("Farm Test", "a failed rename must roll the name back");
+        after.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed);
+    }
+
+    [Fact]
+    public async Task EditFamilyAsync_TwoConsecutiveFailures_KeepOriginalGoodBundleInstalled()
+    {
+        // C2 (ii): two consecutive failed edits must still leave the ORIGINAL good bundle installed. With
+        // the transaction rollback, each attempt reverts the DB to the good state, so every restore
+        // re-installs the good ("Farm Test") bundle — the failed ("Renamed") bundle is never accepted.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+
+        ProfileFamilyWorkerTarget target = new("http://worker", "2.5.0");
+        AllProfilesResponseDto catalog = WorkerCatalog("Prusa Test");
+        Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Strict);
+        _ = worker.Setup(s => s.GetCatalogAsync(string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((target, catalog));
+        _ = worker.Setup(s => s.GetActiveOrcaVersionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync("2.5.0");
+        _ = worker.Setup(s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.Is<ProfileFamilyBundleDto>(b => b.FamilyName == "Renamed"),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("worker rejected the renamed bundle"));
+        _ = worker.Setup(s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.Is<ProfileFamilyBundleDto>(b => b.FamilyName == "Farm Test"),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IPrinterModelAliasService> aliases = RenameRestoreAliases(modelId, "Farm Test", "Renamed");
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), aliases, EchoRenderer(), worker);
+
+        EditProfileFamilyRequestDto rename = new() { Name = "Renamed" };
+        _ = await service.Invoking(s => s.EditFamilyAsync(familyId, rename, CancellationToken.None))
+            .Should().ThrowAsync<HttpRequestException>();
+        _ = await service.Invoking(s => s.EditFamilyAsync(familyId, rename, CancellationToken.None))
+            .Should().ThrowAsync<HttpRequestException>();
+
+        worker.Verify(
+            s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.Is<ProfileFamilyBundleDto>(b => b.FamilyName == "Farm Test"),
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(2),
+            "each of the two failed attempts must restore the ORIGINAL good bundle, never the bad one");
+        MachineModelProfile after = await dbContext.MachineModelProfiles
+            .AsNoTracking().SingleAsync(f => f.Id == familyId);
+        after.Name.Should().Be("Farm Test");
+        after.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed);
+    }
+
+    [Fact]
+    public async Task ListFamiliesAsync_DetectionSaveFails_StillReturnsList()
+    {
+        // C4: a SaveChangesAsync failure inside staleness detection must never break the read.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using ThrowingSaveDbContext dbContext = new(
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connection).Options);
+        dbContext.Database.EnsureCreated();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId); // RenderedForOrcaVersion = 2.4.2
+        dbContext.ThrowOnSave = true; // the detection save (2.4.2 -> Stale) will fail
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            new Mock<ICatalogServiceAdapter>(MockBehavior.Strict),
+            new Mock<IPrinterModelAliasService>(MockBehavior.Strict),
+            new Mock<IProfileFamilyRenderer>(MockBehavior.Strict),
+            StalenessWorker("2.5.0"));
+
+        IReadOnlyList<ProfileFamilySummaryDto> families =
+            await service.ListFamiliesAsync(null, CancellationToken.None);
+
+        families.Should().ContainSingle().Which.FamilyId.Should().Be(
+            familyId, "a failing detection save must be swallowed so the list still returns");
+    }
+
+    [Fact]
+    public async Task RenderStaleFamiliesAsync_UnexpectedFailure_ReturnsFixedDetailNotExceptionMessage()
+    {
+        // S5: the bulk render-stale response must never leak a raw internal exception message.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(
+            dbContext, modelId, status: ProfileFamilyRenderStatus.Stale);
+        const string secret = "SECRET-INTERNAL-connection-string-9f3";
+        Mock<IProfileFamilyRenderer> renderer = new(MockBehavior.Strict);
+        _ = renderer
+            .Setup(service => service.Render(
+                It.IsAny<Guid>(),
+                It.IsAny<CloneProfileFamilyRequestDto>(),
+                It.IsAny<AllProfilesResponseDto>()))
+            .Throws(new InvalidOperationException(secret));
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            new Mock<ICatalogServiceAdapter>(MockBehavior.Strict),
+            new Mock<IPrinterModelAliasService>(MockBehavior.Strict),
+            renderer,
+            EditWorker());
+
+        RenderStaleFamiliesResponseDto response =
+            await service.RenderStaleFamiliesAsync(CancellationToken.None);
+
+        ProfileFamilyRenderResultDto result = response.Results.Single(r => r.FamilyId == familyId);
+        result.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed);
+        result.Code.Should().Be("profile_family_render_failed");
+        result.Detail.Should().Be("Profile family re-render failed unexpectedly.");
+        result.Detail.Should().NotContain(secret, "an internal exception message must never leak");
+    }
+
+    [Fact]
+    public async Task RenderFamilyAsync_ReRenderWouldDropReferencedVariant_Throws409()
+    {
+        // S6: a plain re-render must not be able to orphan a printer-referenced variant. A variant whose
+        // name has no parseable nozzle diameter is dropped by the id-preserving merge; the re-render path
+        // must run the same live reference check as an edit and refuse when the variant is referenced.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        Guid familyId = Guid.NewGuid();
+        Guid variantId = Guid.NewGuid();
+        dbContext.MachineModelProfiles.Add(new MachineModelProfile
+        {
+            Id = familyId,
+            Name = "Farm Test",
+            Manufacturer = "Custom",
+            SlicerType = SlicerType.OrcaSlicer,
+            PrinterModelId = modelId,
+            Hash = familyId.ToString("N") + familyId.ToString("N"),
+            IsSystem = false,
+            RenderStatus = ProfileFamilyRenderStatus.Healthy,
+            SourceMachineModelName = "Prusa Test",
+            SlicerDistribution = "orca",
+            RenderedForOrcaVersion = "2.4.2",
+            LastRenderedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            MachineProfiles =
+            {
+                new MachineProfile
+                {
+                    Id = variantId,
+                    Name = "Farm Test custom variant", // no "X.Y nozzle" suffix => unparseable => dropped
+                    Manufacturer = "Custom",
+                    SlicerType = SlicerType.OrcaSlicer,
+                    MachineModelProfileId = familyId,
+                    Hash = variantId.ToString("N") + variantId.ToString("N"),
+                    SourceSystemPresetName = "Prusa Test custom",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                }
+            }
+        });
+        _ = await dbContext.SaveChangesAsync();
+        Mock<IPrinterProfileCheckRepository> printerRefs = PrinterRefs(new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Bench Printer",
+            TemplateMachineProfileId = variantId
+        });
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            new Mock<ICatalogServiceAdapter>(MockBehavior.Strict),
+            new Mock<IPrinterModelAliasService>(MockBehavior.Strict),
+            new Mock<IProfileFamilyRenderer>(MockBehavior.Strict),
+            new Mock<IProfileFamilyWorkerClient>(MockBehavior.Strict),
+            printerRefs);
+
+        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ProfileFamilyInUseException>();
+        (await dbContext.MachineProfiles.CountAsync(v => v.MachineModelProfileId == familyId))
+            .Should().Be(1, "a blocked re-render must not drop the referenced variant");
+    }
+
+    [Fact]
+    public async Task RenderStaleFamiliesAsync_MoreThanBatchCap_ProcessesBatchAndReportsRemaining()
+    {
+        // S4: the bulk render-stale batch is bounded; a client drains the queue across calls.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        const int total = 27; // > MaxStaleRenderBatch (25)
+        for (int i = 0; i < total; i++)
+        {
+            _ = SeedHealthyFamily(
+                dbContext,
+                Guid.NewGuid(),
+                name: $"Stale Family {i:00}",
+                status: ProfileFamilyRenderStatus.Stale);
+        }
+
+        // A loose alias service: each family has a distinct name, so per-name strict setup is impractical.
+        Mock<IPrinterModelAliasService> aliases = new(MockBehavior.Loose);
+        _ = aliases
+            .Setup(s => s.EnsureModelAliasAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<ICatalogServiceAdapter> catalog = new(MockBehavior.Loose);
+        _ = catalog
+            .Setup(s => s.InvalidateModelAliasesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        ProfileFamilyService service = CreateService(
+            dbContext, catalog, aliases, EchoRenderer(), EditWorker());
+
+        RenderStaleFamiliesResponseDto response =
+            await service.RenderStaleFamiliesAsync(CancellationToken.None);
+
+        response.Results.Should().HaveCount(25, "the batch is capped at MaxStaleRenderBatch");
+        response.RemainingCount.Should().Be(total - 25, "the caller must be told how many remain");
+    }
+
+    /// <summary>
+    /// A <see cref="SlicerDbContext"/> whose <see cref="SaveChangesAsync(CancellationToken)"/> throws on
+    /// demand, used to prove staleness detection swallows a persistence failure on the read path (C4).
+    /// </summary>
+    private sealed class ThrowingSaveDbContext(DbContextOptions<SlicerDbContext> options)
+        : SlicerDbContext(options)
+    {
+        public bool ThrowOnSave { get; set; }
+
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            return ThrowOnSave
+                ? throw new DbUpdateConcurrencyException("simulated concurrent staleness write conflict")
+                : base.SaveChangesAsync(cancellationToken);
+        }
     }
 
     private static (Guid FamilyId, Guid VariantId) SeedHealthyFamily(
@@ -1379,6 +1764,31 @@ public sealed class ProfileFamilyServiceTests
     }
 
 
+
+    /// <summary>
+    /// An alias service for a FAILED rename edit: the new name passes the collision check (resolves to no
+    /// mapping), and the restore path re-adds the previous name's alias and drops the target name's alias.
+    /// The forward install never runs (the worker write throws first), so only these calls occur.
+    /// </summary>
+    private static Mock<IPrinterModelAliasService> RenameRestoreAliases(
+        Guid modelId,
+        string previousName,
+        string targetName)
+    {
+        Mock<IPrinterModelAliasService> aliases = new(MockBehavior.Strict);
+        _ = aliases
+            .Setup(service => service.ResolveModelAliasAsync(targetName, "OrcaSlicer"))
+            .ReturnsAsync((Guid?)null);
+        _ = aliases
+            .Setup(service => service.EnsureModelAliasAsync(
+                modelId, previousName, "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = aliases
+            .Setup(service => service.RemoveModelAliasAsync(
+                modelId, targetName, "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        return aliases;
+    }
 
     private static Mock<IPrinterModelAliasService> DeleteAliases(
         Guid modelId,

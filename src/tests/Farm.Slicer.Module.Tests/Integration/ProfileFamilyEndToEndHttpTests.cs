@@ -300,6 +300,27 @@ public sealed class ProfileFamilyEndToEndHttpTests : IAsyncDisposable
                      entry.Contains("custom-bundles", StringComparison.Ordinal),
             "the API must have issued a real HTTP DELETE to the worker's " +
             "custom-bundles endpoint.");
+
+        // S2: prove the bundle is actually GONE from the worker, not merely that the alias was dropped.
+        // GET machine/for-model above short-circuits to 404 the moment the alias is removed, before ever
+        // contacting the worker, so it cannot distinguish a real bundle delete from a no-op. POST
+        // process/for-machines resolves by MACHINE NAME straight against the worker's live profile store
+        // (no alias, no modelId), so if the cloned machine still resolved there the bundle would not have
+        // been removed. It returned the cloned family's process before the delete (asserted in the clone
+        // E2E test); after the delete the worker must no longer know that machine.
+        string deletedMachineName = $"{FamilyName} 0.4 nozzle";
+        using HttpResponseMessage workerAfterDelete = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/process/for-machines",
+            new { MachineNames = new[] { deletedMachineName } });
+        workerAfterDelete.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "process/for-machines answers straight from the worker and must stay reachable after delete.");
+        List<ProcessProfileDto>? workerProcesses =
+            await workerAfterDelete.Content.ReadFromJsonAsync<List<ProcessProfileDto>>();
+        (workerProcesses ?? []).Should().NotContain(
+            profile => profile.CompatiblePrinters.Contains(deletedMachineName),
+            "after delete the worker itself must no longer resolve the family's machine profile — " +
+            "proving the bundle was physically removed from the worker store, not just alias-hidden.");
     }
 
     /// <summary>

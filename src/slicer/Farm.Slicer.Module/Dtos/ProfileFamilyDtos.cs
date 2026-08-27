@@ -97,6 +97,21 @@ public sealed record ProfileFamilyRenderResultDto(
     string? Detail);
 
 /// <summary>
+/// Response for the bulk <c>render-stale</c> endpoint. The batch is bounded (a single request only
+/// re-renders up to a fixed number of families, each a worker round-trip) so it cannot exceed
+/// Kestrel/nginx request timeouts; <paramref name="RemainingCount"/> lets a client drain the queue
+/// across successive calls.
+/// </summary>
+/// <param name="Results">Per-family outcomes for the families processed in this bounded pass.</param>
+/// <param name="RemainingCount">
+/// Number of Stale/Failed families NOT processed in this pass because the batch cap was reached.
+/// <c>0</c> means the queue was fully drained; a positive value means the client should call again.
+/// </param>
+public sealed record RenderStaleFamiliesResponseDto(
+    IReadOnlyList<ProfileFamilyRenderResultDto> Results,
+    int RemainingCount);
+
+/// <summary>
 /// Describes a machine variant created as part of a custom family.
 /// </summary>
 public sealed record ProfileFamilyMachineVariantDto(
@@ -146,10 +161,14 @@ public sealed record ProfileFamilyVariantSummaryDto(
 /// <param name="LastRenderedAt">Most recent successful render timestamp, if any.</param>
 /// <param name="RenderedForOrcaVersion">OrcaSlicer version the current bundle was rendered for.</param>
 /// <param name="SourceManufacturer">
-/// Deliberately <see langword="null"/>: the source manufacturer is not persisted (the family's
-/// <c>Manufacturer</c> column is the literal <c>"Custom"</c>) and cannot be recovered without a
-/// schema column, which is out of scope for this slice (no migration). Use
-/// <paramref name="SourceMachineModelName"/> instead.
+/// Deliberately <see langword="null"/>. It is NOT persisted (the family's <c>Manufacturer</c> column
+/// is the literal <c>"Custom"</c>) and the only way to recover it is
+/// <c>DeriveSourceManufacturer</c>, which needs the worker's FULL catalog
+/// (<c>AllProfilesResponseDto</c>) — a per-read worker round-trip that list/get (gated on the
+/// non-admin <c>slicing:submit</c>) must not perform, because that read path has to degrade safely
+/// when no worker is online (see the C4 staleness-detection decision). Populating it would directly
+/// contradict that constraint, so the recoverable source identity is surfaced via
+/// <paramref name="SourceMachineModelName"/> instead. No migration is in scope to persist it.
 /// </param>
 /// <param name="SourceMachineModelName">Exact upstream machine-model name the family was cloned from.</param>
 /// <param name="SlicerDistribution">Distribution owning the pinned source preset (normally OrcaSlicer).</param>

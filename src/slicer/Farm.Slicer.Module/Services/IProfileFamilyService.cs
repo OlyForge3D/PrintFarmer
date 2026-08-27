@@ -113,11 +113,16 @@ public interface IProfileFamilyService
     Task<ProfileFamilySummaryDto> RenderFamilyAsync(Guid familyId, CancellationToken ct);
 
     /// <summary>
-    /// Re-renders every family whose render status is <c>Stale</c> or <c>Failed</c>, returning one
-    /// result per family so a single failure never hides the others. The batch is bounded and one bad
-    /// family never aborts the rest.
+    /// Re-renders families whose render status is <c>Stale</c> or <c>Failed</c>, returning one result
+    /// per family so a single failure never hides the others. The batch is bounded to a fixed number of
+    /// families per call (each is a worker round-trip) so the request cannot exceed proxy timeouts; the
+    /// response reports how many families remain unprocessed so a client can drain the queue across
+    /// successive calls. One bad family never aborts the rest.
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>Per-family outcomes; failures carry an actionable <c>{code,detail}</c>.</returns>
-    Task<IReadOnlyList<ProfileFamilyRenderResultDto>> RenderStaleFamiliesAsync(CancellationToken ct);
+    /// <returns>
+    /// Per-family outcomes for the bounded pass (failures carry an actionable <c>{code,detail}</c>) plus
+    /// the count of Stale/Failed families not processed because the batch cap was reached.
+    /// </returns>
+    Task<RenderStaleFamiliesResponseDto> RenderStaleFamiliesAsync(CancellationToken ct);
 }

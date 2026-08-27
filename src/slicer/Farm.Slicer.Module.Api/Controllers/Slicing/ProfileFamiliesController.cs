@@ -105,6 +105,7 @@ public sealed class ProfileFamiliesController(
     [RequirePermission(PrintFarmerPermissions.Slicing.Submit)]
     [ProducesResponseType(typeof(IReadOnlyList<ProfileFamilySummaryDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> ListFamiliesAsync(
         [FromQuery] string? renderStatus,
         CancellationToken ct)
@@ -112,11 +113,15 @@ public sealed class ProfileFamiliesController(
         ProfileFamilyRenderStatus? statusFilter = null;
         if (!string.IsNullOrWhiteSpace(renderStatus))
         {
-            // Enum binds as a string per the repo's JsonStringEnumConverter convention; parse
-            // explicitly so an invalid value returns the {code,detail} envelope, not the default
-            // ASP.NET model-state "errors" dictionary.
-            if (!Enum.TryParse(renderStatus, ignoreCase: true, out ProfileFamilyRenderStatus parsed)
-                || !Enum.IsDefined(parsed))
+            // Enum binds as a string per the repo's JsonStringEnumConverter convention. Match against
+            // the enum NAMES explicitly: Enum.TryParse also accepts the underlying numeric value
+            // (e.g. ?renderStatus=2), which would violate the string-enum-only wire contract, and
+            // Enum.IsDefined then rubber-stamps it. Comparing names rejects numeric input and returns
+            // the {code,detail} envelope instead of the default ASP.NET model-state "errors" dictionary.
+            string trimmed = renderStatus.Trim();
+            string? matchedName = Enum.GetNames<ProfileFamilyRenderStatus>()
+                .FirstOrDefault(name => string.Equals(name, trimmed, StringComparison.OrdinalIgnoreCase));
+            if (matchedName is null)
             {
                 return BadRequest(new
                 {
@@ -125,12 +130,22 @@ public sealed class ProfileFamiliesController(
                 });
             }
 
-            statusFilter = parsed;
+            statusFilter = Enum.Parse<ProfileFamilyRenderStatus>(matchedName);
         }
 
-        IReadOnlyList<ProfileFamilySummaryDto> families =
-            await _profileFamilyService.ListFamiliesAsync(statusFilter, ct);
-        return Ok(families);
+        try
+        {
+            IReadOnlyList<ProfileFamilySummaryDto> families =
+                await _profileFamilyService.ListFamiliesAsync(statusFilter, ct);
+            return Ok(families);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Listing profile families failed");
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new { code = "profile_family_list_failed", detail = "Listing profile families failed." });
+        }
     }
 
     /// <summary>
@@ -140,6 +155,7 @@ public sealed class ProfileFamiliesController(
     [RequirePermission(PrintFarmerPermissions.Slicing.Submit)]
     [ProducesResponseType(typeof(ProfileFamilySummaryDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> GetFamilyAsync(Guid familyId, CancellationToken ct)
     {
         if (!ModelState.IsValid)
@@ -156,6 +172,13 @@ public sealed class ProfileFamiliesController(
         {
             return NotFound(new { code = "profile_family_not_found", detail = ex.Message });
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Reading profile family {FamilyId} failed", familyId);
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new { code = "profile_family_read_failed", detail = "Reading the profile family failed." });
+        }
     }
 
     /// <summary>
@@ -168,6 +191,7 @@ public sealed class ProfileFamiliesController(
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> DeleteFamilyAsync(Guid familyId, CancellationToken ct)
     {
@@ -176,8 +200,15 @@ public sealed class ProfileFamiliesController(
             return BadRequest(new { code = "invalid_profile_family", detail = "Invalid family id." });
         }
 
+        if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
+        {
+            return Forbid();
+        }
+
         try
         {
+            _logger.LogInformation(
+                "User {UserId} is deleting profile family {FamilyId}", userId, familyId);
             await _profileFamilyService.DeleteFamilyAsync(familyId, ct);
             return NoContent();
         }
@@ -200,6 +231,16 @@ public sealed class ProfileFamiliesController(
                     detail = "OrcaSlicer worker unavailable."
                 });
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A late alias/DB failure after the worker bundle was removed: the service has marked the
+            // family Failed (C3) so it is re-deletable; surface the {code,detail} envelope, never a raw
+            // 500 (S3).
+            _logger.LogError(ex, "Profile-family {FamilyId} deletion failed after worker delete", familyId);
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new { code = "profile_family_deletion_failed", detail = "Profile family deletion failed." });
+        }
     }
 
     /// <summary>
@@ -215,6 +256,7 @@ public sealed class ProfileFamiliesController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> EditFamilyAsync(
         Guid familyId,
@@ -235,8 +277,15 @@ public sealed class ProfileFamiliesController(
             return BadRequest(new { code = "invalid_profile_family", detail = "Request body is required." });
         }
 
+        if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
+        {
+            return Forbid();
+        }
+
         try
         {
+            _logger.LogInformation(
+                "User {UserId} is editing profile family {FamilyId}", userId, familyId);
             ProfileFamilySummaryDto family = await _profileFamilyService.EditFamilyAsync(familyId, request, ct);
             return Ok(family);
         }
@@ -271,6 +320,15 @@ public sealed class ProfileFamiliesController(
                     detail = "OrcaSlicer worker unavailable."
                 });
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A late alias/DB failure during the edit's render/install escapes every specific handler
+            // above; supply the {code,detail} envelope rather than a raw 500 (S3).
+            _logger.LogError(ex, "Profile-family {FamilyId} edit failed", familyId);
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new { code = "profile_family_edit_failed", detail = "Profile family edit failed." });
+        }
     }
 
     /// <summary>
@@ -282,7 +340,9 @@ public sealed class ProfileFamiliesController(
     [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(ProfileFamilySummaryDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> RenderFamilyAsync(Guid familyId, CancellationToken ct)
     {
@@ -291,14 +351,30 @@ public sealed class ProfileFamiliesController(
             return BadRequest(new { code = "invalid_profile_family", detail = "Invalid family id." });
         }
 
+        if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
+        {
+            return Forbid();
+        }
+
         try
         {
+            _logger.LogInformation(
+                "User {UserId} is re-rendering profile family {FamilyId}", userId, familyId);
             ProfileFamilySummaryDto family = await _profileFamilyService.RenderFamilyAsync(familyId, ct);
             return Ok(family);
         }
         catch (ProfileFamilyNotFoundException ex)
         {
             return NotFound(new { code = "profile_family_not_found", detail = ex.Message });
+        }
+        catch (ProfileFamilyConflictException ex)
+        {
+            return Conflict(new { code = "profile_family_name_conflict", detail = ex.Message });
+        }
+        catch (ProfileFamilyInUseException ex)
+        {
+            // A re-render that would drop a still-referenced variant is refused (S6), same as an edit.
+            return Conflict(new { code = "profile_family_in_use", detail = ex.Message });
         }
         catch (ProfileFamilySourceException ex)
         {
@@ -319,19 +395,52 @@ public sealed class ProfileFamiliesController(
                     detail = "OrcaSlicer worker unavailable."
                 });
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A late alias/DB failure during render/install escapes every specific handler above;
+            // supply the {code,detail} envelope rather than a raw 500 (S3).
+            _logger.LogError(ex, "Profile-family {FamilyId} re-render failed", familyId);
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new { code = "profile_family_render_failed", detail = "Profile family re-render failed." });
+        }
     }
 
     /// <summary>
-    /// Re-renders every <c>Stale</c> or <c>Failed</c> custom family, returning one result per family so
-    /// a single failure never hides the others. Admin action (<c>slicer_engines:admin</c>).
+    /// Re-renders a bounded batch of <c>Stale</c> or <c>Failed</c> custom families, returning one result
+    /// per family so a single failure never hides the others plus a count of families left unprocessed
+    /// (so the caller can drain the queue across calls). Admin action (<c>slicer_engines:admin</c>).
     /// </summary>
     [HttpPost("families/render-stale")]
     [RequirePermission("slicer_engines:admin")]
-    [ProducesResponseType(typeof(IReadOnlyList<ProfileFamilyRenderResultDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RenderStaleFamiliesResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> RenderStaleFamiliesAsync(CancellationToken ct)
     {
-        IReadOnlyList<ProfileFamilyRenderResultDto> results =
-            await _profileFamilyService.RenderStaleFamiliesAsync(ct);
-        return Ok(results);
+        if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
+        {
+            return Forbid();
+        }
+
+        try
+        {
+            _logger.LogInformation("User {UserId} is re-rendering stale profile families", userId);
+            RenderStaleFamiliesResponseDto response =
+                await _profileFamilyService.RenderStaleFamiliesAsync(ct);
+            return Ok(response);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Per-family failures are captured in the response; this handles a failure of the batch
+            // itself (e.g. the initial DB query), keeping the {code,detail} envelope (S3).
+            _logger.LogError(ex, "Bulk re-render of stale profile families failed");
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new
+                {
+                    code = "profile_family_render_stale_failed",
+                    detail = "Bulk re-render of stale profile families failed."
+                });
+        }
     }
 }

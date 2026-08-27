@@ -131,6 +131,28 @@ public sealed class ProfileFamilyLifecycleHttpTests
     }
 
     [Fact]
+    public async Task ListFamilies_NumericRenderStatus_ReturnsFeatureErrorEnvelope()
+    {
+        // S1: the API contract is string enum names only (JsonStringEnumConverter). A numeric value like
+        // "2" must be rejected, not silently accepted by Enum.TryParse's numeric-literal support.
+        var worker = new RecordingWorkerClient();
+        await using var factory = new LifecycleFactory(worker);
+        await factory.ResetDatabaseAsync();
+
+        using HttpClient client = await factory.CreateAdminClientAsync(
+            "profile-family-numstatus-admin", "profile-family-numstatus@example.com");
+
+        using HttpResponseMessage response =
+            await client.GetAsync("/api/slicer/profiles/families?renderStatus=2");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("code").GetString().Should().Be("invalid_render_status");
+        body.RootElement.GetProperty("detail").GetString().Should().NotBeNullOrWhiteSpace();
+        body.RootElement.TryGetProperty("errors", out _).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task GetFamily_UnknownId_Returns404FeatureErrorEnvelope()
     {
         var worker = new RecordingWorkerClient();
@@ -387,6 +409,31 @@ public sealed class ProfileFamilyLifecycleHttpTests
     }
 
     [Fact]
+    public async Task RenderFamily_UnexpectedServiceFailure_Returns500FeatureErrorEnvelope()
+    {
+        // S3: an unexpected failure during render/install (here the worker catalog fetch throws a
+        // NotSupportedException) must escape as the {code,detail} envelope, never a raw 500 / ASP.NET
+        // problem shape. RecordingWorkerClient.GetCatalogAsync throws, so the re-render fails unexpectedly.
+        var worker = new RecordingWorkerClient();
+        await using var factory = new LifecycleFactory(worker);
+        await factory.ResetDatabaseAsync();
+        (Guid familyId, _) = await SeedFamilyAsync(
+            factory, "Render Boom Family", Guid.NewGuid(), ProfileFamilyRenderStatus.Failed);
+
+        using HttpClient client = await factory.CreateAdminClientAsync(
+            "profile-family-render500-admin", "profile-family-render500@example.com");
+
+        using HttpResponseMessage response = await client.PostAsync(
+            $"/api/slicer/profiles/families/{familyId}/render", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("code").GetString().Should().Be("profile_family_render_failed");
+        body.RootElement.GetProperty("detail").GetString().Should().Be("Profile family re-render failed.");
+        body.RootElement.TryGetProperty("errors", out _).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task RenderStaleFamilies_NoStaleOrFailedFamilies_ReturnsEmptyArray()
     {
         // No worker version is available (GetActiveOrcaVersionAsync returns null), so detection-on-read
@@ -403,10 +450,11 @@ public sealed class ProfileFamilyLifecycleHttpTests
             "/api/slicer/profiles/families/render-stale", content: null);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        List<ProfileFamilyRenderResultDto>? results =
-            await response.Content.ReadFromJsonAsync<List<ProfileFamilyRenderResultDto>>();
-        results.Should().NotBeNull();
-        results!.Should().BeEmpty();
+        RenderStaleFamiliesResponseDto? response2 =
+            await response.Content.ReadFromJsonAsync<RenderStaleFamiliesResponseDto>();
+        response2.Should().NotBeNull();
+        response2!.Results.Should().BeEmpty();
+        response2.RemainingCount.Should().Be(0);
     }
 
     private static async Task<(Guid FamilyId, Guid VariantId)> SeedFamilyAsync(

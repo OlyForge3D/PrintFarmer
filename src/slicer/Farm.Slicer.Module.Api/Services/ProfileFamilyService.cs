@@ -10,6 +10,7 @@ using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 
@@ -47,6 +48,14 @@ public sealed class ProfileFamilyService(
 
     private readonly ILogger<ProfileFamilyService> _logger =
         logger ?? throw new ArgumentNullException(nameof(logger));
+
+    /// <summary>
+    /// Maximum number of Stale/Failed families re-rendered per <c>render-stale</c> call. Each family is
+    /// a synchronous worker HTTP round-trip, so the batch is bounded to stay well within
+    /// Kestrel/nginx request timeouts; the response reports how many remain so a client drains the
+    /// queue across successive calls (S4).
+    /// </summary>
+    private const int MaxStaleRenderBatch = 25;
 
     /// <inheritdoc />
     public async Task<CloneProfileFamilyResponseDto> CloneFamilyAsync(
@@ -281,26 +290,49 @@ public sealed class ProfileFamilyService(
         // Ordering (partial-failure safety): remove the worker bundle first. A worker failure throws
         // (HttpRequestException -> 503) before any DB or alias mutation, so the family remains fully
         // listed and usable. Deleting an already-absent bundle is idempotent (worker 404 -> success).
-        await _workerClient.DeleteBundleAsync(family.RenderedForOrcaVersion, familyId, ct);
+        //
+        // Pass null (any fresh online worker), NEVER family.RenderedForOrcaVersion: the bundle name is
+        // version-independent (PrintFarmer-{familyId:N}) and lives on the worker host across an in-place
+        // engine upgrade, but the worker selector filters candidates on EXACT version equality with no
+        // fallback. After an upgrade makes a family Stale, pinning to the render-time version selects no
+        // worker and throws (503) forever, so a Stale family could never be deleted (C1, issue #2079).
+        await _workerClient.DeleteBundleAsync(null, familyId, ct);
 
-        // Mirror of create-time cache handling: drop the OrcaSlicer alias for the family name and
-        // invalidate the catalog alias cache so the bound model stops resolving the family in-process,
-        // with no worker restart. Families without a bound catalog model have no alias to remove.
-        if (family.PrinterModelId is Guid printerModelId)
+        try
         {
-            await _aliasService.RemoveModelAliasAsync(printerModelId, family.Name, "OrcaSlicer", ct);
-            await _catalogService.InvalidateModelAliasesAsync(printerModelId, ct);
-        }
+            // Mirror of create-time cache handling: drop the OrcaSlicer alias for the family name and
+            // invalidate the catalog alias cache so the bound model stops resolving the family in-process,
+            // with no worker restart. Families without a bound catalog model have no alias to remove.
+            if (family.PrinterModelId is Guid printerModelId)
+            {
+                await _aliasService.RemoveModelAliasAsync(printerModelId, family.Name, "OrcaSlicer", ct);
+                await _catalogService.InvalidateModelAliasesAsync(printerModelId, ct);
+            }
 
-        // Authoritative rows last, atomically. Process/filament profiles are never persisted (they
-        // live only inside the worker bundle removed above), so removing the family row plus its
-        // variant rows deletes every derived process and filament profile created by the clone.
-        await using IDbContextTransaction transaction =
-            await _dbContext.Database.BeginTransactionAsync(ct);
-        _dbContext.MachineProfiles.RemoveRange(family.MachineProfiles);
-        _ = _dbContext.MachineModelProfiles.Remove(family);
-        _ = await _dbContext.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+            // Authoritative rows last, atomically. Process/filament profiles are never persisted (they
+            // live only inside the worker bundle removed above), so removing the family row plus its
+            // variant rows deletes every derived process and filament profile created by the clone.
+            await using IDbContextTransaction transaction =
+                await _dbContext.Database.BeginTransactionAsync(ct);
+            _dbContext.MachineProfiles.RemoveRange(family.MachineProfiles);
+            _ = _dbContext.MachineModelProfiles.Remove(family);
+            _ = await _dbContext.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The worker bundle is already gone but the alias/DB cleanup failed (C3). Leaving the row
+            // Healthy would report a family whose bundle no longer exists and whose slicing is broken.
+            // Compensate by marking it Failed so it is visibly broken and re-deletable rather than a
+            // silent half-delete. The transaction (if any) rolled back on the way out, so the reload
+            // observes the still-present row.
+            await MarkRenderFailedAsync(family.Id);
+            _logger.LogError(
+                ex,
+                "Profile family {FamilyId} bundle was removed from the worker but alias/DB cleanup failed; marked Failed for re-deletion.",
+                family.Id);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -342,19 +374,9 @@ public sealed class ProfileFamilyService(
             await EnsureRenameAvailableAsync(family, targetName, ct);
         }
 
-        // A nozzle-set edit that drops a variant is a scoped delete and must honour the same live
-        // reference check as family deletion. Match by nozzle diameter so a surviving variant is never
-        // treated as removed.
-        if (request.NozzleDiameters is not null)
-        {
-            List<Guid> removedVariantIds = existingVariants
-                .Where(variant => !targetNozzles.Any(nozzle =>
-                    NozzleMatches(ParseNozzleDiameter(variant.Name), nozzle)))
-                .Select(variant => variant.Id)
-                .ToList();
-            await EnsureNoBlockingReferencesAsync(family, removedVariantIds, "edited", ct);
-        }
-
+        // The dropped-variant reference check is centralized in RenderAndInstallAsync (below) so both an
+        // edit and a plain re-render honour it — a re-render that could drop a variant (e.g. an
+        // unparseable variant name) must not orphan a printer/job reference either (S6).
         await RenderAndInstallAsync(
             family,
             existingVariants,
@@ -363,6 +385,7 @@ public sealed class ProfileFamilyService(
             targetNozzles,
             targetOverrides,
             isRename,
+            "edited",
             ct);
 
         return MapToSummary(family);
@@ -385,13 +408,14 @@ public sealed class ProfileFamilyService(
             DeriveNozzleDiameters(existingVariants),
             ParseFamilyOverrides(family.FamilyOverridesJson),
             isRename: false,
+            "re-rendered",
             ct);
 
         return MapToSummary(family);
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<ProfileFamilyRenderResultDto>> RenderStaleFamiliesAsync(
+    public async Task<RenderStaleFamiliesResponseDto> RenderStaleFamiliesAsync(
         CancellationToken ct)
     {
         // Ensure post-upgrade staleness is detected before selecting the batch, so a bulk re-render run
@@ -400,7 +424,7 @@ public sealed class ProfileFamilyService(
 
         // Re-render both Stale (post-upgrade drift) and Failed (recover a family whose last render or
         // install failed) families. Ordered oldest-first for a stable, bounded pass.
-        List<Guid> targetIds = await _dbContext.MachineModelProfiles
+        List<Guid> allTargetIds = await _dbContext.MachineModelProfiles
             .AsNoTracking()
             .Where(family =>
                 !family.IsSystem
@@ -410,6 +434,13 @@ public sealed class ProfileFamilyService(
             .OrderBy(family => family.CreatedAt)
             .Select(family => family.Id)
             .ToListAsync(ct);
+
+        // Bound the batch: each family is a synchronous worker HTTP round-trip, so an unbounded loop
+        // over dozens of families would blow past Kestrel/nginx request timeouts and abort mid-batch
+        // (S4). Process at most MaxStaleRenderBatch per call and report how many remain so a client can
+        // drain the queue across successive calls. No DB transaction is held across the worker calls.
+        List<Guid> targetIds = allTargetIds.Take(MaxStaleRenderBatch).ToList();
+        int remainingCount = allTargetIds.Count - targetIds.Count;
 
         List<ProfileFamilyRenderResultDto> results = new(targetIds.Count);
         foreach (Guid targetId in targetIds)
@@ -442,7 +473,7 @@ public sealed class ProfileFamilyService(
             }
         }
 
-        return results;
+        return new RenderStaleFamiliesResponseDto(results, remainingCount);
     }
 
     /// <summary>
@@ -486,7 +517,26 @@ public sealed class ProfileFamilyService(
             family.UpdatedAt = now;
         }
 
-        _ = await _dbContext.SaveChangesAsync(ct);
+        try
+        {
+            _ = await _dbContext.SaveChangesAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Detection runs on the read path (ListFamiliesAsync/GetFamilyAsync), which is gated on the
+            // non-admin slicing:submit permission (C4). A concurrent engine upgrade lets ordinary readers
+            // race to update the same rows; a save failure (e.g. DbUpdateConcurrencyException) must never
+            // turn that transient write conflict into a denial of service for readers. Swallow it — the
+            // status is recomputed on the next read — and detach the unsaved edits so they cannot leak
+            // into a later save on this scoped context.
+            _logger.LogWarning(
+                ex,
+                "Staleness detection could not persist updated render statuses; returning the read unaffected.");
+            foreach (MachineModelProfile family in stale)
+            {
+                _dbContext.Entry(family).State = EntityState.Detached;
+            }
+        }
     }
 
     /// <summary>
@@ -504,6 +554,7 @@ public sealed class ProfileFamilyService(
         IReadOnlyList<double> targetNozzles,
         Dictionary<string, JsonElement> targetOverrides,
         bool isRename,
+        string blockedAction,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(targetSource))
@@ -512,6 +563,19 @@ public sealed class ProfileFamilyService(
                 $"Profile family '{family.Name}' has no source machine model to render from; " +
                 "re-bind it to a valid source machine model.");
         }
+
+        // Any existing variant whose nozzle diameter is not in the target set is dropped by MergeVariants.
+        // Dropping a variant is a scoped delete, so it must honour the same live reference check as family
+        // deletion — for BOTH edit and re-render (S6). Matching by nozzle diameter means a surviving
+        // variant is never treated as removed; an unparseable variant name has no diameter, so a re-render
+        // that would silently drop it is blocked here when a printer or non-terminal job references it.
+        // Runs before any catalog fetch, worker call, or mutation, so a blocked reference is a clean 409.
+        List<Guid> droppedVariantIds = existingVariants
+            .Where(variant => !targetNozzles.Any(nozzle =>
+                NozzleMatches(ParseNozzleDiameter(variant.Name), nozzle)))
+            .Select(variant => variant.Id)
+            .ToList();
+        await EnsureNoBlockingReferencesAsync(family, droppedVariantIds, blockedAction, ct);
 
         string previousName = family.Name;
 
@@ -552,31 +616,18 @@ public sealed class ProfileFamilyService(
             rendered.CanonicalFamilyOverridesJson);
         DateTime now = DateTime.UtcNow;
 
-        // Persist the authoritative state as Pending with an id-preserving variant merge before touching
-        // the worker, mirroring CloneFamilyAsync's persist-then-install ordering.
-        family.Name = targetName;
-        family.Hash = familyHash;
-        family.SlicerVersion = worker.OrcaVersion;
-        family.SourceMachineModelName = targetSource;
-        family.FamilyOverridesJson = rendered.CanonicalFamilyOverridesJson;
-        family.RenderStatus = ProfileFamilyRenderStatus.Pending;
-        family.UpdatedAt = now;
-
-        MergeVariants(family, existingVariants, rendered, worker.OrcaVersion, familyHash, now);
-
         try
         {
-            _ = await _dbContext.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateException ex) when (IsFamilyNameUniqueConstraintViolation(ex))
-        {
-            throw new ProfileFamilyConflictException(
-                $"A slicer profile family named '{targetName}' already exists.",
-                ex);
-        }
-
-        try
-        {
+            // Install-then-persist (C2): write the new bundle and move the alias FIRST, and only mutate
+            // and save the authoritative DB row once both succeed. The previous good row and variant set
+            // are left untouched throughout the install, so a failed install/alias can never destroy the
+            // last good configuration and there is nothing to roll back. This deliberately does NOT wrap
+            // the work in a DB transaction: the alias service writes through a SEPARATE AppDbContext
+            // connection to the SAME database, so an open SlicerDbContext write transaction here would
+            // hold a write lock the alias write then blocks on ("database is locked"), which the rename
+            // end-to-end test reproduces. Persist-last achieves the identical invariant without the lock,
+            // and is idempotent across repeated attempts because the persisted state stays previous-good
+            // until success, so TryRenderPreviousBundle always reproduces the good bundle on a retry.
             await _workerClient.WriteBundleAsync(worker, rendered.Bundle, ct);
 
             if (family.PrinterModelId is Guid printerModelId)
@@ -599,42 +650,46 @@ public sealed class ProfileFamilyService(
                 }
             }
 
+            // Both the worker bundle and the alias are now in place; commit the authoritative target
+            // state as a single Healthy save with an id-preserving variant merge. family.Name must be set
+            // before MergeVariants so the generated variant descriptions carry the new name.
+            family.Name = targetName;
+            family.Hash = familyHash;
+            family.SlicerVersion = worker.OrcaVersion;
+            family.SourceMachineModelName = targetSource;
+            family.FamilyOverridesJson = rendered.CanonicalFamilyOverridesJson;
             family.RenderStatus = ProfileFamilyRenderStatus.Healthy;
-            family.LastRenderedAt = DateTime.UtcNow;
+            family.LastRenderedAt = now;
             family.RenderedForOrcaVersion = worker.OrcaVersion;
-            family.UpdatedAt = family.LastRenderedAt.Value;
-            _ = await _dbContext.SaveChangesAsync(ct);
+            family.UpdatedAt = now;
+
+            MergeVariants(family, existingVariants, rendered, worker.OrcaVersion, familyHash, now);
+
+            try
+            {
+                _ = await _dbContext.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException ex) when (IsFamilyNameUniqueConstraintViolation(ex))
+            {
+                // A rename that raced past EnsureRenameAvailableAsync collides only here. The new bundle
+                // and alias are already installed, so route through the restore path below (which reverts
+                // both) and surface a 409 rather than a bare 500.
+                throw new ProfileFamilyConflictException(
+                    $"A slicer profile family named '{targetName}' already exists.",
+                    ex);
+            }
         }
         catch (Exception ex)
         {
-            family.RenderStatus = ProfileFamilyRenderStatus.Failed;
-            family.UpdatedAt = DateTime.UtcNow;
-            _ = await _dbContext.SaveChangesAsync(CancellationToken.None);
-
-            // Previous-good-bundle preservation. The worker's InstallAsync removes a bundle on a
-            // blocking install failure rather than restoring the prior one, so a failed re-render can
-            // leave the family with no bundle. Re-install the captured previous good bundle (best-effort)
-            // so the family still slices via GET /api/slicer/profiles/machine/for-model/{modelId}. This
-            // runs only for the narrow window where the render succeeded but the install did not; a
-            // source/validation failure never reaches here, having thrown before the worker was touched.
-            if (previousBundle is not null)
-            {
-                try
-                {
-                    await _workerClient.WriteBundleAsync(worker, previousBundle, CancellationToken.None);
-                    if (family.PrinterModelId is Guid restoreModelId)
-                    {
-                        await _catalogService.InvalidateModelAliasesAsync(restoreModelId, CancellationToken.None);
-                    }
-                }
-                catch (Exception restoreEx)
-                {
-                    _logger.LogError(
-                        restoreEx,
-                        "Failed to restore the previous good bundle for profile family {FamilyId} after a failed re-render",
-                        family.Id);
-                }
-            }
+            // The DB row and variant set were never mutated before the single Healthy save above, so
+            // there is nothing to roll back: restore the previous good worker bundle and alias, then
+            // stamp only RenderStatus=Failed on the untouched row (MarkRenderFailedAsync detaches any
+            // pending in-memory mutations and reloads the previous good row before flipping the status).
+            // A failed re-render therefore never leaves the farm worse off, and the restore is idempotent
+            // across repeated attempts because the persisted state is still the previous good one.
+            await RestorePreviousGoodStateAsync(
+                family, worker, previousBundle, previousName, targetName, isRename);
+            await MarkRenderFailedAsync(family.Id);
 
             _logger.LogError(
                 ex,
@@ -643,6 +698,82 @@ public sealed class ProfileFamilyService(
                 worker.OrcaVersion);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Restores the previous good worker bundle and OrcaSlicer alias after a failed re-render, so the
+    /// family still slices via <c>GET /api/slicer/profiles/machine/for-model/{modelId}</c> and resolves
+    /// under its previous name. Best-effort: every step is idempotent and a restore failure is logged
+    /// rather than thrown, so it can never mask the original render failure. Symmetric with the DB
+    /// rollback — the bundle, alias, and DB row are all returned to the pre-edit state together.
+    /// </summary>
+    private async Task RestorePreviousGoodStateAsync(
+        MachineModelProfile family,
+        ProfileFamilyWorkerTarget worker,
+        ProfileFamilyBundleDto? previousBundle,
+        string previousName,
+        string targetName,
+        bool isRename)
+    {
+        try
+        {
+            if (previousBundle is not null)
+            {
+                // The worker's InstallAsync removes a bundle on a blocking install failure rather than
+                // restoring the prior one, so a failed re-render can leave the family with no bundle;
+                // re-install the captured previous good bundle to recover it.
+                await _workerClient.WriteBundleAsync(worker, previousBundle, CancellationToken.None);
+            }
+
+            if (family.PrinterModelId is Guid printerModelId)
+            {
+                // Restore the previous name's alias and drop the target name's alias (both idempotent),
+                // so a failed rename does not leave the model resolving to a name whose bundle was rolled
+                // back — which would return 404 and leave the model LESS resolvable than doing nothing.
+                await _aliasService.EnsureModelAliasAsync(
+                    printerModelId, previousName, "OrcaSlicer", CancellationToken.None);
+                if (isRename)
+                {
+                    await _aliasService.RemoveModelAliasAsync(
+                        printerModelId, targetName, "OrcaSlicer", CancellationToken.None);
+                }
+
+                await _catalogService.InvalidateModelAliasesAsync(printerModelId, CancellationToken.None);
+            }
+        }
+        catch (Exception restoreEx)
+        {
+            _logger.LogError(
+                restoreEx,
+                "Failed to restore the previous good state for profile family {FamilyId} after a failed re-render",
+                family.Id);
+        }
+    }
+
+    /// <summary>
+    /// Persists ONLY <see cref="ProfileFamilyRenderStatus.Failed"/> (plus <c>UpdatedAt</c>) against the
+    /// current on-disk row, discarding any pending in-memory mutations. Detaches the tracked graph so the
+    /// reload reflects the rolled-back (previous good) state, guaranteeing the abandoned target values are
+    /// never written — only the status flips. Uses <see cref="CancellationToken.None"/> so the family is
+    /// still marked broken even if the request was cancelled.
+    /// </summary>
+    private async Task MarkRenderFailedAsync(Guid familyId)
+    {
+        foreach (EntityEntry entry in _dbContext.ChangeTracker.Entries().ToList())
+        {
+            entry.State = EntityState.Detached;
+        }
+
+        MachineModelProfile? reverted = await _dbContext.MachineModelProfiles
+            .FirstOrDefaultAsync(candidate => candidate.Id == familyId, CancellationToken.None);
+        if (reverted is null)
+        {
+            return;
+        }
+
+        reverted.RenderStatus = ProfileFamilyRenderStatus.Failed;
+        reverted.UpdatedAt = DateTime.UtcNow;
+        _ = await _dbContext.SaveChangesAsync(CancellationToken.None);
     }
 
     /// <summary>
@@ -924,11 +1055,20 @@ public sealed class ProfileFamilyService(
         ProfileFamilyInUseException => ("profile_family_in_use", exception.Message),
         ArgumentException => ("invalid_profile_family", exception.Message),
         HttpRequestException => ("profile_family_worker_unavailable", exception.Message),
-        _ => ("profile_family_render_failed", exception.Message)
+
+        // Every other exception is an unexpected internal failure (500-class). Return a fixed detail —
+        // never exception.Message — so an unfiltered internal message can never leak onto the bulk
+        // response, matching the fixed string the single-family endpoints return for a 500 (S5).
+        _ => ("profile_family_render_failed", "Profile family re-render failed unexpectedly.")
     };
 
+    // Nozzle-diameter equality tolerance. Kept at 1e-4 to match ProfileFamilyRenderer.NearlyEqual so the
+    // service and renderer agree on which variants a rendered nozzle set matches; a tighter tolerance
+    // here (previously 1e-6) could classify a surviving variant as removed and drop a referenced row (S6).
+    private const double NozzleTolerance = 1e-4;
+
     private static bool NozzleMatches(double? candidate, double target) =>
-        candidate is double value && Math.Abs(value - target) < 1e-6;
+        candidate is double value && Math.Abs(value - target) < NozzleTolerance;
 
     private async Task EnsureNoBlockingReferencesAsync(
         MachineModelProfile family,
@@ -991,9 +1131,11 @@ public sealed class ProfileFamilyService(
                 variant.SourceSystemPresetName))
             .ToList();
 
-        // sourceManufacturer is not persisted (the Manufacturer column is the literal "Custom") and is
-        // not recoverable without a schema column, which is out of scope (no migration). The recoverable
-        // source identity is surfaced via sourceMachineModelName instead.
+        // sourceManufacturer is not persisted (the Manufacturer column is the literal "Custom"). It is
+        // derivable ONLY by fetching the full worker catalog (see DeriveSourceManufacturer), which C4
+        // forbids on this non-admin read path — doing so would add a per-family worker round-trip to
+        // every GET. The recoverable source identity is surfaced via sourceMachineModelName instead; see
+        // the ProfileFamilySummaryDto.SourceManufacturer XML doc for the full rationale.
         const string? sourceManufacturer = null;
 
         // Derived process/filament counts are produced only by the renderer at create time and live
