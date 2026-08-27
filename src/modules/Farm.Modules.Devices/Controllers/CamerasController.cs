@@ -13,6 +13,7 @@ using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Startup;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Camera = Farm.Infrastructure.Domain.Camera;
