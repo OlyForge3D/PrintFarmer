@@ -55,7 +55,7 @@
       VSTHRD200;<!-- Use Async suffix for async methods (18) -->
       VSTHRD002;<!-- Avoid problematic synchronous waits (16) -->
       IDISP024; <!-- Don't call GC.SuppressFinalize when no finalizer exists (16) -->
-      CA2025;   <!-- Attribute usage/AttributeUsage correctness (14) -->
+      CA2025;   <!-- Do not pass 'IDisposable' instances into unawaited tasks (14) -->
       IDISP007; <!-- Don't dispose an injected dependency (12) -->
       S927;     <!-- Parameter name mismatch with base/interface (12) -->
       S3459;    <!-- Unassigned private auto-property (10) -->
@@ -83,7 +83,6 @@
       S1215;    <!-- GC.Collect should not be called (2) -->
       S1155;    <!-- .Count() > 0 should use .Any() (2) -->
       CA1052;   <!-- Static holder types should be Static or NotInheritable (2) -->
-      CA5399;   <!-- HttpClient certificate revocation check (2) -->
       CA2213;   <!-- Disposable fields should be disposed (2) -->
       S2743;    <!-- Static fields in generic types (2) -->
       S1118     <!-- Utility classes should not have public constructors (2) -->

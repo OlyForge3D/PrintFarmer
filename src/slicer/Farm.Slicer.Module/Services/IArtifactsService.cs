@@ -136,19 +136,9 @@ public interface IArtifactsService
     Task<ArtifactContentStream?> OpenReadStreamAsync(Guid id, CancellationToken ct);
 
     /// <summary>
-    /// Checks whether an artifact's backing file is present on disk, without exposing the storage
-    /// path to the caller. Prefer this over resolving <see cref="GetWithPathAsync"/> and calling
-    /// file-system APIs directly from a controller.
-    /// </summary>
-    /// <param name="id">The artifact identifier.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns><see langword="true"/> when the artifact row and its file both exist.</returns>
-    Task<bool> ArtifactFileExistsAsync(Guid id, CancellationToken ct);
-
-    /// <summary>
     /// Resolves an artifact's full filesystem path only when its backing file actually exists on
-    /// disk, in a single lookup. Prefer this over calling <see cref="ArtifactFileExistsAsync"/> and
-    /// then <see cref="GetWithPathAsync"/> separately, which resolves the artifact twice.
+    /// disk, in a single lookup. Prefer this over resolving <see cref="GetWithPathAsync"/> and
+    /// then calling file-system APIs directly from a controller.
     /// </summary>
     /// <param name="id">The artifact identifier.</param>
     /// <param name="ct">Cancellation token.</param>

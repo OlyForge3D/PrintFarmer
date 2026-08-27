@@ -985,10 +985,6 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
             .ReturnsAsync((artifact, filePath));
 
         _artifactsMock
-            .Setup(a => a.ArtifactFileExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(File.Exists(filePath));
-
-        _artifactsMock
             .Setup(a => a.GetWithPathIfExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => File.Exists(filePath) ? (artifact, filePath) : null);
 

@@ -489,13 +489,6 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
     }
 
     /// <inheritdoc/>
-    public async Task<bool> ArtifactFileExistsAsync(Guid id, CancellationToken ct)
-    {
-        (Artifact Artifact, string FullPath)? resolved = await GetWithPathAsync(id, ct);
-        return resolved is not null && File.Exists(resolved.Value.FullPath);
-    }
-
-    /// <inheritdoc/>
     public async Task<(Artifact Artifact, string FullPath)?> GetWithPathIfExistsAsync(Guid id, CancellationToken ct)
     {
         (Artifact Artifact, string FullPath)? resolved = await GetWithPathAsync(id, ct);
@@ -511,12 +504,24 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
     public async Task<byte[]?> ReadArtifactBytesAsync(Guid id, CancellationToken ct)
     {
         (Artifact Artifact, string FullPath)? resolved = await GetWithPathAsync(id, ct);
-        if (resolved is null || !File.Exists(resolved.Value.FullPath))
+        if (resolved is null)
         {
             return null;
         }
 
-        return await File.ReadAllBytesAsync(resolved.Value.FullPath, ct);
+        // Read directly and treat a missing file as "not found" via the exception, rather than
+        // pre-checking File.Exists and then reading: a File.Exists-then-read sequence leaves a
+        // window in which the path could be replaced (e.g. deleted, or swapped via a symlink) after
+        // the check but before the read. Opening the file directly makes existence and content
+        // acquisition a single atomic operation from this method's perspective.
+        try
+        {
+            return await File.ReadAllBytesAsync(resolved.Value.FullPath, ct);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;
+        }
     }
 
     private static string SanitizeFileName(string fileName)

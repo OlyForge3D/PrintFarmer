@@ -13,8 +13,8 @@ namespace Farm.Slicer.Module.Tests.Artifacts;
 /// <summary>
 /// Covers <see cref="ArtifactsService.GetWithPathIfExistsAsync"/> directly, exercising both the
 /// "artifact row exists but file missing from disk" and "artifact and file both exist" cases in a
-/// single DB round trip, per issue #2094 (eliminating the previous double-lookup pattern of calling
-/// ArtifactFileExistsAsync followed by GetWithPathAsync).
+/// single DB round trip, per issue #2094 (eliminating the previous double-lookup pattern of
+/// checking file existence and then separately resolving the path).
 /// </summary>
 public sealed class ArtifactsServicePathResolutionTests : IDisposable
 {
@@ -35,6 +35,12 @@ public sealed class ArtifactsServicePathResolutionTests : IDisposable
         (Artifact Artifact, string FullPath)? result = await service.GetWithPathIfExistsAsync(id, CancellationToken.None);
 
         result.Should().BeNull();
+        // A strict mock permits any number of matching calls; explicitly assert a single DB round
+        // trip so a regression back to the old double-lookup pattern (separately checking file
+        // existence, then resolving the path — issue #2094) would fail this test.
+        repository.Verify(
+            candidate => candidate.GetByIdAsync(id, It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -52,6 +58,9 @@ public sealed class ArtifactsServicePathResolutionTests : IDisposable
             await service.GetWithPathIfExistsAsync(artifact.Id, CancellationToken.None);
 
         result.Should().BeNull();
+        repository.Verify(
+            candidate => candidate.GetByIdAsync(artifact.Id, It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -78,6 +87,9 @@ public sealed class ArtifactsServicePathResolutionTests : IDisposable
         result.Should().NotBeNull();
         result!.Value.Artifact.Should().Be(artifact);
         result.Value.FullPath.Should().Be(expectedFullPath);
+        repository.Verify(
+            candidate => candidate.GetByIdAsync(artifact.Id, It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     private Artifact CreateArtifact(string fileName)

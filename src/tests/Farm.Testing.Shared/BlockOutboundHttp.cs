@@ -48,7 +48,14 @@ public sealed class BlockOutboundHttpFilter : IHttpMessageHandlerBuilderFilter
         {
             next(builder);
             // Prepend the blocking handler to ensure it runs before other handlers
-            HttpMessageHandler currentPrimary = builder.PrimaryHandler ?? new HttpClientHandler();
+            HttpMessageHandler currentPrimary = builder.PrimaryHandler ?? new HttpClientHandler
+            {
+                // This handler only ever reaches loopback (see BlockingOutboundHandler above),
+                // so certificate revocation is not meaningful here, but set it explicitly rather
+                // than defer CA5399 — a security-relevant analyzer rule should not be suppressed
+                // just because the call site happens to be test-only.
+                CheckCertificateRevocationList = true,
+            };
             BlockingOutboundHandler blocking = new BlockingOutboundHandler { InnerHandler = currentPrimary };
             builder.PrimaryHandler = blocking;
         };
