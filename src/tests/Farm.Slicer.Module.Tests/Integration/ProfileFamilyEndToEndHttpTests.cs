@@ -443,6 +443,26 @@ public sealed class ProfileFamilyEndToEndHttpTests : IAsyncDisposable
         afterRerender.StatusCode.Should().Be(
             HttpStatusCode.OK, "the model must still resolve after the explicit re-render.");
 
+        // H2: prove the worker actually HOLDS the family's bundle before the delete, so the post-delete
+        // assertion below proves REMOVAL rather than absence. process/for-machines resolves by MACHINE NAME
+        // straight against the worker's live profile store (no alias, no modelId), unlike machine/for-model
+        // which short-circuits to 404 the instant the alias is dropped — before ever contacting the worker.
+        // Use the POST-EDIT machine name (the rename above renamed the variant), not the original.
+        string renamedMachineName = $"{renamedFamily} 0.4 nozzle";
+        using HttpResponseMessage workerBeforeDelete = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/process/for-machines",
+            new { MachineNames = new[] { renamedMachineName } });
+        workerBeforeDelete.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "process/for-machines answers straight from the worker and must be reachable before delete.");
+        List<ProcessProfileDto>? processesBeforeDelete =
+            await workerBeforeDelete.Content.ReadFromJsonAsync<List<ProcessProfileDto>>();
+        processesBeforeDelete.Should().Contain(
+            profile => profile.CompatiblePrinters.Contains(renamedMachineName),
+            "before delete the worker itself must resolve the family's (renamed) machine profile — " +
+            "establishing the bundle is physically present on the worker so the post-delete check " +
+            "proves removal, not mere absence.");
+
         // DELETE ----------------------------------------------------------------
         using HttpResponseMessage delete = await client.DeleteAsync(
             $"/api/slicer/profiles/families/{familyId}");
@@ -460,6 +480,26 @@ public sealed class ProfileFamilyEndToEndHttpTests : IAsyncDisposable
             await afterDelete.Content.ReadAsStringAsync());
         afterDeleteBody.RootElement.GetProperty("code").GetString()
             .Should().Be("no_profiles_for_model");
+
+        // H2: prove the bundle is actually GONE from the worker, not merely alias-hidden. machine/for-model
+        // above short-circuits to 404 the moment the alias is removed, before contacting the worker, so a
+        // completely no-op DeleteBundleAsync would still make it pass. process/for-machines resolves by
+        // MACHINE NAME straight against the worker store, so if the renamed machine still resolved there the
+        // bundle was NOT removed. It resolved before the delete (asserted above); it must not now — this is
+        // the assertion that fails if DeleteBundleAsync were a no-op.
+        using HttpResponseMessage workerAfterDelete = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/process/for-machines",
+            new { MachineNames = new[] { renamedMachineName } });
+        workerAfterDelete.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "process/for-machines answers straight from the worker and must stay reachable after delete.");
+        List<ProcessProfileDto>? processesAfterDelete =
+            await workerAfterDelete.Content.ReadFromJsonAsync<List<ProcessProfileDto>>();
+        (processesAfterDelete ?? []).Should().NotContain(
+            profile => profile.CompatiblePrinters.Contains(renamedMachineName),
+            "after delete the worker itself must no longer resolve the family's (renamed) machine profile — " +
+            "proving the bundle was physically removed from the worker store, not just alias-hidden. A no-op " +
+            "DeleteBundleAsync would leave the machine resolving here and fail this assertion.");
 
         using HttpResponseMessage getGone = await client.GetAsync(
             $"/api/slicer/profiles/families/{familyId}");

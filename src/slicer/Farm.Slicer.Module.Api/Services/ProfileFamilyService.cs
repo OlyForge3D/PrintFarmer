@@ -325,8 +325,9 @@ public sealed class ProfileFamilyService(
             // Healthy would report a family whose bundle no longer exists and whose slicing is broken.
             // Compensate by marking it Failed so it is visibly broken and re-deletable rather than a
             // silent half-delete. The transaction (if any) rolled back on the way out, so the reload
-            // observes the still-present row.
-            await MarkRenderFailedAsync(family.Id);
+            // observes the still-present row. Guarded (H3) so a status-write failure cannot mask the
+            // original cleanup exception the caller still needs to classify.
+            await TryMarkRenderFailedAsync(family.Id);
             _logger.LogError(
                 ex,
                 "Profile family {FamilyId} bundle was removed from the worker but alias/DB cleanup failed; marked Failed for re-deletion.",
@@ -386,6 +387,7 @@ public sealed class ProfileFamilyService(
             targetOverrides,
             isRename,
             "edited",
+            markFailedOnPreInstallFailure: false,
             ct);
 
         return MapToSummary(family);
@@ -409,6 +411,7 @@ public sealed class ProfileFamilyService(
             ParseFamilyOverrides(family.FamilyOverridesJson),
             isRename: false,
             "re-rendered",
+            markFailedOnPreInstallFailure: true,
             ct);
 
         return MapToSummary(family);
@@ -546,6 +549,16 @@ public sealed class ProfileFamilyService(
     /// live bundle untouched. An install failure marks the family <c>Failed</c> and restores the
     /// previous good bundle so the farm is never left worse off.
     /// </summary>
+    /// <remarks>
+    /// <c>markFailedOnPreInstallFailure</c> selects the pre-install failure policy. When
+    /// <see langword="true"/> (the re-render path), a non-cancellation failure that occurs BEFORE the
+    /// install begins — catalog fetch, source derivation, or in-memory render — also stamps the persisted
+    /// row <c>Failed</c>, honouring <see cref="RenderFamilyAsync"/>'s "on any failure the family is marked
+    /// Failed" contract so a source/worker error can never leave the row Healthy and invisible to
+    /// render-stale (H1). When <see langword="false"/> (the edit path), those same failures are pure
+    /// validation-time rejections of caller input and leave the family exactly as it was, per
+    /// <see cref="EditFamilyAsync"/>'s contract. Install-time failures mark <c>Failed</c> on both paths.
+    /// </remarks>
     private async Task RenderAndInstallAsync(
         MachineModelProfile family,
         List<MachineProfile> existingVariants,
@@ -555,6 +568,7 @@ public sealed class ProfileFamilyService(
         Dictionary<string, JsonElement> targetOverrides,
         bool isRename,
         string blockedAction,
+        bool markFailedOnPreInstallFailure,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(targetSource))
@@ -579,36 +593,63 @@ public sealed class ProfileFamilyService(
 
         string previousName = family.Name;
 
-        // Select a fresh worker and download its full catalog (empty manufacturer = every manufacturer)
-        // for the CURRENT live OrcaSlicer version. A missing worker throws HttpRequestException (503)
-        // before any mutation.
-        (ProfileFamilyWorkerTarget worker, AllProfilesResponseDto catalog) =
-            await _workerClient.GetCatalogAsync(string.Empty, null, ct);
+        ProfileFamilyWorkerTarget worker;
+        ProfileFamilyBundleDto? previousBundle;
+        string sourceManufacturer;
+        ProfileFamilyRenderResult rendered;
+        try
+        {
+            // Select a fresh worker and download its full catalog (empty manufacturer = every
+            // manufacturer) for the CURRENT live OrcaSlicer version. A missing worker throws
+            // HttpRequestException (503) before any mutation.
+            AllProfilesResponseDto catalog;
+            (worker, catalog) = await _workerClient.GetCatalogAsync(string.Empty, null, ct);
 
-        // Capture the previous good bundle by rendering the CURRENT persisted state against the same
-        // catalog, so a failed install can restore it. Best-effort: if the previous source no longer
-        // resolves, there is nothing to restore (null) and the pre-mutation ordering below still keeps
-        // the live bundle intact for the common case.
-        ProfileFamilyBundleDto? previousBundle = TryRenderPreviousBundle(family, existingVariants, catalog);
+            // Capture the previous good bundle by rendering the CURRENT persisted state against the same
+            // catalog, so a failed install can restore it. Best-effort: if the previous source no longer
+            // resolves, there is nothing to restore (null) and the pre-mutation ordering below still keeps
+            // the live bundle intact for the common case.
+            previousBundle = TryRenderPreviousBundle(family, existingVariants, catalog);
 
-        // Derive the source manufacturer from the catalog (it is not persisted). A source that no longer
-        // resolves throws ProfileFamilySourceException (422) with an actionable detail — this also
-        // covers the §5 "source preset gone after upgrade" case. Thrown BEFORE any DB or worker
-        // mutation, so the family and its installed bundle are left exactly as they were.
-        string sourceManufacturer = DeriveSourceManufacturer(catalog, targetSource);
+            // Derive the source manufacturer from the catalog (it is not persisted). A source that no
+            // longer resolves throws ProfileFamilySourceException (422) with an actionable detail — this
+            // also covers the §5 "source preset gone after upgrade" case. Thrown BEFORE any DB or worker
+            // mutation, so the family and its installed bundle are left exactly as they were.
+            sourceManufacturer = DeriveSourceManufacturer(catalog, targetSource);
 
-        CloneProfileFamilyRequestDto renderRequest = BuildRenderRequest(
-            family,
-            targetName,
-            sourceManufacturer,
-            targetSource,
-            targetNozzles,
-            targetOverrides);
+            CloneProfileFamilyRequestDto renderRequest = BuildRenderRequest(
+                family,
+                targetName,
+                sourceManufacturer,
+                targetSource,
+                targetNozzles,
+                targetOverrides);
 
-        // Render the new bundle in memory. Bad overrides/nozzles throw ArgumentException (400); a
-        // missing source preset/nozzle throws ProfileFamilySourceException (422). Both fire before any
-        // mutation, so a validation failure preserves the family and its live bundle.
-        ProfileFamilyRenderResult rendered = _renderer.Render(family.Id, renderRequest, catalog);
+            // Render the new bundle in memory. Bad overrides/nozzles throw ArgumentException (400); a
+            // missing source preset/nozzle throws ProfileFamilySourceException (422). Both fire before any
+            // mutation, so a validation failure preserves the family and its live bundle.
+            rendered = _renderer.Render(family.Id, renderRequest, catalog);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // H1: catalog fetch, source derivation, and in-memory render all run BEFORE the install
+            // try below. On the re-render path a failure here would otherwise report Failed to the caller
+            // while leaving the persisted row Healthy/Stale — invisible to ?renderStatus=Failed and never
+            // retried by render-stale — so honour RenderFamilyAsync's "on any failure the family is marked
+            // Failed" contract by flipping the row to Failed. Nothing has been installed on the worker or
+            // mutated in the DB yet, so no bundle/alias restore is needed: only the status flips. Guarded
+            // (H3) so a status-write failure cannot mask the real exception the caller needs for its
+            // 422/503/500 classification, and skipped on cancellation because a cancelled request is not a
+            // render failure. The edit path passes false: an identical pre-install failure there is a
+            // validation-time rejection of caller input and must leave the family exactly as it was, per
+            // EditFamilyAsync's contract.
+            if (markFailedOnPreInstallFailure)
+            {
+                await TryMarkRenderFailedAsync(family.Id);
+            }
+
+            throw;
+        }
 
         string familyHash = ComputeHash(
             targetName,
@@ -689,7 +730,7 @@ public sealed class ProfileFamilyService(
             // across repeated attempts because the persisted state is still the previous good one.
             await RestorePreviousGoodStateAsync(
                 family, worker, previousBundle, previousName, targetName, isRename);
-            await MarkRenderFailedAsync(family.Id);
+            await TryMarkRenderFailedAsync(family.Id);
 
             _logger.LogError(
                 ex,
@@ -747,6 +788,28 @@ public sealed class ProfileFamilyService(
                 restoreEx,
                 "Failed to restore the previous good state for profile family {FamilyId} after a failed re-render",
                 family.Id);
+        }
+    }
+
+    /// <summary>
+    /// Best-effort wrapper around <see cref="MarkRenderFailedAsync"/> for use inside a catch block: a
+    /// failure to persist <see cref="ProfileFamilyRenderStatus.Failed"/> is logged rather than thrown, so
+    /// it can never replace the original render/delete exception the caller still needs for its
+    /// 422/503/500 classification (H3). Symmetric with the swallow-and-log guard in
+    /// <see cref="RestorePreviousGoodStateAsync"/>.
+    /// </summary>
+    private async Task TryMarkRenderFailedAsync(Guid familyId)
+    {
+        try
+        {
+            await MarkRenderFailedAsync(familyId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to persist RenderStatus=Failed for profile family {FamilyId} while handling an earlier failure",
+                familyId);
         }
     }
 

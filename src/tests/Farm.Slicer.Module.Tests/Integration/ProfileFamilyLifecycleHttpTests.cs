@@ -8,6 +8,7 @@ using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
@@ -170,6 +171,34 @@ public sealed class ProfileFamilyLifecycleHttpTests
         body.RootElement.GetProperty("code").GetString().Should().Be("profile_family_not_found");
         body.RootElement.GetProperty("detail").GetString().Should().NotBeNullOrWhiteSpace();
         body.RootElement.TryGetProperty("errors", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetFamily_NonAdminWithSlicingSubmit_Succeeds()
+    {
+        // H4: GET-by-id is gated on slicing:submit, not the admin gate that guards creation — a non-admin
+        // operator holding slicing:submit must be able to fetch a single family, mirroring the list path.
+        var worker = new RecordingWorkerClient();
+        await using var factory = new LifecycleFactory(worker);
+        await factory.ResetDatabaseAsync();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = await SeedFamilyAsync(factory, "Farm Reader Detail", modelId);
+
+        using HttpClient client = await factory.CreateOperatorClientAsync(
+            "slicing", "submit", username: "profile-family-get-reader");
+
+        using HttpResponseMessage response =
+            await client.GetAsync($"/api/slicer/profiles/families/{familyId}");
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "reading a single family is gated on slicing:submit, not the admin creation gate");
+        ProfileFamilySummaryDto? family =
+            await response.Content.ReadFromJsonAsync<ProfileFamilySummaryDto>();
+        family.Should().NotBeNull();
+        family!.FamilyId.Should().Be(familyId);
+        family.FamilyName.Should().Be("Farm Reader Detail");
+        family.TargetPrinterModelId.Should().Be(modelId);
     }
 
     [Fact]
@@ -434,6 +463,63 @@ public sealed class ProfileFamilyLifecycleHttpTests
     }
 
     [Fact]
+    public async Task RenderFamily_SourceUnavailable_Returns422AndPersistsFailed()
+    {
+        // H1: a re-render whose persisted source model is no longer present in the worker catalog fails at
+        // source derivation — in the pre-install region. The caller must still get the 422
+        // source_preset_unavailable envelope AND the stored row must be stamped Failed, or render-stale
+        // never retries it while the catalog keeps reporting it Healthy.
+        var worker = new RenderPathWorkerClient(CatalogWithout("Some Other Model"));
+        await using var factory = new LifecycleFactory(worker);
+        await factory.ResetDatabaseAsync();
+        (Guid familyId, _) = await SeedFamilyAsync(factory, "Render Source Gone Family", Guid.NewGuid());
+
+        using HttpClient client = await factory.CreateAdminClientAsync(
+            "profile-family-render422-admin", "profile-family-render422@example.com");
+
+        using HttpResponseMessage response = await client.PostAsync(
+            $"/api/slicer/profiles/families/{familyId}/render", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("code").GetString().Should().Be("source_preset_unavailable");
+        body.RootElement.GetProperty("detail").GetString().Should().NotBeNullOrWhiteSpace();
+        body.RootElement.TryGetProperty("errors", out _).Should().BeFalse();
+
+        (await ReadStoredRenderStatusAsync(factory, familyId)).Should().Be(
+            ProfileFamilyRenderStatus.Failed,
+            "a pre-install source failure must persist Failed on the stored row (H1)");
+    }
+
+    [Fact]
+    public async Task RenderFamily_WorkerUnavailable_Returns503AndPersistsFailed()
+    {
+        // H1: a re-render whose catalog fetch fails (worker offline) fails at the first pre-install step.
+        // The caller must get the 503 profile_family_worker_unavailable envelope AND the stored row must be
+        // stamped Failed so render-stale re-attempts it.
+        var worker = new RenderPathWorkerClient(new HttpRequestException("worker offline"));
+        await using var factory = new LifecycleFactory(worker);
+        await factory.ResetDatabaseAsync();
+        (Guid familyId, _) = await SeedFamilyAsync(factory, "Render Worker Down Family", Guid.NewGuid());
+
+        using HttpClient client = await factory.CreateAdminClientAsync(
+            "profile-family-render503-admin", "profile-family-render503@example.com");
+
+        using HttpResponseMessage response = await client.PostAsync(
+            $"/api/slicer/profiles/families/{familyId}/render", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("code").GetString().Should().Be("profile_family_worker_unavailable");
+        body.RootElement.GetProperty("detail").GetString().Should().NotBeNullOrWhiteSpace();
+        body.RootElement.TryGetProperty("errors", out _).Should().BeFalse();
+
+        (await ReadStoredRenderStatusAsync(factory, familyId)).Should().Be(
+            ProfileFamilyRenderStatus.Failed,
+            "a pre-install worker failure must persist Failed on the stored row (H1)");
+    }
+
+    [Fact]
     public async Task RenderStaleFamilies_NoStaleOrFailedFamilies_ReturnsEmptyArray()
     {
         // No worker version is available (GetActiveOrcaVersionAsync returns null), so detection-on-read
@@ -501,6 +587,16 @@ public sealed class ProfileFamilyLifecycleHttpTests
         });
         _ = await db.SaveChangesAsync();
         return (familyId, variantId);
+    }
+
+    private static async Task<ProfileFamilyRenderStatus> ReadStoredRenderStatusAsync(
+        CustomWebApplicationFactory factory,
+        Guid familyId)
+    {
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        return (await db.MachineModelProfiles.AsNoTracking().SingleAsync(f => f.Id == familyId))
+            .RenderStatus;
     }
 
     private static async Task<Guid> SeedSliceJobAsync(
@@ -597,5 +693,66 @@ public sealed class ProfileFamilyLifecycleHttpTests
         // so staleness detection safely no-ops in the contract tests.
         public Task<string?> GetActiveOrcaVersionAsync(CancellationToken ct) =>
             Task.FromResult<string?>(null);
+    }
+
+    /// <summary>
+    /// A worker client for the re-render path. It either returns a supplied catalog (used to drive a
+    /// pre-install source-derivation failure by omitting the family's source model) or fails the catalog
+    /// fetch with a supplied exception (used to drive a worker-unavailable failure). Both failures fire in
+    /// the pre-install region that H1 covers, before any bundle write, so <c>WriteBundleAsync</c> is a
+    /// no-op that would only run if a test unexpectedly reached install.
+    /// </summary>
+    private sealed class RenderPathWorkerClient : IProfileFamilyWorkerClient
+    {
+        private readonly AllProfilesResponseDto? _catalog;
+        private readonly Exception? _catalogFailure;
+
+        public RenderPathWorkerClient(AllProfilesResponseDto catalog) => _catalog = catalog;
+
+        public RenderPathWorkerClient(Exception catalogFailure) => _catalogFailure = catalogFailure;
+
+        public Task<(ProfileFamilyWorkerTarget Target, AllProfilesResponseDto Catalog)> GetCatalogAsync(
+            string sourceManufacturer,
+            string? orcaVersion,
+            CancellationToken ct) =>
+            _catalogFailure is not null
+                ? Task.FromException<(ProfileFamilyWorkerTarget, AllProfilesResponseDto)>(_catalogFailure)
+                : Task.FromResult((new ProfileFamilyWorkerTarget("http://worker", "2.5.0"), _catalog!));
+
+        public Task WriteBundleAsync(
+            ProfileFamilyWorkerTarget target,
+            ProfileFamilyBundleDto bundle,
+            CancellationToken ct) =>
+            Task.CompletedTask;
+
+        public Task DeleteBundleAsync(string? orcaVersion, Guid familyId, CancellationToken ct) =>
+            Task.CompletedTask;
+
+        public Task<string?> GetActiveOrcaVersionAsync(CancellationToken ct) =>
+            Task.FromResult<string?>(null);
+    }
+
+    /// <summary>
+    /// Builds a worker catalog under a single "Prusa" manufacturer exposing the given source model names.
+    /// Passing names that exclude the seeded family's source ("Prusa Test") makes
+    /// <c>DeriveSourceManufacturer</c> throw <see cref="ProfileFamilySourceException"/> (422).
+    /// </summary>
+    private static AllProfilesResponseDto CatalogWithout(params string[] modelNames)
+    {
+        ManufacturerProfilesDto manufacturer = new() { Name = "Prusa" };
+        int index = 0;
+        foreach (string modelName in modelNames)
+        {
+            manufacturer.Models[$"model_{index++}"] = new PrinterModelProfilesDto
+            {
+                Name = modelName,
+                ModelId = $"Prusa_{index}"
+            };
+        }
+
+        return new AllProfilesResponseDto
+        {
+            ByHierarchy = { ["Prusa"] = manufacturer }
+        };
     }
 }

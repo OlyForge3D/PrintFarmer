@@ -1044,6 +1044,64 @@ public sealed class ProfileFamilyServiceTests
     }
 
     [Fact]
+    public async Task RenderFamilyAsync_SourceUnavailable_MarksFailed()
+    {
+        // H1: a re-render whose persisted source no longer resolves fails at source derivation — BEFORE
+        // the install try. That happens on the same pre-install region as the catalog fetch and the
+        // in-memory render, so the row must be stamped Failed (not left Healthy/Stale) or render-stale
+        // never retries it and the family reports healthy while being unrenderable.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        // The catalog no longer offers the family's persisted "Prusa Test" source, so DeriveSource
+        // manufacturer throws ProfileFamilySourceException (422) before any worker/DB mutation.
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            Catalog(modelId),
+            EditAliases(modelId, "Farm Test"),
+            EchoRenderer(),
+            EditWorker(sourceModelNames: "Other Model"));
+
+        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ProfileFamilySourceException>();
+        (await dbContext.MachineModelProfiles.AsNoTracking().SingleAsync(f => f.Id == familyId))
+            .RenderStatus.Should().Be(
+                ProfileFamilyRenderStatus.Failed,
+                "a re-render source failure must persist Failed so render-stale retries it (H1)");
+    }
+
+    [Fact]
+    public async Task RenderFamilyAsync_WorkerUnavailable_MarksFailed()
+    {
+        // H1: a re-render whose catalog fetch fails (worker down, 503) fails at the very first pre-install
+        // step. The persisted row must still be stamped Failed rather than left Healthy, so the caller's
+        // 503 is matched by a row render-stale will re-attempt.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Strict);
+        _ = worker
+            .Setup(service => service.GetCatalogAsync(
+                string.Empty, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("worker offline"));
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
+
+        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<HttpRequestException>();
+        (await dbContext.MachineModelProfiles.AsNoTracking().SingleAsync(f => f.Id == familyId))
+            .RenderStatus.Should().Be(
+                ProfileFamilyRenderStatus.Failed,
+                "a re-render worker failure must persist Failed so render-stale retries it (H1)");
+    }
+
+    [Fact]
     public async Task RenderStaleFamiliesAsync_ReturnsPerFamilyResults_WithPartialFailureSurfaced()
     {
         await using SqliteConnection connection = new("Data Source=:memory:");
@@ -1212,7 +1270,7 @@ public sealed class ProfileFamilyServiceTests
         after.RenderedForOrcaVersion.Should().Be(beforeRenderedVersion);
         after.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed, "only the status may change");
         after.MachineProfiles.Should().ContainSingle()
-            .Which.Id.Should().Be(variantId, "the added 0.8 variant must be rolled back with the transaction");
+            .Which.Id.Should().Be(variantId, "the added 0.8 variant must never be persisted (install-then-persist leaves the variant set untouched until the single Healthy save)");
     }
 
     [Fact]
@@ -1270,8 +1328,9 @@ public sealed class ProfileFamilyServiceTests
     public async Task EditFamilyAsync_TwoConsecutiveFailures_KeepOriginalGoodBundleInstalled()
     {
         // C2 (ii): two consecutive failed edits must still leave the ORIGINAL good bundle installed. With
-        // the transaction rollback, each attempt reverts the DB to the good state, so every restore
-        // re-installs the good ("Farm Test") bundle — the failed ("Renamed") bundle is never accepted.
+        // install-then-persist, the DB row and variant set are never mutated on a failed attempt (the
+        // single Healthy save only runs once the install succeeds), so every restore re-installs the good
+        // ("Farm Test") bundle — the failed ("Renamed") bundle is never accepted.
         await using SqliteConnection connection = new("Data Source=:memory:");
         await connection.OpenAsync();
         await using SlicerDbContext dbContext = CreateContext(connection);
