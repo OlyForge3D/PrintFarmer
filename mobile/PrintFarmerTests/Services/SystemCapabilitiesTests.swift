@@ -167,8 +167,9 @@ final class SystemCapabilitiesTests: XCTestCase {
         """)
 
         let service = SystemCapabilitiesService(apiClient: apiClient)
-        await service.refresh()
+        let outcome = await service.refresh()
 
+        XCTAssertEqual(outcome, .loaded)
         XCTAssertFalse(service.resolved.attentionEnabled,
                        "attentionEnabled should be honored from the response")
         XCTAssertTrue(service.resolved.nativePushEnabled,
@@ -187,8 +188,9 @@ final class SystemCapabilitiesTests: XCTestCase {
         }
 
         let service = SystemCapabilitiesService(apiClient: apiClient)
-        await service.refresh()
+        let outcome = await service.refresh()
 
+        XCTAssertEqual(outcome, .legacyDefaults)
         XCTAssertEqual(service.resolved, ResolvedSystemCapabilities.defaults)
     }
 
@@ -198,8 +200,9 @@ final class SystemCapabilitiesTests: XCTestCase {
         mockAPIClient.stubError(.notConnectedToInternet)
 
         let service = SystemCapabilitiesService(apiClient: apiClient)
-        await service.refresh()
+        let outcome = await service.refresh()
 
+        XCTAssertEqual(outcome, .failed)
         XCTAssertEqual(service.resolved, ResolvedSystemCapabilities.defaults)
     }
 

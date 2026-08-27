@@ -75,4 +75,125 @@ final class SignalRServiceTests: XCTestCase {
         XCTAssertNotNil(captured, "negotiate request should have been sent")
         XCTAssertNil(captured?.value(forHTTPHeaderField: "Authorization"))
     }
+
+    func testCancelledReadinessConnectAllowsLaterRecovery() async {
+        let entered = AsyncBarrier()
+        let release = AsyncBarrier()
+        defer {
+            entered.close()
+            release.close()
+        }
+        mockSession.asyncRequestHandler = { request in
+            entered.signal()
+            await release.arriveAndWait()
+            return (TestData.httpResponse(url: request.url, statusCode: 500), Data("{}".utf8))
+        }
+        let service = SignalRService(
+            serverURL: TestData.testBaseURL,
+            session: mockSession.urlSession,
+            tokenProvider: { "test-token" }
+        )
+
+        let readiness = Task {
+            try await service.connectForReadiness()
+        }
+        await entered.waitUntilArrived()
+        readiness.cancel()
+        _ = try? await readiness.value
+
+        mockSession.asyncRequestHandler = nil
+        mockSession.requestHandler = { request in
+            (TestData.httpResponse(url: request.url, statusCode: 500), Data("{}".utf8))
+        }
+        await service.ensureConnected()
+
+        XCTAssertGreaterThanOrEqual(
+            mockSession.capturedRequests.count,
+            2,
+            "Readiness cancellation must not suppress the next recovery attempt"
+        )
+        await service.disconnect()
+    }
+
+    func testTransportCancellationDuringNormalConnectAllowsLaterRecovery() async {
+        let entered = AsyncBarrier()
+        let release = AsyncBarrier()
+        defer {
+            entered.close()
+            release.close()
+        }
+        mockSession.asyncRequestHandler = { _ in
+            entered.signal()
+            await release.arriveAndWait()
+            throw URLError(.cancelled)
+        }
+        let service = SignalRService(
+            serverURL: TestData.testBaseURL,
+            session: mockSession.urlSession,
+            tokenProvider: { "test-token" }
+        )
+
+        let firstConnect = Task {
+            try await service.connect()
+        }
+        await entered.waitUntilArrived()
+        release.release()
+        _ = try? await firstConnect.value
+
+        mockSession.asyncRequestHandler = nil
+        mockSession.requestHandler = { request in
+            (TestData.httpResponse(url: request.url, statusCode: 500), Data("{}".utf8))
+        }
+        await service.ensureConnected()
+
+        XCTAssertGreaterThanOrEqual(
+            mockSession.capturedRequests.count,
+            2,
+            "A transport-cancelled normal connect must leave recovery enabled"
+        )
+        await service.disconnect()
+    }
+
+    func testReadinessWaitsForOverlappingConnectOutcome() async {
+        let negotiateEntered = AsyncBarrier()
+        let releaseNegotiate = AsyncBarrier()
+        let readinessWaiting = AsyncBarrier()
+        defer {
+            negotiateEntered.close()
+            releaseNegotiate.close()
+            readinessWaiting.close()
+        }
+        mockSession.asyncRequestHandler = { request in
+            negotiateEntered.signal()
+            await releaseNegotiate.arriveAndWait()
+            return (TestData.httpResponse(url: request.url, statusCode: 500), Data("{}".utf8))
+        }
+        let service = SignalRService(
+            serverURL: TestData.testBaseURL,
+            session: mockSession.urlSession,
+            tokenProvider: { "test-token" },
+            readinessWaitObserver: {
+                readinessWaiting.signal()
+            }
+        )
+
+        let initialConnect = Task {
+            try await service.connect()
+        }
+        await negotiateEntered.waitUntilArrived()
+        let readiness = Task {
+            try await service.connectForReadiness()
+        }
+        await readinessWaiting.waitUntilArrived()
+        releaseNegotiate.release()
+
+        _ = try? await initialConnect.value
+        do {
+            try await readiness.value
+            XCTFail("Readiness must not succeed when the overlapping connection fails")
+        } catch {
+            // expected
+        }
+        await service.disconnect()
+    }
 }
