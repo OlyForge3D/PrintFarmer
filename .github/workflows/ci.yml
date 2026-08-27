@@ -329,70 +329,12 @@ jobs:
           dotnet build "$project" -c Debug --no-restore \
             -p:RunIntegrationTests=true
 
-      # Tar turns thousands of output files into one transfer object per
-      # project. upload-artifact@v7 sends each pre-compressed tarball directly
-      # (`archive: false`), avoiding a second compression pass. Selection is
-      # keyed by project path and deduplicated, so 1..N shard legs for the same
-      # test project share exactly one build artifact.
-      - name: Package selected .NET outputs
-        working-directory: src
-        env:
-          TEST_MATRIX: ${{ needs.select.outputs.matrix }}
-          MIG_MATRIX: ${{ needs.select.outputs.mig_matrix }}
-          WANT_DOTNET_TEST: ${{ needs.select.outputs.want_dotnet_test }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-          import pathlib
-          import tarfile
-
-          selected_projects = {
-              entry["project"]
-              for matrix_name in ("TEST_MATRIX", "MIG_MATRIX")
-              for entry in json.loads(os.environ[matrix_name])["include"]
-          }
-          projects = set()
-          for selected_project in selected_projects:
-              project_path = pathlib.Path(selected_project)
-              if project_path.suffix != ".csproj":
-                  project_path /= f"{project_path.name}.csproj"
-              projects.add(str(project_path))
-          if os.environ["WANT_DOTNET_TEST"] == "true":
-              projects.update({
-                  "tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj",
-                  (
-                      "migrations/Farm.Migrations.PostgreSQL/"
-                      "Farm.Migrations.PostgreSQL.csproj"
-                  ),
-                  (
-                      "migrations/Farm.Migrations.SqlServer/"
-                      "Farm.Migrations.SqlServer.csproj"
-                  ),
-              })
-
-          artifact_dir = pathlib.Path("../.artifacts/dotnet-build")
-          artifact_dir.mkdir(parents=True, exist_ok=True)
-          for project in sorted(projects):
-              project_path = pathlib.Path(project)
-              output_dir = project_path.parent / "bin/Debug/net10.0"
-              if not output_dir.is_dir():
-                  raise SystemExit(f"missing compiled output: {output_dir}")
-              archive_path = artifact_dir / f"{project_path.stem}.tgz"
-              with tarfile.open(archive_path, "w:gz") as archive:
-                  archive.add(output_dir, arcname="net10.0")
-              print(f"packaged {project}: {archive_path}")
-          PY
-
-      # With `archive: false`, upload-artifact names the artifact from this
-      # file's basename and ignores the `name` input by documented design.
       - name: Upload Farm.Web.Api.Tests build
         if: ${{ needs.select.outputs.want_dotnet_test == 'true' }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Web.Api.Tests.tgz
-          archive: false
+          name: Farm.Web.Api.Tests
+          path: src/tests/Farm.Web.Api.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -400,8 +342,8 @@ jobs:
         if: ${{ contains(needs.select.outputs.matrix, 'Farm.Slicer.Module.Tests.csproj') }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Slicer.Module.Tests.tgz
-          archive: false
+          name: Farm.Slicer.Module.Tests
+          path: src/tests/Farm.Slicer.Module.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -415,8 +357,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.OrcaSlicer.Worker.Tests.tgz
-          archive: false
+          name: Farm.OrcaSlicer.Worker.Tests
+          path: src/tests/Farm.OrcaSlicer.Worker.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -430,8 +372,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Moonraker.Emulator.Tests.tgz
-          archive: false
+          name: Farm.Moonraker.Emulator.Tests
+          path: src/tests/Farm.Moonraker.Emulator.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -445,8 +387,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Slicer.ProfileParsing.Tests.tgz
-          archive: false
+          name: Farm.Slicer.ProfileParsing.Tests
+          path: src/tests/Farm.Slicer.ProfileParsing.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -460,8 +402,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Modules.Abstractions.Tests.tgz
-          archive: false
+          name: Farm.Modules.Abstractions.Tests
+          path: src/tests/Farm.Modules.Abstractions.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -475,8 +417,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Modules.SmartPlug.Tests.tgz
-          archive: false
+          name: Farm.Modules.SmartPlug.Tests
+          path: src/tests/Farm.Modules.SmartPlug.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -490,8 +432,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Modules.Calibration.Tests.tgz
-          archive: false
+          name: Farm.Modules.Calibration.Tests
+          path: src/tests/Farm.Modules.Calibration.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -505,8 +447,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Modules.Devices.Tests.tgz
-          archive: false
+          name: Farm.Modules.Devices.Tests
+          path: src/tests/Farm.Modules.Devices.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -520,8 +462,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Modules.Maintenance.Tests.tgz
-          archive: false
+          name: Farm.Modules.Maintenance.Tests
+          path: src/tests/Farm.Modules.Maintenance.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -535,8 +477,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Modules.PrintQueue.Tests.tgz
-          archive: false
+          name: Farm.Modules.PrintQueue.Tests
+          path: src/tests/Farm.Modules.PrintQueue.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -550,8 +492,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Modules.Gcode.Tests.tgz
-          archive: false
+          name: Farm.Modules.Gcode.Tests
+          path: src/tests/Farm.Modules.Gcode.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -565,8 +507,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Modules.Identity.Tests.tgz
-          archive: false
+          name: Farm.Modules.Identity.Tests
+          path: src/tests/Farm.Modules.Identity.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -580,8 +522,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Modules.Inventory.Tests.tgz
-          archive: false
+          name: Farm.Modules.Inventory.Tests
+          path: src/tests/Farm.Modules.Inventory.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -595,8 +537,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Modules.Administration.Tests.tgz
-          archive: false
+          name: Farm.Modules.Administration.Tests
+          path: src/tests/Farm.Modules.Administration.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -610,8 +552,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Web.IntegrationTests.tgz
-          archive: false
+          name: Farm.Web.IntegrationTests
+          path: src/tests/Farm.Web.IntegrationTests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -626,8 +568,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Migrations.PostgreSQL.tgz
-          archive: false
+          name: Farm.Migrations.PostgreSQL
+          path: src/migrations/Farm.Migrations.PostgreSQL/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -642,8 +584,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Migrations.SqlServer.tgz
-          archive: false
+          name: Farm.Migrations.SqlServer
+          path: src/migrations/Farm.Migrations.SqlServer/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -657,8 +599,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Slicer.Migrations.PostgreSQL.tgz
-          archive: false
+          name: Farm.Slicer.Migrations.PostgreSQL
+          path: src/migrations/Farm.Slicer.Migrations.PostgreSQL/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -672,8 +614,8 @@ jobs:
           }}
         uses: actions/upload-artifact@v7
         with:
-          path: .artifacts/dotnet-build/Farm.Slicer.Migrations.SqlServer.tgz
-          archive: false
+          name: Farm.Slicer.Migrations.SqlServer
+          path: src/migrations/Farm.Slicer.Migrations.SqlServer/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -720,16 +662,17 @@ jobs:
         run: |
           set -euo pipefail
           project_name="${MATRIX_PROJECT##*/}"
-          printf 'name=%s.tgz\n' "$project_name" >> "$GITHUB_OUTPUT"
+          printf 'name=%s\n' "$project_name" >> "$GITHUB_OUTPUT"
+          printf 'path=src/%s/bin/Debug/net10.0\n' "$MATRIX_PROJECT" \
+            >> "$GITHUB_OUTPUT"
 
       - name: Download migration build
         uses: actions/download-artifact@v8
         with:
           name: ${{ steps.migration-build-artifact.outputs.name }}
-          path: ${{ runner.temp }}/dotnet-build
-          skip-decompress: true
+          path: ${{ steps.migration-build-artifact.outputs.path }}
 
-      - name: Extract migration build
+      - name: Verify migration build
         working-directory: src
         env:
           MATRIX_PROJECT: ${{ matrix.project }}
@@ -737,9 +680,6 @@ jobs:
           set -euo pipefail
           project_dir="$MATRIX_PROJECT"
           project_name="${MATRIX_PROJECT##*/}"
-          archive="$RUNNER_TEMP/dotnet-build/$project_name.tgz"
-          mkdir -p "$project_dir/bin/Debug"
-          tar -xzf "$archive" -C "$project_dir/bin/Debug"
           test -f "$project_dir/bin/Debug/net10.0/$project_name.dll"
 
       - name: Check EF Core migration drift
@@ -807,16 +747,18 @@ jobs:
           set -euo pipefail
           project_file="${MATRIX_PROJECT##*/}"
           project_name="${project_file%.csproj}"
-          printf 'name=%s.tgz\n' "$project_name" >> "$GITHUB_OUTPUT"
+          project_dir="${MATRIX_PROJECT%/*}"
+          printf 'name=%s\n' "$project_name" >> "$GITHUB_OUTPUT"
+          printf 'path=src/%s/bin/Debug/net10.0\n' "$project_dir" \
+            >> "$GITHUB_OUTPUT"
 
       - name: Download test build
         uses: actions/download-artifact@v8
         with:
           name: ${{ steps.test-build-artifact.outputs.name }}
-          path: ${{ runner.temp }}/dotnet-build
-          skip-decompress: true
+          path: ${{ steps.test-build-artifact.outputs.path }}
 
-      - name: Extract test build
+      - name: Verify test build
         working-directory: src
         env:
           MATRIX_PROJECT: ${{ matrix.project }}
@@ -825,9 +767,6 @@ jobs:
           project_dir="${MATRIX_PROJECT%/*}"
           project_file="${MATRIX_PROJECT##*/}"
           project_name="${project_file%.csproj}"
-          archive="$RUNNER_TEMP/dotnet-build/$project_name.tgz"
-          mkdir -p "$project_dir/bin/Debug"
-          tar -xzf "$archive" -C "$project_dir/bin/Debug"
           test -f "$project_dir/bin/Debug/net10.0/$project_name.dll"
 
       - name: Test
@@ -959,28 +898,25 @@ jobs:
       - name: Download Farm.Web.Api.Tests build
         uses: actions/download-artifact@v8
         with:
-          name: Farm.Web.Api.Tests.tgz
-          path: ${{ runner.temp }}/dotnet-build
-          skip-decompress: true
+          name: Farm.Web.Api.Tests
+          path: src/tests/Farm.Web.Api.Tests/bin/Debug/net10.0
 
       - name: Download Farm.Migrations.PostgreSQL build
         uses: actions/download-artifact@v8
         with:
-          name: Farm.Migrations.PostgreSQL.tgz
-          path: ${{ runner.temp }}/dotnet-build
-          skip-decompress: true
+          name: Farm.Migrations.PostgreSQL
+          path: src/migrations/Farm.Migrations.PostgreSQL/bin/Debug/net10.0
 
       - name: Download Farm.Migrations.SqlServer build
         uses: actions/download-artifact@v8
         with:
-          name: Farm.Migrations.SqlServer.tgz
-          path: ${{ runner.temp }}/dotnet-build
-          skip-decompress: true
+          name: Farm.Migrations.SqlServer
+          path: src/migrations/Farm.Migrations.SqlServer/bin/Debug/net10.0
 
       # The local restore above regenerates portable `obj/` metadata for EF.
-      # These project-scoped archives supply only the compiled outputs; no
+      # These project-scoped artifacts supply only the compiled outputs; no
       # consumer downloads the measured ~4 GiB full solution bin tree.
-      - name: Extract provider builds
+      - name: Verify provider builds
         working-directory: src
         run: |
           set -euo pipefail
@@ -991,9 +927,6 @@ jobs:
           )
           for project_dir in "${projects[@]}"; do
             project_name="${project_dir##*/}"
-            archive="$RUNNER_TEMP/dotnet-build/$project_name.tgz"
-            mkdir -p "$project_dir/bin/Debug"
-            tar -xzf "$archive" -C "$project_dir/bin/Debug"
             test -f "$project_dir/bin/Debug/net10.0/$project_name.dll"
           done
 
