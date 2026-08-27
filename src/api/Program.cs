@@ -208,10 +208,12 @@ IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 // Farm.Modules.Devices (issue #2043, Phase 15) is the fifth -- OctoPrint API-key
 // authentication, NFC, and cameras (the admin Home Assistant controller had already moved to
 // Farm.Modules.Administration by the time this phase merged -- see Phase 14, issue #2042).
-// Farm.Modules.Identity (issue #2041, Phase 13) is the sixth -- user/role/auth
+// Farm.Modules.Gcode (issue #2039, Phase 11) is the sixth -- Gcode/harvest/promotion.
+// Farm.Modules.Identity (issue #2041, Phase 13) is the seventh -- user/role/auth
 // management moved out of the monolith.
-// Farm.Modules.Gcode (issue #2039, Phase 11) is the seventh -- Gcode/harvest/promotion.
-// Farm.Modules.Administration (issue #2042, Phase 14) is the eighth -- Admin Control Center
+// Farm.Modules.Inventory (issue #2044, Phase 16) is the eighth -- adds the inventory
+// controller slice with no host-wide DI moves.
+// Farm.Modules.Administration (issue #2042, Phase 14) is the ninth -- Admin Control Center
 // overview, data export/import, Home Assistant, Telegram, and settings controllers.
 builder.Services.AddApiModules(
     mvcBuilder,
@@ -223,6 +225,7 @@ builder.Services.AddApiModules(
     typeof(Farm.Modules.Devices.DevicesApiModule).Assembly,
     typeof(Farm.Modules.Gcode.GcodeApiModule).Assembly,
     typeof(Farm.Modules.Identity.IdentityApiModule).Assembly,
+    typeof(Farm.Modules.Inventory.InventoryApiModule).Assembly,
     typeof(Farm.Modules.Administration.AdministrationApiModule).Assembly);
 
 if (slicerModuleEnabled)
