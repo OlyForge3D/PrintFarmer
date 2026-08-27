@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Matches Farm.Web.Api.csproj's prior suppressions for the moved
+         controllers: 1591 (missing XML doc comment on a public member) and
+         S6960 ("controller has multiple responsibilities") already applied in
+         the host. This is a move-only refactor, so relocating unchanged
+         controllers should not introduce new warnings. -->
+    <NoWarn>$(NoWarn);1591;S6960</NoWarn>
+    <Description>Vertical-slice module for printers: printer/printer-group CRUD and
+control actions, the catalog facade (manufacturers, models, bed types), the
+discovery proxy and its SignalR progress broadcaster, locations, and the
+FilaMan firmware read endpoint. Moves Services/Catalog/**,
+Services/Discovery/**, Services/Printers/**, Validators/CreatePrinterValidator.cs,
+and 8 controllers out of Farm.Web.Api as part of issue #2046 (Phase 18 of epic
+#2019), following the move-first-rename-last module migration pattern.
+Namespaces remain unchanged (`Farm.Web.Api.Controllers`/
+`Farm.Web.Api.Services.*`). PrintersController moves as-is with no internal
+decomposition (out of scope; a follow-up epic). Underlying services remain
+registered by Farm.Infrastructure / Farm.Web.Api host-wide DI and are not
+moved in this phase.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\discovery\Farm.Shared.Discovery.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Core\Farm.Backend.Plugin.Core.csproj" />
+    <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- CreatePrinterValidator (moved here) is an IValidator<T> that must be
+         registered via AddValidatorsFromAssemblyContaining, and
+         PrintersController resolves IValidator<CreatePrinterFromDiscoveryDto>
+         via DI. Farm.Web.Api references FluentValidation.AspNetCore (which
+         pulls in FluentValidation.DependencyInjectionExtensions transitively),
+         but that ProjectReference points the other way (Api -> this module),
+         so the DI-extensions package must be referenced directly here too.
+         Version pinned to the one FluentValidation.AspNetCore 11.3.1 currently
+         resolves to solution-wide. -->
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.11.0" />
+  </ItemGroup>
+
+</Project>

@@ -231,7 +231,8 @@ builder.Services.AddApiModules(
     typeof(Farm.Modules.Identity.IdentityApiModule).Assembly,
     typeof(Farm.Modules.Inventory.InventoryApiModule).Assembly,
     typeof(Farm.Modules.Administration.AdministrationApiModule).Assembly,
-    typeof(Farm.Modules.Observability.ObservabilityApiModule).Assembly);
+    typeof(Farm.Modules.Observability.ObservabilityApiModule).Assembly,
+    typeof(Farm.Modules.Printers.PrintersApiModule).Assembly);
 
 if (slicerModuleEnabled)
 {
