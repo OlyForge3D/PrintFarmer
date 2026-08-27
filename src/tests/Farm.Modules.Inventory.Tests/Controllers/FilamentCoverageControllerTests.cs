@@ -165,7 +165,7 @@ public class FilamentCoverageControllerTests : IClassFixture<CustomWebApplicatio
                 ["OperatorFeatures:FilamentCoverageEnabled"] = "false",
             });
         Mock<IFilamentCoverageService> coverage = new(MockBehavior.Strict);
-        await using WebApplicationFactory<Program> host = disabledFactory.WithWebHostBuilder(builder =>
+        await using var host = disabledFactory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureTestServices(services =>
             {
@@ -194,7 +194,7 @@ public class FilamentCoverageControllerTests : IClassFixture<CustomWebApplicatio
                 ["OperatorFeatures:FilamentCoverageEnabled"] = "false",
             });
         Mock<IFilamentCoverageService> coverage = new(MockBehavior.Strict);
-        await using WebApplicationFactory<Program> host = disabledFactory.WithWebHostBuilder(builder =>
+        await using var host = disabledFactory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureTestServices(services =>
             {
@@ -266,7 +266,7 @@ public class FilamentCoverageControllerTests : IClassFixture<CustomWebApplicatio
             .Setup(s => s.GetForFleetAsync(It.IsAny<System.Threading.CancellationToken>()))
             .ReturnsAsync(fleetResult);
 
-        await using WebApplicationFactory<Program> host = _factory.WithWebHostBuilder(builder =>
+        await using var host = _factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureTestServices(services =>
             {
