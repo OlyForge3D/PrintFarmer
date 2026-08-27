@@ -6,10 +6,11 @@
     <Nullable>enable</Nullable>
     <RootNamespace>Farm.Modules.Abstractions</RootNamespace>
     <Description>Host seam for vertical-slice API modules: the IApiModule contract, module
-discovery/registration extensions, and the shared ProblemDetails/attribute shapes future
-Farm.Modules.* assemblies build on. No dependencies beyond ASP.NET Core -- no module exists
-yet, so nothing in the host references these types until a later phase moves a controller
-here (see epic #2019).</Description>
+discovery/registration extensions, and the shared ProblemDetails/attribute shapes
+Farm.Modules.* assemblies build on. No dependencies beyond ASP.NET Core -- a dependency-graph
+leaf by design, so any project may reference it without risking a cycle. Consumed by all nine
+Farm.Modules.* assemblies, Farm.Web.Api, and Farm.Infrastructure (see epic #2019 and issue
+#2100).</Description>
   </PropertyGroup>
 
   <ItemGroup>
