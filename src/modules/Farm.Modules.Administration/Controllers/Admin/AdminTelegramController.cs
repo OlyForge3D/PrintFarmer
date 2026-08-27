@@ -4,6 +4,7 @@ using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Settings;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Admin;
