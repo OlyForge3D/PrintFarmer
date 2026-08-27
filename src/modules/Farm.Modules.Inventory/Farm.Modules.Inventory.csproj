@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Matches Farm.Web.Api.csproj's prior suppressions for the moved
+         controllers: 1591 (missing XML doc comment on a public member) and
+         S6960 ("controller has multiple responsibilities") already applied in
+         the host. This is a move-only refactor, so relocating unchanged
+         controllers should not introduce new warnings. -->
+    <NoWarn>$(NoWarn);1591;S6960</NoWarn>
+    <Description>Vertical-slice module for inventory: Spoolman, filament types,
+bins, parts inventory, material clusters, tags, custom fields, model
+collections, print projects, filament coverage, and filament fallback groups.
+Moves 11 inventory controllers out of Farm.Web.Api as part of issue #2044
+(Phase 16 of epic #2019), following the move-first-rename-last module migration
+pattern. Namespaces remain unchanged (`Farm.Web.Api.Controllers`). Underlying
+services remain registered by Farm.Infrastructure / Farm.Web.Api host-wide DI
+and are not moved in this phase.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
+    <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

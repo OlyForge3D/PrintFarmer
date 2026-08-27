@@ -291,6 +291,25 @@
       "notes": "New in issue #2041 (Phase 13: Auth, users, API keys, quotas, roles, permissions, security audit, and password policy -- the 9 auth/admin controllers plus PermissionCatalogService/RolePermissionService/TokenRevocationCleanupService -- moved out of Farm.Web.Api into Farm.Modules.Identity, depending on Farm.Modules.Abstractions' IApiModule seam from #2035). Follows the Farm.Modules.Calibration.Tests pattern above: its own narrow select-dotnet-tests.sh buckets (identity/tests_identity) rather than full-safe. The 4 reflection-based architecture tests (AuthorizeRolesGateArchitectureTests, AnonymousEndpointArchitectureTests, NoClientsAllArchitectureTests, OpenApiAuthorizationTests), RouteTableSnapshotTests, and the genuine CustomWebApplicationFactory integration tests that exercise the assembled host (AuthenticationServiceIntegrationTests, AuthAuditServiceIntegrationTests, plus the Farm.Infrastructure-resident auth service unit tests under Services/Authentication/) all stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's identity bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module)."
     },
     {
+      "name": "Farm.Modules.Inventory.Tests",
+      "testProject": "tests/Farm.Modules.Inventory.Tests/Farm.Modules.Inventory.Tests.csproj",
+      "productionProject": "modules/Farm.Modules.Inventory/Farm.Modules.Inventory.csproj",
+      "pathPrefixes": ["src/tests/Farm.Modules.Inventory.Tests/"],
+      "dependsOnProjects": [
+        "src/modules/Farm.Modules.Inventory/",
+        "src/modules/Farm.Modules.Abstractions/",
+        "src/infra/",
+        "src/api/",
+        "src/tests/Farm.Web.Api.Tests/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Modules.Inventory.Tests",
+      "notes": "New in issue #2044 (Phase 16: the Inventory vertical slice -- Spoolman, filament types, bins, parts inventory, material clusters, tags, custom fields, model collections, print projects, filament coverage, and filament fallback groups -- moved out of Farm.Web.Api into Farm.Modules.Inventory, depending on Farm.Modules.Abstractions' IApiModule seam from #2035). Follows the Farm.Modules.Identity.Tests pattern above: its own narrow select-dotnet-tests.sh buckets (inventory/tests_inventory) rather than full-safe. Several retained route/host integration checks still stay in Farm.Web.Api.Tests (including RouteTableSnapshotTests), and some relocated tests in this project reuse CustomWebApplicationFactory/TestInfrastructure via a direct ProjectReference back to Farm.Web.Api.Tests, so select-dotnet-tests.sh's api, infra, inventory, and tests_api buckets also select Farm.Modules.Inventory.Tests."
+    },
+    {
       "name": "Farm.Modules.Administration.Tests",
       "testProject": "tests/Farm.Modules.Administration.Tests/Farm.Modules.Administration.Tests.csproj",
       "productionProject": "modules/Farm.Modules.Administration/Farm.Modules.Administration.csproj",

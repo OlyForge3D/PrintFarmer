@@ -29,7 +29,12 @@ public sealed class NoClientsAllArchitectureTests
         // Pre-existing, unrelated to issue #1966: broadcasts a farm-wide filament-fallback-group
         // configuration change. Out of scope for the MaintenanceHub authorization fix; left
         // unchanged per "do not fix unrelated pre-existing issues" policy.
-        "Controllers/FilamentFallbackGroupsController.cs",
+        //
+        // Moved from src/api/Controllers/ to src/modules/Farm.Modules.Inventory/Controllers/ by
+        // the Farm.Modules.Inventory extraction (issue #2044, module-decomposition epic #2019).
+        // The allowlist key is relative to whichever scan root (src/api or src/modules) the file
+        // is found under, so the module-relative path replaces the old api-relative one.
+        "Farm.Modules.Inventory/Controllers/FilamentFallbackGroupsController.cs",
     };
 
     private static string FindRepoRoot()

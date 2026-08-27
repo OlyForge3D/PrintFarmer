@@ -95,8 +95,8 @@ classify.
 | Bucket and exact path selector | Frontend | .NET build | .NET tests | Migration drift | Full-safe |
 | --- | :---: | :---: | --- | --- | :---: |
 | `frontend`: `src/Web/**` | ✓ | | | | |
-| `api`: `src/api/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.Identity.Tests`, `Farm.Modules.Administration.Tests` | `AppPg`, `AppSqlServer` | |
-| `infra`: `src/infra/**` | | ✓ | `Farm.Infrastructure.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Modules.SmartPlug.Tests`, `Farm.Modules.PrintQueue.Tests`, `Farm.Modules.Maintenance.Tests`, `Farm.Modules.Calibration.Tests`, `Farm.Modules.Gcode.Tests`, `Farm.Modules.Identity.Tests`, `Farm.Modules.Administration.Tests` | `AppPg`, `AppSqlServer` | |
+| `api`: `src/api/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.Identity.Tests`, `Farm.Modules.Inventory.Tests`, `Farm.Modules.Administration.Tests` | `AppPg`, `AppSqlServer` | |
+| `infra`: `src/infra/**` | | ✓ | `Farm.Infrastructure.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Modules.SmartPlug.Tests`, `Farm.Modules.PrintQueue.Tests`, `Farm.Modules.Maintenance.Tests`, `Farm.Modules.Calibration.Tests`, `Farm.Modules.Gcode.Tests`, `Farm.Modules.Identity.Tests`, `Farm.Modules.Inventory.Tests`, `Farm.Modules.Administration.Tests` | `AppPg`, `AppSqlServer` | |
 | `backend_core`: `src/backends/Farm.Backend.Plugin.Core/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests` | | |
 | `backend_plugin`: every other `src/backends/**` path (concrete plugin projects) | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests`, `Farm.Modules.PrintQueue.Tests` | | |
 | `slicer`: `src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests`, `Farm.Modules.PrintQueue.Tests`, `Farm.Modules.Calibration.Tests`, `Farm.Modules.Gcode.Tests` | `SlicerPg`, `SlicerSqlServer` | |
@@ -107,10 +107,11 @@ classify.
 | `calibration`: `src/modules/Farm.Modules.Calibration/**` | | ✓ | `Farm.Modules.Calibration.Tests`, `Farm.Modules.Gcode.Tests`, `Farm.Web.Api.Tests` | | |
 | `gcode`: `src/modules/Farm.Modules.Gcode/**` | | ✓ | `Farm.Modules.Gcode.Tests`, `Farm.Web.Api.Tests` | | |
 | `identity`: `src/modules/Farm.Modules.Identity/**` | | ✓ | `Farm.Modules.Identity.Tests`, `Farm.Web.Api.Tests` | | |
+| `inventory`: `src/modules/Farm.Modules.Inventory/**` | | ✓ | `Farm.Modules.Inventory.Tests`, `Farm.Web.Api.Tests` | | |
 | `administration`: `src/modules/Farm.Modules.Administration/**` | | ✓ | `Farm.Modules.Administration.Tests`, `Farm.Web.Api.Tests` | | |
 | `migrations_app`: `src/migrations/Farm.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests` | `AppPg`, `AppSqlServer` | |
 | `migrations_slcr`: `src/migrations/Farm.Slicer.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests` | `SlicerPg`, `SlicerSqlServer` | |
-| `tests_api`: `src/tests/Farm.Web.Api.Tests/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Modules.Identity.Tests`, `Farm.Modules.Administration.Tests` | | |
+| `tests_api`: `src/tests/Farm.Web.Api.Tests/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Modules.Identity.Tests`, `Farm.Modules.Inventory.Tests`, `Farm.Modules.Administration.Tests` | | |
 | `tests_infra`: `src/tests/Farm.Infrastructure.Tests/**` | | ✓ | `Farm.Infrastructure.Tests` | | |
 | `tests_slicer`: `src/tests/Farm.Slicer.Module.Tests/**` | | ✓ | `Farm.Slicer.Module.Tests` | | |
 | `tests_orca`: `src/tests/Farm.OrcaSlicer.Worker.Tests/**` | | ✓ | `Farm.OrcaSlicer.Worker.Tests` | | |
@@ -120,6 +121,7 @@ classify.
 | `tests_calibration`: `src/tests/Farm.Modules.Calibration.Tests/**` | | ✓ | `Farm.Modules.Calibration.Tests` | | |
 | `tests_gcode`: `src/tests/Farm.Modules.Gcode.Tests/**` | | ✓ | `Farm.Modules.Gcode.Tests` | | |
 | `tests_identity`: `src/tests/Farm.Modules.Identity.Tests/**` | | ✓ | `Farm.Modules.Identity.Tests` | | |
+| `tests_inventory`: `src/tests/Farm.Modules.Inventory.Tests/**` | | ✓ | `Farm.Modules.Inventory.Tests` | | |
 | `tests_administration`: `src/tests/Farm.Modules.Administration.Tests/**` | | ✓ | `Farm.Modules.Administration.Tests` | | |
 | `tests_integration`: `src/tests/Farm.Web.IntegrationTests/**` | | ✓ | `Farm.Web.IntegrationTests` | | |
 | `tests_shared`: `src/tests/Farm.Testing.Shared/**` | ✓ | ✓ | all | all | ✓ |
@@ -220,6 +222,15 @@ dependency is why the `api` and `tests_api` buckets also select
 `Farm.Modules.Identity.Tests`: an api-only or `Farm.Web.Api.Tests`-only change
 can alter `CustomWebApplicationFactory`'s runtime behavior without touching any
 identity-owned path, and would otherwise silently escape re-selection.
+
+`inventory` follows the same controller-owning pattern: its eleven moved
+controllers' own retained route coverage (`RouteTableSnapshotTests`) still stays
+behind in `Farm.Web.Api.Tests`, so the bucket selects both
+`Farm.Modules.Inventory.Tests` and `Farm.Web.Api.Tests`. Like `identity`, some
+relocated tests in `Farm.Modules.Inventory.Tests` also reuse
+`CustomWebApplicationFactory` and shared `TestInfrastructure` helpers from
+`Farm.Web.Api.Tests` via a direct project reference, which is why the `api`,
+`infra`, and `tests_api` rows above also include `Farm.Modules.Inventory.Tests`.
 
 `administration` (issue #2042, Phase 14) follows the same controller-owning,
 reverse-dependency pattern as `identity`: the Admin Control Center overview
