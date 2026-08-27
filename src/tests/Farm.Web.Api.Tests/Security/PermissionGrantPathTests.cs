@@ -101,6 +101,11 @@ public sealed class PermissionGrantPathTests
         // guard scanned via AdminHomeAssistantController silently changed identity. Added now so
         // Farm.Modules.Administration's [RequirePermission] sites stay covered.
         typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
+        // Issue #2088: Farm.Modules.Gcode and Farm.Modules.Inventory were extracted by the
+        // module-decomposition epic (#2019, Phases 11/16) but never got an anchor here, so
+        // their [RequirePermission] grant sites silently dropped out of this guard.
+        typeof(Farm.Web.Api.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
+        typeof(Farm.Web.Api.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
     ];
 
     [Fact]
