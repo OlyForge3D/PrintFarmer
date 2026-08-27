@@ -114,4 +114,43 @@ final class SignalRServiceTests: XCTestCase {
         )
         await service.disconnect()
     }
+
+    func testTransportCancellationDuringNormalConnectAllowsLaterRecovery() async {
+        let entered = AsyncBarrier()
+        let release = AsyncBarrier()
+        defer {
+            entered.close()
+            release.close()
+        }
+        mockSession.asyncRequestHandler = { _ in
+            entered.signal()
+            await release.arriveAndWait()
+            throw URLError(.cancelled)
+        }
+        let service = SignalRService(
+            serverURL: TestData.testBaseURL,
+            session: mockSession.urlSession,
+            tokenProvider: { "test-token" }
+        )
+
+        let firstConnect = Task {
+            try await service.connect()
+        }
+        await entered.waitUntilArrived()
+        release.release()
+        _ = try? await firstConnect.value
+
+        mockSession.asyncRequestHandler = nil
+        mockSession.requestHandler = { request in
+            (TestData.httpResponse(url: request.url, statusCode: 500), Data("{}".utf8))
+        }
+        await service.ensureConnected()
+
+        XCTAssertGreaterThanOrEqual(
+            mockSession.capturedRequests.count,
+            2,
+            "A transport-cancelled normal connect must leave recovery enabled"
+        )
+        await service.disconnect()
+    }
 }

@@ -501,7 +501,10 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
         do {
             try await performConnect(myGen: myGen)
-        } catch let error where Self.isCancellation(error) {
+        } catch let error where Self.isCancellation(
+            error,
+            includesTransportCancellation: !cancellationMarksIntentionalDisconnect
+        ) {
             lifecycleSync {
                 guard self.generation == myGen, !self.intentionalDisconnect else {
                     return
@@ -527,11 +530,15 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         }
     }
 
-    private static func isCancellation(_ error: Error) -> Bool {
+    private static func isCancellation(
+        _ error: Error,
+        includesTransportCancellation: Bool
+    ) -> Bool {
         if error is CancellationError {
             return true
         }
-        return (error as? URLError)?.code == .cancelled
+        return includesTransportCancellation
+            && (error as? URLError)?.code == .cancelled
     }
 
     func disconnect() async {
