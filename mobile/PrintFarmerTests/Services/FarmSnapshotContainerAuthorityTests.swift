@@ -76,8 +76,10 @@ private final class BlockingCapabilitiesService: SystemCapabilitiesServiceProtoc
         self.resolved = resolved
     }
 
-    func refresh() async {
+    @discardableResult
+    func refresh() async -> SystemCapabilitiesRefreshOutcome {
         await refreshBarrier.arriveAndWait()
+        return .loaded
     }
 
     func close() {

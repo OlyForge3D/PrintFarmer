@@ -452,6 +452,251 @@ final class ConnectionMonitorTests: XCTestCase {
             "a discarded sample must not pollute the hysteresis counter either"
         )
     }
+
+    // MARK: - Backend readiness gate
+
+    func testReadinessSucceedsWhenEveryEnabledProbeSucceeds() async {
+        let recorder = BackendProbeRecorder()
+        let capabilities = TestCapabilitiesService()
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(endpoint: .api) {
+                    await recorder.record(.api)
+                },
+                BackendReadinessProbe(endpoint: .attention) {
+                    await recorder.record(.attention)
+                },
+            ]
+        )
+
+        let result = await BackendReadinessChecker().check(plan: plan)
+
+        XCTAssertFalse(result.wasCancelled)
+        XCTAssertTrue(result.failures.isEmpty)
+        let recorded = await recorder.snapshot()
+        XCTAssertEqual(Set(recorded), Set([.api, .attention]))
+    }
+
+    func testReadinessSkipsCapabilityDisabledProbes() async {
+        var resolved = ResolvedSystemCapabilities.defaults
+        resolved.attentionEnabled = false
+        resolved.filamentCoverageEnabled = false
+        resolved.shiftPlanEnabled = false
+        resolved.printedPartsInventoryEnabled = false
+        let recorder = BackendProbeRecorder()
+        let capabilities = TestCapabilitiesService(resolved: resolved)
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(endpoint: .printers) {
+                    await recorder.record(.printers)
+                },
+                BackendReadinessProbe(
+                    endpoint: .attention,
+                    isEnabled: { $0.attentionEnabled }
+                ) {
+                    await recorder.record(.attention)
+                },
+                BackendReadinessProbe(
+                    endpoint: .filamentCoverage,
+                    isEnabled: { $0.filamentCoverageEnabled }
+                ) {
+                    await recorder.record(.filamentCoverage)
+                },
+                BackendReadinessProbe(
+                    endpoint: .shiftTasks,
+                    isEnabled: { $0.shiftPlanEnabled }
+                ) {
+                    await recorder.record(.shiftTasks)
+                },
+                BackendReadinessProbe(
+                    endpoint: .partsInventory,
+                    isEnabled: { $0.printedPartsInventoryEnabled }
+                ) {
+                    await recorder.record(.partsInventory)
+                },
+            ]
+        )
+
+        let result = await BackendReadinessChecker().check(plan: plan)
+
+        XCTAssertTrue(result.failures.isEmpty)
+        let recorded = await recorder.snapshot()
+        XCTAssertEqual(recorded, [.printers])
+    }
+
+    func testReadinessAggregatesFailuresInStableDisplayOrder() async {
+        let capabilities = TestCapabilitiesService()
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(endpoint: .dispatch) {
+                    throw ReadinessTestError.failed
+                },
+                BackendReadinessProbe(endpoint: .jobs) {},
+                BackendReadinessProbe(endpoint: .api) {
+                    throw ReadinessTestError.failed
+                },
+            ]
+        )
+
+        let result = await BackendReadinessChecker().check(plan: plan)
+
+        XCTAssertEqual(result.failures.map(\.endpoint), [.api, .dispatch])
+    }
+
+    func testReadinessReportsCapabilitiesRefreshFailureButStillChecksFeatures() async {
+        let recorder = BackendProbeRecorder()
+        let capabilities = TestCapabilitiesService(outcome: .failed)
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(endpoint: .printers) {
+                    await recorder.record(.printers)
+                },
+            ]
+        )
+
+        let result = await BackendReadinessChecker().check(plan: plan)
+
+        XCTAssertEqual(result.failures.map(\.endpoint), [.systemCapabilities])
+        let recorded = await recorder.snapshot()
+        XCTAssertEqual(recorded, [.printers])
+    }
+
+    func testReadinessAcceptsLegacyCapabilitiesDefaults() async {
+        let capabilities = TestCapabilitiesService(outcome: .legacyDefaults)
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [BackendReadinessProbe(endpoint: .api) {}]
+        )
+
+        let result = await BackendReadinessChecker().check(plan: plan)
+
+        XCTAssertTrue(result.failures.isEmpty)
+    }
+
+    func testReadinessTimesOutAnUnresponsiveProbe() async {
+        let capabilities = TestCapabilitiesService()
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(endpoint: .signalR) {
+                    try await Task.sleep(for: .seconds(30))
+                },
+            ]
+        )
+
+        let result = await BackendReadinessChecker(timeout: .milliseconds(5)).check(plan: plan)
+
+        XCTAssertEqual(result.failures.map(\.endpoint), [.signalR])
+    }
+
+    func testReadinessCancellationDoesNotBecomeAServiceFailure() async {
+        let started = AsyncBarrier()
+        defer { started.close() }
+        let capabilities = TestCapabilitiesService()
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(endpoint: .api) {
+                    started.signal()
+                    try await Task.sleep(for: .seconds(30))
+                },
+            ]
+        )
+
+        let task = Task {
+            await BackendReadinessChecker().check(plan: plan)
+        }
+        await started.waitUntilArrived()
+        task.cancel()
+        let result = await task.value
+
+        XCTAssertTrue(result.wasCancelled)
+        XCTAssertTrue(result.failures.isEmpty)
+    }
+
+    func testConnectionGateDiscardsSupersededGenerationResult() async {
+        let started = AsyncBarrier()
+        defer { started.close() }
+        let capabilities = TestCapabilitiesService()
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(endpoint: .api) {
+                    started.signal()
+                    try await Task.sleep(for: .milliseconds(20))
+                },
+            ]
+        )
+        let gate = BackendConnectionGate()
+        var isCurrent = true
+
+        let task = Task {
+            await gate.check(plan: plan, generation: 7) {
+                isCurrent
+            }
+        }
+        await started.waitUntilArrived()
+        isCurrent = false
+        await task.value
+
+        XCTAssertEqual(gate.state, .checking)
+        XCTAssertFalse(gate.allowsMainContent)
+    }
+
+    func testConnectionGateResetInvalidatesInFlightAttempt() async {
+        let started = AsyncBarrier()
+        defer { started.close() }
+        let capabilities = TestCapabilitiesService()
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(endpoint: .api) {
+                    started.signal()
+                    try await Task.sleep(for: .milliseconds(20))
+                },
+            ]
+        )
+        let gate = BackendConnectionGate()
+
+        let task = Task {
+            await gate.check(plan: plan, generation: 1) { true }
+        }
+        await started.waitUntilArrived()
+        gate.reset()
+        await task.value
+
+        XCTAssertEqual(gate.state, .idle)
+        XCTAssertFalse(gate.allowsMainContent)
+    }
+
+    func testConnectionGateAcknowledgesFailureOnceAndAllowsOfflineUI() async {
+        let capabilities = TestCapabilitiesService()
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(endpoint: .attention) {
+                    throw ReadinessTestError.failed
+                },
+            ]
+        )
+        let gate = BackendConnectionGate()
+
+        await gate.check(plan: plan, generation: 2) { true }
+        XCTAssertEqual(gate.failures?.map(\.endpoint), [.attention])
+        XCTAssertFalse(gate.allowsMainContent)
+        XCTAssertTrue(gate.failureMessage?.contains("Attention") == true)
+
+        gate.continueOffline()
+        gate.continueOffline()
+
+        XCTAssertEqual(gate.state, .proceedingOffline)
+        XCTAssertTrue(gate.allowsMainContent)
+        XCTAssertNil(gate.failures)
+    }
 }
 
 // MARK: - Test doubles
@@ -489,4 +734,39 @@ private actor CallCounter {
         count += 1
         return count
     }
+}
+
+@MainActor
+private final class TestCapabilitiesService: SystemCapabilitiesServiceProtocol, @unchecked Sendable {
+    private(set) var resolved: ResolvedSystemCapabilities
+    private let outcome: SystemCapabilitiesRefreshOutcome
+
+    init(
+        resolved: ResolvedSystemCapabilities = .defaults,
+        outcome: SystemCapabilitiesRefreshOutcome = .loaded
+    ) {
+        self.resolved = resolved
+        self.outcome = outcome
+    }
+
+    @discardableResult
+    func refresh() async -> SystemCapabilitiesRefreshOutcome {
+        outcome
+    }
+}
+
+private actor BackendProbeRecorder {
+    private var endpoints: [BackendServiceEndpoint] = []
+
+    func record(_ endpoint: BackendServiceEndpoint) {
+        endpoints.append(endpoint)
+    }
+
+    func snapshot() -> [BackendServiceEndpoint] {
+        endpoints
+    }
+}
+
+private enum ReadinessTestError: Error {
+    case failed
 }

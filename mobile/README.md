@@ -61,6 +61,13 @@ keeps its own Keychain-stored credentials.
 - Switching servers rebuilds the app's API, authentication, and SignalR services
   for the newly active server.
 
+### Post-Login Connection Check
+
+After sign-in or session restoration, the app checks each enabled mobile backend
+feature before opening the main interface. If one or more services are
+unavailable, the app names them in an alert and lets you continue with cached
+data and any services that remain available.
+
 ### HTTPS Certificate Trust
 
 Public servers require HTTPS with normal system certificate trust. Cleartext

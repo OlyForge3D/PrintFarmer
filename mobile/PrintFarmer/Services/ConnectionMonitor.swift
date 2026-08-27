@@ -291,3 +291,405 @@ final class ConnectionMonitor {
         await refresh()
     }
 }
+
+enum BackendServiceEndpoint: String, CaseIterable, Hashable, Sendable {
+    case api
+    case systemCapabilities
+    case signalR
+    case printers
+    case jobs
+    case locations
+    case statistics
+    case notifications
+    case spoolInventory
+    case maintenance
+    case attention
+    case filamentCoverage
+    case shiftTasks
+    case partsInventory
+    case autoDispatch
+    case jobAnalytics
+    case predictiveAnalytics
+    case dispatch
+    case failureDetection
+
+    var displayName: String {
+        switch self {
+        case .api: "PrintFarmer API"
+        case .systemCapabilities: "System capabilities"
+        case .signalR: "Live updates"
+        case .printers: "Printers"
+        case .jobs: "Jobs"
+        case .locations: "Locations"
+        case .statistics: "Statistics"
+        case .notifications: "Notifications"
+        case .spoolInventory: "Spool inventory"
+        case .maintenance: "Maintenance"
+        case .attention: "Attention"
+        case .filamentCoverage: "Filament coverage"
+        case .shiftTasks: "Shift tasks"
+        case .partsInventory: "Parts inventory"
+        case .autoDispatch: "Auto dispatch"
+        case .jobAnalytics: "Job analytics"
+        case .predictiveAnalytics: "Predictive analytics"
+        case .dispatch: "Dispatch"
+        case .failureDetection: "Failure detection"
+        }
+    }
+
+    var sortOrder: Int {
+        Self.allCases.firstIndex(of: self) ?? Self.allCases.count
+    }
+}
+
+struct BackendServiceFailure: Identifiable, Equatable, Sendable {
+    let endpoint: BackendServiceEndpoint
+
+    var id: BackendServiceEndpoint { endpoint }
+    var displayName: String { endpoint.displayName }
+}
+
+struct BackendReadinessResult: Equatable, Sendable {
+    let failures: [BackendServiceFailure]
+    let wasCancelled: Bool
+
+    static let cancelled = BackendReadinessResult(failures: [], wasCancelled: true)
+}
+
+struct BackendReadinessProbe: Sendable {
+    let endpoint: BackendServiceEndpoint
+    let isEnabled: @Sendable (ResolvedSystemCapabilities) -> Bool
+    let operation: @Sendable () async throws -> Void
+
+    init(
+        endpoint: BackendServiceEndpoint,
+        isEnabled: @escaping @Sendable (ResolvedSystemCapabilities) -> Bool = { _ in true },
+        operation: @escaping @Sendable () async throws -> Void
+    ) {
+        self.endpoint = endpoint
+        self.isEnabled = isEnabled
+        self.operation = operation
+    }
+}
+
+struct BackendReadinessPlan: Sendable {
+    let capabilitiesService: any SystemCapabilitiesServiceProtocol
+    let probes: [BackendReadinessProbe]
+
+    init(
+        capabilitiesService: any SystemCapabilitiesServiceProtocol,
+        probes: [BackendReadinessProbe]
+    ) {
+        self.capabilitiesService = capabilitiesService
+        self.probes = probes
+    }
+
+    @MainActor
+    init(services: ServiceContainer) {
+        let apiClient = services.apiClient
+        let signalRService = services.signalRService
+        let printerService = services.printerService
+        let jobService = services.jobService
+        let locationService = services.locationService
+        let statisticsService = services.statisticsService
+        let notificationService = services.notificationService
+        let spoolService = services.spoolService
+        let maintenanceService = services.maintenanceService
+        let attentionService = services.attentionService
+        let filamentCoverageService = services.filamentCoverageService
+        let shiftTaskService = services.shiftTaskService
+        let partsInventoryService = services.partsInventoryService
+        let autoPrintService = services.autoPrintService
+        let jobAnalyticsService = services.jobAnalyticsService
+        let predictiveService = services.predictiveService
+        let dispatchService = services.dispatchService
+        let failureDetectionService = services.failureDetectionService
+
+        self.capabilitiesService = services.capabilitiesService
+        self.probes = [
+            BackendReadinessProbe(endpoint: .api) {
+                guard let apiClient, await apiClient.isReachable() else {
+                    throw BackendReadinessProbeError.unavailable
+                }
+            },
+            BackendReadinessProbe(endpoint: .signalR) {
+                // Keep the hub's reconnect authority alive if the readiness
+                // polling budget expires; cancelling connect() marks an
+                // intentional disconnect and would suppress later recovery.
+                Task {
+                    try? await signalRService.connect()
+                }
+                while signalRService.connectionState != .connected {
+                    try Task.checkCancellation()
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+            },
+            BackendReadinessProbe(endpoint: .printers) {
+                _ = try await printerService.list(includeDisabled: false)
+            },
+            BackendReadinessProbe(endpoint: .jobs) {
+                _ = try await jobService.list()
+            },
+            BackendReadinessProbe(endpoint: .locations) {
+                _ = try await locationService.list()
+            },
+            BackendReadinessProbe(endpoint: .statistics) {
+                _ = try await statisticsService.getSummary()
+            },
+            BackendReadinessProbe(endpoint: .notifications) {
+                _ = try await notificationService.getUnreadCount()
+            },
+            BackendReadinessProbe(endpoint: .spoolInventory) {
+                _ = try await spoolService.listSpools(limit: 1, offset: 0)
+            },
+            BackendReadinessProbe(endpoint: .maintenance) {
+                _ = try await maintenanceService.getAlerts()
+            },
+            BackendReadinessProbe(
+                endpoint: .attention,
+                isEnabled: { $0.attentionEnabled }
+            ) {
+                _ = try await attentionService.getFeed(cursor: nil, limit: 1)
+            },
+            BackendReadinessProbe(
+                endpoint: .filamentCoverage,
+                isEnabled: { $0.filamentCoverageEnabled }
+            ) {
+                _ = try await filamentCoverageService.getForFleet()
+            },
+            BackendReadinessProbe(
+                endpoint: .shiftTasks,
+                isEnabled: { $0.shiftPlanEnabled }
+            ) {
+                _ = try await shiftTaskService.loadSnapshot(shiftPlanEnabled: true)
+            },
+            BackendReadinessProbe(
+                endpoint: .partsInventory,
+                isEnabled: { $0.printedPartsInventoryEnabled }
+            ) {
+                _ = try await partsInventoryService.listParts(includeInactive: false)
+            },
+            BackendReadinessProbe(endpoint: .autoDispatch) {
+                _ = try await autoPrintService.getAllStatus()
+            },
+            BackendReadinessProbe(endpoint: .jobAnalytics) {
+                _ = try await jobAnalyticsService.getStats()
+            },
+            BackendReadinessProbe(endpoint: .predictiveAnalytics) {
+                _ = try await predictiveService.getActiveAlerts(printerId: nil)
+            },
+            BackendReadinessProbe(endpoint: .dispatch) {
+                _ = try await dispatchService.getQueueStatus()
+            },
+            BackendReadinessProbe(endpoint: .failureDetection) {
+                _ = try await failureDetectionService.getStatus()
+            },
+        ]
+    }
+}
+
+private enum BackendReadinessProbeError: Error {
+    case unavailable
+}
+
+private enum BackendProbeRaceResult: Sendable {
+    case succeeded
+    case failed
+    case timedOut
+    case cancelled
+}
+
+private enum CapabilitiesRaceResult: Sendable {
+    case completed(SystemCapabilitiesRefreshOutcome)
+    case timedOut
+    case cancelled
+}
+
+struct BackendReadinessChecker: Sendable {
+    let timeout: Duration
+
+    init(timeout: Duration = .seconds(10)) {
+        self.timeout = timeout
+    }
+
+    @MainActor
+    func check(plan: BackendReadinessPlan) async -> BackendReadinessResult {
+        let capabilitiesResult = await refreshCapabilities(
+            plan.capabilitiesService,
+            timeout: min(timeout, .seconds(5))
+        )
+        guard !Task.isCancelled else { return .cancelled }
+
+        var failures: [BackendServiceFailure] = []
+        switch capabilitiesResult {
+        case .completed(.loaded), .completed(.legacyDefaults):
+            break
+        case .completed(.failed), .timedOut:
+            failures.append(BackendServiceFailure(endpoint: .systemCapabilities))
+        case .cancelled:
+            return .cancelled
+        }
+
+        let capabilities = plan.capabilitiesService.resolved
+        let enabledProbes = plan.probes.filter { $0.isEnabled(capabilities) }
+        let probeFailures = await withTaskGroup(of: BackendServiceFailure?.self) { group in
+            for probe in enabledProbes {
+                group.addTask {
+                    let result = await Self.run(probe: probe, timeout: timeout)
+                    switch result {
+                    case .succeeded:
+                        return nil
+                    case .failed, .timedOut:
+                        return BackendServiceFailure(endpoint: probe.endpoint)
+                    case .cancelled:
+                        return nil
+                    }
+                }
+            }
+
+            var collected: [BackendServiceFailure] = []
+            for await failure in group {
+                if let failure {
+                    collected.append(failure)
+                }
+            }
+            return collected
+        }
+
+        guard !Task.isCancelled else { return .cancelled }
+        failures.append(contentsOf: probeFailures)
+        failures.sort { $0.endpoint.sortOrder < $1.endpoint.sortOrder }
+        return BackendReadinessResult(failures: failures, wasCancelled: false)
+    }
+
+    private func refreshCapabilities(
+        _ service: any SystemCapabilitiesServiceProtocol,
+        timeout: Duration
+    ) async -> CapabilitiesRaceResult {
+        await withTaskGroup(of: CapabilitiesRaceResult.self) { group in
+            group.addTask {
+                .completed(await service.refresh())
+            }
+            group.addTask {
+                do {
+                    try await Task.sleep(for: timeout)
+                    return .timedOut
+                } catch {
+                    return .cancelled
+                }
+            }
+
+            let result = await group.next() ?? .cancelled
+            group.cancelAll()
+            return result
+        }
+    }
+
+    private static func run(
+        probe: BackendReadinessProbe,
+        timeout: Duration
+    ) async -> BackendProbeRaceResult {
+        await withTaskGroup(of: BackendProbeRaceResult.self) { group in
+            group.addTask {
+                do {
+                    try Task.checkCancellation()
+                    try await probe.operation()
+                    try Task.checkCancellation()
+                    return .succeeded
+                } catch is CancellationError {
+                    return .cancelled
+                } catch {
+                    return .failed
+                }
+            }
+            group.addTask {
+                do {
+                    try await Task.sleep(for: timeout)
+                    return .timedOut
+                } catch {
+                    return .cancelled
+                }
+            }
+
+            let result = await group.next() ?? .cancelled
+            group.cancelAll()
+            return result
+        }
+    }
+}
+
+enum BackendConnectionGateState: Equatable, Sendable {
+    case idle
+    case checking
+    case ready
+    case failed([BackendServiceFailure])
+    case proceedingOffline
+}
+
+@MainActor
+@Observable
+final class BackendConnectionGate {
+    private(set) var state: BackendConnectionGateState = .idle
+    @ObservationIgnored private let checker: BackendReadinessChecker
+    @ObservationIgnored private var attemptID: UInt64 = 0
+    @ObservationIgnored private var activeGeneration: Int?
+
+    init(timeout: Duration = .seconds(10)) {
+        checker = BackendReadinessChecker(timeout: timeout)
+    }
+
+    var allowsMainContent: Bool {
+        state == .ready || state == .proceedingOffline
+    }
+
+    var isChecking: Bool {
+        state == .checking
+    }
+
+    var failures: [BackendServiceFailure]? {
+        guard case .failed(let failures) = state else { return nil }
+        return failures
+    }
+
+    var failureMessage: String? {
+        guard let failures, !failures.isEmpty else { return nil }
+        let names = failures.map(\.displayName).joined(separator: ", ")
+        return "Unavailable: \(names). You can continue with cached data and any services that are available."
+    }
+
+    func check(
+        plan: BackendReadinessPlan,
+        generation: Int,
+        isCurrent: @escaping @MainActor @Sendable () -> Bool
+    ) async {
+        attemptID &+= 1
+        let attempt = attemptID
+        activeGeneration = generation
+        state = .checking
+        let result = await checker.check(plan: plan)
+        guard !result.wasCancelled,
+              !Task.isCancelled,
+              attemptID == attempt,
+              activeGeneration == generation,
+              isCurrent() else {
+            return
+        }
+
+        if result.failures.isEmpty {
+            state = .ready
+        } else {
+            state = .failed(result.failures)
+        }
+    }
+
+    func continueOffline() {
+        guard case .failed = state else { return }
+        state = .proceedingOffline
+    }
+
+    func reset() {
+        attemptID &+= 1
+        activeGeneration = nil
+        state = .idle
+    }
+}

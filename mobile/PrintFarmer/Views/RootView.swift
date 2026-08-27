@@ -13,6 +13,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var pendingReadyMonitor = PendingReadyMonitor()
     @State private var connectionMonitor = ConnectionMonitor()
+    @State private var connectionGate = BackendConnectionGate()
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
     @AppStorage("hasCompletedNetworkPermission") private var hasCompletedNetworkPermission = false
     @State private var minimumSplashElapsed = false
@@ -48,34 +49,14 @@ struct RootView: View {
                     // ContentView on `isAuthenticated` alone. If the snapshot did not
                     // activate (e.g. startup preparation failed), show an accessible
                     // retry-or-sign-out surface instead of the main app shell.
-                    if authViewModel.snapshotActivationPending {
+                    if authViewModel.isLoading {
+                        BackendConnectionCheckView(isChecking: true)
+                    } else if authViewModel.snapshotActivationPending {
                         SnapshotActivationPendingView()
+                    } else if shouldBypassConnectionGate || connectionGate.allowsMainContent {
+                        mainContent
                     } else {
-                        ContentView()
-                            .id(services.activeServerGeneration)
-                            .task(id: services.activeServerGeneration) {
-                                if !UITestBootstrap.isEnabled {
-                                    pendingReadyMonitor.configure(
-                                        autoPrintService: services.autoPrintService,
-                                        printerService: services.printerService
-                                    )
-                                    await pendingReadyMonitor.requestNotificationPermission()
-                                    pendingReadyMonitor.startMonitoring()
-                                }
-                                do {
-                                    try await services.signalRService.connect()
-                                } catch {
-                                    // SignalR will auto-reconnect; log silently
-                                }
-                                connectionMonitor.configure(
-                                    apiClient: services.apiClient,
-                                    signalRService: services.signalRService
-                                )
-                                connectionMonitor.start()
-                            }
-                            .onChange(of: pendingReadyMonitor.pendingReadyCount) { _, newValue in
-                                router.pendingReadyCount = newValue
-                            }
+                        connectionCheck
                     }
                 } else if !hasSeenOnboarding {
                     OnboardingView(hasSeenOnboarding: $hasSeenOnboarding)
@@ -94,6 +75,7 @@ struct RootView: View {
             if !isAuthenticated {
                 pendingReadyMonitor.stopMonitoring()
                 connectionMonitor.stop()
+                connectionGate.reset()
                 router.pendingReadyCount = 0
                 disconnectTask = Task { await services.signalRService.disconnect() }
             }
@@ -103,7 +85,11 @@ struct RootView: View {
             Task { await CertificateTrustCoordinator.shared.cancelPendingConfirmations() }
             pendingReadyMonitor.stopMonitoring()
             connectionMonitor.stop()
+            connectionGate.reset()
             router.pendingReadyCount = 0
+        }
+        .onChange(of: DemoMode.shared.isActive) {
+            connectionGate.reset()
         }
         .onChange(of: serverRegistry.servers.isEmpty) { _, isEmpty in
             guard isEmpty else { return }
@@ -115,6 +101,7 @@ struct RootView: View {
         }
         .onDisappear {
             connectionMonitor.stop()
+            connectionGate.reset()
             disconnectTask?.cancel()
             staleRegistrySignOutTask?.cancel()
         }
@@ -161,7 +148,74 @@ struct RootView: View {
             && !serverRegistry.servers.isEmpty
             && serverRegistry.activeServerID != nil
             && authViewModel.isAuthenticated
+            && !authViewModel.isLoading
             && !authViewModel.snapshotActivationPending
+            && (shouldBypassConnectionGate || connectionGate.allowsMainContent)
+    }
+
+    private var shouldBypassConnectionGate: Bool {
+        DemoMode.shared.isActive || UITestBootstrap.isEnabled
+    }
+
+    private var mainContent: some View {
+        ContentView()
+            .id(services.activeServerGeneration)
+            .task(id: services.activeServerGeneration) {
+                if !UITestBootstrap.isEnabled {
+                    pendingReadyMonitor.configure(
+                        autoPrintService: services.autoPrintService,
+                        printerService: services.printerService
+                    )
+                    await pendingReadyMonitor.requestNotificationPermission()
+                    pendingReadyMonitor.startMonitoring()
+                }
+                connectionMonitor.configure(
+                    apiClient: services.apiClient,
+                    signalRService: services.signalRService
+                )
+                connectionMonitor.start()
+                await services.signalRService.ensureConnected()
+            }
+            .onChange(of: pendingReadyMonitor.pendingReadyCount) { _, newValue in
+                router.pendingReadyCount = newValue
+            }
+    }
+
+    private var connectionCheck: some View {
+        BackendConnectionCheckView(isChecking: connectionGate.isChecking)
+            .task(id: services.activeServerGeneration) {
+                let generation = services.activeServerGeneration
+                let plan = BackendReadinessPlan(services: services)
+                await connectionGate.check(
+                    plan: plan,
+                    generation: generation
+                ) {
+                    authViewModel.isAuthenticated
+                        && !authViewModel.isLoading
+                        && !authViewModel.snapshotActivationPending
+                        && services.activeServerGeneration == generation
+                }
+            }
+            .alert(
+                "Some services are unavailable",
+                isPresented: Binding(
+                    get: { connectionGate.failures != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            connectionGate.continueOffline()
+                        }
+                    }
+                )
+            ) {
+                Button("Continue Offline") {
+                    connectionGate.continueOffline()
+                }
+            } message: {
+                Text(
+                    connectionGate.failureMessage
+                        ?? "You can continue with cached data and available services."
+                )
+            }
     }
 
     /// Shown briefly while `restoreSession()` checks for a saved token.
@@ -188,6 +242,55 @@ struct RootView: View {
         staleRegistrySignOutTask?.cancel()
         staleRegistrySignOutTask = Task {
             await authViewModel.logoutIfServerRegistryUnavailable(serverRegistry)
+        }
+    }
+
+    private struct BackendConnectionCheckView: View {
+        let isChecking: Bool
+
+        var body: some View {
+            GeometryReader { proxy in
+                ScrollView {
+                    VStack(spacing: 16) {
+                        Image("AppLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 56, height: 56)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .accessibilityHidden(true)
+
+                        Text("PrintFarmer")
+                            .font(.largeTitle.bold())
+                            .foregroundStyle(Color("LaunchText"))
+
+                        if isChecking {
+                            ProgressView()
+                                .controlSize(.large)
+                                .tint(Color("LaunchText"))
+                                .accessibilityLabel("Connecting to backend services")
+                        } else {
+                            Image(systemName: "wifi.exclamationmark")
+                                .font(.title)
+                                .foregroundStyle(Color("LaunchText"))
+                                .accessibilityHidden(true)
+                        }
+
+                        Text(isChecking ? "Connecting to services..." : "Connection check complete")
+                            .font(.headline)
+                            .foregroundStyle(Color("LaunchText"))
+
+                        Text("Preparing your farm and checking each enabled mobile feature.")
+                            .font(.subheadline)
+                            .foregroundStyle(Color("LaunchText"))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(24)
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .background(Color("LaunchBackground"))
+            }
+            .accessibilityIdentifier("backendConnectionGate")
         }
     }
 }
