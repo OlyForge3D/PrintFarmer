@@ -9,7 +9,7 @@ namespace Farm.Web.Api.Tests.Services.PrintQuotas;
 
 public class PrintQuotaGroupEnforcementTests
 {
-    private static AppDbContext CreateDb() => TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+    private static AppDbContext CreateDb() => AppDbTestHelpers.CreateSqliteInMemoryDb();
 
     private static PrintQuotaService CreateService(AppDbContext db)
         => new(db, new Mock<ILogger<PrintQuotaService>>().Object);

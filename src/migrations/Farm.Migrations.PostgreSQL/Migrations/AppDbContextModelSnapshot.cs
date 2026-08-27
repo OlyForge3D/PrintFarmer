@@ -6467,7 +6467,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("SlicerModelNameNormalized", "SlicerTypeNormalized")
                         .HasDatabaseName("IX_PrinterModelAliases_NormalizedLookup");
 
-                    b.HasIndex("PrinterModelId", "SlicerModelName", "SlicerType")
+                    b.HasIndex("PrinterModelId", "SlicerModelNameNormalized", "SlicerTypeNormalized")
                         .IsUnique();
 
                     b.ToTable("PrinterModelAliases");

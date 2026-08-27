@@ -8,7 +8,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoTagging;
 using Farm.Infrastructure.Services.Queue.Dispatch;
-using Farm.Web.Api.Tests.Builders;
+using Farm.Infrastructure.Tests.Builders;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;

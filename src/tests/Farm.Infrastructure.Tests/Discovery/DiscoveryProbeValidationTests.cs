@@ -1,0 +1,928 @@
+﻿using System.Net;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+using Farm.Backend.Plugin.Moonraker;
+using Farm.Backend.Plugin.OctoPrint;
+using Farm.Backend.Plugin.PrusaLink;
+using Farm.Backend.Plugin.Sdcp;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
+using FluentAssertions;
+
+namespace Farm.Infrastructure.Tests.Discovery;
+
+public class DiscoveryProbeValidationTests
+{
+    [Theory]
+    [InlineData("{ \"printer_model\":\"MK4\", \"friendly_name\":\"Prusa\" }", 100)]
+    [InlineData("{ \"printer_model\":\"MK4\" }", 85)]
+    public async Task PrusaLinkProbe_ScoresByFieldCount(string json, int expectedScore)
+    {
+        var probe = new TestablePrusaLinkProbe();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json)
+        };
+
+        (bool valid, int score, string reason) = await probe.CallValidateAsync(response, await response.Content.ReadAsStringAsync());
+
+        valid.Should().BeTrue();
+        score.Should().Be(expectedScore);
+        reason.Should().Contain("PrusaLink detected");
+    }
+
+    [Theory]
+    [InlineData("{ \"friendly_name\":\"My Printer\", \"printer_model\":\"MK4\" }", 100)]
+    [InlineData("{ \"printer_model\":\"MK4\", \"prusa\":\"field\" }", 100)]
+    [InlineData("{ \"friendly_name\":\"Prusa\" }", 85)]
+    public async Task PrusaLinkProbe_RecognizesVariantFields(string json, int expectedScore)
+    {
+        var probe = new TestablePrusaLinkProbe();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json)
+        };
+
+        (bool valid, int score, string reason) = await probe.CallValidateAsync(response, await response.Content.ReadAsStringAsync());
+
+        valid.Should().BeTrue();
+        score.Should().Be(expectedScore);
+        reason.Should().Contain("PrusaLink detected");
+    }
+
+    [Fact]
+    public async Task PrusaLinkProbe_InvalidWhenMissingFields()
+    {
+        var probe = new TestablePrusaLinkProbe();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{}")
+        };
+
+        (bool valid, int score, string reason) = await probe.CallValidateAsync(response, await response.Content.ReadAsStringAsync());
+
+        valid.Should().BeFalse();
+        score.Should().Be(0);
+        reason.Should().Contain("No Prusa fields");
+    }
+
+    [Fact]
+    public async Task OctoPrintProbe_ReturnsZeroWhenMoonrakerDetected()
+    {
+        string json = "{ \"api\":\"1\", \"text\":\"Moonraker compat\" }";
+        var probe = new TestableOctoPrintProbe();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json)
+        };
+
+        (bool valid, int score, string reason) = await probe.CallValidateAsync(response, await response.Content.ReadAsStringAsync());
+
+        valid.Should().BeFalse();
+        score.Should().Be(0);
+        reason.Should().Contain("Moonraker");
+    }
+
+    [Fact]
+    public async Task OctoPrintProbe_Confidence100_WhenTextMentionsOctoPrint()
+    {
+        string json = "{ \"api\":\"1\", \"text\":\"OctoPrint server\" }";
+        var probe = new TestableOctoPrintProbe();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json)
+        };
+
+        (bool valid, int score, string reason) = await probe.CallValidateAsync(response, await response.Content.ReadAsStringAsync());
+
+        valid.Should().BeTrue();
+        score.Should().Be(100);
+        reason.Should().Contain("OctoPrint detected");
+    }
+
+    [Theory]
+    [InlineData("{ \"api\":\"1\", \"text\":\"OctoPrint\" }", 100)]
+    [InlineData("{ \"api\":\"1\", \"text\":\"Octoprint\" }", 100)]  // Case-insensitive match
+    [InlineData("{ \"api\":\"1\" }", 75)]  // No text field
+    public async Task OctoPrintProbe_VariableScoring(string json, int expectedScore)
+    {
+        var probe = new TestableOctoPrintProbe();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json)
+        };
+
+        (bool valid, int score, string _) = await probe.CallValidateAsync(response, await response.Content.ReadAsStringAsync());
+
+        valid.Should().BeTrue();
+        score.Should().Be(expectedScore);
+    }
+
+    [Theory]
+    [InlineData("{ \"result\": { \"state_message\":\"ok\", \"klipper_path\":\"/path\", \"hostname\":\"host\" } }", 100)]
+    [InlineData("{ \"result\": { \"state_message\":\"ok\", \"hostname\":\"host\" } }", 90)]
+    [InlineData("{ \"result\": { \"state_message\":\"ok\" } }", 75)]
+    public async Task MoonrakerProbe_ScoresByKlipperFields(string json, int expectedScore)
+    {
+        var probe = new TestableMoonrakerProbe();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json)
+        };
+
+        (bool valid, int score, string reason) = await probe.CallValidateAsync(response, await response.Content.ReadAsStringAsync());
+
+        valid.Should().BeTrue();
+        score.Should().Be(expectedScore);
+        reason.Should().Contain("Moonraker detected");
+    }
+
+    [Fact]
+    public async Task MoonrakerProbe_InvalidWhenMissingResult()
+    {
+        var probe = new TestableMoonrakerProbe();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{ }")
+        };
+
+        (bool valid, int score, string reason) = await probe.CallValidateAsync(response, await response.Content.ReadAsStringAsync());
+
+        valid.Should().BeFalse();
+        score.Should().Be(0);
+        reason.Should().Contain("Missing 'result'");
+    }
+
+    [Theory]
+    [InlineData(100, 1.0)]
+    [InlineData(90, 0.9)]
+    [InlineData(75, 0.75)]
+    public void MoonrakerOnboardingResolver_MapConfidenceScore_MapsKnownScoresToNormalizedRange(int score, decimal expected)
+    {
+        MoonrakerOnboardingResolver.MapConfidenceScore(score).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(0, 0.0)]
+    [InlineData(50, 0.5)]
+    [InlineData(150, 1.0)]
+    public void MoonrakerOnboardingResolver_MapConfidenceScore_ClampsUnknownScoresToUnitRange(int score, decimal expected)
+    {
+        MoonrakerOnboardingResolver.MapConfidenceScore(score).Should().Be(expected);
+    }
+
+    [Fact]
+    public void MoonrakerOnboardingResolver_ExtractSoftwareVersion_ReadsFromPrinterInfoResult()
+    {
+        const string content = """{ "result": { "software_version": "v0.12.0-123-g1234567" } }""";
+
+        MoonrakerOnboardingResolver.ExtractSoftwareVersion(content).Should().Be("v0.12.0-123-g1234567");
+    }
+
+    [Theory]
+    [InlineData("""{ "result": { "state_message": "ok" } }""")]  // no software_version field
+    [InlineData("{ }")]  // no result wrapper
+    [InlineData("not json")]  // malformed
+    [InlineData("")]
+    public void MoonrakerOnboardingResolver_ExtractSoftwareVersion_ReturnsNullWhenAbsentOrInvalid(string content)
+    {
+        MoonrakerOnboardingResolver.ExtractSoftwareVersion(content).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task MoonrakerProbe_Port80SystemInfo_ReturnsSnapmakerU1()
+    {
+        const string ipAddress = "192.0.2.42";
+        var handler = new RoutingHttpMessageHandler(request =>
+        {
+            if (request.RequestUri?.Port == 80 && request.RequestUri.AbsolutePath == "/machine/system_info")
+            {
+                return JsonResponse("""
+                    {
+                      "result": {
+                        "system_info": {
+                          "product_info": {
+                            "device_name": "Workshop U1",
+                            "machine_type": "Snapmaker U1",
+                            "serial_number": "redacted"
+                          },
+                          "network": {}
+                        }
+                      }
+                    }
+                    """);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("{}")
+            };
+        });
+        var probe = new HttpClientMoonrakerProbe(handler);
+
+        ProbeResult? result = await probe.ProbeAsync(ipAddress, timeoutMs: 1000, cancellationToken: default);
+
+        result.Should().NotBeNull();
+        result!.Printer.Backend.Should().Be(PrinterBackend.Moonraker);
+        result.Printer.BackendPort.Should().Be(80);
+        result.Printer.FrontendPort.Should().Be(80);
+        result.Printer.ServerUrl.Should().Be($"http://{ipAddress}");
+        result.Printer.Name.Should().Be("Workshop U1");
+        result.Printer.Manufacturer.Should().Be("Snapmaker");
+        result.Printer.Model.Should().Be("Snapmaker U1");
+        result.ConfidenceScore.Should().Be(100);
+        result.Reason.Should().Contain("Snapmaker U1");
+        result.Printer.FirmwareFamily.Should().Be(PrinterFirmwareFamily.Klipper);
+        result.Printer.GcodeDialect.Should().Be(PrinterGcodeDialect.Klipper);
+        result.Printer.FirmwareDetectionSource.Should().Be(FirmwareDetectionSource.Printer);
+        result.Printer.FirmwareDetectionConfidence.Should().Be(1.0m);
+        result.Printer.FirmwareDetectionVersion.Should().Be(MoonrakerOnboardingResolver.FirmwareProbeVersion);
+        result.Printer.FirmwareDetectedAtUtc.Should().NotBeNull();
+
+        // /machine/system_info (Snapmaker U1) does not carry software_version.
+        result.Printer.FirmwareVersion.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task MoonrakerProbe_PrinterInfoOn7125_ReturnsStockMoonraker()
+    {
+        const string ipAddress = "192.0.2.43";
+        var handler = new RoutingHttpMessageHandler(request =>
+        {
+            if (request.RequestUri?.Port == 7125 && request.RequestUri.AbsolutePath == "/printer/info")
+            {
+                return JsonResponse("""{ "result": { "state_message": "ready", "klipper_path": "/home/pi/klipper", "hostname": "voron", "software_version": "v0.12.0-123-g1234567" } }""");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("{}")
+            };
+        });
+        var probe = new HttpClientMoonrakerProbe(handler);
+
+        ProbeResult? result = await probe.ProbeAsync(ipAddress, timeoutMs: 1000, cancellationToken: default);
+
+        result.Should().NotBeNull();
+        result!.Printer.BackendPort.Should().Be(7125);
+        result.Printer.FrontendPort.Should().Be(80);
+        result.Printer.Name.Should().Be("voron");
+        result.Printer.Manufacturer.Should().BeNull();
+        result.Printer.Model.Should().BeNull();
+        result.ConfidenceScore.Should().Be(100);
+        result.Reason.Should().Contain("Moonraker detected");
+        result.Printer.FirmwareFamily.Should().Be(PrinterFirmwareFamily.Klipper);
+        result.Printer.GcodeDialect.Should().Be(PrinterGcodeDialect.Klipper);
+        result.Printer.FirmwareDetectionSource.Should().Be(FirmwareDetectionSource.Printer);
+        result.Printer.FirmwareDetectionConfidence.Should().Be(1.0m);
+        result.Printer.FirmwareDetectionVersion.Should().Be(MoonrakerOnboardingResolver.FirmwareProbeVersion);
+        result.Printer.FirmwareDetectedAtUtc.Should().NotBeNull();
+        result.Printer.FirmwareVersion.Should().Be("v0.12.0-123-g1234567");
+    }
+
+    [Fact]
+    public async Task MoonrakerProbe_NonU1SystemInfo_ReturnsNoResult()
+    {
+        const string ipAddress = "192.0.2.44";
+        var handler = new RoutingHttpMessageHandler(request =>
+        {
+            if (request.RequestUri?.Port == 80 && request.RequestUri.AbsolutePath == "/machine/system_info")
+            {
+                return JsonResponse("""
+                    {
+                      "result": {
+                        "system_info": {
+                          "product_info": {
+                            "device_name": "Generic Klipper",
+                            "machine_type": "Voron 2.4"
+                          },
+                          "network": {}
+                        }
+                      }
+                    }
+                    """);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("{}")
+            };
+        });
+        var probe = new HttpClientMoonrakerProbe(handler);
+
+        ProbeResult? result = await probe.ProbeAsync(ipAddress, timeoutMs: 1000, cancellationToken: default);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task MoonrakerProbe_Port80SnapmakerNonU1_ReturnsNoResult()
+    {
+        const string ipAddress = "192.0.2.46";
+        var handler = new RoutingHttpMessageHandler(request =>
+        {
+            if (request.RequestUri?.Port == 80 && request.RequestUri.AbsolutePath == "/machine/system_info")
+            {
+                return JsonResponse("""
+                    {
+                      "result": {
+                        "system_info": {
+                          "product_info": {
+                            "manufacturer": "Snapmaker",
+                            "model": "J1",
+                            "serial_number": "U1-SERIAL-DOES-NOT-MATTER"
+                          },
+                          "network": {}
+                        }
+                      }
+                    }
+                    """);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("{}")
+            };
+        });
+        var probe = new HttpClientMoonrakerProbe(handler);
+
+        ProbeResult? result = await probe.ProbeAsync(ipAddress, timeoutMs: 1000, cancellationToken: default);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_Port80SystemInfo_ReturnsSnapmakerU1CatalogHints()
+    {
+        var handler = new RoutingHttpMessageHandler(request =>
+        {
+            if (request.RequestUri?.Port == 80 && request.RequestUri.AbsolutePath == "/machine/system_info")
+            {
+                return JsonResponse("""
+                    {
+                      "result": {
+                        "system_info": {
+                          "product_info": {
+                            "device_name": "Workshop U1",
+                            "manufacturer": "Snapmaker",
+                            "model": "U1"
+                          }
+                        }
+                      }
+                    }
+                    """);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("{}")
+            };
+        });
+        using var client = new HttpClient(handler);
+
+        MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(
+            client,
+            new Uri("http://192.0.2.45"),
+            preferredBackendPort: null,
+            cancellationToken: default);
+
+        resolution.Should().NotBeNull();
+        resolution!.BackendPort.Should().Be(80);
+        resolution.EndpointPath.Should().Be("/machine/system_info");
+        resolution.DeviceName.Should().Be("Workshop U1");
+        resolution.Manufacturer.Should().Be("Snapmaker");
+        resolution.Model.Should().Be("Snapmaker U1");
+        resolution.IsSnapmakerU1.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ExtractSnapmakerU1Metadata_ProductInfoIdentifiesU1_ReturnsCatalogModelName()
+    {
+        const string json = """
+            {
+              "result": {
+                "system_info": {
+                  "product_info": {
+                    "manufacturer": "Snapmaker",
+                    "model": "U1"
+                  }
+                }
+              }
+            }
+            """;
+
+        SnapmakerU1Metadata? metadata = MoonrakerOnboardingResolver.ExtractSnapmakerU1Metadata(json);
+
+        metadata.Should().NotBeNull();
+        metadata!.Manufacturer.Should().Be("Snapmaker");
+        metadata.Model.Should().Be("Snapmaker U1");
+        metadata.DeviceName.Should().Be("U1");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ExplicitUrlPort_DoesNotFallbackToPort80()
+    {
+        var requestedPaths = new List<string>();
+        var handler = new RoutingHttpMessageHandler(request =>
+        {
+            requestedPaths.Add($"{request.RequestUri?.Port}{request.RequestUri?.AbsolutePath}");
+            if (request.RequestUri?.Port == 80 && request.RequestUri.AbsolutePath == "/machine/system_info")
+            {
+                return JsonResponse("""
+                    {
+                      "result": {
+                        "system_info": {
+                          "product_info": {
+                            "machine_type": "Snapmaker U1"
+                          }
+                        }
+                      }
+                    }
+                    """);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("{}")
+            };
+        });
+        using var client = new HttpClient(handler);
+
+        MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(
+            client,
+            new Uri("http://192.0.2.47:8123"),
+            preferredBackendPort: null,
+            cancellationToken: default);
+
+        resolution.Should().BeNull();
+        requestedPaths.Should().Equal("8123/printer/info");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ExplicitUrlPortWithDefaultPreferredPort_ProbesOnlyUrlPort()
+    {
+        var requestedPaths = new List<string>();
+        var handler = new RoutingHttpMessageHandler(request =>
+        {
+            requestedPaths.Add($"{request.RequestUri?.Port}{request.RequestUri?.AbsolutePath}");
+            if (request.RequestUri?.Port == 8123 && request.RequestUri.AbsolutePath == "/printer/info")
+            {
+                return JsonResponse("""{ "result": { "state_message": "ready", "hostname": "url-port" } }""");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("{}")
+            };
+        });
+        using var client = new HttpClient(handler);
+
+        MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(
+            client,
+            new Uri("http://192.0.2.49:8123"),
+            preferredBackendPort: 7125,
+            cancellationToken: default);
+
+        resolution.Should().NotBeNull();
+        resolution!.BackendPort.Should().Be(8123);
+        resolution.EndpointPath.Should().Be("/printer/info");
+        requestedPaths.Should().Equal("8123/printer/info");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_PreferredCustomPort_HonorsCustomPortWithoutFallback()
+    {
+        var requestedPaths = new List<string>();
+        var handler = new RoutingHttpMessageHandler(request =>
+        {
+            requestedPaths.Add($"{request.RequestUri?.Port}{request.RequestUri?.AbsolutePath}");
+            if (request.RequestUri?.Port == 9234 && request.RequestUri.AbsolutePath == "/printer/info")
+            {
+                return JsonResponse("""{ "result": { "state_message": "ready", "hostname": "preferred-port" } }""");
+            }
+
+            return JsonResponse("""
+                {
+                  "result": {
+                    "system_info": {
+                      "product_info": {
+                        "machine_type": "Snapmaker U1"
+                      }
+                    }
+                  }
+                }
+                """);
+        });
+        using var client = new HttpClient(handler);
+
+        MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(
+            client,
+            new Uri("http://192.0.2.48"),
+            preferredBackendPort: 9234,
+            cancellationToken: default);
+
+        resolution.Should().NotBeNull();
+        resolution!.BackendPort.Should().Be(9234);
+        resolution.EndpointPath.Should().Be("/printer/info");
+        resolution.IsSnapmakerU1.Should().BeFalse();
+        requestedPaths.Should().Equal("9234/printer/info");
+    }
+
+    [Fact]
+    public async Task AllProbes_InvalidWhenJsonMalformed()
+    {
+        // Test each probe with invalid JSON
+        var probes = new INetworkDiscoveryProbe[]
+        {
+            new PrusaLinkDiscoveryProbe(),
+            new OctoPrintDiscoveryProbe(),
+            new MoonrakerDiscoveryProbe(),
+        };
+
+        foreach (INetworkDiscoveryProbe probe in probes)
+        {
+            using var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{ broken json")
+            };
+
+            // Should handle JsonException gracefully
+            Func<Task> act = async () => await probe.ProbeAsync("127.0.0.1", timeoutMs: 1000, cancellationToken: default);
+            await act.Should().NotThrowAsync();
+        }
+    }
+
+    [Fact]
+    public async Task PrusaLinkProbe_InvalidWhenStatusNotOk()
+    {
+        var probe = new TestablePrusaLinkProbe();
+        using var response = new HttpResponseMessage(HttpStatusCode.NotFound)
+        {
+            Content = new StringContent("{ \"printer_model\":\"MK4\" }")
+        };
+
+        (bool valid, int score, string reason) = await probe.CallValidateAsync(response, await response.Content.ReadAsStringAsync());
+
+        valid.Should().BeFalse();
+        score.Should().Be(0);
+        reason.Should().Contain("HTTP error");
+    }
+
+    [Fact]
+    public async Task OctoPrintProbe_InvalidWhenStatusNotOk()
+    {
+        var probe = new TestableOctoPrintProbe();
+        using var response = new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("{ \"api\":\"1\" }")
+        };
+
+        (bool valid, int score, string reason) = await probe.CallValidateAsync(response, await response.Content.ReadAsStringAsync());
+
+        valid.Should().BeFalse();
+        score.Should().Be(0);
+        reason.Should().Contain("HTTP error");
+    }
+
+    [Fact]
+    public async Task MoonrakerProbe_InvalidWhenStatusNotOk()
+    {
+        var probe = new TestableMoonrakerProbe();
+        using var response = new HttpResponseMessage(HttpStatusCode.Unauthorized)
+        {
+            Content = new StringContent("{ \"result\": { \"state_message\":\"ok\" } }")
+        };
+
+        (bool valid, int score, string reason) = await probe.CallValidateAsync(response, await response.Content.ReadAsStringAsync());
+
+        valid.Should().BeFalse();
+        score.Should().Be(0);
+        reason.Should().Contain("HTTP error");
+    }
+
+    [Fact]
+    public async Task BaseProbe_ReturnsResultWhenValidatePasses()
+    {
+        using var server = new LoopbackServer();
+        server.Start();
+
+        var probe = new TestableBaseProbe(server.Port, shouldValidate: true);
+
+        // Widened from 2000ms: this is a real HTTP round-trip over loopback, and under full
+        // test-suite parallelism (maxParallelThreads=0), thread-pool/CPU contention from dozens
+        // of concurrently-running hosts can legitimately delay it past a short timeout.
+        ProbeResult? result = await probe.ProbeAsync("127.0.0.1", timeoutMs: 10000, cancellationToken: default);
+
+        result.Should().NotBeNull();
+        result!.Printer.Backend.Should().Be(PrinterBackend.Moonraker);
+        result.Printer.BackendPort.Should().Be(server.Port);
+        result.Printer.ServerUrl.Should().Be("http://127.0.0.1");
+        result.ConfidenceScore.Should().Be(80);
+        result.Reason.Should().Be("ok");
+        result.Printer.Name.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task BaseProbe_ReturnsNullWhenValidateFails()
+    {
+        using var server = new LoopbackServer();
+        server.Start();
+
+        var probe = new TestableBaseProbe(server.Port, shouldValidate: false);
+
+        ProbeResult? result = await probe.ProbeAsync("127.0.0.1", timeoutMs: 2000, cancellationToken: default);
+
+        result.Should().BeNull();
+    }
+
+    private sealed class TestablePrusaLinkProbe : PrusaLinkDiscoveryProbe
+    {
+        public Task<(bool, int, string)> CallValidateAsync(HttpResponseMessage response, string content) => ValidateResponseAsync(response, content);
+    }
+
+    private sealed class TestableOctoPrintProbe : OctoPrintDiscoveryProbe
+    {
+        public Task<(bool, int, string)> CallValidateAsync(HttpResponseMessage response, string content) => ValidateResponseAsync(response, content);
+    }
+
+    private sealed class TestableMoonrakerProbe : MoonrakerDiscoveryProbe
+    {
+        public Task<(bool, int, string)> CallValidateAsync(HttpResponseMessage response, string content) => ValidateResponseAsync(response, content);
+    }
+
+    private sealed class HttpClientMoonrakerProbe(HttpMessageHandler handler) : MoonrakerDiscoveryProbe
+    {
+        private readonly HttpMessageHandler _handler = handler;
+
+        protected override HttpClient CreateHttpClient(int timeoutMs) => new(_handler)
+        {
+            Timeout = TimeSpan.FromMilliseconds(timeoutMs)
+        };
+
+        protected override Task<string?> TryResolveHostNameAsync(string ipAddress, CancellationToken cancellationToken)
+        {
+            return Task.FromResult<string?>(null);
+        }
+    }
+
+    private sealed class RoutingHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> route) : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, HttpResponseMessage> _route = route;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(_route(request));
+        }
+    }
+
+    private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(json)
+    };
+
+    private sealed class TestableBaseProbe(int port, bool shouldValidate) : BaseDiscoveryProbe
+    {
+        private readonly int _port = port;
+        private readonly bool _shouldValidate = shouldValidate;
+
+        public override string DisplayName => "TestBase";
+        protected override int[] Ports => new[] { _port };
+        protected override string EndpointPath => "/test";
+        protected override PrinterBackend Backend => PrinterBackend.Moonraker;
+        protected override string PrinterName => "Loopback";
+
+        protected override Task<(bool IsValid, int ConfidenceScore, string Reason)> ValidateResponseAsync(HttpResponseMessage response, string content)
+        {
+            if (!_shouldValidate)
+            {
+                return Task.FromResult<(bool, int, string)>((false, 0, "no"));
+            }
+
+            return Task.FromResult<(bool, int, string)>((true, 80, "ok"));
+        }
+    }
+
+    [Fact]
+    public async Task SdcpDiscoveryProbe_ReturnsNullOnInvalidJson()
+    {
+        var probe = new SdcpDiscoveryProbe();
+
+        // SdcpDiscoveryProbe uses UDP and catches JsonException
+        // We test by calling it with a non-existent IP (will timeout, then return null)
+        ProbeResult? result = await probe.ProbeAsync("127.0.0.255", timeoutMs: 100, cancellationToken: default);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SdcpDiscoveryProbe_ReturnsNullOnMissingDataStructure()
+    {
+        var probe = new SdcpDiscoveryProbe();
+
+        // Test against invalid IP (will fail gracefully)
+        ProbeResult? result = await probe.ProbeAsync("192.0.2.1", timeoutMs: 100, cancellationToken: default);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task InvalidHttpResponses_HandleEdgeCases()
+    {
+        // Empty content
+        var emptyProbe = new TestablePrusaLinkProbe();
+        using var emptyResponse = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("")
+        };
+
+        Func<Task> act = async () => await emptyProbe.CallValidateAsync(emptyResponse, "");
+        await act.Should().NotThrowAsync();
+
+        // Whitespace only
+        var wsProbe = new TestableOctoPrintProbe();
+        using var wsResponse = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("   ")
+        };
+
+        act = async () => await wsProbe.CallValidateAsync(wsResponse, "   ");
+        await act.Should().NotThrowAsync();
+
+        // Null content
+        var nullProbe = new TestableMoonrakerProbe();
+        using var nullResponse = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = null!
+        };
+
+        // This tests defensive null handling
+        act = async () => await nullProbe.CallValidateAsync(nullResponse, "");
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task MoonrakerProbe_DiscoversFrontendPort()
+    {
+        // Test that frontend port discovery works when multiple ports are available
+        using var loopback = new LoopbackServerOnPort(8080);
+        loopback.Start();
+
+        var probe = new MoonrakerDiscoveryProbe();
+        // This will attempt to discover frontend port; may return null if backend 7125 not available
+        // We're testing defensive behavior here
+        await probe.ProbeAsync("127.0.0.1", timeoutMs: 500, cancellationToken: default);
+    }
+
+    [Fact]
+    public async Task MoonrakerProbe_ExtractHostnameFromResponse()
+    {
+        string json = "{ \"result\": { \"state_message\":\"ok\", \"hostname\":\"my-printer\", \"klipper_path\":\"/path\" } }";
+        var probe = new TestableMoonrakerProbe();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json)
+        };
+
+        (bool valid, int score, string reason) = await probe.CallValidateAsync(response, json);
+
+        valid.Should().BeTrue();
+        score.Should().Be(100);
+        reason.Should().Contain("3/3");
+    }
+
+    [Fact]
+    public async Task MoonrakerProbe_NoHostnameInResponse()
+    {
+        string json = "{ \"result\": { \"state_message\":\"ok\", \"klipper_path\":\"/path\" } }";
+        var probe = new TestableMoonrakerProbe();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json)
+        };
+
+        (bool valid, int score, string reason) = await probe.CallValidateAsync(response, json);
+
+        valid.Should().BeTrue();
+        score.Should().Be(90);
+        reason.Should().Contain("2/3");
+    }
+
+    private sealed class LoopbackServer : IDisposable
+    {
+        private readonly HttpListener _listener;
+        private Task? _worker;
+
+        public int Port { get; }
+
+        public LoopbackServer()
+        {
+            Port = GetFreePort();
+            _listener = new HttpListener();
+            _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
+        }
+
+        public void Start()
+        {
+            _listener.Start();
+            _worker = Task.Run(async () =>
+            {
+                while (_listener.IsListening)
+                {
+                    try
+                    {
+                        HttpListenerContext context = await _listener.GetContextAsync();
+                        context.Response.StatusCode = (int)HttpStatusCode.OK;
+                        await context.Response.OutputStream.FlushAsync();
+                        context.Response.Close();
+                    }
+                    catch (HttpListenerException)
+                    {
+                        break;
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        break;
+                    }
+                }
+            });
+        }
+
+        private static int GetFreePort()
+        {
+            using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            listener.Stop();
+            return port;
+        }
+
+        public void Dispose()
+        {
+            _listener.Close();
+            _worker?.Wait(TimeSpan.FromSeconds(1));
+        }
+    }
+
+    private sealed class LoopbackServerOnPort : IDisposable
+    {
+        private readonly HttpListener _listener;
+        private Task? _worker;
+        private readonly int _port;
+
+        public LoopbackServerOnPort(int port)
+        {
+            _port = port;
+            _listener = new HttpListener();
+            _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+        }
+
+        public void Start()
+        {
+            try
+            {
+                _listener.Start();
+                _worker = Task.Run(async () =>
+                {
+                    while (_listener.IsListening)
+                    {
+                        try
+                        {
+                            HttpListenerContext context = await _listener.GetContextAsync();
+                            context.Response.StatusCode = (int)HttpStatusCode.OK;
+                            await context.Response.OutputStream.FlushAsync();
+                            context.Response.Close();
+                        }
+                        catch (HttpListenerException)
+                        {
+                            break;
+                        }
+                        catch (ObjectDisposedException)
+                        {
+                            break;
+                        }
+                    }
+                });
+            }
+            catch
+            {
+                // Port may be in use, that's ok for this test
+            }
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                _listener.Close();
+                _worker?.Wait(TimeSpan.FromSeconds(1));
+            }
+            catch
+            {
+                // Ignore errors on cleanup
+            }
+        }
+    }
+}

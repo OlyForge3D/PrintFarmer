@@ -12,10 +12,15 @@
 #      `*.Tests.csproj` glob (it is "...IntegrationTests.csproj", not
 #      "...Integration.Tests.csproj") and so is never auto-discovered by (1)
 #      — is present in the manifest anyway, by explicit name.
-#   4. `Farm.Web.Api.Tests`'s shards are not exhaustive (every subdirectory
-#      under src/tests/Farm.Web.Api.Tests/ covered by exactly one shard) or
-#      not mutually exclusive (no subdirectory listed twice) or any shard is
-#      empty (zero namespace prefixes).
+#   4. Any manifest entry's shards (Farm.Web.Api.Tests and
+#      Farm.Infrastructure.Tests today) are not exhaustive, not mutually
+#      exclusive, or any shard is empty (zero namespace prefixes). Exhaustive/
+#      mutually-exclusive is proven at the directory level for entries whose
+#      declared prefixes are flat top-level names, and always at the
+#      per-source-file level via a filter-vs-namespace match (this is the
+#      only proof available for entries like Farm.Infrastructure.Tests that
+#      split a single top-level directory, e.g. Services/, across shards
+#      using nested "Parent/Child" namespacePrefixes).
 #   5. The #2022 fix regresses: `Farm.Moonraker.Emulator.Tests` and
 #      `Farm.Slicer.ProfileParsing.Tests` must remain registered in the
 #      manifest (they are only reachable via the tests_other/full-safe
@@ -69,6 +74,259 @@ import json
 import os
 import re
 import sys
+
+
+def _strip_noncode(text):
+    """Return a copy of `text` with every character that is not real C#
+    code -- comments, and the contents of char/string literals, including
+    the delimiter braces of interpolation holes such as `$"{expr}"` and any
+    string nested inside one -- replaced with a space (newlines are kept so
+    line/character positions are unaffected). Brace-counting over the
+    result therefore reflects only genuine code-block nesting (namespace,
+    class, method, lambda, etc.), and is not perturbed by a `{`/`}` that
+    only exists as interpolation-hole punctuation or as an ordinary
+    character inside a string/char literal or comment.
+    """
+    n = len(text)
+    blanks = []
+
+    def scan_string(i, verbatim, interpolated):
+        start = i
+        while i < n:
+            c = text[i]
+            if not verbatim and c == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if verbatim and c == '"':
+                if i + 1 < n and text[i + 1] == '"':
+                    i += 2
+                    continue
+                blanks.append((start, i))
+                return i + 1
+            if not verbatim and c == '"':
+                blanks.append((start, i))
+                return i + 1
+            if interpolated and c == "{":
+                if i + 1 < n and text[i + 1] == "{":
+                    i += 2
+                    continue
+                blanks.append((start, i))
+                blanks.append((i, i + 1))
+                i = scan_code(i + 1, stop_at_hole_close=True)
+                start = i
+                continue
+            if interpolated and c == "}" and i + 1 < n and text[i + 1] == "}":
+                i += 2
+                continue
+            i += 1
+        blanks.append((start, n))
+        return n
+
+    def scan_raw_string(open_start, body_start, quote_run, dollar_count):
+        """Scan a C# 11 raw string literal's body, starting right after its
+        opening delimiter (`open_start..body_start`, the run of `dollar_count`
+        leading `$` interpolation markers plus the opening `quote_run`-length
+        run of '"' characters), and blank the literal's punctuation --
+        opening delimiter, closing delimiter, and (for `dollar_count == 0`,
+        a non-interpolated raw string) the entire body. The closing
+        delimiter is the first run of at least `quote_run` consecutive '"'
+        characters found at or after `body_start` that is not consumed by a
+        nested hole scan (see below); searching from `body_start` (not
+        `open_start`) is essential, since the opening delimiter is itself
+        such a run and must never be mistaken for its own closer.
+
+        For `dollar_count >= 1` (an interpolated raw string), a run of at
+        least `dollar_count` consecutive '{' characters opens an
+        interpolation hole -- per C# 11 raw-string-interpolation rules, the
+        number of braces needed to open a hole is exactly the string's own
+        dollar count, so e.g. a two-dollar-sign raw string literal needs
+        `{{` to open a hole (a lone '{' is literal body text, not a hole --
+        unlike an ordinary interpolated string or a single-`$` raw string,
+        where one '{' always opens). When the run is LONGER than
+        `dollar_count`, the spec resolves the ambiguity by treating the
+        EXCESS braces at the START of the run as literal content and only
+        the LAST `dollar_count` braces of the run as the actual opener --
+        e.g. for `$$`, a run of three '{' is one literal '{' followed by
+        the two-brace opener '{{' (mirrored on the closing side: `}}}` is
+        the two-brace closer followed by one literal '}'). This is the
+        "excess braces are content, pushed to the outer edge away from the
+        hole" rule from the C# 11 spec (a run of `2*dollar_count - 1`
+        braces is the longest one where every brace is still content
+        adjacent to a hole of one fewer brace; `2*dollar_count` or more is
+        a compile error). Once the opener is consumed, the hole's contents
+        are scanned by
+        `scan_code(..., stop_at_hole_close=True, hole_close_run=dollar_count)`
+        -- the same recursive hole scanner `scan_string` already uses for
+        ordinary interpolated strings, extended here to require a matching
+        `dollar_count`-length run of '}' to actually close the hole at
+        brace-nesting depth zero (consuming only the FIRST `hole_close_run`
+        of that run as the closer, leaving any excess '}' as literal body
+        text for this function to resume scanning, mirroring the open
+        side). This means a nested string literal (raw or otherwise) inside
+        the hole is scanned by its own dedicated call -- with its own
+        independent closing-delimiter search -- rather than being
+        swallowed into this literal's blunt "search body text for the next
+        quote_run-or-more run" search. That blunt search is exactly what
+        let a hole containing a nested raw string literal (of any
+        quote-run length, whether shorter, equal to, or longer than this
+        literal's own `quote_run`) be mistaken for this literal's own
+        closer, since the naive search has no concept of "inside a hole"
+        vs. "in body text".
+
+        For `dollar_count == 0` (a non-interpolated raw string, no holes are
+        possible), the body is blanked in one pass exactly as before.
+        """
+        i = body_start
+        while i < n:
+            c = text[i]
+            if c == '"':
+                j = i
+                while j < n and text[j] == '"':
+                    j += 1
+                if j - i >= quote_run:
+                    blanks.append((open_start, j))
+                    return j
+                i = j
+                continue
+            if dollar_count >= 1 and c == "{":
+                j = i
+                while j < n and text[j] == "{":
+                    j += 1
+                if j - i >= dollar_count:
+                    # Per the C# 11 raw-string-interpolation spec, when a
+                    # run of consecutive '{' is longer than `dollar_count`,
+                    # the EXCESS braces at the START of the run are literal
+                    # content and the LAST `dollar_count` braces of the run
+                    # are the hole opener (the mirror image of the closing
+                    # side below, which keeps the FIRST `hole_close_run`
+                    # braces of its run as the closer and treats any excess
+                    # at the END of that run as literal content). E.g. for
+                    # `$$` (dollar_count=2), a run of three '{' is one
+                    # literal '{' followed by the two-brace opener '{{'.
+                    hole_open_start = j - dollar_count
+                    blanks.append((hole_open_start, j))
+                    i = scan_code(
+                        j,
+                        stop_at_hole_close=True,
+                        hole_close_run=dollar_count,
+                    )
+                    continue
+                # Fewer than dollar_count consecutive '{' is literal body
+                # text (not enough to open a hole per this literal's own
+                # dollar count) -- fall through untouched.
+                i = j
+                continue
+            i += 1
+        blanks.append((open_start, n))
+        return n
+
+    def scan_code(i, stop_at_hole_close, hole_close_run=1):
+        hole_depth = 0
+        while i < n:
+            c = text[i]
+            if c == "/" and i + 1 < n and text[i + 1] == "/":
+                j = text.find("\n", i)
+                j = n if j == -1 else j
+                blanks.append((i, j))
+                i = j
+                continue
+            if c == "/" and i + 1 < n and text[i + 1] == "*":
+                j = text.find("*/", i + 2)
+                j = n if j == -1 else j + 2
+                blanks.append((i, j))
+                i = j
+                continue
+            if c == "'":
+                j = i + 1
+                j = j + 2 if j < n and text[j] == "\\" else j + 1
+                while j < n and text[j] != "'":
+                    j += 1
+                j = min(j + 1, n)
+                blanks.append((i, j))
+                i = j
+                continue
+            if c == '"' or c == "$":
+                # C# 11 raw string literal: zero or more '$' (interpolation
+                # markers), followed by a run of 3-or-more '"' characters.
+                # A run of only 1-2 quotes (an ordinary/empty string, or the
+                # `$"`/`@"`/`$@"`/`@$"` prefixes handled below) is not a raw
+                # string and falls through untouched.
+                j = i
+                while j < n and text[j] == "$":
+                    j += 1
+                dollar_count = j - i
+                k = j
+                while k < n and text[k] == '"':
+                    k += 1
+                quote_run = k - j
+                if quote_run >= 3:
+                    i = scan_raw_string(i, k, quote_run, dollar_count)
+                    continue
+            if text[i:i + 3] in ("$@\"", "@$\""):
+                blanks.append((i, i + 3))
+                i = scan_string(i + 3, verbatim=True, interpolated=True)
+                continue
+            if text[i:i + 2] == '@"':
+                blanks.append((i, i + 2))
+                i = scan_string(i + 2, verbatim=True, interpolated=False)
+                continue
+            if text[i:i + 2] == '$"':
+                blanks.append((i, i + 2))
+                i = scan_string(i + 2, verbatim=False, interpolated=True)
+                continue
+            if c == '"':
+                blanks.append((i, i + 1))
+                i = scan_string(i + 1, verbatim=False, interpolated=False)
+                continue
+            if stop_at_hole_close and c == "{":
+                hole_depth += 1
+                i += 1
+                continue
+            if stop_at_hole_close and c == "}":
+                if hole_depth == 0:
+                    j = i
+                    while j < n and text[j] == "}":
+                        j += 1
+                    if j - i >= hole_close_run:
+                        close_end = i + hole_close_run
+                        blanks.append((i, close_end))
+                        return close_end
+                    i = j
+                    continue
+                hole_depth -= 1
+                i += 1
+                continue
+            i += 1
+        return i
+
+    scan_code(0, stop_at_hole_close=False)
+    out = list(text)
+    for s, e in blanks:
+        for k in range(s, e):
+            if out[k] != "\n":
+                out[k] = " "
+    return "".join(out)
+
+
+def _code_brace_depths(code_text):
+    """Return a list, parallel to `code_text`, of the C#-code brace depth at
+    each character position (the depth *before* consuming that position's
+    character): depth 0 is outside any {}-delimited block. Callers must
+    pass text already run through `_strip_noncode`, so that braces inside
+    comments and string/char literals (including interpolation-hole
+    delimiters) do not perturb the count.
+    """
+    depths = [0] * (len(code_text) + 1)
+    depth = 0
+    for idx, ch in enumerate(code_text):
+        depths[idx] = depth
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+    depths[len(code_text)] = depth
+    return depths
+
 
 manifest_path, src_root = sys.argv[1], sys.argv[2]
 
@@ -297,66 +555,92 @@ for rel in discovered:
     if rel not in manifest_test_projects:
         errors.append(f"discovered test project not registered in manifest: {rel}")
 
-# 4. Farm.Web.Api.Tests shard exhaustiveness / mutual exclusivity / non-empty.
-api_entry = next((e for e in entries if e.get("name") == "Farm.Web.Api.Tests"), None)
-if api_entry is None:
-    errors.append("Farm.Web.Api.Tests entry not found in manifest (required for shard validation)")
-else:
-    shards = api_entry.get("shards", [])
-    if not shards:
-        errors.append("Farm.Web.Api.Tests has no shards defined")
+# 4. Shard exhaustiveness / mutual exclusivity / non-empty, generalized over
+# every manifest entry that declares shards (originally Farm.Web.Api.Tests
+# only; Farm.Infrastructure.Tests added in #2033 with the same obligation).
+# bin/obj are dotnet build output, never test-namespace directories; they
+# only exist locally after a build has run and must not affect shard
+# exhaustiveness checks.
+BUILD_OUTPUT_DIRS = {"bin", "obj"}
 
-    # bin/obj are dotnet build output, never test-namespace directories; they
-    # only exist locally after a build has run and must not affect shard
-    # exhaustiveness checks.
-    BUILD_OUTPUT_DIRS = {"bin", "obj"}
-    api_test_dir = os.path.join(src_root, "tests", "Farm.Web.Api.Tests")
-    actual_subdirs = set()
-    if os.path.isdir(api_test_dir):
-        for entry_name in os.listdir(api_test_dir):
-            if entry_name in BUILD_OUTPUT_DIRS:
-                continue
-            if os.path.isdir(os.path.join(api_test_dir, entry_name)):
-                actual_subdirs.add(entry_name)
-    # "(root)" is a synthetic bucket for loose top-level .cs files that are
-    # not inside any namespace subdirectory -- not a real directory.
-    expected = actual_subdirs | {"(root)"}
+if not any(e.get("shards") for e in entries):
+    errors.append("no manifest entry declares any shards (expected at least Farm.Web.Api.Tests and Farm.Infrastructure.Tests)")
+
+for sharded_entry in entries:
+    entry_name = sharded_entry.get("name", "<unnamed>")
+    shards = sharded_entry.get("shards", [])
+    if not shards:
+        continue
+
+    test_project_rel = sharded_entry.get("testProject")
+    entry_test_dir = os.path.join(src_root, os.path.dirname(test_project_rel)) if test_project_rel else None
+    if not entry_test_dir or not os.path.isdir(entry_test_dir):
+        errors.append(f"{entry_name}: has shards but its test directory does not exist: {entry_test_dir}")
+        continue
 
     seen_prefixes = {}
     for shard in shards:
         shard_name = shard.get("name", "<unnamed shard>")
         prefixes = shard.get("namespacePrefixes", [])
         if not prefixes:
-            errors.append(f"Farm.Web.Api.Tests shard '{shard_name}' has zero namespacePrefixes (must be non-empty)")
+            errors.append(f"{entry_name}: shard '{shard_name}' has zero namespacePrefixes (must be non-empty)")
         for p in prefixes:
             seen_prefixes.setdefault(p, []).append(shard_name)
 
-    # Mutually exclusive: no prefix claimed by more than one shard.
+    # Mutually exclusive: no declared prefix claimed by more than one shard.
     for p, owners in seen_prefixes.items():
         if len(owners) > 1:
-            errors.append(f"Farm.Web.Api.Tests namespace prefix '{p}' claimed by multiple shards: {', '.join(owners)}")
+            errors.append(f"{entry_name}: namespace prefix '{p}' claimed by multiple shards: {', '.join(owners)}")
 
-    # Exhaustive: every real subdirectory (+ the root bucket) must be
-    # claimed by exactly one shard.
-    covered = set(seen_prefixes.keys())
-    missing = expected - covered
-    if missing:
-        errors.append(f"Farm.Web.Api.Tests shards do not cover: {', '.join(sorted(missing))}")
-
-    # No shard should claim something that doesn't exist (catches typos/rot).
-    unexpected = covered - expected
-    if unexpected:
-        errors.append(f"Farm.Web.Api.Tests shards reference nonexistent namespaces: {', '.join(sorted(unexpected))}")
+    # Directory-level exhaustiveness only applies cleanly when every declared
+    # prefix is a flat top-level directory name (Farm.Web.Api.Tests' shards).
+    # Farm.Infrastructure.Tests uses nested "Parent/Child" prefixes (e.g.
+    # "Services/Notifications") to split a single top-level directory (e.g.
+    # "Services") across several shards, so top-level-directory enumeration
+    # cannot prove exhaustiveness there -- the per-file filter check below
+    # (which does not depend on directory structure at all) is the actual
+    # proof for those entries.
+    all_flat = all("/" not in p for p in seen_prefixes)
+    if all_flat:
+        actual_subdirs = set()
+        for child in os.listdir(entry_test_dir):
+            if child in BUILD_OUTPUT_DIRS:
+                continue
+            if os.path.isdir(os.path.join(entry_test_dir, child)):
+                actual_subdirs.add(child)
+        # "(root)" is a synthetic bucket for loose top-level .cs files that
+        # are not inside any namespace subdirectory -- not a real directory.
+        expected = actual_subdirs | {"(root)"}
+        covered = set(seen_prefixes.keys())
+        missing = expected - covered
+        if missing:
+            errors.append(f"{entry_name}: shards do not cover: {', '.join(sorted(missing))}")
+        unexpected = covered - expected
+        if unexpected:
+            errors.append(f"{entry_name}: shards reference nonexistent namespaces: {', '.join(sorted(unexpected))}")
 
     # Directory ownership alone cannot prove the VSTest FullyQualifiedName
-    # expressions select every test. Root-level classes share the base
-    # namespace, and a file may deliberately use a namespace that differs from
-    # its directory (IAppSettingTests does). Check every source file containing
-    # xUnit facts/theories against the positive filter prefixes of its owning
-    # shard. A trailing dot is required so `Data` cannot accidentally match
-    # `DataManagement`, or a root class whose name starts with a directory.
-    shard_by_name = {shard.get("name"): shard for shard in shards}
-    for root, dirs, files in os.walk(api_test_dir):
+    # expressions select every test, and for entries with nested prefixes it
+    # is not even attempted above. Check every source file containing xUnit
+    # facts/theories directly against every shard's filter: it must match
+    # exactly one. Root-level classes share the base namespace, and a file
+    # may deliberately use a namespace that differs from its directory (this
+    # is why this check does not rely on which directory the file is in). A
+    # trailing dot is required in every filter term so `Data` cannot
+    # accidentally match `DataManagement`, or a root class whose name starts
+    # with a directory/shard name.
+    #
+    # The candidate FullyQualifiedName is derived from the actual top-level
+    # `class` declaration nearest above each [Fact]/[Theory] attribute, not
+    # from the file name: several files in this codebase legitimately
+    # declare more than one test class (e.g. a class under test plus its
+    # in-memory fake), and relying on the file name would either miss the
+    # non-eponymous classes entirely or produce a false failure once a class
+    # is renamed independently of its file. See the code-nesting-depth
+    # reasoning further below for how nested (non-owning) classes, such as
+    # an `IClassFixture` factory declared inside its test class, are
+    # excluded from this association.
+    for root, dirs, files in os.walk(entry_test_dir):
         dirs[:] = [d for d in dirs if d not in BUILD_OUTPUT_DIRS]
         for file_name in files:
             if not file_name.endswith(".cs"):
@@ -367,37 +651,152 @@ else:
             if not re.search(r"\[\s*(?:Fact|Theory)\b", text):
                 continue
 
-            relative = os.path.relpath(path, api_test_dir)
-            parts = relative.split(os.sep)
-            prefix = "(root)" if len(parts) == 1 else parts[0]
-            owners = seen_prefixes.get(prefix, [])
-            if len(owners) != 1:
-                continue
-
+            relative = os.path.relpath(path, entry_test_dir)
             namespace_match = re.search(
                 r"^\s*namespace\s+([A-Za-z_][A-Za-z0-9_.]*)",
                 text,
                 re.MULTILINE,
             )
             if namespace_match is None:
-                errors.append(f"Farm.Web.Api.Tests test source has no namespace: {relative}")
+                errors.append(f"{entry_name}: test source has no namespace: {relative}")
                 continue
             namespace = namespace_match.group(1)
-            candidate = f"{namespace}.{os.path.splitext(file_name)[0]}."
-            owner_filter = shard_by_name[owners[0]].get("filter", "")
-            positive_prefixes = re.findall(
-                r"FullyQualifiedName~([^|&()]+)",
-                owner_filter,
-            )
-            if not any(
-                token.endswith(".") and candidate.startswith(token)
-                for token in positive_prefixes
-            ):
-                errors.append(
-                    "Farm.Web.Api.Tests shard "
-                    f"'{owners[0]}' filter does not cover test source {relative} "
-                    f"(expected a prefix matching {candidate})"
+
+            # Restricted to `public` classes: xUnit only discovers [Fact]/
+            # [Theory] methods on a publicly reflectable type, so a private
+            # or internal nested helper/fake class (e.g. a local
+            # IHttpClientFactory stub) can never itself own a test and must
+            # not be picked up as an owning class.
+            #
+            # Public classes alone are not sufficient, though: this codebase
+            # also has a recurring xUnit fixture idiom --
+            #   public class FooTests : IClassFixture<FooTests.Factory>
+            #   {
+            #       public class Factory : CustomWebApplicationFactory { ... }
+            #       [Fact] public async Task Bar() { ... }
+            #   }
+            # -- where the nested `Factory` class is itself public. Treating
+            # every public class as a candidate and picking the "nearest
+            # preceding" one by raw text position mis-attributes facts
+            # declared in the outer class (after the nested class) to the
+            # nested class instead, because the nested class's own body has
+            # already closed by the time the fact appears.
+            #
+            # Distinguishing a true top-level test class from a nested one
+            # requires knowing where each class's body actually ends. Naive
+            # brace counting over the raw source is unreliable because C#
+            # interpolated strings (`$"...{expr}..."`) contain `{`/`}`
+            # characters that are not real code-block delimiters -- but
+            # `_strip_noncode` resolves that by blanking out comments and
+            # the contents of every string/char literal (including
+            # interpolation-hole delimiters and any string nested inside a
+            # hole) before brace-counting, so `_code_brace_depths` gives the
+            # syntactically-grounded nesting depth of each class
+            # declaration: a class at namespace scope (this codebase uses
+            # file-scoped namespaces exclusively) sits at depth 0, and a
+            # class nested inside another class's body (e.g. the
+            # `public class Factory : CustomWebApplicationFactory` xUnit
+            # fixture idiom, or a `[CollectionDefinition]` marker class)
+            # sits at depth 1 or deeper -- regardless of how either class
+            # happens to be indented, so a genuine top-level sibling that is
+            # accidentally mis-indented can never be misattributed as
+            # nested, and a genuinely nested class can never be mistaken for
+            # top-level. If `_strip_noncode` ever fails to recognize some
+            # C# construct (e.g. an unhandled string-literal form), the
+            # resulting depth desync cannot silently misattribute a class:
+            # the brace-balance check below fails closed the moment the
+            # file's overall code-brace depth does not return to 0 at EOF.
+            class_matches = list(
+                re.finditer(
+                    r"\bpublic\s+(?:(?:sealed|abstract|static|partial)\s+)*class\s+"
+                    r"([A-Za-z_][A-Za-z0-9_]*)",
+                    text,
                 )
+            )
+            if not class_matches:
+                errors.append(
+                    f"{entry_name}: test source {relative} has [Fact]/[Theory] "
+                    "attributes but no public class declaration"
+                )
+                continue
+
+            code_depths = _code_brace_depths(_strip_noncode(text))
+            if code_depths[-1] != 0:
+                errors.append(
+                    f"{entry_name}: test source {relative} has unbalanced "
+                    f"braces after comment/string stripping (ends at code "
+                    f"depth {code_depths[-1]} instead of 0) -- the "
+                    "shard-coverage validator's C# tokenizer may not "
+                    "understand a construct in this file; refusing to guess "
+                    "class ownership rather than risk a silent "
+                    "misattribution"
+                )
+                continue
+
+            class_depths = {m.start(): code_depths[m.start()] for m in class_matches}
+            min_depth = min(class_depths.values())
+            if min_depth != 0:
+                errors.append(
+                    f"{entry_name}: test source {relative} has every public class "
+                    f"declaration nested at code depth {min_depth} (none at "
+                    "namespace scope), which the shard-coverage validator did "
+                    "not expect -- refusing to guess which class(es) own the "
+                    "[Fact]/[Theory] attributes here"
+                )
+                continue
+
+            class_positions = [
+                (m.start(), m.group(1))
+                for m in class_matches
+                if class_depths[m.start()] == min_depth
+            ]
+
+            active_classes = set()
+            for attr_match in re.finditer(r"\[\s*(?:Fact|Theory)\b", text):
+                attr_pos = attr_match.start()
+                owning_class = None
+                for class_pos, class_name in class_positions:
+                    if class_pos <= attr_pos:
+                        owning_class = class_name
+                    else:
+                        break
+                if owning_class is None:
+                    errors.append(
+                        f"{entry_name}: test source {relative} has a "
+                        "[Fact]/[Theory] attribute before any top-level class "
+                        "declaration"
+                    )
+                    continue
+                active_classes.add(owning_class)
+
+            for class_name in sorted(active_classes):
+                candidate = f"{namespace}.{class_name}."
+
+                matching_shards = []
+                for shard in shards:
+                    positive_prefixes = re.findall(
+                        r"FullyQualifiedName~([^|&()]+)",
+                        shard.get("filter", ""),
+                    )
+                    if any(
+                        token.endswith(".") and candidate.startswith(token)
+                        for token in positive_prefixes
+                    ):
+                        matching_shards.append(shard.get("name", "<unnamed shard>"))
+
+                if not matching_shards:
+                    errors.append(
+                        f"{entry_name}: no shard filter covers test source {relative} "
+                        f"class {class_name} (candidate FullyQualifiedName prefix "
+                        f"{candidate})"
+                    )
+                elif len(matching_shards) > 1:
+                    errors.append(
+                        f"{entry_name}: test source {relative} class {class_name} is "
+                        f"matched by multiple shard filters: "
+                        f"{', '.join(matching_shards)} (candidate FullyQualifiedName "
+                        f"prefix {candidate})"
+                    )
 
 for e in errors:
     print(f"ERROR: {e}")

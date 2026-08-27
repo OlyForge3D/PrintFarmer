@@ -1,4 +1,6 @@
 ﻿using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
@@ -150,6 +152,137 @@ public sealed class ProfileFamilyServiceTests
             .ThrowAsync<ProfileFamilyConflictException>()
             .WithMessage("*Farm Test*already exists*");
         workerClient.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task CloneFamilyAsync_HashCollidesWithExistingFamily_ThrowsHashConflictNamingExistingFamily()
+    {
+        // #2080 (N-INT-1 / finding 3): a Hash collision on IX_MachineModelProfiles_Hash must
+        // surface as ProfileFamilyHashConflictException, not a raw DbUpdateException/500.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+
+        Guid modelId = Guid.NewGuid();
+        CloneProfileFamilyRequestDto request = Request(modelId);
+        request.FamilyName = "Family Two";
+
+        string collidingHash = ComputeExpectedFamilyHash(
+            request.FamilyName,
+            request.SourceManufacturer,
+            request.SourceMachineModelName,
+            """{"speed":100}""");
+        dbContext.MachineModelProfiles.Add(new MachineModelProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Existing Family",
+            Manufacturer = "Existing",
+            SlicerType = SlicerType.OrcaSlicer,
+            Hash = collidingHash,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        _ = await dbContext.SaveChangesAsync();
+
+        Mock<IProfileFamilyWorkerClient> workerClient = Worker();
+        var service = CreateService(
+            dbContext,
+            Catalog(modelId),
+            Aliases(modelId, slicerModelName: request.FamilyName),
+            Renderer(),
+            workerClient);
+
+        Func<Task> act = () =>
+            service.CloneFamilyAsync(request, Guid.NewGuid(), CancellationToken.None);
+
+        await act.Should()
+            .ThrowAsync<ProfileFamilyHashConflictException>()
+            .WithMessage("*Existing Family*");
+        workerClient.Verify(
+            client => client.GetCatalogAsync("Prusa", null, It.IsAny<CancellationToken>()),
+            Times.Once);
+        workerClient.VerifyNoOtherCalls();
+        (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(1);
+        (await dbContext.MachineProfiles.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CloneFamilyAsync_HashCollidesWithExistingMachineProfile_ThrowsHashConflictNamingExistingMachineProfile()
+    {
+        // #2080 (N-INT-1 / finding 3, review gap raised by Hicks): the family-hash-collision
+        // catch clause was already covered, but the sibling IX_MachineProfiles_Hash catch
+        // clause (a collision on a per-variant machine profile, not the family row itself) had
+        // no regression test at all -- this proves it also surfaces as
+        // ProfileFamilyHashConflictException, not a raw DbUpdateException/500.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+
+        Guid modelId = Guid.NewGuid();
+        CloneProfileFamilyRequestDto request = Request(modelId);
+        request.FamilyName = "Family Four";
+
+        // This family's own hash must NOT collide with anything, so the family-hash catch
+        // clause never fires and the machine-profile-hash catch clause is exercised instead.
+        string familyHash = ComputeExpectedFamilyHash(
+            request.FamilyName,
+            request.SourceManufacturer,
+            request.SourceMachineModelName,
+            """{"speed":100}""");
+        string collidingMachineHash = ComputeExpectedMachineProfileHash(
+            familyHash,
+            "Stock 0.6 nozzle",
+            """{"max_layer_height":["0.45"]}""");
+
+        Guid unrelatedFamilyId = Guid.NewGuid();
+        dbContext.MachineModelProfiles.Add(new MachineModelProfile
+        {
+            Id = unrelatedFamilyId,
+            Name = "Unrelated Family",
+            Manufacturer = "Existing",
+            SlicerType = SlicerType.OrcaSlicer,
+            Hash = new string('B', 64),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        dbContext.MachineProfiles.Add(new MachineProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Unrelated Variant",
+            Manufacturer = "Existing",
+            SlicerType = SlicerType.OrcaSlicer,
+            PrinterModelId = modelId,
+            MachineModelProfileId = unrelatedFamilyId,
+            Hash = collidingMachineHash,
+            SourceSystemPresetName = "Stock 0.6 nozzle",
+            OverridesJson = """{"max_layer_height":["0.45"]}""",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        _ = await dbContext.SaveChangesAsync();
+
+        Mock<IProfileFamilyWorkerClient> workerClient = Worker();
+        var service = CreateService(
+            dbContext,
+            Catalog(modelId),
+            Aliases(modelId, slicerModelName: request.FamilyName),
+            Renderer(),
+            workerClient);
+
+        Func<Task> act = () =>
+            service.CloneFamilyAsync(request, Guid.NewGuid(), CancellationToken.None);
+
+        await act.Should()
+            .ThrowAsync<ProfileFamilyHashConflictException>()
+            .WithMessage("*Stock 0.6 nozzle*");
+        workerClient.Verify(
+            client => client.GetCatalogAsync("Prusa", null, It.IsAny<CancellationToken>()),
+            Times.Once);
+        workerClient.VerifyNoOtherCalls();
+        (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(
+            1,
+            "the new family row must be rolled back along with the failed machine profile insert");
+        (await dbContext.MachineProfiles.CountAsync()).Should().Be(1);
     }
 
     [Fact]
@@ -2750,5 +2883,37 @@ public sealed class ProfileFamilyServiceTests
         return worker.Invocations
             .Where(invocation => invocation.Method.Name == nameof(IProfileFamilyWorkerClient.WriteBundleAsync))
             .Select(invocation => ((ProfileFamilyBundleDto)invocation.Arguments[1]).FamilyId);
+    }
+
+    /// <summary>
+    /// Replicates <c>ProfileFamilyService.ComputeHash</c>'s family-hash formula (#2080) so this
+    /// test can pre-insert a colliding row without reflecting into the private implementation.
+    /// </summary>
+    private static string ComputeExpectedFamilyHash(
+        string familyName,
+        string manufacturer,
+        string modelName,
+        string overridesJson)
+    {
+        string input = string.Join(
+            '\n',
+            familyName,
+            $"{manufacturer.Trim()}/{modelName.Trim()}",
+            overridesJson);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input)));
+    }
+
+    /// <summary>
+    /// Replicates <c>ProfileFamilyService.ComputeHash</c>'s machine-variant-hash formula
+    /// (#2080) so this test can pre-insert a colliding <see cref="MachineProfile"/> row
+    /// without reflecting into the private implementation.
+    /// </summary>
+    private static string ComputeExpectedMachineProfileHash(
+        string familyHash,
+        string sourceSystemPresetName,
+        string overridesJson)
+    {
+        string input = string.Join('\n', familyHash, sourceSystemPresetName, overridesJson);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input)));
     }
 }

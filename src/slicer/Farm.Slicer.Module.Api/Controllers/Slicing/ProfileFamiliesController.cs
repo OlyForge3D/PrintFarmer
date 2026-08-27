@@ -68,6 +68,10 @@ public sealed class ProfileFamiliesController(
         {
             return Conflict(new { code = "profile_family_name_conflict", detail = ex.Message });
         }
+        catch (ProfileFamilyHashConflictException ex)
+        {
+            return Conflict(new { code = "profile_family_hash_conflict", detail = ex.Message });
+        }
         catch (ProfileFamilySourceException ex)
         {
             return UnprocessableEntity(new { code = "source_preset_unavailable", detail = ex.Message });
