@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Matches Farm.Web.Api.csproj's prior suppressions for the moved
+         controllers: 1591 (missing XML doc comment on a public member) and
+         S6960 ("controller has multiple responsibilities") already applied in
+         the host. This is a move-only refactor, so relocating unchanged
+         controllers should not introduce new warnings. -->
+    <NoWarn>$(NoWarn);1591;S6960</NoWarn>
+    <Description>Vertical-slice module for observability: notifications, the unified
+attention feed, statistics, correlation/predictive analytics, monitoring, webhooks,
+Obico server integration, failure detection, user tasks, background-service
+diagnostics, and SignalR connectivity testing. Moves Services/Workers/**,
+Services/Tasks/**, Services/SignalR/**, and 14 controllers out of Farm.Web.Api as
+part of issue #2045 (Phase 17 of epic #2019), following the move-first-rename-last
+module migration pattern. Namespaces remain unchanged (`Farm.Web.Api.Controllers`/
+`Farm.Web.Api.Services.*`). Underlying services remain registered by
+Farm.Infrastructure / Farm.Web.Api host-wide DI and are not moved in this
+phase.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
+    <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
