@@ -19,7 +19,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// <see cref="Farm.Web.Api.Controllers.PrintersController"/> must run the caller-supplied
 /// camera target through <c>IEgressGuard</c> before fetching it, exactly like the
 /// <c>PrintersController.TestConnectionAsync</c> path already covered by
-/// <see cref="PrintersControllerTestConnectionEgressTests"/>. These are HTTP-level tests (not
+/// <c>PrintersControllerTestConnectionEgressTests</c> (now in Farm.Modules.Printers.Tests). These are HTTP-level tests (not
 /// unit tests against a mocked guard) so that the real <c>EgressGuard</c> DNS/IP classification
 /// is exercised end-to-end and a loopback listener can prove the server-side socket was never
 /// opened, not merely that the response code looks right.

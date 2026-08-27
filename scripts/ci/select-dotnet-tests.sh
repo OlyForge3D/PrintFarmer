@@ -439,6 +439,18 @@ load_changed_files() {
 #                     controllers -- carved out of Farm.Web.Api, following the
 #                     devices pattern above). Matched before the generic
 #                     `src/modules/*` case.
+#   printers        — src/modules/Farm.Modules.Printers/** (issue #2046,
+#                     Phase 18: Services/Catalog/**, Services/Discovery/**,
+#                     Services/Printers/**, Validators/CreatePrinterValidator.cs,
+#                     and 8 controllers -- PrintersController (moved as-is, no
+#                     internal decomposition), PrinterGroupsController,
+#                     CatalogController, Controllers/Admin/
+#                     CatalogUpdateController, BedTypeController,
+#                     InternalDiscoveryEventsController, LocationsController,
+#                     and FilaManController -- the largest, most-coupled
+#                     module in the epic, carved out of Farm.Web.Api last on
+#                     purpose). Matched before the generic `src/modules/*`
+#                     case.
 #   migrations_app  — src/migrations/Farm.Migrations.*/**
 #   migrations_slcr — src/migrations/Farm.Slicer.Migrations.*/**
 #   tests_api       — src/tests/Farm.Web.Api.Tests/**
@@ -484,6 +496,8 @@ load_changed_files() {
 #   tests_observability — src/tests/Farm.Modules.Observability.Tests/**
 #                     (issue #2045). Matched before the generic
 #                     `src/tests/*` case.
+#   tests_printers  — src/tests/Farm.Modules.Printers.Tests/** (issue #2046).
+#                     Matched before the generic `src/tests/*` case.
 #   tests_other     — any other src/tests/**
 #   tools           — src/tools/**
 #   dotnet_config   — src/*.props, src/*.targets, src/.editorconfig
@@ -614,6 +628,12 @@ classify_path() {
     # gets its own narrow bucket instead of falling into the full-safe
     # `modules` bucket.
     src/modules/Farm.Modules.Observability/*) printf 'observability' ; return ;;
+    # Farm.Modules.Printers is a concrete vertical-slice module (issue #2046,
+    # Phase 18) following the same pattern as smartplug/maintenance/
+    # calibration/devices/observability above -- matched first so it gets its
+    # own narrow bucket instead of falling into the full-safe `modules`
+    # bucket.
+    src/modules/Farm.Modules.Printers/*) printf 'printers' ; return ;;
     src/modules/*)           printf 'modules' ; return ;;
     src/migrations/Farm.Migrations.*)         printf 'migrations_app' ; return ;;
     src/migrations/Farm.Slicer.Migrations.*)  printf 'migrations_slcr' ; return ;;
@@ -635,6 +655,7 @@ classify_path() {
     src/tests/Farm.Modules.Inventory.Tests/*)   printf 'tests_inventory' ; return ;;
     src/tests/Farm.Modules.Administration.Tests/*) printf 'tests_administration' ; return ;;
     src/tests/Farm.Modules.Observability.Tests/*) printf 'tests_observability' ; return ;;
+    src/tests/Farm.Modules.Printers.Tests/*) printf 'tests_printers' ; return ;;
     src/tests/*)             printf 'tests_other' ; return ;;
     src/tools/*)             printf 'tools' ; return ;;
   esac
@@ -829,6 +850,7 @@ main() {
   local has_printqueue=0
   local has_maintenance=0 has_calibration=0 has_devices=0 has_identity=0
   local has_gcode=0 has_inventory=0 has_administration=0 has_observability=0
+  local has_printers=0
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
   local has_tests_integration=0 has_tests_modules=0 has_tests_shared=0 has_tests_smartplug=0 has_tests_infra=0 has_tests_other=0
@@ -836,6 +858,7 @@ main() {
   local has_tests_printqueue=0
   local has_tests_maintenance=0 has_tests_calibration=0 has_tests_devices=0 has_tests_identity=0
   local has_tests_gcode=0 has_tests_inventory=0 has_tests_administration=0 has_tests_observability=0
+  local has_tests_printers=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
 
   local p category
@@ -864,6 +887,7 @@ main() {
       inventory)       has_inventory=1 ;;
       administration)  has_administration=1 ;;
       observability)   has_observability=1 ;;
+      printers)        has_printers=1 ;;
       migrations_app)  has_mig_app=1 ;;
       migrations_slcr) has_mig_slcr=1 ;;
       tests_api)       has_tests_api=1 ;;
@@ -884,6 +908,7 @@ main() {
       tests_inventory) has_tests_inventory=1 ;;
       tests_administration) has_tests_administration=1 ;;
       tests_observability) has_tests_observability=1 ;;
+      tests_printers)  has_tests_printers=1 ;;
       tests_other)     has_tests_other=1 ;;
       tools)           has_tools=1 ;;
       unknown_src)     has_unknown_src=1 ;;
@@ -954,12 +979,12 @@ main() {
   # every bucket that can request either consumer must also request the build.
   if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
         has_orca || has_smartplug || has_printqueue || has_maintenance || has_calibration || has_devices || has_identity ||
-        has_gcode || has_inventory || has_administration || has_observability ||
+        has_gcode || has_inventory || has_administration || has_observability || has_printers ||
         has_mig_app || has_mig_slcr ||
         has_tests_api || has_tests_slicer || has_tests_orca ||
         has_tests_integration || has_tests_smartplug || has_tests_infra || has_tests_backend_plugins || has_tests_printqueue ||
         has_tests_maintenance || has_tests_calibration || has_tests_devices || has_tests_gcode ||
-        has_tests_identity || has_tests_inventory || has_tests_administration || has_tests_observability || has_tools )); then
+        has_tests_identity || has_tests_inventory || has_tests_administration || has_tests_observability || has_tests_printers || has_tools )); then
     want_dotnet_build="true"
   fi
 
@@ -977,6 +1002,14 @@ main() {
     # AdminDataControllerTests, UnifiedSettingsPerKeyPostTests, and
     # UnifiedSettingsAnonymousAccessTests reference Farm.Web.Api.Tests's
     # CustomWebApplicationFactory directly.
+    # Farm.Modules.Printers.Tests (issue #2046) does NOT need to run here: it
+    # references only Farm.Testing.Shared (not Farm.Web.Api.Tests), so an
+    # api-only change can't alter its runtime behavior. The reverse dependency
+    # runs the other way -- see the dedicated has_printers block below, which
+    # selects Farm.Web.Api.Tests because several PrintersController-adjacent
+    # integration tests (RouteTableSnapshotTests,
+    # InternalDiscoveryEventsControllerTests, PrinterGroupsControllerTests,
+    # CatalogUpdateControllerTests, etc.) stayed there.
     test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.Web.IntegrationTests" "Farm.Modules.Identity.Tests" "Farm.Modules.Inventory.Tests" "Farm.Modules.Administration.Tests")
     net_test_bucket_hit=1
   fi
@@ -1000,9 +1033,11 @@ main() {
     # Farm.Modules.Administration (issue #2042), and Farm.Modules.Observability
     # (issue #2045) also reference
     # Farm.Infrastructure directly, so an infra change must re-run all ten
-    # of their test projects too. Farm.Backend.Plugins.Tests (issue #2034)
+    # of their test projects too. Farm.Modules.Printers (issue #2046) also
+    # references Farm.Infrastructure directly, so it must run too.
+    # Farm.Backend.Plugins.Tests (issue #2034)
     # also references Farm.Infrastructure directly, so it must run too.
-    test_names+=("Farm.Infrastructure.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests" "Farm.Modules.Devices.Tests" "Farm.Modules.Gcode.Tests" "Farm.Modules.Identity.Tests" "Farm.Modules.Inventory.Tests" "Farm.Modules.Administration.Tests" "Farm.Modules.Observability.Tests" "Farm.Backend.Plugins.Tests")
+    test_names+=("Farm.Infrastructure.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests" "Farm.Modules.Devices.Tests" "Farm.Modules.Gcode.Tests" "Farm.Modules.Identity.Tests" "Farm.Modules.Inventory.Tests" "Farm.Modules.Administration.Tests" "Farm.Modules.Observability.Tests" "Farm.Modules.Printers.Tests" "Farm.Backend.Plugins.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_backend )); then
@@ -1025,9 +1060,12 @@ main() {
     # (src/slicer/Farm.Slicer.Module/Farm.Slicer.Module.csproj declares
     # ../../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj),
     # AND directly by Farm.Infrastructure.Tests (issue #2033) AND directly by
-    # Farm.Backend.Plugins.Tests (issue #2034). A Core edit must therefore run
-    # all affected test suites.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests" "Farm.Backend.Plugins.Tests")
+    # Farm.Backend.Plugins.Tests (issue #2034) AND directly by
+    # Farm.Modules.Printers.Tests (issue #2046 --
+    # src/modules/Farm.Modules.Printers/Farm.Modules.Printers.csproj declares
+    # ../../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj).
+    # A Core edit must therefore run all affected test suites.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests" "Farm.Backend.Plugins.Tests" "Farm.Modules.Printers.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_slicer )); then
@@ -1068,7 +1106,13 @@ main() {
     # Farm.Web.Api.Tests -- see docs/MODULE_MIGRATION_PATTERN.md. A
     # controller-owning module must therefore also select Farm.Web.Api.Tests,
     # unlike a pure-service module such as Farm.OrcaSlicer.Worker.
-    test_names+=("Farm.Modules.PrintQueue.Tests" "Farm.Web.Api.Tests")
+    # Farm.Modules.Printers project-references Farm.Modules.PrintQueue
+    # directly (PrintersController's TestConnectionResponse/CameraUrlResult
+    # DTOs, Farm.Web.Api.Controllers.Responses namespace, moved there in
+    # Phase 8, #2036), so a PrintQueue-only change must also select
+    # Farm.Modules.Printers.Tests or a PrintQueue API break can silently reach
+    # Printers with CI green.
+    test_names+=("Farm.Modules.PrintQueue.Tests" "Farm.Modules.Printers.Tests" "Farm.Web.Api.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_maintenance )); then
@@ -1096,8 +1140,11 @@ main() {
     # (GcodeArtifactPromoter's IGcodeArtifactPromoter contract moved there in
     # Phase 10, #2038), so a Calibration-only change must also select
     # Farm.Modules.Gcode.Tests or a Calibration API break can silently reach
-    # Gcode with CI green.
-    test_names+=("Farm.Modules.Calibration.Tests" "Farm.Modules.Gcode.Tests" "Farm.Web.Api.Tests")
+    # Gcode with CI green. Farm.Modules.Printers also project-references
+    # Farm.Modules.Calibration directly (CalibrationPrinterUpdateMapper,
+    # Farm.Web.Api.Services.Calibration namespace, moved there in Phase 11,
+    # #2039), so it must run too.
+    test_names+=("Farm.Modules.Calibration.Tests" "Farm.Modules.Gcode.Tests" "Farm.Modules.Printers.Tests" "Farm.Web.Api.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_gcode )); then
@@ -1177,6 +1224,22 @@ main() {
     # Farm.Web.Api.Tests, unlike a pure-service module such as
     # Farm.OrcaSlicer.Worker.
     test_names+=("Farm.Modules.Observability.Tests" "Farm.Web.Api.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_printers )); then
+    # Farm.Modules.Printers (issue #2046, Phase 18) owns the catalog,
+    # discovery, and printers vertical slice -- PrintersController (moved as-is,
+    # no internal decomposition), PrinterGroupsController, CatalogController,
+    # CatalogUpdateController, BedTypeController,
+    # InternalDiscoveryEventsController, LocationsController, and
+    # FilaManController -- but several of these controllers' own integration
+    # test files (RouteTableSnapshotTests, InternalDiscoveryEventsControllerTests,
+    # PrinterGroupsControllerTests, CatalogUpdateControllerTests, and
+    # LocationHierarchyTests) intentionally stayed behind in Farm.Web.Api.Tests
+    # -- see docs/MODULE_MIGRATION_PATTERN.md. A controller-owning module must
+    # therefore also select Farm.Web.Api.Tests, unlike a pure-service module
+    # such as Farm.OrcaSlicer.Worker.
+    test_names+=("Farm.Modules.Printers.Tests" "Farm.Web.Api.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_mig_app )); then
@@ -1287,6 +1350,10 @@ main() {
     test_names+=("Farm.Modules.Observability.Tests")
     net_test_bucket_hit=1
   fi
+  if (( has_tests_printers )); then
+    test_names+=("Farm.Modules.Printers.Tests")
+    net_test_bucket_hit=1
+  fi
   if (( net_test_bucket_hit )); then
     want_dotnet_test="true"
   fi
@@ -1310,6 +1377,7 @@ main() {
   if (( has_inventory )); then reason+="inventory "; fi
   if (( has_administration )); then reason+="administration "; fi
   if (( has_observability )); then reason+="observability "; fi
+  if (( has_printers )); then reason+="printers "; fi
   if (( has_mig_app )); then reason+="mig-app "; fi
   if (( has_mig_slcr )); then reason+="mig-slicer "; fi
   if (( has_tests_api )); then reason+="tests-api "; fi
@@ -1328,6 +1396,7 @@ main() {
   if (( has_tests_inventory )); then reason+="tests-inventory "; fi
   if (( has_tests_administration )); then reason+="tests-administration "; fi
   if (( has_tests_observability )); then reason+="tests-observability "; fi
+  if (( has_tests_printers )); then reason+="tests-printers "; fi
   if (( has_tools )); then reason+="tools "; fi
   if (( has_docs )); then reason+="docs "; fi
   if (( has_mobile )); then reason+="mobile "; fi

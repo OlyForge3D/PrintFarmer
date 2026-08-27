@@ -587,6 +587,21 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Upload Farm.Modules.Printers.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Modules.Printers.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: Farm.Modules.Printers.Tests
+          path: src/tests/Farm.Modules.Printers.Tests/bin/Debug/net10.0
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Upload Farm.Web.IntegrationTests build
         if: >-
           ${{

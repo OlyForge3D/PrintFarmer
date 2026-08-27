@@ -32,6 +32,7 @@ COPY src/modules/Farm.Modules.Identity/*.csproj ./modules/Farm.Modules.Identity/
 COPY src/modules/Farm.Modules.Inventory/*.csproj ./modules/Farm.Modules.Inventory/
 COPY src/modules/Farm.Modules.Administration/*.csproj ./modules/Farm.Modules.Administration/
 COPY src/modules/Farm.Modules.Observability/*.csproj ./modules/Farm.Modules.Observability/
+COPY src/modules/Farm.Modules.Printers/*.csproj ./modules/Farm.Modules.Printers/
 COPY src/api/*.csproj ./api/
 # Place proto at filesystem root so ../../proto from /src/api resolves
 COPY proto /proto

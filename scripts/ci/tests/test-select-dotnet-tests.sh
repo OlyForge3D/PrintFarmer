@@ -705,6 +705,10 @@ case_backend_core_change_selects_both_tests() {
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   assert_contains "matrix orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  # Farm.Modules.Printers (issue #2046) project-references
+  # Farm.Backend.Plugin.Core directly, so a Core edit must also select
+  # Farm.Modules.Printers.Tests.
+  assert_contains "matrix printers depends on backend-core" "$matrix" "Farm.Modules.Printers.Tests" || return 1
   local reason ; reason="$(get_output "$out" reason)"
   assert_contains "reason backend-core" "$reason" "backend-core" || return 1
 }
@@ -877,6 +881,10 @@ case_printqueue_change() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix printqueue" "$matrix" "Farm.Modules.PrintQueue.Tests" || return 1
+  # Farm.Modules.Printers project-references Farm.Modules.PrintQueue directly
+  # (issue #2046), so a PrintQueue-only change must also select
+  # Farm.Modules.Printers.Tests.
+  assert_contains "matrix printers depends on printqueue" "$matrix" "Farm.Modules.Printers.Tests" || return 1
   # The Dispatch/ integration suite and RouteTableSnapshotTests intentionally
   # stayed in Farm.Web.Api.Tests (see docs/MODULE_MIGRATION_PATTERN.md), so a
   # controller-owning module must select it too.
@@ -945,6 +953,10 @@ case_calibration_change() {
   # (issue #2039), so a Calibration-only change must also select
   # Farm.Modules.Gcode.Tests.
   assert_contains "matrix gcode depends on calibration" "$matrix" "Farm.Modules.Gcode.Tests" || return 1
+  # Farm.Modules.Printers project-references Farm.Modules.Calibration directly
+  # (issue #2046), so a Calibration-only change must also select
+  # Farm.Modules.Printers.Tests.
+  assert_contains "matrix printers depends on calibration" "$matrix" "Farm.Modules.Printers.Tests" || return 1
   # The retained calibration contract-negotiation/health-check/route-table
   # coverage (RouteTableSnapshotTests, CalibrationProfileResolutionContractTests)
   # intentionally stayed in Farm.Web.Api.Tests, so a controller-owning module
@@ -1270,6 +1282,63 @@ case_observability_mixed_with_unrelated_backend() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix observability" "$matrix" "Farm.Modules.Observability.Tests" || return 1
+}
+
+
+case_printers_change() {
+  local out="$1"
+  CHANGED_FILES="src/modules/Farm.Modules.Printers/Controllers/PrintersController.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix printers" "$matrix" "Farm.Modules.Printers.Tests" || return 1
+  # RouteTableSnapshotTests, InternalDiscoveryEventsControllerTests,
+  # PrinterGroupsControllerTests, CatalogUpdateControllerTests, and
+  # LocationHierarchyTests intentionally stayed in Farm.Web.Api.Tests, so a
+  # controller-owning module must select it too.
+  assert_contains "api covers controller" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason printers" "$reason" "printers" || return 1
+}
+
+case_test_only_printers() {
+  local out="$1"
+  CHANGED_FILES="src/tests/Farm.Modules.Printers.Tests/Controllers/CatalogControllerTests.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix printers" "$matrix" "Farm.Modules.Printers.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+}
+
+case_printers_mixed_with_unrelated_backend() {
+  local out="$1"
+  CHANGED_FILES=$'src/modules/Farm.Modules.Printers/Services/Catalog/CatalogServiceAdapter.cs\nsrc/backends/Farm.Backends.SomePlugin/SomeFile.cs'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix printers" "$matrix" "Farm.Modules.Printers.Tests" || return 1
+  # The unrelated backend-plugin path must ALSO select its own bucket's tests.
+  # Farm.Web.Api.Tests is NOT a valid witness here: has_printers already
+  # selects it on its own (see has_printers's test_names above), so asserting
+  # it would pass identically even if has_backend's selection logic were
+  # completely broken. Farm.Backend.Plugins.Tests is unique to has_backend's
+  # test_names (not selected by has_printers), so it is the correct witness
+  # that the backend-plugin bucket's own logic actually ran.
+  assert_contains "matrix backend-plugin" "$matrix" "Farm.Backend.Plugins.Tests" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason printers" "$reason" "printers" || return 1
+  assert_contains "reason backend-plugin" "$reason" "backend-plugin" || return 1
 }
 
 
@@ -3769,6 +3838,9 @@ TESTS=(
   case_observability_change
   case_test_only_observability
   case_observability_mixed_with_unrelated_backend
+  case_printers_change
+  case_test_only_printers
+  case_printers_mixed_with_unrelated_backend
   case_migration_app_change
   case_migration_slicer_change
   case_test_only_api
