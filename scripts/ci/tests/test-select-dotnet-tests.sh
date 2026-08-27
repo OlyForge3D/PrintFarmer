@@ -882,6 +882,29 @@ case_calibration_change() {
   assert_contains "reason calibration" "$reason" "calibration" || return 1
 }
 
+case_devices_change() {
+  local out="$1"
+  CHANGED_FILES="src/modules/Farm.Modules.Devices/Controllers/CamerasController.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix devices" "$matrix" "Farm.Modules.Devices.Tests" || return 1
+  # The retained camera-snapshot/NFC-authentication/route-table coverage
+  # (CameraSnapshotsControllerTests, NfcDevicesControllerAuthenticationTests,
+  # RouteTableSnapshotTests) intentionally stayed in Farm.Web.Api.Tests, so a
+  # controller-owning module must select it too. (AdminHomeAssistantController
+  # and its tests ended up owned by Farm.Modules.Administration instead --
+  # Phase 14 landed first and already claimed it.)
+  assert_contains "api covers controller" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason devices" "$reason" "devices" || return 1
+}
+
 case_identity_change() {
   local out="$1"
   CHANGED_FILES="src/modules/Farm.Modules.Identity/Services/Admin/RolePermissionService.cs"
@@ -929,6 +952,19 @@ case_test_only_calibration() {
   assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
 }
 
+case_test_only_devices() {
+  local out="$1"
+  CHANGED_FILES="src/tests/Farm.Modules.Devices.Tests/Filters/OctoPrintApiKeyAttributeTests.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix devices" "$matrix" "Farm.Modules.Devices.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+}
+
 case_maintenance_mixed_with_unrelated_backend() {
   local out="$1"
   CHANGED_FILES=$'src/modules/Farm.Modules.Maintenance/Hubs/MaintenanceHub.cs\nsrc/backends/Farm.Backends.SomePlugin/SomeFile.cs'
@@ -949,6 +985,17 @@ case_calibration_mixed_with_unrelated_backend() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix calibration" "$matrix" "Farm.Modules.Calibration.Tests" || return 1
+}
+
+case_devices_mixed_with_unrelated_backend() {
+  local out="$1"
+  CHANGED_FILES=$'src/modules/Farm.Modules.Devices/Controllers/NfcController.cs\nsrc/backends/Farm.Backends.SomePlugin/SomeFile.cs'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix devices" "$matrix" "Farm.Modules.Devices.Tests" || return 1
 }
 
 case_gcode_change() {
@@ -3329,6 +3376,9 @@ TESTS=(
   case_calibration_change
   case_test_only_calibration
   case_calibration_mixed_with_unrelated_backend
+  case_devices_change
+  case_test_only_devices
+  case_devices_mixed_with_unrelated_backend
   case_gcode_change
   case_test_only_gcode
   case_gcode_mixed_with_unrelated_backend

@@ -372,7 +372,9 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime
         string? current = AppContext.BaseDirectory;
         while (current is not null)
         {
-            string candidate = Path.Join(current, "src", "api", "Controllers", "CamerasController.cs");
+            // Issue #2043 (Phase 15): CamerasController.cs moved from src/api/Controllers to
+            // Farm.Modules.Devices, so it must be located there now rather than in src/api.
+            string candidate = Path.Join(current, "src", "modules", "Farm.Modules.Devices", "Controllers", "CamerasController.cs");
             if (File.Exists(candidate))
             {
                 return File.ReadAllText(candidate);

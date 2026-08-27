@@ -510,6 +510,21 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Upload Farm.Modules.Devices.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Modules.Devices.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Modules.Devices.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Upload Farm.Modules.Maintenance.Tests build
         if: >-
           ${{

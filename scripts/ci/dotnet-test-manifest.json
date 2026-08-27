@@ -28,8 +28,8 @@
         },
         {
           "name": "infra",
-          "namespacePrefixes": ["Filters", "Health", "Hubs", "Infrastructure", "Integration", "Locations", "Middleware", "Monitoring"],
-          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Filters.|FullyQualifiedName~Farm.Web.Api.Tests.Health.|FullyQualifiedName~Farm.Web.Api.Tests.Hubs.|FullyQualifiedName~Farm.Web.Api.Tests.Infrastructure.|FullyQualifiedName~Farm.Web.Api.Tests.Integration.|FullyQualifiedName~Farm.Web.Api.Tests.Locations.|FullyQualifiedName~Farm.Web.Api.Tests.Middleware.|FullyQualifiedName~Farm.Web.Api.Tests.Monitoring."
+          "namespacePrefixes": ["Health", "Hubs", "Infrastructure", "Integration", "Locations", "Middleware", "Monitoring"],
+          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Health.|FullyQualifiedName~Farm.Web.Api.Tests.Hubs.|FullyQualifiedName~Farm.Web.Api.Tests.Infrastructure.|FullyQualifiedName~Farm.Web.Api.Tests.Integration.|FullyQualifiedName~Farm.Web.Api.Tests.Locations.|FullyQualifiedName~Farm.Web.Api.Tests.Middleware.|FullyQualifiedName~Farm.Web.Api.Tests.Monitoring."
         },
         {
           "name": "services",
@@ -250,6 +250,24 @@
       "runIntegration": false,
       "leg": "Farm.Modules.Calibration.Tests",
       "notes": "New in issue #2038 (Phase 10: the calibration vertical-slice -- Services/Calibration, Services/Capabilities, calibration contract negotiation, and profile-resolution startup wiring -- moved out of Farm.Web.Api into Farm.Modules.Calibration, following the Farm.Modules.SmartPlug (#2036) leaf-module pattern rather than the full-safe Farm.Modules.Abstractions treatment). Depends on Farm.Infrastructure and Farm.Slicer.Module (for slicer-host calibration profile resolution). Gets its own narrow select-dotnet-tests.sh buckets (calibration/tests_calibration). The retained CustomWebApplicationFactory-based integration tests for calibration contract negotiation, the calibration health check, and RouteTableSnapshotTests all stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's calibration bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module)."
+    },
+    {
+      "name": "Farm.Modules.Devices.Tests",
+      "testProject": "tests/Farm.Modules.Devices.Tests/Farm.Modules.Devices.Tests.csproj",
+      "productionProject": "modules/Farm.Modules.Devices/Farm.Modules.Devices.csproj",
+      "pathPrefixes": ["src/tests/Farm.Modules.Devices.Tests/"],
+      "dependsOnProjects": [
+        "src/modules/Farm.Modules.Devices/",
+        "src/modules/Farm.Modules.Abstractions/",
+        "src/infra/",
+        "src/discovery/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Modules.Devices.Tests",
+      "notes": "New in issue #2043 (Phase 15: the OctoPrint API-key auth service/handler/filter and 4 device-integration controllers -- NfcController, NfcDevicesController, CamerasController, and CameraSnapshotsController -- moved out of Farm.Web.Api into Farm.Modules.Devices, following the Farm.Modules.SmartPlug (#2036) leaf-module pattern rather than the full-safe Farm.Modules.Abstractions treatment). Admin/AdminHomeAssistantController, also listed in the issue body, had already moved to Farm.Modules.Administration by the time this phase merged (Phase 14, #2082, landed first and claimed it), so it is out of scope here -- a scope correction discovered only at merge time, not a deviation from the issue's intent. Depends on Farm.Infrastructure and Farm.Shared.Discovery (CamerasController's endpoint-detection dependency lives in the standalone discovery project, not Farm.Infrastructure). Gets its own narrow select-dotnet-tests.sh buckets (devices/tests_devices). The retained CustomWebApplicationFactory-based integration tests for camera snapshots, NFC device auth, and RouteTableSnapshotTests all stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's devices bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module). OctoPrintCompatController is explicitly out of scope and unchanged."
     },
     {
       "name": "Farm.Modules.Gcode.Tests",

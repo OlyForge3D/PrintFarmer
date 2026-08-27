@@ -204,10 +204,17 @@ IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 // Farm.Modules.PrintQueue (issue #2040, Phase 12) is the second, and
 // Farm.Modules.Calibration (issue #2038, Phase 10) is the third.
 // Farm.Modules.Maintenance (issue #2037) is the first to also move a SignalR hub -- see its
-// MapEndpoints for the MapHub<MaintenanceHub> call that used to live here. Farm.Modules.Gcode
-// (issue #2039, Phase 11) and Farm.Modules.Identity (issue #2041, Phase 13) followed, and
-// Farm.Modules.Inventory (issue #2044, Phase 16) adds the inventory controller slice with no
-// host-wide DI moves.
+// MapEndpoints for the MapHub<MaintenanceHub> call that used to live here.
+// Farm.Modules.Devices (issue #2043, Phase 15) is the fifth -- OctoPrint API-key
+// authentication, NFC, and cameras (the admin Home Assistant controller had already moved to
+// Farm.Modules.Administration by the time this phase merged -- see Phase 14, issue #2042).
+// Farm.Modules.Gcode (issue #2039, Phase 11) is the sixth -- Gcode/harvest/promotion.
+// Farm.Modules.Identity (issue #2041, Phase 13) is the seventh -- user/role/auth
+// management moved out of the monolith.
+// Farm.Modules.Inventory (issue #2044, Phase 16) is the eighth -- adds the inventory
+// controller slice with no host-wide DI moves.
+// Farm.Modules.Administration (issue #2042, Phase 14) is the ninth -- Admin Control Center
+// overview, data export/import, Home Assistant, Telegram, and settings controllers.
 builder.Services.AddApiModules(
     mvcBuilder,
     builder.Configuration,
@@ -215,6 +222,7 @@ builder.Services.AddApiModules(
     typeof(Farm.Modules.PrintQueue.PrintQueueApiModule).Assembly,
     typeof(Farm.Modules.Maintenance.MaintenanceApiModule).Assembly,
     typeof(Farm.Modules.Calibration.CalibrationApiModule).Assembly,
+    typeof(Farm.Modules.Devices.DevicesApiModule).Assembly,
     typeof(Farm.Modules.Gcode.GcodeApiModule).Assembly,
     typeof(Farm.Modules.Identity.IdentityApiModule).Assembly,
     typeof(Farm.Modules.Inventory.InventoryApiModule).Assembly,

@@ -1,6 +1,7 @@
 ﻿using Farm.Web.Api.Services.OctoPrint;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Filters;
 

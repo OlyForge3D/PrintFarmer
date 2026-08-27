@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.NfcDevices;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;
