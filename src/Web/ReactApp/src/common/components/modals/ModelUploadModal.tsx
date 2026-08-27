@@ -6,6 +6,16 @@ import { Modal } from './Modal';
 import { slicerService } from '@/services/slicerService';
 import { toast } from 'sonner';
 
+// Single source of truth for accepted 3D model file extensions. Keep this in
+// sync with the "Drag files here" advertised format list and the FileUpload
+// `accept` attribute below — the two drifted apart in #2102, where STEP was
+// advertised/accepted but silently rejected by client-side validation.
+const ACCEPTED_MODEL_EXTENSIONS = ['stl', '3mf', 'obj', 'ply', 'step', 'stp'];
+const ACCEPTED_MODEL_FORMATS_LABEL = 'STL, 3MF, OBJ, PLY, STEP';
+
+const isAcceptedModelFile = (file: File): boolean =>
+  ACCEPTED_MODEL_EXTENSIONS.includes(file.name.split('.').pop()?.toLowerCase() || '');
+
 interface ModelUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -65,12 +75,10 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
     e.preventDefault();
     setDragOver(false);
 
-    const files = Array.from(e.dataTransfer.files).filter(file =>
-      ['stl', '3mf', 'obj', 'ply'].includes(file.name.split('.').pop()?.toLowerCase() || '')
-    );
+    const files = Array.from(e.dataTransfer.files).filter(isAcceptedModelFile);
 
     if (files.length === 0) {
-      toast.error('No valid 3D model files (STL, 3MF, OBJ, PLY)');
+      toast.error(`No valid 3D model files (${ACCEPTED_MODEL_FORMATS_LABEL})`);
       return;
     }
 
@@ -88,12 +96,10 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
   const handleFileSelect = useCallback((files: FileList | null) => {
     if (!files) return;
 
-    const validFiles = Array.from(files).filter(file =>
-      ['stl', '3mf', 'obj', 'ply'].includes(file.name.split('.').pop()?.toLowerCase() || '')
-    );
+    const validFiles = Array.from(files).filter(isAcceptedModelFile);
 
     if (validFiles.length === 0) {
-      toast.error('No valid 3D model files (STL, 3MF, OBJ, PLY)');
+      toast.error(`No valid 3D model files (${ACCEPTED_MODEL_FORMATS_LABEL})`);
       return;
     }
 
@@ -204,7 +210,7 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
         <div className="flex flex-col items-center space-y-2">
           <CubeIcon className="w-8 h-8 text-pf-text-tertiary" />
           <p className="text-sm font-medium text-pf-text-secondary">Drag files here or click to browse</p>
-          <p className="text-xs text-pf-text-tertiary">STL, 3MF, OBJ, PLY, STEP</p>
+          <p className="text-xs text-pf-text-tertiary">{ACCEPTED_MODEL_FORMATS_LABEL}</p>
         </div>
         <FileUpload
           id="model-file-upload"

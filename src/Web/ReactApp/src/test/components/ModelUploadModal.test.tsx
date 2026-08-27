@@ -263,11 +263,37 @@ describe('ModelUploadModal', () => {
       fireEvent.change(fileInput);
 
       await waitFor(() => {
-        expect(toast.error).toHaveBeenCalledWith('No valid 3D model files (STL, 3MF, OBJ, PLY)');
+        expect(toast.error).toHaveBeenCalledWith('No valid 3D model files (STL, 3MF, OBJ, PLY, STEP)');
       });
 
       // File should not be added to queue
       expect(screen.queryByText('test.txt')).not.toBeInTheDocument();
+    });
+
+    it('should accept STEP and STP files (issue #2102)', async () => {
+      const validFiles = [
+        new File([''], 'model.step', { type: 'model/step' }),
+        new File([''], 'model.stp', { type: 'model/step' })
+      ];
+
+      renderModal();
+
+      const fileInput = document.querySelector('#model-file-upload') as HTMLInputElement;
+
+      for (const file of validFiles) {
+        Object.defineProperty(fileInput, 'files', {
+          value: [file],
+          writable: false,
+          configurable: true
+        });
+        fireEvent.change(fileInput);
+        await waitFor(() => {
+          expect(screen.getByText(file.name)).toBeInTheDocument();
+        });
+      }
+
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(screen.getByText(/upload 2 files/i)).toBeInTheDocument();
     });
 
     it('should accept valid file types', async () => {
