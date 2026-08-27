@@ -829,6 +829,48 @@ with open(out_path, "w", encoding="utf-8") as f:
   fi
 }
 
+case_ci_upload_lookalike_action_name_fails() {
+  # Negative (check 6, issue #2091, Hicks round-2 review finding): the
+  # 'uses:' check must be anchored on the '@' after the action name, not
+  # a bare substring test -- "actions/upload-artifact" is itself a
+  # substring of a differently-named action such as
+  # "actions/upload-artifact-mirror@v1", so a naive `"uses: actions/"
+  # "upload-artifact" in chunk` test would be fooled by a look-alike
+  # action name into treating it as the real publisher.
+  local mutant ; mutant="$(mktemp)"
+  build_ci_mutant "$mutant" '
+import re, sys
+out_path, src_path = sys.argv[1], sys.argv[2]
+with open(src_path, encoding="utf-8") as f:
+    text = f.read()
+pattern = re.compile(
+    r"(      - name: Upload Farm\.Modules\.Gcode\.Tests build\n(?:.*\n)*?        )uses: actions/upload-artifact@v7\n"
+)
+m = pattern.search(text)
+assert m, "fixture step block/uses: line not found -- ci.yml step shape changed"
+mutated = (
+    text[: m.start()]
+    + m.group(1)
+    + "uses: actions/upload-artifact-mirror@v1\n"
+    + text[m.end():]
+)
+with open(out_path, "w", encoding="utf-8") as f:
+    f.write(mutated)
+'
+  local rc=0
+  local report
+  report="$(CI_WORKFLOW_PATH="$mutant" bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$mutant"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail on a look-alike action name, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"Upload Farm.Modules.Gcode.Tests build' does not use actions/upload-artifact"* ]]; then
+    printf '  expected a wrong-action error for the look-alike action name, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
 case_ci_upload_if_condition_wrong_project_fails() {
   # Negative (check 6, issue #2091, Vasquez review finding #1): a step
   # whose title says "Upload Farm.Modules.Gcode.Tests build" but whose
@@ -859,6 +901,51 @@ with open(out_path, "w", encoding="utf-8") as f:
   fi
   if [[ "$report" != *"Upload Farm.Modules.Gcode.Tests build' if: condition does not guard on 'Farm.Modules.Gcode.Tests.csproj'"* ]]; then
     printf '  expected an if:-condition-mismatch error, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_ci_upload_if_condition_missing_fails() {
+  # Negative (check 6, issue #2091, Hicks round-2 review finding): the
+  # previous if:-condition case only proved the guard catches a
+  # *different* project being referenced -- itself already caught by the
+  # pre-existing mismatch check this guard superseded. This case instead
+  # drops the 'if:' condition entirely (an always-run step), which only
+  # the NEW positive assertion ("has no 'if:' condition guarding it")
+  # can catch, since there is no wrong-project reference to compare
+  # against at all.
+  local mutant ; mutant="$(mktemp)"
+  build_ci_mutant "$mutant" '
+import re, sys
+out_path, src_path = sys.argv[1], sys.argv[2]
+with open(src_path, encoding="utf-8") as f:
+    text = f.read()
+pattern = re.compile(
+    r"      - name: Upload Farm\.Modules\.Gcode\.Tests build\n"
+    r"        if: >-\n"
+    r"(?:.*\n)*?"
+    r"          \}\}\n"
+    r"(        uses: actions/upload-artifact@v7\n)"
+)
+m = pattern.search(text)
+assert m, "fixture step block/if: block not found -- ci.yml step shape changed"
+mutated = (
+    text[: m.start()] + "      - name: Upload Farm.Modules.Gcode.Tests build\n"
+    + m.group(1) + text[m.end():]
+)
+with open(out_path, "w", encoding="utf-8") as f:
+    f.write(mutated)
+'
+  local rc=0
+  local report
+  report="$(CI_WORKFLOW_PATH="$mutant" bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$mutant"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail on an upload step with no if: condition at all, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"Upload Farm.Modules.Gcode.Tests build' has no '"*"if:"*"' condition guarding it"* ]]; then
+    printf '  expected a missing-if:-condition error, got:\n%s\n' "$report" >&2
     return 1
   fi
 }
@@ -961,7 +1048,9 @@ TESTS=(
   case_ci_missing_upload_step_fails
   case_ci_orphaned_upload_step_fails
   case_ci_upload_wrong_action_fails
+  case_ci_upload_lookalike_action_name_fails
   case_ci_upload_if_condition_wrong_project_fails
+  case_ci_upload_if_condition_missing_fails
   case_ci_upload_with_name_mismatch_fails
   case_ci_upload_with_path_mismatch_fails
 )

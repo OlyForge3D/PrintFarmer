@@ -882,9 +882,13 @@ for proj, chunk in upload_steps:
     # A step whose title merely *looks* like an upload step (name match
     # alone) but does not actually invoke the upload-artifact action is not
     # a real artifact publisher -- e.g. a copy-pasted step whose `uses:`
-    # line was never updated. Require the action be present so a bogus
-    # "match" here can never mask a genuinely missing upload.
-    if "uses: actions/upload-artifact" not in chunk:
+    # line was never updated. Anchor on the '@' after the action name (not
+    # a bare substring test) so a differently-named action that merely
+    # starts with the same prefix -- e.g. a hypothetical
+    # 'actions/upload-artifact-mirror@v1' -- is not mistaken for the real
+    # action just because "actions/upload-artifact" happens to be a
+    # substring of its name.
+    if not re.search(r"uses:\s*actions/upload-artifact@", chunk):
         errors.append(
             f"ci.yml step 'Upload {proj} build' does not use "
             "actions/upload-artifact -- it looks like an upload step by "
@@ -962,13 +966,20 @@ for proj, chunk in upload_steps:
             expected_dir = os.path.dirname(expected_test_project).replace(
                 os.sep, "/"
             )
-            expected_prefix = f"src/{expected_dir}/"
-            if not with_path.startswith(expected_prefix):
+            # Every current test-project upload step publishes the exact
+            # same relative build output directory for its project (a
+            # Debug/net10.0 TargetFramework build), so this is an exact
+            # match rather than a mere prefix check -- a prefix-only test
+            # would let a path like '<correct-dir>/bin/Release/net10.0'
+            # (right project, wrong build) or an extra path segment slip
+            # through uncaught.
+            expected_path = f"src/{expected_dir}/bin/Debug/net10.0"
+            if with_path != expected_path:
                 errors.append(
                     f"ci.yml step 'Upload {proj} build' uploads path "
                     f"'{with_path}', which does not match the manifest's "
-                    f"testProject directory for {proj} (expected prefix "
-                    f"'{expected_prefix}') -- likely copy-paste drift"
+                    f"testProject directory for {proj} (expected "
+                    f"'{expected_path}') -- likely copy-paste drift"
                 )
 
 if dotnet_build_job is not None:

@@ -599,14 +599,17 @@ copy-pasted step whose *title* was updated but whose guard, artifact name,
 or artifact path were not is caught too, rather than only the "step present
 or absent" question:
 
-- it must actually invoke `actions/upload-artifact` (a same-titled step
-  repurposed to a different action does not count as a publisher);
+- it must actually invoke `actions/upload-artifact@<ref>` (the check is
+  anchored on the `@` after the action name, so a same-titled step
+  repurposed to a differently-named action -- including a look-alike such
+  as `actions/upload-artifact-mirror@v1` -- does not count as a publisher);
 - its `if:` must positively select on `<name>.csproj` (or, for
   `Farm.Web.Api.Tests`, on `want_dotnet_test`) -- a missing, malformed, or
   differently-quoted condition is flagged rather than failing open;
 - its `with: name:` must equal its own project name, and its `with: path:`
-  must start with `src/<the manifest's own testProject directory>/` for
-  that project.
+  must exactly equal `src/<the manifest's own testProject directory>/bin/Debug/net10.0`
+  for that project (not merely start with it -- a same-directory,
+  wrong-build-config path such as `bin/Release/net10.0` is flagged too).
 
 Steps whose chunk contains `mig_matrix` (the `Farm.Migrations.*` /
 `Farm.Slicer.Migrations.*` uploads) are out of scope -- they are driven by a
