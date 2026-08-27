@@ -328,10 +328,23 @@ public sealed class ProfileFamilyService(
         catch (DbUpdateConcurrencyException ex)
         {
             // Delete-vs-delete (or delete-vs-mutation) race: EF matched zero rows because a concurrent
-            // request already removed/modified this family. The worker bundle was removed first (line
-            // above, idempotent), so nothing is stranded. Surface a clean 409 instead of a raw 500, and do
-            // NOT mark-Failed — the row is already gone. Detach the abandoned graph so the context is clean.
+            // request already removed or modified this family. The worker bundle and alias were removed
+            // first (worker-first ordering), so on a concurrent DELETE the row is gone and nothing is
+            // stranded. But a concurrent MUTATION (e.g. a child MachineProfile UPDATE) can raise this while
+            // the family row SURVIVES — and its bundle/alias are already gone, so leaving it Healthy would
+            // list a family whose slicing is broken. That is consensus finding C3 applied to this new
+            // concurrency branch (H2): detach the abandoned graph, and if the row still exists mark it
+            // Failed via the guarded helper so it is visibly broken, re-deletable, and surfaces under
+            // ?renderStatus=Failed, before surfacing the clean 409.
             DetachTrackedGraph();
+            bool familyStillExists = await _dbContext.MachineModelProfiles
+                .AsNoTracking()
+                .AnyAsync(candidate => candidate.Id == family.Id, ct);
+            if (familyStillExists)
+            {
+                await TryMarkRenderFailedAsync(family.Id);
+            }
+
             throw new ProfileFamilyConcurrencyException(
                 $"Profile family '{familyId}' was modified by a concurrent request; retry the operation.",
                 ex);
@@ -737,7 +750,7 @@ public sealed class ProfileFamilyService(
                 // bundle we installed on the worker above now has no DB row left to ever drive its removal.
                 // Detach our abandoned mutations, confirm the row is really gone, roll back the bundle we
                 // just installed so nothing is stranded, and surface a clean 404 rather than a raw 500. If
-                // the row somehow still exists, report a plain 409 so the caller can retry.
+                // the row somehow still exists, restore the previous good state and report a 409.
                 DetachTrackedGraph();
                 bool familyStillExists = await _dbContext.MachineModelProfiles
                     .AsNoTracking()
@@ -745,12 +758,28 @@ public sealed class ProfileFamilyService(
                 if (!familyStillExists)
                 {
                     await TryDeleteInstalledBundleAsync(family.Id);
+
+                    // H3: on a rename we already created the TARGET-name alias above; the concurrent delete
+                    // only knew the PREVIOUS name, so the target alias would otherwise survive pointing at a
+                    // catalog model with no family or bundle behind it. Best-effort remove it (guarded) so
+                    // no orphaned alias is left. No-op for a non-rename (target == previous name, which the
+                    // concurrent delete already removed).
+                    await TryRemoveOrphanedTargetAliasAsync(family, targetName, isRename);
                     throw new ProfileFamilyConcurrentlyDeletedException(
                         $"Profile family '{family.Id}' was deleted by a concurrent request while its bundle " +
                         "was being rendered; the partially installed bundle has been removed.",
                         ex);
                 }
 
+                // H1: the row survives (a concurrent MODIFICATION, not a delete) but our persist lost the
+                // race, so the DB still holds the OLD state while the new bundle is already installed and the
+                // alias already moved — a silent DB/worker divergence. Restore the previous good bundle and
+                // alias and mark the row Failed (both guarded) BEFORE surfacing the 409, so the caller's
+                // write genuinely lost but the farm is left coherent rather than split-brained. Symmetric
+                // with the generic failure handler below, which does the same restore + mark-Failed.
+                await RestorePreviousGoodStateAsync(
+                    family, worker, previousBundle, previousName, targetName, isRename);
+                await TryMarkRenderFailedAsync(family.Id);
                 throw new ProfileFamilyConcurrencyException(
                     $"Profile family '{family.Id}' was modified by a concurrent request; retry the operation.",
                     ex);
@@ -767,17 +796,17 @@ public sealed class ProfileFamilyService(
         }
         catch (ProfileFamilyConcurrentlyDeletedException)
         {
-            // The concurrency handler above already rolled back the installed bundle and left the row alone
-            // (there is none). Rethrow WITHOUT the restore/mark-Failed compensation below: restoring would
-            // re-install a bundle for a family that no longer exists (re-stranding it), and marking Failed
-            // would write to a row that is gone.
+            // The concurrency handler above already rolled back the installed bundle, removed any orphaned
+            // target alias (H3), and left the row alone (there is none). Rethrow WITHOUT the
+            // restore/mark-Failed compensation below: restoring would re-install a bundle for a family that
+            // no longer exists (re-stranding it), and marking Failed would write to a row that is gone.
             throw;
         }
         catch (ProfileFamilyConcurrencyException)
         {
-            // A concurrent UPDATE (not a delete) won the race. The install-then-persist ordering left the
-            // previous good bundle and alias untouched, so there is nothing to restore; rethrow as a clean
-            // 409 without the restore/mark-Failed compensation below.
+            // A concurrent MODIFICATION (not a delete) won the race and the row survives. The concurrency
+            // handler above already restored the previous good bundle and alias and marked the row Failed
+            // (H1), so rethrow as a clean 409 WITHOUT repeating the restore/mark-Failed compensation below.
             throw;
         }
         catch (Exception ex)
@@ -933,6 +962,42 @@ public sealed class ProfileFamilyService(
                 ex,
                 "Failed to roll back the worker bundle for profile family {FamilyId} after it was deleted concurrently during a render; the bundle may be orphaned on the worker.",
                 familyId);
+        }
+    }
+
+    /// <summary>
+    /// Best-effort removal of the TARGET-name OrcaSlicer alias created during a rename whose family row was
+    /// then deleted by a concurrent request (H3). The install added the new-name alias before the persist,
+    /// but the concurrent delete only knew the PREVIOUS name, so the target alias would otherwise survive
+    /// pointing at a catalog model with no family or bundle behind it. Guarded exactly like
+    /// <see cref="TryDeleteInstalledBundleAsync"/>: a failure is logged and swallowed so it can never mask
+    /// the <see cref="ProfileFamilyConcurrentlyDeletedException"/> the caller is being given, and never
+    /// throws out of the catch block. No-op when the operation was not a rename (the target name equals the
+    /// previous name, which the concurrent delete already removed) or the family has no bound catalog model.
+    /// Uses <see cref="CancellationToken.None"/> so cleanup still runs if the original request was cancelled.
+    /// </summary>
+    private async Task TryRemoveOrphanedTargetAliasAsync(
+        MachineModelProfile family,
+        string targetName,
+        bool isRename)
+    {
+        if (!isRename || family.PrinterModelId is not Guid printerModelId)
+        {
+            return;
+        }
+
+        try
+        {
+            await _aliasService.RemoveModelAliasAsync(printerModelId, targetName, "OrcaSlicer", CancellationToken.None);
+            await _catalogService.InvalidateModelAliasesAsync(printerModelId, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to remove the orphaned target alias '{TargetName}' for profile family {FamilyId} after it was deleted concurrently during a rename; the alias may be orphaned.",
+                targetName,
+                family.Id);
         }
     }
 
@@ -1301,7 +1366,9 @@ public sealed class ProfileFamilyService(
     /// <c>OrcaSlicer</c>, compared by name case-insensitively. Comparing the model's remaining OrcaSlicer
     /// aliases against the family's own name (trimmed, case-insensitive — exactly how the alias is created
     /// and removed) means a genuinely distinct OrcaSlicer alias always short-circuits to allow, so this
-    /// cannot raise a false refusal while other coverage exists.
+    /// cannot raise a false refusal while other coverage exists. A family whose own alias is not present at
+    /// all (its original render failed before the alias was created) strands nothing, so it is allowed
+    /// without an override (H4).
     /// </summary>
     private async Task EnsureNoLastCoverageLossAsync(
         MachineModelProfile family,
@@ -1318,6 +1385,20 @@ public sealed class ProfileFamilyService(
             await _catalogService.GetModelAliasesAsync(printerModelId, ct);
 
         string familyName = family.Name.Trim();
+
+        // The delete removes THIS family's own OrcaSlicer alias, so only that alias's presence can strand
+        // coverage. A family whose original render failed can be persisted before its alias was ever
+        // created, so its own alias is absent from the model's set — deleting it removes nothing and loses
+        // no coverage, so allow it without forcing an override (H4). An empty alias set is the same case.
+        bool familyAliasPresent = aliases.Any(alias =>
+            string.Equals(alias.SlicerType, "OrcaSlicer", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(alias.SlicerModelName)
+            && string.Equals(alias.SlicerModelName.Trim(), familyName, StringComparison.OrdinalIgnoreCase));
+        if (!familyAliasPresent)
+        {
+            return;
+        }
+
         bool otherOrcaCoverageRemains = aliases.Any(alias =>
             string.Equals(alias.SlicerType, "OrcaSlicer", StringComparison.OrdinalIgnoreCase)
             && !string.IsNullOrWhiteSpace(alias.SlicerModelName)

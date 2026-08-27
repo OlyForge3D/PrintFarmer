@@ -1519,6 +1519,210 @@ public sealed class ProfileFamilyServiceTests
     }
 
     [Fact]
+    public async Task EditFamilyAsync_RenameRacesConcurrentModification_RestoresOldBundleAndAlias_Throws409()
+    {
+        // H1: an edit RENAME whose persist loses a concurrency race but whose family row SURVIVES must not
+        // leave the farm split-brained (worker describing "Renamed", DB still "Farm Test"). Force the failure
+        // on a RENAME (not a plain re-render) so restoring the OLD bundle/alias is observable: a plain
+        // re-render's previous and new states are identical, so it cannot distinguish restore from leave.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ConcurrentModifyOnceOnSaveDbContext(options);
+        _ = dbContext.Database.EnsureCreated();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+
+        ProfileFamilyWorkerTarget target = new("http://worker", "2.5.0");
+        AllProfilesResponseDto catalog = WorkerCatalog("Prusa Test");
+        Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Strict);
+        _ = worker.Setup(s => s.GetCatalogAsync(string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((target, catalog));
+        _ = worker.Setup(s => s.GetActiveOrcaVersionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync("2.5.0");
+        _ = worker.Setup(s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Forward rename installs "Renamed" then, on failure, the restore re-installs the OLD "Farm Test"
+        // bundle, re-adds the OLD-name alias, and drops the TARGET-name alias.
+        Mock<IPrinterModelAliasService> aliases = new(MockBehavior.Strict);
+        _ = aliases.Setup(s => s.ResolveModelAliasAsync("Renamed", "OrcaSlicer")).ReturnsAsync((Guid?)null);
+        _ = aliases.Setup(s => s.EnsureModelAliasAsync(modelId, "Renamed", "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = aliases.Setup(s => s.EnsureModelAliasAsync(modelId, "Farm Test", "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = aliases.Setup(s => s.RemoveModelAliasAsync(modelId, "Farm Test", "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = aliases.Setup(s => s.RemoveModelAliasAsync(modelId, "Renamed", "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        ProfileFamilyService service = CreateService(dbContext, Catalog(modelId), aliases, EchoRenderer(), worker);
+
+        // The single Healthy persist loses the race (row survives); every later save (mark-Failed) proceeds.
+        dbContext.ConflictOnNextSave = true;
+        Func<Task> act = () => service.EditFamilyAsync(
+            familyId, new EditProfileFamilyRequestDto { Name = "Renamed" }, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ProfileFamilyConcurrencyException>();
+
+        // The restore re-installed the OLD ("Farm Test") bundle content, never re-PUT the failed new one.
+        worker.Verify(
+            s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.Is<ProfileFamilyBundleDto>(b => b.FamilyName == "Farm Test"),
+                It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the previous good (old-name) bundle must be re-installed after the lost-race rename");
+        aliases.Verify(
+            s => s.EnsureModelAliasAsync(modelId, "Farm Test", "OrcaSlicer", It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the OLD-name alias must be restored");
+        aliases.Verify(
+            s => s.RemoveModelAliasAsync(modelId, "Renamed", "OrcaSlicer", It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the new TARGET-name alias installed before the failed persist must be dropped");
+        MachineModelProfile after = await dbContext.MachineModelProfiles
+            .AsNoTracking().SingleAsync(f => f.Id == familyId);
+        after.Name.Should().Be("Farm Test", "the row still holds the OLD state — the rename never persisted");
+        after.RenderStatus.Should().Be(
+            ProfileFamilyRenderStatus.Failed,
+            "the surviving row must be marked Failed so the divergence is visible and re-renderable (H1)");
+    }
+
+    [Fact]
+    public async Task EditFamilyAsync_RenameDeletedConcurrently_RemovesOrphanedTargetAlias_Throws404()
+    {
+        // H3: an edit RENAME whose family row is DELETED concurrently during persist already created the
+        // TARGET-name alias ("Renamed") before the save. The concurrent delete only knew the PREVIOUS name,
+        // so without compensation the target alias survives pointing at a model with no family/bundle. The
+        // handler must best-effort remove that orphaned target alias. Uses a RENAME, not a plain render,
+        // because only a rename creates a distinct target alias to orphan.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ConcurrentDeleteOnSaveDbContext(options);
+        _ = dbContext.Database.EnsureCreated();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+
+        ProfileFamilyWorkerTarget target = new("http://worker", "2.5.0");
+        AllProfilesResponseDto catalog = WorkerCatalog("Prusa Test");
+        Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Strict);
+        _ = worker.Setup(s => s.GetCatalogAsync(string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((target, catalog));
+        _ = worker.Setup(s => s.GetActiveOrcaVersionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync("2.5.0");
+        _ = worker.Setup(s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = worker.Setup(s => s.DeleteBundleAsync(
+                It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Forward rename: ensure "Renamed", drop "Farm Test". Compensation: remove the orphaned "Renamed".
+        Mock<IPrinterModelAliasService> aliases = new(MockBehavior.Strict);
+        _ = aliases.Setup(s => s.ResolveModelAliasAsync("Renamed", "OrcaSlicer")).ReturnsAsync((Guid?)null);
+        _ = aliases.Setup(s => s.EnsureModelAliasAsync(modelId, "Renamed", "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = aliases.Setup(s => s.RemoveModelAliasAsync(modelId, "Farm Test", "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = aliases.Setup(s => s.RemoveModelAliasAsync(modelId, "Renamed", "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        ProfileFamilyService service = CreateService(dbContext, Catalog(modelId), aliases, EchoRenderer(), worker);
+
+        // Arm the concurrent delete: the persist removes the family rows out-of-band and reports the conflict.
+        dbContext.DeleteFamilyOnNextSave = true;
+        Func<Task> act = () => service.EditFamilyAsync(
+            familyId, new EditProfileFamilyRequestDto { Name = "Renamed" }, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ProfileFamilyConcurrentlyDeletedException>();
+
+        aliases.Verify(
+            s => s.RemoveModelAliasAsync(modelId, "Renamed", "OrcaSlicer", It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the orphaned TARGET-name alias created before the concurrent delete must be removed (H3)");
+        worker.Verify(
+            s => s.DeleteBundleAsync(null, familyId, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the orphaned bundle installed before the concurrent delete must still be removed");
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_ConcurrencyConflictButFamilyStillExists_MarksFailedAndThrows409()
+    {
+        // H2: on the delete path the worker bundle and alias are removed FIRST (worker-first ordering), then
+        // the row delete loses a concurrency race but the family row SURVIVES (a concurrent modification, not
+        // a delete). Leaving it Healthy would list a family whose bundle is gone and whose slicing is broken.
+        // The handler must mark the surviving row Failed (identical to C3 on the other delete failure path).
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ConcurrentModifyOnceOnSaveDbContext(options);
+        _ = dbContext.Database.EnsureCreated();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), DeleteAliases(modelId), Renderer(), DeleteWorker());
+
+        // The transactional row delete loses the race (row survives); the mark-Failed save then proceeds.
+        dbContext.ConflictOnNextSave = true;
+        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ProfileFamilyConcurrencyException>();
+        (await dbContext.MachineModelProfiles.CountAsync())
+            .Should().Be(1, "a lost delete race must leave the surviving row in place");
+        MachineModelProfile persisted = await dbContext.MachineModelProfiles
+            .AsNoTracking().SingleAsync(f => f.Id == familyId);
+        persisted.RenderStatus.Should().Be(
+            ProfileFamilyRenderStatus.Failed,
+            "the surviving row whose bundle/alias were already removed must be marked Failed, not Healthy (H2)");
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_NeverAliasedFamilyWithDependentPrinter_Deletes_WithoutForce()
+    {
+        // H4: a family whose original render failed can be persisted before its OrcaSlicer alias was ever
+        // created. Deleting it strands nothing — there is no alias to remove and no coverage to lose — so it
+        // must delete cleanly WITHOUT force even though the model is otherwise uncovered and a printer uses
+        // it. Before the fix this was a false refusal (empty alias set -> printer check -> refuse).
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        Mock<ICatalogServiceAdapter> catalog = Catalog(modelId);
+        // The model has NO OrcaSlicer coverage at all, and crucially the family's OWN alias is absent.
+        _ = catalog
+            .Setup(service => service.GetModelAliasesAsync(modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SlicerModelAliasDto>());
+        var dependentPrinter = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Shop Printer",
+            ModelId = modelId
+        };
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            catalog,
+            DeleteAliases(modelId),
+            Renderer(),
+            DeleteWorker(),
+            PrinterRefs(modelPrinter: dependentPrinter));
+
+        await service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
+
+        (await dbContext.MachineModelProfiles.CountAsync())
+            .Should().Be(0, "a never-aliased family strands nothing, so it deletes without force despite a dependent printer");
+    }
+
+    [Fact]
     public async Task EditFamilyAsync_WorkerWriteFails_RollsBackDbRowExceptRenderStatus()
     {
         // C2 (i): a failed edit must leave the DB row byte-identical to pre-edit except RenderStatus.
@@ -1871,6 +2075,31 @@ public sealed class ProfileFamilyServiceTests
             }
 
             return await base.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// A <see cref="SlicerDbContext"/> that throws <see cref="DbUpdateConcurrencyException"/> on the NEXT
+    /// armed <see cref="SaveChangesAsync(CancellationToken)"/> WITHOUT removing any row — a concurrent
+    /// MODIFICATION whose family row SURVIVES (not a delete) — then lets every later save proceed. Models
+    /// the render/delete-vs-modification race the persist loses: the guarded mark-Failed compensation that
+    /// follows must still succeed against the surviving row (H1, H2).
+    /// </summary>
+    private sealed class ConcurrentModifyOnceOnSaveDbContext(DbContextOptions<SlicerDbContext> options)
+        : SlicerDbContext(options)
+    {
+        public bool ConflictOnNextSave { get; set; }
+
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            if (ConflictOnNextSave)
+            {
+                ConflictOnNextSave = false;
+                throw new DbUpdateConcurrencyException(
+                    "simulated concurrent family modification during persist (row survives)");
+            }
+
+            return base.SaveChangesAsync(cancellationToken);
         }
     }
 
