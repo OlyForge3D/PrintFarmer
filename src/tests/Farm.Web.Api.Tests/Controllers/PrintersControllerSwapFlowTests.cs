@@ -73,7 +73,7 @@ public class PrintersControllerSwapFlowTests
             printerBackendCapabilitiesService: Mock.Of<IPrinterBackendCapabilitiesService>(),
             backendClientFactory: Mock.Of<IBackendClientFactory>(),
             httpClientFactory: Mock.Of<IHttpClientFactory>(),
-            egressGuard: Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard(),
+            egressGuard: Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard(),
             obicoServerAssignment: Mock.Of<Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService>(),
             settingsService: Mock.Of<Farm.Infrastructure.Settings.ISettingsService>(),
             printerSessionTimelineService: Mock.Of<IPrinterSessionTimelineService>(),

@@ -111,7 +111,7 @@ public class SpoolmanServiceProbeEgressTests
             Content = new StringContent("{\"version\":\"1.2.3\"}", Encoding.UTF8, "application/json")
         });
         using HttpClient http = new(handler);
-        SpoolmanService svc = CreateService(http, TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = CreateService(http, AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanProbeResult result = await svc.ProbeAsync("http://spoolman.local:7912", CancellationToken.None);
 

@@ -19,8 +19,17 @@ public class PrinterModelAliasConfiguration : IEntityTypeConfiguration<PrinterMo
             .HasForeignKey(a => a.PrinterModelId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // Unique constraint: SlicerModelName + SlicerType (NULL safe)
-        _ = builder.HasIndex(a => new { a.PrinterModelId, a.SlicerModelName, a.SlicerType }).IsUnique();
+        // Unique constraint on the normalized columns (not the raw ones): enforcing uniqueness
+        // on the raw SlicerModelName/SlicerType columns let case/whitespace-variant aliases
+        // coexist even though BuildMatchingAliasesQuery/ResolveModelAliasAsync only ever match
+        // on the normalized columns (#2080).
+        _ = builder
+            .HasIndex(a => new { a.PrinterModelId, a.SlicerModelNameNormalized, a.SlicerTypeNormalized })
+            .IsUnique();
+
+        // Non-unique lookup index kept separate (rather than reusing the unique index above):
+        // ResolveModelAliasAsync filters only on the normalized name/type, not PrinterModelId, so
+        // a composite index with PrinterModelId as the leading column can't serve that lookup.
         _ = builder
             .HasIndex(a => new { a.SlicerModelNameNormalized, a.SlicerTypeNormalized })
             .HasDatabaseName("IX_PrinterModelAliases_NormalizedLookup");

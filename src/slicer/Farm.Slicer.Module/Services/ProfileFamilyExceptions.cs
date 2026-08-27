@@ -21,6 +21,27 @@ public sealed class ProfileFamilyConflictException : Exception
     }
 }
 
+/// <summary>Indicates that a rendered profile's content hash collides with an existing profile.</summary>
+public sealed class ProfileFamilyHashConflictException : Exception
+{
+    /// <summary>Creates an empty hash-conflict exception.</summary>
+    public ProfileFamilyHashConflictException()
+    {
+    }
+
+    /// <summary>Creates a hash conflict with a descriptive message.</summary>
+    public ProfileFamilyHashConflictException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Creates a hash conflict with an underlying persistence error.</summary>
+    public ProfileFamilyHashConflictException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
 /// <summary>Indicates that a pinned source model or preset cannot be resolved safely.</summary>
 public sealed class ProfileFamilySourceException : Exception
 {

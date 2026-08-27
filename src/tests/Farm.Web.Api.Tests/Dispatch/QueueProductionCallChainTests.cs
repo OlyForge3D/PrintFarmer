@@ -32,6 +32,7 @@ using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
+using Farm.Infrastructure.Tests.Dispatch;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Controllers.Requests;
 using FluentAssertions;

@@ -29,7 +29,7 @@ public class SpoolmanServiceTests
         using FakeHttpMessageHandler _handler = new FakeHttpMessageHandler();
         using HttpClient http = new HttpClient(_handler);
 
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
 
@@ -60,7 +60,7 @@ public class SpoolmanServiceTests
                 });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams { Limit = 50 }, CancellationToken.None);
 
@@ -103,7 +103,7 @@ public class SpoolmanServiceTests
                 });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         // First call should parse the string array and return two materials
         IReadOnlyList<SpoolmanMaterialDto> mats1 = await svc.ListMaterialsAsync(CancellationToken.None);
@@ -143,7 +143,7 @@ public class SpoolmanServiceTests
             BaseAddress = new Uri("http://spoolman.local")
         };
 
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
 
@@ -172,7 +172,7 @@ public class SpoolmanServiceTests
                 });
 
         using HttpClient http = new HttpClient(handler);
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         IEnumerable<SpoolmanDiscoveryResult> results = await svc.ScanNetworkForSpoolmanAsync(new[] { "192.168.1.0/29" });
         // The helper expands small ranges; ensure at least one available result is returned for the 192.168.1.5
@@ -200,7 +200,7 @@ public class SpoolmanServiceTests
             });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanFilamentDto result = await svc.CreateFilamentInSpoolmanAsync(
             new SpoolmanCreateFilamentRequest { Name = "Sunlu PLA", Material = "PLA" },
@@ -232,7 +232,7 @@ public class SpoolmanServiceTests
             });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         _ = await svc.CreateFilamentInSpoolmanAsync(
             new SpoolmanCreateFilamentRequest { Name = "PETG", Material = "PETG", Density = 1.27d, Diameter = 2.85d },
@@ -264,7 +264,7 @@ public class SpoolmanServiceTests
             });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanFilamentDto result = await svc.CreateFilamentInSpoolmanAsync(
             new SpoolmanCreateFilamentRequest
@@ -295,7 +295,7 @@ public class SpoolmanServiceTests
             });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(
             () => svc.CreateFilamentInSpoolmanAsync(
@@ -331,7 +331,7 @@ public class SpoolmanServiceTests
             });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         _ = await svc.UpdateFilamentInSpoolmanAsync(
             9,
@@ -362,7 +362,7 @@ public class SpoolmanServiceTests
             });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         _ = await svc.UpdateFilamentInSpoolmanAsync(
             9,
@@ -389,7 +389,7 @@ public class SpoolmanServiceTests
             });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(
             () => svc.UpdateFilamentInSpoolmanAsync(
@@ -419,7 +419,7 @@ public class SpoolmanServiceTests
             });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanApiException ex = await Assert.ThrowsAsync<SpoolmanApiException>(
             () => svc.CreateFilamentInSpoolmanAsync(
@@ -446,7 +446,7 @@ public class SpoolmanServiceTests
             });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanApiException ex = await Assert.ThrowsAsync<SpoolmanApiException>(
             () => svc.CreateSpoolInSpoolmanAsync(new SpoolmanSpoolRequest { FilamentId = 12 }, CancellationToken.None));
@@ -476,7 +476,7 @@ public class SpoolmanServiceTests
             });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(
             new SpoolmanSpoolQueryParams
@@ -526,7 +526,7 @@ public class SpoolmanServiceTests
             });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanSpoolDto? res = await svc.GetSpoolByIdAsync(99, CancellationToken.None);
         Assert.Null(res);
@@ -552,7 +552,7 @@ public class SpoolmanServiceTests
         });
 
         HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
         Assert.Empty(result.Items);
@@ -654,7 +654,7 @@ public class SpoolmanServiceTests
         using FakeHttpMessageHandler handler = new FakeHttpMessageHandler();
         using HttpClient http = new HttpClient(handler);
 
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanPagedResult<SpoolmanFilamentDto> result =
             await svc.ListFilamentsPagedAsync(new SpoolmanFilamentQueryParams(), CancellationToken.None);
@@ -690,7 +690,7 @@ public class SpoolmanServiceTests
         });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanPagedResult<SpoolmanFilamentDto> result =
             await svc.ListFilamentsPagedAsync(new SpoolmanFilamentQueryParams { Limit = 50 }, CancellationToken.None);
@@ -731,7 +731,7 @@ public class SpoolmanServiceTests
         });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanPagedResult<SpoolmanFilamentDto> result =
             await svc.ListFilamentsPagedAsync(new SpoolmanFilamentQueryParams { Limit = 50, Offset = 50 }, CancellationToken.None);
@@ -768,7 +768,7 @@ public class SpoolmanServiceTests
         });
 
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
-        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard());
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
         SpoolmanPagedResult<SpoolmanSpoolDto> result =
             await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams { Limit = 100, Offset = 100 }, CancellationToken.None);

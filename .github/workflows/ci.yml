@@ -407,6 +407,21 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Upload Farm.Infrastructure.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Infrastructure.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: Farm.Infrastructure.Tests
+          path: src/tests/Farm.Infrastructure.Tests/bin/Debug/net10.0
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Upload Farm.Modules.SmartPlug.Tests build
         if: >-
           ${{

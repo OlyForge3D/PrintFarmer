@@ -35,7 +35,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task Create_SetsOwnerAndUnshared()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         ModelCollectionService service = CreateService(db, ProviderAllExist().Object);
         Guid owner = Guid.NewGuid();
 
@@ -51,7 +51,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task Create_WithBlankName_Throws()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         ModelCollectionService service = CreateService(db, ProviderAllExist().Object);
 
         _ = await Assert.ThrowsAsync<ArgumentException>(() =>
@@ -61,7 +61,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task Get_OwnerCanRead_NonOwnerDenied()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         ModelCollectionService service = CreateService(db, ProviderAllExist().Object);
         Guid owner = Guid.NewGuid();
         Guid stranger = Guid.NewGuid();
@@ -79,7 +79,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task Get_AdminCanReadOthers()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         ModelCollectionService service = CreateService(db, ProviderAllExist().Object);
         Guid owner = Guid.NewGuid();
 
@@ -93,7 +93,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task Get_SharedReadableByAnyone()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         ModelCollectionService service = CreateService(db, ProviderAllExist().Object);
         Guid owner = Guid.NewGuid();
 
@@ -109,7 +109,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task Get_NonExistent_ReturnsNull()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         ModelCollectionService service = CreateService(db, ProviderAllExist().Object);
 
         ModelCollectionDto? result = await service.GetCollectionAsync(Guid.NewGuid(), Guid.NewGuid(), callerIsAdmin: false, CancellationToken.None);
@@ -119,7 +119,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task Update_NonOwnerDenied_MissingThrowsNotFound()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         ModelCollectionService service = CreateService(db, ProviderAllExist().Object);
         Guid owner = Guid.NewGuid();
 
@@ -136,7 +136,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task Update_OwnerRenames()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         ModelCollectionService service = CreateService(db, ProviderAllExist().Object);
         Guid owner = Guid.NewGuid();
 
@@ -153,7 +153,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task Delete_NonOwnerDenied_OwnerSucceeds()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         ModelCollectionService service = CreateService(db, ProviderAllExist().Object);
         Guid owner = Guid.NewGuid();
 
@@ -172,7 +172,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task AddMember_ValidatesModelExistence()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         var provider = new Mock<IModel3DQueryProvider>();
         _ = provider.Setup(p => p.ExistsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
         ModelCollectionService service = CreateService(db, provider.Object);
@@ -189,7 +189,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task AddMember_IsIdempotent()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         ModelCollectionService service = CreateService(db, ProviderAllExist().Object);
         Guid owner = Guid.NewGuid();
         Guid modelId = Guid.NewGuid();
@@ -207,7 +207,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task AddMember_NullProvider_SkipsValidation()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         ModelCollectionService service = CreateService(db, provider: null);
         Guid owner = Guid.NewGuid();
 
@@ -221,7 +221,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task RemoveMember_IsIdempotent()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         ModelCollectionService service = CreateService(db, ProviderAllExist().Object);
         Guid owner = Guid.NewGuid();
         Guid modelId = Guid.NewGuid();
@@ -241,7 +241,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task ReplaceMembers_ReplacesEntireSet()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         ModelCollectionService service = CreateService(db, ProviderAllExist().Object);
         Guid owner = Guid.NewGuid();
         Guid a = Guid.NewGuid();
@@ -264,7 +264,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task ReplaceMembers_DeduplicatesAndValidates()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         Guid valid = Guid.NewGuid();
         Guid invalid = Guid.NewGuid();
         var provider = new Mock<IModel3DQueryProvider>();
@@ -287,7 +287,7 @@ public class ModelCollectionServiceTests
     [Fact]
     public async Task List_AdminSeesAll_UserSeesVisible()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         ModelCollectionService service = CreateService(db, ProviderAllExist().Object);
         Guid userA = Guid.NewGuid();
         Guid userB = Guid.NewGuid();
