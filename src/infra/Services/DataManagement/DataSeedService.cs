@@ -1030,10 +1030,15 @@ public class DataSeedService : IDataSeedService
 
             foreach (SlicerAliasDto alias in dto.Aliases)
             {
+                // Compare on the normalized columns (not the raw SlicerModelName/SlicerType) so
+                // seeding doesn't attempt to insert a case/whitespace-variant duplicate that the
+                // unique index on the normalized columns would reject (#2080).
+                string normalizedSeedName = PrinterModelAlias.NormalizeLookupValue(alias.SlicerModelName);
+                string normalizedSeedType = PrinterModelAlias.NormalizeLookupValue(alias.SlicerType);
                 bool aliasExists = await _context.PrinterModelAliases
                     .AnyAsync(a => a.PrinterModelId == model.Id &&
-                        a.SlicerModelName == alias.SlicerModelName &&
-                        a.SlicerType == alias.SlicerType);
+                        a.SlicerModelNameNormalized == normalizedSeedName &&
+                        a.SlicerTypeNormalized == normalizedSeedType);
 
                 if (!aliasExists)
                 {

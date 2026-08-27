@@ -109,15 +109,86 @@ public class PrinterModelAliasService(AppDbContext dbContext) : IPrinterModelAli
             return;
         }
 
-        _ = _dbContext.PrinterModelAliases.Add(new Domain.PrinterModelAlias
+        Domain.PrinterModelAlias newAlias = new()
         {
             Id = Guid.NewGuid(),
             PrinterModelId = printerModelId,
             SlicerModelName = slicerModelName.Trim(),
             SlicerType = slicerType.Trim(),
             CreatedAt = DateTime.UtcNow
-        });
-        _ = await _dbContext.SaveChangesAsync(ct);
+        };
+        _ = _dbContext.PrinterModelAliases.Add(newAlias);
+
+        try
+        {
+            _ = await _dbContext.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        {
+            // #2080 N-NORM-1 (review finding): this method's own check-then-insert above is not
+            // atomic, so a concurrent caller can insert the same normalized alias between our
+            // check and this save. The unique index on the normalized columns now makes that a
+            // real, reachable race (previously it raced on the raw columns instead, but the
+            // failure mode was identical). Detach the entity the failed save left tracked as
+            // Added -- otherwise it would be resubmitted (and fail again) on the context's next
+            // SaveChangesAsync -- then re-check under the constraint: if the alias now exists
+            // and maps to the same model, this call is idempotently satisfied; if it maps to a
+            // different model, surface the same conflict the pre-check would have thrown had it
+            // observed the row first.
+            _dbContext.Entry(newAlias).State = EntityState.Detached;
+
+            List<PrinterModelAlias> nowExisting = await BuildMatchingAliasesQuery(
+                    slicerModelName,
+                    slicerType,
+                    includeGeneric: true)
+                .ToListAsync(ct);
+            if (nowExisting.Any(alias => alias.PrinterModelId != printerModelId))
+            {
+                throw new InvalidOperationException(
+                    $"Slicer alias '{slicerModelName}' is already mapped to another printer model.",
+                    ex);
+            }
+
+            if (nowExisting.Count == 0)
+            {
+                // The unique-constraint violation was not caused by an alias row (e.g. a
+                // transient/unrelated failure) -- rethrow rather than silently swallowing it.
+                throw;
+            }
+        }
+    }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+    {
+        if (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx
+            && sqliteEx.SqliteErrorCode == 19)
+        {
+            return true;
+        }
+
+        if (ex.InnerException is System.Data.Common.DbException dbException)
+        {
+            string typeName = dbException.GetType().FullName ?? string.Empty;
+            if (typeName.Contains("SqlException", StringComparison.OrdinalIgnoreCase))
+            {
+                // #2080 N-NORM-1 (review finding, Vasquez): SqlException does not override
+                // DbException.ErrorCode -- that property still returns the base Exception
+                // HResult, not the SQL Server error number. The actual server-side error number
+                // (2601/2627 for a unique-index/constraint violation) is only exposed via the
+                // SqlException.Number property, so it must be read via reflection here (the same
+                // way this method already avoids a direct Microsoft.Data.SqlClient reference).
+                object? numberValue = dbException.GetType().GetProperty("Number")?.GetValue(dbException);
+                if (numberValue is int number && number is 2601 or 2627)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return ex.InnerException?.GetType().FullName?.Contains(
+                "PostgresException", StringComparison.OrdinalIgnoreCase) == true
+            && ex.InnerException.GetType().GetProperty("SqlState")?.GetValue(ex.InnerException)?.ToString()
+                == "23505";
     }
 
     internal IQueryable<PrinterModelAlias> BuildMatchingAliasesQuery(

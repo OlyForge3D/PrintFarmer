@@ -6490,9 +6490,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("SlicerModelNameNormalized", "SlicerTypeNormalized")
                         .HasDatabaseName("IX_PrinterModelAliases_NormalizedLookup");
 
-                    b.HasIndex("PrinterModelId", "SlicerModelName", "SlicerType")
+                    b.HasIndex("PrinterModelId", "SlicerModelNameNormalized", "SlicerTypeNormalized")
                         .IsUnique()
-                        .HasFilter("[SlicerType] IS NOT NULL");
+                        .HasFilter("[SlicerTypeNormalized] IS NOT NULL");
 
                     b.ToTable("PrinterModelAliases");
                 });

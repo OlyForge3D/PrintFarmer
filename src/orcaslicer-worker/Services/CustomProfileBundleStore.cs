@@ -221,26 +221,87 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             HashSet<string> currentBundles = DiscoverCompleteBundleNames();
             bool changed = !_knownCustomBundles.SetEquals(currentBundles);
 
+            // #2080 N-REC-1: isolate each removal so a malformed bundle's stale overlay link
+            // (e.g. an on-disk file where a symlink is expected, throwing overlay_path_conflict)
+            // cannot abort cleanup for its siblings or block the ensure-loop below from ever
+            // running (review finding B1). A bundle whose removal fails stays in
+            // _knownCustomBundles so it is retried on the next tick instead of being silently
+            // dropped from tracking, which would otherwise leak its overlay link forever.
             foreach (string removedBundle in
                 _knownCustomBundles.Except(currentBundles).ToArray())
             {
-                RemoveOverlayLink(
-                    GetOverlayManifestPath(removedBundle),
-                    GetCustomManifestPath(removedBundle),
-                    isDirectory: false);
-                RemoveOverlayLink(
-                    GetOverlayDirectoryPath(removedBundle),
-                    GetCustomDirectoryPath(removedBundle),
-                    isDirectory: true);
+                try
+                {
+                    RemoveOverlayLink(
+                        GetOverlayManifestPath(removedBundle),
+                        GetCustomManifestPath(removedBundle),
+                        isDirectory: false);
+                    RemoveOverlayLink(
+                        GetOverlayDirectoryPath(removedBundle),
+                        GetCustomDirectoryPath(removedBundle),
+                        isDirectory: true);
+                    _ = _knownCustomBundles.Remove(removedBundle);
+                }
+                catch (CustomProfileBundleException ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to remove overlay links for deleted custom OrcaSlicer bundle {BundleName} during reconciliation ({Code}); will retry",
+                        LogSanitizer.Sanitize(removedBundle),
+                        ex.Code);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // #2080 N-REC-1 (round-5 review, Hicks): RemoveOverlayLink's underlying
+                    // File.Delete/DirectoryInfo.Delete calls can themselves throw IOException or
+                    // UnauthorizedAccessException (permissions, concurrent path replacement) --
+                    // not just CustomProfileBundleException. Catching only the latter would let a
+                    // transient filesystem error on one bundle escape this loop and abort
+                    // reconciliation for every other bundle too, defeating the per-bundle
+                    // isolation this fix exists to provide.
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to remove overlay links for deleted custom OrcaSlicer bundle {BundleName} during reconciliation (filesystem error); will retry",
+                        LogSanitizer.Sanitize(removedBundle));
+                }
             }
 
+            // #2080 N-REC-1: isolate each bundle so one malformed bundle (e.g. a manual file
+            // dropped where a symlink is expected, throwing overlay_path_conflict) cannot abort
+            // reconciliation for every other bundle. Only bundles that reconcile successfully
+            // are added to _knownCustomBundles -- a bundle that previously succeeded and is
+            // still present but currently failing is neither added nor removed here, so it
+            // remains tracked (review finding B2: this is what lets a later actual deletion of
+            // that bundle still be detected and cleaned up by the removal loop above, instead of
+            // being silently forgotten and leaking a dangling overlay symlink).
             foreach (string bundleName in currentBundles)
             {
-                EnsureOverlayLinks(bundleName);
+                try
+                {
+                    EnsureOverlayLinks(bundleName);
+                    _ = _knownCustomBundles.Add(bundleName);
+                }
+                catch (CustomProfileBundleException ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Skipping custom OrcaSlicer bundle {BundleName} during overlay reconciliation ({Code})",
+                        LogSanitizer.Sanitize(bundleName),
+                        ex.Code);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // #2080 N-REC-1 (round-5 review, Hicks): same rationale as the removal loop
+                    // above -- EnsureOverlayLinks' underlying File/Directory symlink calls can
+                    // throw IOException or UnauthorizedAccessException, not just
+                    // CustomProfileBundleException, and must not abort reconciliation for sibling
+                    // bundles.
+                    _logger.LogWarning(
+                        ex,
+                        "Skipping custom OrcaSlicer bundle {BundleName} during overlay reconciliation (filesystem error)",
+                        LogSanitizer.Sanitize(bundleName));
+                }
             }
-
-            _knownCustomBundles.Clear();
-            _knownCustomBundles.UnionWith(currentBundles);
 
             if (changed)
             {
@@ -727,7 +788,23 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         }
 
         EnsureExpectedLink(linkPath, targetPath, isDirectory);
-        link.Delete();
+
+        // #2080 N-REC-1 (CI regression, Linux): DirectoryInfo.Delete() removes a directory
+        // reparse point on Windows even when its target no longer exists, because Windows
+        // tracks the reparse point as an independent filesystem object. On Unix, deleting a
+        // *dangling* directory symlink this way fails: .NET's directory-delete path stats the
+        // target first (following the link) to validate it, and that stat fails with ENOENT
+        // before rmdir() is ever attempted -- and POSIX rmdir() refuses to operate on a symlink
+        // at all, dangling or not. A dangling directory symlink must instead be removed with
+        // File.Delete (unlink), which does not require the target to exist or resolve.
+        if (isDirectory && !OperatingSystem.IsWindows())
+        {
+            File.Delete(linkPath);
+        }
+        else
+        {
+            link.Delete();
+        }
     }
 
     private string GetCustomManifestPath(string bundleName) =>
