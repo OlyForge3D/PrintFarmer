@@ -70,11 +70,35 @@ public sealed class ArtifactsServiceOpenReadStreamTests : IDisposable
     {
         Artifact artifact = CreateArtifact();
         WriteArtifactFile(artifact, "; gcode bytes");
-        string fullPath = Path.Join(_root, artifact.RelativePath);
         // The parent directory exists (a file was uploaded here previously) but the specific
         // file itself has since vanished (e.g. concurrent cleanup). This exercises
         // FileNotFoundException, distinct from the DirectoryNotFoundException case above.
-        File.Delete(fullPath);
+        File.Delete(ResolveFullPath(artifact));
+
+        var repository = new Mock<IArtifactsRepository>(MockBehavior.Strict);
+        repository
+            .Setup(r => r.GetByIdAsync(artifact.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(artifact);
+
+        using ArtifactsMetrics metrics = new();
+        ArtifactsService service = CreateService(repository.Object, metrics);
+
+        ArtifactContentStream? content = await service.OpenReadStreamAsync(artifact.Id, CancellationToken.None);
+
+        content.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task OpenReadStreamAsync_PathReplacedByDirectory_ReturnsNullInsteadOfThrowing()
+    {
+        Artifact artifact = CreateArtifact();
+        // The artifact's expected file path is occupied by a directory instead of a file (e.g.
+        // it was replaced in the race window, or storage was corrupted externally). Opening a
+        // directory as a FileStream throws UnauthorizedAccessException on both Windows and Unix
+        // (EISDIR is normalized to UnauthorizedAccessException there), which is the exception
+        // type added to OpenReadStreamAsync's catch filter alongside the not-found cases above.
+        string fullPath = ResolveFullPath(artifact);
+        Directory.CreateDirectory(fullPath);
 
         var repository = new Mock<IArtifactsRepository>(MockBehavior.Strict);
         repository
@@ -122,9 +146,11 @@ public sealed class ArtifactsServiceOpenReadStreamTests : IDisposable
         };
     }
 
+    private string ResolveFullPath(Artifact artifact) => Path.Join(_root, artifact.RelativePath);
+
     private void WriteArtifactFile(Artifact artifact, string content)
     {
-        string fullPath = Path.Join(_root, artifact.RelativePath);
+        string fullPath = ResolveFullPath(artifact);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         File.WriteAllText(fullPath, content);
     }
