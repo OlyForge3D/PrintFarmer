@@ -80,10 +80,14 @@ public sealed class PrintersServiceFirmwareRefreshTests
         Guid printerId = Guid.NewGuid();
 
         var repository = new Mock<IPrintersRepository>();
+        // IDISP013 false positive: Moq's SetupSequence lambda is an expression tree
+        // describing which member to intercept — it is never invoked directly.
+#pragma warning disable IDISP013 // Await in using
         repository
             .SetupSequence(r => r.ExistsAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true)  // pre-lock check: printer is still real
             .ReturnsAsync(false); // post-lock check: printer vanished while waiting for/after the lock
+#pragma warning restore IDISP013
         repository
             .Setup(r => r.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException(
@@ -165,6 +169,9 @@ public sealed class PrintersServiceFirmwareRefreshTests
 
         var unitOfWork = new Mock<IUnitOfWork>();
         unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
+        // IDISP013 false positive: this Returns callback lambda is not invoked here — it
+        // runs later when the mocked SaveChangesAsync is actually called during the save.
+#pragma warning disable IDISP013 // Await in using
         unitOfWork
             .Setup(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns<CancellationToken>(_ =>
@@ -181,6 +188,7 @@ public sealed class PrintersServiceFirmwareRefreshTests
                     "simulated concurrency conflict: row deleted mid-write",
                     new[] { updateEntry }));
             });
+#pragma warning restore IDISP013
 
         PrintersService service = CreateService(db, unitOfWork.Object);
 
@@ -422,7 +430,7 @@ public sealed class PrintersServiceFirmwareRefreshTests
             FirmwareDetectedAtUtc = DateTime.UtcNow,
         };
 
-        Func<Task> act = () => service.RefreshDetectedFirmwareIdentityAsync(printerId, discovered, CancellationToken.None);
+        Func<Task> act = async () => await service.RefreshDetectedFirmwareIdentityAsync(printerId, discovered, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
 
@@ -487,7 +495,9 @@ public sealed class PrintersServiceFirmwareRefreshTests
             .Returns(new EfPrintersRepository(requestDb, Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>()));
         requestUnitOfWork
             .Setup(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()))
+#pragma warning disable IDISP013 // Await in using — Returns callback runs later, not here
             .Returns((CancellationToken token) => requestDb.SaveChangesAsync(token));
+#pragma warning restore IDISP013
         PrintersService requestService = CreateService(requestDb, requestUnitOfWork.Object);
 
         Printer trackedInRequestScope = (await requestUnitOfWork.Object.Printers.FindByIdAsync(printerId, CancellationToken.None))!;
@@ -593,7 +603,9 @@ public sealed class PrintersServiceFirmwareRefreshTests
             .Returns(new EfPrintersRepository(dbB, Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>()));
         unitOfWorkB
             .Setup(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()))
+#pragma warning disable IDISP013 // Await in using — Returns callback runs later, not here
             .Returns((CancellationToken token) => dbB.SaveChangesAsync(token));
+#pragma warning restore IDISP013
         PrintersService serviceB = CreateService(dbB, unitOfWorkB.Object);
 
         DiscoveredPrinterDto discoveredA = new()

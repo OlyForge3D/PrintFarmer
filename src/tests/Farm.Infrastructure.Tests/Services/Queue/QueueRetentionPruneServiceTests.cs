@@ -342,7 +342,7 @@ public class QueueRetentionPruneServiceTests : IDisposable
 
         QueueRetentionPruneService svc = CreateSut(sp);
 
-        Func<Task> act = () => svc.RunOnceAsync(CancellationToken.None);
+        Func<Task> act = async () => await svc.RunOnceAsync(CancellationToken.None);
         _ = await act.Should().NotThrowAsync("the prune loop must tolerate transient database failures");
     }
 
@@ -357,7 +357,7 @@ public class QueueRetentionPruneServiceTests : IDisposable
         using CancellationTokenSource cts = new();
         cts.Cancel();
 
-        Func<Task> act = () => svc.RunOnceAsync(cts.Token);
+        Func<Task> act = async () => await svc.RunOnceAsync(cts.Token);
         _ = await act.Should().NotThrowAsync("a cancelled token must be swallowed for graceful shutdown");
     }
 }

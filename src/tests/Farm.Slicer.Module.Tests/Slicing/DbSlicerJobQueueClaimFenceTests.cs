@@ -69,10 +69,10 @@ public sealed class DbSlicerJobQueueClaimFenceTests : IAsyncDisposable
             ClaimToken = staleClaimToken,
         };
 
-        Func<Task> progress = () => queue.UpdateProgressAsync(staleJob, 45);
-        Func<Task> failure = () => queue.FailJobAsync(staleJob, "stale failure");
-        Func<Task> requeue = () => queue.RequeueJobAsync(staleJob);
-        Func<Task> completion = () => queue.CompleteJobAsync(
+        Func<Task> progress = async () => await queue.UpdateProgressAsync(staleJob, 45);
+        Func<Task> failure = async () => await queue.FailJobAsync(staleJob, "stale failure");
+        Func<Task> requeue = async () => await queue.RequeueJobAsync(staleJob);
+        Func<Task> completion = async () => await queue.CompleteJobAsync(
             staleJob,
             new SlicingResult
             {

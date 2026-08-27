@@ -671,7 +671,7 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
         await using AppDbContext context = new(options);
         var repository = new EfDeviceTokenRepository(context);
 
-        Func<Task> act = () => repository.UpsertAsync(
+        Func<Task> act = async () => await repository.UpsertAsync(
             Guid.NewGuid(),
             "installation-fk",
             new string('c', 64),

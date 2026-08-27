@@ -99,7 +99,7 @@ public class PrintablesOAuthServiceTests
         HttpClient client = new(new SequenceHttpHandler(_ => Json(HttpStatusCode.OK, """{ "data": { "viewer": {} } }""")));
         PrintablesOAuthService sut = CreateService(db, client);
 
-        Func<Task> act = () => sut.GetDownloadHistoryAsync(userId, 24, null, CancellationToken.None);
+        Func<Task> act = async () => await sut.GetDownloadHistoryAsync(userId, 24, null, CancellationToken.None);
         _ = await act.Should().ThrowAsync<NotSupportedException>()
             .WithMessage("*unavailable from upstream*");
     }
@@ -110,7 +110,7 @@ public class PrintablesOAuthServiceTests
         await using AppDbContext db = CreateDbContext();
         PrintablesOAuthService sut = CreateService(db, new HttpClient(new SequenceHttpHandler(_ => Json(HttpStatusCode.OK, "{}"))));
 
-        Func<Task> act = () => sut.GetLikedModelsAsync(Guid.NewGuid(), 24, null, CancellationToken.None);
+        Func<Task> act = async () => await sut.GetLikedModelsAsync(Guid.NewGuid(), 24, null, CancellationToken.None);
         _ = await act.Should().ThrowAsync<PrintablesOAuthNotLinkedException>()
             .WithMessage("*not linked*");
     }
@@ -132,7 +132,7 @@ public class PrintablesOAuthServiceTests
         HttpClient client = new(new SequenceHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized)));
         PrintablesOAuthService sut = CreateService(db, client);
 
-        Func<Task> act = () => sut.GetDownloadHistoryAsync(userId, 24, null, CancellationToken.None);
+        Func<Task> act = async () => await sut.GetDownloadHistoryAsync(userId, 24, null, CancellationToken.None);
         _ = await act.Should().ThrowAsync<PrintablesOAuthNotLinkedException>()
             .WithMessage("*Reconnect*");
 
@@ -269,7 +269,7 @@ public class PrintablesOAuthServiceTests
         HttpClient client = new(new SequenceHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
         PrintablesOAuthService sut = CreateService(db, client);
 
-        Func<Task> act = () => sut.GetLikedModelsAsync(userId, 24, null, CancellationToken.None);
+        Func<Task> act = async () => await sut.GetLikedModelsAsync(userId, 24, null, CancellationToken.None);
         _ = await act.Should().ThrowAsync<PrintablesOAuthTemporarilyUnavailableException>()
             .WithMessage("*temporarily unavailable*");
 
@@ -295,7 +295,7 @@ public class PrintablesOAuthServiceTests
         HttpClient client = new(new SequenceHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
         PrintablesOAuthService sut = CreateService(db, client);
 
-        Func<Task> act = () => sut.GetLikedModelsAsync(userId, 24, null, CancellationToken.None);
+        Func<Task> act = async () => await sut.GetLikedModelsAsync(userId, 24, null, CancellationToken.None);
         _ = await act.Should().ThrowAsync<PrintablesOAuthTemporarilyUnavailableException>()
             .WithMessage("*temporarily unavailable*");
 
@@ -322,7 +322,7 @@ public class PrintablesOAuthServiceTests
         HttpClient client = new(new SequenceHttpHandler(_ => Json(HttpStatusCode.BadRequest, """{ "error": "invalid_grant" }""")));
         PrintablesOAuthService sut = CreateService(db, client);
 
-        Func<Task> act = () => sut.GetLikedModelsAsync(userId, 24, null, CancellationToken.None);
+        Func<Task> act = async () => await sut.GetLikedModelsAsync(userId, 24, null, CancellationToken.None);
         _ = await act.Should().ThrowAsync<PrintablesOAuthNotLinkedException>()
             .WithMessage("*Reconnect*");
 
@@ -396,7 +396,7 @@ public class PrintablesOAuthServiceTests
 
         PrintablesOAuthService sut = CreateService(primaryDb, client);
 
-        Func<Task> act = () => sut.GetLikedModelsAsync(userId, 24, null, CancellationToken.None);
+        Func<Task> act = async () => await sut.GetLikedModelsAsync(userId, 24, null, CancellationToken.None);
         _ = await act.Should().ThrowAsync<PrintablesOAuthNotLinkedException>()
             .WithMessage("*no longer linked*");
     }

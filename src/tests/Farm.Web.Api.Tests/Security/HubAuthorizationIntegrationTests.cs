@@ -94,10 +94,10 @@ public sealed class HubAuthorizationIntegrationTests : IAsyncLifetime
             .Build();
         await connection.StartAsync();
 
-        Func<Task> queueJoin = () => connection.InvokeAsync(
+        Func<Task> queueJoin = async () => await connection.InvokeAsync(
             "SubscribeToQueueJobAsync",
             Guid.NewGuid().ToString());
-        Func<Task> projectJoin = () => connection.InvokeAsync(
+        Func<Task> projectJoin = async () => await connection.InvokeAsync(
             "SubscribeToProjectAsync",
             Guid.NewGuid().ToString());
 

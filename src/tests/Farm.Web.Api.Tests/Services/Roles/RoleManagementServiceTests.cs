@@ -141,7 +141,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
         await using AppDbContext context = await CreateSeededContextAsync();
         RoleManagementService service = CreateService(context);
 
-        Func<Task> act = () => service.CreateRoleAsync(
+        Func<Task> act = async () => await service.CreateRoleAsync(
             new CreateCustomRoleRequest { Name = invalidName, DisplayName = "Test Role" },
             Guid.NewGuid(),
             "127.0.0.1");
@@ -156,7 +156,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
         await using AppDbContext context = await CreateSeededContextAsync();
         RoleManagementService service = CreateService(context);
 
-        Func<Task> act = () => service.CreateRoleAsync(
+        Func<Task> act = async () => await service.CreateRoleAsync(
             new CreateCustomRoleRequest { Name = "farm_custom", DisplayName = "Test Role" },
             Guid.NewGuid(),
             "127.0.0.1");
@@ -174,7 +174,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
 
         _ = await service.CreateRoleAsync(new CreateCustomRoleRequest { Name = "operators", DisplayName = "Operators" }, actor, null);
 
-        Func<Task> act = () => service.CreateRoleAsync(new CreateCustomRoleRequest { Name = "OPERATORS", DisplayName = "Dup" }, actor, null);
+        Func<Task> act = async () => await service.CreateRoleAsync(new CreateCustomRoleRequest { Name = "OPERATORS", DisplayName = "Dup" }, actor, null);
 
         (await act.Should().ThrowAsync<RoleManagementException>())
             .Which.ErrorCode.Should().Be(RoleManagementErrorCode.InvalidName);
@@ -217,7 +217,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
         Guid actor = Guid.NewGuid();
         RoleDetailDto created = await service.CreateRoleAsync(new CreateCustomRoleRequest { Name = "operators", DisplayName = "Operators" }, actor, null);
 
-        Func<Task> act = () => service.UpdateRoleAsync(created.Id, new UpdateCustomRoleRequest { Name = "renamed_operators" }, actor, null);
+        Func<Task> act = async () => await service.UpdateRoleAsync(created.Id, new UpdateCustomRoleRequest { Name = "renamed_operators" }, actor, null);
 
         (await act.Should().ThrowAsync<RoleManagementException>())
             .Which.ErrorCode.Should().Be(RoleManagementErrorCode.NameIsImmutable);
@@ -233,7 +233,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
         Guid farmAdminId = await GetRoleIdAsync(context, "farm_admin");
         Guid actor = Guid.NewGuid();
 
-        Func<Task> act = () => service.UpdateRoleAsync(farmAdminId, new UpdateCustomRoleRequest { IsActive = false }, actor, null);
+        Func<Task> act = async () => await service.UpdateRoleAsync(farmAdminId, new UpdateCustomRoleRequest { IsActive = false }, actor, null);
 
         (await act.Should().ThrowAsync<RoleManagementException>())
             .Which.ErrorCode.Should().Be(RoleManagementErrorCode.SystemRoleProtected);
@@ -265,7 +265,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
         Guid farmUserId = await GetRoleIdAsync(context, "farm_user");
         Guid actor = Guid.NewGuid();
 
-        Func<Task> act = () => service.DeleteRoleAsync(farmUserId, reassignToRoleId: null, cascade: false, actor, null);
+        Func<Task> act = async () => await service.DeleteRoleAsync(farmUserId, reassignToRoleId: null, cascade: false, actor, null);
 
         (await act.Should().ThrowAsync<RoleManagementException>())
             .Which.ErrorCode.Should().Be(RoleManagementErrorCode.SystemRoleProtected);
@@ -283,7 +283,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
         Guid memberId = await CreateUserAsync(context, "operator1");
         await AssignRoleAsync(context, memberId, role.Id);
 
-        Func<Task> act = () => service.DeleteRoleAsync(role.Id, reassignToRoleId: null, cascade: false, actor, null);
+        Func<Task> act = async () => await service.DeleteRoleAsync(role.Id, reassignToRoleId: null, cascade: false, actor, null);
 
         (await act.Should().ThrowAsync<RoleManagementException>())
             .Which.ErrorCode.Should().Be(RoleManagementErrorCode.HasMembers);
@@ -362,7 +362,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
         Guid memberId = await CreateUserAsync(context, "super-admin-1");
         await AssignRoleAsync(context, memberId, customAdminRoleId);
 
-        Func<Task> act = () => service.DeleteRoleAsync(customAdminRoleId, reassignToRoleId: null, cascade: true, actor, null);
+        Func<Task> act = async () => await service.DeleteRoleAsync(customAdminRoleId, reassignToRoleId: null, cascade: true, actor, null);
 
         (await act.Should().ThrowAsync<RoleManagementException>())
             .Which.ErrorCode.Should().Be(RoleManagementErrorCode.LastAdminRole);
@@ -404,7 +404,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
 
         // Global coverage exists (farm_admin has a member), but the acting admin is themself the
         // sole member of the role being removed and holds no other admin-equivalent role.
-        Func<Task> act = () => service.DeleteRoleAsync(customAdminRoleId, reassignToRoleId: null, cascade: true, actorUserId, null);
+        Func<Task> act = async () => await service.DeleteRoleAsync(customAdminRoleId, reassignToRoleId: null, cascade: true, actorUserId, null);
 
         (await act.Should().ThrowAsync<RoleManagementException>())
             .Which.ErrorCode.Should().Be(RoleManagementErrorCode.SelfLockout);
@@ -461,7 +461,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
 
         // farm_user is not admin-equivalent, so reassigning to it does not spare the actor
         // from a self-lockout.
-        Func<Task> act = () => service.DeleteRoleAsync(customAdminRoleId, reassignToRoleId: farmUserId, cascade: false, actorUserId, null);
+        Func<Task> act = async () => await service.DeleteRoleAsync(customAdminRoleId, reassignToRoleId: farmUserId, cascade: false, actorUserId, null);
 
         (await act.Should().ThrowAsync<RoleManagementException>())
             .Which.ErrorCode.Should().Be(RoleManagementErrorCode.SelfLockout);
@@ -482,7 +482,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
         // count as "another admin-equivalent role" that would spare them from self-lockout.
         await AssignRoleAsync(context, actorUserId, farmAdminId, expiresAt: DateTime.UtcNow.AddDays(-1));
 
-        Func<Task> act = () => service.DeleteRoleAsync(customAdminRoleId, reassignToRoleId: null, cascade: true, actorUserId, null);
+        Func<Task> act = async () => await service.DeleteRoleAsync(customAdminRoleId, reassignToRoleId: null, cascade: true, actorUserId, null);
 
         (await act.Should().ThrowAsync<RoleManagementException>())
             .Which.ErrorCode.Should().Be(RoleManagementErrorCode.SelfLockout);
@@ -505,7 +505,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
         Guid memberId = await CreateUserAsync(context, "super-admin-1");
         await AssignRoleAsync(context, memberId, customAdminRoleId);
 
-        Func<Task> act = () => service.DeleteRoleAsync(customAdminRoleId, reassignToRoleId: null, cascade: true, actor, null);
+        Func<Task> act = async () => await service.DeleteRoleAsync(customAdminRoleId, reassignToRoleId: null, cascade: true, actor, null);
 
         (await act.Should().ThrowAsync<RoleManagementException>())
             .Which.ErrorCode.Should().Be(RoleManagementErrorCode.LastAdminRole);
@@ -580,7 +580,7 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
         RoleManagementService service = new(repository.Object, _authAuditService.Object);
 
         CreateCustomRoleRequest request = new() { Name = "dupe_role", DisplayName = "Dupe Role" };
-        Func<Task> act = () => service.CreateRoleAsync(request, Guid.NewGuid(), null);
+        Func<Task> act = async () => await service.CreateRoleAsync(request, Guid.NewGuid(), null);
 
         (await act.Should().ThrowAsync<RoleManagementException>())
             .Which.ErrorCode.Should().Be(RoleManagementErrorCode.InvalidName);

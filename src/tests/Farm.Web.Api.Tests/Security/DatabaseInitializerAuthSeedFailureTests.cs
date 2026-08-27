@@ -57,7 +57,7 @@ public sealed class DatabaseInitializerAuthSeedFailureTests
         DatabaseInitializer initializer = new(context, recordingLogger, dataSeedService.Object);
 
         // Act
-        Func<Task> act = () => initializer.SeedAllAsync();
+        Func<Task> act = async () => await initializer.SeedAllAsync();
 
         // Assert: the probe failure is not swallowed — it propagates out of SeedAllAsync so the
         // caller's retry/failure handling actually sees it, instead of the entire authentication
@@ -103,7 +103,7 @@ public sealed class DatabaseInitializerAuthSeedFailureTests
         DatabaseInitializer initializer = new(context, recordingLogger, dataSeedService.Object);
 
         // Act
-        Func<Task> act = () => initializer.SeedAllAsync();
+        Func<Task> act = async () => await initializer.SeedAllAsync();
 
         // Assert: exhausting the retry loop must fail startup, not return normally as if seeding
         // succeeded.

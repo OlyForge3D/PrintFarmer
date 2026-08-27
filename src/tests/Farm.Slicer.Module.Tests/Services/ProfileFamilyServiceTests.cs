@@ -146,8 +146,8 @@ public sealed class ProfileFamilyServiceTests
             PrinterRefs().Object,
             NullLogger<ProfileFamilyService>.Instance);
 
-        Func<Task> act = () =>
-            service.CloneFamilyAsync(Request(modelId), Guid.NewGuid(), CancellationToken.None);
+        Func<Task> act = async () =>
+            await service.CloneFamilyAsync(Request(modelId), Guid.NewGuid(), CancellationToken.None);
 
         await act.Should()
             .ThrowAsync<ProfileFamilyConflictException>()
@@ -193,8 +193,8 @@ public sealed class ProfileFamilyServiceTests
             Renderer(),
             workerClient);
 
-        Func<Task> act = () =>
-            service.CloneFamilyAsync(request, Guid.NewGuid(), CancellationToken.None);
+        Func<Task> act = async () =>
+            await service.CloneFamilyAsync(request, Guid.NewGuid(), CancellationToken.None);
 
         await act.Should()
             .ThrowAsync<ProfileFamilyHashConflictException>()
@@ -270,8 +270,8 @@ public sealed class ProfileFamilyServiceTests
             Renderer(),
             workerClient);
 
-        Func<Task> act = () =>
-            service.CloneFamilyAsync(request, Guid.NewGuid(), CancellationToken.None);
+        Func<Task> act = async () =>
+            await service.CloneFamilyAsync(request, Guid.NewGuid(), CancellationToken.None);
 
         await act.Should()
             .ThrowAsync<ProfileFamilyHashConflictException>()
@@ -660,7 +660,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), Aliases(modelId), Renderer(), Worker());
 
-        Func<Task> act = () => service.GetFamilyAsync(Guid.NewGuid(), CancellationToken.None);
+        Func<Task> act = async () => await service.GetFamilyAsync(Guid.NewGuid(), CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ProfileFamilyNotFoundException>();
     }
@@ -689,7 +689,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), Aliases(modelId), Renderer(), Worker());
 
-        Func<Task> act = () => service.GetFamilyAsync(stockId, CancellationToken.None);
+        Func<Task> act = async () => await service.GetFamilyAsync(stockId, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ProfileFamilyNotFoundException>();
     }
@@ -737,7 +737,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), DeleteAliases(modelId), Renderer(), worker);
 
-        Func<Task> act = () => service.DeleteFamilyAsync(Guid.NewGuid(), force: false, CancellationToken.None);
+        Func<Task> act = async () => await service.DeleteFamilyAsync(Guid.NewGuid(), force: false, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ProfileFamilyNotFoundException>();
         worker.Verify(
@@ -768,7 +768,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), DeleteAliases(modelId), Renderer(), worker);
 
-        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
+        Func<Task> act = async () => await service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
 
         (await act.Should().ThrowAsync<ProfileFamilyInUseException>())
             .Which.Message.Should().Contain(jobId.ToString());
@@ -827,7 +827,7 @@ public sealed class ProfileFamilyServiceTests
             worker,
             PrinterRefs(blockingPrinter));
 
-        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
+        Func<Task> act = async () => await service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
 
         (await act.Should().ThrowAsync<ProfileFamilyInUseException>())
             .Which.Message.Should().Contain("Bench Printer");
@@ -853,7 +853,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, catalog, aliases, Renderer(), worker);
 
-        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
+        Func<Task> act = async () => await service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<HttpRequestException>();
         (await dbContext.MachineModelProfiles.CountAsync())
@@ -941,7 +941,7 @@ public sealed class ProfileFamilyServiceTests
             new Mock<IProfileFamilyRenderer>(MockBehavior.Strict),
             new Mock<IProfileFamilyWorkerClient>(MockBehavior.Strict));
 
-        Func<Task> act = () => service.EditFamilyAsync(
+        Func<Task> act = async () => await service.EditFamilyAsync(
             familyId, new EditProfileFamilyRequestDto { Name = "Taken" }, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ProfileFamilyConflictException>();
@@ -983,7 +983,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
 
-        Func<Task> act = () => service.EditFamilyAsync(familyId, request, CancellationToken.None);
+        Func<Task> act = async () => await service.EditFamilyAsync(familyId, request, CancellationToken.None);
 
         await act.Should()
             .ThrowAsync<ProfileFamilyHashConflictException>()
@@ -1067,7 +1067,7 @@ public sealed class ProfileFamilyServiceTests
             new Mock<IProfileFamilyWorkerClient>(MockBehavior.Strict),
             printerRefs);
 
-        Func<Task> act = () => service.EditFamilyAsync(
+        Func<Task> act = async () => await service.EditFamilyAsync(
             familyId, new EditProfileFamilyRequestDto { NozzleDiameters = [0.4] }, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ProfileFamilyInUseException>();
@@ -1098,7 +1098,7 @@ public sealed class ProfileFamilyServiceTests
             new Mock<IProfileFamilyRenderer>(MockBehavior.Strict),
             new Mock<IProfileFamilyWorkerClient>(MockBehavior.Strict));
 
-        Func<Task> act = () => service.EditFamilyAsync(
+        Func<Task> act = async () => await service.EditFamilyAsync(
             familyId, new EditProfileFamilyRequestDto { NozzleDiameters = [0.4] }, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ProfileFamilyInUseException>();
@@ -1119,7 +1119,7 @@ public sealed class ProfileFamilyServiceTests
             new Mock<IProfileFamilyRenderer>(MockBehavior.Strict),
             new Mock<IProfileFamilyWorkerClient>(MockBehavior.Strict));
 
-        Func<Task> act = () => service.EditFamilyAsync(
+        Func<Task> act = async () => await service.EditFamilyAsync(
             familyId, new EditProfileFamilyRequestDto { NozzleDiameters = [] }, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ArgumentException>();
@@ -1137,7 +1137,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), EditWorker());
 
-        Func<Task> act = () => service.EditFamilyAsync(
+        Func<Task> act = async () => await service.EditFamilyAsync(
             familyId,
             new EditProfileFamilyRequestDto { SourceMachineModelName = "Removed Model" },
             CancellationToken.None);
@@ -1218,7 +1218,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
 
-        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+        Func<Task> act = async () => await service.RenderFamilyAsync(familyId, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<HttpRequestException>();
         (await dbContext.MachineModelProfiles.AsNoTracking().SingleAsync(f => f.Id == familyId))
@@ -1253,7 +1253,7 @@ public sealed class ProfileFamilyServiceTests
             EchoRenderer(),
             EditWorker(sourceModelNames: "Other Model"));
 
-        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+        Func<Task> act = async () => await service.RenderFamilyAsync(familyId, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ProfileFamilySourceException>();
         (await dbContext.MachineModelProfiles.AsNoTracking().SingleAsync(f => f.Id == familyId))
@@ -1281,7 +1281,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
 
-        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+        Func<Task> act = async () => await service.RenderFamilyAsync(familyId, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<HttpRequestException>();
         (await dbContext.MachineModelProfiles.AsNoTracking().SingleAsync(f => f.Id == familyId))
@@ -1320,7 +1320,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
 
-        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+        Func<Task> act = async () => await service.RenderFamilyAsync(familyId, CancellationToken.None);
 
         await act.Should()
             .ThrowAsync<ProfileFamilyHashConflictException>()
@@ -1386,7 +1386,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
 
-        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+        Func<Task> act = async () => await service.RenderFamilyAsync(familyId, CancellationToken.None);
 
         await act.Should()
             .ThrowAsync<ProfileFamilyHashConflictException>()
@@ -1568,7 +1568,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, catalog, DeleteAliases(modelId), Renderer(), DeleteWorker());
 
-        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
+        Func<Task> act = async () => await service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<InvalidOperationException>();
         MachineModelProfile persisted = await dbContext.MachineModelProfiles
@@ -1610,7 +1610,7 @@ public sealed class ProfileFamilyServiceTests
             worker,
             PrinterRefs(modelPrinter: affectedPrinter));
 
-        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
+        Func<Task> act = async () => await service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
 
         (await act.Should().ThrowAsync<ProfileFamilyLastCoverageException>())
             .Which.Message.Should().Contain("Shop Printer")
@@ -1741,7 +1741,7 @@ public sealed class ProfileFamilyServiceTests
             worker,
             PrinterRefs(blockingPrinter));
 
-        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: true, CancellationToken.None);
+        Func<Task> act = async () => await service.DeleteFamilyAsync(familyId, force: true, CancellationToken.None);
 
         (await act.Should().ThrowAsync<ProfileFamilyInUseException>())
             .Which.Message.Should().Contain("Bench Printer");
@@ -1794,7 +1794,7 @@ public sealed class ProfileFamilyServiceTests
         // Arm the concurrent delete: the next persist (the render's single Healthy save) removes the family
         // rows out-of-band and reports the optimistic-concurrency conflict EF raises on a zero-row update.
         dbContext.DeleteFamilyOnNextSave = true;
-        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+        Func<Task> act = async () => await service.RenderFamilyAsync(familyId, CancellationToken.None);
 
         (await act.Should().ThrowAsync<ProfileFamilyConcurrentlyDeletedException>())
             .Which.Message.Should().Contain(familyId.ToString());
@@ -1849,7 +1849,7 @@ public sealed class ProfileFamilyServiceTests
 
         // Every persist throws DbUpdateConcurrencyException, but the row is never actually removed.
         dbContext.ThrowOnSave = true;
-        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+        Func<Task> act = async () => await service.RenderFamilyAsync(familyId, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ProfileFamilyConcurrencyException>();
         worker.Verify(
@@ -1906,7 +1906,7 @@ public sealed class ProfileFamilyServiceTests
         using var cts = new CancellationTokenSource();
         dbContext.DeleteFamilyOnNextSave = true;
         dbContext.CancelRequestOnConflict = cts;
-        Func<Task> act = () => service.RenderFamilyAsync(familyId, cts.Token);
+        Func<Task> act = async () => await service.RenderFamilyAsync(familyId, cts.Token);
 
         // Post-fix: the deleted-concurrently branch runs despite cancellation -> clean 404-mapping exception.
         // Pre-fix (ct threaded): the re-check throws OperationCanceledException, so this assertion fails.
@@ -1970,7 +1970,7 @@ public sealed class ProfileFamilyServiceTests
 
         // The single Healthy persist loses the race (row survives); every later save (mark-Failed) proceeds.
         dbContext.ConflictOnNextSave = true;
-        Func<Task> act = () => service.EditFamilyAsync(
+        Func<Task> act = async () => await service.EditFamilyAsync(
             familyId, new EditProfileFamilyRequestDto { Name = "Renamed" }, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ProfileFamilyConcurrencyException>();
@@ -2045,7 +2045,7 @@ public sealed class ProfileFamilyServiceTests
 
         // Arm the concurrent delete: the persist removes the family rows out-of-band and reports the conflict.
         dbContext.DeleteFamilyOnNextSave = true;
-        Func<Task> act = () => service.EditFamilyAsync(
+        Func<Task> act = async () => await service.EditFamilyAsync(
             familyId, new EditProfileFamilyRequestDto { Name = "Renamed" }, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ProfileFamilyConcurrentlyDeletedException>();
@@ -2119,7 +2119,7 @@ public sealed class ProfileFamilyServiceTests
 
         // Arm the concurrent delete: the persist removes the family rows out-of-band and reports the conflict.
         dbContext.DeleteFamilyOnNextSave = true;
-        Func<Task> act = () => service.EditFamilyAsync(
+        Func<Task> act = async () => await service.EditFamilyAsync(
             familyId, new EditProfileFamilyRequestDto { Name = maliciousName }, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ProfileFamilyConcurrentlyDeletedException>();
@@ -2152,7 +2152,7 @@ public sealed class ProfileFamilyServiceTests
 
         // The transactional row delete loses the race (row survives); the mark-Failed save then proceeds.
         dbContext.ConflictOnNextSave = true;
-        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
+        Func<Task> act = async () => await service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ProfileFamilyConcurrencyException>();
         (await dbContext.MachineModelProfiles.CountAsync())
@@ -2189,7 +2189,7 @@ public sealed class ProfileFamilyServiceTests
         using var cts = new CancellationTokenSource();
         dbContext.ConflictOnNextSave = true;
         dbContext.CancelRequestOnConflict = cts;
-        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: false, cts.Token);
+        Func<Task> act = async () => await service.DeleteFamilyAsync(familyId, force: false, cts.Token);
 
         // Post-fix: the compensation runs despite cancellation -> clean 409 + surviving row marked Failed.
         // Pre-fix (ct threaded): the re-check throws OperationCanceledException, so BOTH assertions fail.
@@ -2262,7 +2262,7 @@ public sealed class ProfileFamilyServiceTests
             dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
 
         // Change BOTH an override and the nozzle set so multiple facets would mutate on success.
-        Func<Task> act = () => service.EditFamilyAsync(
+        Func<Task> act = async () => await service.EditFamilyAsync(
             familyId,
             new EditProfileFamilyRequestDto
             {
@@ -2317,7 +2317,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), aliases, EchoRenderer(), worker);
 
-        Func<Task> act = () => service.EditFamilyAsync(
+        Func<Task> act = async () => await service.EditFamilyAsync(
             familyId, new EditProfileFamilyRequestDto { Name = "Renamed" }, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<HttpRequestException>();
@@ -2508,7 +2508,7 @@ public sealed class ProfileFamilyServiceTests
             new Mock<IProfileFamilyWorkerClient>(MockBehavior.Strict),
             printerRefs);
 
-        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+        Func<Task> act = async () => await service.RenderFamilyAsync(familyId, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ProfileFamilyInUseException>();
         (await dbContext.MachineProfiles.CountAsync(v => v.MachineModelProfileId == familyId))

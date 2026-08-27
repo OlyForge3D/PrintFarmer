@@ -384,9 +384,13 @@ public class IdempotencyStoreTests : IDisposable
                 "user-A", IdempotencyRouteKeys.TaskComplete, "race-key", "hash-A", CancellationToken.None);
         }
 
+        // IDISP013 false positive: every task is awaited via Task.WhenAll on the next line,
+        // before `gate` leaves its using scope.
+#pragma warning disable IDISP013 // Await in using
         Task<IdempotencyLookupResult>[] racers = Enumerable.Range(0, racerCount)
             .Select(_ => Task.Run(RaceAsync))
             .ToArray();
+#pragma warning restore IDISP013
 
         IdempotencyLookupResult[] results = await Task.WhenAll(racers);
 

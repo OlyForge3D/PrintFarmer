@@ -42,7 +42,13 @@
            project rather than one large one." Remove entries below incrementally as #2106's
            tiered burn-down clears each rule for the whole test tree; do not add further rule
            IDs here without linking a tracking issue. -->
-      IDISP013; <!-- Await in using / IDisposable analyzer variants (236) -->
+      <!-- IDISP013 (Await in using) fully cleared across src/tests/ — see #2106 burn-down.
+           All ~123 instances (the issue's original "236" estimate double-counted duplicate
+           build-log lines) were either fixed directly (FluentAssertions `Func<Task> act = ()
+           => ...` idiom missing async/await) or are documented IDisposableAnalyzers false
+           positives (Moq Setup/Returns callbacks, Task.Run/Task.Factory.StartNew awaited later
+           via Task.WhenAll) suppressed with a scoped #pragma warning disable/restore IDISP013
+           plus an explanatory comment at each site. -->
       CA1001;   <!-- Type owns disposable field but isn't IDisposable (74) -->
       CA1859;   <!-- Use a more specific return type for performance (54) -->
       CA1826;   <!-- Use property instead of Linq method, e.g. Count() vs Count (40) -->

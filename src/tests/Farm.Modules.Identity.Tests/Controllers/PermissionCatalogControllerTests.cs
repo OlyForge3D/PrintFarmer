@@ -49,7 +49,7 @@ public class PermissionCatalogControllerTests
 
         PermissionCatalogController controller = new(service.Object);
 
-        Func<Task> act = () => controller.GetCatalogAsync(cts.Token);
+        Func<Task> act = async () => await controller.GetCatalogAsync(cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }

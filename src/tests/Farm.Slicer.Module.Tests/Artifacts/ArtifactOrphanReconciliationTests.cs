@@ -496,7 +496,7 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
 
         try
         {
-            Func<Task> upload = () => artifactsService.UploadAsync(
+            Func<Task> upload = async () => await artifactsService.UploadAsync(
                 formFile,
                 Guid.NewGuid(),
                 workerId: null,

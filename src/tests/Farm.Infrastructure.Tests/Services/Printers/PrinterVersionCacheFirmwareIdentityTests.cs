@@ -573,6 +573,9 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
 
         var unitOfWork = new Mock<IUnitOfWork>();
         unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
+        // IDISP013 false positive: this Returns callback lambda is not invoked here — it
+        // runs later when the mocked SaveChangesAsync is actually called during the save.
+#pragma warning disable IDISP013 // Await in using
         unitOfWork
             .Setup(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns<CancellationToken>(_ =>
@@ -584,6 +587,7 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
                     "simulated concurrency conflict: row deleted mid-write",
                     new[] { updateEntry }));
             });
+#pragma warning restore IDISP013
 
         (Mock<IBackendClientFactory> backendFactory, Mock<ISupportsPrinterInformation> info) =
             CreateMockedInfoBackend(PrinterBackend.Moonraker, "v-should-never-be-observed-as-committed");

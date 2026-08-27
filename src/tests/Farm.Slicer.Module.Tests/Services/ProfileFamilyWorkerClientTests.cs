@@ -103,7 +103,7 @@ public sealed class ProfileFamilyWorkerClientTests
             """{"name":"Custom","machine_list":[]}""",
             []);
 
-        Func<Task> act = () => client.WriteBundleAsync(
+        Func<Task> act = async () => await client.WriteBundleAsync(
             new ProfileFamilyWorkerTarget("http://worker:5100", "2.3.0"),
             bundle,
             CancellationToken.None);
@@ -134,7 +134,7 @@ public sealed class ProfileFamilyWorkerClientTests
             """{"name":"Custom","machine_list":[]}""",
             []);
 
-        Func<Task> act = () => client.WriteBundleAsync(
+        Func<Task> act = async () => await client.WriteBundleAsync(
             new ProfileFamilyWorkerTarget("http://worker:5100", "2.3.0"),
             bundle,
             CancellationToken.None);
@@ -174,7 +174,7 @@ public sealed class ProfileFamilyWorkerClientTests
             """{"name":"Custom","machine_list":[]}""",
             []);
 
-        Func<Task> act = () => client.WriteBundleAsync(
+        Func<Task> act = async () => await client.WriteBundleAsync(
             new ProfileFamilyWorkerTarget("http://worker:5100", "2.3.0"),
             bundle,
             CancellationToken.None);

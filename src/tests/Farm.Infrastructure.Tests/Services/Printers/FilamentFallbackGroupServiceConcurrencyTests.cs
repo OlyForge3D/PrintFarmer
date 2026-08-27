@@ -91,7 +91,7 @@ public sealed class FilamentFallbackGroupServiceConcurrencyTests : IAsyncLifetim
         await using AppDbContext serviceDb = CreateContext(interceptor);
         FilamentFallbackGroupService service = new(serviceDb, NullLogger<FilamentFallbackGroupService>.Instance);
 
-        Func<Task> act = () => service.CreateAsync(
+        Func<Task> act = async () => await service.CreateAsync(
             printerId,
             new CreateFilamentFallbackGroupRequest("pla chain", "PLA", null, [t0, t1]),
             CancellationToken.None);
