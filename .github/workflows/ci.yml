@@ -557,6 +557,21 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Upload Farm.Modules.Observability.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Modules.Observability.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: Farm.Modules.Observability.Tests
+          path: src/tests/Farm.Modules.Observability.Tests/bin/Debug/net10.0
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Upload Farm.Web.IntegrationTests build
         if: >-
           ${{
