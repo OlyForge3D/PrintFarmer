@@ -404,10 +404,16 @@ case_infra_change() {
     select_run >/dev/null 2>&1
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
-  assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  # Issue #2033: an infra-only change now selects Farm.Infrastructure.Tests
+  # directly and NO LONGER selects Farm.Web.Api.Tests / Farm.Web.IntegrationTests
+  # -- those legs build Farm.Web.Api themselves, and the separate full-solution
+  # dotnet-build job (asserted below) already gives compile coverage for
+  # Farm.Web.Api against an infra change without paying for its test suite.
+  assert_contains "matrix infra" "$matrix" "Farm.Infrastructure.Tests" || return 1
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "no integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
   assert_contains "matrix orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
-  assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
   assert_contains "matrix smartplug" "$matrix" "Farm.Modules.SmartPlug.Tests" || return 1
   assert_contains "matrix printqueue" "$matrix" "Farm.Modules.PrintQueue.Tests" || return 1
   assert_contains "matrix maintenance" "$matrix" "Farm.Modules.Maintenance.Tests" || return 1
@@ -416,7 +422,138 @@ case_infra_change() {
   assert_contains "matrix identity" "$matrix" "Farm.Modules.Identity.Tests" || return 1
   assert_contains "matrix inventory" "$matrix" "Farm.Modules.Inventory.Tests" || return 1
   assert_contains "matrix administration" "$matrix" "Farm.Modules.Administration.Tests" || return 1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
   assert_app_migration_drift "$out" || return 1
+}
+
+case_infra_change_does_not_build_web_api_test_leg() {
+  local out="$1"
+  # Acceptance criterion (issue #2033): "A change touching only src/infra/**
+  # selects this leg without building Farm.Web.Api." Farm.Infrastructure.Tests
+  # deliberately has no ProjectReference to Farm.Web.Api.csproj, so its own
+  # dotnet-test matrix leg never touches Farm.Web.Api -- verified here by
+  # confirming Farm.Web.Api.Tests/Farm.Web.IntegrationTests (the two legs
+  # whose entire suites target the assembled Farm.Web.Api host, as opposed
+  # to legs like Farm.Slicer.Module.Tests or Farm.Modules.Gcode.Tests that
+  # reference Farm.Web.Api.csproj but only exercise it in a subset of
+  # cases) are absent from the matrix.
+  CHANGED_FILES="src/infra/Services/SomeInfraService.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix infra" "$matrix" "Farm.Infrastructure.Tests" || return 1
+  assert_not_contains "no api leg" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "no integration leg" "$matrix" "Farm.Web.IntegrationTests" || return 1
+}
+
+case_infra_test_project_change_selects_narrow_bucket() {
+  local out="$1"
+  # tests_infra bucket (mirrors tests_api): a change confined to
+  # Farm.Infrastructure.Tests's own test files selects only that project.
+  CHANGED_FILES="src/tests/Farm.Infrastructure.Tests/Services/Printers/PrintersServiceTests.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix infra tests" "$matrix" "Farm.Infrastructure.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "no slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
+  assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  assert_not_contains "no integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  local mig ; mig="$(get_output "$out" mig_matrix)"
+  assert_not_contains "no app mig" "$mig" "AppPg" || return 1
+}
+
+case_infra_and_api_mixed_selects_both_projects() {
+  local out="$1"
+  # Mixed-path case: an infra change plus an api change in the same PR must
+  # select both Farm.Infrastructure.Tests (infra) and Farm.Web.Api.Tests (api),
+  # since the api bucket alone still selects the web-host suites.
+  CHANGED_FILES="src/infra/Services/SomeInfraService.cs
+src/api/Controllers/PrintersController.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix infra" "$matrix" "Farm.Infrastructure.Tests" || return 1
+  assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+}
+
+case_infra_change_full_safe_still_includes_infra_tests() {
+  local out="$1"
+  # A discovery-framework change is full-safe (runs ALL_TEST_PROJECTS from the
+  # manifest); confirm Farm.Infrastructure.Tests (newly registered in the
+  # manifest, issue #2033) is included in that full-safe set.
+  CHANGED_FILES="src/discovery/IPrinterDiscoveryProbe.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix infra full-safe" "$matrix" "Farm.Infrastructure.Tests" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+}
+
+case_backend_core_change_selects_infra_tests() {
+  local out="$1"
+  # Farm.Backend.Plugin.Core is referenced directly by Farm.Infrastructure.Tests
+  # (issue #2033), in addition to Farm.Web.Api.Tests/Slicer.Module.Tests.
+  CHANGED_FILES="src/backends/Farm.Backend.Plugin.Core/ICapability.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix infra via backend-core" "$matrix" "Farm.Infrastructure.Tests" || return 1
+}
+
+case_backend_plugin_change_selects_infra_tests() {
+  local out="$1"
+  # Concrete backend plugins (e.g. Moonraker) are referenced directly by
+  # Farm.Infrastructure.Tests (issue #2033).
+  CHANGED_FILES="src/backends/Farm.Backend.Plugin.Moonraker/MoonrakerClient.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix infra via backend-plugin" "$matrix" "Farm.Infrastructure.Tests" || return 1
+}
+
+case_slicer_change_selects_infra_tests() {
+  local out="$1"
+  # Farm.Slicer.Module/Farm.Slicer.Module.Api are referenced directly by
+  # Farm.Infrastructure.Tests (issue #2033).
+  CHANGED_FILES="src/slicer/Farm.Slicer.Module/SlicerModule.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix infra via slicer" "$matrix" "Farm.Infrastructure.Tests" || return 1
+}
+
+case_mig_app_change_selects_infra_tests() {
+  local out="$1"
+  # Farm.Infrastructure.Tests references Farm.Migrations.Sqlite/PostgreSQL/
+  # SqlServer directly (issue #2033).
+  CHANGED_FILES="src/migrations/Farm.Migrations.PostgreSQL/Migrations/20990101_Add.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix infra via mig-app" "$matrix" "Farm.Infrastructure.Tests" || return 1
+}
+
+case_mig_slcr_change_selects_infra_tests() {
+  local out="$1"
+  # Farm.Infrastructure.Tests references Farm.Slicer.Migrations.Sqlite/
+  # PostgreSQL/SqlServer directly (issue #2033).
+  CHANGED_FILES="src/migrations/Farm.Slicer.Migrations.SqlServer/Migrations/20990101_Add.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix infra via mig-slicer" "$matrix" "Farm.Infrastructure.Tests" || return 1
 }
 
 case_infra_entity_change_selects_app_drift() {
@@ -3208,6 +3345,15 @@ TESTS=(
   case_api_change
   case_auth_forwarded_headers_change_selects_integration
   case_infra_change
+  case_infra_change_does_not_build_web_api_test_leg
+  case_infra_test_project_change_selects_narrow_bucket
+  case_infra_and_api_mixed_selects_both_projects
+  case_infra_change_full_safe_still_includes_infra_tests
+  case_backend_core_change_selects_infra_tests
+  case_backend_plugin_change_selects_infra_tests
+  case_slicer_change_selects_infra_tests
+  case_mig_app_change_selects_infra_tests
+  case_mig_slcr_change_selects_infra_tests
   case_infra_entity_change_selects_app_drift
   case_infra_configuration_change_selects_app_drift
   case_backend_plugin_change

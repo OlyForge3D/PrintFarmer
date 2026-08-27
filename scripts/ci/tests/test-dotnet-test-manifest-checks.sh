@@ -26,7 +26,58 @@
 #      path is left unchanged (would otherwise silently vanish from the CI
 #      matrix since select-dotnet-tests.sh looks entries up by name), and
 #   9. FAILs when an API shard filter drops a root-level test class even though
-#      the directory-level `(root)` ownership marker still exists.
+#      the directory-level `(root)` ownership marker still exists, and
+#  10. FAILs when two new, unregistered top-level sibling classes in one file
+#      are declared at different indentation (a stray extra space on the
+#      second) -- both must still be reported as uncovered, proving neither
+#      is ever silently excluded as "nested" merely because of how it is
+#      indented, and
+#  11. FAILs closed (rather than silently guessing) when a file's public
+#      class(es) are all nested at a non-zero code-brace depth (e.g. wrapped
+#      in a block-scoped `namespace X { ... }` instead of this codebase's
+#      usual file-scoped `namespace X;`), so there is no class at namespace
+#      scope to safely treat as the owner of its [Fact]/[Theory] attributes,
+#  12. does NOT desync its brace-depth count on a C# 11 raw string literal
+#      (`"""..."""`) containing an embedded `"` character and a `//`-looking
+#      substring -- both classes in the file must still be correctly
+#      attributed and reported as coverage gaps, proving the raw string's
+#      own closing delimiter was not swallowed by a mistaken ordinary-string
+#      or line-comment match, and
+#  13. FAILs closed (rather than silently using a desynced depth) when any
+#      construct -- not just an unhandled string form -- leaves the file's
+#      overall code-brace depth unbalanced at EOF, and
+#  14. does NOT desync its brace-depth count when a raw string literal's own
+#      interpolation hole contains a NESTED raw string literal whose opening
+#      quote run is LONGER than the outer literal's own (round-7 reviewer
+#      finding) OR EQUAL to it (round-8 reviewer finding, the more dangerous
+#      case: the hole's open/close braces are swallowed symmetrically, so
+#      the file's overall brace count happens to stay balanced at EOF and
+#      the #13 EOF-balance guard alone cannot catch it) -- `scan_raw_string`
+#      now recursively hands an interpolated raw string's hole to the same
+#      `scan_code(..., stop_at_hole_close=True)` hole scanner ordinary
+#      interpolated strings already use, instead of blanking the whole body
+#      in one blunt, hole-unaware pass, so a nested literal inside the hole
+#      is scanned by its own dedicated, independent closing-delimiter search
+#      and can never be mistaken for the outer literal's own closer, and
+#  15. correctly requires a run of exactly `dollar_count` consecutive braces
+#      (not just one) to open or close an interpolation hole in a raw string
+#      opened with two or more leading '$' signs (round-9 reviewer finding:
+#      the round-8 fix modeled hole-opening as "single '{' opens, doubled
+#      '{{' is an escaped literal", borrowing ordinary interpolated-string
+#      escaping semantics that do not exist in raw strings at all -- for a
+#      `dollar_count == 2` literal, a single '{' is literal text and only a
+#      genuine '{{' run opens a hole, the reverse of what the round-8 fix
+#      assumed; 37 files in this repository use two-dollar raw strings
+#      today, so this was a live gap, not a theoretical one), AND correctly
+#      attributes EXCESS braces in a longer-than-`dollar_count` run to the
+#      START of an opening run and the END of a closing run as literal
+#      content, per the C# 11 spec (round-10 reviewer finding: the round-9
+#      fix consumed the FIRST `dollar_count` braces of an opening run as the
+#      hole opener rather than the LAST `dollar_count`, mis-attributing any
+#      excess leading brace as a nested code brace and desyncing
+#      `hole_depth` whenever the matching closing run has no excess of its
+#      own to absorb it, which silently swallowed a following sibling class
+#      and left the file's overall brace count unbalanced at EOF).
 # =============================================================================
 
 set -uo pipefail
@@ -326,8 +377,326 @@ with open(out_path, "w", encoding="utf-8") as f:
     printf '  expected validator to fail when a shard filter drops a root test, but it passed\n' >&2
     return 1
   fi
-  if [[ "$report" != *"filter does not cover test source PasswordSecurityTests.cs"* ]]; then
+  if [[ "$report" != *"no shard filter covers test source PasswordSecurityTests.cs class PasswordSecurityTests"* ]]; then
     printf '  expected a shard-filter-coverage error, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_sibling_mismatched_indentation_both_flagged_uncovered_fails() {
+  # Negative (proves no misattribution): two public top-level sibling
+  # classes at different indentation (a stray extra space on the second)
+  # must BOTH still be recognized as real, independent owning classes --
+  # indentation is just formatting and must not affect whether a class is
+  # treated as top-level. Since these are brand-new class names with no
+  # registered shard filter, the validator must report a coverage gap for
+  # *each* of them; if the mis-indented sibling were ever silently excluded
+  # as "nested" (the exact false pass this check guards against), only one
+  # gap -- or none -- would be reported instead of two.
+  local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/_ScratchSiblingCoverageTests.cs"
+  cat >"$scratch" <<'EOF'
+namespace Farm.Web.Api.Tests;
+
+public class ScratchSiblingCoverageTests
+{
+    [Fact]
+    public void Foo()
+    {
+    }
+}
+
+ public class ScratchSiblingCoverageSiblingTests
+{
+    [Fact]
+    public void Bar()
+    {
+    }
+}
+EOF
+  local rc=0
+  local report
+  report="$(bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$scratch"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail (both new sibling classes are uncovered), but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchSiblingCoverageTests.cs class ScratchSiblingCoverageTests"* ]]; then
+    printf '  expected a coverage-gap error naming the first (indent-0) sibling, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchSiblingCoverageTests.cs class ScratchSiblingCoverageSiblingTests"* ]]; then
+    printf '  expected a coverage-gap error naming the second (mis-indented) sibling too -- it must not have been silently treated as nested, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_block_scoped_namespace_fails_closed() {
+  # Negative: every public class in a file at code-nesting depth > 0 (e.g.
+  # every class sits inside a block-scoped `namespace X { ... }` wrapper
+  # instead of this codebase's usual file-scoped `namespace X;`) means the
+  # validator found no class at namespace scope at all -- it must refuse to
+  # guess which class(es) own the [Fact]/[Theory] attributes rather than
+  # silently treating the shallowest-nested class as if it were top-level.
+  local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/Controllers/_ScratchBlockScopedNamespaceTests.cs"
+  cat >"$scratch" <<'EOF'
+namespace Farm.Web.Api.Tests.Controllers
+{
+    public class ScratchBlockScopedNamespaceTests
+    {
+        [Fact]
+        public void Foo()
+        {
+        }
+    }
+}
+EOF
+  local rc=0
+  local report
+  report="$(bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$scratch"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail closed on an every-class-nested file, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"has every public class declaration nested at code depth"* ]]; then
+    printf '  expected a nested-at-every-class error, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_raw_string_literal_does_not_desync_brace_depth() {
+  # Negative (proves no misattribution): a C# 11 raw string literal
+  # (`"""..."""`) containing an embedded `"` character and a `//`-looking
+  # substring must not be mistaken for an ordinary string terminator or a
+  # line comment -- either mistake would blank past the raw string's own
+  # closing delimiter and desync the brace count for the rest of the file,
+  # potentially hiding or misattributing the second sibling class below it.
+  # (This reproduces the exact false-pass mechanism a round-6 reviewer
+  # demonstrated against `PerToolAttributionDtoSerializationTests.cs`.)
+  local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/_ScratchRawStringTests.cs"
+  cat >"$scratch" <<'EOF'
+namespace Farm.Web.Api.Tests;
+
+public class ScratchRawStringTests
+{
+    private const string Payload = """
+        {"legacy": "http://old.example" // not a real comment
+        """;
+
+    [Fact]
+    public void Foo()
+    {
+    }
+}
+
+public class ScratchRawStringSiblingTests
+{
+    [Fact]
+    public void Bar()
+    {
+    }
+}
+EOF
+  local rc=0
+  local report
+  report="$(bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$scratch"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail (both new classes are uncovered), but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" == *"unbalanced braces"* ]]; then
+    printf '  raw string literal desynced the brace count instead of being handled, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchRawStringTests.cs class ScratchRawStringTests"* ]]; then
+    printf '  expected a coverage-gap error naming the first class, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchRawStringTests.cs class ScratchRawStringSiblingTests"* ]]; then
+    printf '  expected a coverage-gap error naming the sibling after the raw string too -- the raw string must not have swallowed its closing delimiter, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_unbalanced_braces_fails_closed() {
+  # Negative: a stray, unmatched brace anywhere in the file (simulating any
+  # future C# construct `_strip_noncode` does not yet understand) must make
+  # the file's overall code-brace depth fail to return to 0 at EOF. The
+  # validator must refuse to guess class ownership in that case rather than
+  # silently using a desynced depth, regardless of what specific construct
+  # caused the desync.
+  local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/_ScratchUnbalancedBraceTests.cs"
+  cat >"$scratch" <<'EOF'
+namespace Farm.Web.Api.Tests;
+
+public class ScratchUnbalancedBraceTests
+{
+    [Fact]
+    public void Foo()
+    {
+    }
+}
+{
+EOF
+  local rc=0
+  local report
+  report="$(bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$scratch"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail closed on an unbalanced-brace file, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"has unbalanced braces after comment/string stripping"* ]]; then
+    printf '  expected an unbalanced-braces error, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_nested_raw_string_in_hole_does_not_desync_brace_depth() {
+  # Positive (round-8 fix, proves no misattribution): `scan_raw_string` now
+  # recursively hands an interpolated raw string's hole to
+  # `scan_code(..., stop_at_hole_close=True)` instead of blanking the whole
+  # body in one blunt, hole-unaware pass. This closes two related false-close
+  # scenarios reviewers identified across rounds 7 and 8: a nested raw string
+  # literal inside the hole whose own opening quote run is LONGER than the
+  # outer literal's (4 vs 3, round 7) or EQUAL to it (3 vs 3, round 8) must
+  # not be mistaken for the outer literal's own closing delimiter. The
+  # equal-length case is the more dangerous of the two -- before this fix, it
+  # happened to leave the file's overall brace count balanced at EOF (the
+  # hole's open and close braces were both swallowed symmetrically), so the
+  # `case_unbalanced_braces_fails_closed` EOF-balance guard alone could not
+  # catch it. Proving all three classes below (both nested-raw-string cases
+  # plus their sibling) are still correctly separated and reported as
+  # coverage gaps -- and that no "unbalanced braces" error fires at all -- is
+  # the only way to confirm this construct is now handled correctly at the
+  # source, rather than merely backstopped.
+  local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/_ScratchNestedRawStringHoleTests.cs"
+  cat >"$scratch" <<'EOF'
+namespace Farm.Web.Api.Tests;
+
+public class ScratchNestedRawStringHoleLongerTests
+{
+    private static string Build(string inner) => inner;
+
+    [Fact]
+    public void Foo()
+    {
+        string s = $"""outer{Build(""""nested"""")}outer""";
+    }
+}
+
+public class ScratchNestedRawStringHoleEqualTests
+{
+    private static string Build(string inner) => inner;
+
+    [Fact]
+    public void Bar()
+    {
+        string s = $"""outer{Build("""nested""")}outer""";
+    }
+}
+
+public class ScratchNestedRawStringHoleSiblingTests
+{
+    [Fact]
+    public void Baz()
+    {
+    }
+}
+EOF
+  local rc=0
+  local report
+  report="$(bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$scratch"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail (all three new classes are uncovered), but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" == *"unbalanced braces"* ]]; then
+    printf '  nested raw string in a hole desynced the brace count instead of being handled, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchNestedRawStringHoleTests.cs class ScratchNestedRawStringHoleLongerTests"* ]]; then
+    printf '  expected a coverage-gap error naming the longer-nested-quote-run class, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchNestedRawStringHoleTests.cs class ScratchNestedRawStringHoleEqualTests"* ]]; then
+    printf '  expected a coverage-gap error naming the equal-nested-quote-run class, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchNestedRawStringHoleTests.cs class ScratchNestedRawStringHoleSiblingTests"* ]]; then
+    printf '  expected a coverage-gap error naming the sibling after both nested-raw-string classes too -- neither must have swallowed the rest of the file, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_multi_dollar_raw_string_hole_requires_matching_brace_run() {
+  # Positive (round-10 fix, proves no misattribution): per the C# 11
+  # raw-string-interpolation spec, when a run of consecutive '{' is longer
+  # than the literal's own `dollar_count`, the EXCESS braces at the START
+  # of the run are literal content and only the LAST `dollar_count` braces
+  # of the run are the actual hole opener (mirrored on the closing side:
+  # excess trailing '}' beyond `dollar_count` are literal content that
+  # follows the hole). The round-9 fix got this backwards -- it consumed
+  # the FIRST `dollar_count` braces of the run as the opener and handed any
+  # excess brace to the hole's own code scan, which mis-attributes that
+  # excess brace as a real nested code brace and desyncs `hole_depth`
+  # whenever the matching close side has no excess of its own to absorb
+  # it. That is not a cosmetic difference: this fixture's open run is three
+  # '{' (dollar_count=2, one excess) but its close run is exactly two '}'
+  # (no excess), so under the round-9 fix the hole never closes via its
+  # intended matching run and the scanner runs on past the literal's true
+  # closing delimiter, swallowing the sibling class below entirely and
+  # leaving the file's overall brace count UNBALANCED at EOF -- proven by
+  # empirically running both the round-9 and round-10 tokenizers against
+  # this exact fixture. Proving both classes below are still correctly
+  # separated and reported as coverage gaps, with no "unbalanced braces"
+  # false pass, confirms the excess-brace attribution is now correct on
+  # both sides of the hole, not just the equal-run-length case rounds 8
+  # and 9 exercised.
+  local scratch="$REPO_ROOT/src/tests/Farm.Web.Api.Tests/_ScratchMultiDollarRawStringHoleTests.cs"
+  cat >"$scratch" <<'EOF'
+namespace Farm.Web.Api.Tests;
+
+public class ScratchMultiDollarRawStringHoleTests
+{
+    private static string Build(string inner) => inner;
+
+    [Fact]
+    public void Foo()
+    {
+        string s = $$"""literal{{{Build("""nested""")}}outer""";
+    }
+}
+
+public class ScratchMultiDollarRawStringHoleSiblingTests
+{
+    [Fact]
+    public void Baz()
+    {
+    }
+}
+EOF
+  local rc=0
+  local report
+  report="$(bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$scratch"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail (both new classes are uncovered), but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" == *"unbalanced braces"* ]]; then
+    printf '  multi-dollar raw string hole with excess leading braces desynced the brace count instead of being handled, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchMultiDollarRawStringHoleTests.cs class ScratchMultiDollarRawStringHoleTests"* ]]; then
+    printf '  expected a coverage-gap error naming the multi-dollar-hole class, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+  if [[ "$report" != *"no shard filter covers test source _ScratchMultiDollarRawStringHoleTests.cs class ScratchMultiDollarRawStringHoleSiblingTests"* ]]; then
+    printf '  expected a coverage-gap error naming the sibling after the multi-dollar hole class too -- it must not have swallowed the rest of the file, got:\n%s\n' "$report" >&2
     return 1
   fi
 }
@@ -342,6 +711,12 @@ TESTS=(
   case_pinned_default_filter_narrowed_fails
   case_canonical_name_renamed_fails
   case_api_shard_filter_coverage_fails
+  case_sibling_mismatched_indentation_both_flagged_uncovered_fails
+  case_block_scoped_namespace_fails_closed
+  case_raw_string_literal_does_not_desync_brace_depth
+  case_unbalanced_braces_fails_closed
+  case_nested_raw_string_in_hole_does_not_desync_brace_depth
+  case_multi_dollar_raw_string_hole_requires_matching_brace_run
 )
 
 printf '=== dotnet test manifest validator regression suite ===\n'

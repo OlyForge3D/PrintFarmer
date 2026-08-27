@@ -75,7 +75,7 @@ public class TagServicePrinterTagsTests
     [Fact]
     public async Task GetObjectTagsAsync_Printer_ReturnsAssignedTags()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
 
         TagDto red = await service.CreateTagAsync(new CreateTagDto { Name = "Red" }, CancellationToken.None);
@@ -92,7 +92,7 @@ public class TagServicePrinterTagsTests
     [Fact]
     public async Task GetObjectTagsAsync_PrinterWithNoTags_ReturnsEmptyList()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
         Printer printer = await NewPrinterAsync(db, "Bambu");
 
@@ -104,7 +104,7 @@ public class TagServicePrinterTagsTests
     [Fact]
     public async Task AssignTagAsync_Printer_PersistsTagOnPrinter()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
         TagDto pla = await service.CreateTagAsync(new CreateTagDto { Name = "Pla" }, CancellationToken.None);
         Printer printer = await NewPrinterAsync(db, "Ender");
@@ -119,7 +119,7 @@ public class TagServicePrinterTagsTests
     [Fact]
     public async Task AssignTagAsync_PrinterAlreadyTagged_IsIdempotent()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
         TagDto pla = await service.CreateTagAsync(new CreateTagDto { Name = "Pla" }, CancellationToken.None);
         Printer printer = await NewPrinterAsync(db, "Ender");
@@ -135,7 +135,7 @@ public class TagServicePrinterTagsTests
     [Fact]
     public async Task RemoveTagAsync_Printer_RemovesTagFromPrinter()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
         TagDto pla = await service.CreateTagAsync(new CreateTagDto { Name = "Pla" }, CancellationToken.None);
         Printer printer = await NewPrinterAsync(db, "Ender");
@@ -152,7 +152,7 @@ public class TagServicePrinterTagsTests
     [Fact]
     public async Task RemoveTagAsync_PrinterNotTagged_DoesNotThrow()
     {
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
         TagDto pla = await service.CreateTagAsync(new CreateTagDto { Name = "Pla" }, CancellationToken.None);
         Printer printer = await NewPrinterAsync(db, "Ender");
@@ -170,7 +170,7 @@ public class TagServicePrinterTagsTests
         // Core symptom of the defect: a tag assigned via AssignTagAsync must be visible to a
         // subsequent GetObjectTagsAsync read for the same printer (the tagging modal's
         // save-then-refetch flow), and removing it must make the read empty again.
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
         TagDto abs = await service.CreateTagAsync(new CreateTagDto { Name = "Abs" }, CancellationToken.None);
         Printer printer = await NewPrinterAsync(db, "Prusa");
@@ -189,7 +189,7 @@ public class TagServicePrinterTagsTests
     {
         // Compatibility check: routing AssignTagAsync/RemoveTagAsync/GetObjectTagsAsync by
         // objectType must not change existing GcodeFile behavior.
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
         TagDto support = await service.CreateTagAsync(new CreateTagDto { Name = "Support" }, CancellationToken.None);
         Guid folderId = await SeedGcodeFolderAsync(db);
@@ -211,7 +211,7 @@ public class TagServicePrinterTagsTests
     {
         // Compatibility check: routing AssignTagAsync/RemoveTagAsync/GetObjectTagsAsync by
         // objectType must not change existing Model3D (join-table) behavior.
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         Guid model3DId = Guid.NewGuid();
         var model3DQuery = new Mock<IModel3DQueryProvider>();
         model3DQuery.Setup(q => q.ExistsAsync(model3DId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
@@ -233,7 +233,7 @@ public class TagServicePrinterTagsTests
         // Guards against a regression where dispatch-by-objectType could fall back to
         // scanning the wrong table: tagging a printer must not affect an unrelated GcodeFile,
         // and vice versa, even when both are read back with their own objectType.
-        using AppDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
         TagService service = CreateService(db);
         TagDto shared = await service.CreateTagAsync(new CreateTagDto { Name = "Shared" }, CancellationToken.None);
         Printer printer = await NewPrinterAsync(db, "Klipper");

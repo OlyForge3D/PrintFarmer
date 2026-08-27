@@ -9,6 +9,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Spoolman;
+using Farm.Testing.Shared;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -297,7 +298,7 @@ public class FilamentCoverageControllerTests : IClassFixture<CustomWebApplicatio
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         AppDbContext ctx = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        (Guid manufacturerId, Guid modelId) = await TestInfrastructure.TestHelpers.GetUnknownCatalogIdsAsync(ctx);
+        (Guid manufacturerId, Guid modelId) = await AppDbTestHelpers.GetUnknownCatalogIdsAsync(ctx);
 
         Printer printer = new()
         {

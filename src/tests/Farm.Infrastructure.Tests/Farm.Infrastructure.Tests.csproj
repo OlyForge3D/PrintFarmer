@@ -1,0 +1,78 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  <NoWarn>$(NoWarn);S2699</NoWarn>
+  <!-- Default quick-run filter: exclude Docker tests unless explicitly overridden -->
+  <VSTestTestCaseFilter>Category!='Docker'</VSTestTestCaseFilter>
+  </PropertyGroup>
+
+  <!-- Coverage is collected on-demand via the VSTest data collector (coverlet.collector),
+       not the coverlet.msbuild post-test target — see issue #965. Enable it by running
+       `dotnet test` with the "XPlat Code Coverage" collector and the coverlet.runsettings
+       settings file (see src/coverlet.runsettings). -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+    <PackageReference Include="FluentAssertions" Version="8.10.0" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector" Version="10.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- YamlSeedDataTests (issue #2033) read real seed YAML files at "Data/seed/" relative to the
+       test output directory. Farm.Web.Api.Tests gets these transitively via its ProjectReference
+       to Farm.Web.Api.csproj, which copies them to output. This project deliberately does not
+       reference Farm.Web.Api, so mirror the same CopyToOutputDirectory items here, sourced from
+       the same physical files under src/api/Data/seed/, to keep test-only output parity without
+       any product-code change. -->
+  <ItemGroup>
+    <None Include="..\..\api\Data\seed\**\*.yaml" Link="Data\seed\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\..\api\Data\seed\**\*.yml" Link="Data\seed\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\..\api\Data\seed\**\*.md" Link="Data\seed\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- Farm.Infrastructure only, deliberately NOT Farm.Web.Api (issue #2033: cohort C is the
+       subset of the former Farm.Web.Api.Tests suite that references neither Farm.Web.Api.* nor
+       a web host). Backend plugins and migration projects are referenced because moved tests
+       exercise real backend-client types and EF Core migration assemblies directly. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
+    <ProjectReference Include="..\Farm.Testing.Shared\Farm.Testing.Shared.csproj" />
+    <ProjectReference Include="..\..\migrations\Farm.Migrations.Sqlite\Farm.Migrations.Sqlite.csproj" />
+    <ProjectReference Include="..\..\migrations\Farm.Migrations.PostgreSQL\Farm.Migrations.PostgreSQL.csproj" />
+    <ProjectReference Include="..\..\migrations\Farm.Migrations.SqlServer\Farm.Migrations.SqlServer.csproj" />
+    <ProjectReference Include="..\..\migrations\Farm.Slicer.Migrations.Sqlite\Farm.Slicer.Migrations.Sqlite.csproj" />
+    <ProjectReference Include="..\..\migrations\Farm.Slicer.Migrations.PostgreSQL\Farm.Slicer.Migrations.PostgreSQL.csproj" />
+    <ProjectReference Include="..\..\migrations\Farm.Slicer.Migrations.SqlServer\Farm.Slicer.Migrations.SqlServer.csproj" />
+    <ProjectReference Include="..\..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
+    <ProjectReference Include="..\..\slicer\Farm.Slicer.Module.Api\Farm.Slicer.Module.Api.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Core\Farm.Backend.Plugin.Core.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Moonraker\Farm.Backend.Plugin.Moonraker.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.PrusaLink\Farm.Backend.Plugin.PrusaLink.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Sdcp\Farm.Backend.Plugin.Sdcp.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.OctoPrint\Farm.Backend.Plugin.OctoPrint.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.FlashForge\Farm.Backend.Plugin.FlashForge.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.TestEmulator\Farm.Backend.Plugin.TestEmulator.csproj" />
+  </ItemGroup>
+</Project>

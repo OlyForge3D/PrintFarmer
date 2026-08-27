@@ -10,7 +10,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Queue.Dispatch;
-using Farm.Web.Api.Tests.Builders;
+using Farm.Infrastructure.Tests.Builders;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
