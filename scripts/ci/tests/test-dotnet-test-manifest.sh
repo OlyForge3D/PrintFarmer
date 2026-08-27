@@ -35,7 +35,15 @@
 #      step's project must be registered in the manifest. Without this, a
 #      new test project can be selected/compiled but never published,
 #      failing late at the consumer leg with a misleading
-#      artifact-not-found error instead of failing fast here.
+#      artifact-not-found error instead of failing fast here. Each matched
+#      step is also checked for internal consistency -- it must actually
+#      invoke `actions/upload-artifact`, its `if:` must positively guard on
+#      its own project (not merely avoid referencing a *different* one),
+#      and its `with: name:`/`with: path:` must match its own project and
+#      the manifest's `testProject` directory -- so a copy-pasted step
+#      whose title was updated but whose guard/artifact-name/path were not
+#      is caught too, rather than only the "step present or absent"
+#      question.
 #
 # This script does not build or run any .NET code; it only reads the
 # manifest JSON, the ci.yml workflow text, and walks the filesystem, so it
@@ -857,6 +865,11 @@ for idx in range(len(step_bounds) - 1):
         upload_steps.append((name_match.group("proj"), chunk))
 
 manifest_names = set(seen_names)
+name_to_test_project = {
+    entry.get("name"): entry.get("testProject")
+    for entry in entries
+    if entry.get("name")
+}
 ci_yml_test_projects = set()
 for proj, chunk in upload_steps:
     if "mig_matrix" in chunk:
@@ -866,22 +879,97 @@ for proj, chunk in upload_steps:
         continue
     ci_yml_test_projects.add(proj)
 
-    # Defensive cross-check: when the step's `if:` names a project via
-    # `contains(needs.select.outputs.matrix, '<X>.csproj')`, <X> must match
-    # the project named in the step title, or the two have silently drifted
-    # apart from each other even though both still "exist".
-    referenced = re.findall(
-        r"needs\.select\.outputs\.matrix,\s*\n?\s*'([\w.]+)\.csproj'",
-        chunk,
-    )
-    for ref in referenced:
-        if ref != proj:
+    # A step whose title merely *looks* like an upload step (name match
+    # alone) but does not actually invoke the upload-artifact action is not
+    # a real artifact publisher -- e.g. a copy-pasted step whose `uses:`
+    # line was never updated. Require the action be present so a bogus
+    # "match" here can never mask a genuinely missing upload.
+    if "uses: actions/upload-artifact" not in chunk:
+        errors.append(
+            f"ci.yml step 'Upload {proj} build' does not use "
+            "actions/upload-artifact -- it looks like an upload step by "
+            "name but isn't one"
+        )
+
+    # Positively assert the step's `if:` guard actually selects this
+    # project (rather than only flagging a *mismatch* when some other
+    # project happens to be referenced). A missing, malformed, or
+    # differently-quoted condition would otherwise fail open and silently
+    # publish (or skip) the wrong artifact.
+    if_match = re.search(r"\n\s*if:(.*?)\n\s*uses:", chunk, re.DOTALL)
+    if_text = if_match.group(1) if if_match else ""
+    if not if_match:
+        errors.append(
+            f"ci.yml step 'Upload {proj} build' has no 'if:' condition "
+            "guarding it"
+        )
+    elif proj == "Farm.Web.Api.Tests":
+        # Farm.Web.Api.Tests is the always-selected primary leg: its step
+        # guards on want_dotnet_test rather than a per-project
+        # contains(matrix, ...) check (see EXPECTED_CANONICAL above for
+        # this project's other pinned properties).
+        if "want_dotnet_test" not in if_text:
             errors.append(
-                f"ci.yml step 'Upload {proj} build' guards on "
-                f"'{ref}.csproj' in its if: condition -- step title and "
-                "matrix-selector project name have drifted apart from "
-                "each other"
+                f"ci.yml step 'Upload {proj} build' if: condition does not "
+                "reference want_dotnet_test as expected for this project"
             )
+    elif not re.search(
+        r"needs\.select\.outputs\.matrix,\s*['\"]"
+        + re.escape(proj)
+        + r"\.csproj['\"]",
+        if_text,
+    ):
+        errors.append(
+            f"ci.yml step 'Upload {proj} build' if: condition does not "
+            f"guard on '{proj}.csproj' via needs.select.outputs.matrix -- "
+            "step title and matrix-selector project name may have "
+            "drifted apart from each other"
+        )
+
+    # A copy-pasted step whose title/if: were updated but whose with: block
+    # was left pointing at the old project would compile and even satisfy
+    # the checks above while uploading the wrong artifact under the wrong
+    # name/path -- the same silent-drift failure mode this guard exists to
+    # catch, just one layer deeper. Tie both fields back to this step's own
+    # project and (for name/path) the manifest's own testProject location.
+    with_match = re.search(r"\n\s*with:\n(?P<body>.*)", chunk, re.DOTALL)
+    with_text = with_match.group("body") if with_match else ""
+    name_field = re.search(r"(?m)^\s+name:\s*(\S+)\s*$", with_text)
+    path_field = re.search(r"(?m)^\s+path:\s*(\S+)\s*$", with_text)
+    with_name = name_field.group(1) if name_field else None
+    with_path = path_field.group(1) if path_field else None
+
+    if with_name is None:
+        errors.append(
+            f"ci.yml step 'Upload {proj} build' with: block is missing a "
+            "'name:' field"
+        )
+    elif with_name != proj:
+        errors.append(
+            f"ci.yml step 'Upload {proj} build' uploads artifact name "
+            f"'{with_name}', which does not match its own step "
+            f"title/project '{proj}' -- likely copy-paste drift"
+        )
+
+    if with_path is None:
+        errors.append(
+            f"ci.yml step 'Upload {proj} build' with: block is missing a "
+            "'path:' field"
+        )
+    else:
+        expected_test_project = name_to_test_project.get(proj)
+        if expected_test_project:
+            expected_dir = os.path.dirname(expected_test_project).replace(
+                os.sep, "/"
+            )
+            expected_prefix = f"src/{expected_dir}/"
+            if not with_path.startswith(expected_prefix):
+                errors.append(
+                    f"ci.yml step 'Upload {proj} build' uploads path "
+                    f"'{with_path}', which does not match the manifest's "
+                    f"testProject directory for {proj} (expected prefix "
+                    f"'{expected_prefix}') -- likely copy-paste drift"
+                )
 
 if dotnet_build_job is not None:
     missing_upload_steps = sorted(manifest_names - ci_yml_test_projects)

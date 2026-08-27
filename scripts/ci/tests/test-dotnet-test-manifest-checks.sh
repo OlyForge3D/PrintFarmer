@@ -86,6 +86,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 VALIDATOR="$SCRIPT_DIR/test-dotnet-test-manifest.sh"
 REAL_MANIFEST="$REPO_ROOT/scripts/ci/dotnet-test-manifest.json"
+REAL_CI_WORKFLOW="$REPO_ROOT/.github/workflows/ci.yml"
 
 PYTHON_BIN=""
 for candidate in python3 python; do
@@ -122,6 +123,16 @@ build_mutant() {
   local out_file="$1"
   local py_script="$2"
   "$PYTHON_BIN" -c "$py_script" "$out_file" "$REAL_MANIFEST"
+}
+
+# Same as build_mutant, but for check 6 (manifest <-> ci.yml upload-artifact
+# drift, issue #2091): mutates the real .github/workflows/ci.yml text instead
+# of the manifest JSON. The mutation script receives the output path as
+# sys.argv[1] and the real ci.yml path as sys.argv[2].
+build_ci_mutant() {
+  local out_file="$1"
+  local py_script="$2"
+  "$PYTHON_BIN" -c "$py_script" "$out_file" "$REAL_CI_WORKFLOW"
 }
 
 case_baseline_roundtrip_passes() {
@@ -701,6 +712,236 @@ EOF
   fi
 }
 
+case_ci_missing_upload_step_fails() {
+  # Negative (check 6, issue #2091): register a brand-new project in the
+  # manifest without adding a matching "Upload <name> build" step to
+  # ci.yml. A project reachable from the manifest but never published
+  # would otherwise compile fine and fail late, at the consumer leg, with
+  # a misleading artifact-not-found error -- this must be caught here
+  # instead. CI_WORKFLOW_PATH is left unset (real ci.yml) since only the
+  # manifest is mutated.
+  local mutant ; mutant="$(mktemp)"
+  build_mutant "$mutant" '
+import json, sys
+out_path, src_path = sys.argv[1], sys.argv[2]
+with open(src_path, encoding="utf-8") as f:
+    data = json.load(f)
+data["testProjects"].append({
+    "name": "Farm.Scratch.Unpublished.Tests",
+    "testProject": "tests/Farm.Modules.Gcode.Tests/Farm.Modules.Gcode.Tests.csproj",
+    "productionProject": "modules/Farm.Modules.Gcode/Farm.Modules.Gcode.csproj",
+    "pathPrefixes": ["src/tests/Farm.Modules.Gcode.Tests/"],
+    "dependsOnProjects": [],
+    "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+    "shards": [],
+    "requiresProviders": [],
+    "runIntegration": False,
+    "leg": "Farm.Scratch.Unpublished.Tests",
+})
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump(data, f)
+'
+  local rc=0
+  local report
+  report="$(TEST_MANIFEST_PATH="$mutant" bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$mutant"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail on a manifest project with no upload-artifact step, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"Farm.Scratch.Unpublished.Tests is registered in"*"but has no matching 'Upload Farm.Scratch.Unpublished.Tests build' upload-artifact step"* ]]; then
+    printf '  expected a missing-upload-step error naming the new project, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_ci_orphaned_upload_step_fails() {
+  # Negative (check 6, issue #2091): add an extra "Upload <name> build"
+  # step to ci.yml (a duplicate of a real one, renamed) whose project is
+  # not registered in the manifest. Proves the guard is bidirectional --
+  # an orphaned publish step that no manifest entry drives must be
+  # flagged, not just a missing one.
+  local mutant ; mutant="$(mktemp)"
+  build_ci_mutant "$mutant" '
+import re, sys
+out_path, src_path = sys.argv[1], sys.argv[2]
+with open(src_path, encoding="utf-8") as f:
+    text = f.read()
+pattern = re.compile(
+    r"(      - name: Upload Farm\.Modules\.Gcode\.Tests build\n"
+    r"(?:.*\n)*?"
+    r"          if-no-files-found: error\n)"
+)
+m = pattern.search(text)
+assert m, "fixture step block not found -- ci.yml step shape changed"
+block = m.group(1)
+orphan_block = block.replace("Farm.Modules.Gcode.Tests", "Farm.Scratch.Orphaned.Tests")
+mutated = text[: m.end()] + orphan_block + text[m.end():]
+with open(out_path, "w", encoding="utf-8") as f:
+    f.write(mutated)
+'
+  local rc=0
+  local report
+  report="$(CI_WORKFLOW_PATH="$mutant" bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$mutant"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail on an orphaned upload-artifact step, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"has an 'Upload Farm.Scratch.Orphaned.Tests build' upload-artifact step"*"but Farm.Scratch.Orphaned.Tests is not registered"* ]]; then
+    printf '  expected an orphaned-upload-step error naming the fake project, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_ci_upload_wrong_action_fails() {
+  # Negative (check 6, issue #2091, Hicks review finding): a step whose
+  # title matches "Upload <name> build" but whose 'uses:' was repurposed
+  # to a different action (e.g. a copy-paste that forgot to restore
+  # actions/upload-artifact) would otherwise satisfy a title-only match
+  # while never actually publishing anything.
+  local mutant ; mutant="$(mktemp)"
+  build_ci_mutant "$mutant" '
+import re, sys
+out_path, src_path = sys.argv[1], sys.argv[2]
+with open(src_path, encoding="utf-8") as f:
+    text = f.read()
+pattern = re.compile(
+    r"(      - name: Upload Farm\.Modules\.Gcode\.Tests build\n(?:.*\n)*?        )uses: actions/upload-artifact@v7\n"
+)
+m = pattern.search(text)
+assert m, "fixture step block/uses: line not found -- ci.yml step shape changed"
+mutated = text[: m.start()] + m.group(1) + "uses: actions/checkout@v4\n" + text[m.end():]
+with open(out_path, "w", encoding="utf-8") as f:
+    f.write(mutated)
+'
+  local rc=0
+  local report
+  report="$(CI_WORKFLOW_PATH="$mutant" bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$mutant"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail on an upload step not using actions/upload-artifact, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"Upload Farm.Modules.Gcode.Tests build' does not use actions/upload-artifact"* ]]; then
+    printf '  expected a wrong-action error, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_ci_upload_if_condition_wrong_project_fails() {
+  # Negative (check 6, issue #2091, Vasquez review finding #1): a step
+  # whose title says "Upload Farm.Modules.Gcode.Tests build" but whose
+  # if: condition's matrix-selector csproj name was left pointing at a
+  # different project (classic copy-paste drift) must fail even though
+  # the step *looks* correct by title and by 'uses:' alone -- the old
+  # check only flagged a *mismatch when a wrong project happened to be
+  # referenced*, so this is exactly that case, made explicit.
+  local mutant ; mutant="$(mktemp)"
+  build_ci_mutant "$mutant" '
+import sys
+out_path, src_path = sys.argv[1], sys.argv[2]
+with open(src_path, encoding="utf-8") as f:
+    text = f.read()
+needle = "'"'"'Farm.Modules.Gcode.Tests.csproj'"'"'"
+assert text.count(needle) == 1, "expected exactly one occurrence of the fixture csproj selector"
+mutated = text.replace(needle, "'"'"'Farm.Modules.Inventory.Tests.csproj'"'"'")
+with open(out_path, "w", encoding="utf-8") as f:
+    f.write(mutated)
+'
+  local rc=0
+  local report
+  report="$(CI_WORKFLOW_PATH="$mutant" bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$mutant"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail when if: guards on the wrong csproj, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"Upload Farm.Modules.Gcode.Tests build' if: condition does not guard on 'Farm.Modules.Gcode.Tests.csproj'"* ]]; then
+    printf '  expected an if:-condition-mismatch error, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_ci_upload_with_name_mismatch_fails() {
+  # Negative (check 6, issue #2091, Vasquez review finding #2): a step
+  # whose title/if: still correctly name Farm.Modules.Gcode.Tests, but
+  # whose with: name: field was left pointing at a different project
+  # (the copy-paste drifted one field deeper than title/if:) must be
+  # caught -- otherwise the guard would pass while ci.yml still uploads
+  # the wrong artifact under the wrong name.
+  local mutant ; mutant="$(mktemp)"
+  build_ci_mutant "$mutant" '
+import re, sys
+out_path, src_path = sys.argv[1], sys.argv[2]
+with open(src_path, encoding="utf-8") as f:
+    text = f.read()
+pattern = re.compile(
+    r"(      - name: Upload Farm\.Modules\.Gcode\.Tests build\n(?:.*\n)*?        with:\n          name: )Farm\.Modules\.Gcode\.Tests\n"
+)
+m = pattern.search(text)
+assert m, "fixture step block/with:-name: line not found -- ci.yml step shape changed"
+mutated = text[: m.start()] + m.group(1) + "Farm.Modules.Inventory.Tests\n" + text[m.end():]
+with open(out_path, "w", encoding="utf-8") as f:
+    f.write(mutated)
+'
+  local rc=0
+  local report
+  report="$(CI_WORKFLOW_PATH="$mutant" bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$mutant"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail when with: name: does not match the step title/project, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"uploads artifact name 'Farm.Modules.Inventory.Tests', which does not match its own step title/project 'Farm.Modules.Gcode.Tests'"* ]]; then
+    printf '  expected a with:-name-mismatch error, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
+case_ci_upload_with_path_mismatch_fails() {
+  # Negative (check 6, issue #2091, Vasquez review finding #2): a step
+  # whose title/if:/with:-name all still correctly name
+  # Farm.Modules.Gcode.Tests, but whose with: path: was left pointing at
+  # a different project's build output directory, must be caught -- this
+  # is the deepest layer of copy-paste drift: everything about the step
+  # *looks* right except the one field that actually determines which
+  # build output gets published.
+  local mutant ; mutant="$(mktemp)"
+  build_ci_mutant "$mutant" '
+import re, sys
+out_path, src_path = sys.argv[1], sys.argv[2]
+with open(src_path, encoding="utf-8") as f:
+    text = f.read()
+pattern = re.compile(
+    r"(      - name: Upload Farm\.Modules\.Gcode\.Tests build\n(?:.*\n)*?          path: )"
+    r"src/tests/Farm\.Modules\.Gcode\.Tests/bin/Debug/net10\.0\n"
+)
+m = pattern.search(text)
+assert m, "fixture step block/with:-path: line not found -- ci.yml step shape changed"
+mutated = (
+    text[: m.start()]
+    + m.group(1)
+    + "src/tests/Farm.Modules.Inventory.Tests/bin/Debug/net10.0\n"
+    + text[m.end():]
+)
+with open(out_path, "w", encoding="utf-8") as f:
+    f.write(mutated)
+'
+  local rc=0
+  local report
+  report="$(CI_WORKFLOW_PATH="$mutant" bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$mutant"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail when with: path: does not match the manifest testProject directory, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"uploads path 'src/tests/Farm.Modules.Inventory.Tests/bin/Debug/net10.0', which does not match the manifest's testProject directory for Farm.Modules.Gcode.Tests"* ]]; then
+    printf '  expected a with:-path-mismatch error, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
 TESTS=(
   case_baseline_roundtrip_passes
   case_duplicate_test_project_path_fails
@@ -717,6 +958,12 @@ TESTS=(
   case_unbalanced_braces_fails_closed
   case_nested_raw_string_in_hole_does_not_desync_brace_depth
   case_multi_dollar_raw_string_hole_requires_matching_brace_run
+  case_ci_missing_upload_step_fails
+  case_ci_orphaned_upload_step_fails
+  case_ci_upload_wrong_action_fails
+  case_ci_upload_if_condition_wrong_project_fails
+  case_ci_upload_with_name_mismatch_fails
+  case_ci_upload_with_path_mismatch_fails
 )
 
 printf '=== dotnet test manifest validator regression suite ===\n'

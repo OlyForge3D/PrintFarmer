@@ -591,12 +591,25 @@ of naming the actual cause (issue #2091).
 directions:
 
 - every manifest `testProjects[].name` has a matching `Upload <name> build`
-  step whose `if:` selects on `<name>.csproj` (or, for
-  `Farm.Web.Api.Tests`, on `want_dotnet_test`);
+  step;
 - every such upload step's project is registered in the manifest.
 
-Steps whose `if:` references `mig_matrix` (the `Farm.Migrations.*` /
-`Farm.Slicer.Migrations.*` uploads) are out of scope — they are driven by a
+Each matched step is also checked for internal consistency, so a
+copy-pasted step whose *title* was updated but whose guard, artifact name,
+or artifact path were not is caught too, rather than only the "step present
+or absent" question:
+
+- it must actually invoke `actions/upload-artifact` (a same-titled step
+  repurposed to a different action does not count as a publisher);
+- its `if:` must positively select on `<name>.csproj` (or, for
+  `Farm.Web.Api.Tests`, on `want_dotnet_test`) -- a missing, malformed, or
+  differently-quoted condition is flagged rather than failing open;
+- its `with: name:` must equal its own project name, and its `with: path:`
+  must start with `src/<the manifest's own testProject directory>/` for
+  that project.
+
+Steps whose chunk contains `mig_matrix` (the `Farm.Migrations.*` /
+`Farm.Slicer.Migrations.*` uploads) are out of scope -- they are driven by a
 separate matrix, not this manifest. Override the workflow path with
 `CI_WORKFLOW_PATH` for testing, the same way `TEST_MANIFEST_PATH` overrides
 the manifest path.
