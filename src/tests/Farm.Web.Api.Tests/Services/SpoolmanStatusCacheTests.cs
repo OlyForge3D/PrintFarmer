@@ -26,6 +26,9 @@ public sealed class SpoolmanStatusCacheTests
         var requestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseRequest = new TaskCompletionSource<SpoolmanSpoolDto?>(TaskCreationOptions.RunContinuationsAsynchronously);
         Mock<ISpoolmanService> spoolman = new();
+        // IDISP013 false positive: this callback is only invoked later when the mocked
+        // method is called during the test, not at setup time.
+#pragma warning disable IDISP013 // Await in using
         _ = spoolman
             .Setup(service => service.GetSpoolByIdAsync(42, It.IsAny<CancellationToken>()))
             .Returns(() =>
@@ -33,6 +36,7 @@ public sealed class SpoolmanStatusCacheTests
                 requestStarted.SetResult();
                 return releaseRequest.Task;
             });
+#pragma warning restore IDISP013
         using ServiceProvider services = BuildServices(spoolman.Object);
         var cache = new SpoolmanStatusCache(
             memoryCache,
@@ -65,10 +69,14 @@ public sealed class SpoolmanStatusCacheTests
         var first = new SpoolmanSpoolDto(7, "First", "PLA", 900, null, false);
         var refreshed = new SpoolmanSpoolDto(7, "Refreshed", "PLA", 850, null, false);
         Mock<ISpoolmanService> spoolman = new();
+        // IDISP013 false positive: the setup lambda is an expression tree describing which
+        // member to intercept; it is never invoked at this point.
+#pragma warning disable IDISP013 // Await in using
         _ = spoolman
             .SetupSequence(service => service.GetSpoolByIdAsync(7, It.IsAny<CancellationToken>()))
             .ReturnsAsync(first)
             .ReturnsAsync(refreshed);
+#pragma warning restore IDISP013
         using ServiceProvider services = BuildServices(spoolman.Object);
         var cache = new SpoolmanStatusCache(
             memoryCache,
@@ -93,6 +101,9 @@ public sealed class SpoolmanStatusCacheTests
         var requestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseRequest = new TaskCompletionSource<SpoolmanSpoolDto?>(TaskCreationOptions.RunContinuationsAsynchronously);
         Mock<ISpoolmanService> spoolman = new();
+        // IDISP013 false positive: this callback is only invoked later when the mocked
+        // method is called during the test, not at setup time.
+#pragma warning disable IDISP013 // Await in using
         _ = spoolman
             .Setup(service => service.GetSpoolByIdAsync(21, It.IsAny<CancellationToken>()))
             .Returns(() =>
@@ -100,6 +111,7 @@ public sealed class SpoolmanStatusCacheTests
                 requestStarted.SetResult();
                 return releaseRequest.Task;
             });
+#pragma warning restore IDISP013
         using ServiceProvider services = BuildServices(spoolman.Object);
         var cache = new SpoolmanStatusCache(
             memoryCache,
@@ -129,10 +141,14 @@ public sealed class SpoolmanStatusCacheTests
         using var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var expected = new SpoolmanSpoolDto(31, "ABS", "ABS", 700, null, false);
         Mock<ISpoolmanService> spoolman = new();
+        // IDISP013 false positive: the setup lambda is an expression tree describing which
+        // member to intercept; it is never invoked at this point.
+#pragma warning disable IDISP013 // Await in using
         _ = spoolman
             .SetupSequence(service => service.GetSpoolByIdAsync(31, It.IsAny<CancellationToken>()))
             .ReturnsAsync((SpoolmanSpoolDto?)null)
             .ReturnsAsync(expected);
+#pragma warning restore IDISP013
         using ServiceProvider services = BuildServices(spoolman.Object);
         var cache = new SpoolmanStatusCache(
             memoryCache,

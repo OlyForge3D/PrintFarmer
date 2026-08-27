@@ -21,7 +21,7 @@ public sealed class CalibrationBlobStoreTests
             "image/png");
         await using MemoryStream content = new(Encoding.UTF8.GetBytes("not an image"));
 
-        Func<Task> operation = () => store.PutAsync(request, content, CancellationToken.None);
+        Func<Task> operation = async () => await store.PutAsync(request, content, CancellationToken.None);
 
         CalibrationBlobValidationException exception =
             (await operation.Should().ThrowAsync<CalibrationBlobValidationException>()).Which;

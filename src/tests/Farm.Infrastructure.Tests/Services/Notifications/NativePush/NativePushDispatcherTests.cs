@@ -264,10 +264,14 @@ public sealed class NativePushDispatcherTests
             .ReturnsAsync(NativePushDispatchResult.Delivered());
 
         var serverIdentity = new Mock<IServerIdentityService>();
+        // IDISP013 false positive: Moq's SetupSequence lambda is an expression tree
+        // describing which member to intercept — it is never invoked directly.
+#pragma warning disable IDISP013 // Await in using
         _ = serverIdentity
             .SetupSequence(s => s.GetOrCreateServerIdAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("server identity unavailable"))
             .ReturnsAsync(expectedServerId);
+#pragma warning restore IDISP013
 
         NativePushDispatcher sut = BuildWithScope(
             sender,
@@ -1591,16 +1595,21 @@ public sealed class NativePushDispatcherTests
 
         var sender = new Mock<INativePushSender>();
         sender.SetupGet(s => s.ModeName).Returns("direct");
+        // IDISP013 false positive: this Returns callback lambda is not invoked here — it
+        // runs later when the mocked SendAsync is actually called during dispatch, which
+        // happens synchronously within this method before `innerCts` leaves its using scope.
+#pragma warning disable IDISP013 // Await in using
         sender
             .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
             .Returns<NativePushEnvelope, CancellationToken>((_, _) =>
                 Task.FromException<NativePushDispatchResult>(new OperationCanceledException(innerCts.Token)));
+#pragma warning restore IDISP013
 
         NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
 
         // Caller cancellation token is None; the unexpected inner OCE still
         // propagates instead of being swallowed by fan-out isolation.
-        Func<Task> act = () => sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null, cancellationToken: CancellationToken.None);
+        Func<Task> act = async () => await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null, cancellationToken: CancellationToken.None);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -1633,9 +1642,14 @@ public sealed class NativePushDispatcherTests
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         using var innerCts = new CancellationTokenSource();
         innerCts.Cancel();
+        // IDISP013 false positive: this Returns callback lambda is not invoked here — it
+        // runs later when the mocked RecordSuccessAsync is actually called during dispatch,
+        // which happens synchronously within this method before `innerCts` leaves its scope.
+#pragma warning disable IDISP013 // Await in using
         tokens
             .Setup(r => r.RecordSuccessAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns<Guid, long, DateTime, CancellationToken>((_, _, _, _) => Task.FromException(new OperationCanceledException(innerCts.Token)));
+#pragma warning restore IDISP013
         Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
 
         var sender = new Mock<INativePushSender>();
@@ -1646,7 +1660,7 @@ public sealed class NativePushDispatcherTests
 
         NativePushDispatcher sut = BuildWithScope(sender, gate.Object, tokens.Object, attention.Object, db);
 
-        Func<Task> act = () => sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null, cancellationToken: CancellationToken.None);
+        Func<Task> act = async () => await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null, cancellationToken: CancellationToken.None);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -1945,21 +1959,27 @@ public sealed class NativePushDispatcherTests
             new NativePushMetrics(),
             NullLogger<NativePushDispatcher>.Instance);
 
+        // IDISP013 false positive: both dispatch tasks are awaited via Task.WhenAll below
+        // (line ~1972), before `provider` leaves its using scope.
+#pragma warning disable IDISP013 // Await in using
         Task firstDispatch = Task.Factory.StartNew(
             () => sut.DispatchAsync(firstItem.Id, AttentionChangeKind.Created, firstUserId),
             CancellationToken.None,
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default).Unwrap();
+#pragma warning restore IDISP013
         Task? secondDispatch = null;
         try
         {
             await firstStartupEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
+#pragma warning disable IDISP013 // Await in using
             secondDispatch = Task.Factory.StartNew(
                 () => sut.DispatchAsync(secondItem.Id, AttentionChangeKind.Created, secondUserId),
                 CancellationToken.None,
                 TaskCreationOptions.LongRunning,
                 TaskScheduler.Default).Unwrap();
+#pragma warning restore IDISP013
             await secondStartupEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         }
         finally
@@ -2759,7 +2779,7 @@ public sealed class NativePushDispatcherTests
         await cancelledLookupEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         cancellation.Cancel();
 
-        Func<Task> awaitCancelledResolution = () => cancelledResolution;
+        Func<Task> awaitCancelledResolution = async () => await cancelledResolution;
         await awaitCancelledResolution.Should().ThrowAsync<OperationCanceledException>();
 
         await sut.DispatchAsync(
@@ -3533,7 +3553,7 @@ public sealed class NativePushDispatcherTests
         // First dispatch: sender returns an already-canceled Task. The
         // dispatcher must not guess this is benign, so it propagates —
         // matching the established, tested contract for unrelated OCEs.
-        Func<Task> firstAttempt = () => sut.DispatchAsync(
+        Func<Task> firstAttempt = async () => await sut.DispatchAsync(
             item.Id,
             AttentionChangeKind.Created,
             userId,
@@ -4205,11 +4225,15 @@ public sealed class NativePushDispatcherTests
         // its DispatchCoreAsync call is the FIRST call to CreateScope, so
         // the gate blocks it deterministically right there, strictly before
         // TryObserveLifecycle for userId has ever run.
+        // IDISP013 false positive: targetedTask is awaited below (line ~4244) via
+        // targetedTask.WaitAsync, before this scope's disposables leave scope.
+#pragma warning disable IDISP013 // Await in using
         Task targetedTask = Task.Run(() => sut.DispatchAsync(
             item.Id,
             AttentionChangeKind.Created,
             userId,
             occurredAtUtc: staleTargetedAt));
+#pragma warning restore IDISP013
 
         await targetedEnteredScopeCreation.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
@@ -4898,7 +4922,7 @@ public sealed class NativePushDispatcherTests
         await firstSettlementWait.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         firstCts.Cancel();
-        Func<Task> awaitCancelledFirst = () => r2First;
+        Func<Task> awaitCancelledFirst = async () => await r2First;
         await awaitCancelledFirst.Should().ThrowAsync<OperationCanceledException>();
 
         // R2 retry (same v2, global). On the buggy version-blind design
@@ -5017,7 +5041,7 @@ public sealed class NativePushDispatcherTests
         await firstSettlementWait.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         firstCts.Cancel();
-        Func<Task> awaitCancelledFirst = () => r2First;
+        Func<Task> awaitCancelledFirst = async () => await r2First;
         await awaitCancelledFirst.Should().ThrowAsync<OperationCanceledException>();
 
         Task r2Retry = sut.DispatchAsync(
@@ -5127,7 +5151,7 @@ public sealed class NativePushDispatcherTests
 
         await gate.WaitForPausedAsync().WaitAsync(TimeSpan.FromSeconds(30));
         firstCts.Cancel();
-        Func<Task> awaitCancelledFirst = () => r2First;
+        Func<Task> awaitCancelledFirst = async () => await r2First;
         await awaitCancelledFirst.Should().ThrowAsync<OperationCanceledException>();
         gate.DisarmPause();
         gate.ReleasePause();
@@ -6152,6 +6176,9 @@ public sealed class NativePushDispatcherTests
             .Returns(() => Task.FromResult(featureEnabled));
         Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
         int activeOwnerLookups = 0;
+        // IDISP013 false positive: this Returns callback lambda is not invoked here — it
+        // runs later when the mocked GetActiveTokenOwnersAsync is actually called.
+#pragma warning disable IDISP013 // Await in using
         tokens.Setup(repository => repository.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
@@ -6164,6 +6191,7 @@ public sealed class NativePushDispatcherTests
 
                 return Task.FromResult<IReadOnlyList<Guid>>(new[] { userId });
             });
+#pragma warning restore IDISP013
         tokens.Setup(repository => repository.RecordSuccessAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<long>(),
@@ -6849,7 +6877,7 @@ public sealed class NativePushDispatcherTests
             NullLogger<NativePushDispatcher>.Instance);
 
         throwingMonitor.ArmThrowsForNextReads(1);
-        Func<Task> act = () => sut.DispatchAsync(
+        Func<Task> act = async () => await sut.DispatchAsync(
             item.Id,
             AttentionChangeKind.Created,
             userId,
@@ -7061,7 +7089,7 @@ public sealed class NativePushDispatcherTests
         // Cancel while the async gate is paused. The dispatcher must observe
         // cancellation without waiting for the gate to resolve.
         cts.Cancel();
-        Func<Task> act = () => dispatch.WaitAsync(TimeSpan.FromSeconds(10));
+        Func<Task> act = async () => await dispatch.WaitAsync(TimeSpan.FromSeconds(10));
         await act.Should().ThrowAsync<OperationCanceledException>(
             "cancellation observed while awaiting the async gate propagates promptly");
 

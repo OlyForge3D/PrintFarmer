@@ -499,6 +499,9 @@ public class OrcaSlicerAssetRegistryTests
         var registry = new OrcaSlicerAssetRegistry();
         using var start = new ManualResetEventSlim(false);
 
+        // IDISP013 false positive: IDisposableAnalyzers cannot see that every task in this
+        // array is awaited via Task.WhenAll below, before `start` leaves its using scope.
+#pragma warning disable IDISP013 // Await in using
         Task<int>[] tasks = Enumerable.Range(0, 64)
             .Select(index => Task.Run(async () =>
             {
@@ -513,6 +516,7 @@ public class OrcaSlicerAssetRegistryTests
                 return asset is not null ? (await registry.ListAssetsAsync()).Count() : 0;
             }))
             .ToArray();
+#pragma warning restore IDISP013
 
         start.Set();
         int[] assetCounts = await Task.WhenAll(tasks);

@@ -54,7 +54,7 @@ public sealed class MaintenanceHubAuthorizationIntegrationTests : IAsyncLifetime
 
         // The excluded user has no PrinterGroupAccess rule granting this printer's group, so
         // subscribing must be rejected with resource_forbidden and must NOT join the group.
-        Func<Task> excludedSubscribe = () => excludedConnection.InvokeAsync(
+        Func<Task> excludedSubscribe = async () => await excludedConnection.InvokeAsync(
             "SubscribeToPrinterAsync",
             printerId.ToString());
         (await excludedSubscribe.Should().ThrowAsync<Microsoft.AspNetCore.SignalR.HubException>())
