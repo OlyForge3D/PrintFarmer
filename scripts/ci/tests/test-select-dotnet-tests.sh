@@ -377,6 +377,7 @@ case_api_change() {
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
   assert_contains "matrix identity" "$matrix" "Farm.Modules.Identity.Tests" || return 1
+  assert_contains "matrix administration" "$matrix" "Farm.Modules.Administration.Tests" || return 1
   assert_api_shard_matrix "api change" "$matrix" "$TEST_MANIFEST" || return 1
   assert_contains "integration opt-in" "$matrix" '"run_integration":"true"' || return 1
   assert_not_contains "no orca for api-only" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
@@ -414,6 +415,7 @@ case_infra_change() {
   assert_contains "matrix gcode" "$matrix" "Farm.Modules.Gcode.Tests" || return 1
   assert_contains "matrix identity" "$matrix" "Farm.Modules.Identity.Tests" || return 1
   assert_contains "matrix inventory" "$matrix" "Farm.Modules.Inventory.Tests" || return 1
+  assert_contains "matrix administration" "$matrix" "Farm.Modules.Administration.Tests" || return 1
   assert_app_migration_drift "$out" || return 1
 }
 
@@ -925,6 +927,50 @@ case_inventory_mixed_with_unrelated_backend() {
   assert_contains "matrix inventory" "$matrix" "Farm.Modules.Inventory.Tests" || return 1
 }
 
+case_administration_change() {
+  local out="$1"
+  CHANGED_FILES="src/modules/Farm.Modules.Administration/Services/Admin/AdminOverviewService.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix administration" "$matrix" "Farm.Modules.Administration.Tests" || return 1
+  # RouteTableSnapshotTests and the genuine CustomWebApplicationFactory
+  # integration tests (e.g. AdminDataControllerTests) intentionally stayed in
+  # Farm.Web.Api.Tests, so a controller-owning module must select it too.
+  assert_contains "api covers controller" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason administration" "$reason" "administration" || return 1
+}
+
+case_test_only_administration() {
+  local out="$1"
+  CHANGED_FILES="src/tests/Farm.Modules.Administration.Tests/Controllers/Admin/AdminDataControllerTests.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix administration" "$matrix" "Farm.Modules.Administration.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+}
+
+case_administration_mixed_with_unrelated_backend() {
+  local out="$1"
+  CHANGED_FILES=$'src/modules/Farm.Modules.Administration/Controllers/SettingsController.cs\nsrc/backends/Farm.Backends.SomePlugin/SomeFile.cs'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix administration" "$matrix" "Farm.Modules.Administration.Tests" || return 1
+}
+
 
 case_migration_app_change() {
   local out="$1"
@@ -976,6 +1022,7 @@ case_test_only_api() {
   assert_not_contains "no slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   assert_contains "matrix identity" "$matrix" "Farm.Modules.Identity.Tests" || return 1
   assert_contains "matrix inventory" "$matrix" "Farm.Modules.Inventory.Tests" || return 1
+  assert_contains "matrix administration" "$matrix" "Farm.Modules.Administration.Tests" || return 1
 }
 
 case_test_only_slicer() {
@@ -3145,6 +3192,9 @@ TESTS=(
   case_inventory_change
   case_test_only_inventory
   case_inventory_mixed_with_unrelated_backend
+  case_administration_change
+  case_test_only_administration
+  case_administration_mixed_with_unrelated_backend
   case_migration_app_change
   case_migration_slicer_change
   case_test_only_api

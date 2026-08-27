@@ -155,6 +155,7 @@
     <ProjectReference Include="..\modules\Farm.Modules.Gcode\Farm.Modules.Gcode.csproj" />
     <ProjectReference Include="..\modules\Farm.Modules.Identity\Farm.Modules.Identity.csproj" />
     <ProjectReference Include="..\modules\Farm.Modules.Inventory\Farm.Modules.Inventory.csproj" />
+    <ProjectReference Include="..\modules\Farm.Modules.Administration\Farm.Modules.Administration.csproj" />
   </ItemGroup>
 
   <!-- Copy backend plugin DLLs (runtime-loaded, not compile-time referenced)

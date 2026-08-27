@@ -9,3 +9,9 @@
 // CustomWebApplicationFactory's internal configOverrides constructor to spin up
 // the real host for inventory endpoint testing.
 [assembly: InternalsVisibleTo("Farm.Modules.Inventory.Tests")]
+
+// AdminDataControllerTests, UnifiedSettingsPerKeyPostTests, and
+// UnifiedSettingsAnonymousAccessTests (moved to Farm.Modules.Administration.Tests as part of
+// issue #2042) each define a nested Factory : CustomWebApplicationFactory subclass calling the
+// internal configOverrides constructor to spin up the real host.
+[assembly: InternalsVisibleTo("Farm.Modules.Administration.Tests")]
