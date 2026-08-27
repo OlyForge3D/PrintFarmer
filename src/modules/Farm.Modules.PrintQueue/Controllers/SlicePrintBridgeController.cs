@@ -136,8 +136,8 @@ public class SlicePrintBridgeController(
         }
 
         // 5. Resolve the artifact file on disk
-        var pathResult = await artifactsService.GetWithPathAsync(gcodeArtifact.Id, ct);
-        if (pathResult is null || !System.IO.File.Exists(pathResult.Value.FullPath))
+        byte[]? gcodeBytes = await artifactsService.ReadArtifactBytesAsync(gcodeArtifact.Id, ct);
+        if (gcodeBytes is null)
         {
             logger.LogError(
                 "Gcode artifact file missing from disk for artifact {ArtifactId}, job {JobId}",
@@ -145,14 +145,12 @@ public class SlicePrintBridgeController(
             return BadRequest(new { error = "Gcode artifact file is missing from storage.", artifactId = gcodeArtifact.Id });
         }
 
-        string fullPath = pathResult.Value.FullPath;
-        string fileName = pathResult.Value.Artifact.FileName;
+        string fileName = gcodeArtifact.FileName;
 
-        // 6. Read the artifact once, then validate and upload from that exact byte content.
-        // Reading once (instead of validating the file, then reopening it for upload) closes
-        // a time-of-check/time-of-use gap: a file swapped on disk between validation and
-        // upload could otherwise reach the printer without ever being validated.
-        byte[] gcodeBytes = await System.IO.File.ReadAllBytesAsync(fullPath, ct);
+        // 6. Validate and upload from the exact byte content just read. Reading once (instead of
+        // validating the file, then reopening it for upload) closes a time-of-check/time-of-use
+        // gap: a file swapped on disk between validation and upload could otherwise reach the
+        // printer without ever being validated.
 
         // File.ReadAllTextAsync (used previously) strips a leading UTF-8 byte-order-mark via
         // StreamReader's BOM detection. Decoding the raw bytes directly does not: a BOM byte
@@ -515,9 +513,10 @@ public class SlicePrintBridgeController(
             return BadRequest(new { error = "Slice job has no gcode artifact.", jobId = id });
         }
 
-        // 4. Resolve the artifact file on disk
-        var pathResult = await artifactsService.GetWithPathAsync(gcodeArtifact.Id, ct);
-        if (pathResult is null || !System.IO.File.Exists(pathResult.Value.FullPath))
+        // 4. Resolve the artifact file on disk (single lookup that both verifies file existence
+        // and returns the path, avoiding a duplicate DB round trip for the same artifact).
+        var pathResult = await artifactsService.GetWithPathIfExistsAsync(gcodeArtifact.Id, ct);
+        if (pathResult is null)
         {
             logger.LogError(
                 "Gcode artifact file missing from disk for artifact {ArtifactId}, job {JobId}",

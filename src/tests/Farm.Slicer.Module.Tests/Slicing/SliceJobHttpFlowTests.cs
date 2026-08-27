@@ -16,7 +16,7 @@ public class SliceJobHttpFlowTests(Xunit.Abstractions.ITestOutputHelper output) 
 {
     private readonly CustomWebApplicationFactory _factory = new CustomWebApplicationFactory();
     private readonly Xunit.Abstractions.ITestOutputHelper _output = output;
-    private HttpClient _client;
+    private HttpClient _client = null!;
 
     public async Task InitializeAsync()
     {

@@ -29,7 +29,7 @@ namespace Farm.Web.Api.Tests.Security;
 /// <list type="bullet">
 /// <item>a seeded non-admin role (today, only <c>farm_user</c>) holds the exact
 /// <c>resource:action</c> permission, or holds <c>resource:admin</c> (which implies every other
-/// action on that resource per <see cref="PrintFarmerPermissions.ImpliesViaResourceAdmin"/>); or</item>
+/// action on that resource per <see cref="PrintFarmerPermissions.ImpliesViaResourceAdmin(System.Security.Claims.ClaimsPrincipal, string, string)"/>); or</item>
 /// <item>the permission is on <see cref="AdminOnlyAllowlist"/> with a written reason explaining
 /// why it is intentionally farm_admin-only.</item>
 /// </list>

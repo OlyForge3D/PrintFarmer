@@ -7,8 +7,8 @@ namespace Farm.Moonraker.Emulator.Tests;
 
 /// <summary>
 /// Contract tests for the MMU/filament-changer fixture: control-API gating and mode
-/// switching, and the exact wire shapes <see cref="MmuMode.HappyHare"/>,
-/// <see cref="MmuMode.Afc"/>, and <see cref="MmuMode.Qidibox"/> emit through
+/// switching, and the exact wire shapes <see cref="Farm.Moonraker.Emulator.Domain.MmuMode.HappyHare"/>,
+/// <see cref="Farm.Moonraker.Emulator.Domain.MmuMode.Afc"/>, and <see cref="Farm.Moonraker.Emulator.Domain.MmuMode.Qidibox"/> emit through
 /// <c>printer/objects/list</c>/<c>printer/objects/query</c> (and, for Qidibox, the seeded
 /// <c>server/files/config/officiall_filas_list.cfg</c> dictionary). See
 /// <c>RealMoonrakerSubscriptionServiceIntegrationTests</c> for coverage of the same shapes

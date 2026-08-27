@@ -18,7 +18,7 @@ namespace Farm.Web.IntegrationTests.Calibration;
 /// <remarks>
 /// <para>
 /// Issue #1794 fixed a defect where a viewer rotation of X=22.92°, Y=51.57°, Z=-74.48° was
-/// mis-oriented by 129° by OrcaSlicer's CLI. <see cref="BuildTransformFlagsTests"/>'s
+/// mis-oriented by 129° by OrcaSlicer's CLI. <c>BuildTransformFlagsTests</c>'s
 /// <c>SimulateOrcaCli</c>/<c>ExtractEulerAnglesLikeOrca</c> hand-transcribe OrcaSlicer's own
 /// Euler-angle extraction and composition math so unit tests can assert against it without a
 /// container — but a hand transcription can silently drift from the real binary it models. This
@@ -195,8 +195,8 @@ public sealed class PinnedOrcaCliRotationTests(ITestOutputHelper output) : IAsyn
         await File.WriteAllTextAsync(localProcessJson, processJson, cancellationToken);
         await File.WriteAllTextAsync(localFilamentJson, filamentJson, cancellationToken);
 
-        string containerWorkDir = FormattableString.Invariant(
-            $"/work/pinned-orca-cli-rotation-{Guid.NewGuid():N}");
+        string containerWorkDir = string.Create(
+            CultureInfo.InvariantCulture, $"/work/pinned-orca-cli-rotation-{Guid.NewGuid():N}");
         string containerMachineJson = $"{containerWorkDir}/machine.json";
         string containerProcessJson = $"{containerWorkDir}/process.json";
         string containerFilamentJson = $"{containerWorkDir}/filament.json";

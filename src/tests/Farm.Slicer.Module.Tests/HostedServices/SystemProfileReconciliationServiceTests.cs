@@ -88,7 +88,7 @@ public class SystemProfileReconciliationServiceTests
     }
 
     /// <summary>
-    /// Startup must not wait on reconciliation. <see cref="BackgroundService.StartAsync"/> returns
+    /// Startup must not wait on reconciliation. <see cref="Microsoft.Extensions.Hosting.BackgroundService.StartAsync"/> returns
     /// as soon as the implementation hits its first await, so readiness is never gated on a
     /// catalog-wide seed that talks to a worker over the network.
     /// </summary>

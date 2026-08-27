@@ -17,7 +17,7 @@ using Xunit;
 namespace Farm.Backend.Plugins.Tests.Backends;
 
 /// <summary>
-/// Behavior-level tests verifying that <see cref="SdcpClient.StartPrintAsync"/> correctly
+/// Behavior-level tests verifying that <see cref="SdcpClient.StartPrintAsync(System.Uri, string, Farm.Infrastructure.Domain.PrinterCredential?, System.Threading.CancellationToken)"/> correctly
 /// propagates a rejected start as <see cref="PrinterBackendBusyException"/> when the
 /// printer's CurrentStatus reports an active print job (#317).
 ///
@@ -29,7 +29,7 @@ public sealed class SdcpClientBusyTests
 {
     /// <summary>
     /// When the firmware rejects StartPrint (Ack=1) and CurrentStatus reports printing (code 1),
-    /// <see cref="SdcpClient.StartPrintAsync"/> must throw <see cref="PrinterBackendBusyException"/>.
+    /// <see cref="SdcpClient.StartPrintAsync(System.Uri, string, Farm.Infrastructure.Domain.PrinterCredential?, System.Threading.CancellationToken)"/> must throw <see cref="PrinterBackendBusyException"/>.
     /// </summary>
     [Fact]
     public async Task StartPrintAsync_WhenStartRejectedAndStatusIsPrinting_ThrowsPrinterBackendBusyException()
@@ -51,7 +51,7 @@ public sealed class SdcpClientBusyTests
 
     /// <summary>
     /// When the firmware rejects StartPrint (Ack=1) and CurrentStatus reports "starting" (code 9),
-    /// <see cref="SdcpClient.StartPrintAsync"/> must also throw <see cref="PrinterBackendBusyException"/>.
+    /// <see cref="SdcpClient.StartPrintAsync(System.Uri, string, Farm.Infrastructure.Domain.PrinterCredential?, System.Threading.CancellationToken)"/> must also throw <see cref="PrinterBackendBusyException"/>.
     /// Code 9 is a transient "starting" state included in the busy set.
     /// </summary>
     [Fact]
@@ -71,7 +71,7 @@ public sealed class SdcpClientBusyTests
 
     /// <summary>
     /// When the firmware rejects StartPrint (Ack=1) but CurrentStatus reports idle (code 0),
-    /// <see cref="SdcpClient.StartPrintAsync"/> must return false rather than throw.
+    /// <see cref="SdcpClient.StartPrintAsync(System.Uri, string, Farm.Infrastructure.Domain.PrinterCredential?, System.Threading.CancellationToken)"/> must return false rather than throw.
     /// This is the negative case — rejection with a non-busy reason.
     /// </summary>
     [Fact]

@@ -500,7 +500,6 @@ public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
         => _db.NozzleModelDefinitions.CountAsync(n => n.ManufacturerId == manufacturerId, ct);
 
     // Nozzle material catalog CRUD (see #1825)
-
     public async Task<IReadOnlyList<NozzleMaterial>> GetNozzleMaterialsAsync(CancellationToken ct = default)
         => await _db.NozzleMaterials
             .AsNoTracking()

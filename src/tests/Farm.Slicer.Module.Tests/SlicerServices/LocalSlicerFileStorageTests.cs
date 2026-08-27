@@ -520,9 +520,6 @@ public class LocalSlicerFileStorageTests : IDisposable
     }
 }
 
-/// <summary>
-/// Configuration options for LocalSlicerFileStorage
-/// </summary>
 // NOTE: Removed duplicate LocalFileStorageOptions test shim.
 // The production options class (Farm.Slicer.Module.Services.Configuration.LocalFileStorageOptions)
 // is used directly via the using directive at the top of this file.

@@ -2570,12 +2570,6 @@ public sealed class ProfileFamilyServiceTests
     }
 
     /// <summary>
-    /// A <see cref="SlicerDbContext"/> that simulates a concurrent DELETE landing between a render's worker
-    /// install and its persist (#2087): the next armed <see cref="SaveChangesAsync(CancellationToken)"/>
-    /// removes the family and variant rows out-of-band and then throws the
-    /// <see cref="DbUpdateConcurrencyException"/> EF raises when an UPDATE matches zero rows.
-    /// </summary>
-    /// <summary>
     /// Minimal <see cref="ILogger{T}"/> that records the formatted message of every log entry, so a test
     /// can assert on exactly what would be written to a log sink (used to verify log-forging sanitization).
     /// </summary>
@@ -2598,6 +2592,12 @@ public sealed class ProfileFamilyServiceTests
         }
     }
 
+    /// <summary>
+    /// A <see cref="SlicerDbContext"/> that simulates a concurrent DELETE landing between a render's worker
+    /// install and its persist (#2087): the next armed <c>SaveChangesAsync(CancellationToken)</c>
+    /// removes the family and variant rows out-of-band and then throws the
+    /// <see cref="DbUpdateConcurrencyException"/> EF raises when an UPDATE matches zero rows.
+    /// </summary>
     private sealed class ConcurrentDeleteOnSaveDbContext(DbContextOptions<SlicerDbContext> options)
         : SlicerDbContext(options)
     {

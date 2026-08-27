@@ -17,7 +17,7 @@ using Xunit;
 namespace Farm.Infrastructure.Tests.Dispatch;
 
 /// <summary>
-/// #1827 dispatch/backward-compat parity: locks in that <see cref="DispatchScorer.ScoreNozzleHardness"/>
+/// #1827 dispatch/backward-compat parity: locks in that nozzle-hardness scoring
 /// (via <c>Toolhead.NozzleModel.IsHardened</c>) still eliminates/admits abrasive-filament jobs
 /// identically to the pre-catalog <c>IsHardenedByMaterial(NozzleType)</c> baseline (removed in
 /// commit eb2804eb1's predecessor, before the #1824 <see cref="NozzleMaterial"/> catalog

@@ -141,6 +141,7 @@ public class PrinterHub(
         }
 
         var candidateIds = new List<Guid>();
+
         // Preserve the caller's original string for each id (first occurrence wins on
         // duplicates) so the response echoes back exactly what the client sent, not the
         // server's own re-serialization. Otherwise a valid but non-canonical GUID string

@@ -21,6 +21,13 @@ namespace Farm.Api.Controllers;
 [Route("api/job-queue-analytics")]
 [Authorize]
 [Produces("application/json")]
+
+// S6960: Sonar suggests splitting this controller into 2 smaller ones. Its endpoints are
+// cohesive read-only analytics/history views over the same print-queue domain and share the
+// same authorization/DI surface; splitting would add controller-count/routing overhead without
+// improving readability or testability. Deliberately not refactored — tracked as a design
+// decision, not a defect, per issue #2094.
+#pragma warning disable S6960
 public class JobQueueAnalyticsController(
     IPrintJobManagementService printJobManagementService,
     IJobCostCalculationService jobCostCalculationService,
@@ -1279,3 +1286,4 @@ public class JobQueueAnalyticsController(
             : value.Trim().TrimStart('W', '/').Trim('"');
     }
 }
+#pragma warning restore S6960

@@ -21,9 +21,9 @@ namespace Farm.Backend.Plugins.Tests.Services.PrusaLink;
 
 /// <summary>
 /// Unit tests for the "printerupdated" broadcast suppression gate wired into
-/// <see cref="PrusaLinkPollingService.PollPrinterAsync"/> (issue #1355). <c>PollPrinterAsync</c>
+/// <c>PrusaLinkPollingService.PollPrinterAsync</c> (issue #1355). <c>PollPrinterAsync</c>
 /// is a private, infinitely-looping method, so tests invoke it via reflection and cancel the
-/// token from inside the mocked <see cref="IPrusaLinkClient.GetCompositeStatusAsync"/> callback
+/// token from inside the mocked <see cref="IPrusaLinkClient.GetCompositeStatusAsync(string, Farm.Infrastructure.Domain.PrinterCredential?, System.Threading.CancellationToken)"/> callback
 /// once the desired number of poll iterations has executed. Cancelling there lets the current
 /// iteration finish (compare + optionally broadcast + cache update) before the trailing
 /// <c>await Task.Delay(PollingInterval, ct)</c> throws and exits the loop. Multi-iteration tests

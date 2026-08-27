@@ -51,6 +51,7 @@ public class OctoPrintCompatController : ControllerBase
 
 #pragma warning disable S6932 // Controller intentionally uses raw request data for OctoPrint API compatibility
     [HttpPost("files/local")]
+
     // Real authentication is required here (issue #1666): either a JWT Bearer token or a
     // resolved OctoPrint API key (via OctoPrintApiKeyAuthenticationHandler), so that
     // [RequirePermission] below runs against a genuine, permission-checkable identity

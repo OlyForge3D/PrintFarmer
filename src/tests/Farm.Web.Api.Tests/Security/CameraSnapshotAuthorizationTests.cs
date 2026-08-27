@@ -8,7 +8,6 @@ using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.StorageManagement;
 using FluentAssertions;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -462,9 +461,5 @@ public sealed class CameraSnapshotAuthorizationTests : IAsyncLifetime
                 ["Security:DevModeBypassAuth"] = "false",
             })
     {
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
-        {
-            base.ConfigureWebHost(builder);
-        }
     }
 }
