@@ -643,17 +643,35 @@ final class ConnectionMonitorTests: XCTestCase {
     }
 
     func testReadinessTimesOutAnUnresponsiveProbe() async {
+        let operationStarted = AsyncBarrier()
+        let timeoutGate = AsyncBarrier()
+        defer {
+            operationStarted.close()
+            timeoutGate.close()
+        }
         let capabilities = TestCapabilitiesService()
         let plan = BackendReadinessPlan(
             capabilitiesService: capabilities,
             probes: [
                 BackendReadinessProbe(endpoint: .signalR) {
+                    operationStarted.signal()
                     try await Task.sleep(for: .seconds(30))
                 },
             ]
         )
+        let checker = BackendReadinessChecker(
+            timeout: .seconds(30),
+            probeTimeoutSleep: { _ in
+                await timeoutGate.arriveAndWait()
+            }
+        )
+        let checkTask = Task {
+            await checker.check(plan: plan)
+        }
 
-        let result = await BackendReadinessChecker(timeout: .milliseconds(5)).check(plan: plan)
+        await operationStarted.waitUntilArrived()
+        timeoutGate.release()
+        let result = await checkTask.value
 
         XCTAssertEqual(result.failures.map(\.endpoint), [.signalR])
     }
@@ -722,14 +740,18 @@ final class ConnectionMonitorTests: XCTestCase {
 
     func testConnectionGateDiscardsSupersededGenerationResult() async {
         let started = AsyncBarrier()
-        defer { started.close() }
+        let release = AsyncBarrier()
+        defer {
+            started.close()
+            release.close()
+        }
         let capabilities = TestCapabilitiesService()
         let plan = BackendReadinessPlan(
             capabilitiesService: capabilities,
             probes: [
                 BackendReadinessProbe(endpoint: .api) {
                     started.signal()
-                    try await Task.sleep(for: .milliseconds(20))
+                    await release.arriveAndWait()
                 },
             ]
         )
@@ -743,6 +765,7 @@ final class ConnectionMonitorTests: XCTestCase {
         }
         await started.waitUntilArrived()
         isCurrent = false
+        release.release()
         await task.value
 
         XCTAssertEqual(gate.state, .idle)
@@ -751,14 +774,18 @@ final class ConnectionMonitorTests: XCTestCase {
 
     func testConnectionGateResetInvalidatesInFlightAttempt() async {
         let started = AsyncBarrier()
-        defer { started.close() }
+        let release = AsyncBarrier()
+        defer {
+            started.close()
+            release.close()
+        }
         let capabilities = TestCapabilitiesService()
         let plan = BackendReadinessPlan(
             capabilitiesService: capabilities,
             probes: [
                 BackendReadinessProbe(endpoint: .api) {
                     started.signal()
-                    try await Task.sleep(for: .milliseconds(20))
+                    await release.arriveAndWait()
                 },
             ]
         )
@@ -769,6 +796,7 @@ final class ConnectionMonitorTests: XCTestCase {
         }
         await started.waitUntilArrived()
         gate.reset()
+        release.release()
         await task.value
 
         XCTAssertEqual(gate.state, .idle)
