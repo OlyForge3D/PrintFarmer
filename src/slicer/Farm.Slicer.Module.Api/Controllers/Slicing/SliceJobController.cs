@@ -1867,7 +1867,7 @@ public partial class SliceJobController(
 
     /// <summary>
     /// Disambiguates a set of same-named process/filament profile candidates against the resolved
-    /// machine profile, using the same compatibility rules <see cref="ProfilesService"/> applies
+    /// machine profile, using the same compatibility rules <see cref="Farm.Slicer.Module.Api.Services.ProfilesService"/> applies
     /// when browsing profiles for a selected machine. <c>Name</c> alone is not a unique key for
     /// either <see cref="ProcessProfile"/> or <see cref="FilamentProfile"/> — OrcaSlicer commonly
     /// ships process profiles with the same display name scoped to different printer models via

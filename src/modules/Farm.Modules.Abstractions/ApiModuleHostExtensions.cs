@@ -38,7 +38,7 @@ namespace Farm.Modules.Abstractions;
 /// A vertical-slice module therefore ships as an ordinary project reference of
 /// <c>Farm.Web.Api</c> (like <c>Farm.Slicer.Module.Api</c> today), and the host names that
 /// module's assembly explicitly -- e.g. <c>typeof(SomePartsModule).Assembly</c> -- in the
-/// <paramref name="moduleAssemblies"/> passed to <see cref="AddApiModules"/>. As of this
+/// <c>moduleAssemblies</c> passed to <see cref="AddApiModules"/>. As of this
 /// phase (#2035) no module assembly exists yet, so the host passes none: this seam adds no
 /// application parts, no endpoints, and no routes until a later phase of epic #2019
 /// introduces the first module and adds its assembly to that call.

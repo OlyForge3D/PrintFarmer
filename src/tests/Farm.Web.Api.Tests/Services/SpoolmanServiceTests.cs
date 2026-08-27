@@ -542,7 +542,7 @@ public class SpoolmanServiceTests
         FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
         {
             // Return empty successful payload
-            string json = JsonSerializer.Serialize(new object[] { });
+            string json = JsonSerializer.Serialize(Array.Empty<object>());
             HttpResponseMessage response = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")

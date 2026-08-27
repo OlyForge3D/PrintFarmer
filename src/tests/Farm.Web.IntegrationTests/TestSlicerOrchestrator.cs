@@ -18,7 +18,7 @@ public class TestSlicerOrchestrator : ISlicerOrchestrator
     public Task<SlicingJobResponse> SubmitJobAsync(SlicingJobRequest request, CancellationToken cancellationToken = default)
     {
         // Validate engine value - mirror production validation for tests
-        if (!Enum.IsDefined(typeof(SlicerEngineType), request.SlicerEngine))
+        if (!Enum.IsDefined(request.SlicerEngine))
         {
             throw new ArgumentException($"Slicer engine {request.SlicerEngine} is not available", nameof(request));
         }
@@ -46,7 +46,7 @@ public class TestSlicerOrchestrator : ISlicerOrchestrator
     public Task<SlicingJobStatusResponse?> GetJobStatusAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
         _ = _jobs.TryGetValue(jobId, out SlicingJobStatusResponse? r);
-        return Task.FromResult((SlicingJobStatusResponse?)r);
+        return Task.FromResult(r);
     }
 
     public Task<bool> CancelJobAsync(Guid jobId, CancellationToken cancellationToken = default)

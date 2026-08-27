@@ -117,6 +117,7 @@ public static class AuthenticationStartup
                 // instead of weakening validation here.)
                 options.TokenValidationParameters = tvp;
             })
+
             // Real authentication scheme for the OctoPrint-compatible X-Api-Key header (issue #1666).
             // Chained onto the same AddAuthentication("Bearer") builder — NOT a second
             // AddAuthentication() call — so "Bearer" remains the default scheme while

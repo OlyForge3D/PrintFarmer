@@ -49,7 +49,7 @@ internal sealed class PinnedOrcaWorkerContainer : IAsyncDisposable
     public int WorkerPort { get; }
 
     /// <summary>Gets the worker's loopback base address on the runner.</summary>
-    public string BaseAddress => FormattableString.Invariant($"http://127.0.0.1:{WorkerPort}");
+    public string BaseAddress => string.Create(CultureInfo.InvariantCulture, $"http://127.0.0.1:{WorkerPort}");
 
     /// <summary>
     /// Determines whether a usable Docker CLI is present.
@@ -126,7 +126,7 @@ internal sealed class PinnedOrcaWorkerContainer : IAsyncDisposable
 
         int workerPort = ReserveLoopbackPort();
         string containerName = $"pfarm-orca-smoke-{Guid.NewGuid():N}"[..40];
-        string workerAddress = FormattableString.Invariant($"http://127.0.0.1:{workerPort}");
+        string workerAddress = string.Create(CultureInfo.InvariantCulture, $"http://127.0.0.1:{workerPort}");
 
         List<string> arguments =
         [
@@ -137,7 +137,7 @@ internal sealed class PinnedOrcaWorkerContainer : IAsyncDisposable
             // Share the runner's network namespace so the worker can dial the loopback API listener.
             "--network", "host",
             "--env", "ASPNETCORE_ENVIRONMENT=Production",
-            "--env", FormattableString.Invariant($"ASPNETCORE_URLS={workerAddress}"),
+            "--env", string.Create(CultureInfo.InvariantCulture, $"ASPNETCORE_URLS={workerAddress}"),
             "--env", $"SlicerApi__BaseUrl={apiBaseAddress}",
             "--env", $"SlicerRegistry__ApiBaseUrl={apiBaseAddress}",
             "--env", $"Worker__ApiBaseUrl={apiBaseAddress}",

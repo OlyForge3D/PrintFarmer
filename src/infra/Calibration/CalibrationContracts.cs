@@ -498,6 +498,14 @@ public sealed class PrinterConfigurationSnapshotDto
 }
 
 /// <summary>Credential-free profile data exposed by a caller-reachable profile store.</summary>
+/// <remarks>
+/// The optional machine-profile facts below (<c>PrintablePolygon</c> through
+/// <c>HotendMaxTemperature</c>) are derived from <c>RawJson</c> (#1613 §4.3, #1615 PR-2).
+/// Populated once by the producer (<c>CalibrationProfileResolver.MapMachine</c>) via the
+/// shared <c>Farm.Slicer.ProfileParsing</c> library, so both the monolith and split
+/// deployments expose the same typed facts over this DTO without <c>src/api</c> ever parsing
+/// OrcaSlicer JSON itself. Only ever populated on the <c>"machine"</c>-kind profile.
+/// </remarks>
 public sealed record ResolvedCalibrationProfile(
     Guid Id,
     string Kind,
@@ -535,16 +543,7 @@ public sealed record ResolvedCalibrationProfile(
     double? NozzleDiameter = null,
     NozzleType? NozzleType = null,
     int? NozzleMaxTemperature = null,
-    int? HotendMaxTemperature = null)
-{
-    /// <summary>
-    /// Machine-profile facts derivable from <see cref="RawJson"/> (#1613 §4.3, #1615 PR-2).
-    /// Populated once by the producer (<c>CalibrationProfileResolver.MapMachine</c>) via the
-    /// shared <c>Farm.Slicer.ProfileParsing</c> library, so both the monolith and split
-    /// deployments expose the same typed facts over this DTO without <c>src/api</c> ever parsing
-    /// OrcaSlicer JSON itself. Only ever populated on the <c>"machine"</c>-kind profile.
-    /// </summary>
-}
+    int? HotendMaxTemperature = null);
 
 public sealed record ResolvedCalibrationProfiles(
     ResolvedCalibrationProfile? Machine,

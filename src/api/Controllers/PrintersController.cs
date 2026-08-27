@@ -4359,8 +4359,8 @@ public class PrintersController(
         }
     }
 
-    private static readonly IReadOnlyDictionary<string, string> ThumbnailContentTypesByExtension =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, string> ThumbnailContentTypesByExtension =
+        new(StringComparer.OrdinalIgnoreCase)
         {
             [".png"] = "image/png",
             [".jpg"] = "image/jpeg",

@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure;
+﻿namespace Farm.Infrastructure;
 
 /// <summary>
 /// Produces credential-free HTTP URLs that authenticated clients may display or navigate to.

@@ -32,7 +32,7 @@ public class CameraSnapshotsController(
     private readonly IQueueResourceAuthorizationService _queueResourceAuthorization = queueResourceAuthorization;
 
     /// <summary>
-    /// Enforces the same PrinterGroup access rules as <see cref="PrintersController"/> so
+    /// Enforces the same PrinterGroup access rules as <c>PrintersController</c> so
     /// snapshot reads and deletes cannot be reached by a caller outside the printer's group.
     /// </summary>
     private Task<bool> CanAccessPrinterAsync(
@@ -121,6 +121,7 @@ public class CameraSnapshotsController(
     /// Serves the actual snapshot image file.
     /// </summary>
     [HttpGet("{snapshotId:guid}/image")]
+#pragma warning disable CA3003 // Path resolved from a Guid DB lookup then canonicalized and containment-checked below — no injection risk
     public async Task<IActionResult> GetImageAsync(Guid snapshotId, CancellationToken ct)
     {
         CameraSnapshot? snapshot = await _db.CameraSnapshots.FindAsync([snapshotId], ct);
@@ -148,15 +149,16 @@ public class CameraSnapshotsController(
             return BadRequest("Invalid snapshot path.");
         }
 
-        if (!System.IO.File.Exists(fullPath))
+        if (!System.IO.File.Exists(canonicalFull))
         {
-            _logger.LogWarning("[CameraSnapshots] Snapshot file not found on disk: {Path}", fullPath);
+            _logger.LogWarning("[CameraSnapshots] Snapshot file not found on disk: {Path}", canonicalFull);
             return NotFound("Snapshot file not found on disk.");
         }
 
-        FileStream fileStream = new(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        FileStream fileStream = new(canonicalFull, FileMode.Open, FileAccess.Read, FileShare.Read);
         return File(fileStream, "image/jpeg");
     }
+#pragma warning restore CA3003
 
     /// <summary>
     /// Deletes a snapshot and its file from disk. This is irreversible and destroys print-event
@@ -165,6 +167,7 @@ public class CameraSnapshotsController(
     /// </summary>
     [HttpDelete("{snapshotId:guid}")]
     [RequirePermission(PrintFarmerPermissions.Queue.Write)]
+#pragma warning disable CA3003 // Path resolved from a Guid DB lookup then canonicalized and containment-checked below — no injection risk
     public async Task<IActionResult> DeleteAsync(Guid snapshotId, CancellationToken ct)
     {
         CameraSnapshot? snapshot = await _db.CameraSnapshots.FindAsync([snapshotId], ct);
@@ -193,9 +196,9 @@ public class CameraSnapshotsController(
             return BadRequest("Invalid snapshot path.");
         }
 
-        if (System.IO.File.Exists(fullPath))
+        if (System.IO.File.Exists(canonicalFull))
         {
-            System.IO.File.Delete(fullPath);
+            System.IO.File.Delete(canonicalFull);
         }
 
         _db.CameraSnapshots.Remove(snapshot);
@@ -203,4 +206,5 @@ public class CameraSnapshotsController(
 
         return NoContent();
     }
+#pragma warning restore CA3003
 }

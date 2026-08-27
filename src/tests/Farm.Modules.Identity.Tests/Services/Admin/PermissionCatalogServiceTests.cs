@@ -324,11 +324,11 @@ public class PermissionCatalogServiceTests
 
         public bool ActiveChangeCallbacks => false;
 
-        public IDisposable RegisterChangeCallback(Action<object?> callback, object? state) => NullDisposable.Instance;
+        public IDisposable RegisterChangeCallback(Action<object?> callback, object? state) => NullDisposable.Singleton;
 
         private sealed class NullDisposable : IDisposable
         {
-            public static readonly NullDisposable Instance = new();
+            public static readonly NullDisposable Singleton = new();
 
             public void Dispose()
             {

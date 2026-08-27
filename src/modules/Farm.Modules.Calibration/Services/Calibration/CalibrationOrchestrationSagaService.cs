@@ -596,6 +596,9 @@ public sealed class CalibrationOrchestrationSagaService(
         return actor.IsFarmAdmin ? query : query.Where(project => project.OwnerUserId == actor.UserId);
     }
 
+    /// <param name="orchestrationId">The orchestration's unique identifier.</param>
+    /// <param name="actor">The caller, used to scope visibility to their own projects unless they are a farm admin.</param>
+    /// <param name="cancellationToken">Cancellation token for the query.</param>
     /// <param name="asNoTracking">
     /// When true, the query is executed with <c>AsNoTracking</c> and never populates the
     /// DbContext's change tracker. This matters for the unlocked pre-lock existence/visibility

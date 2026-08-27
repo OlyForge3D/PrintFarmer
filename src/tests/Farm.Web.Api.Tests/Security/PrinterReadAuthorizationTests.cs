@@ -240,7 +240,7 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
 
     /// <summary>
     /// Endpoints that proxy an outbound HTTP call to the printer's camera (via
-    /// <see cref="ProxyCameraAsync"/>) against a non-routable stub URL. The proxy's upstream
+    /// <c>ProxyCameraAsync</c>) against a non-routable stub URL. The proxy's upstream
     /// failure surfaces as some non-2xx status, so these can only be asserted "not the
     /// authorization-shaped 404" rather than a specific success code.
     /// </summary>

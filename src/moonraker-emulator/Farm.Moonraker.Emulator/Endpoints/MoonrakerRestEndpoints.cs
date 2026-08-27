@@ -293,22 +293,22 @@ public static class MoonrakerRestEndpoints
         string relativePath,
         IReadOnlyList<string> dirs,
         IReadOnlyList<VirtualFile> files) => new()
-    {
-        ["path"] = rawPath,
-        ["dirname"] = relativePath,
-        ["modified"] = (double)DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-        ["size"] = 0,
-        ["permissions"] = "rw",
-        ["dirs"] = dirs.Select(d => new Dictionary<string, object?> { ["dirname"] = d, ["permissions"] = "rw" }).ToArray(),
-        ["files"] = files.Select(f => new Dictionary<string, object?>
         {
-            ["filename"] = f.Path,
-            ["modified"] = (double)f.Modified.ToUnixTimeSeconds(),
-            ["size"] = f.Content.LongLength,
+            ["path"] = rawPath,
+            ["dirname"] = relativePath,
+            ["modified"] = (double)DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            ["size"] = 0,
             ["permissions"] = "rw",
-        }).ToArray(),
-        ["disk_usage"] = new Dictionary<string, object?> { ["total"] = 32_000_000_000L, ["used"] = 4_000_000_000L, ["free"] = 28_000_000_000L },
-    };
+            ["dirs"] = dirs.Select(d => new Dictionary<string, object?> { ["dirname"] = d, ["permissions"] = "rw" }).ToArray(),
+            ["files"] = files.Select(f => new Dictionary<string, object?>
+            {
+                ["filename"] = f.Path,
+                ["modified"] = (double)f.Modified.ToUnixTimeSeconds(),
+                ["size"] = f.Content.LongLength,
+                ["permissions"] = "rw",
+            }).ToArray(),
+            ["disk_usage"] = new Dictionary<string, object?> { ["total"] = 32_000_000_000L, ["used"] = 4_000_000_000L, ["free"] = 28_000_000_000L },
+        };
 
     private sealed record DirectoryRequest(string? Path);
 

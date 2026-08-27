@@ -230,7 +230,7 @@ public sealed class MoonrakerEmulatorSeederTests
             Assert.Equal(ToolheadType.Physical, toolhead.ToolheadType);
             Assert.Equal(0, toolhead.Index);
             Assert.Equal(0.4, toolhead.NozzleDiameter);
-            Assert.Equal(["PLA", "PETG"], toolhead.SupportedMaterials);
+            Assert.Equal(["PLA", "PETG"], toolhead.SupportedMaterials ?? []);
         });
 
         // All five seeded printers share the same catalog model, so exactly one machine,
@@ -401,6 +401,6 @@ public sealed class MoonrakerEmulatorSeederTests
         Toolhead recreatedToolhead = seedPrinter.Toolheads.Single();
         Assert.Equal(ToolheadType.Physical, recreatedToolhead.ToolheadType);
         Assert.Equal(0, recreatedToolhead.Index);
-        Assert.Equal(["PLA", "PETG"], recreatedToolhead.SupportedMaterials);
+        Assert.Equal(["PLA", "PETG"], recreatedToolhead.SupportedMaterials ?? []);
     }
 }

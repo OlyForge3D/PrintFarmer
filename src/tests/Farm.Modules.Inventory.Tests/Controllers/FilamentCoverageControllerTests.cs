@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -34,6 +36,7 @@ public class FilamentCoverageControllerTests : IClassFixture<CustomWebApplicatio
 {
     private const string PerPrinterRoute = "/api/printers/{0}/filament-coverage";
     private const string FleetRoute = "/api/printers/filament-coverage";
+    private static readonly CompositeFormat PerPrinterRouteFormat = CompositeFormat.Parse(PerPrinterRoute);
 
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
@@ -83,7 +86,7 @@ public class FilamentCoverageControllerTests : IClassFixture<CustomWebApplicatio
         await using CustomWebApplicationFactory strictFactory = new(new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" });
         await strictFactory.ResetDataAsync();
         using HttpClient anon = strictFactory.CreateClient();
-        HttpResponseMessage response = await anon.GetAsync(string.Format(PerPrinterRoute, Guid.NewGuid()));
+        HttpResponseMessage response = await anon.GetAsync(string.Format(CultureInfo.InvariantCulture, PerPrinterRouteFormat, Guid.NewGuid()));
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
@@ -94,7 +97,7 @@ public class FilamentCoverageControllerTests : IClassFixture<CustomWebApplicatio
     [Fact]
     public async Task GetForPrinter_UnknownId_Returns404()
     {
-        HttpResponseMessage response = await _client!.GetAsync(string.Format(PerPrinterRoute, Guid.NewGuid()));
+        HttpResponseMessage response = await _client!.GetAsync(string.Format(CultureInfo.InvariantCulture, PerPrinterRouteFormat, Guid.NewGuid()));
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
@@ -107,7 +110,7 @@ public class FilamentCoverageControllerTests : IClassFixture<CustomWebApplicatio
     {
         Printer printer = await SeedPrinterWithToolheadAsync();
 
-        HttpResponseMessage response = await _client!.GetAsync(string.Format(PerPrinterRoute, printer.Id));
+        HttpResponseMessage response = await _client!.GetAsync(string.Format(CultureInfo.InvariantCulture, PerPrinterRouteFormat, printer.Id));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         string body = await response.Content.ReadAsStringAsync();
@@ -206,7 +209,7 @@ public class FilamentCoverageControllerTests : IClassFixture<CustomWebApplicatio
         using HttpClient client = host.CreateClient();
         client.DefaultRequestHeaders.Authorization = _client!.DefaultRequestHeaders.Authorization;
 
-        HttpResponseMessage response = await client.GetAsync(string.Format(PerPrinterRoute, Guid.NewGuid()));
+        HttpResponseMessage response = await client.GetAsync(string.Format(CultureInfo.InvariantCulture, PerPrinterRouteFormat, Guid.NewGuid()));
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());

@@ -60,7 +60,13 @@ public class SpoolmanServiceProbeEgressTests
         using RecordingLoopbackServer targetServer = RecordingLoopbackServer.Start(_ => (HttpStatusCode.OK, null));
         using RecordingLoopbackServer redirectServer = RecordingLoopbackServer.Start(_ => (HttpStatusCode.Found, targetServer.BaseUrl + "/internal-secret"));
 
-        using HttpClientHandler handler = new() { AllowAutoRedirect = false };
+        using HttpClientHandler handler = new()
+        {
+            AllowAutoRedirect = false,
+            // Loopback-only real HTTP listeners (RecordingLoopbackServer) — no TLS certificate is
+            // ever involved, but set this explicitly rather than defer CA5399.
+            CheckCertificateRevocationList = true,
+        };
         using HttpClient http = new(handler);
         // Note: TestHelpers.PermissiveEgressGuard() pins to a fixed documentation address
         // (203.0.113.100), which is fine for tests using a stubbed transport but would break a

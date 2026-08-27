@@ -252,7 +252,7 @@ public class PartInventoryAdjustDoubleApplicationTests : IDisposable
         public override bool CanSeek => false;
         public override bool CanWrite => true;
         public override long Length => throw new NotSupportedException();
-        public override long Position { get => 0; set { } }
+        public override long Position { get => 0; set => _ = value; }
 
         public override void Flush()
         {

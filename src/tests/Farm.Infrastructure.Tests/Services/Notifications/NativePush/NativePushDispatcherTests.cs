@@ -29,7 +29,7 @@ namespace Farm.Infrastructure.Tests.Services.Notifications.NativePush;
 /// Behavioral coverage for <see cref="NativePushDispatcher"/> covering the fast-path early
 /// returns (empty id / Mode.Disabled). Full end-to-end coverage of the triple gate,
 /// role-based maintenance filter, and dedupe/rate-limit interactions is exercised through
-/// <see cref="AttentionBroadcasterBehaviorTests"/> and the future integration test harness;
+/// <see cref="Farm.Infrastructure.Tests.Services.Attention.AttentionBroadcasterBehaviorTests"/> and the future integration test harness;
 /// the tests here lock the observable invariants that the dispatcher never touches its
 /// downstream sender or scope factory when it should short-circuit.
 /// </summary>

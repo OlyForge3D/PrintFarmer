@@ -119,7 +119,11 @@ public class FileManagementServiceTests
         try
         {
             string hash = await sut.ComputeFileHashAsync(filePath, "sha1");
+            // SHA1 here validates the service's legacy "sha1" algorithm option for backward
+            // compatibility, not any security-sensitive use.
+#pragma warning disable CA5350
             byte[] expectedBytes = SHA1.HashData(Encoding.UTF8.GetBytes("data"));
+#pragma warning restore CA5350
             string expected = string.Concat(expectedBytes.Select(b => b.ToString("x2")));
 
             hash.Should().Be(expected);

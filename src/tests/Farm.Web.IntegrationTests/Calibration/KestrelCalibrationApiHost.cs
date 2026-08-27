@@ -71,8 +71,8 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
 
             // Kestrel binds loopback only. The worker container shares the runner's network namespace,
             // so the same address resolves inside the container without exposing anything externally.
-            ["ASPNETCORE_URLS"] = FormattableString.Invariant($"http://127.0.0.1:{listenPort}"),
-            ["urls"] = FormattableString.Invariant($"http://127.0.0.1:{listenPort}"),
+            ["ASPNETCORE_URLS"] = string.Create(CultureInfo.InvariantCulture, $"http://127.0.0.1:{listenPort}"),
+            ["urls"] = string.Create(CultureInfo.InvariantCulture, $"http://127.0.0.1:{listenPort}"),
         };
     }
 
@@ -86,7 +86,7 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
     public int ListenPort { get; }
 
     /// <summary>Gets the loopback base address a container on the runner's network can dial.</summary>
-    public string BaseAddress => FormattableString.Invariant($"http://127.0.0.1:{ListenPort}");
+    public string BaseAddress => string.Create(CultureInfo.InvariantCulture, $"http://127.0.0.1:{ListenPort}");
 
     /// <summary>Gets the service provider of the host bound to <see cref="BaseAddress"/>.</summary>
     public IServiceProvider ListeningServices => _kestrelHost?.Services

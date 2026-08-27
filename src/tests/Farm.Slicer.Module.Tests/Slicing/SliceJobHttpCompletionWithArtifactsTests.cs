@@ -21,7 +21,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
-    private HttpClient _client;
+    private HttpClient _client = null!;
 
     public SliceJobHttpCompletionWithArtifactsTests()
     {

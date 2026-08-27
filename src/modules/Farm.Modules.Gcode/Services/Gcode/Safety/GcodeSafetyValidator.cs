@@ -66,7 +66,7 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
         ArgumentNullException.ThrowIfNull(request);
         if (string.IsNullOrEmpty(request.Gcode))
         {
-            return GcodeSafetyResult<GcodeSafetyReport>.Failure(
+            return GcodeSafetyResult.Failure<GcodeSafetyReport>(
                 GcodeSafetyProblemCodes.Malformed,
                 "gcode",
                 "The g-code program is empty.");
@@ -78,13 +78,13 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
 
         if (problems.Count > 0)
         {
-            return GcodeSafetyResult<GcodeSafetyReport>.Failure(problems);
+            return GcodeSafetyResult.Failure<GcodeSafetyReport>(problems);
         }
 
         string sha256 = Convert.ToHexString(
                 SHA256.HashData(Encoding.UTF8.GetBytes(request.Gcode)))
             .ToLowerInvariant();
-        return GcodeSafetyResult<GcodeSafetyReport>.Success(new GcodeSafetyReport(
+        return GcodeSafetyResult.Success(new GcodeSafetyReport(
             request.Checkpoint,
             sha256,
             state.CommandCount,

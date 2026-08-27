@@ -1262,7 +1262,7 @@ public class PrintersService(
     /// any caller acquires a per-printer firmware-identity write lock for it. See the round-5
     /// remarks on <see cref="FirmwareIdentityWriteLocks"/>: without this guard, a caller could grow
     /// that dictionary without bound just by requesting firmware detection for ids that were never
-    /// real. <see cref="IPrintersRepository.ExistsAsync"/> is a lightweight existence check — it
+    /// real. <see cref="Farm.Infrastructure.Repositories.Printers.IPrintersRepository.ExistsAsync(Guid, CancellationToken)"/> is a lightweight existence check — it
     /// does not load or track the full entity, so a caller supplying a nonexistent id costs one
     /// cheap query and nothing else.
     /// </summary>
@@ -1321,8 +1321,8 @@ public class PrintersService(
     /// its own -- the caught exception's tracked entity (<paramref name="ex"/>'s
     /// <see cref="DbUpdateException.Entries"/>) remains attached to its
     /// <see cref="Microsoft.EntityFrameworkCore.DbContext"/>'s identity map after this method
-    /// returns. <see cref="EfPrintersRepository.FindByIdAsync"/> is backed by
-    /// <see cref="Microsoft.EntityFrameworkCore.DbSet{TEntity}.FindAsync"/>, which satisfies a
+    /// returns. <see cref="Farm.Infrastructure.Repositories.Printers.EfPrintersRepository.FindByIdAsync(Guid, CancellationToken)"/> is backed by
+    /// <see cref="Microsoft.EntityFrameworkCore.DbSet{TEntity}.FindAsync(object[])"/>, which satisfies a
     /// lookup by key from a same-scope tracked instance without ever re-querying the database.
     /// <see cref="PrinterVersionCache.GetAsync"/> does exactly this kind of same-scope re-read
     /// immediately after <see cref="RefreshDetectedFirmwareIdentityAsync"/> returns, so a deleted
@@ -1360,7 +1360,7 @@ public class PrintersService(
     /// <see cref="Printer"/> entity after this call returns to build its response.
     /// <para>
     /// Concurrency (Vasquez, PR #1660 review round 2): <c>Printer</c> has no concurrency
-    /// token, and EF Core's <see cref="Microsoft.EntityFrameworkCore.DbSet{TEntity}.FindAsync"/>
+    /// token, and EF Core's <see cref="Microsoft.EntityFrameworkCore.DbSet{TEntity}.FindAsync(object[])"/>
     /// (used by the repository) returns the already-tracked instance for a given key straight
     /// from the change tracker's identity map without ever re-querying the database. That means
     /// a caller's subsequent "re-read" of the same entity in the same scope is a no-op: it can
@@ -1401,7 +1401,7 @@ public class PrintersService(
     /// re-confirms existence with <see cref="FirmwarePrinterExistsAsync"/> again (a fresh
     /// <c>Printers.AnyAsync</c> query that always hits the database, never the identity map) rather
     /// than relying solely on the immediately-following <c>FindByIdAsync</c> null-check: that call
-    /// is backed by <see cref="Microsoft.EntityFrameworkCore.DbSet{TEntity}.FindAsync"/>, which
+    /// is backed by <see cref="Microsoft.EntityFrameworkCore.DbSet{TEntity}.FindAsync(object[])"/>, which
     /// would silently return the already-tracked instance from this scope's identity map — without
     /// re-querying the database at all — if the printer was already tracked earlier in this same
     /// scope (as it typically is here: see <see cref="PrinterVersionCache"/>'s own
