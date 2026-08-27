@@ -513,22 +513,27 @@ public class SlicePrintBridgeController(
             return BadRequest(new { error = "Slice job has no gcode artifact.", jobId = id });
         }
 
-        // 4. Resolve the artifact file on disk (single lookup that both verifies file existence
-        // and returns the path, avoiding a duplicate DB round trip for the same artifact).
-        var pathResult = await artifactsService.GetWithPathIfExistsAsync(gcodeArtifact.Id, ct);
-        if (pathResult is null)
+        // 4. Open the artifact's bytes and import it in one atomic step. Using
+        // OpenReadStreamAsync (rather than resolving a path and reading it separately)
+        // closes the check-then-use gap between resolving the artifact's storage location
+        // and reading its bytes.
+        SliceGcodeImportResult importResult;
+        await using (ArtifactContentStream? artifactContent = await artifactsService.OpenReadStreamAsync(gcodeArtifact.Id, ct))
         {
-            logger.LogError(
-                "Gcode artifact file missing from disk for artifact {ArtifactId}, job {JobId}",
-                gcodeArtifact.Id, id);
-            return BadRequest(new { error = "Gcode artifact file is missing from storage.", artifactId = gcodeArtifact.Id });
-        }
+            if (artifactContent is null)
+            {
+                logger.LogError(
+                    "Gcode artifact file missing from disk for artifact {ArtifactId}, job {JobId}",
+                    gcodeArtifact.Id, id);
+                return BadRequest(new { error = "Gcode artifact file is missing from storage.", artifactId = gcodeArtifact.Id });
+            }
 
-        // 5. Import the gcode into the GcodeFile library
-        SliceGcodeImportResult importResult = await importService.ImportAsync(
-            pathResult.Value.Artifact.FileName,
-            pathResult.Value.FullPath,
-            ct);
+            // 5. Import the gcode into the GcodeFile library
+            importResult = await importService.ImportAsync(
+                artifactContent.Artifact.FileName,
+                artifactContent.Content,
+                ct);
+        }
 
         logger.LogInformation(
             "Imported slice gcode from job {JobId} as GcodeFile {GcodeFileId} (isNew={IsNewFile})",
