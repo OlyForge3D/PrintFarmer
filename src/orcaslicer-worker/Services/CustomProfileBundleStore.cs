@@ -219,38 +219,53 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             Directory.CreateDirectory(_overlayProfilesPath);
 
             HashSet<string> currentBundles = DiscoverCompleteBundleNames();
+            bool changed = !_knownCustomBundles.SetEquals(currentBundles);
 
-            // #2080 N-REC-1: snapshot the previously-known set before any mutation so the
-            // "did anything change" comparison below reflects what this process actually
-            // exposed, not the raw discovery result -- a bundle that fails reconciliation
-            // must not be reported as reconciled.
-            HashSet<string> previousBundles = new(_knownCustomBundles);
-
+            // #2080 N-REC-1: isolate each removal so a malformed bundle's stale overlay link
+            // (e.g. an on-disk file where a symlink is expected, throwing overlay_path_conflict)
+            // cannot abort cleanup for its siblings or block the ensure-loop below from ever
+            // running (review finding B1). A bundle whose removal fails stays in
+            // _knownCustomBundles so it is retried on the next tick instead of being silently
+            // dropped from tracking, which would otherwise leak its overlay link forever.
             foreach (string removedBundle in
                 _knownCustomBundles.Except(currentBundles).ToArray())
             {
-                RemoveOverlayLink(
-                    GetOverlayManifestPath(removedBundle),
-                    GetCustomManifestPath(removedBundle),
-                    isDirectory: false);
-                RemoveOverlayLink(
-                    GetOverlayDirectoryPath(removedBundle),
-                    GetCustomDirectoryPath(removedBundle),
-                    isDirectory: true);
+                try
+                {
+                    RemoveOverlayLink(
+                        GetOverlayManifestPath(removedBundle),
+                        GetCustomManifestPath(removedBundle),
+                        isDirectory: false);
+                    RemoveOverlayLink(
+                        GetOverlayDirectoryPath(removedBundle),
+                        GetCustomDirectoryPath(removedBundle),
+                        isDirectory: true);
+                    _ = _knownCustomBundles.Remove(removedBundle);
+                }
+                catch (CustomProfileBundleException ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to remove overlay links for deleted custom OrcaSlicer bundle {BundleName} during reconciliation ({Code}); will retry",
+                        LogSanitizer.Sanitize(removedBundle),
+                        ex.Code);
+                }
             }
 
             // #2080 N-REC-1: isolate each bundle so one malformed bundle (e.g. a manual file
             // dropped where a symlink is expected, throwing overlay_path_conflict) cannot abort
-            // reconciliation for every other bundle. A persistently-broken bundle is excluded
-            // from the known-good set below, so it is retried -- and logged -- on every tick
-            // without blocking its siblings.
-            HashSet<string> reconciledBundles = new();
+            // reconciliation for every other bundle. Only bundles that reconcile successfully
+            // are added to _knownCustomBundles -- a bundle that previously succeeded and is
+            // still present but currently failing is neither added nor removed here, so it
+            // remains tracked (review finding B2: this is what lets a later actual deletion of
+            // that bundle still be detected and cleaned up by the removal loop above, instead of
+            // being silently forgotten and leaking a dangling overlay symlink).
             foreach (string bundleName in currentBundles)
             {
                 try
                 {
                     EnsureOverlayLinks(bundleName);
-                    _ = reconciledBundles.Add(bundleName);
+                    _ = _knownCustomBundles.Add(bundleName);
                 }
                 catch (CustomProfileBundleException ex)
                 {
@@ -262,15 +277,11 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
                 }
             }
 
-            _knownCustomBundles.Clear();
-            _knownCustomBundles.UnionWith(reconciledBundles);
-
-            bool changed = !previousBundles.SetEquals(reconciledBundles);
             if (changed)
             {
                 _logger.LogInformation(
                     "Reconciled {BundleCount} custom OrcaSlicer bundles from the shared volume",
-                    reconciledBundles.Count);
+                    currentBundles.Count);
             }
 
             return changed;

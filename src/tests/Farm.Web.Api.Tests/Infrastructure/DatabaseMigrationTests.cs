@@ -165,6 +165,69 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public async Task CoreMigration_DeduplicatesPreExistingCaseVariantAliasesBeforeEnforcingUniqueness()
+    {
+        // #2080 N-NORM-1 (review finding, Vasquez): a database that already accumulated
+        // case/whitespace-variant duplicate aliases under the old raw-column unique index would
+        // otherwise fail outright when EnforceNormalizedPrinterModelAliasUniqueness tries to
+        // create its normalized-column unique index. The migration must dedupe first.
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.Database.GetService<IMigrator>();
+        await migrator.MigrateAsync("20260826051847_AddPrinterModelAliasNormalizedLookup");
+
+        Guid manufacturerId = Guid.NewGuid();
+        Guid printerModelId = Guid.NewGuid();
+        context.Manufacturers.Add(new Manufacturer
+        {
+            Id = manufacturerId,
+            Name = "Prusa Research",
+        });
+        context.PrinterModels.Add(new PrinterModel
+        {
+            Id = printerModelId,
+            ManufacturerId = manufacturerId,
+            Name = "CORE One",
+        });
+        _ = await context.SaveChangesAsync();
+
+        Guid survivorId = Guid.NewGuid();
+        Guid duplicateId = Guid.NewGuid();
+        _ = await context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+             INSERT INTO "PrinterModelAliases"
+                 ("Id", "PrinterModelId", "SlicerModelName", "SlicerModelNameNormalized",
+                  "SlicerType", "SlicerTypeNormalized", "CreatedAt")
+             VALUES
+                 ({survivorId}, {printerModelId}, {"Prusa Core One"}, {"PRUSA CORE ONE"},
+                  {"OrcaSlicer"}, {"ORCASLICER"}, {DateTime.UtcNow});
+             """);
+        _ = await context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+             INSERT INTO "PrinterModelAliases"
+                 ("Id", "PrinterModelId", "SlicerModelName", "SlicerModelNameNormalized",
+                  "SlicerType", "SlicerTypeNormalized", "CreatedAt")
+             VALUES
+                 ({duplicateId}, {printerModelId}, {"  prusa core one  "}, {"PRUSA CORE ONE"},
+                  {"orcaslicer"}, {"ORCASLICER"}, {DateTime.UtcNow});
+             """);
+
+        Func<Task> migrateFurther = () => migrator.MigrateAsync(
+            "20260827005237_EnforceNormalizedPrinterModelAliasUniqueness");
+
+        _ = await migrateFurther.Should().NotThrowAsync(
+            "the migration must deduplicate pre-existing case/whitespace-variant rows before " +
+            "creating the normalized-column unique index");
+
+        List<Guid> remainingIds = await context.Set<PrinterModelAlias>()
+            .Where(a => a.PrinterModelId == printerModelId)
+            .Select(a => a.Id)
+            .ToListAsync();
+        _ = remainingIds.Should().ContainSingle()
+            .Which.Should().Be(survivorId, "the dedup step must keep the lowest-Id row per group");
+    }
+
+    [Fact]
     public async Task CoreMigration_SeedsBuiltInNozzleMaterialsMatchingPreCatalogHardnessBaseline()
     {
         // #1827 dispatch/backward-compat parity: prior to this test, no test asserted the actual

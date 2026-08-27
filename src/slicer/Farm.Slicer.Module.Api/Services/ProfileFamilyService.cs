@@ -293,9 +293,17 @@ public sealed class ProfileFamilyService(
         catch (DbUpdateException ex) when (IsMachineProfileHashUniqueConstraintViolation(ex))
         {
             await transaction.RollbackAsync(CancellationToken.None);
+
+            // Materialize the candidate hashes before querying: relying on EF to translate a
+            // nested `machineProfiles.Select(...).Contains(...)` closure risks an
+            // InvalidOperationException escaping this catch clause and reverting the caller to
+            // the raw 500 this fix exists to avoid (review finding).
+            List<string> candidateHashes = [.. machineProfiles
+                .Where(candidate => candidate.Hash is not null)
+                .Select(candidate => candidate.Hash!)];
             MachineProfile? collidingProfile = await _dbContext.MachineProfiles
                 .AsNoTracking()
-                .Where(profile => machineProfiles.Select(candidate => candidate.Hash).Contains(profile.Hash))
+                .Where(profile => profile.Hash != null && candidateHashes.Contains(profile.Hash))
                 .FirstOrDefaultAsync(CancellationToken.None);
             throw new ProfileFamilyHashConflictException(
                 collidingProfile is null
