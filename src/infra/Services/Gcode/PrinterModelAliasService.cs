@@ -169,10 +169,19 @@ public class PrinterModelAliasService(AppDbContext dbContext) : IPrinterModelAli
         if (ex.InnerException is System.Data.Common.DbException dbException)
         {
             string typeName = dbException.GetType().FullName ?? string.Empty;
-            if (typeName.Contains("SqlException", StringComparison.OrdinalIgnoreCase)
-                && dbException.ErrorCode is 2601 or 2627)
+            if (typeName.Contains("SqlException", StringComparison.OrdinalIgnoreCase))
             {
-                return true;
+                // #2080 N-NORM-1 (review finding, Vasquez): SqlException does not override
+                // DbException.ErrorCode -- that property still returns the base Exception
+                // HResult, not the SQL Server error number. The actual server-side error number
+                // (2601/2627 for a unique-index/constraint violation) is only exposed via the
+                // SqlException.Number property, so it must be read via reflection here (the same
+                // way this method already avoids a direct Microsoft.Data.SqlClient reference).
+                object? numberValue = dbException.GetType().GetProperty("Number")?.GetValue(dbException);
+                if (numberValue is int number && number is 2601 or 2627)
+                {
+                    return true;
+                }
             }
         }
 

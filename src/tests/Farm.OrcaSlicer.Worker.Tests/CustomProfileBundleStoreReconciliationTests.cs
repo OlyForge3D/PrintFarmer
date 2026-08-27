@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+using System.Linq;
+using System.Text.Json;
 using Farm.OrcaSlicer.Worker.Services;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -17,6 +18,20 @@ public sealed class CustomProfileBundleStoreReconciliationTests : IAsyncDisposab
         AppContext.BaseDirectory,
         "test-artifacts",
         $"bundle-reconcile-{Guid.NewGuid():N}");
+
+    /// <summary>
+    /// Whether a filesystem entry named <paramref name="entryName"/> is still present directly
+    /// inside <paramref name="parentDirectory"/>. Unlike <see cref="File.Exists(string)"/> or
+    /// <see cref="Directory.Exists(string)"/> -- both of which follow the entry if it is a
+    /// symlink and therefore report "false" for any *dangling* symlink whether or not it was
+    /// actually removed (review finding B4) -- directory enumeration lists the raw entry names
+    /// present in the parent directory without resolving link targets, so it correctly
+    /// distinguishes "the symlink itself was removed" from "the symlink still exists but its
+    /// target is gone".
+    /// </summary>
+    private static bool OverlayEntryExists(string parentDirectory, string entryName) =>
+        Directory.EnumerateFileSystemEntries(parentDirectory)
+            .Any(entry => string.Equals(Path.GetFileName(entry), entryName, StringComparison.Ordinal));
 
     [Fact]
     public async Task ReconcileOverlayAsync_OneBundleWithConflictingOverlayPath_DoesNotBlockOthers()
@@ -121,8 +136,7 @@ public sealed class CustomProfileBundleStoreReconciliationTests : IAsyncDisposab
         Func<Task> secondReconcile = async () => await store.ReconcileOverlayAsync();
         _ = await secondReconcile.Should().NotThrowAsync();
 
-        File.Exists(alphaOverlayManifest).Should().BeFalse();
-        Directory.Exists(alphaOverlayDirectory).Should().BeFalse(
+        OverlayEntryExists(overlayRoot, "Alpha").Should().BeFalse(
             "the dangling overlay directory symlink must eventually be cleaned up once the " +
             "conflict is resolved -- it must not be leaked forever");
     }
@@ -187,7 +201,7 @@ public sealed class CustomProfileBundleStoreReconciliationTests : IAsyncDisposab
         _ = await thirdReconcile.Should().NotThrowAsync();
 
         File.Exists(alphaOverlayManifest).Should().BeFalse();
-        Directory.Exists(alphaOverlayDirectory).Should().BeFalse(
+        OverlayEntryExists(overlayRoot, "Alpha").Should().BeFalse(
             "the overlay link must not be leaked forever just because the bundle failed once " +
             "before being deleted");
     }

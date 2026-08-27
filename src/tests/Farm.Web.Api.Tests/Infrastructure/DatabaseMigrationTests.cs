@@ -191,8 +191,16 @@ public sealed class DatabaseMigrationTests
         });
         _ = await context.SaveChangesAsync();
 
-        Guid survivorId = Guid.NewGuid();
-        Guid duplicateId = Guid.NewGuid();
+        // Migration dedup keeps the row with the textually smaller Id per duplicate group (see
+        // the migration's own dedup SQL, which self-joins on "Id" > "Id"). Guid.NewGuid() values
+        // are random, so assign deterministically here (review finding, Vasquez): otherwise this
+        // assertion is flaky -- whichever of the two randomly-generated ids happens to sort lower
+        // survives, not necessarily the one this test labels "survivor".
+        Guid first = Guid.NewGuid();
+        Guid second = Guid.NewGuid();
+        (Guid survivorId, Guid duplicateId) = string.CompareOrdinal(first.ToString(), second.ToString()) <= 0
+            ? (first, second)
+            : (second, first);
         _ = await context.Database.ExecuteSqlInterpolatedAsync(
             $"""
              INSERT INTO "PrinterModelAliases"
