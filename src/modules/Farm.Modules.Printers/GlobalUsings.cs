@@ -9,6 +9,7 @@ global using Farm.Infrastructure.Contracts.SignalR;
 global using Farm.Infrastructure.Dtos;
 global using Farm.Settings;
 global using Microsoft.AspNetCore.Http;
+global using Microsoft.Extensions.Configuration;
 global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.Hosting;
 global using Microsoft.Extensions.Logging;

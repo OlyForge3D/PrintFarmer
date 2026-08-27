@@ -34,6 +34,17 @@ moved in this phase.</Description>
     <ProjectReference Include="..\..\discovery\Farm.Shared.Discovery.csproj" />
     <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Core\Farm.Backend.Plugin.Core.csproj" />
     <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
+    <!-- PrintersController's test-connection and camera-URL actions reuse the
+         shared TestConnectionResponse / CameraUrlResult DTOs, which stayed
+         under the (unchanged) Farm.Web.Api.Controllers.Responses namespace
+         but physically moved into Farm.Modules.PrintQueue during Phase 8
+         (#2036). -->
+    <ProjectReference Include="..\Farm.Modules.PrintQueue\Farm.Modules.PrintQueue.csproj" />
+    <!-- PrintersController's toolhead-metrology update path calls
+         CalibrationPrinterUpdateMapper (Farm.Web.Api.Services.Calibration,
+         unchanged namespace), which physically lives in
+         Farm.Modules.Calibration since Phase 11 (#2039). -->
+    <ProjectReference Include="..\Farm.Modules.Calibration\Farm.Modules.Calibration.csproj" />
   </ItemGroup>
 
   <ItemGroup>
