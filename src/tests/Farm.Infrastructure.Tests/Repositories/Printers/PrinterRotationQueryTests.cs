@@ -26,7 +26,7 @@ namespace Farm.Infrastructure.Tests.Repositories.Printers;
 /// meaningfully validate.
 ///
 /// Prior to the fix, the equivalent of
-/// <see cref="RotatesAcrossThreeIntervals_AllPrintersProcessedExactlyOnce_NoStarvation"/> would have
+/// <c>RotatesAcrossThreeIntervals_AllPrintersProcessedExactlyOnce_NoStarvation</c> would have
 /// failed: seeding 3x the per-iteration cap and driving 3 iterations of "call
 /// GetAllAsync().Take(MaxPrintersPerIteration)" would return the SAME first-N printers on every
 /// iteration (GetAllAsync has no ordering guarantee tied to processing state), so two-thirds of the
