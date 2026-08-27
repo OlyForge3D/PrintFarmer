@@ -2932,10 +2932,15 @@ _migration_upload_artifact_names() {
 # step inside the `dotnet-build` job body. Reuses `extract_job_block` so
 # only steps inside that job are considered — other jobs' upload-artifact
 # steps (e.g. TRX/coverage uploads) use unrelated naming and must not be
-# mistaken for orphaned per-project build uploads.
+# mistaken for orphaned per-project build uploads. Resets scope at every
+# `- name: ` step boundary (every step in this job's `steps:` list has
+# one) so an `upload-artifact` step that is missing its own `with.name`
+# can never "borrow" a later, unrelated step's name and be misreported
+# as present.
 _dotnet_build_upload_artifact_names() {
   local workflow="$1"
   extract_job_block "$workflow" "dotnet-build" | awk '
+    /^ *- name: / { in_block = 0 }
     /^ *uses: actions\/upload-artifact@/ { in_block = 1; next }
     in_block && /^ *name: / {
       sub(/^ *name: */, "")
@@ -2997,7 +3002,7 @@ case_manifest_upload_artifact_sync() {
 # Adding a project to the manifest with no matching upload step must be
 # caught locally instead of failing late at the consumer leg.
 case_upload_artifact_guard_rejects_missing_upload_step() {
-  local mutant workflow="$REPO_ROOT/.github/workflows/ci.yml"
+  local mutant
   mutant="$(mktemp)"
   # shellcheck disable=SC2064
   trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
@@ -3025,7 +3030,7 @@ case_upload_artifact_guard_rejects_missing_upload_step() {
 # An orphaned upload step for a project no longer in the manifest must
 # also be caught (the reverse direction from the case above).
 case_upload_artifact_guard_rejects_orphaned_upload_step() {
-  local mutant workflow="$REPO_ROOT/.github/workflows/ci.yml"
+  local mutant
   mutant="$(mktemp)"
   # shellcheck disable=SC2064
   trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
@@ -3053,6 +3058,38 @@ case_upload_artifact_guard_rejects_orphaned_upload_step() {
   fi
   assert_contains "orphaned-upload diagnostic" "$stderr_output" "Farm.Retired.Ghost.Tests" || return 1
   assert_contains "orphaned-upload names the manifest file" "$stderr_output" "scripts/ci/dotnet-test-manifest.json" || return 1
+}
+
+# An upload-artifact step whose own `with.name` field was dropped must
+# never be able to "borrow" the artifact name of a later, unrelated step
+# in the same job — the scope-reset at each `- name: ` step boundary in
+# `_dotnet_build_upload_artifact_names` is what prevents that. Without
+# the reset, deleting `Farm.Slicer.Module.Tests`'s `with.name` line would
+# make its `uses: actions/upload-artifact@` line pair with the next
+# step's own `- name: Upload Farm.OrcaSlicer.Worker.Tests build` header
+# instead, silently reporting the mutated step as present under the
+# wrong project name and never surfacing the drift.
+case_upload_artifact_guard_scopes_name_to_its_own_step() {
+  local mutant
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Delete only the `with.name` line for Farm.Slicer.Module.Tests's
+  # upload step; its `uses:`, `path:`, etc. lines are left intact.
+  _mutate "$mutant" '
+    { sub(/\r$/, "") }
+    /^          name: Farm\.Slicer\.Module\.Tests$/ { next }
+    { print }
+  ' || return 1
+
+  local stderr_output
+  if stderr_output="$(_check_upload_artifact_sync "$mutant" "$TEST_MANIFEST" "$SELECTOR" 2>&1)"; then
+    printf '  guard failed to reject an upload step missing its own with.name (silently borrowed a later step'"'"'s name instead)\n' >&2
+    return 1
+  fi
+  assert_contains "missing-with-name diagnostic names the affected project" "$stderr_output" "Farm.Slicer.Module.Tests" || return 1
+  assert_not_contains "guard must not misreport the next step's project as orphaned" "$stderr_output" "Farm.OrcaSlicer.Worker.Tests" || return 1
 }
 
 
@@ -3776,6 +3813,7 @@ TESTS=(
   case_manifest_upload_artifact_sync
   case_upload_artifact_guard_rejects_missing_upload_step
   case_upload_artifact_guard_rejects_orphaned_upload_step
+  case_upload_artifact_guard_scopes_name_to_its_own_step
   case_mutate_helper_propagates_awk_failure
   case_manifest_default_path_reflects_checked_in_file
   case_manifest_missing_file_fails_closed
