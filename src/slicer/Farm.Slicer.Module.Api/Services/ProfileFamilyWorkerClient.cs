@@ -100,6 +100,39 @@ public sealed class ProfileFamilyWorkerClient(
         }
     }
 
+    /// <inheritdoc />
+    public async Task DeleteBundleAsync(
+        string? orcaVersion,
+        Guid familyId,
+        CancellationToken ct)
+    {
+        ProfileFamilyWorkerTarget target = await SelectWorkerAsync(orcaVersion, ct);
+        string bundleName = $"PrintFarmer-{familyId:N}";
+        string requestUri =
+            $"{target.BaseUrl.TrimEnd('/')}/api/profiles/custom-bundles/{bundleName}";
+        using HttpRequestMessage request = CreateAuthenticatedRequest(
+            HttpMethod.Delete,
+            requestUri,
+            content: null);
+        using HttpResponseMessage response = await _httpClient.SendAsync(request, ct);
+
+        // Idempotent by contract: the worker returns 404 when the bundle is already gone, which is
+        // an acceptable terminal state for a delete. Any other non-success status is a genuine
+        // failure and must abort the caller before it removes authoritative DB rows.
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                $"OrcaSlicer worker bundle delete failed with HTTP {(int)response.StatusCode}.",
+                null,
+                response.StatusCode);
+        }
+    }
+
     private static ProfileFamilySourceException CreateSourcePresetException(
         string requestedBundleName,
         string responseBody)
@@ -144,7 +177,31 @@ public sealed class ProfileFamilyWorkerClient(
     private static string Display(string? value, string fallback = "unknown") =>
         string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
 
+    /// <inheritdoc />
+    public async Task<string?> GetActiveOrcaVersionAsync(CancellationToken ct)
+    {
+        ProfileFamilyWorkerTarget? target = await TrySelectWorkerAsync(null, ct);
+        return target?.OrcaVersion;
+    }
+
     private async Task<ProfileFamilyWorkerTarget> SelectWorkerAsync(
+        string? requestedVersion,
+        CancellationToken ct)
+    {
+        ProfileFamilyWorkerTarget? selected = await TrySelectWorkerAsync(requestedVersion, ct);
+        if (selected is null)
+        {
+            string versionSuffix = string.IsNullOrWhiteSpace(requestedVersion)
+                ? string.Empty
+                : $" for version '{requestedVersion.Trim()}'";
+            throw new HttpRequestException(
+                $"No fresh online OrcaSlicer worker is available{versionSuffix}.");
+        }
+
+        return selected;
+    }
+
+    private async Task<ProfileFamilyWorkerTarget?> TrySelectWorkerAsync(
         string? requestedVersion,
         CancellationToken ct)
     {
@@ -175,11 +232,7 @@ public sealed class ProfileFamilyWorkerClient(
         SlicerService? selected = candidates.FirstOrDefault();
         if (selected is null)
         {
-            string versionSuffix = normalizedVersion is null
-                ? string.Empty
-                : $" for version '{normalizedVersion}'";
-            throw new HttpRequestException(
-                $"No fresh online OrcaSlicer worker is available{versionSuffix}.");
+            return null;
         }
 
         _logger.LogInformation(
@@ -194,7 +247,7 @@ public sealed class ProfileFamilyWorkerClient(
     private HttpRequestMessage CreateAuthenticatedRequest(
         HttpMethod method,
         string requestUri,
-        HttpContent content)
+        HttpContent? content)
     {
         string sharedKey = WorkerAuthConfiguration.ResolveSharedKey(_configuration)?.Value
             ?? throw new InvalidOperationException(

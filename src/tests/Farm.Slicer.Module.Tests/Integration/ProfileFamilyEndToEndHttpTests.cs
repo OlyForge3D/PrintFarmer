@@ -209,6 +209,407 @@ public sealed class ProfileFamilyEndToEndHttpTests : IAsyncDisposable
             "machine so slice submission can select it without a manual reassignment.");
     }
 
+    /// <summary>
+    /// End-to-end proof for issue #2079: after cloning a family, DELETE
+    /// <c>/api/slicer/profiles/families/{familyId}</c> MUST remove the rendered
+    /// worker bundle and the OrcaSlicer model alias over real HTTP, so an
+    /// immediate <c>GET machine/for-model/{modelId}</c> once again reports
+    /// <c>no_profiles_for_model</c> — with no worker restart, reload, or
+    /// reconciliation tick. This mirrors the #2073/#2077 assertion style in
+    /// reverse: the clone makes the model resolve; the delete makes it stop.
+    /// </summary>
+    [Fact]
+    public async Task DeleteFamily_RemovesWorkerBundleAndAlias_ForModelLookupNoLongerResolves()
+    {
+        string stockRoot = Path.Join(_testRoot, "stock");
+        string overlayRoot = Path.Join(_testRoot, "overlay");
+        string customRoot = Path.Join(_testRoot, "custom");
+        string dbPath = Path.Join(_testRoot, "profile-cache.db");
+        Directory.CreateDirectory(stockRoot);
+        Directory.CreateDirectory(overlayRoot);
+        Directory.CreateDirectory(customRoot);
+        WriteStockProfiles(stockRoot);
+        WriteStockProfiles(overlayRoot);
+
+        HttpMessageHandler workerHandler = await StartWorkerAsync(
+            stockRoot,
+            overlayRoot,
+            customRoot,
+            dbPath);
+        var recorder = new List<string>();
+        var recordingHandler = new RecordingDelegatingHandler(workerHandler, recorder);
+
+        _factory = new E2EFactory(recordingHandler);
+        await _factory.ResetDatabaseAsync();
+
+        Guid targetModelId = Guid.NewGuid();
+        await SeedTargetModelAndWorkerAsync(_factory, targetModelId);
+
+        using HttpClient client = await _factory.CreateAdminClientAsync(
+            "profile-family-e2e-delete-admin",
+            "profile-family-e2e-delete@example.com");
+
+        var request = new CloneProfileFamilyRequestDto
+        {
+            FamilyName = FamilyName,
+            TargetPrinterModelId = targetModelId,
+            SourceManufacturer = SourceManufacturer,
+            SourceMachineModelName = SourceModel,
+            NozzleDiameters = [0.4]
+        };
+        using HttpResponseMessage clone = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/clone-family",
+            request);
+        string cloneBody = await clone.Content.ReadAsStringAsync();
+        clone.StatusCode.Should().Be(
+            HttpStatusCode.Created,
+            $"the clone must succeed before delete can be exercised. Body: {cloneBody}");
+        CloneProfileFamilyResponseDto? cloneResult =
+            await clone.Content.ReadFromJsonAsync<CloneProfileFamilyResponseDto>();
+        cloneResult.Should().NotBeNull();
+
+        using HttpResponseMessage afterClone = await client.GetAsync(
+            $"/api/slicer/profiles/machine/for-model/{targetModelId}");
+        afterClone.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "sanity check: the clone must make the model resolve before the delete " +
+            "is meaningful.");
+
+        using HttpResponseMessage delete = await client.DeleteAsync(
+            $"/api/slicer/profiles/families/{cloneResult!.FamilyId}");
+        delete.StatusCode.Should().Be(
+            HttpStatusCode.NoContent,
+            "DELETE families/{id} must remove the worker bundle over real HTTP and " +
+            "the OrcaSlicer alias, returning 204. Recorded worker requests:\n  " +
+            string.Join("\n  ", recorder));
+
+        using HttpResponseMessage afterDelete = await client.GetAsync(
+            $"/api/slicer/profiles/machine/for-model/{targetModelId}");
+        afterDelete.StatusCode.Should().Be(
+            HttpStatusCode.NotFound,
+            "immediately after delete, GET machine/for-model MUST report " +
+            "'no_profiles_for_model' again — proving the worker bundle was removed " +
+            "and the alias invalidated over real HTTP without any worker restart.");
+        using JsonDocument afterDeleteBody = JsonDocument.Parse(
+            await afterDelete.Content.ReadAsStringAsync());
+        afterDeleteBody.RootElement.GetProperty("code").GetString()
+            .Should().Be("no_profiles_for_model");
+
+        recorder.Should().Contain(
+            entry => entry.Contains("DELETE", StringComparison.Ordinal) &&
+                     entry.Contains("custom-bundles", StringComparison.Ordinal),
+            "the API must have issued a real HTTP DELETE to the worker's " +
+            "custom-bundles endpoint.");
+
+        // S2: prove the bundle is actually GONE from the worker, not merely that the alias was dropped.
+        // GET machine/for-model above short-circuits to 404 the moment the alias is removed, before ever
+        // contacting the worker, so it cannot distinguish a real bundle delete from a no-op. POST
+        // process/for-machines resolves by MACHINE NAME straight against the worker's live profile store
+        // (no alias, no modelId), so if the cloned machine still resolved there the bundle would not have
+        // been removed. It returned the cloned family's process before the delete (asserted in the clone
+        // E2E test); after the delete the worker must no longer know that machine.
+        string deletedMachineName = $"{FamilyName} 0.4 nozzle";
+        using HttpResponseMessage workerAfterDelete = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/process/for-machines",
+            new { MachineNames = new[] { deletedMachineName } });
+        workerAfterDelete.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "process/for-machines answers straight from the worker and must stay reachable after delete.");
+        List<ProcessProfileDto>? workerProcesses =
+            await workerAfterDelete.Content.ReadFromJsonAsync<List<ProcessProfileDto>>();
+        (workerProcesses ?? []).Should().NotContain(
+            profile => profile.CompatiblePrinters.Contains(deletedMachineName),
+            "after delete the worker itself must no longer resolve the family's machine profile — " +
+            "proving the bundle was physically removed from the worker store, not just alias-hidden.");
+    }
+
+    /// <summary>
+    /// Full profile-family lifecycle round trip (issue #2079, Phase 4 explicit acceptance
+    /// criterion): create → list → edit → re-render → delete, all over real HTTP against the
+    /// hosted worker, proving each stage takes effect immediately with NO worker restart,
+    /// reconciliation tick, or reload. The edit is a rename, which re-renders the bundle (the
+    /// bundle embeds the family name) and moves the OrcaSlicer alias; the surviving variant keeps
+    /// its <c>MachineProfile.Id</c>; the explicit re-render recovers the same Healthy state; and
+    /// the delete removes the worker bundle so the model stops resolving.
+    /// </summary>
+    [Fact]
+    public async Task FullLifecycle_CreateListEditRerenderDelete_TakesEffectWithoutWorkerRestart()
+    {
+        string stockRoot = Path.Join(_testRoot, "stock");
+        string overlayRoot = Path.Join(_testRoot, "overlay");
+        string customRoot = Path.Join(_testRoot, "custom");
+        string dbPath = Path.Join(_testRoot, "profile-cache.db");
+        Directory.CreateDirectory(stockRoot);
+        Directory.CreateDirectory(overlayRoot);
+        Directory.CreateDirectory(customRoot);
+        WriteStockProfiles(stockRoot);
+        WriteStockProfiles(overlayRoot);
+
+        HttpMessageHandler workerHandler = await StartWorkerAsync(
+            stockRoot, overlayRoot, customRoot, dbPath);
+        var recorder = new List<string>();
+        var recordingHandler = new RecordingDelegatingHandler(workerHandler, recorder);
+
+        _factory = new E2EFactory(recordingHandler);
+        await _factory.ResetDatabaseAsync();
+
+        Guid targetModelId = Guid.NewGuid();
+        await SeedTargetModelAndWorkerAsync(_factory, targetModelId);
+
+        using HttpClient client = await _factory.CreateAdminClientAsync(
+            "profile-family-e2e-lifecycle-admin",
+            "profile-family-e2e-lifecycle@example.com");
+
+        // CREATE ----------------------------------------------------------------
+        var createRequest = new CloneProfileFamilyRequestDto
+        {
+            FamilyName = FamilyName,
+            TargetPrinterModelId = targetModelId,
+            SourceManufacturer = SourceManufacturer,
+            SourceMachineModelName = SourceModel,
+            NozzleDiameters = [0.4]
+        };
+        using HttpResponseMessage clone = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/clone-family", createRequest);
+        string cloneBody = await clone.Content.ReadAsStringAsync();
+        clone.StatusCode.Should().Be(
+            HttpStatusCode.Created,
+            $"the create step must succeed before the lifecycle can continue. Body: {cloneBody}");
+        CloneProfileFamilyResponseDto? created =
+            await clone.Content.ReadFromJsonAsync<CloneProfileFamilyResponseDto>();
+        created.Should().NotBeNull();
+        Guid familyId = created!.FamilyId;
+        Guid originalVariantId = created.MachineProfiles.Single().Id;
+
+        using HttpResponseMessage afterCreate = await client.GetAsync(
+            $"/api/slicer/profiles/machine/for-model/{targetModelId}");
+        afterCreate.StatusCode.Should().Be(
+            HttpStatusCode.OK, "immediately after create the model must resolve.");
+
+        // LIST ------------------------------------------------------------------
+        using HttpResponseMessage list = await client.GetAsync("/api/slicer/profiles/families");
+        list.StatusCode.Should().Be(HttpStatusCode.OK);
+        List<ProfileFamilySummaryDto>? families =
+            await list.Content.ReadFromJsonAsync<List<ProfileFamilySummaryDto>>();
+        families.Should().ContainSingle(family => family.FamilyId == familyId)
+            .Which.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
+
+        // EDIT (rename → re-render → alias move) --------------------------------
+        const string renamedFamily = "E2E Farm v2";
+        using HttpResponseMessage edit = await client.PatchAsJsonAsync(
+            $"/api/slicer/profiles/families/{familyId}",
+            new { name = renamedFamily });
+        string editBody = await edit.Content.ReadAsStringAsync();
+        edit.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            $"a rename must re-render and move the alias over real HTTP. Body: {editBody}");
+        ProfileFamilySummaryDto? edited =
+            await edit.Content.ReadFromJsonAsync<ProfileFamilySummaryDto>();
+        edited.Should().NotBeNull();
+        edited!.FamilyName.Should().Be(renamedFamily);
+        edited.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
+        edited.Variants.Single().MachineProfileId.Should().Be(
+            originalVariantId,
+            "an unrelated rename must preserve the surviving variant's MachineProfile.Id rather " +
+            "than orphaning printer/job references.");
+
+        using HttpResponseMessage afterEdit = await client.GetAsync(
+            $"/api/slicer/profiles/machine/for-model/{targetModelId}");
+        afterEdit.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "after the rename the alias must have moved so the model still resolves with no restart.");
+        List<MachineProfileDto>? renamedProfiles =
+            await afterEdit.Content.ReadFromJsonAsync<List<MachineProfileDto>>();
+        renamedProfiles.Should().NotBeNull();
+        renamedProfiles!.Should().ContainSingle(profile =>
+            profile.Name == $"{renamedFamily} 0.4 nozzle" && profile.PrinterModel == renamedFamily);
+
+        // RE-RENDER (explicit) --------------------------------------------------
+        using HttpResponseMessage rerender = await client.PostAsync(
+            $"/api/slicer/profiles/families/{familyId}/render", content: null);
+        string rerenderBody = await rerender.Content.ReadAsStringAsync();
+        rerender.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            $"an explicit re-render must recover the same Healthy state. Body: {rerenderBody}");
+        ProfileFamilySummaryDto? rerendered =
+            await rerender.Content.ReadFromJsonAsync<ProfileFamilySummaryDto>();
+        rerendered!.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
+        rerendered.RenderedForOrcaVersion.Should().Be("2.4.2");
+        rerendered.Variants.Single().MachineProfileId.Should().Be(
+            originalVariantId, "an idempotent re-render must not churn the variant id.");
+
+        using HttpResponseMessage afterRerender = await client.GetAsync(
+            $"/api/slicer/profiles/machine/for-model/{targetModelId}");
+        afterRerender.StatusCode.Should().Be(
+            HttpStatusCode.OK, "the model must still resolve after the explicit re-render.");
+
+        // H2: prove the worker actually HOLDS the family's bundle before the delete, so the post-delete
+        // assertion below proves REMOVAL rather than absence. process/for-machines resolves by MACHINE NAME
+        // straight against the worker's live profile store (no alias, no modelId), unlike machine/for-model
+        // which short-circuits to 404 the instant the alias is dropped — before ever contacting the worker.
+        // Use the POST-EDIT machine name (the rename above renamed the variant), not the original.
+        string renamedMachineName = $"{renamedFamily} 0.4 nozzle";
+        using HttpResponseMessage workerBeforeDelete = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/process/for-machines",
+            new { MachineNames = new[] { renamedMachineName } });
+        workerBeforeDelete.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "process/for-machines answers straight from the worker and must be reachable before delete.");
+        List<ProcessProfileDto>? processesBeforeDelete =
+            await workerBeforeDelete.Content.ReadFromJsonAsync<List<ProcessProfileDto>>();
+        processesBeforeDelete.Should().Contain(
+            profile => profile.CompatiblePrinters.Contains(renamedMachineName),
+            "before delete the worker itself must resolve the family's (renamed) machine profile — " +
+            "establishing the bundle is physically present on the worker so the post-delete check " +
+            "proves removal, not mere absence.");
+
+        // DELETE ----------------------------------------------------------------
+        using HttpResponseMessage delete = await client.DeleteAsync(
+            $"/api/slicer/profiles/families/{familyId}");
+        delete.StatusCode.Should().Be(
+            HttpStatusCode.NoContent,
+            "delete must remove the worker bundle and alias. Recorded worker requests:\n  " +
+            string.Join("\n  ", recorder));
+
+        using HttpResponseMessage afterDelete = await client.GetAsync(
+            $"/api/slicer/profiles/machine/for-model/{targetModelId}");
+        afterDelete.StatusCode.Should().Be(
+            HttpStatusCode.NotFound,
+            "after delete the model must stop resolving with no worker restart.");
+        using JsonDocument afterDeleteBody = JsonDocument.Parse(
+            await afterDelete.Content.ReadAsStringAsync());
+        afterDeleteBody.RootElement.GetProperty("code").GetString()
+            .Should().Be("no_profiles_for_model");
+
+        // H2: prove the bundle is actually GONE from the worker, not merely alias-hidden. machine/for-model
+        // above short-circuits to 404 the moment the alias is removed, before contacting the worker, so a
+        // completely no-op DeleteBundleAsync would still make it pass. process/for-machines resolves by
+        // MACHINE NAME straight against the worker store, so if the renamed machine still resolved there the
+        // bundle was NOT removed. It resolved before the delete (asserted above); it must not now — this is
+        // the assertion that fails if DeleteBundleAsync were a no-op.
+        using HttpResponseMessage workerAfterDelete = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/process/for-machines",
+            new { MachineNames = new[] { renamedMachineName } });
+        workerAfterDelete.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "process/for-machines answers straight from the worker and must stay reachable after delete.");
+        List<ProcessProfileDto>? processesAfterDelete =
+            await workerAfterDelete.Content.ReadFromJsonAsync<List<ProcessProfileDto>>();
+        (processesAfterDelete ?? []).Should().NotContain(
+            profile => profile.CompatiblePrinters.Contains(renamedMachineName),
+            "after delete the worker itself must no longer resolve the family's (renamed) machine profile — " +
+            "proving the bundle was physically removed from the worker store, not just alias-hidden. A no-op " +
+            "DeleteBundleAsync would leave the machine resolving here and fail this assertion.");
+
+        using HttpResponseMessage getGone = await client.GetAsync(
+            $"/api/slicer/profiles/families/{familyId}");
+        getGone.StatusCode.Should().Be(
+            HttpStatusCode.NotFound, "the family row must be gone from the API DB too.");
+
+        using HttpResponseMessage listGone = await client.GetAsync("/api/slicer/profiles/families");
+        List<ProfileFamilySummaryDto>? remaining =
+            await listGone.Content.ReadFromJsonAsync<List<ProfileFamilySummaryDto>>();
+        remaining.Should().BeEmpty("no families remain after the round trip.");
+    }
+
+    /// <summary>
+    /// Issue #2079 §4/§5 acceptance criterion: a re-render that fails must never leave the farm
+    /// worse off than before it ran. Re-binding a Healthy family to a source machine model that
+    /// does not resolve in the live catalog fails with <c>422 source_preset_unavailable</c> BEFORE
+    /// any worker or DB mutation, so the previously installed good bundle is preserved and the
+    /// model still slices via <c>GET machine/for-model/{modelId}</c> — with no worker restart.
+    /// </summary>
+    [Fact]
+    public async Task EditFamily_SourceRebindToUnavailableModel_PreservesPreviousGoodBundle()
+    {
+        string stockRoot = Path.Join(_testRoot, "stock");
+        string overlayRoot = Path.Join(_testRoot, "overlay");
+        string customRoot = Path.Join(_testRoot, "custom");
+        string dbPath = Path.Join(_testRoot, "profile-cache.db");
+        Directory.CreateDirectory(stockRoot);
+        Directory.CreateDirectory(overlayRoot);
+        Directory.CreateDirectory(customRoot);
+        WriteStockProfiles(stockRoot);
+        WriteStockProfiles(overlayRoot);
+
+        HttpMessageHandler workerHandler = await StartWorkerAsync(
+            stockRoot, overlayRoot, customRoot, dbPath);
+        var recorder = new List<string>();
+        var recordingHandler = new RecordingDelegatingHandler(workerHandler, recorder);
+
+        _factory = new E2EFactory(recordingHandler);
+        await _factory.ResetDatabaseAsync();
+
+        Guid targetModelId = Guid.NewGuid();
+        await SeedTargetModelAndWorkerAsync(_factory, targetModelId);
+
+        using HttpClient client = await _factory.CreateAdminClientAsync(
+            "profile-family-e2e-preserve-admin",
+            "profile-family-e2e-preserve@example.com");
+
+        var createRequest = new CloneProfileFamilyRequestDto
+        {
+            FamilyName = FamilyName,
+            TargetPrinterModelId = targetModelId,
+            SourceManufacturer = SourceManufacturer,
+            SourceMachineModelName = SourceModel,
+            NozzleDiameters = [0.4]
+        };
+        using HttpResponseMessage clone = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/clone-family", createRequest);
+        string cloneBody = await clone.Content.ReadAsStringAsync();
+        clone.StatusCode.Should().Be(
+            HttpStatusCode.Created,
+            $"the clone must succeed so there is a good bundle to preserve. Body: {cloneBody}");
+        CloneProfileFamilyResponseDto? created =
+            await clone.Content.ReadFromJsonAsync<CloneProfileFamilyResponseDto>();
+        Guid familyId = created!.FamilyId;
+
+        using HttpResponseMessage before = await client.GetAsync(
+            $"/api/slicer/profiles/machine/for-model/{targetModelId}");
+        before.StatusCode.Should().Be(
+            HttpStatusCode.OK, "sanity: the good bundle resolves before the failed re-render.");
+
+        // Force a re-render failure: re-bind to a source machine model that does not exist in the
+        // live worker catalog. The source manufacturer cannot be derived, so the edit fails 422
+        // before any worker PUT or DB mutation.
+        using HttpResponseMessage edit = await client.PatchAsJsonAsync(
+            $"/api/slicer/profiles/families/{familyId}",
+            new { sourceMachineModelName = "Ghost Printer That Does Not Exist" });
+        edit.StatusCode.Should().Be(
+            HttpStatusCode.UnprocessableEntity,
+            "re-binding to a source that no longer resolves must fail 422 source_preset_unavailable.");
+        using JsonDocument editBody = JsonDocument.Parse(await edit.Content.ReadAsStringAsync());
+        editBody.RootElement.GetProperty("code").GetString().Should().Be("source_preset_unavailable");
+        editBody.RootElement.GetProperty("detail").GetString().Should().NotBeNullOrWhiteSpace();
+        editBody.RootElement.TryGetProperty("errors", out _).Should().BeFalse();
+
+        // The previous good bundle must be preserved: the model still slices with no worker restart.
+        using HttpResponseMessage after = await client.GetAsync(
+            $"/api/slicer/profiles/machine/for-model/{targetModelId}");
+        after.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "a failed re-render must leave the previously installed good bundle intact so the " +
+            "model still resolves — the farm must never be left worse off than before the edit.");
+        List<MachineProfileDto>? profiles =
+            await after.Content.ReadFromJsonAsync<List<MachineProfileDto>>();
+        profiles.Should().NotBeNull();
+        profiles!.Should().ContainSingle(profile => profile.Name == $"{FamilyName} 0.4 nozzle");
+
+        // The family row is untouched (still Healthy, unchanged source) because the failure fired
+        // before any mutation.
+        using HttpResponseMessage getFamily = await client.GetAsync(
+            $"/api/slicer/profiles/families/{familyId}");
+        getFamily.StatusCode.Should().Be(HttpStatusCode.OK);
+        ProfileFamilySummaryDto? family =
+            await getFamily.Content.ReadFromJsonAsync<ProfileFamilySummaryDto>();
+        family!.RenderStatus.Should().Be(
+            ProfileFamilyRenderStatus.Healthy,
+            "the pre-mutation 422 must not flip the family to Failed.");
+        family.SourceMachineModelName.Should().Be(
+            SourceModel, "the unchanged source binding must survive the rejected re-bind.");
+    }
+
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
