@@ -396,6 +396,8 @@
         "src/modules/Farm.Modules.Calibration/",
         "src/modules/Farm.Modules.Abstractions/",
         "src/infra/",
+        "src/discovery/",
+        "src/backends/Farm.Backend.Plugin.Core/",
         "src/tests/Farm.Testing.Shared/"
       ],
       "defaultFilter": "Category!=DbHeavy&Category!=Docker",

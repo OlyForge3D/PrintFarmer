@@ -705,6 +705,10 @@ case_backend_core_change_selects_both_tests() {
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   assert_contains "matrix orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  # Farm.Modules.Printers (issue #2046) project-references
+  # Farm.Backend.Plugin.Core directly, so a Core edit must also select
+  # Farm.Modules.Printers.Tests.
+  assert_contains "matrix printers depends on backend-core" "$matrix" "Farm.Modules.Printers.Tests" || return 1
   local reason ; reason="$(get_output "$out" reason)"
   assert_contains "reason backend-core" "$reason" "backend-core" || return 1
 }
@@ -877,6 +881,10 @@ case_printqueue_change() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix printqueue" "$matrix" "Farm.Modules.PrintQueue.Tests" || return 1
+  # Farm.Modules.Printers project-references Farm.Modules.PrintQueue directly
+  # (issue #2046), so a PrintQueue-only change must also select
+  # Farm.Modules.Printers.Tests.
+  assert_contains "matrix printers depends on printqueue" "$matrix" "Farm.Modules.Printers.Tests" || return 1
   # The Dispatch/ integration suite and RouteTableSnapshotTests intentionally
   # stayed in Farm.Web.Api.Tests (see docs/MODULE_MIGRATION_PATTERN.md), so a
   # controller-owning module must select it too.
@@ -945,6 +953,10 @@ case_calibration_change() {
   # (issue #2039), so a Calibration-only change must also select
   # Farm.Modules.Gcode.Tests.
   assert_contains "matrix gcode depends on calibration" "$matrix" "Farm.Modules.Gcode.Tests" || return 1
+  # Farm.Modules.Printers project-references Farm.Modules.Calibration directly
+  # (issue #2046), so a Calibration-only change must also select
+  # Farm.Modules.Printers.Tests.
+  assert_contains "matrix printers depends on calibration" "$matrix" "Farm.Modules.Printers.Tests" || return 1
   # The retained calibration contract-negotiation/health-check/route-table
   # coverage (RouteTableSnapshotTests, CalibrationProfileResolutionContractTests)
   # intentionally stayed in Farm.Web.Api.Tests, so a controller-owning module
@@ -1316,6 +1328,14 @@ case_printers_mixed_with_unrelated_backend() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix printers" "$matrix" "Farm.Modules.Printers.Tests" || return 1
+  # The unrelated backend-plugin path must ALSO select its own bucket's tests
+  # (Farm.Web.Api.Tests, per has_backend's test_names) -- if this assertion
+  # were absent, the test would pass identically whether or not the backend
+  # bucket's selection logic was broken, silently hiding a regression there.
+  assert_contains "matrix backend-plugin" "$matrix" "Farm.Web.Api.Tests" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason printers" "$reason" "printers" || return 1
+  assert_contains "reason backend-plugin" "$reason" "backend-plugin" || return 1
 }
 
 

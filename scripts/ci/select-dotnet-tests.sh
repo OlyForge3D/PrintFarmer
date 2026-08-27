@@ -1060,9 +1060,12 @@ main() {
     # (src/slicer/Farm.Slicer.Module/Farm.Slicer.Module.csproj declares
     # ../../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj),
     # AND directly by Farm.Infrastructure.Tests (issue #2033) AND directly by
-    # Farm.Backend.Plugins.Tests (issue #2034). A Core edit must therefore run
-    # all affected test suites.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests" "Farm.Backend.Plugins.Tests")
+    # Farm.Backend.Plugins.Tests (issue #2034) AND directly by
+    # Farm.Modules.Printers.Tests (issue #2046 --
+    # src/modules/Farm.Modules.Printers/Farm.Modules.Printers.csproj declares
+    # ../../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj).
+    # A Core edit must therefore run all affected test suites.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests" "Farm.Backend.Plugins.Tests" "Farm.Modules.Printers.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_slicer )); then
