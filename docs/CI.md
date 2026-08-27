@@ -96,7 +96,7 @@ classify.
 | --- | :---: | :---: | --- | --- | :---: |
 | `frontend`: `src/Web/**` | ✓ | | | | |
 | `api`: `src/api/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.Identity.Tests`, `Farm.Modules.Inventory.Tests`, `Farm.Modules.Administration.Tests` | `AppPg`, `AppSqlServer` | |
-| `infra`: `src/infra/**` | | ✓ | `Farm.Infrastructure.Tests`, `Farm.Backend.Plugins.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Modules.SmartPlug.Tests`, `Farm.Modules.PrintQueue.Tests`, `Farm.Modules.Maintenance.Tests`, `Farm.Modules.Calibration.Tests`, `Farm.Modules.Gcode.Tests`, `Farm.Modules.Identity.Tests`, `Farm.Modules.Inventory.Tests`, `Farm.Modules.Administration.Tests` | `AppPg`, `AppSqlServer` | |
+| `infra`: `src/infra/**` | | ✓ | `Farm.Infrastructure.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Modules.SmartPlug.Tests`, `Farm.Modules.PrintQueue.Tests`, `Farm.Modules.Maintenance.Tests`, `Farm.Modules.Calibration.Tests`, `Farm.Modules.Devices.Tests`, `Farm.Modules.Gcode.Tests`, `Farm.Modules.Identity.Tests`, `Farm.Modules.Inventory.Tests`, `Farm.Modules.Administration.Tests`, `Farm.Backend.Plugins.Tests` | `AppPg`, `AppSqlServer` | |
 | `backend_core`: `src/backends/Farm.Backend.Plugin.Core/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests`, `Farm.Backend.Plugins.Tests` | | |
 | `backend_plugin`: every other `src/backends/**` path (concrete plugin projects) | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests`, `Farm.Modules.PrintQueue.Tests`, `Farm.Backend.Plugins.Tests` | | |
 | `slicer`: `src/slicer/**`, `src/Slicers/**`, `src/worker-shared/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests`, `Farm.Modules.PrintQueue.Tests`, `Farm.Modules.Calibration.Tests`, `Farm.Modules.Gcode.Tests` | `SlicerPg`, `SlicerSqlServer` | |
@@ -112,7 +112,7 @@ classify.
 | `migrations_app`: `src/migrations/Farm.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests` | `AppPg`, `AppSqlServer` | |
 | `migrations_slcr`: `src/migrations/Farm.Slicer.Migrations.*/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests` | `SlicerPg`, `SlicerSqlServer` | |
 | `tests_api`: `src/tests/Farm.Web.Api.Tests/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Modules.Identity.Tests`, `Farm.Modules.Inventory.Tests`, `Farm.Modules.Administration.Tests` | | |
-| `tests_infra`: `src/tests/Farm.Infrastructure.Tests/**` | | ✓ | `Farm.Infrastructure.Tests`, `Farm.Backend.Plugins.Tests` | | |
+| `tests_infra`: `src/tests/Farm.Infrastructure.Tests/**` | | ✓ | `Farm.Infrastructure.Tests` | | |
 | `tests_backend_plugins`: `src/tests/Farm.Backend.Plugins.Tests/**` | | ✓ | `Farm.Backend.Plugins.Tests` | | |
 | `tests_slicer`: `src/tests/Farm.Slicer.Module.Tests/**` | | ✓ | `Farm.Slicer.Module.Tests` | | |
 | `tests_orca`: `src/tests/Farm.OrcaSlicer.Worker.Tests/**` | | ✓ | `Farm.OrcaSlicer.Worker.Tests` | | |
