@@ -6562,7 +6562,13 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime?>("LastHistorySeedUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("LastMaintenanceAlertEvaluatedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime?>("LastModelSyncAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("LastStatsSyncAttemptedAt")
                         .HasColumnType("datetime2");
 
                     b.Property<Guid?>("ObicoServerId")
@@ -6574,6 +6580,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasDefaultValue(1L);
 
                     b.HasKey("PrinterId");
+
+                    b.HasIndex("LastMaintenanceAlertEvaluatedAt");
+
+                    b.HasIndex("LastStatsSyncAttemptedAt");
 
                     b.HasIndex("ObicoServerId");
 
