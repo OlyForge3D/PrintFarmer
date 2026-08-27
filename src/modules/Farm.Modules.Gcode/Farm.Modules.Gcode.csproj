@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- S6960 ("controller has multiple responsibilities") was suppressed for
+         GcodeHarvestController at its prior Farm.Web.Api location via that
+         project's NoWarn; carry the same suppression forward so the move
+         doesn't newly surface a warning on unchanged code. -->
+    <NoWarn>$(NoWarn);S6960</NoWarn>
+    <Description>Vertical-slice module for gcode file management: gcode library, chunked/multi
+    uploads, moves and deletes, harvest completion and diagnostics, and gcode safety validation.
+    Registers via IApiModule (see Farm.Modules.Abstractions, issue #2035). Phase 11 of the
+    module-decomposition epic #2019 -- namespaces are intentionally unchanged from their prior
+    Farm.Web.Api location (move-first-rename-last).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Required for IServiceCollection/IMvcBuilder/IEndpointRouteBuilder/ControllerBase/HttpClient -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
+    <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
+    <!-- GcodeArtifactPromoter implements IGcodeArtifactPromoter, which moved into
+         Farm.Modules.Calibration in Phase 10 (#2038) because Calibration's slice-promotion
+         saga is its primary consumer. Calibration does not reference anything in this
+         module, so this is a one-directional Gcode -> Calibration dependency. -->
+    <ProjectReference Include="..\Farm.Modules.Calibration\Farm.Modules.Calibration.csproj" />
+  </ItemGroup>
+
+</Project>
