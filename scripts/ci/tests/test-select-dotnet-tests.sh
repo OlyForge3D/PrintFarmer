@@ -431,8 +431,9 @@ case_infra_change_does_not_build_web_api_test_leg() {
   # selects this leg without building Farm.Web.Api." Farm.Infrastructure.Tests
   # deliberately has no ProjectReference to Farm.Web.Api.csproj, so its own
   # dotnet-test matrix leg never touches Farm.Web.Api -- verified here by
-  # confirming Farm.Web.Api.Tests/Farm.Web.IntegrationTests (the two legs that
-  # DO reference Farm.Web.Api.csproj) are absent from the matrix.
+  # confirming Farm.Web.Api.Tests/Farm.Web.IntegrationTests (the two legs
+  # whose test suites exercise the web host directly, e.g. via
+  # CustomWebApplicationFactory) are absent from the matrix.
   CHANGED_FILES="src/infra/Services/SomeInfraService.cs"
   EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \

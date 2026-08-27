@@ -928,7 +928,7 @@ main() {
     # #2037), Farm.Modules.Calibration (issue #2038), Farm.Modules.Gcode
     # (issue #2039), Farm.Modules.Identity (issue #2041), and
     # Farm.Modules.Administration (issue #2042) also reference
-    # Farm.Infrastructure directly, so an infra change must re-run all eight
+    # Farm.Infrastructure directly, so an infra change must re-run all seven
     # of their test projects too.
     test_names+=("Farm.Infrastructure.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests" "Farm.Modules.Gcode.Tests" "Farm.Modules.Identity.Tests" "Farm.Modules.Administration.Tests")
     net_test_bucket_hit=1
@@ -964,7 +964,7 @@ main() {
     # references Farm.Slicer.Module directly (slicer-host calibration
     # profile resolution), and Farm.Modules.Gcode (issue #2039) references
     # Farm.Slicer.Module/Farm.Slicer.Module.Api directly too (AddSlicerModule
-    # is on for this module), so a slicer change must re-run all four of
+    # is on for this module), so a slicer change must re-run all three of
     # their test projects.
     test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Calibration.Tests" "Farm.Modules.Gcode.Tests")
     net_test_bucket_hit=1
