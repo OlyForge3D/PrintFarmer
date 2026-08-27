@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.StorageManagement;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -122,6 +123,28 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             .GetString();
 
         health.Should().Be("Healthy");
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_OmitsDisabledBackgroundServices()
+    {
+        const string serviceId = "DisabledSystemInfoTestService";
+        const string displayName = "Disabled System Info Test Service";
+
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            IBackgroundServiceMonitor monitor = scope.ServiceProvider.GetRequiredService<IBackgroundServiceMonitor>();
+            monitor.Register(serviceId, displayName);
+            monitor.ReportStarted(serviceId);
+            monitor.ReportEnabled(serviceId, false);
+        }
+
+        HttpResponseMessage response = await _adminClient!.GetAsync("/api/system/info");
+        SystemInfoDto? dto = await response.Content.ReadFromJsonAsync<SystemInfoDto>(JsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        dto.Should().NotBeNull();
+        dto!.Services.Should().NotContain(service => service.Name == displayName);
     }
 
     private async Task SeedSystemInfoDataAsync()
