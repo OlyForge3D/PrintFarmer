@@ -2863,6 +2863,200 @@ case_drift_snapshot_rejects_duplicate_drift_step() {
 
 
 # --------------------------------------------------------------------------
+# dotnet-build upload-artifact <-> manifest drift guard (issue #2091).
+#
+# scripts/ci/dotnet-test-manifest.json drives TEST_MATRIX/MIG_MATRIX at
+# runtime and a required check (test-dotnet-test-manifest.sh) already
+# validates it for exhaustiveness and mutual exclusivity. But each matrix
+# leg's compiled output is published by one of many HARDCODED
+# "Upload <name> build" / `actions/upload-artifact` steps in the
+# `dotnet-build` job — GitHub Actions cannot generate steps in a loop, so
+# that half of the pipeline can't be driven by the manifest at runtime.
+# Nothing enforced agreement between the two: adding a project to the
+# manifest with no matching upload step compiled fine, selected fine, and
+# only failed late, at the consumer leg, with an artifact-not-found error
+# that points away from the real cause (the missing upload step back in
+# `dotnet-build`).
+#
+# `_check_upload_artifact_sync` closes that gap in both directions:
+#   * every manifest test project (by manifest `name`, NOT the sharded
+#     `leg` — the build job uploads one artifact per project, not per
+#     shard) and every migration context/provider project must have
+#     exactly one matching "Upload <name> build" upload-artifact step.
+#   * every "Upload <name> build" upload-artifact step in the job must
+#     name a project that still exists in the manifest or migration list
+#     — an orphaned step for a project that was since removed is caught
+#     too, per the issue's own acceptance criteria.
+#
+# The migration project list is parsed out of select-dotnet-tests.sh's own
+# `ALL_MIG_ENTRIES` array rather than duplicated here by hand, so this
+# guard cannot itself drift from the selector's canonical migration list.
+# --------------------------------------------------------------------------
+
+# _manifest_upload_artifact_names <manifest>
+# One line per checked-manifest test project, using the manifest `name`
+# field (the artifact name the build job uploads under), not the
+# per-shard `leg`. CR-tolerant like the rest of this file's workflow
+# parsing: some Python installs (notably Windows CPython under a
+# non-Windows shell) emit CRLF line endings on stdout even though the
+# script only ever prints `\n`, which would otherwise make every entry
+# fail to `comm`-match its LF-only ci.yml counterpart.
+_manifest_upload_artifact_names() {
+  local manifest="$1"
+  "$PYTHON_BIN" - "$manifest" <<'PYEOF' | tr -d '\r'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    manifest = json.load(f)
+for entry in manifest["testProjects"]:
+    print(entry["name"])
+PYEOF
+}
+
+# _migration_upload_artifact_names <selector>
+# One line per migration project basename declared in <selector>'s
+# `ALL_MIG_ENTRIES` array (e.g. `Farm.Migrations.PostgreSQL`), derived by
+# parsing the array rather than hand-duplicating its contents.
+_migration_upload_artifact_names() {
+  local selector="$1"
+  awk '
+    /^readonly ALL_MIG_ENTRIES=\(/ { inside = 1; next }
+    inside && /^\)/ { exit }
+    inside { print }
+  ' "$selector" | grep -oE 'migrations/Farm\.[A-Za-z.]+' | sed 's#.*/##' | sort -u
+}
+
+# _dotnet_build_upload_artifact_names <workflow>
+# One line per artifact `name:` published by an `actions/upload-artifact`
+# step inside the `dotnet-build` job body. Reuses `extract_job_block` so
+# only steps inside that job are considered — other jobs' upload-artifact
+# steps (e.g. TRX/coverage uploads) use unrelated naming and must not be
+# mistaken for orphaned per-project build uploads.
+_dotnet_build_upload_artifact_names() {
+  local workflow="$1"
+  extract_job_block "$workflow" "dotnet-build" | awk '
+    /^ *uses: actions\/upload-artifact@/ { in_block = 1; next }
+    in_block && /^ *name: / {
+      sub(/^ *name: */, "")
+      print
+      in_block = 0
+      next
+    }
+  '
+}
+
+# _check_upload_artifact_sync <workflow> <manifest> <selector>
+# Returns 0 with no output when the dotnet-build job's upload-artifact
+# steps and the manifest/migration project lists name exactly the same
+# set of projects. Otherwise returns 1 and prints one itemized diagnostic
+# per missing or orphaned project, naming both the project and the file
+# to edit.
+_check_upload_artifact_sync() {
+  local workflow="$1" manifest="$2" selector="$3"
+  local expected actual missing extra ok=0
+
+  expected="$( { _manifest_upload_artifact_names "$manifest"; _migration_upload_artifact_names "$selector"; } | sort -u)"
+  actual="$(_dotnet_build_upload_artifact_names "$workflow" | sort -u)"
+
+  missing="$(comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$actual"))"
+  extra="$(comm -13 <(printf '%s\n' "$expected") <(printf '%s\n' "$actual"))"
+
+  if [[ -n "$missing" ]]; then
+    printf '  manifest/migration project(s) with no matching "Upload <name> build" upload-artifact step in the dotnet-build job of %s:\n' "$workflow" >&2
+    while IFS= read -r proj; do
+      [[ -z "$proj" ]] && continue
+      printf '    - %s -> add an "Upload %s build" actions/upload-artifact step to the dotnet-build job in .github/workflows/ci.yml\n' "$proj" "$proj" >&2
+    done <<< "$missing"
+    ok=1
+  fi
+
+  if [[ -n "$extra" ]]; then
+    printf '  "Upload <name> build" upload-artifact step(s) in the dotnet-build job of %s with no matching manifest/migration project:\n' "$workflow" >&2
+    while IFS= read -r proj; do
+      [[ -z "$proj" ]] && continue
+      printf '    - %s -> remove the orphaned upload step from .github/workflows/ci.yml, or register the project in scripts/ci/dotnet-test-manifest.json\n' "$proj" >&2
+    done <<< "$extra"
+    ok=1
+  fi
+
+  (( ok == 0 ))
+}
+
+# The real workflow and the real manifest must agree today.
+case_manifest_upload_artifact_sync() {
+  local workflow="$REPO_ROOT/.github/workflows/ci.yml"
+  local out
+  if ! out="$(_check_upload_artifact_sync "$workflow" "$TEST_MANIFEST" "$SELECTOR" 2>&1)"; then
+    printf '%s\n' "$out" >&2
+    return 1
+  fi
+  return 0
+}
+
+# Adding a project to the manifest with no matching upload step must be
+# caught locally instead of failing late at the consumer leg.
+case_upload_artifact_guard_rejects_missing_upload_step() {
+  local mutant workflow="$REPO_ROOT/.github/workflows/ci.yml"
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  # Delete the "Upload Farm.Slicer.Module.Tests build" step (name line
+  # through its trailing blank line) so the manifest project has no
+  # matching upload step left.
+  _mutate "$mutant" '
+    { sub(/\r$/, "") }
+    /^      - name: Upload Farm\.Slicer\.Module\.Tests build$/ { skipping = 1 }
+    skipping && /^$/ { skipping = 0; next }
+    skipping { next }
+    { print }
+  ' || return 1
+
+  local stderr_output
+  if stderr_output="$(_check_upload_artifact_sync "$mutant" "$TEST_MANIFEST" "$SELECTOR" 2>&1)"; then
+    printf '  guard failed to reject a manifest project with no upload step\n' >&2
+    return 1
+  fi
+  assert_contains "missing-upload diagnostic" "$stderr_output" "Farm.Slicer.Module.Tests" || return 1
+  assert_contains "missing-upload names the file to edit" "$stderr_output" ".github/workflows/ci.yml" || return 1
+}
+
+# An orphaned upload step for a project no longer in the manifest must
+# also be caught (the reverse direction from the case above).
+case_upload_artifact_guard_rejects_orphaned_upload_step() {
+  local mutant workflow="$REPO_ROOT/.github/workflows/ci.yml"
+  mutant="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
+  _copy_real_workflow_for_mutation "$mutant"
+  _mutate "$mutant" '
+    { sub(/\r$/, "") }
+    { print }
+    /^      - name: Upload Farm\.Slicer\.Module\.Tests build$/ && !inserted {
+      print "      - name: Upload Farm.Retired.Ghost.Tests build"
+      print "        uses: actions/upload-artifact@v7"
+      print "        with:"
+      print "          name: Farm.Retired.Ghost.Tests"
+      print "          path: src/tests/Farm.Retired.Ghost.Tests/bin/Debug/net10.0"
+      print "          retention-days: 1"
+      print "          if-no-files-found: error"
+      print ""
+      inserted = 1
+    }
+  ' || return 1
+
+  local stderr_output
+  if stderr_output="$(_check_upload_artifact_sync "$mutant" "$TEST_MANIFEST" "$SELECTOR" 2>&1)"; then
+    printf '  guard failed to reject an orphaned upload step\n' >&2
+    return 1
+  fi
+  assert_contains "orphaned-upload diagnostic" "$stderr_output" "Farm.Retired.Ghost.Tests" || return 1
+  assert_contains "orphaned-upload names the manifest file" "$stderr_output" "scripts/ci/dotnet-test-manifest.json" || return 1
+}
+
+
+# --------------------------------------------------------------------------
 # Workflow-scope shadow-job header shapes — the header shape check
 # rejects each attempt to hide a second `migration-drift` job at
 # 2-space indent.
@@ -3579,6 +3773,9 @@ TESTS=(
   case_drift_shape_rejects_inline_comment_shadow_migration_drift_job
   case_drift_shape_rejects_inline_flow_shadow_migration_drift_job
   case_drift_shape_accepts_migration_drift_extra_sibling_job
+  case_manifest_upload_artifact_sync
+  case_upload_artifact_guard_rejects_missing_upload_step
+  case_upload_artifact_guard_rejects_orphaned_upload_step
   case_mutate_helper_propagates_awk_failure
   case_manifest_default_path_reflects_checked_in_file
   case_manifest_missing_file_fails_closed
