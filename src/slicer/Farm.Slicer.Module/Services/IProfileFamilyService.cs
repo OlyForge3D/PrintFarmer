@@ -50,14 +50,32 @@ public interface IProfileFamilyService
     /// resolve by re-running the delete.</para>
     /// <para><b>Refusal.</b> Deletion is refused (<see cref="ProfileFamilyInUseException"/>) when a
     /// registered printer's template profile, or a non-terminal slice job, still references one of
-    /// the family's variant machine profiles.</para>
+    /// the family's variant machine profiles — the <em>direct</em> binding. It is also refused
+    /// (<see cref="ProfileFamilyLastCoverageException"/>) when removing the family's OrcaSlicer alias
+    /// would leave its bound catalog model with no OrcaSlicer coverage AND a registered printer uses
+    /// that model — the <em>indirect</em> binding, which would silently orphan every printer of that
+    /// model. Pass <paramref name="force"/> to bypass ONLY the indirect coverage refusal; the direct
+    /// binding is never bypassed, so a variant bound as a printer's template profile can never be
+    /// force-deleted.</para>
     /// </remarks>
     /// <param name="familyId">Family identity.</param>
+    /// <param name="force">
+    /// When <see langword="true"/> (admin-gated), bypasses the last-OrcaSlicer-coverage refusal so a
+    /// mis-created family a printer happens to reference can still be deleted. Never bypasses the direct
+    /// template-profile / slice-job refusal.
+    /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <exception cref="ProfileFamilyNotFoundException">Thrown when the family does not exist.</exception>
     /// <exception cref="ProfileFamilyInUseException">Thrown when a live reference holds the family.</exception>
+    /// <exception cref="ProfileFamilyLastCoverageException">
+    /// Thrown when deletion would strip a model's last OrcaSlicer coverage while a printer uses it and
+    /// <paramref name="force"/> is <see langword="false"/>.
+    /// </exception>
+    /// <exception cref="ProfileFamilyConcurrencyException">
+    /// Thrown when a concurrent request modified or removed the family mid-delete.
+    /// </exception>
     /// <exception cref="HttpRequestException">Thrown when the OrcaSlicer worker is unavailable.</exception>
-    Task DeleteFamilyAsync(Guid familyId, CancellationToken ct);
+    Task DeleteFamilyAsync(Guid familyId, bool force, CancellationToken ct);
 
     /// <summary>
     /// Applies an in-place edit to one custom OrcaSlicer family and re-renders it. Supports three
@@ -82,6 +100,13 @@ public interface IProfileFamilyService
     /// <exception cref="ProfileFamilyInUseException">Thrown when removing a still-referenced variant.</exception>
     /// <exception cref="ProfileFamilySourceException">Thrown when the source preset cannot be resolved.</exception>
     /// <exception cref="ArgumentException">Thrown when the edit is malformed (e.g. empty nozzle set).</exception>
+    /// <exception cref="ProfileFamilyConcurrentlyDeletedException">
+    /// Thrown when a concurrent delete removed the family between the worker install and the persist; the
+    /// partially installed bundle is rolled back before this is thrown.
+    /// </exception>
+    /// <exception cref="ProfileFamilyConcurrencyException">
+    /// Thrown when a concurrent request modified the family mid-edit.
+    /// </exception>
     /// <exception cref="HttpRequestException">Thrown when the OrcaSlicer worker is unavailable.</exception>
     Task<ProfileFamilySummaryDto> EditFamilyAsync(
         Guid familyId,
@@ -109,6 +134,13 @@ public interface IProfileFamilyService
     /// <returns>The re-rendered family in the same read shape as <see cref="GetFamilyAsync"/>.</returns>
     /// <exception cref="ProfileFamilyNotFoundException">Thrown when the family does not exist.</exception>
     /// <exception cref="ProfileFamilySourceException">Thrown when the source preset cannot be resolved.</exception>
+    /// <exception cref="ProfileFamilyConcurrentlyDeletedException">
+    /// Thrown when a concurrent delete removed the family between the worker install and the persist; the
+    /// partially installed bundle is rolled back before this is thrown.
+    /// </exception>
+    /// <exception cref="ProfileFamilyConcurrencyException">
+    /// Thrown when a concurrent request modified the family mid-render.
+    /// </exception>
     /// <exception cref="HttpRequestException">Thrown when the OrcaSlicer worker is unavailable.</exception>
     Task<ProfileFamilySummaryDto> RenderFamilyAsync(Guid familyId, CancellationToken ct);
 

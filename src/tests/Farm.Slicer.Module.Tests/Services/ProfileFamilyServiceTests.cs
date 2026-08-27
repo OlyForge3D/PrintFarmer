@@ -1,6 +1,7 @@
 ﻿using System.Globalization;
 using System.Text.Json;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Repositories;
 using Farm.Slicer.Module.Api.Services;
@@ -573,7 +574,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, catalog, aliases, Renderer(), worker);
 
-        await service.DeleteFamilyAsync(familyId, CancellationToken.None);
+        await service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
 
         (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(0);
         (await dbContext.MachineProfiles.CountAsync()).Should().Be(0);
@@ -602,7 +603,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), DeleteAliases(modelId), Renderer(), worker);
 
-        Func<Task> act = () => service.DeleteFamilyAsync(Guid.NewGuid(), CancellationToken.None);
+        Func<Task> act = () => service.DeleteFamilyAsync(Guid.NewGuid(), force: false, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<ProfileFamilyNotFoundException>();
         worker.Verify(
@@ -633,7 +634,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), DeleteAliases(modelId), Renderer(), worker);
 
-        Func<Task> act = () => service.DeleteFamilyAsync(familyId, CancellationToken.None);
+        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
 
         (await act.Should().ThrowAsync<ProfileFamilyInUseException>())
             .Which.Message.Should().Contain(jobId.ToString());
@@ -664,7 +665,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), DeleteAliases(modelId), Renderer(), DeleteWorker());
 
-        await service.DeleteFamilyAsync(familyId, CancellationToken.None);
+        await service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
 
         (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(0);
     }
@@ -692,7 +693,7 @@ public sealed class ProfileFamilyServiceTests
             worker,
             PrinterRefs(blockingPrinter));
 
-        Func<Task> act = () => service.DeleteFamilyAsync(familyId, CancellationToken.None);
+        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
 
         (await act.Should().ThrowAsync<ProfileFamilyInUseException>())
             .Which.Message.Should().Contain("Bench Printer");
@@ -718,7 +719,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, catalog, aliases, Renderer(), worker);
 
-        Func<Task> act = () => service.DeleteFamilyAsync(familyId, CancellationToken.None);
+        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<HttpRequestException>();
         (await dbContext.MachineModelProfiles.CountAsync())
@@ -1192,7 +1193,7 @@ public sealed class ProfileFamilyServiceTests
         ProfileFamilyService service = CreateService(
             dbContext, Catalog(modelId), DeleteAliases(modelId), Renderer(), worker);
 
-        await service.DeleteFamilyAsync(familyId, CancellationToken.None);
+        await service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
 
         (await dbContext.MachineModelProfiles.CountAsync()).Should().Be(0);
         worker.Verify(
@@ -1214,12 +1215,19 @@ public sealed class ProfileFamilyServiceTests
         (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
         Mock<ICatalogServiceAdapter> catalog = new(MockBehavior.Strict);
         _ = catalog
+            .Setup(service => service.GetModelAliasesAsync(modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SlicerModelAliasDto>
+            {
+                new(Guid.NewGuid(), modelId, "Farm Test", "OrcaSlicer"),
+                new(Guid.NewGuid(), modelId, "Other Coverage", "OrcaSlicer"),
+            });
+        _ = catalog
             .Setup(service => service.InvalidateModelAliasesAsync(modelId, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("alias cache is down"));
         ProfileFamilyService service = CreateService(
             dbContext, catalog, DeleteAliases(modelId), Renderer(), DeleteWorker());
 
-        Func<Task> act = () => service.DeleteFamilyAsync(familyId, CancellationToken.None);
+        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
 
         _ = await act.Should().ThrowAsync<InvalidOperationException>();
         MachineModelProfile persisted = await dbContext.MachineModelProfiles
@@ -1227,6 +1235,287 @@ public sealed class ProfileFamilyServiceTests
         persisted.RenderStatus.Should().Be(
             ProfileFamilyRenderStatus.Failed,
             "a post-worker-delete cleanup failure must leave the row visibly broken, not Healthy (C3)");
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_LastOrcaCoverageForModelUsedByPrinter_Throws409_BeforeWorkerCall()
+    {
+        // #2086: the family's OrcaSlicer alias is the model's ONLY coverage and a registered printer uses
+        // that model, so deleting it would leave that printer with zero machine profiles
+        // (GET .../machine/for-model/{modelId} would start returning 404 no_profiles_for_model). Refuse with
+        // a specific 409 whose detail names the affected printer, and do so BEFORE touching the worker.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        Mock<ICatalogServiceAdapter> catalog = Catalog(modelId);
+        // Only the family's own alias covers the model, so its removal strips the last OrcaSlicer coverage.
+        _ = catalog
+            .Setup(service => service.GetModelAliasesAsync(modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(OnlyFamilyAlias(modelId));
+        var affectedPrinter = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Shop Printer",
+            ModelId = modelId
+        };
+        Mock<IProfileFamilyWorkerClient> worker = DeleteWorker();
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            catalog,
+            DeleteAliases(modelId),
+            Renderer(),
+            worker,
+            PrinterRefs(modelPrinter: affectedPrinter));
+
+        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ProfileFamilyLastCoverageException>())
+            .Which.Message.Should().Contain("Shop Printer")
+            .And.Contain(affectedPrinter.Id.ToString());
+        (await dbContext.MachineModelProfiles.CountAsync())
+            .Should().Be(1, "a coverage-loss refusal must not delete the family");
+        worker.Verify(
+            client => client.DeleteBundleAsync(
+                It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "the coverage-loss refusal must fire before any worker mutation");
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_ModelHasAnotherOrcaAlias_DeletesEvenWithDependentPrinter()
+    {
+        // #2086: when the model keeps a DISTINCT OrcaSlicer alias after this family's alias is removed, the
+        // model retains coverage, so deletion must succeed even though a registered printer uses the model.
+        // A distinct alias short-circuits before FindByModelIdAsync is ever consulted, so no false refusal.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        var dependentPrinter = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Shop Printer",
+            ModelId = modelId
+        };
+        // Catalog(modelId) returns the family alias PLUS a second distinct OrcaSlicer alias by default.
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            Catalog(modelId),
+            DeleteAliases(modelId),
+            Renderer(),
+            DeleteWorker(),
+            PrinterRefs(modelPrinter: dependentPrinter));
+
+        await service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
+
+        (await dbContext.MachineModelProfiles.CountAsync())
+            .Should().Be(0, "another OrcaSlicer alias keeps the model covered, so deletion must succeed");
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_LastCoverageButNoDependentPrinter_Deletes()
+    {
+        // #2086: even when this family's alias is the model's last OrcaSlicer coverage, deletion must
+        // succeed when NO registered printer uses that model — there is nothing to orphan. This is the
+        // FullLifecycle E2E scenario in miniature, which must keep passing unchanged.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        Mock<ICatalogServiceAdapter> catalog = Catalog(modelId);
+        _ = catalog
+            .Setup(service => service.GetModelAliasesAsync(modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(OnlyFamilyAlias(modelId));
+        // PrinterRefs() default reports no printer bound to the model (FindByModelIdAsync -> null).
+        ProfileFamilyService service = CreateService(
+            dbContext, catalog, DeleteAliases(modelId), Renderer(), DeleteWorker());
+
+        await service.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
+
+        (await dbContext.MachineModelProfiles.CountAsync())
+            .Should().Be(0, "no printer depends on the model, so removing its last coverage orphans nothing");
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_ForceTrue_OverridesLastCoverageRefusal()
+    {
+        // #2086 escape hatch: ?force=true bypasses ONLY the indirect coverage-loss check, so a mis-created
+        // family that a printer happens to depend on can still be deleted rather than being stuck forever.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        Mock<ICatalogServiceAdapter> catalog = Catalog(modelId);
+        _ = catalog
+            .Setup(service => service.GetModelAliasesAsync(modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(OnlyFamilyAlias(modelId));
+        var affectedPrinter = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Shop Printer",
+            ModelId = modelId
+        };
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            catalog,
+            DeleteAliases(modelId),
+            Renderer(),
+            DeleteWorker(),
+            PrinterRefs(modelPrinter: affectedPrinter));
+
+        await service.DeleteFamilyAsync(familyId, force: true, CancellationToken.None);
+
+        (await dbContext.MachineModelProfiles.CountAsync())
+            .Should().Be(0, "force=true must bypass the coverage-loss refusal and delete the family");
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_ForceTrue_DoesNotOverrideDirectTemplateProfileRefusal()
+    {
+        // #2086: force waives ONLY the indirect coverage check, NEVER the direct-reference refusal. A
+        // variant bound as a printer's template machine profile is a concrete FK-ish binding whose removal
+        // orphans that printer, so it must stay refused regardless of force.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, Guid variantId) = SeedHealthyFamily(dbContext, modelId);
+        var blockingPrinter = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Bench Printer",
+            TemplateMachineProfileId = variantId
+        };
+        Mock<IProfileFamilyWorkerClient> worker = DeleteWorker();
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            Catalog(modelId),
+            DeleteAliases(modelId),
+            Renderer(),
+            worker,
+            PrinterRefs(blockingPrinter));
+
+        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: true, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ProfileFamilyInUseException>())
+            .Which.Message.Should().Contain("Bench Printer");
+        (await dbContext.MachineModelProfiles.CountAsync())
+            .Should().Be(1, "force must never bypass the direct template-profile refusal");
+        worker.Verify(
+            client => client.DeleteBundleAsync(
+                It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "the direct-reference refusal must fire before any worker mutation, even under force");
+    }
+
+    [Fact]
+    public async Task RenderFamilyAsync_FamilyDeletedConcurrentlyDuringPersist_RemovesBundleAndThrows404()
+    {
+        // #2087: a render racing a delete installs its bundle on the worker, then its persist matches zero
+        // rows (the row was deleted) and EF throws DbUpdateConcurrencyException. The handler must remove the
+        // orphaned bundle it just installed and surface a clean 404, never a raw 500 that strands the bundle.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ConcurrentDeleteOnSaveDbContext(options);
+        _ = dbContext.Database.EnsureCreated();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+
+        ProfileFamilyWorkerTarget target = new("http://worker", "2.4.2");
+        AllProfilesResponseDto catalog = WorkerCatalog("Prusa Test");
+        Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Strict);
+        _ = worker
+            .Setup(service => service.GetCatalogAsync(string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((target, catalog));
+        _ = worker
+            .Setup(service => service.GetActiveOrcaVersionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync("2.4.2");
+        _ = worker
+            .Setup(service => service.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = worker
+            .Setup(service => service.DeleteBundleAsync(
+                It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
+
+        // Arm the concurrent delete: the next persist (the render's single Healthy save) removes the family
+        // rows out-of-band and reports the optimistic-concurrency conflict EF raises on a zero-row update.
+        dbContext.DeleteFamilyOnNextSave = true;
+        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ProfileFamilyConcurrentlyDeletedException>())
+            .Which.Message.Should().Contain(familyId.ToString());
+        worker.Verify(
+            service => service.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the bundle was installed before the persist lost the race");
+        worker.Verify(
+            service => service.DeleteBundleAsync(null, familyId, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the orphaned bundle installed before the concurrent delete must be compensated");
+    }
+
+    [Fact]
+    public async Task RenderFamilyAsync_ConcurrencyConflictButFamilyStillExists_Throws409_WithoutBundleRemoval()
+    {
+        // #2087: a DbUpdateConcurrencyException whose row still exists (a concurrent modification, not a
+        // delete) maps to a clean 409, and must NOT remove the installed bundle — the row still drives it.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ThrowingSaveDbContext(options);
+        _ = dbContext.Database.EnsureCreated();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+
+        ProfileFamilyWorkerTarget target = new("http://worker", "2.4.2");
+        AllProfilesResponseDto catalog = WorkerCatalog("Prusa Test");
+        Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Strict);
+        _ = worker
+            .Setup(service => service.GetCatalogAsync(string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((target, catalog));
+        _ = worker
+            .Setup(service => service.GetActiveOrcaVersionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync("2.4.2");
+        _ = worker
+            .Setup(service => service.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = worker
+            .Setup(service => service.DeleteBundleAsync(
+                It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
+
+        // Every persist throws DbUpdateConcurrencyException, but the row is never actually removed.
+        dbContext.ThrowOnSave = true;
+        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ProfileFamilyConcurrencyException>();
+        worker.Verify(
+            service => service.DeleteBundleAsync(
+                It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "a concurrent modification (row still present) must not remove the bundle the row still drives");
     }
 
     [Fact]
@@ -1557,6 +1846,40 @@ public sealed class ProfileFamilyServiceTests
                 : base.SaveChangesAsync(cancellationToken);
         }
     }
+
+    /// <summary>
+    /// A <see cref="SlicerDbContext"/> that simulates a concurrent DELETE landing between a render's worker
+    /// install and its persist (#2087): the next armed <see cref="SaveChangesAsync(CancellationToken)"/>
+    /// removes the family and variant rows out-of-band and then throws the
+    /// <see cref="DbUpdateConcurrencyException"/> EF raises when an UPDATE matches zero rows.
+    /// </summary>
+    private sealed class ConcurrentDeleteOnSaveDbContext(DbContextOptions<SlicerDbContext> options)
+        : SlicerDbContext(options)
+    {
+        public bool DeleteFamilyOnNextSave { get; set; }
+
+        public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            if (DeleteFamilyOnNextSave)
+            {
+                DeleteFamilyOnNextSave = false;
+                // Child rows first so SQLite's per-connection foreign-key enforcement (enabled by the EF
+                // Core provider) does not reject the parent delete.
+                _ = await Database.ExecuteSqlRawAsync(
+                    "DELETE FROM MachineProfiles; DELETE FROM MachineModelProfiles;", cancellationToken);
+                throw new DbUpdateConcurrencyException("simulated concurrent family delete during render");
+            }
+
+            return await base.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// A single OrcaSlicer alias mapping named for the seeded family ("Farm Test"), i.e. the family's own
+    /// alias is the model's ONLY coverage, so removing it strips the model's last OrcaSlicer coverage.
+    /// </summary>
+    private static IReadOnlyList<SlicerModelAliasDto> OnlyFamilyAlias(Guid modelId) =>
+        new List<SlicerModelAliasDto> { new(Guid.NewGuid(), modelId, "Farm Test", "OrcaSlicer") };
 
     private static (Guid FamilyId, Guid VariantId) SeedHealthyFamily(
         SlicerDbContext dbContext,
@@ -1905,6 +2228,19 @@ public sealed class ProfileFamilyServiceTests
                 modelId,
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        // Default coverage: the model carries the family's own OrcaSlicer alias PLUS a second, distinct
+        // OrcaSlicer alias, so the delete-time last-coverage check (EnsureNoLastCoverageLossAsync) always
+        // short-circuits to "other coverage remains" and never blocks. The #2086 last-coverage tests
+        // re-Setup this to return ONLY the family alias to exercise the refusal path.
+        _ = catalog
+            .Setup(service => service.GetModelAliasesAsync(
+                modelId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SlicerModelAliasDto>
+            {
+                new(Guid.NewGuid(), modelId, "Farm Test", "OrcaSlicer"),
+                new(Guid.NewGuid(), modelId, "Other Coverage", "OrcaSlicer"),
+            });
         return catalog;
     }
 
@@ -2033,9 +2369,13 @@ public sealed class ProfileFamilyServiceTests
 
     /// <summary>
     /// A printer-reference repository that reports no printer bound to any variant, i.e. deletion
-    /// is not blocked by a printer. Pass a configured mock to exercise the blocking path.
+    /// is not blocked by a printer. Pass <paramref name="blockingPrinter"/> to exercise the direct
+    /// template-profile block, or <paramref name="modelPrinter"/> to exercise the indirect
+    /// last-coverage block (a printer that uses the family's bound catalog model).
     /// </summary>
-    private static Mock<IPrinterProfileCheckRepository> PrinterRefs(Printer? blockingPrinter = null)
+    private static Mock<IPrinterProfileCheckRepository> PrinterRefs(
+        Printer? blockingPrinter = null,
+        Printer? modelPrinter = null)
     {
         Mock<IPrinterProfileCheckRepository> printerRefs = new();
         _ = printerRefs
@@ -2043,6 +2383,11 @@ public sealed class ProfileFamilyServiceTests
                 It.IsAny<IReadOnlyCollection<Guid>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(blockingPrinter);
+        _ = printerRefs
+            .Setup(repository => repository.FindByModelIdAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(modelPrinter);
         return printerRefs;
     }
 

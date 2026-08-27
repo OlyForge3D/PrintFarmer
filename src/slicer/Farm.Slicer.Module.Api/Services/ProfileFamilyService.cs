@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Repositories;
 using Farm.Slicer.Module.Data;
@@ -271,7 +272,7 @@ public sealed class ProfileFamilyService(
     }
 
     /// <inheritdoc />
-    public async Task DeleteFamilyAsync(Guid familyId, CancellationToken ct)
+    public async Task DeleteFamilyAsync(Guid familyId, bool force, CancellationToken ct)
     {
         MachineModelProfile? family = await _dbContext.MachineModelProfiles
             .Include(candidate => candidate.MachineProfiles)
@@ -285,7 +286,12 @@ public sealed class ProfileFamilyService(
 
         List<Guid> variantIds = family!.MachineProfiles.Select(variant => variant.Id).ToList();
 
-        await EnsureNoBlockingReferencesAsync(family, variantIds, "deleted", ct);
+        // enforceCoverageLoss: this is the ONLY path that removes the family's OrcaSlicer alias, so it is
+        // the only path that can strip a model's last profile coverage. force bypasses ONLY that indirect
+        // coverage check — never the direct-reference refusal, which always runs first below regardless of
+        // force, so a variant bound as a printer's template profile can never be force-deleted.
+        await EnsureNoBlockingReferencesAsync(
+            family, variantIds, "deleted", enforceCoverageLoss: true, forceCoverageLoss: force, ct);
 
         // Ordering (partial-failure safety): remove the worker bundle first. A worker failure throws
         // (HttpRequestException -> 503) before any DB or alias mutation, so the family remains fully
@@ -318,6 +324,17 @@ public sealed class ProfileFamilyService(
             _ = _dbContext.MachineModelProfiles.Remove(family);
             _ = await _dbContext.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            // Delete-vs-delete (or delete-vs-mutation) race: EF matched zero rows because a concurrent
+            // request already removed/modified this family. The worker bundle was removed first (line
+            // above, idempotent), so nothing is stranded. Surface a clean 409 instead of a raw 500, and do
+            // NOT mark-Failed — the row is already gone. Detach the abandoned graph so the context is clean.
+            DetachTrackedGraph();
+            throw new ProfileFamilyConcurrencyException(
+                $"Profile family '{familyId}' was modified by a concurrent request; retry the operation.",
+                ex);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -589,7 +606,8 @@ public sealed class ProfileFamilyService(
                 NozzleMatches(ParseNozzleDiameter(variant.Name), nozzle)))
             .Select(variant => variant.Id)
             .ToList();
-        await EnsureNoBlockingReferencesAsync(family, droppedVariantIds, blockedAction, ct);
+        await EnsureNoBlockingReferencesAsync(
+            family, droppedVariantIds, blockedAction, enforceCoverageLoss: false, forceCoverageLoss: false, ct);
 
         string previousName = family.Name;
 
@@ -710,6 +728,33 @@ public sealed class ProfileFamilyService(
             {
                 _ = await _dbContext.SaveChangesAsync(ct);
             }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                // Optimistic-concurrency race. MachineModelProfile carries no concurrency token, so EF only
+                // throws here when the UPDATE matched ZERO rows — i.e. the family row was DELETED by a
+                // concurrent request between our load and this persist (a concurrent UPDATE is
+                // last-writer-wins and never throws). That is the render-vs-delete race Bishop flagged: the
+                // bundle we installed on the worker above now has no DB row left to ever drive its removal.
+                // Detach our abandoned mutations, confirm the row is really gone, roll back the bundle we
+                // just installed so nothing is stranded, and surface a clean 404 rather than a raw 500. If
+                // the row somehow still exists, report a plain 409 so the caller can retry.
+                DetachTrackedGraph();
+                bool familyStillExists = await _dbContext.MachineModelProfiles
+                    .AsNoTracking()
+                    .AnyAsync(candidate => candidate.Id == family.Id, ct);
+                if (!familyStillExists)
+                {
+                    await TryDeleteInstalledBundleAsync(family.Id);
+                    throw new ProfileFamilyConcurrentlyDeletedException(
+                        $"Profile family '{family.Id}' was deleted by a concurrent request while its bundle " +
+                        "was being rendered; the partially installed bundle has been removed.",
+                        ex);
+                }
+
+                throw new ProfileFamilyConcurrencyException(
+                    $"Profile family '{family.Id}' was modified by a concurrent request; retry the operation.",
+                    ex);
+            }
             catch (DbUpdateException ex) when (IsFamilyNameUniqueConstraintViolation(ex))
             {
                 // A rename that raced past EnsureRenameAvailableAsync collides only here. The new bundle
@@ -719,6 +764,21 @@ public sealed class ProfileFamilyService(
                     $"A slicer profile family named '{targetName}' already exists.",
                     ex);
             }
+        }
+        catch (ProfileFamilyConcurrentlyDeletedException)
+        {
+            // The concurrency handler above already rolled back the installed bundle and left the row alone
+            // (there is none). Rethrow WITHOUT the restore/mark-Failed compensation below: restoring would
+            // re-install a bundle for a family that no longer exists (re-stranding it), and marking Failed
+            // would write to a row that is gone.
+            throw;
+        }
+        catch (ProfileFamilyConcurrencyException)
+        {
+            // A concurrent UPDATE (not a delete) won the race. The install-then-persist ordering left the
+            // previous good bundle and alias untouched, so there is nothing to restore; rethrow as a clean
+            // 409 without the restore/mark-Failed compensation below.
+            throw;
         }
         catch (Exception ex)
         {
@@ -822,10 +882,7 @@ public sealed class ProfileFamilyService(
     /// </summary>
     private async Task MarkRenderFailedAsync(Guid familyId)
     {
-        foreach (EntityEntry entry in _dbContext.ChangeTracker.Entries().ToList())
-        {
-            entry.State = EntityState.Detached;
-        }
+        DetachTrackedGraph();
 
         MachineModelProfile? reverted = await _dbContext.MachineModelProfiles
             .FirstOrDefaultAsync(candidate => candidate.Id == familyId, CancellationToken.None);
@@ -837,6 +894,46 @@ public sealed class ProfileFamilyService(
         reverted.RenderStatus = ProfileFamilyRenderStatus.Failed;
         reverted.UpdatedAt = DateTime.UtcNow;
         _ = await _dbContext.SaveChangesAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Detaches every tracked entity so a follow-up query reflects the on-disk state rather than the
+    /// abandoned in-memory mutations. Used after a failed save (render rollback) and after a concurrency
+    /// conflict, where the pending graph must be discarded before re-reading the row.
+    /// </summary>
+    private void DetachTrackedGraph()
+    {
+        foreach (EntityEntry entry in _dbContext.ChangeTracker.Entries().ToList())
+        {
+            entry.State = EntityState.Detached;
+        }
+    }
+
+    /// <summary>
+    /// Best-effort removal of a bundle installed on the worker that was orphaned by a concurrent delete:
+    /// the family row is already gone, so nothing else will ever drive this bundle's removal. Guarded the
+    /// same way as <see cref="TryMarkRenderFailedAsync"/> (H3) — a cleanup failure is logged and swallowed
+    /// so it can never mask the <see cref="ProfileFamilyConcurrentlyDeletedException"/> the caller is being
+    /// given, and never throws out of the catch block that calls it. Uses <see cref="CancellationToken.None"/>
+    /// so the orphaned bundle is still removed even if the original request was cancelled.
+    /// </summary>
+    private async Task TryDeleteInstalledBundleAsync(Guid familyId)
+    {
+        try
+        {
+            // Pass null (any fresh online worker), NEVER a pinned version: the bundle name is
+            // version-independent (PrintFarmer-{familyId:N}) and the worker selector filters on EXACT
+            // version equality, so pinning could select no worker and leave the bundle stranded — the same
+            // reasoning as the delete path (C1). Idempotent: a worker 404 is treated as success.
+            await _workerClient.DeleteBundleAsync(null, familyId, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to roll back the worker bundle for profile family {FamilyId} after it was deleted concurrently during a render; the bundle may be orphaned on the worker.",
+                familyId);
+        }
     }
 
     /// <summary>
@@ -1137,47 +1234,114 @@ public sealed class ProfileFamilyService(
         MachineModelProfile family,
         List<Guid> variantIds,
         string blockedAction,
+        bool enforceCoverageLoss,
+        bool forceCoverageLoss,
         CancellationToken ct)
     {
-        if (variantIds.Count == 0)
+        // Direct binding: a live reference points at a concrete family VARIANT (a printer's template
+        // machine profile, or a non-terminal slice job). Only meaningful when variants are being removed.
+        if (variantIds.Count > 0)
+        {
+            // Slice-job reference: only NON-TERMINAL jobs (Queued, Processing) block deletion. A terminal
+            // job (Completed, Failed, Cancelled) has already captured its effective machine profile as an
+            // immutable snapshot (SliceJob.MachineProfileJson / MachineProfileSha256), so deletion does not
+            // erase its provenance; blocking on historical jobs would make every family that ever sliced
+            // permanently undeletable.
+            SliceJob? blockingJob = await _dbContext.SliceJobs
+                .AsNoTracking()
+                .Where(job =>
+                    job.MachineProfileId != null
+                    && variantIds.Contains(job.MachineProfileId.Value)
+                    && (job.Status == SliceJobStatus.Queued || job.Status == SliceJobStatus.Processing))
+                .OrderBy(job => job.CreatedAt)
+                .FirstOrDefaultAsync(ct);
+
+            if (blockingJob is not null)
+            {
+                throw new ProfileFamilyInUseException(
+                    $"Profile family '{family.Name}' cannot be {blockedAction} because slice job " +
+                    $"'{blockingJob.Id}' (status {blockingJob.Status}) references one of its machine profiles.");
+            }
+
+            // Printer reference: block when a registered printer's template machine profile points at a
+            // family variant. This is the DIRECT binding — an FK-ish pointer at a concrete variant row that
+            // removing the family would orphan. It is never bypassed by forceCoverageLoss below: force only
+            // waives the indirect coverage check, not this. Runs against the shared AppDbContext (monolith
+            // and split modes alike).
+            Printer? blockingPrinter =
+                await _printerReferenceRepository.FindByTemplateMachineProfileIdsAsync(variantIds, ct);
+
+            if (blockingPrinter is not null)
+            {
+                throw new ProfileFamilyInUseException(
+                    $"Profile family '{family.Name}' cannot be {blockedAction} because printer " +
+                    $"'{blockingPrinter.Name}' ({blockingPrinter.Id}) references one of its machine profiles.");
+            }
+        }
+
+        // Indirect binding (coverage loss): a custom family exists precisely because OrcaSlicer ships no
+        // profiles for that model (#2056), so the family's alias is frequently the model's ONLY OrcaSlicer
+        // coverage. Deleting the family removes that alias and every printer of the model silently loses
+        // coverage — GET .../profiles/machine/for-model/{modelId} starts returning 404 no_profiles_for_model.
+        // Only DELETE removes the alias (a PATCH rename adds the new-name alias before dropping the old, so
+        // coverage is never lost mid-edit), so only the delete path passes enforceCoverageLoss. The model
+        // ROW surviving the delete is irrelevant here: a surviving row with no OrcaSlicer alias still has no
+        // coverage. force bypasses ONLY this check (#2086 escape hatch), never the direct binding above.
+        if (enforceCoverageLoss && !forceCoverageLoss)
+        {
+            await EnsureNoLastCoverageLossAsync(family, blockedAction, ct);
+        }
+    }
+
+    /// <summary>
+    /// Refuses when removing this family's OrcaSlicer alias would leave its bound catalog model with zero
+    /// OrcaSlicer coverage AND a registered printer uses that model — the indirect binding #2086 describes.
+    /// "Last coverage" mirrors the read path (<see cref="Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController"/>
+    /// for-model resolution): OrcaSlicer coverage is the set of aliases whose slicer type is
+    /// <c>OrcaSlicer</c>, compared by name case-insensitively. Comparing the model's remaining OrcaSlicer
+    /// aliases against the family's own name (trimmed, case-insensitive — exactly how the alias is created
+    /// and removed) means a genuinely distinct OrcaSlicer alias always short-circuits to allow, so this
+    /// cannot raise a false refusal while other coverage exists.
+    /// </summary>
+    private async Task EnsureNoLastCoverageLossAsync(
+        MachineModelProfile family,
+        string blockedAction,
+        CancellationToken ct)
+    {
+        // A family with no bound catalog model contributes no alias, so removing it cannot strand coverage.
+        if (family.PrinterModelId is not Guid printerModelId)
         {
             return;
         }
 
-        // Slice-job reference: only NON-TERMINAL jobs (Queued, Processing) block deletion. A terminal
-        // job (Completed, Failed, Cancelled) has already captured its effective machine profile as an
-        // immutable snapshot (SliceJob.MachineProfileJson / MachineProfileSha256), so deletion does not
-        // erase its provenance; blocking on historical jobs would make every family that ever sliced
-        // permanently undeletable.
-        SliceJob? blockingJob = await _dbContext.SliceJobs
-            .AsNoTracking()
-            .Where(job =>
-                job.MachineProfileId != null
-                && variantIds.Contains(job.MachineProfileId.Value)
-                && (job.Status == SliceJobStatus.Queued || job.Status == SliceJobStatus.Processing))
-            .OrderBy(job => job.CreatedAt)
-            .FirstOrDefaultAsync(ct);
+        IReadOnlyList<SlicerModelAliasDto> aliases =
+            await _catalogService.GetModelAliasesAsync(printerModelId, ct);
 
-        if (blockingJob is not null)
+        string familyName = family.Name.Trim();
+        bool otherOrcaCoverageRemains = aliases.Any(alias =>
+            string.Equals(alias.SlicerType, "OrcaSlicer", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(alias.SlicerModelName)
+            && !string.Equals(alias.SlicerModelName.Trim(), familyName, StringComparison.OrdinalIgnoreCase));
+
+        // Another OrcaSlicer alias survives the delete, so the model keeps coverage — nothing to strand.
+        if (otherOrcaCoverageRemains)
         {
-            throw new ProfileFamilyInUseException(
-                $"Profile family '{family.Name}' cannot be {blockedAction} because slice job " +
-                $"'{blockingJob.Id}' (status {blockingJob.Status}) references one of its machine profiles.");
+            return;
         }
 
-        // Printer reference: block when a registered printer's template machine profile points at a
-        // family variant. Deliberately NOT Printer.ModelId, which references the stock catalog model
-        // that survives family deletion; only the concrete TemplateMachineProfileId binding is orphaned
-        // by removing the family. Runs against the shared AppDbContext (monolith and split modes alike).
-        Printer? blockingPrinter =
-            await _printerReferenceRepository.FindByTemplateMachineProfileIdsAsync(variantIds, ct);
-
-        if (blockingPrinter is not null)
+        // This family's alias is the model's last OrcaSlicer coverage. Refuse only when a registered
+        // printer actually uses the model; with no dependent printer there is nothing to orphan.
+        Printer? affectedPrinter = await _printerReferenceRepository.FindByModelIdAsync(printerModelId, ct);
+        if (affectedPrinter is null)
         {
-            throw new ProfileFamilyInUseException(
-                $"Profile family '{family.Name}' cannot be {blockedAction} because printer " +
-                $"'{blockingPrinter.Name}' ({blockingPrinter.Id}) references one of its machine profiles.");
+            return;
         }
+
+        throw new ProfileFamilyLastCoverageException(
+            $"Profile family '{family.Name}' cannot be {blockedAction} because its OrcaSlicer alias is the " +
+            $"last machine profile coverage for a model that printer '{affectedPrinter.Name}' " +
+            $"({affectedPrinter.Id}) uses; removing it would leave that printer with no machine profiles. " +
+            "Re-point the printer to another profile family, or pass force=true to delete anyway.");
     }
 
     private static bool IsCustomFamily([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] MachineModelProfile? family) =>

@@ -184,7 +184,10 @@ public sealed class ProfileFamiliesController(
     /// <summary>
     /// Deletes a custom OrcaSlicer profile family, its variants, its worker bundle, and its alias.
     /// Deletion remains an admin action (<c>slicer_engines:admin</c>). Refuses with 409 when a
-    /// printer or a non-terminal slice job still references the family.
+    /// printer or a non-terminal slice job directly references the family (<c>profile_family_in_use</c>),
+    /// or when removing the family's alias would strip a model's last OrcaSlicer coverage while a printer
+    /// uses that model (<c>profile_family_last_coverage</c>). Pass <c>?force=true</c> to bypass ONLY the
+    /// coverage refusal — never the direct-reference refusal.
     /// </summary>
     [HttpDelete("families/{familyId:guid}")]
     [RequirePermission("slicer_engines:admin")]
@@ -193,7 +196,10 @@ public sealed class ProfileFamiliesController(
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
-    public async Task<IActionResult> DeleteFamilyAsync(Guid familyId, CancellationToken ct)
+    public async Task<IActionResult> DeleteFamilyAsync(
+        Guid familyId,
+        [FromQuery] bool force,
+        CancellationToken ct)
     {
         if (!ModelState.IsValid)
         {
@@ -208,8 +214,11 @@ public sealed class ProfileFamiliesController(
         try
         {
             _logger.LogInformation(
-                "User {UserId} is deleting profile family {FamilyId}", userId, familyId);
-            await _profileFamilyService.DeleteFamilyAsync(familyId, ct);
+                "User {UserId} is deleting profile family {FamilyId} (force: {Force})",
+                userId,
+                familyId,
+                force);
+            await _profileFamilyService.DeleteFamilyAsync(familyId, force, ct);
             return NoContent();
         }
         catch (ProfileFamilyNotFoundException ex)
@@ -219,6 +228,16 @@ public sealed class ProfileFamiliesController(
         catch (ProfileFamilyInUseException ex)
         {
             return Conflict(new { code = "profile_family_in_use", detail = ex.Message });
+        }
+        catch (ProfileFamilyLastCoverageException ex)
+        {
+            // Distinct code from profile_family_in_use: the remediation differs (re-point the printer or
+            // retry with ?force=true), so a client must be able to tell the two refusals apart.
+            return Conflict(new { code = "profile_family_last_coverage", detail = ex.Message });
+        }
+        catch (ProfileFamilyConcurrencyException ex)
+        {
+            return Conflict(new { code = "profile_family_concurrent_modification", detail = ex.Message });
         }
         catch (HttpRequestException ex)
         {
@@ -301,6 +320,15 @@ public sealed class ProfileFamiliesController(
         {
             return Conflict(new { code = "profile_family_in_use", detail = ex.Message });
         }
+        catch (ProfileFamilyConcurrentlyDeletedException ex)
+        {
+            // The family was deleted mid-edit; the service rolled back the partially installed bundle.
+            return NotFound(new { code = "profile_family_deleted_concurrently", detail = ex.Message });
+        }
+        catch (ProfileFamilyConcurrencyException ex)
+        {
+            return Conflict(new { code = "profile_family_concurrent_modification", detail = ex.Message });
+        }
         catch (ProfileFamilySourceException ex)
         {
             return UnprocessableEntity(new { code = "source_preset_unavailable", detail = ex.Message });
@@ -375,6 +403,16 @@ public sealed class ProfileFamiliesController(
         {
             // A re-render that would drop a still-referenced variant is refused (S6), same as an edit.
             return Conflict(new { code = "profile_family_in_use", detail = ex.Message });
+        }
+        catch (ProfileFamilyConcurrentlyDeletedException ex)
+        {
+            // The family was deleted mid-render; the service rolled back the partially installed bundle
+            // so nothing is stranded on the worker.
+            return NotFound(new { code = "profile_family_deleted_concurrently", detail = ex.Message });
+        }
+        catch (ProfileFamilyConcurrencyException ex)
+        {
+            return Conflict(new { code = "profile_family_concurrent_modification", detail = ex.Message });
         }
         catch (ProfileFamilySourceException ex)
         {

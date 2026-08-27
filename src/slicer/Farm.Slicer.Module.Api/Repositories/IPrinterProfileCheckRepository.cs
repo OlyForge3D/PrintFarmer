@@ -29,4 +29,15 @@ public interface IPrinterProfileCheckRepository
     Task<Printer?> FindByTemplateMachineProfileIdsAsync(
         IReadOnlyCollection<Guid> machineProfileIds,
         CancellationToken ct);
+
+    /// <summary>
+    /// Returns the first registered printer whose <see cref="Printer.ModelId"/> matches the supplied
+    /// catalog model identity, or <see langword="null"/> when none do. Used by profile-family deletion
+    /// to detect the <em>indirect</em> binding: removing a family's OrcaSlicer alias would strip a
+    /// model's last profile coverage, orphaning every printer of that model even though no variant is
+    /// bound as a template profile.
+    /// </summary>
+    /// <param name="modelId">Catalog model identity to match against.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<Printer?> FindByModelIdAsync(Guid modelId, CancellationToken ct);
 }

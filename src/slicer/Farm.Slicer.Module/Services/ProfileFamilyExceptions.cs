@@ -86,3 +86,81 @@ public sealed class ProfileFamilyInUseException : Exception
     {
     }
 }
+
+/// <summary>
+/// Indicates that a family cannot be deleted because its OrcaSlicer alias is the <em>last</em> profile
+/// coverage for a catalog model that a registered printer uses. Distinct from
+/// <see cref="ProfileFamilyInUseException"/> (a direct variant binding): here the binding is indirect —
+/// removing the alias would make <c>GET /api/slicer/profiles/machine/for-model/{modelId}</c> return
+/// <c>404 no_profiles_for_model</c> for every printer of that model. The remediation differs (re-point
+/// the printer or force the delete), so it carries its own <c>{code}</c>.
+/// </summary>
+public sealed class ProfileFamilyLastCoverageException : Exception
+{
+    /// <summary>Creates an empty last-coverage exception.</summary>
+    public ProfileFamilyLastCoverageException()
+    {
+    }
+
+    /// <summary>Creates a last-coverage exception with a descriptive message naming the printer.</summary>
+    public ProfileFamilyLastCoverageException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Creates a last-coverage exception with an underlying error.</summary>
+    public ProfileFamilyLastCoverageException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
+/// <summary>
+/// Indicates that a mutating family operation lost an optimistic-concurrency race: the row was modified
+/// by a concurrent request between load and persist. Mapped to <c>409</c> so the caller can retry rather
+/// than seeing a raw <c>500</c>.
+/// </summary>
+public sealed class ProfileFamilyConcurrencyException : Exception
+{
+    /// <summary>Creates an empty concurrency exception.</summary>
+    public ProfileFamilyConcurrencyException()
+    {
+    }
+
+    /// <summary>Creates a concurrency exception with a descriptive message.</summary>
+    public ProfileFamilyConcurrencyException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Creates a concurrency exception with an underlying error.</summary>
+    public ProfileFamilyConcurrencyException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
+/// <summary>
+/// Indicates that a render lost the race with a concurrent delete: the family row was removed between the
+/// worker install and the authoritative persist. The partially installed bundle is rolled back before this
+/// is thrown, so nothing is stranded on the worker. Mapped to <c>404</c>.
+/// </summary>
+public sealed class ProfileFamilyConcurrentlyDeletedException : Exception
+{
+    /// <summary>Creates an empty concurrently-deleted exception.</summary>
+    public ProfileFamilyConcurrentlyDeletedException()
+    {
+    }
+
+    /// <summary>Creates a concurrently-deleted exception with a descriptive message.</summary>
+    public ProfileFamilyConcurrentlyDeletedException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Creates a concurrently-deleted exception with an underlying error.</summary>
+    public ProfileFamilyConcurrentlyDeletedException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}

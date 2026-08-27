@@ -38,4 +38,12 @@ public sealed class EfPrinterProfileCheckRepository(AppDbContext dbContext) : IP
             .OrderBy(printer => printer.Name)
             .FirstOrDefaultAsync(ct);
     }
+
+    /// <inheritdoc />
+    public Task<Printer?> FindByModelIdAsync(Guid modelId, CancellationToken ct) =>
+        _dbContext.Printers
+            .AsNoTracking()
+            .Where(printer => printer.ModelId == modelId)
+            .OrderBy(printer => printer.Name)
+            .FirstOrDefaultAsync(ct);
 }
