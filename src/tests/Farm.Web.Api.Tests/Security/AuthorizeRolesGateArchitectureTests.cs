@@ -79,6 +79,21 @@ public sealed class AuthorizeRolesGateArchitectureTests
         typeof(Farm.Web.Api.Controllers.MaintenanceController).Assembly,
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
         typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly,
+        // Issue #2043: Farm.Modules.Devices hosts the OctoPrint-compat auth surface plus the
+        // NFC/camera device controllers. Must be scanned for the same reason PrintQueue/Identity
+        // are above. Admin/AdminHomeAssistantController, also named in the issue, ended up owned
+        // by Farm.Modules.Administration instead (Phase 14, #2042, landed first and already
+        // claimed it), so NfcController anchors the Devices assembly here instead.
+        typeof(Farm.Web.Api.Controllers.NfcController).Assembly,
+        // Phase 14 (#2042) moved AdminHomeAssistantController, AdminTelegramController,
+        // AdminOverviewController, AdminDataController, and UnifiedSettingsController into
+        // Farm.Modules.Administration but never added an anchor for that assembly here. The
+        // gap went unnoticed pre-merge because AdminHomeAssistantController.Assembly happened to
+        // resolve to Farm.Web.Api (the same as every other anchor); once Phase 15 moved that
+        // controller into Farm.Modules.Administration, the anchor's identity silently changed
+        // and this was the first thing to notice Administration was never covered. Added now so
+        // Farm.Modules.Administration's controllers stay covered by this role-name-gate guard.
+        typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
     ];
 
     /// <summary>
@@ -102,6 +117,8 @@ public sealed class AuthorizeRolesGateArchitectureTests
         typeof(Farm.Web.Api.Controllers.MaintenanceController).Assembly,
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
         typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly,
+        typeof(Farm.Web.Api.Controllers.NfcController).Assembly,
+        typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
     ];
 
     [Fact]
