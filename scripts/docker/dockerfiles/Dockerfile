@@ -34,6 +34,7 @@ COPY src/modules/Farm.Modules.PrintQueue/*.csproj ./modules/Farm.Modules.PrintQu
 COPY src/modules/Farm.Modules.Maintenance/*.csproj ./modules/Farm.Modules.Maintenance/
 COPY src/modules/Farm.Modules.Gcode/*.csproj ./modules/Farm.Modules.Gcode/
 COPY src/modules/Farm.Modules.Identity/*.csproj ./modules/Farm.Modules.Identity/
+COPY src/modules/Farm.Modules.Inventory/*.csproj ./modules/Farm.Modules.Inventory/
 COPY src/modules/Farm.Modules.Administration/*.csproj ./modules/Farm.Modules.Administration/
 COPY src/api/*.csproj ./api/
 COPY Directory.Build.props ./

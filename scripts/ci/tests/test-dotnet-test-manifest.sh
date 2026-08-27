@@ -213,6 +213,12 @@ EXPECTED_CANONICAL = {
         "defaultFilter": "Category!=DbHeavy&Category!=Docker",
         "runIntegration": False,
     },
+    "Farm.Modules.Inventory.Tests": {
+        "testProject": "tests/Farm.Modules.Inventory.Tests/Farm.Modules.Inventory.Tests.csproj",
+        "productionProject": "modules/Farm.Modules.Inventory/Farm.Modules.Inventory.csproj",
+        "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+        "runIntegration": False,
+    },
 }
 entries_by_name = {entry.get("name"): entry for entry in entries if entry.get("name")}
 for pinned_name, pinned_fields in EXPECTED_CANONICAL.items():
