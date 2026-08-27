@@ -248,6 +248,58 @@ public class FilamentCoverageSpoolResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_DistinctNativeSources_ResolveConcurrently()
+    {
+        TaskCompletionSource<bool> sourceAStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<bool> sourceBStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<bool> releaseSources = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Mock<IBackendClient> native = new();
+        native.As<ISupportsSpoolman>()
+            .Setup(service => service.GetSpoolmanSpoolsAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (string baseUrl, CancellationToken ct) =>
+            {
+                TaskCompletionSource<bool> started = baseUrl.Contains("moon-a", StringComparison.Ordinal)
+                    ? sourceAStarted
+                    : sourceBStarted;
+                _ = started.TrySetResult(true);
+                await releaseSources.Task.WaitAsync(ct);
+                int spoolId = ReferenceEquals(started, sourceAStarted) ? 1 : 2;
+                return JsonSerializer.Serialize(new[]
+                {
+                    new { id = spoolId, remaining_weight = 100, material = "PLA" },
+                });
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(service => service.GetClient((int)PrinterBackend.Moonraker))
+            .Returns(native.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+        Printer printerA = PrinterWithSpool("http://moon-a.local", PrinterBackend.Moonraker, 1);
+        Printer printerB = PrinterWithSpool("http://moon-b.local", PrinterBackend.Moonraker, 2);
+
+        Task<IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>>> resolving =
+            resolver.ResolveAsync([printerA, printerB], CancellationToken.None);
+        try
+        {
+            await Task.WhenAll(sourceAStarted.Task, sourceBStarted.Task)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            _ = releaseSources.TrySetResult(true);
+        }
+
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result =
+            await resolving;
+        result[printerA.Id][1].Spool!.RemainingWeightG.Should().Be(100);
+        result[printerB.Id][2].Spool!.RemainingWeightG.Should().Be(100);
+    }
+
+    [Fact]
     public async Task ResolveAsync_ManagedPrinters_UseOneCentralBatch()
     {
         Mock<IBackendClientFactory> factory = new(MockBehavior.Strict);
