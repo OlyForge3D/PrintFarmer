@@ -26,6 +26,7 @@ public class KasaSmartPlugProviderTests : IDisposable
     public void Dispose()
     {
         _listener.Stop();
+        _listener.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -128,7 +129,7 @@ public class KasaSmartPlugProviderTests : IDisposable
             public override long Position
             {
                 get => 0;
-                set { }
+                set => _ = value;
             }
 
             public override void Flush()

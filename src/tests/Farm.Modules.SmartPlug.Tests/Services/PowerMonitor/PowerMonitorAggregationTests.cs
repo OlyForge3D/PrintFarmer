@@ -21,7 +21,7 @@ namespace Farm.Web.Api.Tests.Services.PowerMonitor;
 
 /// <summary>
 /// Correctness tests for <see cref="PowerMonitorPollingService"/>'s server-side aggregation
-/// (COUNT + SUM pushed into SQL instead of materializing every <see cref="PowerReading"/>).
+/// (COUNT + SUM pushed into SQL instead of materializing every <see cref="Farm.Infrastructure.Domain.PowerReading"/>).
 /// Verifies the computed <see cref="PrintJob.KwhUsed"/> is unchanged from the equivalent
 /// in-memory sum, across multiple-reading, single-reading, and no-reading windows.
 /// </summary>

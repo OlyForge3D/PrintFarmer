@@ -169,7 +169,11 @@ public class SettingsMetadataAttributeTests
             .OrderBy(path => path, StringComparer.Ordinal)
             .Select(path => (Path: path, Name: AssemblyName.GetAssemblyName(path)))
             .GroupBy(candidate => candidate.Name.FullName ?? candidate.Path, StringComparer.Ordinal)
+            // S3885: Assembly.Load requires an assembly name, not a file path. This test scans
+            // build output for Farm.*.dll files at runtime, so LoadFrom is required here.
+#pragma warning disable S3885
             .Select(group => Assembly.LoadFrom(group.First().Path))
+#pragma warning restore S3885
             .Where(assembly => GetLoadableTypes(assembly)
                 .Any(type => type.GetCustomAttribute<AppSettingAttribute>() is not null));
 

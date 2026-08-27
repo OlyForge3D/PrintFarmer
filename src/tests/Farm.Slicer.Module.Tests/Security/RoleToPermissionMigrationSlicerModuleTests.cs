@@ -14,7 +14,7 @@ namespace Farm.Slicer.Module.Tests.Security;
 /// <c>Farm.Infrastructure.Authorization.RequirePermissionAttribute</c>
 /// (covered by <c>Farm.Web.Api.Tests.Security.RoleToPermissionMigrationTests</c>).
 ///
-/// Also proves the fix for a real gap found during pre-PR review: <see cref="WorkersController"/>'s
+/// Also proves the fix for a real gap found during pre-PR review: <see cref="Farm.Slicer.Module.Api.Controllers.WorkersController"/>'s
 /// <c>ResetAsync</c> stacks a class-level <c>dispatch-settings:manage</c> requirement (pre-existing)
 /// with a method-level <c>dispatch-settings:admin</c> requirement (added by this migration). Because
 /// ASP.NET Core combines class- and method-level filters with AND semantics, a custom role holding

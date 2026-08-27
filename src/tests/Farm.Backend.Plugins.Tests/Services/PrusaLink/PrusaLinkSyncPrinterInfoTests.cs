@@ -18,7 +18,7 @@ using Xunit;
 namespace Farm.Backend.Plugins.Tests.Services.PrusaLink;
 
 /// <summary>
-/// Unit tests for <see cref="PrusaLinkPollingService.SyncPrinterInfoAsync"/>.
+/// Unit tests for <c>PrusaLinkPollingService.SyncPrinterInfoAsync</c>.
 /// The method is private and invoked via reflection. A mocked <see cref="IServiceScopeFactory"/>
 /// injects fake <see cref="IPrusaLinkClient"/> and <see cref="IUnitOfWork"/> instances.
 /// </summary>

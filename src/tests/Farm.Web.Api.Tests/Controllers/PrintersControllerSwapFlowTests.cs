@@ -858,7 +858,11 @@ public class PrintersControllerSwapFlowTests
     }
 
     // Local alias so the test file avoids a namespace clash with Farm.Infrastructure enum converters.
+    // S2094 false positive: intentionally empty — this exists solely to give a distinct type name
+    // to Json.Serialization.JsonStringEnumConverter, it deliberately adds no members.
+#pragma warning disable S2094
     private sealed class JsonStringEnumConverterAlias : System.Text.Json.Serialization.JsonStringEnumConverter
     {
     }
+#pragma warning restore S2094
 }

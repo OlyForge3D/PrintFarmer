@@ -285,7 +285,9 @@ public class NetworkDiscoveryServiceTests
         // For test stability we always emulate the expected CreateDiscoveredPrinter
         // behavior locally rather than invoking private API methods via reflection.
         DiagnosticLogLoadedPrinterInfoTypes();
+#pragma warning disable CA1303 // Test diagnostic output only; not user-facing/localizable text.
         Console.WriteLine("[TEST DIAGNOSTIC] Using local emulation of CreateDiscoveredPrinter for deterministic tests");
+#pragma warning restore CA1303
 
         // Extract values from printerInfo permissively
         string? name = null;
@@ -361,7 +363,9 @@ public class NetworkDiscoveryServiceTests
     {
         try
         {
+#pragma warning disable CA1303 // Test diagnostic output only; not user-facing/localizable text.
             Console.WriteLine("[TEST DIAGNOSTIC] Enumerating loaded assemblies for types named 'PrinterInfo':");
+#pragma warning restore CA1303
             foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 string asmName = asm.FullName ?? asm.GetName().Name ?? "<unknown assembly>";

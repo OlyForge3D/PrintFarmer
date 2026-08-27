@@ -274,11 +274,12 @@ public class HarvestHubTests
         }
 
         object? value = property.GetValue(obj);
-        if (value == null && expectedValue == null)
+        bool expectedIsNull = expectedValue is null;
+        if (value == null && expectedIsNull)
         {
             return true;
         }
 
-        return value == null || expectedValue == null ? false : value.Equals(expectedValue);
+        return value != null && !expectedIsNull && value.Equals(expectedValue);
     }
 }

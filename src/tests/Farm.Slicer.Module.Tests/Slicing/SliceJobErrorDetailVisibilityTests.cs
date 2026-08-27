@@ -14,7 +14,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// <summary>
 /// Regression coverage for issue #1768's acceptance criterion that worker-side failure detail
 /// must be retrievable by an admin without leaking internal paths/filenames to non-admins.
-/// <see cref="Farm.Slicer.Module.Api.Controllers.Slicing.SliceJobController.MapToPublicStatusResponse"/>
+/// <c>Farm.Slicer.Module.Api.Controllers.Slicing.SliceJobController.MapToPublicStatusResponse</c>
 /// always reduces <c>ErrorMessage</c> to a generic "Slicing failed." string for every caller, and
 /// only populates the real <c>ErrorDetail</c> (which may contain worker container paths, model
 /// filenames, or OrcaSlicer stderr) when <see cref="Farm.Infrastructure.Security.PrintFarmerPermissions.IsFarmAdmin"/>

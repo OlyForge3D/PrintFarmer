@@ -63,7 +63,12 @@ public class SlicersServiceWorkerSyncTests
 
     private static HttpClient CreateMockHttpClient()
     {
-        HttpClientHandler handler = new HttpClientHandler();
+        HttpClientHandler handler = new HttpClientHandler
+        {
+            // Loopback-only test client (BaseAddress below is http://localhost); set explicitly
+            // rather than defer CA5399, since it's cheap to fix at the two real call sites.
+            CheckCertificateRevocationList = true,
+        };
         return new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
     }
 

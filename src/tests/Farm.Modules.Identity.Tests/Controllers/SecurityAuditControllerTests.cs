@@ -251,7 +251,7 @@ public class SecurityAuditControllerTests : IClassFixture<SecurityAuditControlle
         rawTimestamp.Should().NotBeNullOrEmpty();
         DateTimeOffset.TryParse(rawTimestamp, out DateTimeOffset parsed).Should().BeTrue(
             "timestamp must be parseable as DateTimeOffset");
-        bool isUtcFormat = rawTimestamp!.EndsWith("Z", StringComparison.OrdinalIgnoreCase)
+        bool isUtcFormat = rawTimestamp!.EndsWith('Z')
             || rawTimestamp.EndsWith("+00:00", StringComparison.OrdinalIgnoreCase);
         isUtcFormat.Should().BeTrue("login audit timestamps must be UTC (Z or +00:00) per service contract");
         parsed.Offset.Should().Be(TimeSpan.Zero, "LoginAuditService always writes DateTimeOffset.UtcNow");

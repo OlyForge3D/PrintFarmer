@@ -209,7 +209,7 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
 
     /// <summary>
     /// Regression guard for the #941 regate finding: a memberless
-    /// <see cref="ValidationException"/> — the shape used by 21 of the 23 <c>Validate()</c>
+    /// <see cref="System.ComponentModel.DataAnnotations.ValidationException"/> — the shape used by 21 of the 23 <c>Validate()</c>
     /// implementations across the settings classes — must surface its <see cref="Exception.Message"/>
     /// in the top-level <c>message</c> field of the response. The React SettingsPage save-error
     /// banner renders that field verbatim (<c>firstMessage ?? summary</c>). If the message is a

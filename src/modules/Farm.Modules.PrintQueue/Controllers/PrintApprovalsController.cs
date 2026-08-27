@@ -12,6 +12,13 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/print-approvals")]
 [Authorize]
+
+// S6960: Sonar suggests splitting this controller into 2 smaller ones. Its endpoints are
+// cohesive approve/reject/list operations over the same print-approval workflow and share the
+// same authorization/DI surface; splitting would add controller-count/routing overhead without
+// improving readability or testability. Deliberately not refactored — tracked as a design
+// decision, not a defect, per issue #2094.
+#pragma warning disable S6960
 public class PrintApprovalsController(IPrintApprovalService approvalService, Farm.Infrastructure.Repositories.PrintJobs.IPrintApprovalRepository? repo = null) : ControllerBase
 {
     private readonly IPrintApprovalService _approvalService = approvalService;
@@ -57,3 +64,4 @@ public class PrintApprovalsController(IPrintApprovalService approvalService, Far
         return NoContent();
     }
 }
+#pragma warning restore S6960

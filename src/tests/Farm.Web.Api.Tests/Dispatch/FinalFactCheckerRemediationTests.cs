@@ -642,7 +642,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         service.ConvertFromUtc(
                 advanced.ScheduledStartTime,
                 "America/New_York")
-            .Should().Be(new DateTime(2026, 3, 8, 9, 30, 0));
+            .Should().Be(new DateTime(2026, 3, 8, 9, 30, 0, DateTimeKind.Unspecified));
     }
 
     [Theory]

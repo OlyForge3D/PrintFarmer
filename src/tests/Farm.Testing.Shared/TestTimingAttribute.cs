@@ -9,9 +9,13 @@ namespace Farm.Testing.Shared;
 /// unless PF_TIMING=0. Safe to apply broadly (sub-millisecond overhead typically).
 /// CSV Header: TimestampUtc,DurationMs,Category,Class,Method
 /// </summary>
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = false, Inherited = true)]
 public sealed class TestTimingAttribute(string category = "DbHeavy") : BeforeAfterTestAttribute
 {
     private readonly string _category = category;
+
+    /// <summary>Gets the timing bucket label recorded alongside each test's duration.</summary>
+    public string Category => _category;
 
     [ThreadStatic]
     private static Stopwatch? _sw;
@@ -52,7 +56,7 @@ public sealed class TestTimingAttribute(string category = "DbHeavy") : BeforeAft
 }
 
 /// <summary>
-/// Shared helper for writing timing lines (console + CSV) with initialization & run segmentation.
+/// Shared helper for writing timing lines (console + CSV) with initialization &amp; run segmentation.
 /// Used by explicit <see cref="TestTimingAttribute"/> and the automatic timing sink.
 /// </summary>
 internal static class TestTimingLog

@@ -5,7 +5,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <WarningsNotAsErrors>nullable</WarningsNotAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);nullable</WarningsNotAsErrors>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <Title>Farm.Slicers.OrcaSlicer.v2_4_0</Title>
     <Description>OrcaSlicer v2.4.0 slicer library for PrintFarmer. Contains profiles, assets, and UI components.</Description>

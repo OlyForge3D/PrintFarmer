@@ -1525,8 +1525,13 @@ public sealed class PrusaLinkHistoryAuthorityTests
         parameter.Should().Contain($"response=\"{expectedResponse}\"");
     }
 
+    // CA5351 false positive: MD5 here reproduces the HTTP Digest Authentication algorithm
+    // (RFC 7616), which mandates MD5 for HA1/HA2/response hashing — this is not a security
+    // use of MD5, it's exercising the exact wire protocol PrusaLink's client implements.
+#pragma warning disable CA5351
     private static string Md5Hex(string input) =>
         Convert.ToHexStringLower(MD5.HashData(Encoding.ASCII.GetBytes(input)));
+#pragma warning restore CA5351
 
     [Fact]
     public async Task PluginRegistration_DirectApiClient_UsesVettedEgressClient()

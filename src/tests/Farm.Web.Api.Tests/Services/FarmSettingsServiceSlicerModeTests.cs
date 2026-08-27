@@ -13,12 +13,17 @@ public class FarmSettingsServiceSlicerModeTests
     private readonly Mock<ISettingsService> _settingsMock = new();
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
 
+    // CA1825 false positive: this collection expression has 3 elements; the analyzer misfires on
+    // TheoryData<string>'s implicit array-conversion operator when targeted by a C# 12 collection
+    // expression.
+#pragma warning disable CA1825
     public static TheoryData<string> NonAdvanceableTokens =>
     [
         Convert.ToBase64String(Convert.FromHexString("000000000000002A")),
         Convert.ToBase64String(Guid.Parse("29e33b8d-b7e9-4f1e-8632-3f687aa99210").ToByteArray()),
         RevisionETag.Encode(long.MaxValue),
     ];
+#pragma warning restore CA1825
 
     public FarmSettingsServiceSlicerModeTests()
     {

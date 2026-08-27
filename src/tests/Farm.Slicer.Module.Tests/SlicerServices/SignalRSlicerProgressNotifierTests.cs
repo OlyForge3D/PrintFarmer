@@ -440,7 +440,4 @@ public class SignalRSlicerProgressNotifierTests
     }
 }
 
-/// <summary>
-/// Mock SignalR Hub for testing
-/// </summary>
 // NOTE: Removed duplicate SlicerProgressHub test stub; using production hub class instead.

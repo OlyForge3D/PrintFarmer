@@ -16,7 +16,7 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Controllers;
 
 /// <summary>
-/// Verifies that <see cref="PrintersController.UpdateAsync"/> notifies
+/// Verifies that <see cref="Farm.Web.Api.Controllers.PrintersController.UpdateAsync"/> notifies
 /// <see cref="IPrinterCacheInvalidator"/> exactly when a printer edit is durably committed
 /// (issue #1763). This is the invalidation half of the polling-cache perf fix: the polling
 /// services only stop re-querying the printer row per tick because an edit is guaranteed to

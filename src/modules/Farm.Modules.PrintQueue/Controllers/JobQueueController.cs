@@ -35,6 +35,14 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/job-queue")]
 [Tags("Print Job Queue")]
 [Authorize]
+
+// S6960: Sonar suggests splitting this controller into 3 smaller ones. Its endpoints are
+// cohesive operations over the same print-job-queue domain (enqueue, assignment, dispatch,
+// idempotency, parts-inventory reservation) and share the same authorization/DI surface;
+// splitting would fragment a single client-facing workflow across multiple routes without
+// improving readability or testability. Deliberately not refactored — tracked as a design
+// decision, not a defect, per issue #2094.
+#pragma warning disable S6960
 public class JobQueueController(
     IJobQueueService queueService,
     IPrintJobManagementService printJobManagementService,
@@ -1332,3 +1340,4 @@ public class JobQueueController(
 
     private string GetActorSubject() => QueueActorIdentity.Resolve(User);
 }
+#pragma warning restore S6960

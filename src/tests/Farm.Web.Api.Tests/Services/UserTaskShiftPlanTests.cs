@@ -8,7 +8,7 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Services;
 
 /// <summary>
-/// Focused coverage for <see cref="UserTaskService.GetShiftPlanAsync"/>:
+/// Focused coverage for <see cref="UserTaskService.GetShiftPlanAsync(System.Threading.CancellationToken)"/>:
 /// deterministic anchor grouping/order, legacy-task tolerance, and stable tie-breaking.
 /// </summary>
 public class UserTaskShiftPlanTests
