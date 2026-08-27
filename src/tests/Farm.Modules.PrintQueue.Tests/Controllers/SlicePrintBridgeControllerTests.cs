@@ -340,28 +340,6 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         result.Should().BeOfType<BadRequestObjectResult>();
     }
 
-    [Fact]
-    [Trait("Category", "SlicePrintBridge")]
-    public async Task SendToPrinter_GetWithPathReturnsNull_Returns400()
-    {
-        Guid jobId = Guid.NewGuid();
-        Guid printerId = Guid.NewGuid();
-        Artifact gcode = CreateArtifact(jobId, "gcode", "model.gcode");
-
-        SetupCompletedJobWithGcode(jobId, gcode);
-        SetupPrinterExists(printerId);
-
-        _artifactsMock
-            .Setup(a => a.ReadArtifactBytesAsync(gcode.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
-
-        var request = new SendToPrinterRequest { PrinterId = printerId };
-
-        IActionResult result = await _controller.SendToPrinterAsync(jobId, request, CancellationToken.None);
-
-        result.Should().BeOfType<BadRequestObjectResult>();
-    }
-
     // =========================================================================
     // Happy path: upload only (200)
     // =========================================================================
@@ -1009,6 +987,10 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         _artifactsMock
             .Setup(a => a.ArtifactFileExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(File.Exists(filePath));
+
+        _artifactsMock
+            .Setup(a => a.GetWithPathIfExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => File.Exists(filePath) ? (artifact, filePath) : null);
 
         _artifactsMock
             .Setup(a => a.ReadArtifactBytesAsync(artifact.Id, It.IsAny<CancellationToken>()))

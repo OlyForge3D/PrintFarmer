@@ -21,7 +21,7 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Controllers;
 
 /// <summary>
-/// Integration tests for <see cref="CameraSnapshotsController"/>.
+/// Integration tests for <see cref="Farm.Web.Api.Controllers.CameraSnapshotsController"/>.
 /// </summary>
 [Trait("Category", "Integration")]
 public class CameraSnapshotsControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime

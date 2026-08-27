@@ -29,7 +29,7 @@ namespace Farm.Infrastructure.Tests.Locations;
 /// O(1)/O(2) EF command round trips as the subtree grows, using the materialized
 /// <see cref="Location.Path"/> prefix instead of a per-node BFS. Command counts are
 /// measured with a <see cref="DbCommandInterceptor"/>, mirroring the throwaway benchmark
-/// used in the #1500 spike and the pattern already used in <see cref="LocationHierarchyTests"/>.
+/// used in the #1500 spike and the pattern already used in <c>LocationHierarchyTests</c>.
 /// </summary>
 public class LocationSubtreeQueryPerformanceTests : IDisposable
 {

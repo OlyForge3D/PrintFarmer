@@ -8,7 +8,7 @@ namespace Farm.Slicer.Module.Tests.Data.Repositories;
 
 /// <summary>
 /// Regression tests for the batch-commit-then-per-row-fallback pattern used by
-/// <see cref="ProfilesService"/>'s seed loops (issue #1354). These use a real EF Core
+/// <see cref="Farm.Slicer.Module.Api.Services.ProfilesService"/>'s seed loops (issue #1354). These use a real EF Core
 /// <see cref="SlicerDbContext"/> (SQLite) instead of mocks, because the bug this guards
 /// against — the change tracker still holding the whole failed batch as <c>Added</c> after a
 /// failed <c>SaveChangesAsync</c>, causing a per-row retry to resubmit the entire poisoned

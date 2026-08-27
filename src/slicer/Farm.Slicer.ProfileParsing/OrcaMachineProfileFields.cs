@@ -158,14 +158,14 @@ public static class OrcaMachineProfileFields
 
     private static (double X, double Y)? TryParsePoint(string pointString)
     {
-        // S3878 (remove array creation, pass elements) does not apply here: passing the chars
-        // directly (`Split('x', 'X')`) does not do what it looks like it does. Because a char
-        // converts implicitly to int, the two-argument call binds to the non-params overload
-        // `Split(char separator, int count, StringSplitOptions options = default)` in normal
-        // form (C# prefers a normal-form applicable candidate over the params-array-expanded
-        // form), silently treating 'X' (88) as a result-count limit instead of a second
-        // separator. The explicit array keeps the intended `Split(char[]?)` overload.
-#pragma warning disable S3878
+        // S3878 (remove this array creation) and S3220 (this call partially matches a non-params
+        // overload) directly conflict for this exact call shape: Split('x', 'X') triggers S3220
+        // because 'X' has an implicit char->int conversion, so the call partially matches the
+        // unrelated Split(char, int, StringSplitOptions) overload; wrapping the arguments in an
+        // explicit array (as done here) resolves that ambiguity at the cost of the trivial
+        // allocation S3878 objects to. Disambiguation wins here since it is a real-behavior
+        // safety net, not a style preference.
+#pragma warning disable S3878 // Array creation is intentional to disambiguate from Split(char, int, StringSplitOptions) - see comment above.
         string[] parts = pointString.Split(['x', 'X']);
 #pragma warning restore S3878
         if (parts.Length == 2 &&

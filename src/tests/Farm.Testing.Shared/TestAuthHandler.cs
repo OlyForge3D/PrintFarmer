@@ -37,7 +37,9 @@ public class TestAuthHandler(
         // Deterministic test identity. Allow tests to override roles via
         // the X-Test-Roles request header (comma-separated). This lets tests
         // simulate non-admin users while still using the Test auth scheme.
-        string? roleHeader = Request.Headers.ContainsKey("X-Test-Roles") ? Request.Headers["X-Test-Roles"].ToString() : null;
+        string? roleHeader = Request.Headers.TryGetValue("X-Test-Roles", out var roleHeaderValues)
+            ? roleHeaderValues.ToString()
+            : null;
         List<string> roles = new List<string>();
         if (!string.IsNullOrWhiteSpace(roleHeader))
         {

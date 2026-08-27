@@ -11,7 +11,7 @@ namespace Farm.Testing.Shared;
 /// <summary>
 /// Custom xUnit test framework hook that, on disposal (after all tests complete),
 /// reads the per-test timing CSV (emitted by <see cref="TestTimingAttribute"/>)
-/// and writes an aggregated summary (percentiles & top hotspots) to both console output
+/// and writes an aggregated summary (percentiles &amp; top hotspots) to both console output
 /// and a companion file "test-timings-summary.txt" in the same directory.
 /// Enabled by default when timing is enabled; can be disabled via PF_TIMING_SUMMARY=0.
 /// </summary>

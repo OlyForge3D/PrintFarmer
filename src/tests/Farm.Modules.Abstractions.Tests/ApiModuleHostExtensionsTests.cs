@@ -195,7 +195,7 @@ public sealed class IdempotentAttributeTests
     [Fact]
     public void Constructor_BlankRouteKey_Throws()
     {
-        Action act = () => new Farm.Modules.Abstractions.Idempotency.IdempotentAttribute(" ");
+        Action act = () => _ = new Farm.Modules.Abstractions.Idempotency.IdempotentAttribute(" ");
 
         act.Should().Throw<ArgumentException>();
     }

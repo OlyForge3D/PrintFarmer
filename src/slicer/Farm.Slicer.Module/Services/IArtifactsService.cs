@@ -146,6 +146,19 @@ public interface IArtifactsService
     Task<bool> ArtifactFileExistsAsync(Guid id, CancellationToken ct);
 
     /// <summary>
+    /// Resolves an artifact's full filesystem path only when its backing file actually exists on
+    /// disk, in a single lookup. Prefer this over calling <see cref="ArtifactFileExistsAsync"/> and
+    /// then <see cref="GetWithPathAsync"/> separately, which resolves the artifact twice.
+    /// </summary>
+    /// <param name="id">The artifact identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// The artifact and its full path, or <see langword="null"/> when the artifact row or its file
+    /// is missing.
+    /// </returns>
+    Task<(Artifact Artifact, string FullPath)?> GetWithPathIfExistsAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
     /// Reads the full contents of an artifact's backing file, without exposing the storage path to
     /// the caller.
     /// </summary>

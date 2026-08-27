@@ -513,16 +513,9 @@ public class SlicePrintBridgeController(
             return BadRequest(new { error = "Slice job has no gcode artifact.", jobId = id });
         }
 
-        // 4. Resolve the artifact file on disk
-        if (!await artifactsService.ArtifactFileExistsAsync(gcodeArtifact.Id, ct))
-        {
-            logger.LogError(
-                "Gcode artifact file missing from disk for artifact {ArtifactId}, job {JobId}",
-                gcodeArtifact.Id, id);
-            return BadRequest(new { error = "Gcode artifact file is missing from storage.", artifactId = gcodeArtifact.Id });
-        }
-
-        var pathResult = await artifactsService.GetWithPathAsync(gcodeArtifact.Id, ct);
+        // 4. Resolve the artifact file on disk (single lookup that both verifies file existence
+        // and returns the path, avoiding a duplicate DB round trip for the same artifact).
+        var pathResult = await artifactsService.GetWithPathIfExistsAsync(gcodeArtifact.Id, ct);
         if (pathResult is null)
         {
             logger.LogError(

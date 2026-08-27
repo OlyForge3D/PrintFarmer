@@ -26,6 +26,14 @@
          cannot silently regress the baseline and require manual grep-diffing across CI logs
          (as happened repeatedly on #2085). -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- #2094: NuGetAudit (NU1901-NU1904) reports vulnerabilities from an external, continuously
+         updated advisory database, not from anything in this repo's code or a package version
+         bump. With TreatWarningsAsErrors on, a newly published CVE for an already-pinned
+         transitive package would turn every unrelated build red with zero code change until
+         someone manually re-pins. Keep these visible as warnings (so real vulnerabilities are
+         still seen and triaged) without letting an external database update block the build. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
     
     <!-- NuGet warning suppressions for .NET 10 migration -->
     <!-- NU1605: Transitive version downgrades (expected due to mixed 9.x and 10.0 dependencies) -->

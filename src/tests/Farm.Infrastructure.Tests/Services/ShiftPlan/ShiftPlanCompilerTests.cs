@@ -925,7 +925,8 @@ public class ShiftPlanCompilerTests
                 It.IsAny<CancellationToken>()),
             Times.Never);
     }
-    /// exact-key bootstrap re-establishes fail-closed suppression from the persisted row.
+    /// <summary>
+    /// Exact-key bootstrap re-establishes fail-closed suppression from the persisted row.
     /// </summary>
     [Fact]
     public async Task CompileAsync_RestartDiscardsClearedEvidence_RecoversDurableSuppressionFailClosed()
@@ -1253,7 +1254,7 @@ public class ShiftPlanCompilerTests
     /// <summary>
     /// Issue #823 (legacy versionless-seed edge — direct state): a key present in
     /// <see cref="ShiftPlanSuppressionState.SuppressedKeys"/> with NO matching
-    /// <see cref="ShiftPlanSuppressionState.SuppressedVersions"/> entry (a versionless/direct-seeded
+    /// <c>SuppressedVersions</c> entry (a versionless/direct-seeded
     /// legacy row) must clear to a replay tombstone floored at the legacy version <c>0</c> — NOT
     /// <see cref="long.MinValue"/>. Otherwise an equal legacy-<c>0</c> durable/delta replay reads as
     /// strictly newer than the tombstone and wrongly re-suppresses a genuine recurrence after the

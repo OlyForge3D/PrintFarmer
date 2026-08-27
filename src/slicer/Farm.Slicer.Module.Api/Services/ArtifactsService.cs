@@ -496,6 +496,18 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
     }
 
     /// <inheritdoc/>
+    public async Task<(Artifact Artifact, string FullPath)?> GetWithPathIfExistsAsync(Guid id, CancellationToken ct)
+    {
+        (Artifact Artifact, string FullPath)? resolved = await GetWithPathAsync(id, ct);
+        if (resolved is null || !File.Exists(resolved.Value.FullPath))
+        {
+            return null;
+        }
+
+        return resolved;
+    }
+
+    /// <inheritdoc/>
     public async Task<byte[]?> ReadArtifactBytesAsync(Guid id, CancellationToken ct)
     {
         (Artifact Artifact, string FullPath)? resolved = await GetWithPathAsync(id, ct);

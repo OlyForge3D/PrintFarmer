@@ -71,7 +71,7 @@ public class DesktopScopePermissionMapTests
     [Fact]
     public void ApiKeyScope_UnderlyingType_IsIntToMatchThePersistedColumn()
     {
-        Enum.GetUnderlyingType(typeof(ApiKeyScope)).Should().Be(typeof(int));
+        Enum.GetUnderlyingType(typeof(ApiKeyScope)).Should().Be<int>();
     }
 
     [Theory]

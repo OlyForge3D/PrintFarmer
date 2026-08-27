@@ -9,7 +9,7 @@ namespace Farm.Infrastructure.Tests.Infrastructure;
 
 public class GcodeMetadataExtractorServiceTests
 {
-    private readonly Mock<ILogger<GcodeMetadataExtractorService>> _loggerMock;
+    private readonly Mock<ILogger<GcodeMetadataExtractorService>>? _loggerMock;
     private readonly GcodeMetadataExtractorService _service;
     private readonly bool _useConsoleLogging = false; // Set to true to see detailed logs during debugging
 

@@ -16,12 +16,10 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Integration;
 
-/// <summary>
-/// Integration tests for GcodeFilesService library operations
-/// Tests G-code file library management: queries, retrieval, deletion
-/// Covers filtering by search, material, and nozzle diameter
-/// Fast executing (~3-4 seconds for 15 tests) - suitable for CI/CD pipelines
-/// </summary>
+// Integration tests for GcodeFilesService library operations
+// Tests G-code file library management: queries, retrieval, deletion
+// Covers filtering by search, material, and nozzle diameter
+// Fast executing (~3-4 seconds for 15 tests) - suitable for CI/CD pipelines
 [Trait("Category", "Integration")]
 public class GcodeLibraryServiceIntegrationTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
@@ -41,9 +39,7 @@ public class GcodeLibraryServiceIntegrationTests : IClassFixture<CustomWebApplic
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Helper method to get or create a gcode folder for tests
-    /// </summary>
+    // Helper method to get or create a gcode folder for tests
     private async Task<FolderNode> GetOrCreateGcodeFolderAsync(AppDbContext context)
     {
         FolderNode? folder = await context.Set<FolderNode>().FirstOrDefaultAsync(f => f.Path == "/" && f.FolderType == "gcode");

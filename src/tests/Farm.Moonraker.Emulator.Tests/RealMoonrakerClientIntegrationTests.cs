@@ -17,7 +17,7 @@ namespace Farm.Moonraker.Emulator.Tests;
 /// PrintFarmer ships, proving it round-trips correctly against the emulator's wire
 /// format for the REST surfaces it consumes.
 /// </summary>
-public sealed class RealMoonrakerClientIntegrationTests : IClassFixture<RealEmulatorHost>, IAsyncLifetime
+public sealed class RealMoonrakerClientIntegrationTests : IClassFixture<RealEmulatorHost>, IAsyncLifetime, IDisposable
 {
     private readonly RealEmulatorHost _host;
     private readonly HttpClient _http = new();
@@ -36,6 +36,12 @@ public sealed class RealMoonrakerClientIntegrationTests : IClassFixture<RealEmul
         _http.Dispose();
         return Task.CompletedTask;
     }
+
+    // CA1001: xUnit disposes async-lifetime fixtures via DisposeAsync above, but the analyzer
+    // only recognizes IDisposable for a type that owns a disposable field. Implementing it here
+    // (HttpClient.Dispose is idempotent) satisfies the analyzer without changing xUnit's actual
+    // teardown path. No GC.SuppressFinalize: the type is sealed with no finalizer (IDISP024).
+    public void Dispose() => _http.Dispose();
 
     [Fact]
     public async Task GetStatusAsync_ReadyScenario_ReportsOnlineAndReadyState()

@@ -144,10 +144,22 @@ public sealed record GcodeSafetyReport(
 public sealed class GcodeSafetyResult<T>
 {
     // CA1000: factory construction lives on the non-generic <see cref="GcodeSafetyResult"/> class so
-    // this generic type carries no static members; the constructor stays internal so only that
-    // factory (and this assembly) can create instances.
+    // this generic type carries no static members; the constructor is internal (rather than private)
+    // so that factory can call it. The guard below preserves the invariant that used to be enforced
+    // purely by access control: a result cannot be both "valid" and carry problems, or "invalid" with
+    // no problems, no matter which in-assembly caller constructs it.
     internal GcodeSafetyResult(bool isValid, T? value, IReadOnlyList<GcodeSafetyProblem> problems)
     {
+        if (isValid && problems.Count > 0)
+        {
+            throw new ArgumentException("A valid result cannot carry problems.", nameof(problems));
+        }
+
+        if (!isValid && problems.Count == 0)
+        {
+            throw new ArgumentException("An invalid result must carry at least one problem.", nameof(problems));
+        }
+
         IsValid = isValid;
         Value = value;
         Problems = problems;

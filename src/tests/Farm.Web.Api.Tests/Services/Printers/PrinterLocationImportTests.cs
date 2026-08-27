@@ -31,13 +31,13 @@ public class PrinterLocationImportTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private AsyncServiceScope _scope;
-    private IPrintersService _printersService;
-    private ILocationService _locationService;
-    private AppDbContext _dbContext;
-    private Location _testLocation1;
-    private Location _testLocation2;
+    private IPrintersService _printersService = null!;
+    private ILocationService _locationService = null!;
+    private AppDbContext _dbContext = null!;
+    private Location _testLocation1 = null!;
+    private Location _testLocation2 = null!;
     private PrinterBackend _testBackend = PrinterBackend.Moonraker;
-    private Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector;
+    private Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector = null!;
 
     public PrinterLocationImportTests()
     {

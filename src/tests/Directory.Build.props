@@ -1,13 +1,18 @@
 <Project>
   <!-- Test-only analyzer suppressions. This file applies to all projects under src/tests/ -->
 
-  <!-- Security: this file shadows ../Directory.Build.props (MSBuild auto-imports only the nearest
-       Directory.Build.props), so the solution-wide patched-SQLite pin must be repeated here to
-       guarantee test projects never resolve the vulnerable SQLitePCLRaw.lib.e_sqlite3 2.1.11
-       (GHSA-2m69-gcr7-jv3q) even if a future test project doesn't reference a pinned src project. -->
-  <ItemGroup>
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
-  </ItemGroup>
+  <!-- #2094: this file shadows ../Directory.Build.props (MSBuild auto-imports only the nearest
+       Directory.Build.props in the directory chain), so without this explicit Import, test
+       projects would silently lose every setting from src/Directory.Build.props, including
+       TreatWarningsAsErrors, and new warnings introduced under src/tests/ would never fail
+       the build. Import it first so the NoWarn additions below layer on top of (not instead
+       of) the solution-wide settings. -->
+  <Import Project="../Directory.Build.props" />
+
+  <!-- Security: the solution-wide patched-SQLite pin (SQLitePCLRaw.bundle_e_sqlite3 3.0.3,
+       guarding against GHSA-2m69-gcr7-jv3q) is already inherited via the Import above; do not
+       repeat the PackageReference here, or MSBuild reports it as a duplicate (NU1504), which is
+       itself now build-breaking under the inherited TreatWarningsAsErrors. -->
 
   <PropertyGroup>
     <!-- Suppress noisy rules in tests: Sonar (S*), IDisposableAnalyzers (IDISP*), some CA*, CS1998, and StyleCop (SA*) -->
@@ -25,7 +30,63 @@
       SA1000;SA1001;SA1002;SA1003;SA1004;SA1005;SA1006;SA1007;SA1008;SA1009;SA1010;SA1011;SA1012;SA1013;SA1014;SA1015;SA1016;SA1017;SA1018;SA1019;SA1020;SA1021;SA1022;SA1023;SA1024;SA1025;SA1026;SA1027;SA1028; <!-- StyleCop spacing rules in tests -->
       SA1100;SA1101;SA1102;SA1103;SA1104;SA1105;SA1106;SA1107;SA1108;SA1109;SA1110;SA1111;SA1112;SA1113;SA1114;SA1115;SA1116;SA1117;SA1118;SA1119;SA1120;SA1121;SA1122;SA1123;SA1124;SA1125;SA1126;SA1127;SA1128;SA1129;SA1130;SA1131;SA1132;SA1133;SA1134;SA1135;SA1136;SA1137;SA1138;SA1139;SA1140;SA1141;SA1142; <!-- StyleCop readability rules in tests -->
       SA1200;SA1201;SA1202;SA1203;SA1204;SA1205;SA1206;SA1207;SA1208;SA1209;SA1210;SA1211;SA1212;SA1213;SA1214;SA1215;SA1216;SA1217; <!-- StyleCop ordering rules in tests -->
-      SA1300;SA1301;SA1302;SA1303;SA1304;SA1305;SA1306;SA1307;SA1308;SA1309;SA1310;SA1311;SA1312;SA1313;SA1314;SA1315;SA1316;SA1400;SA1401;SA1402;SA1403;SA1404;SA1405;SA1406;SA1407;SA1408;SA1409;SA1410;SA1411;SA1412;SA1413;SA1500;SA1501;SA1502;SA1503;SA1504;SA1505;SA1506;SA1507;SA1508;SA1509;SA1510;SA1511;SA1512;SA1513;SA1514;SA1515;SA1516;SA1517;SA1518;SA1519;SA1520 <!-- StyleCop naming/maintainability/layout rules in tests -->
+      SA1300;SA1301;SA1302;SA1303;SA1304;SA1305;SA1306;SA1307;SA1308;SA1309;SA1310;SA1311;SA1312;SA1313;SA1314;SA1315;SA1316;SA1400;SA1401;SA1402;SA1403;SA1404;SA1405;SA1406;SA1407;SA1408;SA1409;SA1410;SA1411;SA1412;SA1413;SA1500;SA1501;SA1502;SA1503;SA1504;SA1505;SA1506;SA1507;SA1508;SA1509;SA1510;SA1511;SA1512;SA1513;SA1514;SA1515;SA1516;SA1517;SA1518;SA1519;SA1520; <!-- StyleCop naming/maintainability/layout rules in tests -->
+
+      <!-- #2094 follow-up (tracked in #2106): closing the ../Directory.Build.props Import gap
+           above (see comment on the Import) surfaced ~390 previously-invisible warning
+           instances across 43 rule IDs, ALL pre-existing and confined to src/tests/ — none of
+           this is new code introduced by #2094, and production code outside src/tests/ is
+           fully clean. #2094 fixes what's cheap/on-topic with its own scope (CS1570/CS8618
+           and similar) directly; the remainder is suppressed here rather than hand-fixed in
+           one oversized PR, per #2094's own guidance to prefer "several small PRs by tier and
+           project rather than one large one." Remove entries below incrementally as #2106's
+           tiered burn-down clears each rule for the whole test tree; do not add further rule
+           IDs here without linking a tracking issue. -->
+      IDISP013; <!-- Await in using / IDisposable analyzer variants (236) -->
+      CA1001;   <!-- Type owns disposable field but isn't IDisposable (74) -->
+      CA1859;   <!-- Use a more specific return type for performance (54) -->
+      CA1826;   <!-- Use property instead of Linq method, e.g. Count() vs Count (40) -->
+      S1144;    <!-- Unused private types or members (36) -->
+      VSTHRD003;<!-- Avoid awaiting foreign Tasks (30) -->
+      CA1032;   <!-- Implement standard exception constructors (26) -->
+      IDISP017; <!-- Prefer using-declaration (24) -->
+      SA1414;   <!-- Tuple types in signatures should have element names (18) -->
+      CA1862;   <!-- Use case-insensitive string comparison methods (18) -->
+      VSTHRD200;<!-- Use Async suffix for async methods (18) -->
+      VSTHRD002;<!-- Avoid problematic synchronous waits (16) -->
+      IDISP024; <!-- Don't call GC.SuppressFinalize when no finalizer exists (16) -->
+      CA2025;   <!-- Attribute usage/AttributeUsage correctness (14) -->
+      IDISP007; <!-- Don't dispose an injected dependency (12) -->
+      S927;     <!-- Parameter name mismatch with base/interface (12) -->
+      S3459;    <!-- Unassigned private auto-property (10) -->
+      CA1806;   <!-- Do not ignore method results (10) -->
+      CA1725;   <!-- Parameter names should match base declaration (8) -->
+      IDISP026; <!-- Await disposal of resource after using (8) -->
+      S1751;    <!-- Loop with single unconditional break/return (6) -->
+      S3871;    <!-- Exception types should be public (6) -->
+      S3376;    <!-- Attribute types should conform to naming (4) -->
+      S1172;    <!-- Unused method parameter (4) -->
+      S1244;    <!-- Floating point equality comparison (4) -->
+      S2925;    <!-- Do not use Thread.Sleep in tests (4) -->
+      CA1802;   <!-- Use const instead of readonly for compile-time constants (4) -->
+      IDISP016; <!-- Don't use disposables in fire-and-forget code (4) -->
+      CA1034;   <!-- Nested types should not be visible (4) -->
+      CA2241;   <!-- Format string arguments should match (4) -->
+      S2933;    <!-- Fields not modified after construction should be readonly (4) -->
+      S3928;    <!-- Parameter name in exception should match an actual parameter (2) -->
+      S3241;    <!-- Methods should not return unused private types (2) -->
+      S6580;    <!-- Use a format provider when parsing date/number (2) -->
+      CA1823;   <!-- Avoid unused private fields (2) -->
+      S2701;    <!-- Literal boolean values shouldn't be used in assertions (2) -->
+      S2123;    <!-- Values shouldn't be uselessly incremented/reassigned (2) -->
+      CA1827;   <!-- .Count() == 0 should use .Any()/.Count == 0 (2) -->
+      S1215;    <!-- GC.Collect should not be called (2) -->
+      S1155;    <!-- .Count() > 0 should use .Any() (2) -->
+      CA1052;   <!-- Static holder types should be Static or NotInheritable (2) -->
+      CA5399;   <!-- HttpClient certificate revocation check (2) -->
+      CA2213;   <!-- Disposable fields should be disposed (2) -->
+      S2743;    <!-- Static fields in generic types (2) -->
+      S1118     <!-- Utility classes should not have public constructors (2) -->
     </NoWarn>
   </PropertyGroup>
 </Project>

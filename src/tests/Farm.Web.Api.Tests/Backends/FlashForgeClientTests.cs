@@ -655,8 +655,8 @@ public sealed class FlashForgeClientTests
         plugin.BackendType.Should().Be("flashforge");
         plugin.DisplayName.Should().Be("FlashForge");
         plugin.Version.Should().Be(new Version(1, 0, 0));
-        plugin.ClientType.Should().Be(typeof(FlashForgeClient));
-        plugin.ClientInterfaceType.Should().Be(typeof(IFlashForgeClient));
+        plugin.ClientType.Should().Be<FlashForgeClient>();
+        plugin.ClientInterfaceType.Should().Be<IFlashForgeClient>();
     }
 
     [Fact]

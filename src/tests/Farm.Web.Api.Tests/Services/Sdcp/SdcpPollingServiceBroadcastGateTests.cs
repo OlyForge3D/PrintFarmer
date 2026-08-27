@@ -22,7 +22,7 @@ namespace Farm.Web.Api.Tests.Services.Sdcp;
 
 /// <summary>
 /// Unit tests for the "printerupdated" broadcast suppression gate wired into
-/// <see cref="SdcpPollingService.PollPrinterAsync"/> (issue #1355). Mirrors
+/// <c>SdcpPollingService.PollPrinterAsync</c> (issue #1355). Mirrors
 /// <c>PrusaLinkPollingServiceBroadcastGateTests</c>: <c>PollPrinterAsync</c> is a private,
 /// infinitely-looping method, so tests invoke it via reflection and cancel the token from inside
 /// the mocked <see cref="ISdcpClient.GetCompositeStatusAsync(string, CancellationToken)"/>

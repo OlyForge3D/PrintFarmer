@@ -27,7 +27,7 @@ namespace Farm.Web.Api.Tests.Infrastructure.Idempotency;
 /// the tests remain host-agnostic while still verifying the header contract,
 /// feature-gate bypass, replay behavior, and hash-conflict / abandon paths.
 /// A live <see cref="IdempotencyStore"/> against SQLite-in-memory is used so
-/// the filter <-> store handshake is not mocked away.
+/// the filter-to-store handshake is not mocked away.
 /// </summary>
 public class IdempotencyFilterTests : IDisposable
 {
@@ -842,7 +842,7 @@ public class IdempotencyFilterTests : IDisposable
         public override bool CanSeek => false;
         public override bool CanWrite => true;
         public override long Length => throw new NotSupportedException();
-        public override long Position { get => 0; set { } }
+        public override long Position { get => 0; set => _ = value; }
         public override void Flush() { }
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
