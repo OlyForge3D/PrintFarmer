@@ -285,8 +285,8 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # dotnet-build — full solution restore + build. Runs whenever any .NET
-  # input changed (including tools). Preserves compile coverage and packages
-  # each selected consumer project separately so matrix legs download only
+  # input changed (including tools). Preserves compile coverage and uploads each
+  # selected consumer project's output separately so matrix legs download only
   # their own dependency closure. A measured full bin tree was ~4 GiB, while
   # one monolithic archive would transfer ~8.4 GiB across a full-safe fan-out.
   # `obj/` is deliberately never transported: NuGet-generated assets embed
