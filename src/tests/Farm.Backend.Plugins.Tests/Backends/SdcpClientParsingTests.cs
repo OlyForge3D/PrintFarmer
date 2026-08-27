@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Backends;
+namespace Farm.Backend.Plugins.Tests.Backends;
 
 /// <summary>
 /// Tests for SDCP file list parsing (Cmd 258)

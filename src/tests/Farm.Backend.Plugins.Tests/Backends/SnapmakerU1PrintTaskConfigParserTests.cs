@@ -4,7 +4,7 @@ using Farm.Infrastructure;
 using FluentAssertions;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Backends;
+namespace Farm.Backend.Plugins.Tests.Backends;
 
 public class SnapmakerU1PrintTaskConfigParserTests
 {

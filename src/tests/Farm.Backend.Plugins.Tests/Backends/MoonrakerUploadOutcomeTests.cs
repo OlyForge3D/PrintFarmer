@@ -11,7 +11,7 @@ using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Farm.Web.Api.Tests.Backends;
+namespace Farm.Backend.Plugins.Tests.Backends;
 
 public sealed class MoonrakerUploadOutcomeTests
 {

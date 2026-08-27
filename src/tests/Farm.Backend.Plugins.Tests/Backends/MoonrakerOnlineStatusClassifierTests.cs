@@ -3,7 +3,7 @@ using Farm.Backend.Plugin.Moonraker;
 using FluentAssertions;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Backends;
+namespace Farm.Backend.Plugins.Tests.Backends;
 
 public sealed class MoonrakerOnlineStatusClassifierTests
 {
