@@ -77,7 +77,7 @@ public sealed class SlicerHostCalibrationProfileResolverTests
         RecordingHandler handler = new(Responses.Status(HttpStatusCode.Unauthorized));
         SlicerHostCalibrationProfileResolver resolver = CreateResolver(handler, out CapturingLogger logger);
 
-        Func<Task> resolve = () => resolver.ResolveAsync(
+        Func<Task> resolve = async () => await resolver.ResolveAsync(
             MachineId,
             ProcessId,
             FilamentId,
@@ -101,7 +101,7 @@ public sealed class SlicerHostCalibrationProfileResolverTests
             out CapturingLogger logger,
             authorizationHeader: null);
 
-        Func<Task> resolve = () => resolver.ResolveAsync(
+        Func<Task> resolve = async () => await resolver.ResolveAsync(
             MachineId,
             ProcessId,
             FilamentId,
@@ -129,7 +129,7 @@ public sealed class SlicerHostCalibrationProfileResolverTests
             out _,
             authorizationHeader);
 
-        Func<Task> resolve = () => resolver.ResolveAsync(
+        Func<Task> resolve = async () => await resolver.ResolveAsync(
             MachineId,
             ProcessId,
             FilamentId,
@@ -220,7 +220,7 @@ public sealed class SlicerHostCalibrationProfileResolverTests
         RecordingHandler handler = new(Responses.Status(statusCode));
         SlicerHostCalibrationProfileResolver resolver = CreateResolver(handler, out _);
 
-        Func<Task> resolve = () => resolver.ResolveAsync(
+        Func<Task> resolve = async () => await resolver.ResolveAsync(
             MachineId,
             ProcessId,
             FilamentId,
@@ -239,7 +239,7 @@ public sealed class SlicerHostCalibrationProfileResolverTests
         RecordingHandler handler = new(Responses.Json("{\"machine\": "));
         SlicerHostCalibrationProfileResolver resolver = CreateResolver(handler, out _);
 
-        Func<Task> resolve = () => resolver.ResolveAsync(
+        Func<Task> resolve = async () => await resolver.ResolveAsync(
             MachineId,
             ProcessId,
             FilamentId,
@@ -259,7 +259,7 @@ public sealed class SlicerHostCalibrationProfileResolverTests
             """{"machine":null,"process":null,"filament":null,"internalConnectionString":"secret"}"""));
         SlicerHostCalibrationProfileResolver resolver = CreateResolver(handler, out _);
 
-        Func<Task> resolve = () => resolver.ResolveAsync(
+        Func<Task> resolve = async () => await resolver.ResolveAsync(
             MachineId,
             ProcessId,
             FilamentId,
@@ -279,7 +279,7 @@ public sealed class SlicerHostCalibrationProfileResolverTests
             Responses.Status(HttpStatusCode.OK, "<html>login</html>", "text/html"));
         SlicerHostCalibrationProfileResolver resolver = CreateResolver(handler, out _);
 
-        Func<Task> resolve = () => resolver.ResolveAsync(
+        Func<Task> resolve = async () => await resolver.ResolveAsync(
             MachineId,
             ProcessId,
             FilamentId,
@@ -300,7 +300,7 @@ public sealed class SlicerHostCalibrationProfileResolverTests
             out _,
             options: CreateOptions(maxResponseBytes: 2048));
 
-        Func<Task> resolve = () => resolver.ResolveAsync(
+        Func<Task> resolve = async () => await resolver.ResolveAsync(
             MachineId,
             ProcessId,
             FilamentId,
@@ -319,7 +319,7 @@ public sealed class SlicerHostCalibrationProfileResolverTests
             out _,
             options: CreateOptions(resolveTimeout: TimeSpan.FromMilliseconds(150)));
 
-        Func<Task> resolve = () => resolver.ResolveAsync(
+        Func<Task> resolve = async () => await resolver.ResolveAsync(
             MachineId,
             ProcessId,
             FilamentId,
@@ -340,7 +340,7 @@ public sealed class SlicerHostCalibrationProfileResolverTests
         using CancellationTokenSource callerCancellation = new();
         callerCancellation.CancelAfter(TimeSpan.FromMilliseconds(100));
 
-        Func<Task> resolve = () => resolver.ResolveAsync(
+        Func<Task> resolve = async () => await resolver.ResolveAsync(
             MachineId,
             ProcessId,
             FilamentId,
@@ -419,7 +419,7 @@ public sealed class SlicerHostCalibrationProfileResolverTests
             new HttpIOException(HttpRequestError.ResponseEnded, "response ended prematurely")));
         SlicerHostCalibrationProfileResolver resolver = CreateResolver(handler, out CapturingLogger logger);
 
-        Func<Task> resolve = () => resolver.ResolveAsync(
+        Func<Task> resolve = async () => await resolver.ResolveAsync(
             MachineId,
             ProcessId,
             FilamentId,

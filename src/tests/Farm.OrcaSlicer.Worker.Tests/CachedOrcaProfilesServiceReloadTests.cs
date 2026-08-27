@@ -135,7 +135,7 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
             overlayRoot,
             customRoot);
 
-        Func<Task> act = () => store.InstallAsync(
+        Func<Task> act = async () => await store.InstallAsync(
             "Voron",
             Bundle([], []));
 
@@ -171,7 +171,7 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
             overlayRoot,
             customRoot);
 
-        Func<Task> act = () => store.InstallAsync(
+        Func<Task> act = async () => await store.InstallAsync(
             bundleName,
             Bundle([], []));
 
@@ -204,7 +204,7 @@ public sealed class CachedOrcaProfilesServiceReloadTests : IAsyncDisposable
             overlayRoot,
             customRoot);
 
-        Func<Task> act = () => store.InstallAsync(
+        Func<Task> act = async () => await store.InstallAsync(
             "Custom",
             Bundle(
                 [],

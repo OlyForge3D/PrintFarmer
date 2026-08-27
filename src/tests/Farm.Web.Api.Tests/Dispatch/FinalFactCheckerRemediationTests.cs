@@ -471,7 +471,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             NullLogger<JobSchedulingService>.Instance,
             resourceAuthorization: authorization.Object);
 
-        Func<Task> denied = () => service.ScheduleJobAsync(
+        Func<Task> denied = async () => await service.ScheduleJobAsync(
             jobId,
             DateTime.SpecifyKind(DateTime.UtcNow.AddMinutes(5), DateTimeKind.Unspecified),
             "UTC",
@@ -677,7 +677,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             NullLogger<JobSchedulingService>.Instance,
             resourceAuthorization: AllowAllSchedulingAuthorization());
 
-        Func<Task> schedule = () => service.ScheduleJobAsync(
+        Func<Task> schedule = async () => await service.ScheduleJobAsync(
             job.Id,
             new DateTime(year, month, day, hour, minute, 0, DateTimeKind.Unspecified),
             "America/New_York",

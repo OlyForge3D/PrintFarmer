@@ -157,7 +157,7 @@ public sealed class PreferenceConcurrencyRetryTests
             new SqliteException("FOREIGN KEY constraint failed", 19, 787));
         int attempts = 0;
 
-        Func<Task> act = () => PreferenceConcurrencyRetry.ExecuteAsync<int>(
+        Func<Task> act = async () => await PreferenceConcurrencyRetry.ExecuteAsync<int>(
             factory,
             fallbackContext: null,
             operation: (_, _) =>
@@ -177,7 +177,7 @@ public sealed class PreferenceConcurrencyRetryTests
     {
         using var factory = new CountingFactory();
 
-        Func<Task> act = () => PreferenceConcurrencyRetry.ExecuteAsync<int>(
+        Func<Task> act = async () => await PreferenceConcurrencyRetry.ExecuteAsync<int>(
             factory,
             fallbackContext: null,
             operation: (_, _) => throw new OperationCanceledException("cancelled"),

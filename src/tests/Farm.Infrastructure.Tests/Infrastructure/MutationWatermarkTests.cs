@@ -82,7 +82,7 @@ public sealed class MutationWatermarkTests
         await using (AppDbContext write = AppDbTestHelpers.CreateContext(connection))
         {
             EfUserTaskRepository repository = new(write);
-            Func<Task> act = () => repository.AddAsync(NewTask("duplicate", "duplicate"));
+            Func<Task> act = async () => await repository.AddAsync(NewTask("duplicate", "duplicate"));
             _ = await act.Should().ThrowAsync<DbUpdateException>();
         }
 
@@ -280,7 +280,7 @@ public sealed class MutationWatermarkTests
         await firstRepository.UpdateAsync(first);
 
         stale.Title = "stale writer";
-        Func<Task> act = () => staleRepository.UpdateAsync(stale);
+        Func<Task> act = async () => await staleRepository.UpdateAsync(stale);
         _ = await act.Should().ThrowAsync<DbUpdateConcurrencyException>();
 
         await using AppDbContext verify = AppDbTestHelpers.CreateContext(connection);
