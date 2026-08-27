@@ -6,6 +6,7 @@ using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Services.Catalog.Caching;
+using Farm.Modules.Abstractions.Normalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
