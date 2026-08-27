@@ -250,6 +250,20 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
                         LogSanitizer.Sanitize(removedBundle),
                         ex.Code);
                 }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // #2080 N-REC-1 (round-5 review, Hicks): RemoveOverlayLink's underlying
+                    // File.Delete/DirectoryInfo.Delete calls can themselves throw IOException or
+                    // UnauthorizedAccessException (permissions, concurrent path replacement) --
+                    // not just CustomProfileBundleException. Catching only the latter would let a
+                    // transient filesystem error on one bundle escape this loop and abort
+                    // reconciliation for every other bundle too, defeating the per-bundle
+                    // isolation this fix exists to provide.
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to remove overlay links for deleted custom OrcaSlicer bundle {BundleName} during reconciliation (filesystem error); will retry",
+                        LogSanitizer.Sanitize(removedBundle));
+                }
             }
 
             // #2080 N-REC-1: isolate each bundle so one malformed bundle (e.g. a manual file
@@ -274,6 +288,18 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
                         "Skipping custom OrcaSlicer bundle {BundleName} during overlay reconciliation ({Code})",
                         LogSanitizer.Sanitize(bundleName),
                         ex.Code);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // #2080 N-REC-1 (round-5 review, Hicks): same rationale as the removal loop
+                    // above -- EnsureOverlayLinks' underlying File/Directory symlink calls can
+                    // throw IOException or UnauthorizedAccessException, not just
+                    // CustomProfileBundleException, and must not abort reconciliation for sibling
+                    // bundles.
+                    _logger.LogWarning(
+                        ex,
+                        "Skipping custom OrcaSlicer bundle {BundleName} during overlay reconciliation (filesystem error)",
+                        LogSanitizer.Sanitize(bundleName));
                 }
             }
 
