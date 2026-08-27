@@ -386,6 +386,26 @@
       "notes": "New in issue #2045 (Phase 17: Services/Workers/**, Services/Tasks/**, Services/SignalR/**, and 14 controllers -- AttentionController, CorrelationAnalyticsController, FailureDetectionController, MonitoringController, NotificationsController, ObicoServerController, PredictiveAnalyticsController, StatisticsController, TasksController, WebhooksController, BackgroundServicesController, SignalRTestController, DiagnosticChannelsController, and ConnectionDiagnosticsController -- moved out of Farm.Web.Api into Farm.Modules.Observability, following the Farm.Modules.Devices (#2043) leaf-module pattern rather than the full-safe Farm.Modules.Abstractions treatment). Depends only on Farm.Infrastructure (all underlying services -- notification, webhook, attention, monitoring, failure-detection, background-service-monitor, etc. -- were already registered against Farm.Infrastructure types before this move). Gets its own narrow select-dotnet-tests.sh buckets (observability/tests_observability). The 14 controllers' own test files (AttentionControllerTests, NotificationsControllerVapidKeyTests, MonitoringControllerTests, TasksControllerTests, ObicoServerControllerTests, FailureDetectionControllerTests, ConnectionDiagnosticsControllerTests, StatisticsDateRangeTests, NotificationPreferences*Tests, MonitoringSessionServiceTests, ObicoServerAuthorizationTests, AnalyticsControllerIntegrationTests, etc.) and RouteTableSnapshotTests all stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's observability bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module). Only the 2 unit-test files with no CustomWebApplicationFactory dependency -- HistorySeedingBackgroundServiceRuntimeToggleTests and SignalRTaskBroadcasterTests -- moved with their services."
     },
     {
+      "name": "Farm.Modules.Printers.Tests",
+      "testProject": "tests/Farm.Modules.Printers.Tests/Farm.Modules.Printers.Tests.csproj",
+      "productionProject": "modules/Farm.Modules.Printers/Farm.Modules.Printers.csproj",
+      "pathPrefixes": ["src/tests/Farm.Modules.Printers.Tests/"],
+      "dependsOnProjects": [
+        "src/modules/Farm.Modules.Printers/",
+        "src/modules/Farm.Modules.PrintQueue/",
+        "src/modules/Farm.Modules.Calibration/",
+        "src/modules/Farm.Modules.Abstractions/",
+        "src/infra/",
+        "src/tests/Farm.Testing.Shared/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Modules.Printers.Tests",
+      "notes": "New in issue #2046 (Phase 18: the largest, most-coupled module in the epic -- Services/Catalog/**, Services/Discovery/**, Services/Printers/**, Validators/CreatePrinterValidator.cs, and 8 controllers -- PrintersController (5,281 LOC, moved as-is with no internal decomposition, per the issue's explicit non-goal), PrinterGroupsController, CatalogController, Controllers/Admin/CatalogUpdateController, BedTypeController, InternalDiscoveryEventsController, LocationsController, and FilaManController -- moved out of Farm.Web.Api into Farm.Modules.Printers, depending on Farm.Infrastructure, Farm.Shared.Discovery, Farm.Backend.Plugin.Core, and Farm.Modules.Abstractions). Two forward-only cross-module references were required and are not violations of the module boundary: Farm.Modules.PrintQueue (PrintersController's TestConnectionResponse/CameraUrlResult DTOs kept their original Farm.Web.Api.Controllers.Responses namespace but physically moved there in Phase 8, #2036) and Farm.Modules.Calibration (CalibrationPrinterUpdateMapper, Farm.Web.Api.Services.Calibration namespace, moved there in Phase 11, #2039). Gets its own narrow select-dotnet-tests.sh buckets (printers/tests_printers). PrintersController's own controller test files (PrintersControllerBackendPinningTests, PrintersControllerControlGuardsTests, PrintersControllerSwapFlowTests, PrintersControllerTestConnectionEgressTests, PrintersControllerTestConnectionTests), CatalogControllerTests, RequestObjectsTests, DiscoveryServiceAuthenticatorTests, CatalogServiceTests/CatalogServiceNozzleHardnessTests, DiscoveryProxyServiceTests, and PrinterStatusBroadcastGateTests all moved with their services/controllers (no CustomWebApplicationFactory dependency, verified individually). RouteTableSnapshotTests and every other PrintersController-adjacent integration test that does depend on CustomWebApplicationFactory (e.g. FilaManControllerTests, LocationsControllerTests, BedTypeControllerTests, InternalDiscoveryEventsControllerTests, PrinterGroupsControllerTests, CatalogUpdateControllerTests) stay in Farm.Web.Api.Tests, so select-dotnet-tests.sh's printers bucket also selects Farm.Web.Api.Tests (a controller-owning module keeps the API-tests leg, unlike a pure-service module)."
+    },
+    {
       "name": "Farm.Web.IntegrationTests",
       "testProject": "tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj",
       "productionProject": "api/Farm.Web.Api.csproj",

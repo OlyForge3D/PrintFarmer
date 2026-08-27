@@ -1273,6 +1273,52 @@ case_observability_mixed_with_unrelated_backend() {
 }
 
 
+case_printers_change() {
+  local out="$1"
+  CHANGED_FILES="src/modules/Farm.Modules.Printers/Controllers/PrintersController.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix printers" "$matrix" "Farm.Modules.Printers.Tests" || return 1
+  # RouteTableSnapshotTests, InternalDiscoveryEventsControllerTests,
+  # PrinterGroupsControllerTests, CatalogUpdateControllerTests, and
+  # LocationHierarchyTests intentionally stayed in Farm.Web.Api.Tests, so a
+  # controller-owning module must select it too.
+  assert_contains "api covers controller" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason printers" "$reason" "printers" || return 1
+}
+
+case_test_only_printers() {
+  local out="$1"
+  CHANGED_FILES="src/tests/Farm.Modules.Printers.Tests/Controllers/CatalogControllerTests.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix printers" "$matrix" "Farm.Modules.Printers.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+}
+
+case_printers_mixed_with_unrelated_backend() {
+  local out="$1"
+  CHANGED_FILES=$'src/modules/Farm.Modules.Printers/Services/Catalog/CatalogServiceAdapter.cs\nsrc/backends/Farm.Backends.SomePlugin/SomeFile.cs'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix printers" "$matrix" "Farm.Modules.Printers.Tests" || return 1
+}
+
+
 case_migration_app_change() {
   local out="$1"
   CHANGED_FILES="src/migrations/Farm.Migrations.PostgreSQL/Migrations/20260101_AddThing.cs"
@@ -3514,6 +3560,9 @@ TESTS=(
   case_observability_change
   case_test_only_observability
   case_observability_mixed_with_unrelated_backend
+  case_printers_change
+  case_test_only_printers
+  case_printers_mixed_with_unrelated_backend
   case_migration_app_change
   case_migration_slicer_change
   case_test_only_api
