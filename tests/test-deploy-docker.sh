@@ -120,6 +120,35 @@ test_dry_run_mode() {
     pass_test
 }
 
+test_compose_helper_available_when_sourced() {
+    start_test "compose helper available in verify-only execution path"
+
+    local helper_script="$TEST_TEMP_DIR/check-compose-helper.sh"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$DEPLOY_SCRIPT"
+type dc >/dev/null
+EOF
+    chmod +x "$helper_script"
+
+    assert_exit_code 0 "$helper_script" "Sourcing deploy-docker.sh should define the dc helper"
+
+    pass_test
+}
+
+test_verification_uses_anonymous_api_endpoint() {
+    start_test "deployment verification uses anonymous API endpoint"
+
+    local script_content
+    script_content=$(cat "$DEPLOY_SCRIPT")
+
+    assert_contains "$script_content" "\$api_url/api/setup/status" "Verification should probe the anonymous setup endpoint"
+    assert_not_contains "$script_content" "\$api_url/api/catalog/manufacturers" "Verification should not require catalog authorization"
+
+    pass_test
+}
+
 # Test batch mode
 test_batch_mode() {
     start_test "batch mode execution"
@@ -1817,6 +1846,8 @@ run_all_tests() {
     test_help_output
     test_basic_execution
     test_dry_run_mode
+    test_compose_helper_available_when_sourced
+    test_verification_uses_anonymous_api_endpoint
     test_batch_mode
     test_config_file_generation
     test_environment_variables

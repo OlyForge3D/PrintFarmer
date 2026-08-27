@@ -316,6 +316,7 @@ public class SystemInfoService(
 
         IReadOnlyList<BackgroundServiceStatus> backgroundServices = _backgroundServiceMonitor
             .GetAllStatuses()
+            .Where(status => status.IsEnabled)
             .OrderBy(status => status.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -329,7 +330,7 @@ public class SystemInfoService(
         return services;
     }
 
-    // Background services degrade when disabled or idle, and become critical when they report explicit errors.
+    // Enabled background services degrade when idle and become critical when they report explicit errors.
     // Uses a failure-rate threshold so a single historical failure doesn't permanently mark a healthy service as Degraded.
     private static SystemServiceHealth MapServiceHealth(BackgroundServiceStatus status)
     {
@@ -338,7 +339,7 @@ public class SystemInfoService(
             return SystemServiceHealth.Critical;
         }
 
-        if (!status.IsEnabled || !status.IsRunning)
+        if (!status.IsRunning)
         {
             return SystemServiceHealth.Degraded;
         }

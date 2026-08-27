@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  <NoWarn>$(NoWarn);S2699</NoWarn>
+  <!-- Default quick-run filter: exclude Docker tests unless explicitly overridden -->
+  <VSTestTestCaseFilter>Category!='Docker'</VSTestTestCaseFilter>
+  </PropertyGroup>
+
+  <!-- Coverage is collected on-demand via the VSTest data collector (coverlet.collector),
+       not the coverlet.msbuild post-test target — see issue #965. Enable it by running
+       `dotnet test` with the "XPlat Code Coverage" collector and the coverlet.runsettings
+       settings file (see src/coverlet.runsettings). -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
+    <PackageReference Include="FluentAssertions" Version="8.10.0" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector" Version="10.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- Farm.Infrastructure + the backend plugin assemblies (issue #2034, Phase 6: Backends/**
+       and the PrusaLink/Sdcp/FlashForge/TestEmulator service-cohort tests moved out of
+       Farm.Web.Api.Tests). No migration or ASP.NET host project references are needed: every
+       moved test is a pure mock-based unit test against a backend client or polling service,
+       none of them touch a DbContext, EF Core provider, or CustomWebApplicationFactory. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Core\Farm.Backend.Plugin.Core.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Moonraker\Farm.Backend.Plugin.Moonraker.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.PrusaLink\Farm.Backend.Plugin.PrusaLink.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Sdcp\Farm.Backend.Plugin.Sdcp.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.FlashForge\Farm.Backend.Plugin.FlashForge.csproj" />
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.TestEmulator\Farm.Backend.Plugin.TestEmulator.csproj" />
+  </ItemGroup>
+</Project>

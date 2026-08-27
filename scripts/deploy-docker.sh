@@ -38,6 +38,12 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/docker-utils.sh"
 source "$SCRIPT_DIR/common-utils.sh"
 
+# Consistently invoke Docker Compose with the active environment and compose files.
+# Defining this at script scope keeps verify-only mode equivalent to a full deployment.
+dc() {
+    docker compose --env-file "${ENV_FILE:-.env}" -f "${COMPOSE_FILE:-docker-compose.yml}" "$@"
+}
+
 # Source container versions from single source of truth
 VERSIONS_FILE="$SCRIPT_DIR/docker/container-versions.conf"
 if [[ -f "$VERSIONS_FILE" ]]; then
@@ -1077,13 +1083,6 @@ generate_deployment_config() {
         # Set the compose file path for the rest of the deployment script
         COMPOSE_FILE="docker-compose.yml"
 
-        # Helper: consistently invoke docker compose with the active env file and compose file
-        # Usage: dc <docker-compose subcommand and args...>
-        dc() {
-            # forward all args to docker compose while ensuring env and compose file are applied
-            docker compose --env-file "${ENV_FILE:-.env}" -f "${COMPOSE_FILE:-docker-compose.yml}" "$@"
-        }
-        
         # Record generated files for cleanup
         GENERATED_FILES=(
             "docker-compose.yml"
@@ -6901,16 +6900,14 @@ verify_deployment() {
         fi
     fi
     
-    # Test API endpoints (catalog endpoint - reliable and doesn't require printers to exist)
+    # Test an anonymous API endpoint without depending on catalog authorization policy.
     print_info "Testing API endpoints..."
-    local endpoint_response=$(curl -s -w "\n%{http_code}" "$api_url/api/catalog/manufacturers" 2>&1)
+    local endpoint_response=$(curl -s -w "\n%{http_code}" "$api_url/api/setup/status" 2>&1)
     local endpoint_body=$(echo "$endpoint_response" | head -n -1)
     local endpoint_status=$(echo "$endpoint_response" | tail -n 1)
     
-    if [ "$endpoint_status" = "200" ]; then
-        # Count manufacturers to verify data is present
-        local mfr_count=$(echo "$endpoint_body" | jq 'length' 2>/dev/null || echo "?")
-        print_success "✓ API endpoints: OK (/api/catalog/manufacturers - $mfr_count manufacturers)"
+    if [ "$endpoint_status" = "200" ] && echo "$endpoint_body" | grep -q '"needsSetup"'; then
+        print_success "✓ API endpoints: OK (/api/setup/status)"
     else
         print_warning "✗ API endpoints: Failed"
         print_info "  HTTP Status: $endpoint_status"

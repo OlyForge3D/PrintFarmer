@@ -3,7 +3,7 @@ using Farm.Backend.Plugin.TestEmulator;
 using FluentAssertions;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.TestEmulator;
+namespace Farm.Backend.Plugins.Tests.Services.TestEmulator;
 
 /// <summary>
 /// Cross-stack contract test for issue #1546. <c>TestEmulatorSeeder.BuildServerUrl</c>

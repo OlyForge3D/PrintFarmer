@@ -3,7 +3,7 @@ using Farm.Infrastructure;
 using FluentAssertions;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Backends;
+namespace Farm.Backend.Plugins.Tests.Backends;
 
 /// <summary>
 /// Spike tests for issue #1498: establishes whether <see cref="PrinterStatusUpdate"/> record
