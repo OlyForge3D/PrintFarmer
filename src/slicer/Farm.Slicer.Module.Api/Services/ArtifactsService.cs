@@ -473,9 +473,11 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
 
         // Deliberately no File.Exists precheck: that would reintroduce a check-then-open
         // race window between the check and the actual FileStream open. Instead open
-        // directly and treat "file vanished/replaced with something unreadable in that
-        // window" as a not-found condition, mirroring the hardening applied to artifact
-        // reads in #2094.
+        // directly and treat the outcomes a vanished/replaced file can produce as a
+        // not-found condition, mirroring the hardening applied to artifact reads in #2094.
+        // FileNotFoundException/DirectoryNotFoundException cover deletion; the file being
+        // replaced by a directory in the same window surfaces as UnauthorizedAccessException
+        // rather than DirectoryNotFoundException, so it is caught here too.
         try
         {
             return ArtifactContentStream.Open(
@@ -488,7 +490,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
                     bufferSize: 81920,
                     useAsync: true));
         }
-        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException or UnauthorizedAccessException)
         {
             return null;
         }

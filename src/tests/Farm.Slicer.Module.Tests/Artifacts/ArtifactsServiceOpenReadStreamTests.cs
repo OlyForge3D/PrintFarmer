@@ -47,12 +47,11 @@ public sealed class ArtifactsServiceOpenReadStreamTests : IDisposable
     }
 
     [Fact]
-    public async Task OpenReadStreamAsync_FileMissingFromDisk_ReturnsNullInsteadOfThrowing()
+    public async Task OpenReadStreamAsync_ParentDirectoryMissing_ReturnsNullInsteadOfThrowing()
     {
         Artifact artifact = CreateArtifact();
-        // Deliberately do not write the backing file: the artifact row exists but its bytes do
-        // not (e.g. deleted or never landed). Previously this relied on a File.Exists precheck;
-        // now it must be caught from the FileStream open itself.
+        // Deliberately do not write the backing file or its parent directory: the artifact row
+        // exists but nothing was ever written to disk. This exercises DirectoryNotFoundException.
         var repository = new Mock<IArtifactsRepository>(MockBehavior.Strict);
         repository
             .Setup(r => r.GetByIdAsync(artifact.Id, It.IsAny<CancellationToken>()))
@@ -61,13 +60,33 @@ public sealed class ArtifactsServiceOpenReadStreamTests : IDisposable
         using ArtifactsMetrics metrics = new();
         ArtifactsService service = CreateService(repository.Object, metrics);
 
-        Func<Task> act = async () =>
-        {
-            await using ArtifactContentStream? content = await service.OpenReadStreamAsync(artifact.Id, CancellationToken.None);
-            content.Should().BeNull();
-        };
+        ArtifactContentStream? content = await service.OpenReadStreamAsync(artifact.Id, CancellationToken.None);
 
-        await act.Should().NotThrowAsync();
+        content.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task OpenReadStreamAsync_FileDeletedAfterUpload_ReturnsNullInsteadOfThrowing()
+    {
+        Artifact artifact = CreateArtifact();
+        WriteArtifactFile(artifact, "; gcode bytes");
+        string fullPath = Path.Join(_root, artifact.RelativePath);
+        // The parent directory exists (a file was uploaded here previously) but the specific
+        // file itself has since vanished (e.g. concurrent cleanup). This exercises
+        // FileNotFoundException, distinct from the DirectoryNotFoundException case above.
+        File.Delete(fullPath);
+
+        var repository = new Mock<IArtifactsRepository>(MockBehavior.Strict);
+        repository
+            .Setup(r => r.GetByIdAsync(artifact.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(artifact);
+
+        using ArtifactsMetrics metrics = new();
+        ArtifactsService service = CreateService(repository.Object, metrics);
+
+        ArtifactContentStream? content = await service.OpenReadStreamAsync(artifact.Id, CancellationToken.None);
+
+        content.Should().BeNull();
     }
 
     [Fact]
