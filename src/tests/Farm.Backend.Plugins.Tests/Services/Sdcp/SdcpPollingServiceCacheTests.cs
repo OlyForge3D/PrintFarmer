@@ -2,8 +2,9 @@
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Backend.Plugin.FlashForge;
+using Farm.Backend.Plugin.Sdcp;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Printers.Sdcp;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
@@ -17,21 +18,21 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.FlashForge;
+namespace Farm.Backend.Plugins.Tests.Services.Sdcp;
 
 /// <summary>
 /// Unit tests for the printer-row caching + invalidation behavior added to
-/// <see cref="FlashForgePollingService"/> for issue #1763, and the durable invalidation-generation
+/// <see cref="SdcpPollingService"/> for issue #1763, and the durable invalidation-generation
 /// fence added afterward (PR #1786 review) to close a race where <c>PollPrinterAsync</c>'s
 /// cache-miss fallback could publish a stale row if an invalidation arrived while the fetch was
 /// still in flight.
 /// </summary>
-public class FlashForgePollingServiceCacheTests
+public class SdcpPollingServiceCacheTests
 {
-    private readonly Mock<IFlashForgeClient> _flashForgeClient = new(MockBehavior.Loose);
+    private readonly Mock<ISdcpClient> _sdcpClient = new(MockBehavior.Loose);
     private readonly Mock<IPrintersRepository> _printersRepository = new(MockBehavior.Loose);
     private readonly Mock<IUnitOfWork> _unitOfWork = new(MockBehavior.Loose);
-    private readonly FlashForgePollingService _service;
+    private readonly SdcpPollingService _service;
     private readonly MethodInfo _pollPrinterAsync;
     private readonly MethodInfo _onPrinterInvalidated;
     private readonly MethodInfo _tryPublishCachedPrinter;
@@ -39,7 +40,7 @@ public class FlashForgePollingServiceCacheTests
     private readonly FieldInfo _invalidationGenerationsField;
     private readonly Type _pollingStateType;
 
-    public FlashForgePollingServiceCacheTests()
+    public SdcpPollingServiceCacheTests()
     {
         _unitOfWork.Setup(u => u.Printers).Returns(_printersRepository.Object);
 
@@ -48,7 +49,7 @@ public class FlashForgePollingServiceCacheTests
             NullLogger<ManagedSpoolProviderHelper>.Instance);
 
         Mock<IServiceProvider> serviceProvider = new(MockBehavior.Loose);
-        serviceProvider.Setup(p => p.GetService(typeof(IFlashForgeClient))).Returns(_flashForgeClient.Object);
+        serviceProvider.Setup(p => p.GetService(typeof(ISdcpClient))).Returns(_sdcpClient.Object);
         serviceProvider.Setup(p => p.GetService(typeof(IUnitOfWork))).Returns(_unitOfWork.Object);
         serviceProvider.Setup(p => p.GetService(typeof(ManagedSpoolProviderHelper))).Returns(spoolProvider);
 
@@ -64,13 +65,13 @@ public class FlashForgePollingServiceCacheTests
         Mock<IHubContext<PrinterHub>> hub = new();
         hub.Setup(h => h.Clients).Returns(clients.Object);
 
-        _service = new FlashForgePollingService(
+        _service = new SdcpPollingService(
             hub: hub.Object,
             scopeFactory: scopeFactory.Object,
-            logger: NullLogger<FlashForgePollingService>.Instance,
+            logger: NullLogger<SdcpPollingService>.Instance,
             statusCacheWriter: new Mock<IPrinterStatusCacheWriter>(MockBehavior.Loose).Object);
 
-        Type serviceType = typeof(FlashForgePollingService);
+        Type serviceType = typeof(SdcpPollingService);
         _pollPrinterAsync = serviceType.GetMethod("PollPrinterAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _onPrinterInvalidated = serviceType.GetMethod("OnPrinterInvalidated", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _tryPublishCachedPrinter = serviceType.GetMethod("TryPublishCachedPrinter", BindingFlags.NonPublic | BindingFlags.Instance)!;
@@ -135,7 +136,7 @@ public class FlashForgePollingServiceCacheTests
     private async Task RunOneTickAsync(Guid printerId, PrinterCompositeStatus status)
     {
         using CancellationTokenSource cts = new();
-        _flashForgeClient
+        _sdcpClient
             .Setup(c => c.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
@@ -157,7 +158,7 @@ public class FlashForgePollingServiceCacheTests
     public async Task PollPrinterAsync_CachedPrinterPresent_DoesNotQueryRepository()
     {
         Guid printerId = Guid.NewGuid();
-        var printer = new Printer { Id = printerId, Name = "Cached Printer", ServerUrl = "192.168.1.50", Backend = (int)PrinterBackend.FlashForge };
+        var printer = new Printer { Id = printerId, Name = "Cached Printer", ServerUrl = "192.168.1.60", Backend = (int)PrinterBackend.SDCP };
         SeedCachedPrinter(printerId, printer);
 
         await RunOneTickAsync(printerId, IdleStatus());
@@ -170,7 +171,7 @@ public class FlashForgePollingServiceCacheTests
     public async Task PollPrinterAsync_NoCachedPrinter_FallsBackToRepositoryAndPopulatesCache()
     {
         Guid printerId = Guid.NewGuid();
-        var printer = new Printer { Id = printerId, Name = "Fallback Printer", ServerUrl = "192.168.1.50", Backend = (int)PrinterBackend.FlashForge };
+        var printer = new Printer { Id = printerId, Name = "Fallback Printer", ServerUrl = "192.168.1.60", Backend = (int)PrinterBackend.SDCP };
         _printersRepository
             .Setup(r => r.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(printer);
@@ -185,7 +186,7 @@ public class FlashForgePollingServiceCacheTests
     public void OnPrinterInvalidated_MatchingPrinterId_ClearsCachedPrinter()
     {
         Guid printerId = Guid.NewGuid();
-        var printer = new Printer { Id = printerId, Backend = (int)PrinterBackend.FlashForge };
+        var printer = new Printer { Id = printerId, Backend = (int)PrinterBackend.SDCP };
         SeedCachedPrinter(printerId, printer);
 
         _onPrinterInvalidated.Invoke(_service, [printerId]);
@@ -213,7 +214,7 @@ public class FlashForgePollingServiceCacheTests
     public async Task PollPrinterAsync_InvalidationRacesCacheMissFetch_DoesNotPublishStaleData()
     {
         Guid printerId = Guid.NewGuid();
-        var stale = new Printer { Id = printerId, Name = "Stale", ServerUrl = "192.168.1.50", Backend = (int)PrinterBackend.FlashForge };
+        var stale = new Printer { Id = printerId, Name = "Stale", ServerUrl = "192.168.1.60", Backend = (int)PrinterBackend.SDCP };
 
         var fetchStarted = new TaskCompletionSource();
         var releaseFetch = new TaskCompletionSource();
@@ -228,7 +229,7 @@ public class FlashForgePollingServiceCacheTests
             });
 
         using CancellationTokenSource cts = new();
-        _flashForgeClient
+        _sdcpClient
             .Setup(c => c.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
@@ -288,7 +289,7 @@ public class FlashForgePollingServiceCacheTests
         const int rounds = 200;
         for (int i = 0; i < rounds; i++)
         {
-            var printer = new Printer { Id = printerId, Name = $"Stale-{i}", ServerUrl = "192.168.1.50", Backend = (int)PrinterBackend.FlashForge };
+            var printer = new Printer { Id = printerId, Name = $"Stale-{i}", ServerUrl = "192.168.1.60", Backend = (int)PrinterBackend.SDCP };
             long capturedGeneration = GetInvalidationGeneration(printerId);
 
             var tasks = new Task[2];
@@ -326,7 +327,7 @@ public class FlashForgePollingServiceCacheTests
     {
         Guid printerId = Guid.NewGuid();
         object state = GetOrCreateEmptyState(printerId);
-        var printer = new Printer { Id = printerId, Name = "Stale", ServerUrl = "192.168.1.50", Backend = (int)PrinterBackend.FlashForge };
+        var printer = new Printer { Id = printerId, Name = "Stale", ServerUrl = "192.168.1.60", Backend = (int)PrinterBackend.SDCP };
         long capturedGeneration = GetInvalidationGeneration(printerId);
 
         using ManualResetEventSlim insideCriticalSection = new(initialState: false);
@@ -347,7 +348,10 @@ public class FlashForgePollingServiceCacheTests
             _tryPublishCachedPrinter.Invoke(_service, [printerId, printer, capturedGeneration, state, (Action)OnGenerationCheckPassed]);
         });
 
-        insideCriticalSection.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue(
+        // Widened from 5s: under full test-suite parallelism (maxParallelThreads=0),
+        // thread-pool contention from dozens of concurrently-running hosts can legitimately
+        // delay the Task.Run scheduling this waits on past a short timeout.
+        insideCriticalSection.Wait(TimeSpan.FromSeconds(15)).Should().BeTrue(
             "the publish call must reach its paused callback inside the lock within the timeout");
 
         Task invalidateTask = Task.Run(() => _onPrinterInvalidated.Invoke(_service, [printerId]));

@@ -198,6 +198,27 @@
       "notes": "New in issue #2033 (Phase 5: cohort C moved out of Farm.Web.Api.Tests). shards[] here are a runtime partition for parallel wall-clock only (proven exhaustive/mutually-exclusive/non-empty across the 26 moved namespace groups), NOT a compile-time blast-radius split -- the whole project still builds and restores as one unit per CI leg. select-dotnet-tests.sh's has_infra/has_backend/has_backend_core/has_slicer/has_mig_app/has_mig_slcr buckets all select this project (see comments there) since Farm.Infrastructure.Tests.csproj references Farm.Infrastructure, every backend plugin, Farm.Slicer.Module(.Api), and every migration project directly. has_infra intentionally no longer also selects Farm.Web.Api.Tests/Farm.Web.IntegrationTests -- see select-dotnet-tests.sh for why the full-solution dotnet-build job still provides compile coverage for that combination."
     },
     {
+      "name": "Farm.Backend.Plugins.Tests",
+      "testProject": "tests/Farm.Backend.Plugins.Tests/Farm.Backend.Plugins.Tests.csproj",
+      "productionProject": "backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj",
+      "pathPrefixes": ["src/tests/Farm.Backend.Plugins.Tests/"],
+      "dependsOnProjects": [
+        "src/infra/",
+        "src/backends/Farm.Backend.Plugin.Core/",
+        "src/backends/Farm.Backend.Plugin.Moonraker/",
+        "src/backends/Farm.Backend.Plugin.PrusaLink/",
+        "src/backends/Farm.Backend.Plugin.Sdcp/",
+        "src/backends/Farm.Backend.Plugin.FlashForge/",
+        "src/backends/Farm.Backend.Plugin.TestEmulator/"
+      ],
+      "defaultFilter": "Category!=DbHeavy&Category!=Docker",
+      "shards": [],
+      "requiresProviders": [],
+      "runIntegration": false,
+      "leg": "Farm.Backend.Plugins.Tests",
+      "notes": "New in issue #2034 (Phase 6: Backends/** and the PrusaLink/Sdcp/FlashForge/TestEmulator service-cohort tests moved out of Farm.Web.Api.Tests). Farm.Backend.Plugins.Tests.csproj references Farm.Infrastructure and every backend plugin (Core, Moonraker, PrusaLink, Sdcp, FlashForge, TestEmulator) directly, but deliberately no migration or ASP.NET host project reference -- every moved test is a pure mock-based unit test, none touch a DbContext, EF Core provider, or CustomWebApplicationFactory. select-dotnet-tests.sh's has_infra/has_backend/has_backend_core buckets all select this project alongside Farm.Infrastructure.Tests (see comments there), since this project shares the same infra + backend-plugin dependency surface. It is NOT selected by has_mig_app/has_mig_slcr, unlike Farm.Infrastructure.Tests, because it has no migration-project reference."
+    },
+    {
       "name": "Farm.Modules.PrintQueue.Tests",
       "testProject": "tests/Farm.Modules.PrintQueue.Tests/Farm.Modules.PrintQueue.Tests.csproj",
       "productionProject": "modules/Farm.Modules.PrintQueue/Farm.Modules.PrintQueue.csproj",

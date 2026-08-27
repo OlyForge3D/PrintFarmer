@@ -8,7 +8,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Backends;
+namespace Farm.Backend.Plugins.Tests.Backends;
 
 /// <summary>
 /// Behavior-level tests verifying that <see cref="FlashForgeClient.StartPrintAsync"/> correctly
