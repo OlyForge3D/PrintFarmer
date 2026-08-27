@@ -32,4 +32,13 @@ phase.</Description>
     <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- TasksController uses IValidator<CreateManualTaskDto> directly. Farm.Web.Api
+         references FluentValidation.AspNetCore (which pulls in this core package
+         transitively), but that ProjectReference points the other way (Api -> this
+         module), so it must be referenced directly here too. Version pinned to the
+         one FluentValidation.AspNetCore 11.3.1 currently resolves to solution-wide. -->
+    <PackageReference Include="FluentValidation" Version="11.11.0" />
+  </ItemGroup>
+
 </Project>

@@ -4,7 +4,10 @@
 // "for free" apply here. Mirrors the subset of src/api/GlobalUsings.cs that the
 // moved observability controllers/services actually need.
 global using Farm.Infrastructure;
+global using Farm.Infrastructure.Contracts.SignalR;
 global using Farm.Infrastructure.Dtos;
 global using Farm.Settings;
 global using Microsoft.AspNetCore.Http;
+global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.Hosting;
 global using Microsoft.Extensions.Logging;
