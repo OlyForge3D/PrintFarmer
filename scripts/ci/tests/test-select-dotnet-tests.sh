@@ -1328,11 +1328,14 @@ case_printers_mixed_with_unrelated_backend() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix printers" "$matrix" "Farm.Modules.Printers.Tests" || return 1
-  # The unrelated backend-plugin path must ALSO select its own bucket's tests
-  # (Farm.Web.Api.Tests, per has_backend's test_names) -- if this assertion
-  # were absent, the test would pass identically whether or not the backend
-  # bucket's selection logic was broken, silently hiding a regression there.
-  assert_contains "matrix backend-plugin" "$matrix" "Farm.Web.Api.Tests" || return 1
+  # The unrelated backend-plugin path must ALSO select its own bucket's tests.
+  # Farm.Web.Api.Tests is NOT a valid witness here: has_printers already
+  # selects it on its own (see has_printers's test_names above), so asserting
+  # it would pass identically even if has_backend's selection logic were
+  # completely broken. Farm.Backend.Plugins.Tests is unique to has_backend's
+  # test_names (not selected by has_printers), so it is the correct witness
+  # that the backend-plugin bucket's own logic actually ran.
+  assert_contains "matrix backend-plugin" "$matrix" "Farm.Backend.Plugins.Tests" || return 1
   local reason ; reason="$(get_output "$out" reason)"
   assert_contains "reason printers" "$reason" "printers" || return 1
   assert_contains "reason backend-plugin" "$reason" "backend-plugin" || return 1
