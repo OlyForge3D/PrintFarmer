@@ -6,8 +6,10 @@ using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
 
