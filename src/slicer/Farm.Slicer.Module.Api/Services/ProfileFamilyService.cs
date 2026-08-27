@@ -809,6 +809,44 @@ public sealed class ProfileFamilyService(
                     $"A slicer profile family named '{targetName}' already exists.",
                     ex);
             }
+            catch (DbUpdateException ex) when (IsFamilyHashUniqueConstraintViolation(ex))
+            {
+                // #2093: the rendered family content collides with another family's hash. Same shape as
+                // the name-collision case above — the new bundle and alias are already installed, so
+                // rethrow to the generic handler below, which restores the previous good bundle/alias and
+                // marks the row Failed before surfacing this as a 409 rather than a bare 500.
+                MachineModelProfile? collidingFamily = await _dbContext.MachineModelProfiles
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        candidate => candidate.Id != family.Id && candidate.Hash == familyHash,
+                        CancellationToken.None);
+                throw new ProfileFamilyHashConflictException(
+                    collidingFamily is null
+                        ? $"A slicer profile family with the same rendered content already exists (family '{targetName}')."
+                        : $"A slicer profile family with the same rendered content already exists: '{collidingFamily.Name}'.",
+                    ex);
+            }
+            catch (DbUpdateException ex) when (IsMachineProfileHashUniqueConstraintViolation(ex))
+            {
+                // #2093: same as above, but the collision is on a rendered machine-variant hash rather
+                // than the family hash. Materialize the candidate hashes before querying, mirroring the
+                // clone path, so a translation failure can never escape this catch and revert the caller
+                // to the raw 500 this fix exists to avoid.
+                List<string> candidateHashes = [.. rendered.MachineVariants
+                    .Select(variant => ComputeHash(familyHash, variant.SourceSystemPresetName, variant.OverridesJson))];
+                MachineProfile? collidingProfile = await _dbContext.MachineProfiles
+                    .AsNoTracking()
+                    .Where(candidate =>
+                        candidate.MachineModelProfileId != family.Id
+                        && candidate.Hash != null
+                        && candidateHashes.Contains(candidate.Hash))
+                    .FirstOrDefaultAsync(CancellationToken.None);
+                throw new ProfileFamilyHashConflictException(
+                    collidingProfile is null
+                        ? $"A machine profile with the same rendered content already exists (family '{targetName}')."
+                        : $"A machine profile with the same rendered content already exists: '{collidingProfile.SourceSystemPresetName}'.",
+                    ex);
+            }
         }
         catch (ProfileFamilyConcurrentlyDeletedException)
         {
@@ -1295,6 +1333,7 @@ public sealed class ProfileFamilyService(
     {
         ProfileFamilySourceException => ("source_preset_unavailable", exception.Message),
         ProfileFamilyConflictException => ("profile_family_name_conflict", exception.Message),
+        ProfileFamilyHashConflictException => ("profile_family_hash_conflict", exception.Message),
         ProfileFamilyInUseException => ("profile_family_in_use", exception.Message),
         ArgumentException => ("invalid_profile_family", exception.Message),
         HttpRequestException => ("profile_family_worker_unavailable", exception.Message),
