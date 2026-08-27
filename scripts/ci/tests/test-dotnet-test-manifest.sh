@@ -887,8 +887,11 @@ for proj, chunk in upload_steps:
     # starts with the same prefix -- e.g. a hypothetical
     # 'actions/upload-artifact-mirror@v1' -- is not mistaken for the real
     # action just because "actions/upload-artifact" happens to be a
-    # substring of its name.
-    if not re.search(r"uses:\s*actions/upload-artifact@", chunk):
+    # substring of its name. Anchor on the start of a YAML line (not just
+    # anywhere in the chunk) so a step whose real 'uses:' points elsewhere
+    # cannot be masked by an unrelated '# uses: actions/upload-artifact@..'
+    # comment line sitting in the same chunk (Hicks review finding, round 3).
+    if not re.search(r"(?m)^\s*uses:\s*actions/upload-artifact@", chunk):
         errors.append(
             f"ci.yml step 'Upload {proj} build' does not use "
             "actions/upload-artifact -- it looks like an upload step by "

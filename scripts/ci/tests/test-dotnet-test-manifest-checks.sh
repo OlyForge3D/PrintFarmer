@@ -871,6 +871,52 @@ with open(out_path, "w", encoding="utf-8") as f:
   fi
 }
 
+case_ci_upload_action_masked_by_comment_fails() {
+  # Negative (check 6, issue #2091, Hicks round-3 review finding): the
+  # 'uses:' check must be anchored on the START of a YAML line, not merely
+  # searched anywhere in the step's chunk -- otherwise a step whose real
+  # 'uses:' points at a different action (e.g. actions/checkout) could be
+  # masked by an unrelated comment line elsewhere in the same chunk that
+  # happens to contain the literal text
+  # "uses: actions/upload-artifact@v7" (e.g. a stale commented-out line
+  # left behind by a previous edit), fooling a plain substring/search
+  # check into believing the step really publishes an artifact.
+  local mutant ; mutant="$(mktemp)"
+  build_ci_mutant "$mutant" '
+import re, sys
+out_path, src_path = sys.argv[1], sys.argv[2]
+with open(src_path, encoding="utf-8") as f:
+    text = f.read()
+pattern = re.compile(
+    r"(      - name: Upload Farm\.Modules\.Gcode\.Tests build\n(?:.*\n)*?        )uses: actions/upload-artifact@v7\n"
+)
+m = pattern.search(text)
+assert m, "fixture step block/uses: line not found -- ci.yml step shape changed"
+mutated = (
+    text[: m.start()]
+    + m.group(1)
+    + "uses: actions/checkout@v4\n"
+    + m.group(1)
+    + "# uses: actions/upload-artifact@v7 (left over from a prior edit)\n"
+    + text[m.end():]
+)
+with open(out_path, "w", encoding="utf-8") as f:
+    f.write(mutated)
+'
+  local rc=0
+  local report
+  report="$(CI_WORKFLOW_PATH="$mutant" bash "$VALIDATOR" 2>&1)" || rc=$?
+  rm -f "$mutant"
+  if (( rc == 0 )); then
+    printf '  expected validator to fail when the real uses: is wrong but masked by a comment, but it passed\n' >&2
+    return 1
+  fi
+  if [[ "$report" != *"Upload Farm.Modules.Gcode.Tests build' does not use actions/upload-artifact"* ]]; then
+    printf '  expected a wrong-action error despite the masking comment, got:\n%s\n' "$report" >&2
+    return 1
+  fi
+}
+
 case_ci_upload_if_condition_wrong_project_fails() {
   # Negative (check 6, issue #2091, Vasquez review finding #1): a step
   # whose title says "Upload Farm.Modules.Gcode.Tests build" but whose
@@ -1049,6 +1095,7 @@ TESTS=(
   case_ci_orphaned_upload_step_fails
   case_ci_upload_wrong_action_fails
   case_ci_upload_lookalike_action_name_fails
+  case_ci_upload_action_masked_by_comment_fails
   case_ci_upload_if_condition_wrong_project_fails
   case_ci_upload_if_condition_missing_fails
   case_ci_upload_with_name_mismatch_fails

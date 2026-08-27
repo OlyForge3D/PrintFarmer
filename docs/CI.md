@@ -600,9 +600,12 @@ or artifact path were not is caught too, rather than only the "step present
 or absent" question:
 
 - it must actually invoke `actions/upload-artifact@<ref>` (the check is
-  anchored on the `@` after the action name, so a same-titled step
-  repurposed to a differently-named action -- including a look-alike such
-  as `actions/upload-artifact-mirror@v1` -- does not count as a publisher);
+  anchored on the start of a YAML `uses:` line, requiring the `@` come
+  right after the action name, so a same-titled step repurposed to a
+  differently-named action -- including a look-alike such as
+  `actions/upload-artifact-mirror@v1` -- does not count as a publisher,
+  and a stray comment line elsewhere in the step's chunk cannot mask the
+  real, wrong `uses:` value either);
 - its `if:` must positively select on `<name>.csproj` (or, for
   `Farm.Web.Api.Tests`, on `want_dotnet_test`) -- a missing, malformed, or
   differently-quoted condition is flagged rather than failing open;
