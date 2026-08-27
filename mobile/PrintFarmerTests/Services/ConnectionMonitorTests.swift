@@ -575,10 +575,16 @@ final class ConnectionMonitorTests: XCTestCase {
             capabilitiesService: capabilities,
             probes: [
                 BackendReadinessProbe(endpoint: .api) {},
-                BackendReadinessProbe(endpoint: .attention) {
+                BackendReadinessProbe(
+                    endpoint: .attention,
+                    treatsUnsupportedAsAvailable: true
+                ) {
                     throw NetworkError.notFound
                 },
-                BackendReadinessProbe(endpoint: .dispatch) {
+                BackendReadinessProbe(
+                    endpoint: .dispatch,
+                    treatsUnsupportedAsAvailable: true
+                ) {
                     throw NetworkError.methodNotAllowed
                 },
             ]
@@ -587,6 +593,22 @@ final class ConnectionMonitorTests: XCTestCase {
         let result = await BackendReadinessChecker().check(plan: plan)
 
         XCTAssertTrue(result.failures.isEmpty)
+    }
+
+    func testReadinessReportsUnsupportedEndpointByDefault() async {
+        let capabilities = TestCapabilitiesService()
+        let plan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(endpoint: .printers) {
+                    throw NetworkError.notFound
+                },
+            ]
+        )
+
+        let result = await BackendReadinessChecker().check(plan: plan)
+
+        XCTAssertEqual(result.failures.map(\.endpoint), [.printers])
     }
 
     func testReadinessReportsCapabilitiesRefreshFailureButStillChecksFeatures() async {
@@ -637,36 +659,40 @@ final class ConnectionMonitorTests: XCTestCase {
     }
 
     func testReadinessTimeoutReturnsWhenProbeIgnoresCancellation() async {
+        let operationStarted = AsyncBarrier()
         let blocker = AsyncBarrier()
-        let releaseTask = Task {
-            try? await Task.sleep(for: .milliseconds(500))
-            blocker.release()
-        }
+        let timeoutGate = AsyncBarrier()
         defer {
+            operationStarted.close()
             blocker.close()
-            releaseTask.cancel()
+            timeoutGate.close()
         }
         let capabilities = TestCapabilitiesService()
         let plan = BackendReadinessPlan(
             capabilitiesService: capabilities,
             probes: [
                 BackendReadinessProbe(endpoint: .maintenance) {
+                    operationStarted.signal()
                     await blocker.arriveAndWait()
                 },
             ]
         )
-        let clock = ContinuousClock()
-        let start = clock.now
+        let checker = BackendReadinessChecker(
+            timeout: .seconds(30),
+            probeTimeoutSleep: { _ in
+                await timeoutGate.arriveAndWait()
+            }
+        )
+        let checkTask = Task {
+            await checker.check(plan: plan)
+        }
 
-        let result = await BackendReadinessChecker(timeout: .milliseconds(100)).check(plan: plan)
-        let elapsed = start.duration(to: clock.now)
+        await operationStarted.waitUntilArrived()
+        timeoutGate.release()
+        let result = await checkTask.value
 
         XCTAssertEqual(result.failures.map(\.endpoint), [.maintenance])
-        XCTAssertLessThan(
-            elapsed,
-            .milliseconds(300),
-            "Timeout must not wait for a cancellation-ignoring probe to finish"
-        )
+        blocker.release()
     }
 
     func testReadinessCancellationDoesNotBecomeAServiceFailure() async {
@@ -749,37 +775,6 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertFalse(gate.allowsMainContent)
     }
 
-    func testConnectionGateResetCancelsSignalRWorkRetainedAfterTimeout() async {
-        let cancelled = AsyncBarrier()
-        defer { cancelled.close() }
-        let capabilities = TestCapabilitiesService()
-        let plan = BackendReadinessPlan(
-            capabilitiesService: capabilities,
-            probes: [
-                BackendReadinessProbe(
-                    endpoint: .signalR,
-                    continuesAfterTimeout: true
-                ) {
-                    do {
-                        try await Task.sleep(for: .seconds(30))
-                    } catch {
-                        cancelled.signal()
-                        throw error
-                    }
-                },
-            ]
-        )
-        let gate = BackendConnectionGate(timeout: .milliseconds(5))
-
-        await gate.check(plan: plan, generation: 3) { true }
-        XCTAssertEqual(gate.failures?.map(\.endpoint), [.signalR])
-
-        gate.reset()
-        await cancelled.waitUntilArrived()
-
-        XCTAssertEqual(gate.state, .idle)
-    }
-
     func testConnectionGateAcknowledgesFailureOnceAndAllowsOfflineUI() async {
         let capabilities = TestCapabilitiesService()
         let plan = BackendReadinessPlan(
@@ -803,6 +798,17 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertEqual(gate.state, .proceedingOffline)
         XCTAssertTrue(gate.allowsMainContent)
         XCTAssertNil(gate.failures)
+    }
+
+    func testConnectionGateRetryRearmsTheTaskIdentity() async {
+        let gate = BackendConnectionGate()
+        let initialRevision = gate.retryRevision
+
+        gate.retry()
+
+        XCTAssertEqual(gate.state, .idle)
+        XCTAssertEqual(gate.retryRevision, initialRevision + 1)
+        XCTAssertTrue(gate.isChecking)
     }
 }
 

@@ -50,7 +50,10 @@ struct RootView: View {
                     // activate (e.g. startup preparation failed), show an accessible
                     // retry-or-sign-out surface instead of the main app shell.
                     if authViewModel.isLoading {
-                        BackendConnectionCheckView(isChecking: true)
+                        BackendConnectionCheckView(
+                            isChecking: true,
+                            statusText: "Connecting to services..."
+                        )
                     } else if authViewModel.snapshotActivationPending {
                         SnapshotActivationPendingView()
                     } else if shouldBypassConnectionGate || connectionGate.allowsMainContent {
@@ -182,8 +185,13 @@ struct RootView: View {
     }
 
     private var connectionCheck: some View {
-        BackendConnectionCheckView(isChecking: connectionGate.isChecking)
-            .task(id: services.activeServerGeneration) {
+        BackendConnectionCheckView(
+            isChecking: connectionGate.isChecking,
+            statusText: connectionGate.failures == nil
+                ? "Connecting to services..."
+                : "Some services are unavailable"
+        )
+            .task(id: "\(services.activeServerGeneration):\(connectionGate.retryRevision)") {
                 let generation = services.activeServerGeneration
                 let plan = BackendReadinessPlan(services: services)
                 await connectionGate.check(
@@ -207,6 +215,9 @@ struct RootView: View {
                     }
                 )
             ) {
+                Button("Try Again") {
+                    connectionGate.retry()
+                }
                 Button("Continue Offline") {
                     connectionGate.continueOffline()
                 }
@@ -247,6 +258,7 @@ struct RootView: View {
 
     private struct BackendConnectionCheckView: View {
         let isChecking: Bool
+        let statusText: String
 
         var body: some View {
             GeometryReader { proxy in
@@ -275,11 +287,15 @@ struct RootView: View {
                                 .accessibilityHidden(true)
                         }
 
-                        Text(isChecking ? "Connecting to services..." : "Connection check complete")
+                        Text(statusText)
                             .font(.headline)
                             .foregroundStyle(Color("LaunchText"))
 
-                        Text("Preparing your farm and checking each enabled mobile feature.")
+                        Text(
+                            isChecking
+                                ? "Preparing your farm and checking each enabled mobile feature."
+                                : "Try again, or continue with cached data and available services."
+                        )
                             .font(.subheadline)
                             .foregroundStyle(Color("LaunchText"))
                             .multilineTextAlignment(.center)

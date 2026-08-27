@@ -432,6 +432,14 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     // MARK: - Public API
 
     func connect() async throws {
+        try await connect(cancellationMarksIntentionalDisconnect: true)
+    }
+
+    func connectForReadiness() async throws {
+        try await connect(cancellationMarksIntentionalDisconnect: false)
+    }
+
+    private func connect(cancellationMarksIntentionalDisconnect: Bool) async throws {
         // r9 blockers #1 + #2: reserve generation/intent AND publish
         // `.connecting` inside one lifecycleSync transition. If an
         // earlier reconnect flow still owns the slot, cancel and clear
@@ -493,12 +501,12 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
         do {
             try await performConnect(myGen: myGen)
-        } catch is CancellationError {
+        } catch let error where Self.isCancellation(error) {
             lifecycleSync {
                 guard self.generation == myGen, !self.intentionalDisconnect else {
                     return
                 }
-                self.intentionalDisconnect = true
+                self.intentionalDisconnect = cancellationMarksIntentionalDisconnect
                 self.generation &+= 1
                 self.tearDownLocked()
                 self.connectionStateHub.setState(.disconnected)
@@ -517,6 +525,13 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             }
             throw error
         }
+    }
+
+    private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+        return (error as? URLError)?.code == .cancelled
     }
 
     func disconnect() async {

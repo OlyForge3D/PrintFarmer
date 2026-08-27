@@ -75,4 +75,43 @@ final class SignalRServiceTests: XCTestCase {
         XCTAssertNotNil(captured, "negotiate request should have been sent")
         XCTAssertNil(captured?.value(forHTTPHeaderField: "Authorization"))
     }
+
+    func testCancelledReadinessConnectAllowsLaterRecovery() async {
+        let entered = AsyncBarrier()
+        let release = AsyncBarrier()
+        defer {
+            entered.close()
+            release.close()
+        }
+        mockSession.asyncRequestHandler = { request in
+            entered.signal()
+            await release.arriveAndWait()
+            return (TestData.httpResponse(url: request.url, statusCode: 500), Data("{}".utf8))
+        }
+        let service = SignalRService(
+            serverURL: TestData.testBaseURL,
+            session: mockSession.urlSession,
+            tokenProvider: { "test-token" }
+        )
+
+        let readiness = Task {
+            try await service.connectForReadiness()
+        }
+        await entered.waitUntilArrived()
+        readiness.cancel()
+        _ = try? await readiness.value
+
+        mockSession.asyncRequestHandler = nil
+        mockSession.requestHandler = { request in
+            (TestData.httpResponse(url: request.url, statusCode: 500), Data("{}".utf8))
+        }
+        await service.ensureConnected()
+
+        XCTAssertGreaterThanOrEqual(
+            mockSession.capturedRequests.count,
+            2,
+            "Readiness cancellation must not suppress the next recovery attempt"
+        )
+        await service.disconnect()
+    }
 }

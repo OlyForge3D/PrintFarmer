@@ -360,20 +360,17 @@ struct BackendReadinessProbe: Sendable {
     let endpoint: BackendServiceEndpoint
     let isEnabled: @Sendable (ResolvedSystemCapabilities) -> Bool
     let treatsUnsupportedAsAvailable: Bool
-    let continuesAfterTimeout: Bool
     let operation: @Sendable () async throws -> Void
 
     init(
         endpoint: BackendServiceEndpoint,
         isEnabled: @escaping @Sendable (ResolvedSystemCapabilities) -> Bool = { _ in true },
-        treatsUnsupportedAsAvailable: Bool = true,
-        continuesAfterTimeout: Bool = false,
+        treatsUnsupportedAsAvailable: Bool = false,
         operation: @escaping @Sendable () async throws -> Void
     ) {
         self.endpoint = endpoint
         self.isEnabled = isEnabled
         self.treatsUnsupportedAsAvailable = treatsUnsupportedAsAvailable
-        self.continuesAfterTimeout = continuesAfterTimeout
         self.operation = operation
     }
 }
@@ -418,11 +415,8 @@ struct BackendReadinessPlan: Sendable {
                     throw BackendReadinessProbeError.unavailable
                 }
             },
-            BackendReadinessProbe(
-                endpoint: .signalR,
-                continuesAfterTimeout: true
-            ) {
-                try await signalRService.connect()
+            BackendReadinessProbe(endpoint: .signalR) {
+                try await signalRService.connectForReadiness()
             },
             BackendReadinessProbe(endpoint: .printers) {
                 _ = try await printerService.list(includeDisabled: false)
@@ -447,41 +441,60 @@ struct BackendReadinessPlan: Sendable {
             },
             BackendReadinessProbe(
                 endpoint: .attention,
-                isEnabled: { $0.attentionEnabled }
+                isEnabled: { $0.attentionEnabled },
+                treatsUnsupportedAsAvailable: true
             ) {
                 _ = try await attentionService.getFeed(cursor: nil, limit: 1)
             },
             BackendReadinessProbe(
                 endpoint: .filamentCoverage,
-                isEnabled: { $0.filamentCoverageEnabled }
+                isEnabled: { $0.filamentCoverageEnabled },
+                treatsUnsupportedAsAvailable: true
             ) {
                 _ = try await filamentCoverageService.getForFleet()
             },
             BackendReadinessProbe(
                 endpoint: .shiftTasks,
-                isEnabled: { $0.shiftPlanEnabled }
+                isEnabled: { $0.shiftPlanEnabled },
+                treatsUnsupportedAsAvailable: true
             ) {
                 _ = try await shiftTaskService.loadSnapshot(shiftPlanEnabled: true)
             },
             BackendReadinessProbe(
                 endpoint: .partsInventory,
-                isEnabled: { $0.printedPartsInventoryEnabled }
+                isEnabled: { $0.printedPartsInventoryEnabled },
+                treatsUnsupportedAsAvailable: true
             ) {
                 _ = try await partsInventoryService.listParts(includeInactive: false)
             },
-            BackendReadinessProbe(endpoint: .autoDispatch) {
+            BackendReadinessProbe(
+                endpoint: .autoDispatch,
+                treatsUnsupportedAsAvailable: true
+            ) {
                 _ = try await autoPrintService.getAllStatus()
             },
-            BackendReadinessProbe(endpoint: .jobAnalytics) {
+            BackendReadinessProbe(
+                endpoint: .jobAnalytics,
+                treatsUnsupportedAsAvailable: true
+            ) {
                 _ = try await jobAnalyticsService.getStats()
             },
-            BackendReadinessProbe(endpoint: .predictiveAnalytics) {
+            BackendReadinessProbe(
+                endpoint: .predictiveAnalytics,
+                treatsUnsupportedAsAvailable: true
+            ) {
                 _ = try await predictiveService.getActiveAlerts(printerId: nil)
             },
-            BackendReadinessProbe(endpoint: .dispatch) {
+            BackendReadinessProbe(
+                endpoint: .dispatch,
+                treatsUnsupportedAsAvailable: true
+            ) {
                 _ = try await dispatchService.getQueueStatus()
             },
-            BackendReadinessProbe(endpoint: .failureDetection) {
+            BackendReadinessProbe(
+                endpoint: .failureDetection,
+                treatsUnsupportedAsAvailable: true
+            ) {
                 _ = try await failureDetectionService.getStatus()
             },
         ]
@@ -537,36 +550,21 @@ private final class BackendReadinessRace<Value: Sendable>: @unchecked Sendable {
     }
 }
 
-private final class BackendReadinessTaskRegistry: @unchecked Sendable {
-    private let lock = NSLock()
-    private var tasks: [Task<Void, Never>] = []
-
-    func retain(_ task: Task<Void, Never>) {
-        lock.lock()
-        tasks.append(task)
-        lock.unlock()
-    }
-
-    func cancelAll() {
-        lock.lock()
-        let retained = tasks
-        tasks.removeAll()
-        lock.unlock()
-        retained.forEach { $0.cancel() }
-    }
-}
-
 struct BackendReadinessChecker: Sendable {
     let timeout: Duration
-    private let lingeringTasks: BackendReadinessTaskRegistry
+    let capabilitiesTimeout: Duration
+    private let probeTimeoutSleep: @Sendable (Duration) async throws -> Void
 
-    init(timeout: Duration = .seconds(10)) {
+    init(
+        timeout: Duration = .seconds(10),
+        capabilitiesTimeout: Duration = .seconds(5),
+        probeTimeoutSleep: @escaping @Sendable (Duration) async throws -> Void = {
+            try await Task.sleep(for: $0)
+        }
+    ) {
         self.timeout = timeout
-        lingeringTasks = BackendReadinessTaskRegistry()
-    }
-
-    func cancelLingeringOperations() {
-        lingeringTasks.cancelAll()
+        self.capabilitiesTimeout = capabilitiesTimeout
+        self.probeTimeoutSleep = probeTimeoutSleep
     }
 
     @MainActor
@@ -574,7 +572,7 @@ struct BackendReadinessChecker: Sendable {
         if let apiProbe = plan.probes.first(where: { $0.endpoint == .api }) {
             let apiResult = await run(
                 probe: apiProbe,
-                timeout: min(timeout, .seconds(3))
+                timeout: min(timeout, .seconds(6))
             )
             switch apiResult {
             case .completed(.succeeded), .completed(.unsupported):
@@ -591,7 +589,7 @@ struct BackendReadinessChecker: Sendable {
 
         let capabilitiesResult = await refreshCapabilities(
             plan.capabilitiesService,
-            timeout: min(timeout, .seconds(5))
+            timeout: capabilitiesTimeout
         )
         guard !Task.isCancelled else { return .cancelled }
 
@@ -654,7 +652,7 @@ struct BackendReadinessChecker: Sendable {
     ) async -> BackendTimedResult<BackendProbeExecutionResult> {
         await runWithTimeout(
             timeout: timeout,
-            continuesAfterTimeout: probe.continuesAfterTimeout
+            timeoutSleep: probeTimeoutSleep
         ) {
             do {
                 try Task.checkCancellation()
@@ -675,7 +673,9 @@ struct BackendReadinessChecker: Sendable {
 
     private func runWithTimeout<Value: Sendable>(
         timeout: Duration,
-        continuesAfterTimeout: Bool = false,
+        timeoutSleep: @escaping @Sendable (Duration) async throws -> Void = {
+            try await Task.sleep(for: $0)
+        },
         operation: @escaping @Sendable () async -> Value
     ) async -> BackendTimedResult<Value> {
         let race = BackendReadinessRace<BackendTimedResult<Value>>()
@@ -684,7 +684,7 @@ struct BackendReadinessChecker: Sendable {
         }
         let timeoutTask = Task {
             do {
-                try await Task.sleep(for: timeout)
+                try await timeoutSleep(timeout)
                 race.resolve(.timedOut)
             } catch {
                 // The operation completed or the caller cancelled the race.
@@ -698,12 +698,7 @@ struct BackendReadinessChecker: Sendable {
         }
 
         timeoutTask.cancel()
-        switch result {
-        case .timedOut where continuesAfterTimeout:
-            lingeringTasks.retain(operationTask)
-        default:
-            operationTask.cancel()
-        }
+        operationTask.cancel()
         return result
     }
 
@@ -730,6 +725,7 @@ enum BackendConnectionGateState: Equatable, Sendable {
 @Observable
 final class BackendConnectionGate {
     private(set) var state: BackendConnectionGateState = .idle
+    private(set) var retryRevision: UInt64 = 0
     @ObservationIgnored private let checker: BackendReadinessChecker
     @ObservationIgnored private var attemptID: UInt64 = 0
     @ObservationIgnored private var activeGeneration: Int?
@@ -762,7 +758,6 @@ final class BackendConnectionGate {
         generation: Int,
         isCurrent: @escaping @MainActor @Sendable () -> Bool
     ) async {
-        checker.cancelLingeringOperations()
         attemptID &+= 1
         let attempt = attemptID
         activeGeneration = generation
@@ -791,8 +786,14 @@ final class BackendConnectionGate {
         state = .proceedingOffline
     }
 
+    func retry() {
+        attemptID &+= 1
+        activeGeneration = nil
+        retryRevision &+= 1
+        state = .idle
+    }
+
     func reset() {
-        checker.cancelLingeringOperations()
         attemptID &+= 1
         activeGeneration = nil
         state = .idle
