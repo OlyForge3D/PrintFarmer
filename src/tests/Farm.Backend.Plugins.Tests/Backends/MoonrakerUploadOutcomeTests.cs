@@ -400,12 +400,16 @@ public sealed class MoonrakerUploadOutcomeTests
     public async Task GetFileListAsync_CallerCancellation_PropagatesCancellation()
     {
         using var cts = new CancellationTokenSource();
+        // IDISP013 false positive: this handler delegate is not invoked here — it runs later
+        // when HttpClient dispatches the request, synchronously within this method's scope.
+#pragma warning disable IDISP013 // Await in using
         using var handler = new AsyncMessageHandler((_, _) =>
         {
             cts.Cancel();
             return Task.FromException<HttpResponseMessage>(
                 new OperationCanceledException(cts.Token));
         });
+#pragma warning restore IDISP013
         using var http = new HttpClient(handler);
         var client = new MoonrakerClient(
             http,

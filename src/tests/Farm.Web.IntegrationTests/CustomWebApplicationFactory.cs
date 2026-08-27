@@ -198,7 +198,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
     [
         typeof(Farm.Infrastructure.Services.GcodeHarvest.GcodeHarvestQueueProcessorService),
         typeof(Farm.Infrastructure.Services.SystemLogs.SystemLogCleanupService),
-        typeof(Farm.Web.Api.Services.Workers.DiscoveryHeartbeatMonitorService),
+        typeof(Farm.Modules.Administration.Services.Workers.DiscoveryHeartbeatMonitorService),
         typeof(Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchBackgroundService),
         typeof(Farm.Infrastructure.Services.Cameras.CameraHealthMonitorService),
         typeof(Farm.Infrastructure.Services.FailureDetection.PrintFailureMonitorService),

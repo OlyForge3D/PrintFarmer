@@ -43,7 +43,7 @@ public sealed class SdcpClientBusyTests
 
         await using var env = await CreateSdcpMultiResponseServer(responseQueue);
 
-        Func<Task> act = () => env.Client.StartPrintAsync(env.BaseUrl, "test.gcode");
+        Func<Task> act = async () => await env.Client.StartPrintAsync(env.BaseUrl, "test.gcode");
 
         await act.Should().ThrowAsync<PrinterBackendBusyException>(
             because: "rejected start with CurrentStatus=printing must propagate as PrinterBackendBusyException (#317)");
@@ -64,7 +64,7 @@ public sealed class SdcpClientBusyTests
 
         await using var env = await CreateSdcpMultiResponseServer(responseQueue);
 
-        Func<Task> act = () => env.Client.StartPrintAsync(env.BaseUrl, "test.gcode");
+        Func<Task> act = async () => await env.Client.StartPrintAsync(env.BaseUrl, "test.gcode");
 
         await act.Should().ThrowAsync<PrinterBackendBusyException>();
     }

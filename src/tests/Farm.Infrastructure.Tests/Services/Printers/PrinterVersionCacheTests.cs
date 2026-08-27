@@ -155,8 +155,12 @@ public sealed class PrinterVersionCacheTests
 
         try
         {
+            // IDISP013 false positive: both tasks are awaited via Task.WhenAll two lines
+            // below, before this scope's disposables leave scope.
+#pragma warning disable IDISP013 // Await in using
             Task<PrinterVersionInfoDto?> call1 = Task.Run(() => cache.GetAsync(printer.Id, CancellationToken.None, forceRefresh: true));
             Task<PrinterVersionInfoDto?> call2 = Task.Run(() => cache.GetAsync(printer.Id, CancellationToken.None, forceRefresh: true));
+#pragma warning restore IDISP013
 
             PrinterVersionInfoDto?[] results = await Task.WhenAll(call1, call2);
 

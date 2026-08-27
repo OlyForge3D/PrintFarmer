@@ -330,7 +330,7 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
         DbSlicerJobQueue queue = CreateQueue(context);
         _interceptor.Reset();
 
-        Func<Task> action = () => queue.GetQueueStatsAsync((SlicerEngineType)999);
+        Func<Task> action = async () => await queue.GetQueueStatsAsync((SlicerEngineType)999);
 
         _ = await action.Should().ThrowAsync<ArgumentOutOfRangeException>();
         _interceptor.Commands.Should().BeEmpty();
@@ -344,7 +344,7 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
 
-        Func<Task> action = () => queue.GetAllQueueStatsAsync(cancellation.Token);
+        Func<Task> action = async () => await queue.GetAllQueueStatsAsync(cancellation.Token);
 
         _ = await action.Should().ThrowAsync<OperationCanceledException>();
     }

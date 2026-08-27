@@ -122,7 +122,7 @@ public sealed class CalibrationQueueCanonicalizerTests : IAsyncDisposable
             RequiredSlicerVersion: null,
             RequiredSlicerContainerDigest: null);
 
-        Func<Task> act = () => canonicalizer.BuildAsync(
+        Func<Task> act = async () => await canonicalizer.BuildAsync(
             request, gcode, classification, actorUserId: null, CancellationToken.None);
 
         (await act.Should().ThrowAsync<CalibrationQueueIncompatibleException>())

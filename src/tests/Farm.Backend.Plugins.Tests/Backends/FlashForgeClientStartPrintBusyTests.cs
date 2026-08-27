@@ -39,7 +39,7 @@ public sealed class FlashForgeClientStartPrintBusyTests
         await using var server = StartTcpServer(responses);
 
         var client = new FlashForgeClient(NullLogger<FlashForgeClient>.Instance, new BackendTimeoutSettings());
-        Func<Task> act = () => client.StartPrintAsync($"127.0.0.1:{server.Port}", "test.gcode");
+        Func<Task> act = async () => await client.StartPrintAsync($"127.0.0.1:{server.Port}", "test.gcode");
 
         await act.Should().ThrowAsync<PrinterBackendBusyException>(
             because: "~M23 rejection + BUILDING_FROM_SD M119 must propagate as PrinterBackendBusyException (#317)");
@@ -61,7 +61,7 @@ public sealed class FlashForgeClientStartPrintBusyTests
         await using var server = StartTcpServer(responses);
 
         var client = new FlashForgeClient(NullLogger<FlashForgeClient>.Instance, new BackendTimeoutSettings());
-        Func<Task> act = () => client.StartPrintAsync($"127.0.0.1:{server.Port}", "test.gcode");
+        Func<Task> act = async () => await client.StartPrintAsync($"127.0.0.1:{server.Port}", "test.gcode");
 
         await act.Should().ThrowAsync<PrinterBackendBusyException>();
     }

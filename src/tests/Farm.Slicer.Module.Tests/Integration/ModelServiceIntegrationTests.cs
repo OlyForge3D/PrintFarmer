@@ -756,7 +756,7 @@ public class ModelServiceIntegrationTests : IClassFixture<CustomWebApplicationFa
         BitConverter.GetBytes(5u).CopyTo(content, 80);
         IFormFile formFile = CreateMockFormFile("truncated.stl", content);
 
-        Func<Task> act = () => service.UploadModelAsync(formFile, CancellationToken.None);
+        Func<Task> act = async () => await service.UploadModelAsync(formFile, CancellationToken.None);
 
         (await act.Should().ThrowAsync<ArgumentException>())
             .WithMessage("*failed validation*");
@@ -779,7 +779,7 @@ public class ModelServiceIntegrationTests : IClassFixture<CustomWebApplicationFa
         byte[] content = new byte[10];
         IFormFile formFile = CreateMockFormFile("truncated-header.stl", content);
 
-        Func<Task> act = () => service.UploadModelAsync(formFile, CancellationToken.None);
+        Func<Task> act = async () => await service.UploadModelAsync(formFile, CancellationToken.None);
 
         (await act.Should().ThrowAsync<ArgumentException>())
             .WithMessage("*failed validation*");
@@ -797,7 +797,7 @@ public class ModelServiceIntegrationTests : IClassFixture<CustomWebApplicationFa
 
         IFormFile formFile = CreateMockFormFile("malformed.obj", "This is not a 3D model.\n");
 
-        Func<Task> act = () => service.UploadModelAsync(formFile, CancellationToken.None);
+        Func<Task> act = async () => await service.UploadModelAsync(formFile, CancellationToken.None);
 
         (await act.Should().ThrowAsync<ArgumentException>())
             .WithMessage("*failed validation*");

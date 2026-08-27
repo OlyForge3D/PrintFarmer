@@ -52,7 +52,7 @@ public class AdminOverviewControllerTests
 
         AdminOverviewController controller = new(service.Object);
 
-        Func<Task> act = () => controller.GetOverviewAsync(cts.Token);
+        Func<Task> act = async () => await controller.GetOverviewAsync(cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }

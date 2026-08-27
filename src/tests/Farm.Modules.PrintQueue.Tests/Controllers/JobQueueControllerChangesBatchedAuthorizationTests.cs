@@ -577,7 +577,7 @@ public class JobQueueControllerChangesBatchedAuthorizationTests
             authorization,
             CreatePrincipalWithNoResolvableSubject());
 
-        Func<Task<IActionResult>> act = () => controller.GetChangesAsync(
+        Func<Task<IActionResult>> act = async () => await controller.GetChangesAsync(
             afterSequence: 0,
             limit: 500,
             CancellationToken.None);

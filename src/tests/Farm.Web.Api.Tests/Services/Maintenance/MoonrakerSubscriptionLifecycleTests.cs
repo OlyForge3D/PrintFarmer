@@ -192,7 +192,11 @@ public sealed class MoonrakerSubscriptionLifecycleTests
             new Mock<IHttpClientFactory>().Object,
             new Mock<IPrinterStatusCacheWriter>().Object,
             activityAccumulator: accumulator);
+        // IDISP013 false positive: this override delegate is not invoked here — it runs later
+        // when the service starts its internal subscription loop.
+#pragma warning disable IDISP013 // Await in using
         service.SubscriptionLoopOverride = (_, token) => Task.Delay(Timeout.InfiniteTimeSpan, token);
+#pragma warning restore IDISP013
 
         await service.EnumerateAndStartSubscriptionsAsync(CancellationToken.None);
 

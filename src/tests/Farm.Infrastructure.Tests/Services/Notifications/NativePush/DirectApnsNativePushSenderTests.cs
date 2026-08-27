@@ -1089,7 +1089,11 @@ public sealed class DirectApnsNativePushSenderTests : IDisposable
                 Content = new StringContent("{\"reason\":\"InvalidProviderToken\"}"),
             });
             using var bCts = new CancellationTokenSource();
+            // IDISP013 false positive: bTask is awaited below (line ~1113) via
+            // bTask.WaitAsync, before `bCts` leaves its using scope.
+#pragma warning disable IDISP013 // Await in using
             Task<NativePushDispatchResult> bTask = Task.Run(() => sut.SendAsync(Sample, bCts.Token));
+#pragma warning restore IDISP013
 
             // (5) Deterministic barrier: hook fired → B is inside InvalidateJwtCacheAsync
             //     about to call _jwtLock.WaitAsync(bCts.Token). Because we hold the semaphore

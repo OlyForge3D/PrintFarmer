@@ -289,7 +289,7 @@ public class AdminOverviewServiceTests
         _healthCheckService.Setup(s => s.CheckHealthAsync(It.IsAny<System.Func<HealthCheckRegistration, bool>?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException(cts.Token));
 
-        Func<Task> act = () => CreateService().GetOverviewAsync(cts.Token);
+        Func<Task> act = async () => await CreateService().GetOverviewAsync(cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }

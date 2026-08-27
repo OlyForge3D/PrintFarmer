@@ -218,7 +218,7 @@ public sealed class CustomWebApplicationFactoryTests
             typeof(Farm.Infrastructure.Services.SystemLogs.SystemLogCleanupService),
             identity.HostedServiceTypes);
         Assert.DoesNotContain(
-            typeof(Farm.Web.Api.Services.Workers.DiscoveryHeartbeatMonitorService),
+            typeof(Farm.Modules.Administration.Services.Workers.DiscoveryHeartbeatMonitorService),
             identity.HostedServiceTypes);
         Assert.DoesNotContain(
             typeof(Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchBackgroundService),
