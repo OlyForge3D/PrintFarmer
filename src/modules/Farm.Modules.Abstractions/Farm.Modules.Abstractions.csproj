@@ -8,8 +8,8 @@
     <Description>Host seam for vertical-slice API modules: the IApiModule contract, module
 discovery/registration extensions, and the shared ProblemDetails/attribute shapes
 Farm.Modules.* assemblies build on. No dependencies beyond ASP.NET Core -- a dependency-graph
-leaf by design, so any project may reference it without risking a cycle. Consumed by all nine
-Farm.Modules.* assemblies, Farm.Web.Api, and Farm.Infrastructure (see epic #2019 and issue
+leaf by design, so any project may reference it without risking a cycle. Consumed by every
+Farm.Modules.* assembly, Farm.Web.Api, and Farm.Infrastructure (see epic #2019 and issue
 #2100).</Description>
   </PropertyGroup>
 
