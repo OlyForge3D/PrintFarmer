@@ -26,10 +26,21 @@
 #      manifest (they are only reachable via the tests_other/full-safe
 #      fallback bucket today — this script does not change that, it only
 #      guards the registration itself from disappearing again).
+#   6. Manifest/`.github/workflows/ci.yml` upload-artifact drift (issue
+#      #2091): the `dotnet-build` job's per-project `upload-artifact` steps
+#      are 20+ individually hardcoded steps that must stay in sync with this
+#      manifest by hand (GitHub Actions cannot generate steps in a loop).
+#      Every manifest `testProjects[].name` must have a matching
+#      "Upload <name> build" step in the `dotnet-build` job, and every such
+#      step's project must be registered in the manifest. Without this, a
+#      new test project can be selected/compiled but never published,
+#      failing late at the consumer leg with a misleading
+#      artifact-not-found error instead of failing fast here.
 #
 # This script does not build or run any .NET code; it only reads the
-# manifest JSON and walks the filesystem, so it is safe to run without a
-# restore and fast enough for every PR (`ci-tools` job).
+# manifest JSON, the ci.yml workflow text, and walks the filesystem, so it
+# is safe to run without a restore and fast enough for every PR
+# (`ci-tools` job).
 # =============================================================================
 
 set -uo pipefail
@@ -38,11 +49,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 MANIFEST="${TEST_MANIFEST_PATH:-$REPO_ROOT/scripts/ci/dotnet-test-manifest.json}"
 SRC_ROOT="$REPO_ROOT/src"
+CI_WORKFLOW="${CI_WORKFLOW_PATH:-$REPO_ROOT/.github/workflows/ci.yml}"
 
 FAILURES=()
 
 if [[ ! -r "$MANIFEST" ]]; then
   echo "FATAL: manifest not readable at $MANIFEST" >&2
+  exit 1
+fi
+
+if [[ ! -r "$CI_WORKFLOW" ]]; then
+  echo "FATAL: ci workflow not readable at $CI_WORKFLOW" >&2
   exit 1
 fi
 
@@ -64,12 +81,12 @@ if [[ -z "$PYTHON_BIN" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 1 & 2 & 3 & 5: manifest structural checks, delegated to Python for JSON
-# parsing and duplicate/shard-coverage detection. Emits one "ERROR: ..." line
-# per problem found and exits non-zero if any were found; prints nothing on
-# success.
+# 1 & 2 & 3 & 5 & 6: manifest structural checks, delegated to Python for JSON
+# parsing and duplicate/shard-coverage/upload-artifact-drift detection. Emits
+# one "ERROR: ..." line per problem found and exits non-zero if any were
+# found; prints nothing on success.
 # ---------------------------------------------------------------------------
-manifest_report="$("$PYTHON_BIN" - "$MANIFEST" "$SRC_ROOT" <<'PYEOF'
+manifest_report="$("$PYTHON_BIN" - "$MANIFEST" "$SRC_ROOT" "$CI_WORKFLOW" <<'PYEOF'
 import json
 import os
 import re
@@ -328,7 +345,7 @@ def _code_brace_depths(code_text):
     return depths
 
 
-manifest_path, src_root = sys.argv[1], sys.argv[2]
+manifest_path, src_root, ci_workflow_path = sys.argv[1], sys.argv[2], sys.argv[3]
 
 with open(manifest_path, encoding="utf-8") as f:
     data = json.load(f)
@@ -797,6 +814,97 @@ for sharded_entry in entries:
                         f"{', '.join(matching_shards)} (candidate FullyQualifiedName "
                         f"prefix {candidate})"
                     )
+
+# 6. Manifest <-> ci.yml upload-artifact drift guard (issue #2091). The
+# `dotnet-build` job publishes each selected test project's build output as
+# its own hardcoded `upload-artifact` step (GitHub Actions cannot generate
+# steps in a loop), so nothing but this check keeps that static list in sync
+# with the manifest driving TEST_MATRIX. A project present in one but not
+# the other compiles fine but either never gets uploaded (its `dotnet-test`
+# leg then fails downstream with a misleading artifact-not-found error) or
+# uploads a build nothing ever consumes.
+with open(ci_workflow_path, encoding="utf-8") as f:
+    ci_yml_text = f.read()
+
+job_header_re = re.compile(r"(?m)^  ([A-Za-z_][\w-]*):[ \t]*$")
+job_headers = list(job_header_re.finditer(ci_yml_text))
+dotnet_build_job = next(
+    (m for m in job_headers if m.group(1) == "dotnet-build"), None
+)
+if dotnet_build_job is None:
+    errors.append(
+        f"{ci_workflow_path}: no top-level 'dotnet-build:' job found -- "
+        "the upload-artifact drift guard (issue #2091) cannot locate the "
+        "job whose steps it is supposed to cross-check against the manifest"
+    )
+    dotnet_build_text = ""
+else:
+    later_headers = [m for m in job_headers if m.start() > dotnet_build_job.end()]
+    job_end = later_headers[0].start() if later_headers else len(ci_yml_text)
+    dotnet_build_text = ci_yml_text[dotnet_build_job.end():job_end]
+
+# Split the job body into per-step chunks so each "Upload <name> build" step
+# is inspected independently of its neighbours (its `if:` condition may span
+# multiple lines via a YAML `>-` block scalar).
+step_re = re.compile(r"(?m)^      - name: ")
+step_bounds = [m.start() for m in step_re.finditer(dotnet_build_text)]
+step_bounds.append(len(dotnet_build_text))
+upload_steps = []
+for idx in range(len(step_bounds) - 1):
+    chunk = dotnet_build_text[step_bounds[idx]:step_bounds[idx + 1]]
+    name_match = re.match(r"      - name: Upload (?P<proj>[\w.]+) build\b", chunk)
+    if name_match:
+        upload_steps.append((name_match.group("proj"), chunk))
+
+manifest_names = set(seen_names)
+ci_yml_test_projects = set()
+for proj, chunk in upload_steps:
+    if "mig_matrix" in chunk:
+        # Migration-project upload (Farm.Migrations.*, Farm.Slicer.Migrations.*):
+        # driven by MIG_MATRIX, not the dotnet-test manifest this script
+        # validates -- out of scope for this check.
+        continue
+    ci_yml_test_projects.add(proj)
+
+    # Defensive cross-check: when the step's `if:` names a project via
+    # `contains(needs.select.outputs.matrix, '<X>.csproj')`, <X> must match
+    # the project named in the step title, or the two have silently drifted
+    # apart from each other even though both still "exist".
+    referenced = re.findall(
+        r"needs\.select\.outputs\.matrix,\s*\n?\s*'([\w.]+)\.csproj'",
+        chunk,
+    )
+    for ref in referenced:
+        if ref != proj:
+            errors.append(
+                f"ci.yml step 'Upload {proj} build' guards on "
+                f"'{ref}.csproj' in its if: condition -- step title and "
+                "matrix-selector project name have drifted apart from "
+                "each other"
+            )
+
+if dotnet_build_job is not None:
+    missing_upload_steps = sorted(manifest_names - ci_yml_test_projects)
+    for name in missing_upload_steps:
+        errors.append(
+            f"{name} is registered in {os.path.basename(manifest_path)} but "
+            f"has no matching 'Upload {name} build' upload-artifact step in "
+            "the dotnet-build job of .github/workflows/ci.yml -- add one "
+            "(issue #2091: a project reachable from the manifest without an "
+            "upload step compiles but is never published, so its "
+            "dotnet-test leg fails downstream with a misleading "
+            "artifact-not-found error instead of failing fast here)"
+        )
+
+    orphaned_upload_steps = sorted(ci_yml_test_projects - manifest_names)
+    for name in orphaned_upload_steps:
+        errors.append(
+            f".github/workflows/ci.yml has an 'Upload {name} build' "
+            f"upload-artifact step in the dotnet-build job, but {name} is "
+            f"not registered in {os.path.basename(manifest_path)} -- either "
+            "add it to the manifest or remove the orphaned upload step "
+            "(issue #2091)"
+        )
 
 for e in errors:
     print(f"ERROR: {e}")

@@ -509,10 +509,13 @@ given tree.
   `shards`, `requiresProviders`, `runIntegration`, `leg`) and (as needed)
   the classification map in `select-dotnet-tests.sh`, then add a matching
   test case in the selector suite. Add the project's direct-upload step to
-  `dotnet-build`; consumers derive the matching archive name from
-  `matrix.project`. Add the project to `farm-web.sln` when appropriate, but
-  CI also supports required projects that intentionally live outside the
-  solution. Run
+  `dotnet-build` (a step named `Upload <name> build`, matching the
+  manifest's `name`); consumers derive the matching archive name from
+  `matrix.project`. GitHub Actions cannot generate these per-project steps
+  in a loop, so the manifest and this static list can drift apart silently
+  (issue #2091) — see "Manifest/ci.yml upload-artifact drift guard" below.
+  Add the project to `farm-web.sln` when appropriate, but CI also supports
+  required projects that intentionally live outside the solution. Run
   `bash scripts/ci/tests/test-dotnet-test-manifest.sh` to confirm the
   manifest still registers every `*.Tests.csproj` on disk exactly once (and,
   for `Farm.Web.Api.Tests`, that its `shards` remain exhaustive, mutually
@@ -571,3 +574,29 @@ regression suite, run against mutated copies of the real manifest:
 ```bash
 bash scripts/ci/tests/test-dotnet-test-manifest-checks.sh
 ```
+
+### Manifest/ci.yml upload-artifact drift guard
+
+The `dotnet-build` job's per-project `upload-artifact` steps are individually
+hardcoded (GitHub Actions cannot generate steps in a loop), so nothing but a
+test enforces that they stay in sync with the manifest driving
+`TEST_MATRIX`. Without a check, adding a project to
+`dotnet-test-manifest.json` without a matching `Upload <name> build` step
+compiles fine — the failure only surfaces later, and at the wrong place: the
+project's `dotnet-test` leg fails with an artifact-not-found error instead
+of naming the actual cause (issue #2091).
+
+`test-dotnet-test-manifest.sh` guards against this by parsing
+`.github/workflows/ci.yml`'s `dotnet-build` job and asserting, in both
+directions:
+
+- every manifest `testProjects[].name` has a matching `Upload <name> build`
+  step whose `if:` selects on `<name>.csproj` (or, for
+  `Farm.Web.Api.Tests`, on `want_dotnet_test`);
+- every such upload step's project is registered in the manifest.
+
+Steps whose `if:` references `mig_matrix` (the `Farm.Migrations.*` /
+`Farm.Slicer.Migrations.*` uploads) are out of scope — they are driven by a
+separate matrix, not this manifest. Override the workflow path with
+`CI_WORKFLOW_PATH` for testing, the same way `TEST_MANIFEST_PATH` overrides
+the manifest path.
