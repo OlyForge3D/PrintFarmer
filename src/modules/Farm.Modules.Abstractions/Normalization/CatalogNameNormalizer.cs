@@ -6,11 +6,16 @@
 /// Models: simple rule (trim + capitalize first character only) preserving remainder as-entered.
 /// </summary>
 /// <remarks>
-/// Self-contained duplicate of the existing (internal, non-movable)
-/// <c>Farm.Web.Api.Infrastructure.Normalization.CatalogNameNormalizer</c> /
-/// <c>Farm.Infrastructure.Normalization.CatalogNameNormalizer</c> logic, made <see langword="public"/>
-/// so a future module can consume it without a project reference to the monolith or
-/// <c>Farm.Infrastructure</c>. Both existing copies are untouched by this phase.
+/// #2080 (N-DUP-1): this is a deliberate, self-contained duplicate of
+/// <c>Farm.Infrastructure.Normalization.CatalogNameNormalizer</c>. A former third copy in
+/// <c>Farm.Web.Api.Infrastructure.Normalization</c> was pure redundancy (the web API project
+/// already references <c>Farm.Infrastructure</c>) and was deleted as part of #2080, repointing its
+/// call sites at the canonical <c>Farm.Infrastructure</c> copy. This module copy must remain
+/// separate, not merged with it: <c>Farm.Modules.Abstractions.csproj</c> deliberately carries zero
+/// project references beyond <c>Microsoft.AspNetCore.App</c> as part of the module-decomposition
+/// epic (#2019), so it cannot reference <c>Farm.Infrastructure</c> without reintroducing the
+/// monolith coupling that decomposition is removing. Keep the two copies logically identical when
+/// changing normalization rules.
 /// </remarks>
 public static class CatalogNameNormalizer
 {

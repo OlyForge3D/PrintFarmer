@@ -278,6 +278,31 @@ public sealed class ProfileFamilyService(
                 $"A slicer profile family named '{family.Name}' already exists.",
                 ex);
         }
+        catch (DbUpdateException ex) when (IsFamilyHashUniqueConstraintViolation(ex))
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            MachineModelProfile? collidingFamily = await _dbContext.MachineModelProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(profile => profile.Hash == family.Hash, CancellationToken.None);
+            throw new ProfileFamilyHashConflictException(
+                collidingFamily is null
+                    ? $"A slicer profile family with the same rendered content already exists (family '{family.Name}')."
+                    : $"A slicer profile family with the same rendered content already exists: '{collidingFamily.Name}'.",
+                ex);
+        }
+        catch (DbUpdateException ex) when (IsMachineProfileHashUniqueConstraintViolation(ex))
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            MachineProfile? collidingProfile = await _dbContext.MachineProfiles
+                .AsNoTracking()
+                .Where(profile => machineProfiles.Select(candidate => candidate.Hash).Contains(profile.Hash))
+                .FirstOrDefaultAsync(CancellationToken.None);
+            throw new ProfileFamilyHashConflictException(
+                collidingProfile is null
+                    ? $"A machine profile with the same rendered content already exists (family '{family.Name}')."
+                    : $"A machine profile with the same rendered content already exists: '{collidingProfile.SourceSystemPresetName}'.",
+                ex);
+        }
     }
 
     private static CloneProfileFamilyRequestDto CopyRequest(
@@ -299,10 +324,36 @@ public sealed class ProfileFamilyService(
         };
     }
 
-    private static bool IsFamilyNameUniqueConstraintViolation(DbUpdateException exception)
-    {
-        const string familyNameIndex = "IX_MachineModelProfiles_Name_SlicerType";
+    private static bool IsFamilyNameUniqueConstraintViolation(DbUpdateException exception) =>
+        IsUniqueConstraintViolation(
+            exception,
+            "IX_MachineModelProfiles_Name_SlicerType",
+            "MachineModelProfiles.NameNormalized, MachineModelProfiles.SlicerType");
 
+    private static bool IsFamilyHashUniqueConstraintViolation(DbUpdateException exception) =>
+        IsUniqueConstraintViolation(
+            exception,
+            "IX_MachineModelProfiles_Hash",
+            "MachineModelProfiles.Hash");
+
+    private static bool IsMachineProfileHashUniqueConstraintViolation(DbUpdateException exception) =>
+        IsUniqueConstraintViolation(
+            exception,
+            "IX_MachineProfiles_Hash",
+            "MachineProfiles.Hash");
+
+    /// <summary>
+    /// #2080: shared unique-constraint detection for <see cref="PersistFamilyAsync"/>'s catch
+    /// clauses -- covers SQLite (extended error code + column-list message), Postgres
+    /// (SqlState 23505 + ConstraintName), and SqlServer (error 2601/2627 + message) so a
+    /// content-hash collision is reported the same way a family-name collision already is,
+    /// instead of surfacing as a raw 500.
+    /// </summary>
+    private static bool IsUniqueConstraintViolation(
+        DbUpdateException exception,
+        string indexName,
+        string sqliteColumnsSubstring)
+    {
         for (Exception? inner = exception.InnerException;
              inner is not null;
              inner = inner.InnerException)
@@ -311,7 +362,7 @@ public sealed class ProfileFamilyService(
                 && sqlite.SqliteExtendedErrorCode is 1555 or 2067)
             {
                 return sqlite.Message.Contains(
-                    "MachineModelProfiles.NameNormalized, MachineModelProfiles.SlicerType",
+                    sqliteColumnsSubstring,
                     StringComparison.OrdinalIgnoreCase);
             }
 
@@ -322,7 +373,7 @@ public sealed class ProfileFamilyService(
                     inner.GetType().GetProperty("ConstraintName")?.GetValue(inner) as string;
                 return string.Equals(
                     constraintName,
-                    familyNameIndex,
+                    indexName,
                     StringComparison.OrdinalIgnoreCase);
             }
 
@@ -333,7 +384,7 @@ public sealed class ProfileFamilyService(
                 && number is 2601 or 2627)
             {
                 return inner.Message.Contains(
-                    familyNameIndex,
+                    indexName,
                     StringComparison.OrdinalIgnoreCase);
             }
         }

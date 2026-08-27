@@ -1,9 +1,9 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services.DataManagement;
 using Farm.Infrastructure.Services.Interfaces;
-using Farm.Web.Api.Infrastructure.Normalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 

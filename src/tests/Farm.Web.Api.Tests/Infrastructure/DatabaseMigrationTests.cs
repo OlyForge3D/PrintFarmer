@@ -58,7 +58,8 @@ public sealed class DatabaseMigrationTests
             "20260825141109_DropGeneratedProfileRevisionTables",
             "20260825150550_DeletePrinterConfigurationSnapshot",
             "20260825185839_DropDeadCalibrationOrchestrationColumns",
-            "20260826051847_AddPrinterModelAliasNormalizedLookup");
+            "20260826051847_AddPrinterModelAliasNormalizedLookup",
+            "20260827005237_EnforceNormalizedPrinterModelAliasUniqueness");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -109,6 +110,58 @@ public sealed class DatabaseMigrationTests
         (await reader.ReadAsync()).Should().BeTrue();
         reader.GetString(0).Should().Be("PRUSA CORE ONE");
         reader.GetString(1).Should().Be("ORCASLICER");
+    }
+
+    [Fact]
+    public async Task CoreMigration_RejectsCaseAndWhitespaceVariantDuplicatePrinterModelAlias()
+    {
+        // #2080 N-NORM-1: EnsureModelAliasAsync persists the trimmed raw name while
+        // ResolveModelAliasAsync matches on the normalized columns, so the unique constraint must
+        // live on the normalized columns too -- otherwise the DB can silently accept two aliases
+        // that differ only by case/whitespace, which the read path can never tell apart.
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        _ = await ProviderAwareMigrationRunner.MigrateAsync(
+            context,
+            DatabaseMigrationTarget.Core,
+            NullLogger.Instance);
+
+        Guid manufacturerId = Guid.NewGuid();
+        Guid printerModelId = Guid.NewGuid();
+        context.Manufacturers.Add(new Manufacturer
+        {
+            Id = manufacturerId,
+            Name = "Prusa Research",
+        });
+        context.PrinterModels.Add(new PrinterModel
+        {
+            Id = printerModelId,
+            ManufacturerId = manufacturerId,
+            Name = "CORE One",
+        });
+        _ = await context.SaveChangesAsync();
+
+        _ = await context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+             INSERT INTO "PrinterModelAliases"
+                 ("Id", "PrinterModelId", "SlicerModelName", "SlicerModelNameNormalized",
+                  "SlicerType", "SlicerTypeNormalized", "CreatedAt")
+             VALUES
+                 ({Guid.NewGuid()}, {printerModelId}, {"Prusa Core One"}, {"PRUSA CORE ONE"},
+                  {"OrcaSlicer"}, {"ORCASLICER"}, {DateTime.UtcNow});
+             """);
+
+        Func<Task> duplicateInsert = async () => await context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+             INSERT INTO "PrinterModelAliases"
+                 ("Id", "PrinterModelId", "SlicerModelName", "SlicerModelNameNormalized",
+                  "SlicerType", "SlicerTypeNormalized", "CreatedAt")
+             VALUES
+                 ({Guid.NewGuid()}, {printerModelId}, {"  prusa core one  "}, {"PRUSA CORE ONE"},
+                  {"orcaslicer"}, {"ORCASLICER"}, {DateTime.UtcNow});
+             """);
+
+        _ = await duplicateInsert.Should().ThrowAsync<SqliteException>();
     }
 
     [Fact]
@@ -467,7 +520,8 @@ public sealed class DatabaseMigrationTests
             "20260825141109_DropGeneratedProfileRevisionTables",
             "20260825150550_DeletePrinterConfigurationSnapshot",
             "20260825185839_DropDeadCalibrationOrchestrationColumns",
-            "20260826051847_AddPrinterModelAliasNormalizedLookup");
+            "20260826051847_AddPrinterModelAliasNormalizedLookup",
+            "20260827005237_EnforceNormalizedPrinterModelAliasUniqueness");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1000,6 +1054,7 @@ public sealed class DatabaseMigrationTests
                 "20260825150521_DeletePrinterConfigurationSnapshot",
                 "20260825185802_DropDeadCalibrationOrchestrationColumns",
                 "20260826051825_AddPrinterModelAliasNormalizedLookup",
+                "20260827005201_EnforceNormalizedPrinterModelAliasUniqueness",
             ]
             :
             [
@@ -1023,6 +1078,7 @@ public sealed class DatabaseMigrationTests
                 "20260825150540_DeletePrinterConfigurationSnapshot",
                 "20260825185812_DropDeadCalibrationOrchestrationColumns",
                 "20260826051836_AddPrinterModelAliasNormalizedLookup",
+                "20260827005219_EnforceNormalizedPrinterModelAliasUniqueness",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");

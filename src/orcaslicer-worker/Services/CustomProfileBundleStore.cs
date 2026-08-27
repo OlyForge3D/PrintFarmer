@@ -219,7 +219,12 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
             Directory.CreateDirectory(_overlayProfilesPath);
 
             HashSet<string> currentBundles = DiscoverCompleteBundleNames();
-            bool changed = !_knownCustomBundles.SetEquals(currentBundles);
+
+            // #2080 N-REC-1: snapshot the previously-known set before any mutation so the
+            // "did anything change" comparison below reflects what this process actually
+            // exposed, not the raw discovery result -- a bundle that fails reconciliation
+            // must not be reported as reconciled.
+            HashSet<string> previousBundles = new(_knownCustomBundles);
 
             foreach (string removedBundle in
                 _knownCustomBundles.Except(currentBundles).ToArray())
@@ -234,19 +239,38 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
                     isDirectory: true);
             }
 
+            // #2080 N-REC-1: isolate each bundle so one malformed bundle (e.g. a manual file
+            // dropped where a symlink is expected, throwing overlay_path_conflict) cannot abort
+            // reconciliation for every other bundle. A persistently-broken bundle is excluded
+            // from the known-good set below, so it is retried -- and logged -- on every tick
+            // without blocking its siblings.
+            HashSet<string> reconciledBundles = new();
             foreach (string bundleName in currentBundles)
             {
-                EnsureOverlayLinks(bundleName);
+                try
+                {
+                    EnsureOverlayLinks(bundleName);
+                    _ = reconciledBundles.Add(bundleName);
+                }
+                catch (CustomProfileBundleException ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Skipping custom OrcaSlicer bundle {BundleName} during overlay reconciliation ({Code})",
+                        LogSanitizer.Sanitize(bundleName),
+                        ex.Code);
+                }
             }
 
             _knownCustomBundles.Clear();
-            _knownCustomBundles.UnionWith(currentBundles);
+            _knownCustomBundles.UnionWith(reconciledBundles);
 
+            bool changed = !previousBundles.SetEquals(reconciledBundles);
             if (changed)
             {
                 _logger.LogInformation(
                     "Reconciled {BundleCount} custom OrcaSlicer bundles from the shared volume",
-                    currentBundles.Count);
+                    reconciledBundles.Count);
             }
 
             return changed;
