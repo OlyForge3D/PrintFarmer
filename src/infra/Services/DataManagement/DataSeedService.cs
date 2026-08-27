@@ -4,8 +4,8 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Logging;
-using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services.DataManagement;
+using Farm.Modules.Abstractions.Normalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
