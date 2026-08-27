@@ -888,16 +888,16 @@ out_path, src_path = sys.argv[1], sys.argv[2]
 with open(src_path, encoding="utf-8") as f:
     text = f.read()
 pattern = re.compile(
-    r"(      - name: Upload Farm\.Modules\.Gcode\.Tests build\n(?:.*\n)*?        )uses: actions/upload-artifact@v7\n"
+    r"(      - name: Upload Farm\.Modules\.Gcode\.Tests build\n(?:.*\n)*?)(        )uses: actions/upload-artifact@v7\n"
 )
 m = pattern.search(text)
 assert m, "fixture step block/uses: line not found -- ci.yml step shape changed"
+header, indent = m.group(1), m.group(2)
 mutated = (
     text[: m.start()]
-    + m.group(1)
-    + "uses: actions/checkout@v4\n"
-    + m.group(1)
-    + "# uses: actions/upload-artifact@v7 (left over from a prior edit)\n"
+    + header
+    + indent + "uses: actions/checkout@v4\n"
+    + indent + "# uses: actions/upload-artifact@v7 (left over from a prior edit)\n"
     + text[m.end():]
 )
 with open(out_path, "w", encoding="utf-8") as f:
