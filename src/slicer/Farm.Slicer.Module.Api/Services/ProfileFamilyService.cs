@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Repositories;
 using Farm.Slicer.Module.Data;
@@ -1011,7 +1012,7 @@ public sealed class ProfileFamilyService(
             _logger.LogError(
                 ex,
                 "Failed to remove the orphaned target alias '{TargetName}' for profile family {FamilyId} after it was deleted concurrently during a rename; the alias may be orphaned.",
-                targetName,
+                LogSanitizer.Sanitize(targetName),
                 family.Id);
         }
     }
@@ -1197,15 +1198,17 @@ public sealed class ProfileFamilyService(
         AllProfilesResponseDto catalog,
         string sourceMachineModelName)
     {
-        foreach (KeyValuePair<string, ManufacturerProfilesDto> pair in catalog.ByHierarchy)
+        string? manufacturer = catalog.ByHierarchy
+            .Where(pair => pair.Value.Models.Values.Any(model => string.Equals(
+                model.Name,
+                sourceMachineModelName,
+                StringComparison.OrdinalIgnoreCase)))
+            .Select(pair => pair.Key)
+            .FirstOrDefault();
+
+        if (manufacturer is not null)
         {
-            if (pair.Value.Models.Values.Any(model => string.Equals(
-                    model.Name,
-                    sourceMachineModelName,
-                    StringComparison.OrdinalIgnoreCase)))
-            {
-                return pair.Key;
-            }
+            return manufacturer;
         }
 
         throw new ProfileFamilySourceException(

@@ -14,6 +14,7 @@ using Farm.Slicer.Module.Services;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -1853,6 +1854,78 @@ public sealed class ProfileFamilyServiceTests
     }
 
     [Fact]
+    public async Task EditFamilyAsync_RenameDeletedConcurrently_SanitizesTargetNameBeforeLoggingOrphanedAlias()
+    {
+        // cs/log-forging: the rename target name is attacker-controlled request input (the PATCH body) and
+        // it reaches the orphaned-target-alias failure log verbatim. A name carrying CR/LF must be routed
+        // through LogSanitizer.Sanitize before it is written, so it cannot forge extra log lines. This
+        // reuses the H3 concurrent-delete-during-rename path but forces the compensation alias removal to
+        // throw, so the guarded catch that emits the log actually runs.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ConcurrentDeleteOnSaveDbContext(options);
+        _ = dbContext.Database.EnsureCreated();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+
+        // Internal CR/LF survives name normalization (which only trims the edges), so it reaches the logger.
+        const string maliciousName = "Re\r\n2026-01-01 ERROR Forged log line";
+
+        ProfileFamilyWorkerTarget target = new("http://worker", "2.5.0");
+        AllProfilesResponseDto catalog = WorkerCatalog("Prusa Test");
+        Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Strict);
+        _ = worker.Setup(s => s.GetCatalogAsync(string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((target, catalog));
+        _ = worker.Setup(s => s.GetActiveOrcaVersionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync("2.5.0");
+        _ = worker.Setup(s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = worker.Setup(s => s.DeleteBundleAsync(
+                It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Forward rename: ensure the target alias, drop the previous one. Compensation removes the orphaned
+        // target alias and is armed to throw so the guarded catch logs the sanitized target name.
+        Mock<IPrinterModelAliasService> aliases = new(MockBehavior.Strict);
+        _ = aliases.Setup(s => s.ResolveModelAliasAsync(maliciousName, "OrcaSlicer")).ReturnsAsync((Guid?)null);
+        _ = aliases.Setup(s => s.EnsureModelAliasAsync(modelId, maliciousName, "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = aliases.Setup(s => s.RemoveModelAliasAsync(modelId, "Farm Test", "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = aliases.Setup(s => s.RemoveModelAliasAsync(modelId, maliciousName, "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("alias store unavailable"));
+
+        CapturingLogger<ProfileFamilyService> capturingLogger = new();
+        ProfileFamilyService service = new(
+            dbContext,
+            Catalog(modelId).Object,
+            aliases.Object,
+            EchoRenderer().Object,
+            worker.Object,
+            PrinterRefs().Object,
+            capturingLogger);
+
+        // Arm the concurrent delete: the persist removes the family rows out-of-band and reports the conflict.
+        dbContext.DeleteFamilyOnNextSave = true;
+        Func<Task> act = () => service.EditFamilyAsync(
+            familyId, new EditProfileFamilyRequestDto { Name = maliciousName }, CancellationToken.None);
+
+        _ = await act.Should().ThrowAsync<ProfileFamilyConcurrentlyDeletedException>();
+
+        string logged = capturingLogger.Messages.Should()
+            .ContainSingle(message => message.Contains("orphaned target alias", StringComparison.Ordinal))
+            .Which;
+        logged.Should().NotContain("\r", "raw CR would let the family name forge a new log line");
+        logged.Should().NotContain("\n", "raw LF would let the family name forge a new log line");
+        logged.Should().Contain("Re\\r\\n", "CR/LF must be written as the literal escape sequence, not a real break");
+    }
+
+    [Fact]
     public async Task DeleteFamilyAsync_ConcurrencyConflictButFamilyStillExists_MarksFailedAndThrows409()
     {
         // H2: on the delete path the worker bundle and alias are removed FIRST (worker-first ordering), then
@@ -2295,6 +2368,29 @@ public sealed class ProfileFamilyServiceTests
     /// removes the family and variant rows out-of-band and then throws the
     /// <see cref="DbUpdateConcurrencyException"/> EF raises when an UPDATE matches zero rows.
     /// </summary>
+    /// <summary>
+    /// Minimal <see cref="ILogger{T}"/> that records the formatted message of every log entry, so a test
+    /// can assert on exactly what would be written to a log sink (used to verify log-forging sanitization).
+    /// </summary>
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        IDisposable? ILogger.BeginScope<TState>(TState state) => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(state, exception));
+        }
+    }
+
     private sealed class ConcurrentDeleteOnSaveDbContext(DbContextOptions<SlicerDbContext> options)
         : SlicerDbContext(options)
     {
