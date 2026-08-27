@@ -948,6 +948,60 @@ public sealed class ProfileFamilyServiceTests
     }
 
     [Fact]
+    public async Task EditFamilyAsync_OverridesChangeCollidesWithExistingFamilyHash_ThrowsHashConflictAndRestoresPreviousBundle()
+    {
+        // #2093: the edit path's RenderAndInstallAsync only filtered on the name-collision unique
+        // index, so a hash-index violation on the SAME save fell through to the generic 500 handler.
+        // Prove it now maps to ProfileFamilyHashConflictException, naming the colliding family, AND
+        // that the compensation (restore previous bundle/alias, mark Failed) still runs -- exactly
+        // like the sibling name-collision case above.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+
+        EditProfileFamilyRequestDto request = new()
+        {
+            FamilyOverrides = Overrides("""{"printable_height":"250"}""")
+        };
+        string canonicalOverrides = JsonSerializer.Serialize(request.FamilyOverrides);
+        string collidingHash = ComputeExpectedFamilyHash("Farm Test", "Prusa", "Prusa Test", canonicalOverrides);
+        dbContext.MachineModelProfiles.Add(new MachineModelProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Existing Colliding Family",
+            Manufacturer = "Custom",
+            SlicerType = SlicerType.OrcaSlicer,
+            Hash = collidingHash,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        _ = await dbContext.SaveChangesAsync();
+
+        Mock<IProfileFamilyWorkerClient> worker = EditWorker();
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
+
+        Func<Task> act = () => service.EditFamilyAsync(familyId, request, CancellationToken.None);
+
+        await act.Should()
+            .ThrowAsync<ProfileFamilyHashConflictException>()
+            .WithMessage("*Existing Colliding Family*");
+        (await dbContext.MachineModelProfiles.AsNoTracking().SingleAsync(f => f.Id == familyId))
+            .RenderStatus.Should().Be(
+                ProfileFamilyRenderStatus.Failed,
+                "a failed edit must mark the row Failed, same as the name-collision path");
+        worker.Verify(
+            s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(2),
+            "the previous good bundle must be re-installed after the failed hash-collision save");
+    }
+
+    [Fact]
     public async Task EditFamilyAsync_AddNozzle_MaterializesNewVariantAndPreservesExistingId()
     {
         await using SqliteConnection connection = new("Data Source=:memory:");
@@ -1237,6 +1291,118 @@ public sealed class ProfileFamilyServiceTests
     }
 
     [Fact]
+    public async Task RenderFamilyAsync_HashCollidesWithExistingFamily_ThrowsHashConflictAndRestoresPreviousBundle()
+    {
+        // #2093: a plain re-render recomputes the exact same family hash every time. Seed ANOTHER
+        // family with that exact hash so IX_MachineModelProfiles_Hash rejects the save at
+        // SaveChangesAsync -- exercising the new DbUpdateException catch clause in
+        // RenderAndInstallAsync, not the pre-check that only guards a RENAMED name.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+
+        string collidingHash = ComputeExpectedFamilyHash("Farm Test", "Prusa", "Prusa Test", "{}");
+        dbContext.MachineModelProfiles.Add(new MachineModelProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Existing Colliding Family",
+            Manufacturer = "Custom",
+            SlicerType = SlicerType.OrcaSlicer,
+            Hash = collidingHash,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        _ = await dbContext.SaveChangesAsync();
+
+        Mock<IProfileFamilyWorkerClient> worker = EditWorker();
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
+
+        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        await act.Should()
+            .ThrowAsync<ProfileFamilyHashConflictException>()
+            .WithMessage("*Existing Colliding Family*");
+        (await dbContext.MachineModelProfiles.AsNoTracking().SingleAsync(f => f.Id == familyId))
+            .RenderStatus.Should().Be(
+                ProfileFamilyRenderStatus.Failed,
+                "a hash-collision re-render must mark the row Failed, same as any other failed re-render");
+        worker.Verify(
+            s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(2),
+            "the previous good bundle must be re-installed after the failed hash-collision save");
+    }
+
+    [Fact]
+    public async Task RenderFamilyAsync_HashCollidesWithExistingMachineProfile_ThrowsHashConflictNamingExistingMachineProfile()
+    {
+        // #2093 sibling case: the collision is on a rendered machine-VARIANT hash
+        // (IX_MachineProfiles_Hash), not the family hash. The family's own hash must not collide
+        // with anything so the family-hash catch clause never fires and the machine-profile-hash
+        // catch clause is exercised instead.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+
+        string familyHash = ComputeExpectedFamilyHash("Farm Test", "Prusa", "Prusa Test", "{}");
+        string collidingMachineHash = ComputeExpectedMachineProfileHash(
+            familyHash, "Prusa Test 0.4 nozzle", """{"nozzle_diameter":["0.4"]}""");
+
+        Guid unrelatedFamilyId = Guid.NewGuid();
+        dbContext.MachineModelProfiles.Add(new MachineModelProfile
+        {
+            Id = unrelatedFamilyId,
+            Name = "Unrelated Family",
+            Manufacturer = "Existing",
+            SlicerType = SlicerType.OrcaSlicer,
+            Hash = new string('B', 64),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        dbContext.MachineProfiles.Add(new MachineProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Unrelated Variant",
+            Manufacturer = "Existing",
+            SlicerType = SlicerType.OrcaSlicer,
+            PrinterModelId = modelId,
+            MachineModelProfileId = unrelatedFamilyId,
+            Hash = collidingMachineHash,
+            SourceSystemPresetName = "Stock 0.6 nozzle",
+            OverridesJson = """{"max_layer_height":["0.45"]}""",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        _ = await dbContext.SaveChangesAsync();
+
+        Mock<IProfileFamilyWorkerClient> worker = EditWorker();
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
+
+        Func<Task> act = () => service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        await act.Should()
+            .ThrowAsync<ProfileFamilyHashConflictException>()
+            .WithMessage("*Stock 0.6 nozzle*");
+        (await dbContext.MachineModelProfiles.AsNoTracking().SingleAsync(f => f.Id == familyId))
+            .RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed);
+        worker.Verify(
+            s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(2),
+            "the previous good bundle must be re-installed after the failed hash-collision save");
+    }
+
+    [Fact]
     public async Task RenderStaleFamiliesAsync_ReturnsPerFamilyResults_WithPartialFailureSurfaced()
     {
         await using SqliteConnection connection = new("Data Source=:memory:");
@@ -1263,6 +1429,47 @@ public sealed class ProfileFamilyServiceTests
         broken.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed);
         broken.Code.Should().Be("source_preset_unavailable");
         broken.Detail.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task RenderStaleFamiliesAsync_HashConflict_ReportsDistinctCodeNotGenericFailure()
+    {
+        // #2093: the per-family result for a bulk re-render must classify a hash-index violation
+        // as profile_family_hash_conflict, not fall back to the generic profile_family_render_failed
+        // code that ClassifyRenderFailure returns for an unrecognized exception.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid staleId, _) = SeedHealthyFamily(
+            dbContext, modelId, name: "Renderable", status: ProfileFamilyRenderStatus.Stale);
+
+        // A Healthy (not Stale/Failed) family, so it is never itself a re-render target, but its hash
+        // exactly matches what the stale family's re-render will produce.
+        string collidingHash = ComputeExpectedFamilyHash("Renderable", "Prusa", "Prusa Test", "{}");
+        dbContext.MachineModelProfiles.Add(new MachineModelProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Existing Colliding Family",
+            Manufacturer = "Custom",
+            SlicerType = SlicerType.OrcaSlicer,
+            Hash = collidingHash,
+            RenderStatus = ProfileFamilyRenderStatus.Healthy,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        _ = await dbContext.SaveChangesAsync();
+
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Renderable"), EchoRenderer(), EditWorker());
+
+        RenderStaleFamiliesResponseDto response =
+            await service.RenderStaleFamiliesAsync(CancellationToken.None);
+
+        ProfileFamilyRenderResultDto result = response.Results.Single(r => r.FamilyId == staleId);
+        result.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed);
+        result.Code.Should().Be("profile_family_hash_conflict");
+        result.Detail.Should().Contain("Existing Colliding Family");
     }
 
     [Fact]

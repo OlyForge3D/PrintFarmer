@@ -320,6 +320,10 @@ public sealed class ProfileFamiliesController(
         {
             return Conflict(new { code = "profile_family_name_conflict", detail = ex.Message });
         }
+        catch (ProfileFamilyHashConflictException ex)
+        {
+            return Conflict(new { code = "profile_family_hash_conflict", detail = ex.Message });
+        }
         catch (ProfileFamilyInUseException ex)
         {
             return Conflict(new { code = "profile_family_in_use", detail = ex.Message });
@@ -402,6 +406,10 @@ public sealed class ProfileFamiliesController(
         catch (ProfileFamilyConflictException ex)
         {
             return Conflict(new { code = "profile_family_name_conflict", detail = ex.Message });
+        }
+        catch (ProfileFamilyHashConflictException ex)
+        {
+            return Conflict(new { code = "profile_family_hash_conflict", detail = ex.Message });
         }
         catch (ProfileFamilyInUseException ex)
         {
