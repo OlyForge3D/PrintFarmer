@@ -19,6 +19,7 @@ final class AppRouterTests: XCTestCase {
     private let printerId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
     private let spoolId = 42
     private let originServerId = UUID(uuidString: "00000000-0000-0000-0000-000000000010")!
+    private let capabilities = ResolvedSystemCapabilities.defaults
 
     // MARK: - Defaults
 
@@ -36,13 +37,53 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(AppTab.allCases.count, 5)
     }
 
+    func testVisibleTabsRemoveDisabledAttentionAndTasks() {
+        var disabled = capabilities
+        disabled.attentionEnabled = false
+        disabled.shiftPlanEnabled = false
+
+        XCTAssertEqual(AppTab.visibleTabs(for: disabled), [.farm, .scan, .inventory])
+        XCTAssertEqual(AppTab.fallbackTab(for: disabled), .farm)
+    }
+
+    func testReconcileMovesDisabledSelectionToDeterministicFallback() {
+        var disabled = capabilities
+        disabled.attentionEnabled = false
+        disabled.shiftPlanEnabled = false
+        let router = AppRouter()
+        router.selectedTab = .attention
+        router.notificationBadgeCount = 3
+        router.pendingAttentionItemId = "attention-1"
+        router.notificationsPath.append(AppDestination.jobDetail(id: printerId))
+
+        router.reconcileCapabilities(disabled)
+
+        XCTAssertEqual(router.selectedTab, .farm)
+        XCTAssertEqual(router.notificationBadgeCount, 0)
+        XCTAssertNil(router.pendingAttentionItemId)
+        XCTAssertTrue(router.notificationsPath.isEmpty)
+    }
+
+    func testReconcileMovesDisabledTasksSelectionToAttentionWhenAvailable() {
+        var disabled = capabilities
+        disabled.shiftPlanEnabled = false
+        let router = AppRouter()
+        router.selectedTab = .tasks
+        router.jobsPath.append(AppDestination.jobDetail(id: printerId))
+
+        router.reconcileCapabilities(disabled)
+
+        XCTAssertEqual(router.selectedTab, .attention)
+        XCTAssertTrue(router.jobsPath.isEmpty)
+    }
+
     // MARK: - Deep link routing
 
     func testPrinterDetailDeepLinkSelectsFarmTab() async {
         let router = AppRouter()
         router.selectedTab = .attention
 
-        router.navigate(to: .printerDetail(id: printerId))
+        router.navigate(to: .printerDetail(id: printerId), capabilities: capabilities)
         XCTAssertEqual(router.selectedTab, .farm)
 
         // navigate() schedules a delayed append; wait past the 50 ms delay.
@@ -54,7 +95,7 @@ final class AppRouterTests: XCTestCase {
         let router = AppRouter()
         router.selectedTab = .attention
 
-        router.navigate(to: .printerReady(id: printerId))
+        router.navigate(to: .printerReady(id: printerId), capabilities: capabilities)
 
         XCTAssertEqual(router.selectedTab, .farm)
         XCTAssertEqual(router.pendingNFCReadyPrinterId, printerId)
@@ -67,7 +108,7 @@ final class AppRouterTests: XCTestCase {
         let router = AppRouter()
         router.selectedTab = .attention
 
-        router.navigate(to: .spoolDetail(id: spoolId))
+        router.navigate(to: .spoolDetail(id: spoolId), capabilities: capabilities)
 
         XCTAssertEqual(router.selectedTab, .inventory)
         XCTAssertEqual(router.pendingSpoolHighlightId, spoolId)
@@ -76,7 +117,7 @@ final class AppRouterTests: XCTestCase {
     func testAttentionDeepLinkSelectsAttentionAndPreservesItem() {
         let router = AppRouter()
 
-        router.navigate(to: .attentionItem(id: "failure-123"))
+        router.navigate(to: .attentionItem(id: "failure-123"), capabilities: capabilities)
 
         XCTAssertEqual(router.selectedTab, .attention)
         XCTAssertEqual(router.pendingAttentionItemId, "failure-123")
@@ -86,7 +127,10 @@ final class AppRouterTests: XCTestCase {
         let jobId = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
         let router = AppRouter()
 
-        router.navigate(to: .filamentSwap(printerId: printerId, toolheadIndex: 2, jobId: jobId))
+        router.navigate(
+            to: .filamentSwap(printerId: printerId, toolheadIndex: 2, jobId: jobId),
+            capabilities: capabilities
+        )
 
         XCTAssertEqual(router.selectedTab, .farm)
         XCTAssertEqual(
@@ -98,13 +142,63 @@ final class AppRouterTests: XCTestCase {
         XCTAssertFalse(router.printersPath.isEmpty)
     }
 
+    func testDisabledAttentionDeepLinkRoutesToFarmWithoutPendingItem() {
+        var disabled = capabilities
+        disabled.attentionEnabled = false
+        let router = AppRouter()
+        router.selectedTab = .inventory
+
+        router.navigate(
+            to: .attentionItem(id: "failure-123"),
+            capabilities: disabled
+        )
+
+        XCTAssertEqual(router.selectedTab, .farm)
+        XCTAssertNil(router.pendingAttentionItemId)
+        XCTAssertTrue(router.notificationsPath.isEmpty)
+    }
+
+    func testDisabledGuidedSwapDeepLinkOpensPrinterWithoutOpeningSwap() async {
+        var disabled = capabilities
+        disabled.guidedSwapEnabled = false
+        let router = AppRouter()
+
+        router.navigate(
+            to: .filamentSwap(printerId: printerId, toolheadIndex: 2, jobId: nil),
+            capabilities: disabled
+        )
+
+        XCTAssertEqual(router.selectedTab, .farm)
+        XCTAssertNil(router.pendingFilamentSwap)
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertFalse(router.printersPath.isEmpty)
+    }
+
+    func testCapabilityReconciliationClearsPendingGuidedSwap() {
+        let router = AppRouter()
+        router.pendingFilamentSwap = .init(
+            printerId: printerId,
+            toolheadIndex: 2,
+            jobId: nil
+        )
+        var disabled = capabilities
+        disabled.guidedSwapEnabled = false
+
+        router.reconcileCapabilities(disabled)
+
+        XCTAssertNil(router.pendingFilamentSwap)
+    }
+
     func testPendingPrinterNavigationIsInvalidatedWhenServerChanges() async {
         let router = AppRouter()
 
-        router.navigate(to: .printerDetail(id: printerId))
-        router.navigate(to: .attentionItem(id: "attention-1"))
-        router.navigate(to: .spoolDetail(id: 42))
-        router.navigate(to: .filamentSwap(printerId: printerId, toolheadIndex: 1, jobId: nil))
+        router.navigate(to: .printerDetail(id: printerId), capabilities: capabilities)
+        router.navigate(to: .attentionItem(id: "attention-1"), capabilities: capabilities)
+        router.navigate(to: .spoolDetail(id: 42), capabilities: capabilities)
+        router.navigate(
+            to: .filamentSwap(printerId: printerId, toolheadIndex: 1, jobId: nil),
+            capabilities: capabilities
+        )
         router.invalidatePendingNavigation()
         try? await Task.sleep(for: .milliseconds(120))
 
@@ -117,7 +211,10 @@ final class AppRouterTests: XCTestCase {
     func testNotificationRoutingSurfacesInvalidDestination() {
         let router = AppRouter()
 
-        router.routeNotification(userInfo: ["link": "printfarmer://attention"])
+        router.routeNotification(
+            userInfo: ["link": "printfarmer://attention"],
+            capabilities: capabilities
+        )
 
         XCTAssertEqual(
             router.notificationRoutingError,
@@ -134,7 +231,8 @@ final class AppRouterTests: XCTestCase {
                 "originServerId": "00000000-0000-0000-0000-000000000011",
                 "deepLink": "printfarmer://printer/\(printerId.uuidString)"
             ],
-            activeOriginServerId: originServerId
+            activeOriginServerId: originServerId,
+            capabilities: capabilities
         )
 
         XCTAssertEqual(router.notificationRoutingError, "This notification belongs to a different server.")
@@ -313,5 +411,35 @@ final class AppRouterTests: XCTestCase {
         XCTAssertTrue(router.dashboardSheetPath.isEmpty)
         XCTAssertTrue(router.maintenanceSheetPath.isEmpty)
         XCTAssertTrue(router.notificationsSheetPath.isEmpty)
+    }
+
+    // MARK: - Inventory feature visibility
+
+    func testInventorySegmentsKeepSpoolsWhenPrintedPartsAreDisabled() {
+        XCTAssertEqual(
+            InventoryView.Segment.available(printedPartsInventoryEnabled: false),
+            [.spools]
+        )
+        XCTAssertEqual(
+            InventoryView.Segment.resolved(
+                .parts,
+                printedPartsInventoryEnabled: false
+            ),
+            .spools
+        )
+    }
+
+    func testInventorySegmentsIncludePrintedPartsWhenEnabled() {
+        XCTAssertEqual(
+            InventoryView.Segment.available(printedPartsInventoryEnabled: true),
+            [.spools, .parts]
+        )
+        XCTAssertEqual(
+            InventoryView.Segment.resolved(
+                .parts,
+                printedPartsInventoryEnabled: true
+            ),
+            .parts
+        )
     }
 }

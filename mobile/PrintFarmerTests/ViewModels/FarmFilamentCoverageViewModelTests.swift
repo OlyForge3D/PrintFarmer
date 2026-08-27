@@ -21,6 +21,31 @@ import XCTest
 @MainActor
 final class FarmFilamentCoverageViewModelTests: XCTestCase {
 
+    func testCapabilityDisableClearsCoverageAndStopsFurtherProbes() async {
+        let service = ControlledFilamentCoverageService()
+        let signalR = MockSignalRService()
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configure(coverageService: service)
+        vm.configureSignalR(signalR)
+
+        async let initial: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeSuccess(index: 0, fleet: Self.oneCoverPrinterFleet())
+        _ = await initial
+        XCTAssertEqual(vm.coverageByPrinter.count, 1)
+
+        vm.disableForCapabilityGate()
+        await vm.load()
+
+        XCTAssertTrue(vm.isFeatureDisabled)
+        XCTAssertTrue(vm.coverageByPrinter.isEmpty)
+        XCTAssertNil(vm.lastLoadError)
+        XCTAssertFalse(vm.isShowingStaleCache)
+        XCTAssertEqual(vm.dispatchedRequestCount, 1)
+        XCTAssertEqual(signalR.filamentCoverageSubscriberCount, 0)
+        XCTAssertEqual(signalR.connectionStateSubscriberCount, 0)
+    }
+
     // MARK: - Idempotent SignalR configuration + subscription count
 
     func testConfigureSignalRIsIdempotent() {

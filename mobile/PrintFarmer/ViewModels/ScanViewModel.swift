@@ -2,14 +2,14 @@ import Foundation
 import os
 
 /// Drives the unified F9 scan station (#714): a single generic camera scan
-/// type-dispatches to a printer deep-link, a printed-part bin, a printed-part
-/// SKU, or (falling back) the existing spool-barcode intake flow.
+/// type-dispatches to a printer deep-link, an enabled printed-parts destination,
+/// or (falling back) the existing spool-barcode intake flow.
 ///
-/// Dispatch order matches the frozen mobile scope posted on #714: printer →
-/// bin → part → spool. Each step only advances past a definitive "not
-/// found" (`NetworkError.notFound`); any other failure (network outage,
-/// `.featureDisabled`, etc.) surfaces immediately instead of being silently
-/// swallowed and retried against the next resolver.
+/// When printed-parts inventory is enabled, dispatch order matches the frozen
+/// mobile scope posted on #714: printer → bin → part → spool. Not-found and
+/// feature-disabled part resolvers fall through; other failures remain visible.
+/// Disabling the capability skips or fences those resolvers without blocking
+/// printer and spool routing.
 @MainActor @Observable
 final class ScanViewModel {
     /// A resolved scan outcome that the view presents as a sheet. Printer
@@ -40,6 +40,7 @@ final class ScanViewModel {
         let title: String
         let subtitle: String
         let scannedAt: Date
+        let requiresPrintedPartsInventory: Bool
 
         static func == (lhs: RecentScan, rhs: RecentScan) -> Bool {
             lhs.id == rhs.id
@@ -47,6 +48,11 @@ final class ScanViewModel {
     }
 
     private static let maxRecentScans = 20
+
+    private enum PrintedPartsDispatchResult {
+        case stop
+        case continueToSpool
+    }
 
     var isScanning = false
     var errorMessage: String?
@@ -71,17 +77,37 @@ final class ScanViewModel {
     private var partsInventoryService: (any PartsInventoryServiceProtocol)?
     private var barcodeIntakeService: (any BarcodeIntakeServiceProtocol)?
     private var spoolService: (any SpoolServiceProtocol)?
+    private var printedPartsInventoryEnabled = true
+    private var printedPartsCapabilityGeneration = 0
 
     func configure(
         scanner: (any BarcodeScannerProtocol)?,
         partsInventoryService: any PartsInventoryServiceProtocol,
         barcodeIntakeService: any BarcodeIntakeServiceProtocol,
-        spoolService: any SpoolServiceProtocol
+        spoolService: any SpoolServiceProtocol,
+        printedPartsInventoryEnabled: Bool = true
     ) {
         self.scanner = scanner
         self.partsInventoryService = partsInventoryService
         self.barcodeIntakeService = barcodeIntakeService
         self.spoolService = spoolService
+        setPrintedPartsInventoryEnabled(printedPartsInventoryEnabled)
+    }
+
+    func setPrintedPartsInventoryEnabled(_ isEnabled: Bool) {
+        guard printedPartsInventoryEnabled != isEnabled else { return }
+
+        printedPartsInventoryEnabled = isEnabled
+        printedPartsCapabilityGeneration &+= 1
+        guard !isEnabled else { return }
+
+        switch pendingOutcome {
+        case .some(.bin), .some(.part):
+            pendingOutcome = nil
+        case .some(.unknownCode), .none:
+            break
+        }
+        recentScans.removeAll(where: \.requiresPrintedPartsInventory)
     }
 
     var isScannerAvailable: Bool {
@@ -142,46 +168,19 @@ final class ScanViewModel {
             }
         }
 
-        guard let partsInventoryService else {
-            errorMessage = "Parts inventory service not available"
-            return
-        }
-
-        do {
-            let bin = try await partsInventoryService.resolveBinByBarcode(trimmed)
-            guard isViewActive else { return }
-            recordRecentScan(icon: "shippingbox", title: bin.name, subtitle: "Bin \(bin.code)")
-            pendingOutcome = .bin(bin)
-            return
-        } catch NetworkError.notFound, NetworkError.featureDisabled {
-            // Not a bin, or printed-parts inventory is disabled server-side —
-            // either way fall through to part resolution rather than surfacing
-            // an error (the feature gate must not block spool/printer routing).
-        } catch {
-            logger.warning("Bin resolution failed: \(error.localizedDescription)")
-            errorMessage = error.localizedDescription
-            return
-        }
-
-        do {
-            let part = try await partsInventoryService.resolvePartByBarcode(trimmed)
-            guard isViewActive else { return }
-            recordRecentScan(icon: "cube.box", title: part.name, subtitle: "SKU \(part.sku)")
-            pendingOutcome = .part(part)
-            return
-        } catch NetworkError.notFound, NetworkError.featureDisabled {
-            // Not a part SKU, or printed-parts inventory is disabled server-side —
-            // either way fall through to spool resolution.
-        } catch {
-            logger.warning("Part resolution failed: \(error.localizedDescription)")
-            errorMessage = error.localizedDescription
-            return
+        if printedPartsInventoryEnabled {
+            switch await dispatchPrintedParts(trimmed) {
+            case .stop:
+                return
+            case .continueToSpool:
+                break
+            }
         }
 
         guard isViewActive else { return }
 
         // A spool deep link (captured above) reaches this stage only
-        // after bin/part resolution both missed — an unambiguous format,
+        // after enabled bin/part resolution missed — an unambiguous format,
         // so it takes priority over re-parsing the same code as a
         // structured URL/JSON payload below.
         if let deferredSpoolId {
@@ -231,6 +230,77 @@ final class ScanViewModel {
         }
     }
 
+    private func dispatchPrintedParts(_ code: String) async -> PrintedPartsDispatchResult {
+        guard let partsInventoryService else {
+            errorMessage = "Parts inventory service not available"
+            return .stop
+        }
+        let generation = printedPartsCapabilityGeneration
+
+        do {
+            let bin = try await partsInventoryService.resolveBinByBarcode(code)
+            if let interrupted = interruptedPrintedPartsResult(for: generation) {
+                return interrupted
+            }
+            recordRecentScan(
+                icon: "shippingbox",
+                title: bin.name,
+                subtitle: "Bin \(bin.code)",
+                requiresPrintedPartsInventory: true
+            )
+            pendingOutcome = .bin(bin)
+            return .stop
+        } catch NetworkError.notFound, NetworkError.featureDisabled {
+            if let interrupted = interruptedPrintedPartsResult(for: generation) {
+                return interrupted
+            }
+        } catch {
+            if let interrupted = interruptedPrintedPartsResult(for: generation) {
+                return interrupted
+            }
+            logger.warning("Bin resolution failed: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            return .stop
+        }
+
+        do {
+            let part = try await partsInventoryService.resolvePartByBarcode(code)
+            if let interrupted = interruptedPrintedPartsResult(for: generation) {
+                return interrupted
+            }
+            recordRecentScan(
+                icon: "cube.box",
+                title: part.name,
+                subtitle: "SKU \(part.sku)",
+                requiresPrintedPartsInventory: true
+            )
+            pendingOutcome = .part(part)
+            return .stop
+        } catch NetworkError.notFound, NetworkError.featureDisabled {
+            if let interrupted = interruptedPrintedPartsResult(for: generation) {
+                return interrupted
+            }
+            return .continueToSpool
+        } catch {
+            if let interrupted = interruptedPrintedPartsResult(for: generation) {
+                return interrupted
+            }
+            logger.warning("Part resolution failed: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            return .stop
+        }
+    }
+
+    private func interruptedPrintedPartsResult(
+        for generation: Int
+    ) -> PrintedPartsDispatchResult? {
+        guard isViewActive else { return .stop }
+        guard generation != printedPartsCapabilityGeneration || !printedPartsInventoryEnabled else {
+            return nil
+        }
+        return .continueToSpool
+    }
+
     /// Confirms a candidate spool ID (from a deep link, a structured
     /// URL/JSON payload, or an unresolved bare-numeric fallback) actually
     /// exists on the currently-connected (active) server before routing
@@ -264,8 +334,19 @@ final class ScanViewModel {
         errorMessage = nil
     }
 
-    private func recordRecentScan(icon: String, title: String, subtitle: String) {
-        let entry = RecentScan(icon: icon, title: title, subtitle: subtitle, scannedAt: .now)
+    private func recordRecentScan(
+        icon: String,
+        title: String,
+        subtitle: String,
+        requiresPrintedPartsInventory: Bool = false
+    ) {
+        let entry = RecentScan(
+            icon: icon,
+            title: title,
+            subtitle: subtitle,
+            scannedAt: .now,
+            requiresPrintedPartsInventory: requiresPrintedPartsInventory
+        )
         recentScans.insert(entry, at: 0)
         if recentScans.count > Self.maxRecentScans {
             recentScans.removeLast(recentScans.count - Self.maxRecentScans)

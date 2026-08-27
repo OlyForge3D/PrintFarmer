@@ -16,6 +16,35 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
     private let printerA = UUID(uuidString: "AAAAAAAA-1111-1111-1111-111111111111")!
     private let printerB = UUID(uuidString: "BBBBBBBB-2222-2222-2222-222222222222")!
 
+    func testCapabilityDisableClearsCoverageAndStopsFurtherProbes() async {
+        let service = ControlledFilamentCoverageService()
+        let signalR = MockSignalRService()
+        let vm = PrinterFilamentCoverageViewModel(printerId: printerA)
+        vm.configure(coverageService: service)
+        vm.configureSignalR(signalR)
+
+        async let initial: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeSuccess(
+            index: 0,
+            printer: Self.coverage(for: printerA, status: .covers)
+        )
+        _ = await initial
+        XCTAssertNotNil(vm.coverage)
+
+        vm.disableForCapabilityGate()
+        await vm.load()
+
+        XCTAssertTrue(vm.isFeatureDisabled)
+        XCTAssertNil(vm.coverage)
+        XCTAssertFalse(vm.isPrinterNotFound)
+        XCTAssertNil(vm.lastLoadError)
+        XCTAssertFalse(vm.isShowingStaleCache)
+        XCTAssertEqual(vm.dispatchedRequestCount, 1)
+        XCTAssertEqual(signalR.filamentCoverageSubscriberCount, 0)
+        XCTAssertEqual(signalR.connectionStateSubscriberCount, 0)
+    }
+
     // MARK: - Invalidation filtering
 
     /// A scoped invalidation for a DIFFERENT printer must not cause a

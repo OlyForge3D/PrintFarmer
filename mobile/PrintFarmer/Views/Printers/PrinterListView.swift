@@ -8,6 +8,10 @@ struct PrinterListView: View {
     @State private var coverageViewModel = FarmFilamentCoverageViewModel()
     @State private var retryTask: Task<Void, Never>?
 
+    private var filamentCoverageEnabled: Bool {
+        services.capabilitiesService.resolved.filamentCoverageEnabled
+    }
+
     private var iPadColumns: [GridItem] {
         [GridItem(.adaptive(minimum: 340))]
     }
@@ -18,7 +22,7 @@ struct PrinterListView: View {
         NavigationStack(path: $router.printersPath) {
             VStack(spacing: 0) {
                 // #789: shared stale banner — honest, read-only cached coverage.
-                if coverageViewModel.isShowingStaleCache {
+                if filamentCoverageEnabled && coverageViewModel.isShowingStaleCache {
                     ConnectionStatusBar(
                         status: .offline,
                         lastConfirmedAt: coverageViewModel.cacheLastUpdatedAt,
@@ -77,13 +81,19 @@ struct PrinterListView: View {
                 autoPrintService: services.autoPrintService,
                 signalRService: services.signalRService
             )
+            await viewModel.loadPrinters()
+        }
+        .task(id: filamentCoverageEnabled) {
+            guard filamentCoverageEnabled else {
+                coverageViewModel.disableForCapabilityGate()
+                return
+            }
             coverageViewModel.configure(coverageService: services.filamentCoverageService)
             coverageViewModel.configureSignalR(services.signalRService)
             // #789: wire + hydrate the fleet read-cache BEFORE the canonical load
             // so an offline launch shows honestly-stale coverage immediately.
             coverageViewModel.configureCache(services.filamentCoverageReadCache)
             await coverageViewModel.hydrateFromCache()
-            await viewModel.loadPrinters()
             await coverageViewModel.load()
         }
         .onDisappear {
@@ -128,7 +138,9 @@ struct PrinterListView: View {
                                 iPadPrinterCardView(
                                     printer: printer,
                                     isPendingReady: viewModel.isPendingReady(printer),
-                                    coverage: coverageViewModel.coverage(for: printer.id)
+                                    coverage: filamentCoverageEnabled
+                                        ? coverageViewModel.coverage(for: printer.id)
+                                        : nil
                                 )
                             }
                             .buttonStyle(.plain)
@@ -151,7 +163,9 @@ struct PrinterListView: View {
                             PrinterCardView(
                                 printer: printer,
                                 isPendingReady: viewModel.isPendingReady(printer),
-                                coverage: coverageViewModel.coverage(for: printer.id)
+                                coverage: filamentCoverageEnabled
+                                    ? coverageViewModel.coverage(for: printer.id)
+                                    : nil
                             )
                         }
                         .buttonStyle(.plain)

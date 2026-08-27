@@ -58,6 +58,18 @@ final class PrinterFilamentCoverageViewModel {
         coverageAuthorityEpoch &+= 1
     }
 
+    func disableForCapabilityGate() {
+        coverageAuthorityEpoch &+= 1
+        coverageService = nil
+        tearDownSignalR()
+        coverage = nil
+        isFeatureDisabled = true
+        isPrinterNotFound = false
+        lastLoadError = nil
+        isShowingStaleCache = false
+        cacheLastUpdatedAtMillis = nil
+    }
+
     /// Wire the #789 per-printer read-cache. Additive; safe to call repeatedly.
     func configureCache(_ cache: FilamentCoverageReadCacheAdapter) {
         self.coverageCache = cache

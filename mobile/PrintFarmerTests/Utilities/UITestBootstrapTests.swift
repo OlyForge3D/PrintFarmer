@@ -51,35 +51,35 @@ final class UITestBootstrapTests: XCTestCase {
         )
     }
 
-    // MARK: - Attention-disabled mode (#727)
+    // MARK: - Operator-features-disabled mode (#2117)
 
-    func test_attentionDisabledLaunchArgument_matchesUITestsHarness() {
-        // Contract with OperatorShellUITests.AttentionDisabledFallbackUITests,
+    func test_operatorFeaturesDisabledLaunchArgument_matchesUITestsHarness() {
+        // Contract with OperatorShellUITests.OperatorFeatureVisibilityUITests,
         // which hardcodes this literal (UI test targets cannot import the app).
         XCTAssertEqual(
-            UITestBootstrap.attentionDisabledLaunchArgument,
-            "--uitesting-attention-disabled"
+            UITestBootstrap.operatorFeaturesDisabledLaunchArgument,
+            "--uitesting-operator-features-disabled"
         )
     }
 
-    func test_mode_isAttentionDisabled_whenArgumentPresent() {
+    func test_mode_isOperatorFeaturesDisabled_whenArgumentPresent() {
         XCTAssertEqual(
-            UITestBootstrap.mode(in: ["--uitesting", "--uitesting-attention-disabled"]),
-            .authenticatedAttentionDisabled
+            UITestBootstrap.mode(in: [
+                "--uitesting",
+                "--uitesting-operator-features-disabled"
+            ]),
+            .authenticatedOperatorFeaturesDisabled
         )
     }
 
-    func test_mode_attentionDisabled_takesPrecedenceOverUnauthenticated() {
-        // Both flags together resolve to attention-disabled (authenticated).
-        // The Notifications-fallback tests need auth AND disabled — passing
-        // both must not silently downgrade to signed-out.
+    func test_mode_operatorFeaturesDisabled_takesPrecedenceOverUnauthenticated() {
         XCTAssertEqual(
             UITestBootstrap.mode(in: [
                 "--uitesting",
                 "--uitesting-unauthenticated",
-                "--uitesting-attention-disabled"
+                "--uitesting-operator-features-disabled"
             ]),
-            .authenticatedAttentionDisabled
+            .authenticatedOperatorFeaturesDisabled
         )
     }
 
@@ -255,54 +255,39 @@ final class UITestBootstrapTests: XCTestCase {
     }
     #endif
 
-    func test_makeBundle_attentionDisabled_overridesCapabilities() throws {
+    func test_makeBundle_operatorFeaturesDisabled_overridesCapabilities() throws {
         let defaults = try makeEphemeralDefaults()
         let bundle = UITestBootstrap.makeBundle(
-            mode: .authenticatedAttentionDisabled,
-            defaults: defaults
-        )
-
-        XCTAssertFalse(
-            bundle.services.capabilitiesService.resolved.attentionEnabled,
-            "authenticatedAttentionDisabled mode must resolve attentionEnabled=false so AttentionView renders disabledFallback"
-        )
-    }
-
-    func test_makeBundle_attentionDisabled_keepsOtherCapabilitiesAtDefaults() throws {
-        // The mode targets only the attention gate — other gates must
-        // stay at their production defaults so unrelated features are
-        // not accidentally exercised in a disabled state.
-        let defaults = try makeEphemeralDefaults()
-        let bundle = UITestBootstrap.makeBundle(
-            mode: .authenticatedAttentionDisabled,
+            mode: .authenticatedOperatorFeaturesDisabled,
             defaults: defaults
         )
         let resolved = bundle.services.capabilitiesService.resolved
 
-        XCTAssertTrue(resolved.filamentCoverageEnabled)
+        XCTAssertFalse(resolved.attentionEnabled)
+        XCTAssertFalse(resolved.filamentCoverageEnabled)
+        XCTAssertFalse(resolved.shiftPlanEnabled)
+        XCTAssertFalse(resolved.printedPartsInventoryEnabled)
         XCTAssertTrue(resolved.guidedSwapEnabled)
         XCTAssertTrue(resolved.multiSlotFallbackEnabled)
-        XCTAssertTrue(resolved.shiftPlanEnabled)
-        XCTAssertFalse(resolved.printedPartsInventoryEnabled)
         XCTAssertTrue(resolved.offlineWriteReplayEnabled)
     }
 
-    func test_makeBundle_attentionDisabled_staysAuthenticated() throws {
+    func test_makeBundle_operatorFeaturesDisabled_staysAuthenticated() throws {
         let defaults = try makeEphemeralDefaults()
         let bundle = UITestBootstrap.makeBundle(
-            mode: .authenticatedAttentionDisabled,
+            mode: .authenticatedOperatorFeaturesDisabled,
             defaults: defaults
         )
 
         XCTAssertTrue(
             bundle.authViewModel.isAuthenticated,
-            "The disabled-attention mode is a variant of the authenticated shell; the operator shell must still render"
+            "The disabled-operator-features mode must still render the authenticated shell"
         )
         XCTAssertEqual(bundle.authViewModel.currentUser?.id, DemoData.demoUser.id)
     }
 
     func test_makeBundle_authenticated_leavesDefaultCapabilities() throws {
-        // Guard against regressions where the disabled-attention override
+        // Guard against regressions where the disabled-feature override
         // leaks into the default authenticated mode.
         let defaults = try makeEphemeralDefaults()
         let bundle = UITestBootstrap.makeBundle(mode: .authenticated, defaults: defaults)

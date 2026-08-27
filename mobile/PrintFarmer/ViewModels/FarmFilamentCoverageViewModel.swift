@@ -116,6 +116,17 @@ final class FarmFilamentCoverageViewModel {
         coverageAuthorityEpoch &+= 1
     }
 
+    func disableForCapabilityGate() {
+        coverageAuthorityEpoch &+= 1
+        coverageService = nil
+        tearDownSignalR()
+        coverageByPrinter = [:]
+        isFeatureDisabled = true
+        lastLoadError = nil
+        isShowingStaleCache = false
+        cacheLastUpdatedAtMillis = nil
+    }
+
     /// Wire the #789 fleet read-cache. Additive: when never called the view model
     /// behaves exactly as it did pre-#789. Safe to call more than once.
     func configureCache(_ cache: FilamentCoverageReadCacheAdapter) {

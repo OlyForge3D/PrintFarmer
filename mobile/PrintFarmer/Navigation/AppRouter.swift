@@ -18,8 +18,8 @@ import SwiftUI
 /// * `dashboardSheetPath` — Dashboard sheet (from Attention overflow)
 /// * `maintenanceSheetPath` — Maintenance sheet (from Attention overflow)
 /// * `notificationsSheetPath` — legacy Notifications sheet (from Attention
-///   feature-disabled fallback). Kept distinct from `notificationsPath` so
-///   the sheet never shares state with the Attention tab stack.
+///   overflow). Kept distinct from `notificationsPath` so the sheet never
+///   shares state with the Attention tab stack.
 ///
 /// See issue #706 (F1 operator shell) and #727 (legacy sheet reset) for
 /// the migration and hardening rationale.
@@ -62,7 +62,10 @@ final class AppRouter {
     /// dismissal wiring.
     var sheetDismissalNonce: Int = 0
 
-    func navigate(to destination: DeepLinkDestination) {
+    func navigate(
+        to destination: DeepLinkDestination,
+        capabilities: ResolvedSystemCapabilities
+    ) {
         navigationEpoch &+= 1
         let capturedEpoch = navigationEpoch
         switch destination {
@@ -88,17 +91,25 @@ final class AppRouter {
             inventoryPath = NavigationPath()
             pendingSpoolHighlightId = id
         case .attentionItem(let id):
+            guard capabilities.attentionEnabled else {
+                selectedTab = AppTab.fallbackTab(for: capabilities)
+                notificationsPath = NavigationPath()
+                pendingAttentionItemId = nil
+                return
+            }
             selectedTab = .attention
             notificationsPath = NavigationPath()
             pendingAttentionItemId = id
         case .filamentSwap(let printerId, let toolheadIndex, let jobId):
             selectedTab = .farm
             printersPath = NavigationPath()
-            pendingFilamentSwap = FilamentSwapDeepLink(
-                printerId: printerId,
-                toolheadIndex: toolheadIndex,
-                jobId: jobId
-            )
+            pendingFilamentSwap = capabilities.guidedSwapEnabled
+                ? FilamentSwapDeepLink(
+                    printerId: printerId,
+                    toolheadIndex: toolheadIndex,
+                    jobId: jobId
+                )
+                : nil
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(50))
                 guard capturedEpoch == navigationEpoch else { return }
@@ -117,7 +128,8 @@ final class AppRouter {
 
     func routeNotification(
         userInfo: [AnyHashable: Any],
-        activeOriginServerId: UUID? = nil
+        activeOriginServerId: UUID? = nil,
+        capabilities: ResolvedSystemCapabilities
     ) {
         switch NotificationDeepLinkRouting.destination(
             from: userInfo,
@@ -125,10 +137,37 @@ final class AppRouter {
         ) {
         case .success(let destination):
             notificationRoutingError = nil
-            navigate(to: destination)
+            navigate(to: destination, capabilities: capabilities)
         case .failure(let failure):
             notificationRoutingError = failure.message
         }
+    }
+
+    func resolvedTab(for capabilities: ResolvedSystemCapabilities) -> AppTab {
+        selectedTab.isEnabled(in: capabilities)
+            ? selectedTab
+            : AppTab.fallbackTab(for: capabilities)
+    }
+
+    func selectTab(_ tab: AppTab, capabilities: ResolvedSystemCapabilities) {
+        selectedTab = tab.isEnabled(in: capabilities)
+            ? tab
+            : AppTab.fallbackTab(for: capabilities)
+    }
+
+    func reconcileCapabilities(_ capabilities: ResolvedSystemCapabilities) {
+        if !capabilities.attentionEnabled {
+            notificationsPath = NavigationPath()
+            pendingAttentionItemId = nil
+            notificationBadgeCount = 0
+        }
+        if !capabilities.shiftPlanEnabled {
+            jobsPath = NavigationPath()
+        }
+        if !capabilities.guidedSwapEnabled {
+            pendingFilamentSwap = nil
+        }
+        selectedTab = resolvedTab(for: capabilities)
     }
 
     /// Requests that any active legacy/operator sheet be dismissed. Task-action
@@ -210,4 +249,23 @@ enum AppTab: Hashable, CaseIterable {
     case tasks
     case scan
     case inventory
+
+    func isEnabled(in capabilities: ResolvedSystemCapabilities) -> Bool {
+        switch self {
+        case .attention:
+            capabilities.attentionEnabled
+        case .tasks:
+            capabilities.shiftPlanEnabled
+        case .farm, .scan, .inventory:
+            true
+        }
+    }
+
+    static func visibleTabs(for capabilities: ResolvedSystemCapabilities) -> [AppTab] {
+        allCases.filter { $0.isEnabled(in: capabilities) }
+    }
+
+    static func fallbackTab(for capabilities: ResolvedSystemCapabilities) -> AppTab {
+        visibleTabs(for: capabilities).first ?? .farm
+    }
 }

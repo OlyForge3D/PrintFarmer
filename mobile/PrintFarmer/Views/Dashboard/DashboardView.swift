@@ -294,9 +294,13 @@ struct DashboardView: View {
 
                 Spacer()
 
-                if !topPrinters.isEmpty {
+                if !topPrinters.isEmpty
+                    && services.capabilitiesService.resolved.shiftPlanEnabled {
                     Button {
-                        router.selectedTab = .tasks
+                        router.selectTab(
+                            .tasks,
+                            capabilities: services.capabilitiesService.resolved
+                        )
                     } label: {
                         Text("See All")
                             .font(.subheadline)

@@ -56,17 +56,19 @@ final class SystemCapabilitiesTests: XCTestCase {
 
     // MARK: - Decoding
 
-    func testDecodesFullCamelCasePayload() throws {
+    func testDecodesCanonicalNestedCamelCasePayload() throws {
         let json = """
         {
-            "attentionEnabled": false,
-            "nativePushEnabled": true,
-            "filamentCoverageEnabled": false,
-            "guidedSwapEnabled": false,
-            "multiSlotFallbackEnabled": false,
-            "shiftPlanEnabled": false,
-            "printedPartsInventoryEnabled": false,
-            "offlineWriteReplayEnabled": false
+            "operatorFeatures": {
+                "attentionEnabled": false,
+                "nativePushEnabled": true,
+                "filamentCoverageEnabled": false,
+                "guidedSwapEnabled": false,
+                "multiSlotFallbackEnabled": false,
+                "shiftPlanEnabled": false,
+                "printedPartsInventoryEnabled": false,
+                "offlineWriteReplayEnabled": false
+            }
         }
         """.data(using: .utf8)!
 
@@ -102,8 +104,10 @@ final class SystemCapabilitiesTests: XCTestCase {
         // default of `false` (#1000).
         let json = """
         {
-            "attentionEnabled": false,
-            "nativePushEnabled": true
+            "operatorFeatures": {
+                "attentionEnabled": false,
+                "nativePushEnabled": true
+            }
         }
         """.data(using: .utf8)!
 
@@ -118,6 +122,48 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertTrue(resolved.shiftPlanEnabled)
         XCTAssertFalse(resolved.printedPartsInventoryEnabled)
         XCTAssertTrue(resolved.offlineWriteReplayEnabled)
+    }
+
+    func testLegacyTopLevelFlagsRemainSupported() throws {
+        let json = """
+        {
+            "attentionEnabled": false,
+            "nativePushEnabled": true,
+            "shiftPlanEnabled": false
+        }
+        """.data(using: .utf8)!
+
+        let resolved = try JSONDecoder()
+            .decode(SystemCapabilities.self, from: json)
+            .resolved
+
+        XCTAssertFalse(resolved.attentionEnabled)
+        XCTAssertTrue(resolved.nativePushEnabled)
+        XCTAssertFalse(resolved.shiftPlanEnabled)
+        XCTAssertFalse(resolved.printedPartsInventoryEnabled)
+    }
+
+    func testCanonicalNestedFlagsTakePrecedenceAndLegacyFillsNestedOmissions() throws {
+        let json = """
+        {
+            "attentionEnabled": true,
+            "filamentCoverageEnabled": true,
+            "shiftPlanEnabled": false,
+            "operatorFeatures": {
+                "attentionEnabled": false,
+                "filamentCoverageEnabled": false
+            }
+        }
+        """.data(using: .utf8)!
+
+        let resolved = try JSONDecoder()
+            .decode(SystemCapabilities.self, from: json)
+            .resolved
+
+        XCTAssertFalse(resolved.attentionEnabled)
+        XCTAssertFalse(resolved.filamentCoverageEnabled)
+        XCTAssertFalse(resolved.shiftPlanEnabled)
+        XCTAssertFalse(resolved.printedPartsInventoryEnabled)
     }
 
     // MARK: - APIError.code (ProblemDetails extension)
@@ -161,8 +207,10 @@ final class SystemCapabilitiesTests: XCTestCase {
     func testRefreshUpdatesResolvedOnSuccessfulResponse() async {
         mockAPIClient.stubResponse(json: """
         {
-            "attentionEnabled": false,
-            "nativePushEnabled": true
+            "operatorFeatures": {
+                "attentionEnabled": false,
+                "nativePushEnabled": true
+            }
         }
         """)
 
@@ -211,7 +259,11 @@ final class SystemCapabilitiesTests: XCTestCase {
         // subsequent transport error must NOT flip it back to the
         // enabled default (fail-open means "don't touch existing state").
         mockAPIClient.stubResponse(json: """
-        { "attentionEnabled": false }
+        {
+            "operatorFeatures": {
+                "attentionEnabled": false
+            }
+        }
         """)
 
         let service = SystemCapabilitiesService(apiClient: apiClient)
