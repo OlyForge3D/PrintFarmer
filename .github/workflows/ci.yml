@@ -422,6 +422,21 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Upload Farm.Backend.Plugins.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Backend.Plugins.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: Farm.Backend.Plugins.Tests
+          path: src/tests/Farm.Backend.Plugins.Tests/bin/Debug/net10.0
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Upload Farm.Modules.SmartPlug.Tests build
         if: >-
           ${{
@@ -554,6 +569,21 @@ jobs:
         with:
           name: Farm.Modules.Administration.Tests
           path: src/tests/Farm.Modules.Administration.Tests/bin/Debug/net10.0
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Modules.Observability.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Modules.Observability.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: Farm.Modules.Observability.Tests
+          path: src/tests/Farm.Modules.Observability.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 

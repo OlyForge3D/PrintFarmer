@@ -38,7 +38,7 @@ export function ActiveJobsWidget({ maxJobs = 5, className = '' }: ActiveJobsWidg
         iconBgClass={hasJobs ? 'bg-pf-accent-bg/15' : 'bg-pf-bg-2'}
         subtitle={
           hasJobs
-            ? `${jobCount} job${jobCount !== 1 ? 's' : ''} in queue`
+            ? `${jobCount} active job${jobCount !== 1 ? 's' : ''}`
             : 'No active jobs'
         }
         hasContent={hasJobs}
@@ -50,7 +50,7 @@ export function ActiveJobsWidget({ maxJobs = 5, className = '' }: ActiveJobsWidg
         emptyState={
           <div className="text-center py-6">
             <ClockIcon className="h-10 w-10 text-pf-text-tertiary mx-auto mb-2" />
-            <p className="text-sm text-pf-text-primary font-medium">No Jobs in Queue</p>
+            <p className="text-sm text-pf-text-primary font-medium">No Active Jobs</p>
             <p className="text-xs text-pf-text-tertiary mt-1">Queue a print from the G-code library</p>
           </div>
         }
@@ -107,7 +107,7 @@ export function ActiveJobsWidget({ maxJobs = 5, className = '' }: ActiveJobsWidg
           })}
           {globalQueue && globalQueue.length > maxJobs && (
             <p className="text-xs text-pf-text-tertiary text-center py-2">
-              +{globalQueue.length - maxJobs} more in queue
+              +{globalQueue.length - maxJobs} more
             </p>
           )}
         </div>

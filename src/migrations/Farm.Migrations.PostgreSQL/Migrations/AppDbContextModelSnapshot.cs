@@ -6538,7 +6538,13 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<DateTime?>("LastHistorySeedUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("LastMaintenanceAlertEvaluatedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime?>("LastModelSyncAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastStatsSyncAttemptedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("ObicoServerId")
@@ -6550,6 +6556,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasDefaultValue(1L);
 
                     b.HasKey("PrinterId");
+
+                    b.HasIndex("LastMaintenanceAlertEvaluatedAt");
+
+                    b.HasIndex("LastStatsSyncAttemptedAt");
 
                     b.HasIndex("ObicoServerId");
 
