@@ -2933,14 +2933,15 @@ _migration_upload_artifact_names() {
 # only steps inside that job are considered — other jobs' upload-artifact
 # steps (e.g. TRX/coverage uploads) use unrelated naming and must not be
 # mistaken for orphaned per-project build uploads. Resets scope at every
-# `- name: ` step boundary (every step in this job's `steps:` list has
-# one) so an `upload-artifact` step that is missing its own `with.name`
-# can never "borrow" a later, unrelated step's name and be misreported
-# as present.
+# step-list boundary (any `      - ` item at the job's step indent, not
+# just steps that happen to start with `name:`) so an `upload-artifact`
+# step that is missing its own `with.name` can never "borrow" a `name:`
+# field that belongs to a later, unrelated step — regardless of what key
+# that later step's own YAML mapping happens to lead with.
 _dotnet_build_upload_artifact_names() {
   local workflow="$1"
   extract_job_block "$workflow" "dotnet-build" | awk '
-    /^ *- name: / { in_block = 0 }
+    /^      - / { in_block = 0 }
     /^ *uses: actions\/upload-artifact@/ { in_block = 1; next }
     in_block && /^ *name: / {
       sub(/^ *name: */, "")
@@ -3061,14 +3062,22 @@ case_upload_artifact_guard_rejects_orphaned_upload_step() {
 }
 
 # An upload-artifact step whose own `with.name` field was dropped must
-# never be able to "borrow" the artifact name of a later, unrelated step
-# in the same job — the scope-reset at each `- name: ` step boundary in
-# `_dotnet_build_upload_artifact_names` is what prevents that. Without
-# the reset, deleting `Farm.Slicer.Module.Tests`'s `with.name` line would
-# make its `uses: actions/upload-artifact@` line pair with the next
-# step's own `- name: Upload Farm.OrcaSlicer.Worker.Tests build` header
-# instead, silently reporting the mutated step as present under the
-# wrong project name and never surfacing the drift.
+# never "borrow" a `name:` field that belongs to a later, unrelated
+# step in the same job. The scope-reset in `_dotnet_build_upload_artifact_names`
+# fires on ANY step-list boundary (not just steps that start with
+# `- name:`), because YAML permits a step to lead with a different key
+# (`- id:`, `- uses:`, ...) and still carry its own `with.name` further
+# down. This fixture proves the reset actually matters: it deletes
+# Farm.Slicer.Module.Tests's `with.name`, then inserts an unrelated
+# `actions/cache` step — deliberately headed by `- id:`, not `- name:`,
+# and never touching `actions/upload-artifact` — carrying its own
+# `with.name: Farm.Unrelated.Cache.Entry` immediately afterward. Without
+# a reset that fires on this non-`- name:` step boundary, the scan
+# begun by the mutated step's `uses: actions/upload-artifact@` line
+# stays "in block" straight through the unrelated step and captures
+# its `with.name` as if it were the mutated step's own — silently
+# reporting a bogus orphaned project instead of surfacing the real
+# drift.
 case_upload_artifact_guard_scopes_name_to_its_own_step() {
   local mutant
   mutant="$(mktemp)"
@@ -3076,20 +3085,35 @@ case_upload_artifact_guard_scopes_name_to_its_own_step() {
   trap "rm -f -- '$mutant' '${mutant}.tmp'" RETURN
   _copy_real_workflow_for_mutation "$mutant"
   # Delete only the `with.name` line for Farm.Slicer.Module.Tests's
-  # upload step; its `uses:`, `path:`, etc. lines are left intact.
+  # upload step, then insert an unrelated, non-upload-artifact step
+  # (headed by `- id:`, not `- name:`) carrying its own `with.name`
+  # immediately after it, before the next real upload step.
   _mutate "$mutant" '
     { sub(/\r$/, "") }
-    /^          name: Farm\.Slicer\.Module\.Tests$/ { next }
+    /^      - name: Upload Farm\.Slicer\.Module\.Tests build$/ { in_target = 1 }
+    in_target && /^          name: Farm\.Slicer\.Module\.Tests$/ { next }
+    in_target && /^          if-no-files-found: error$/ {
+      print
+      print ""
+      print "      - id: restore-cache"
+      print "        uses: actions/cache@v4"
+      print "        with:"
+      print "          name: Farm.Unrelated.Cache.Entry"
+      print "          path: /tmp/unrelated-cache"
+      in_target = 0
+      next
+    }
     { print }
   ' || return 1
 
   local stderr_output
   if stderr_output="$(_check_upload_artifact_sync "$mutant" "$TEST_MANIFEST" "$SELECTOR" 2>&1)"; then
-    printf '  guard failed to reject an upload step missing its own with.name (silently borrowed a later step'"'"'s name instead)\n' >&2
+    printf '  guard failed to reject an upload step missing its own with.name (silently borrowed a later, unrelated step'"'"'s with.name instead)\n' >&2
     return 1
   fi
   assert_contains "missing-with-name diagnostic names the affected project" "$stderr_output" "Farm.Slicer.Module.Tests" || return 1
-  assert_not_contains "guard must not misreport the next step's project as orphaned" "$stderr_output" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  assert_not_contains "guard must not borrow the intervening non-upload step's with.name" "$stderr_output" "Farm.Unrelated.Cache.Entry" || return 1
+  assert_not_contains "guard must not misreport the next real upload step's project as orphaned" "$stderr_output" "Farm.OrcaSlicer.Worker.Tests" || return 1
 }
 
 
