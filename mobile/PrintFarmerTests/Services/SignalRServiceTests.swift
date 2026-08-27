@@ -153,4 +153,47 @@ final class SignalRServiceTests: XCTestCase {
         )
         await service.disconnect()
     }
+
+    func testReadinessWaitsForOverlappingConnectOutcome() async {
+        let negotiateEntered = AsyncBarrier()
+        let releaseNegotiate = AsyncBarrier()
+        let readinessWaiting = AsyncBarrier()
+        defer {
+            negotiateEntered.close()
+            releaseNegotiate.close()
+            readinessWaiting.close()
+        }
+        mockSession.asyncRequestHandler = { request in
+            negotiateEntered.signal()
+            await releaseNegotiate.arriveAndWait()
+            return (TestData.httpResponse(url: request.url, statusCode: 500), Data("{}".utf8))
+        }
+        let service = SignalRService(
+            serverURL: TestData.testBaseURL,
+            session: mockSession.urlSession,
+            tokenProvider: { "test-token" },
+            readinessWaitObserver: {
+                readinessWaiting.signal()
+            }
+        )
+
+        let initialConnect = Task {
+            try await service.connect()
+        }
+        await negotiateEntered.waitUntilArrived()
+        let readiness = Task {
+            try await service.connectForReadiness()
+        }
+        await readinessWaiting.waitUntilArrived()
+        releaseNegotiate.release()
+
+        _ = try? await initialConnect.value
+        do {
+            try await readiness.value
+            XCTFail("Readiness must not succeed when the overlapping connection fails")
+        } catch {
+            // expected
+        }
+        await service.disconnect()
+    }
 }

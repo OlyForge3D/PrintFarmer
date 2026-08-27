@@ -35,6 +35,58 @@ func defaultSignalRReconnectSleeper(_ seconds: TimeInterval) async {
     try? await Task.sleep(for: .seconds(seconds))
 }
 
+private enum SignalRReadinessError: Error {
+    case connectionFailed
+}
+
+private final class SignalRReadinessWaiter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Result<Void, Error>?
+    private var continuation: CheckedContinuation<Void, Error>?
+    private var subscription: SignalRSubscription?
+
+    func setSubscription(_ subscription: SignalRSubscription) {
+        lock.lock()
+        if result == nil {
+            self.subscription = subscription
+            lock.unlock()
+        } else {
+            lock.unlock()
+            subscription.cancel()
+        }
+    }
+
+    func resolve(_ result: Result<Void, Error>) {
+        lock.lock()
+        guard self.result == nil else {
+            lock.unlock()
+            return
+        }
+        self.result = result
+        let continuation = continuation
+        self.continuation = nil
+        let subscription = subscription
+        self.subscription = nil
+        lock.unlock()
+
+        subscription?.cancel()
+        continuation?.resume(with: result)
+    }
+
+    func value() async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            if let result {
+                lock.unlock()
+                continuation.resume(with: result)
+            } else {
+                self.continuation = continuation
+                lock.unlock()
+            }
+        }
+    }
+}
+
 /// SignalR real-time connection to /hubs/printers.
 ///
 /// Uses URLSessionWebSocketTask with the SignalR JSON protocol (messages
@@ -86,6 +138,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// behavior in bounded wall time without gating on the production
     /// exponential curve.
     private let reconnectBackoff: @Sendable (Int) -> TimeInterval
+    private let readinessWaitObserver: @Sendable () -> Void
 
     static let defaultReconnectBackoff: @Sendable (Int) -> TimeInterval = { attempt in
         let base = min(pow(2.0, Double(max(attempt - 1, 0))), 30.0)
@@ -313,7 +366,8 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         reconnectSleeper: @escaping SignalRReconnectSleeper = defaultSignalRReconnectSleeper,
         maxReconnectAttempts: Int? = nil,
         inboundStalenessThreshold: TimeInterval = SignalRService.defaultInboundStalenessThreshold,
-        webSocketFactory: (@Sendable (URL) -> SignalRWebSocket)? = nil
+        webSocketFactory: (@Sendable (URL) -> SignalRWebSocket)? = nil,
+        readinessWaitObserver: @escaping @Sendable () -> Void = {}
     ) {
         self.serverURL = serverURL
         self.tokenProvider = tokenProvider
@@ -322,6 +376,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         self.reconnectSleeper = reconnectSleeper
         self.maxReconnectAttempts = maxReconnectAttempts
         self.inboundStalenessThreshold = inboundStalenessThreshold
+        self.readinessWaitObserver = readinessWaitObserver
         // Capture `session` in a local Sendable so the closure escapes
         // safely into the actor-agnostic factory.
         let capturedSession = session
@@ -437,6 +492,44 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
     func connectForReadiness() async throws {
         try await connect(cancellationMarksIntentionalDisconnect: false)
+        switch connectionState {
+        case .connected:
+            return
+        case .connecting:
+            try await waitForCurrentConnectionAttempt()
+        case .reconnecting, .disconnected:
+            throw SignalRReadinessError.connectionFailed
+        }
+    }
+
+    private func waitForCurrentConnectionAttempt() async throws {
+        let waiter = SignalRReadinessWaiter()
+        let observation = connectionStateHub.subscribe { state in
+            switch state {
+            case .connected:
+                waiter.resolve(.success(()))
+            case .reconnecting, .disconnected:
+                waiter.resolve(.failure(SignalRReadinessError.connectionFailed))
+            case .connecting:
+                break
+            }
+        }
+        waiter.setSubscription(observation.subscription)
+        readinessWaitObserver()
+        switch observation.initial {
+        case .connected:
+            waiter.resolve(.success(()))
+        case .reconnecting, .disconnected:
+            waiter.resolve(.failure(SignalRReadinessError.connectionFailed))
+        case .connecting:
+            break
+        }
+
+        try await withTaskCancellationHandler {
+            try await waiter.value()
+        } onCancel: {
+            waiter.resolve(.failure(CancellationError()))
+        }
     }
 
     private func connect(cancellationMarksIntentionalDisconnect: Bool) async throws {
