@@ -1519,6 +1519,72 @@ public sealed class ProfileFamilyServiceTests
     }
 
     [Fact]
+    public async Task RenderFamilyAsync_FamilyDeletedConcurrently_WithCancelledRequestToken_StillRemovesBundle()
+    {
+        // Cancellation-after-conflict (render path): the render installs its bundle, the persist loses the
+        // race to a concurrent DELETE, AND the caller's request token is cancelled at that exact instant.
+        // The post-conflict existence re-check must NOT observe that token (it uses CancellationToken.None),
+        // so the deleted-concurrently branch is still taken and the orphaned bundle is still removed. If the
+        // read threaded `ct`, it would throw OperationCanceledException, fall through to the generic restore
+        // handler, and re-install (re-orphan) the bundle it just installed — the unrecoverable state this
+        // whole fix exists to prevent.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ConcurrentDeleteOnSaveDbContext(options);
+        _ = dbContext.Database.EnsureCreated();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+
+        ProfileFamilyWorkerTarget target = new("http://worker", "2.4.2");
+        AllProfilesResponseDto catalog = WorkerCatalog("Prusa Test");
+        Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Strict);
+        _ = worker
+            .Setup(service => service.GetCatalogAsync(string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((target, catalog));
+        _ = worker
+            .Setup(service => service.GetActiveOrcaVersionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync("2.4.2");
+        _ = worker
+            .Setup(service => service.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = worker
+            .Setup(service => service.DeleteBundleAsync(
+                It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
+
+        // The request token becomes cancelled at the instant the persist loses the delete race — exactly the
+        // window the compensation reads run in. A pre-cancelled token from the start would instead abort the
+        // pre-persist worker/catalog work, so cancellation is armed to fire WITH the conflict.
+        using var cts = new CancellationTokenSource();
+        dbContext.DeleteFamilyOnNextSave = true;
+        dbContext.CancelRequestOnConflict = cts;
+        Func<Task> act = () => service.RenderFamilyAsync(familyId, cts.Token);
+
+        // Post-fix: the deleted-concurrently branch runs despite cancellation -> clean 404-mapping exception.
+        // Pre-fix (ct threaded): the re-check throws OperationCanceledException, so this assertion fails.
+        (await act.Should().ThrowAsync<ProfileFamilyConcurrentlyDeletedException>())
+            .Which.Message.Should().Contain(familyId.ToString());
+        worker.Verify(
+            service => service.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once,
+            "only the initial install runs; the generic restore path (which would re-orphan the bundle) must not");
+        worker.Verify(
+            service => service.DeleteBundleAsync(null, familyId, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the orphaned bundle must still be compensated even though the request token was cancelled");
+    }
+
+    [Fact]
     public async Task EditFamilyAsync_RenameRacesConcurrentModification_RestoresOldBundleAndAlias_Throws409()
     {
         // H1: an edit RENAME whose persist loses a concurrency race but whose family row SURVIVES must not
@@ -1683,6 +1749,45 @@ public sealed class ProfileFamilyServiceTests
         persisted.RenderStatus.Should().Be(
             ProfileFamilyRenderStatus.Failed,
             "the surviving row whose bundle/alias were already removed must be marked Failed, not Healthy (H2)");
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_ConcurrencyConflictButFamilyStillExists_WithCancelledRequestToken_StillMarksFailed()
+    {
+        // Cancellation-after-conflict (delete path): the worker bundle and alias are removed FIRST, the row
+        // delete loses the race but the family row SURVIVES, AND the caller's request token is cancelled at
+        // that exact instant. The post-conflict existence re-check must NOT observe that token (it uses
+        // CancellationToken.None), so the surviving row is still marked Failed. If the read threaded `ct`, it
+        // would throw OperationCanceledException, skip TryMarkRenderFailedAsync, and leave a family reporting
+        // Healthy with no bundle behind it — the exact H2 defect, reopened via cancellation.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ConcurrentModifyOnceOnSaveDbContext(options);
+        _ = dbContext.Database.EnsureCreated();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), DeleteAliases(modelId), Renderer(), DeleteWorker());
+
+        // The request token becomes cancelled at the instant the row delete loses the race — exactly the
+        // window the existence re-check and mark-Failed compensation run in.
+        using var cts = new CancellationTokenSource();
+        dbContext.ConflictOnNextSave = true;
+        dbContext.CancelRequestOnConflict = cts;
+        Func<Task> act = () => service.DeleteFamilyAsync(familyId, force: false, cts.Token);
+
+        // Post-fix: the compensation runs despite cancellation -> clean 409 + surviving row marked Failed.
+        // Pre-fix (ct threaded): the re-check throws OperationCanceledException, so BOTH assertions fail.
+        _ = await act.Should().ThrowAsync<ProfileFamilyConcurrencyException>();
+        (await dbContext.MachineModelProfiles.CountAsync())
+            .Should().Be(1, "a lost delete race must leave the surviving row in place");
+        MachineModelProfile persisted = await dbContext.MachineModelProfiles
+            .AsNoTracking().SingleAsync(f => f.Id == familyId);
+        persisted.RenderStatus.Should().Be(
+            ProfileFamilyRenderStatus.Failed,
+            "the compensation must mark the surviving row Failed even though the request token was cancelled");
     }
 
     [Fact]
@@ -2062,6 +2167,14 @@ public sealed class ProfileFamilyServiceTests
     {
         public bool DeleteFamilyOnNextSave { get; set; }
 
+        /// <summary>
+        /// When set, this source is cancelled at the instant the armed delete-conflict fires — i.e. the
+        /// caller's request token becomes cancelled EXACTLY when the persist loses the race, so the
+        /// post-conflict compensation reads run against an already-cancelled token. Proves those reads use
+        /// <see cref="CancellationToken.None"/> and not the caller token.
+        /// </summary>
+        public CancellationTokenSource? CancelRequestOnConflict { get; set; }
+
         public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
             if (DeleteFamilyOnNextSave)
@@ -2071,6 +2184,7 @@ public sealed class ProfileFamilyServiceTests
                 // Core provider) does not reject the parent delete.
                 _ = await Database.ExecuteSqlRawAsync(
                     "DELETE FROM MachineProfiles; DELETE FROM MachineModelProfiles;", cancellationToken);
+                CancelRequestOnConflict?.Cancel();
                 throw new DbUpdateConcurrencyException("simulated concurrent family delete during render");
             }
 
@@ -2090,11 +2204,21 @@ public sealed class ProfileFamilyServiceTests
     {
         public bool ConflictOnNextSave { get; set; }
 
+        /// <summary>
+        /// When set, this source is cancelled at the instant the armed conflict fires — i.e. the caller's
+        /// request token becomes cancelled EXACTLY when the persist loses the race, so the post-conflict
+        /// existence re-check runs against an already-cancelled token. Proves that read uses
+        /// <see cref="CancellationToken.None"/> and not the caller token, so the mark-Failed compensation
+        /// still runs.
+        /// </summary>
+        public CancellationTokenSource? CancelRequestOnConflict { get; set; }
+
         public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
             if (ConflictOnNextSave)
             {
                 ConflictOnNextSave = false;
+                CancelRequestOnConflict?.Cancel();
                 throw new DbUpdateConcurrencyException(
                     "simulated concurrent family modification during persist (row survives)");
             }

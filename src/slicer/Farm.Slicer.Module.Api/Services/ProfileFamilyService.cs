@@ -337,9 +337,16 @@ public sealed class ProfileFamilyService(
             // Failed via the guarded helper so it is visibly broken, re-deletable, and surfaces under
             // ?renderStatus=Failed, before surfacing the clean 409.
             DetachTrackedGraph();
+
+            // CancellationToken.None, NOT ct: this is a compensation read inside a catch block whose whole
+            // job is to decide whether the surviving row must be marked Failed. ct is the caller's request
+            // token and may already be cancelled here; threading it through would let AnyAsync throw
+            // OperationCanceledException, skip TryMarkRenderFailedAsync, and leave a family reporting Healthy
+            // with no bundle behind it (the exact H2 defect, reopened via cancellation). Do not "helpfully"
+            // thread ct back in.
             bool familyStillExists = await _dbContext.MachineModelProfiles
                 .AsNoTracking()
-                .AnyAsync(candidate => candidate.Id == family.Id, ct);
+                .AnyAsync(candidate => candidate.Id == family.Id, CancellationToken.None);
             if (familyStillExists)
             {
                 await TryMarkRenderFailedAsync(family.Id);
@@ -752,9 +759,17 @@ public sealed class ProfileFamilyService(
                 // just installed so nothing is stranded, and surface a clean 404 rather than a raw 500. If
                 // the row somehow still exists, restore the previous good state and report a 409.
                 DetachTrackedGraph();
+
+                // CancellationToken.None, NOT ct: this is a compensation read inside a catch block whose
+                // result routes the entire recovery — the deleted-concurrently branch (roll back the just-
+                // installed bundle) versus the generic restore branch. ct is the caller's request token and
+                // may already be cancelled here; threading it through would let AnyAsync throw
+                // OperationCanceledException, skip the deleted-concurrently branch, and fall through to the
+                // restore path, which restores against a row that no longer exists and re-orphans the bundle
+                // just installed — the unrecoverable state this whole fix exists to prevent. Do not thread ct.
                 bool familyStillExists = await _dbContext.MachineModelProfiles
                     .AsNoTracking()
-                    .AnyAsync(candidate => candidate.Id == family.Id, ct);
+                    .AnyAsync(candidate => candidate.Id == family.Id, CancellationToken.None);
                 if (!familyStillExists)
                 {
                     await TryDeleteInstalledBundleAsync(family.Id);
