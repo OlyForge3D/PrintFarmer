@@ -762,7 +762,23 @@ public sealed partial class CustomProfileBundleStore : IAsyncDisposable
         }
 
         EnsureExpectedLink(linkPath, targetPath, isDirectory);
-        link.Delete();
+
+        // #2080 N-REC-1 (CI regression, Linux): DirectoryInfo.Delete() removes a directory
+        // reparse point on Windows even when its target no longer exists, because Windows
+        // tracks the reparse point as an independent filesystem object. On Unix, deleting a
+        // *dangling* directory symlink this way fails: .NET's directory-delete path stats the
+        // target first (following the link) to validate it, and that stat fails with ENOENT
+        // before rmdir() is ever attempted -- and POSIX rmdir() refuses to operate on a symlink
+        // at all, dangling or not. A dangling directory symlink must instead be removed with
+        // File.Delete (unlink), which does not require the target to exist or resolve.
+        if (isDirectory && !OperatingSystem.IsWindows())
+        {
+            File.Delete(linkPath);
+        }
+        else
+        {
+            link.Delete();
+        }
     }
 
     private string GetCustomManifestPath(string bundleName) =>
