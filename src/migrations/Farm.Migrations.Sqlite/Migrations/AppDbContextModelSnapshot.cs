@@ -6517,7 +6517,13 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<DateTime?>("LastHistorySeedUtc")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("LastMaintenanceAlertEvaluatedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("LastModelSyncAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastStatsSyncAttemptedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("ObicoServerId")
@@ -6529,6 +6535,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasDefaultValue(1L);
 
                     b.HasKey("PrinterId");
+
+                    b.HasIndex("LastMaintenanceAlertEvaluatedAt");
+
+                    b.HasIndex("LastStatsSyncAttemptedAt");
 
                     b.HasIndex("ObicoServerId");
 

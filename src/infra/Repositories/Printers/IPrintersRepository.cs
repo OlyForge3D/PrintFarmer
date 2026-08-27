@@ -177,4 +177,60 @@ public interface IPrintersRepository
     /// </summary>
     /// <param name="toolheads">The toolhead entities to add (must have PrinterId set).</param>
     void AddToolheads(IEnumerable<Toolhead> toolheads);
+
+    /// <summary>
+    /// Gets the <paramref name="maxCount"/> printers most overdue for a print-statistics sync,
+    /// ordered by <c>PrinterServiceState.LastStatsSyncAttemptedAt</c> ascending (never-attempted
+    /// first), with <see cref="Printer.Id"/> as a stable tiebreaker so ties do not stall rotation.
+    /// Only <paramref name="maxCount"/> rows are materialized in SQL via keyset-style ordering plus
+    /// <c>Take</c> — unlike <see cref="GetAllAsync"/>, this never loads the full table (issue
+    /// #2061). Used by <c>PrintStatsSyncHostedService</c> so every printer's statistics are synced
+    /// within a bounded number of intervals instead of only the first N. The staleness key is a
+    /// dedicated rotation cursor rather than <c>PrinterStatistics.LastSyncTime</c> (which only
+    /// advances on an actual successful backend read) so a printer whose sync keeps failing still
+    /// rotates out of the front of the queue every tick instead of permanently starving the rest of
+    /// the fleet; see <see cref="MarkStatsSyncAttemptedAsync"/>.
+    /// </summary>
+    /// <param name="maxCount">The maximum number of printers to return.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Up to <paramref name="maxCount"/> printers, least-recently-attempted first, with credentials populated.</returns>
+    Task<List<Printer>> GetForStatsSyncRotationAsync(int maxCount, CancellationToken ct);
+
+    /// <summary>
+    /// Records that <c>PrintStatsSyncHostedService</c> just attempted to sync a printer's
+    /// statistics, advancing its rotation cursor (<c>PrinterServiceState.LastStatsSyncAttemptedAt</c>)
+    /// so subsequent iterations prioritize other printers — regardless of whether the attempt
+    /// itself succeeded or failed. Creates the printer's <c>PrinterServiceState</c> row if it does
+    /// not yet exist (issue #2061).
+    /// </summary>
+    /// <param name="printerId">The printer whose sync was just attempted.</param>
+    /// <param name="attemptedAtUtc">The UTC timestamp of the attempt.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task MarkStatsSyncAttemptedAsync(Guid printerId, DateTime attemptedAtUtc, CancellationToken ct);
+
+    /// <summary>
+    /// Gets the <paramref name="maxCount"/> printers most overdue for a maintenance alert
+    /// evaluation, ordered by <c>PrinterServiceState.LastMaintenanceAlertEvaluatedAt</c> ascending
+    /// (never-evaluated first), with <see cref="Printer.Id"/> as a stable tiebreaker. Only
+    /// <paramref name="maxCount"/> rows are materialized in SQL (issue #2061). Returns a minimal
+    /// projection (no credentials, no other columns) since maintenance evaluation only needs the
+    /// printer's identity. Used by <c>MaintenanceAlertHostedService</c> so every printer's
+    /// maintenance schedules are evaluated within a bounded number of intervals instead of only
+    /// the first N.
+    /// </summary>
+    /// <param name="maxCount">The maximum number of printers to return.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Up to <paramref name="maxCount"/> printer candidates, oldest-evaluated first.</returns>
+    Task<List<PrinterRotationCandidate>> GetForMaintenanceAlertRotationAsync(int maxCount, CancellationToken ct);
+
+    /// <summary>
+    /// Records that the maintenance alert engine just evaluated a printer, advancing its rotation
+    /// cursor (<c>PrinterServiceState.LastMaintenanceAlertEvaluatedAt</c>) so subsequent iterations
+    /// prioritize other printers. Creates the printer's <c>PrinterServiceState</c> row if it does
+    /// not yet exist (issue #2061).
+    /// </summary>
+    /// <param name="printerId">The printer that was just evaluated.</param>
+    /// <param name="evaluatedAtUtc">The UTC timestamp of the evaluation.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task MarkMaintenanceAlertEvaluatedAsync(Guid printerId, DateTime evaluatedAtUtc, CancellationToken ct);
 }

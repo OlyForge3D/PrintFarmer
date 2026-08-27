@@ -1271,7 +1271,7 @@ public class PrintersController(
             p.ServiceState?.ObicoServer?.Name,
             p.Wattage,
             p.MachineHourlyRate,
-            p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+            p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt,
             p.ZOffsetMm,
             p.LastZOffsetCalibrationAt,
             p.UseModelDispatchDefaults,

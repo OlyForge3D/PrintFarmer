@@ -713,7 +713,7 @@ dotnet_diagnostic.S5332.severity = none
 dotnet_diagnostic.S5332.severity = none
 
 # API edge adapters below talk to explicitly configured LAN/internal services.
-[api/Controllers/ObicoServerController.cs]
+[modules/Farm.Modules.Observability/Controllers/ObicoServerController.cs]
 dotnet_diagnostic.S5332.severity = none
 
 [api/Services/Discovery/DiscoveryProxyService.cs]
@@ -724,7 +724,7 @@ dotnet_diagnostic.S5332.severity = none
 dotnet_diagnostic.S5332.severity = none
 
 # SignalR test helper generates local/private demo URLs only.
-[api/Services/SignalR/SignalRTestService.cs]
+[modules/Farm.Modules.Observability/Services/SignalR/SignalRTestService.cs]
 dotnet_diagnostic.S5332.severity = none
 dotnet_diagnostic.S1313.severity = none
 

@@ -215,6 +215,10 @@ IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 // controller slice with no host-wide DI moves.
 // Farm.Modules.Administration (issue #2042, Phase 14) is the ninth -- Admin Control Center
 // overview, data export/import, Home Assistant, Telegram, and settings controllers.
+// Farm.Modules.Observability (issue #2045, Phase 17) is the tenth -- notifications,
+// attention, statistics/analytics, monitoring, webhooks, Obico, failure detection, tasks,
+// background-service/SignalR diagnostics controllers, plus the history-seeding workers,
+// SignalR task broadcaster, and SignalR test service.
 builder.Services.AddApiModules(
     mvcBuilder,
     builder.Configuration,
@@ -226,7 +230,8 @@ builder.Services.AddApiModules(
     typeof(Farm.Modules.Gcode.GcodeApiModule).Assembly,
     typeof(Farm.Modules.Identity.IdentityApiModule).Assembly,
     typeof(Farm.Modules.Inventory.InventoryApiModule).Assembly,
-    typeof(Farm.Modules.Administration.AdministrationApiModule).Assembly);
+    typeof(Farm.Modules.Administration.AdministrationApiModule).Assembly,
+    typeof(Farm.Modules.Observability.ObservabilityApiModule).Assembly);
 
 if (slicerModuleEnabled)
 {

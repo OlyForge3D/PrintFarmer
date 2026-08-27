@@ -1,7 +1,5 @@
 ﻿using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.SignalR;
-using Farm.Web.Api.Hubs;
-using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;

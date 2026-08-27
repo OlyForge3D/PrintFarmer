@@ -9,6 +9,7 @@ using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Security;
 using Farm.Web.Api.Services.Maintenance;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -927,8 +928,12 @@ public class PrintStatsExternalBaselineTests
         };
 
         Mock<IPrintersRepository> printers = new(MockBehavior.Strict);
-        printers.Setup(repository => repository.GetAllAsync(It.IsAny<CancellationToken>()))
+        printers.Setup(repository => repository.GetForStatsSyncRotationAsync(
+                It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([failingPrinter, healthyPrinter]);
+        printers.Setup(repository => repository.MarkStatsSyncAttemptedAsync(
+                It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         Mock<IPrintJobStatisticsRepository> jobStats = new(MockBehavior.Strict);
         jobStats.Setup(repository => repository.GetByPrinterModelAsync(
@@ -1056,6 +1061,115 @@ public class PrintStatsExternalBaselineTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    /// <summary>
+    /// Regression coverage for issue #2061 round-2 review (Hicks): the rotation-query test suite
+    /// (<c>PrinterRotationQueryTests</c>) proves <see cref="EfPrintersRepository.GetForStatsSyncRotationAsync"/>
+    /// and <see cref="EfPrintersRepository.MarkStatsSyncAttemptedAsync"/> rotate correctly in
+    /// isolation, but calls <c>MarkStatsSyncAttemptedAsync</c> directly rather than driving
+    /// <see cref="PrintStatsSyncHostedService"/> itself — so it would keep passing even if the
+    /// hosted service's <c>finally</c> cursor-advance block were deleted entirely. This test closes
+    /// that gap: it drives the REAL <see cref="PrintStatsSyncHostedService.SyncPrinterStatisticsAsync(PrintStatsSyncSettings,CancellationToken)"/>
+    /// entry point end-to-end, through a real <see cref="EfPrintersRepository"/>, across three
+    /// iterations, with EVERY printer's per-model job-statistics lookup throwing on every attempt
+    /// (simulating a permanently failing backend/dependency for the entire fleet). If the
+    /// hosted service's rotation-cursor <c>finally</c> block were ever removed or short-circuited,
+    /// this test would fail because the same two printers would be re-selected on every iteration.
+    /// </summary>
+    [Fact]
+    public async Task SyncPrinterStatisticsAsync_ThreeIterations_AllPrintersAttempted_EvenWhenEveryAttemptFails()
+    {
+        const int maxPrintersPerIteration = 2;
+        const int printerCount = maxPrintersPerIteration * 3;
+        string dbName = Guid.NewGuid().ToString("N");
+
+        List<Guid> printerIds = [.. Enumerable.Range(0, printerCount).Select(_ => Guid.NewGuid())];
+
+        Mock<IPrintJobStatisticsRepository> jobStats = new(MockBehavior.Strict);
+        jobStats.Setup(repository => repository.GetByPrinterModelAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<bool>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.FromException<List<PrintJobStatistics>>(
+                new TimeoutException("injected: every printer fails every iteration")));
+
+        Mock<IBackendClient> client = new();
+        client.As<ISupportsHistory>()
+            .Setup(history => history.GetHistoryTotalsAsync(
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryTotals { JobTotals = new JobTotals { TotalPrintTime = 3600, TotalJobs = 1 } });
+        Mock<IBackendClientFactory> clientFactory = new();
+        clientFactory.Setup(factory => factory.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
+
+        Mock<IOperatorFeatureGate> featureGate = new();
+        featureGate.Setup(gate => gate.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
+        featureGate.Setup(gate => gate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        ServiceCollection services = new();
+        services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase(dbName));
+        services.AddScoped<IPrintersRepository>(sp =>
+            new EfPrintersRepository(sp.GetRequiredService<AppDbContext>(), NoOpSensitiveDataProtector.Instance));
+        services.AddScoped<IPrinterStatisticsRepository, EfPrinterStatisticsRepository>();
+        services.AddScoped<IToolheadStatisticsRepository, EfToolheadStatisticsRepository>();
+        services.AddSingleton<IPrintJobStatisticsRepository>(jobStats.Object);
+        services.AddSingleton<IBackendClientFactory>(clientFactory.Object);
+        services.AddSingleton<IOperatorFeatureGate>(featureGate.Object);
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        await using (AsyncServiceScope seedScope = provider.CreateAsyncScope())
+        {
+            AppDbContext seed = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            foreach (Guid printerId in printerIds)
+            {
+                seed.Printers.Add(new Printer
+                {
+                    Id = printerId,
+                    Name = $"Printer {printerId}",
+                    Backend = (int)PrinterBackend.Moonraker,
+                    ModelId = Guid.NewGuid(),
+                    ServerUrl = $"http://printer-{printerId}.local"
+                });
+            }
+            await seed.SaveChangesAsync();
+        }
+
+        PrintStatsSyncHostedService service = CreateService(provider);
+        var settings = new PrintStatsSyncSettings
+        {
+            IncludePrintFarmerJobs = true,
+            MaxPrintersPerIteration = maxPrintersPerIteration,
+            ApiTimeoutSeconds = 30
+        };
+
+        HashSet<Guid> attemptedAcrossAllIterations = [];
+        for (int iteration = 0; iteration < 3; iteration++)
+        {
+            await service.SyncPrinterStatisticsAsync(settings, CancellationToken.None);
+
+            await using AsyncServiceScope verifyScope = provider.CreateAsyncScope();
+            AppDbContext verify = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            List<Guid> attemptedThisIteration = await verify.PrinterServiceStates
+                .AsNoTracking()
+                .Where(s => s.LastStatsSyncAttemptedAt != null && !attemptedAcrossAllIterations.Contains(s.PrinterId))
+                .Select(s => s.PrinterId)
+                .ToListAsync();
+
+            attemptedThisIteration.Should().HaveCount(
+                maxPrintersPerIteration,
+                $"iteration {iteration} must advance the cursor for exactly {maxPrintersPerIteration} previously-unattempted printers, " +
+                "even though every printer's sync fails");
+            attemptedAcrossAllIterations.UnionWith(attemptedThisIteration);
+        }
+
+        attemptedAcrossAllIterations.Should().BeEquivalentTo(
+            printerIds,
+            "all printers must be attempted exactly once across the 3 iterations despite every attempt failing " +
+            "(issue #2061 round-2 review: the rotation cursor must advance through the hosted service's real " +
+            "finally-block wiring, not just via a direct repository call)");
+    }
+
     private static PrintStatsSyncHostedService CreateService(IServiceProvider provider)
     {
         return new PrintStatsSyncHostedService(
@@ -1074,5 +1188,16 @@ public class PrintStatsExternalBaselineTests
         public override long GetTimestamp() => _timestamp;
 
         public void Advance(TimeSpan elapsed) => _timestamp = checked(_timestamp + elapsed.Ticks);
+    }
+
+    /// <summary>
+    /// Null-op protector — this test only exercises rotation across the hosted service, not
+    /// encryption/decryption of printer credentials.
+    /// </summary>
+    private sealed class NoOpSensitiveDataProtector : ISensitiveDataProtector
+    {
+        public static NoOpSensitiveDataProtector Instance { get; } = new();
+        public string? Protect(string? plainText) => plainText;
+        public string? Unprotect(string? protectedText) => protectedText;
     }
 }

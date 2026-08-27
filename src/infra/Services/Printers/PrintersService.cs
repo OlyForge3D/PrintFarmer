@@ -1950,7 +1950,7 @@ public class PrintersService(
                 null,
                 p.InMaintenance,
                 p.IsEnabled,
-                p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue)))
+                p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt))
             .ToListAsync(ct);
 
         IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses = _statusCache.GetAllStatuses();
@@ -2050,7 +2050,7 @@ public class PrintersService(
                     FrontendUrl: PrinterClientUrl.Create(p.FrontendUrl),
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
                     ObicoEnabled: p.ObicoEnabled,
-                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt,
                     EstimatedCompletionTimeUtc: status.PrintTimeLeftSeconds is { } timeLeft ? DateTime.UtcNow.AddSeconds(timeLeft) : null,
                     BedTypeId: p.BedTypeId,
                     BedTypeName: p.BedType?.Name,
@@ -2102,7 +2102,7 @@ public class PrintersService(
                     FrontendUrl: PrinterClientUrl.Create(p.FrontendUrl),
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
                     ObicoEnabled: p.ObicoEnabled,
-                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt,
                     BedTypeId: p.BedTypeId,
                     BedTypeName: p.BedType?.Name,
                     BedTypeColor: p.BedType?.Color,
@@ -2535,7 +2535,7 @@ public class PrintersService(
             FrontendUrl: PrinterClientUrl.Create(p.FrontendUrl),
             Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
             ObicoEnabled: p.ObicoEnabled,
-            HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+            HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt,
             UseModelDispatchDefaults: p.UseModelDispatchDefaults,
             RowVersion: rowVersion,
             ConfigurationRevision: p.ConfigurationRevision));

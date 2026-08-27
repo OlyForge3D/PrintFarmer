@@ -113,12 +113,17 @@ public class PrintStatsSyncHostedService(
     {
         try
         {
+            // Keyset rotation query (issue #2061): materializes at most MaxPrintersPerIteration
+            // rows, ordered by staleness (PrinterServiceState.LastStatsSyncAttemptedAt ascending,
+            // never-attempted first) with Id as a tiebreaker, so every printer is synced within a
+            // bounded number of intervals instead of only the first N ever advancing. Deliberately
+            // does NOT use GetAllAsync — other callers depend on its full-table, unordered semantics.
             List<Printer> printers;
             using (IServiceScope printerListScope = _serviceProvider.CreateScope())
             {
                 IPrintersRepository printersRepo =
                     printerListScope.ServiceProvider.GetRequiredService<IPrintersRepository>();
-                printers = await printersRepo.GetAllAsync(ct);
+                printers = await printersRepo.GetForStatsSyncRotationAsync(settings.MaxPrintersPerIteration, ct);
             }
 
             if (printers.Count == 0)
@@ -127,19 +132,13 @@ public class PrintStatsSyncHostedService(
                 return;
             }
 
-            // Limit printers per iteration to avoid overload
-            int printersToSync = Math.Min(printers.Count, settings.MaxPrintersPerIteration);
-
             _logger.LogInformation(
-                "Syncing statistics for {SyncCount} of {TotalCount} printers",
-                printersToSync,
+                "Syncing statistics for {SyncCount} printers this iteration",
                 printers.Count);
 
             // Process each printer
-            for (int i = 0; i < printersToSync; i++)
+            foreach (Printer printer in printers)
             {
-                Printer printer = printers[i];
-
                 try
                 {
                     // A printer owns one scoped AppDbContext/unit of work. If any operation fails
@@ -184,6 +183,33 @@ public class PrintStatsSyncHostedService(
                         printer.Name,
                         printer.Id,
                         (PrinterBackend)printer.Backend);
+                }
+                finally
+                {
+                    // Advance the rotation cursor even on failure: a printer whose sync keeps
+                    // throwing (or whose backend is unreachable every tick) must not permanently
+                    // monopolize the front of the queue and starve every other printer behind it
+                    // (issue #2061 review finding). This intentionally uses its own isolated
+                    // scope/DbContext, separate from the per-printer processing scope above, so it
+                    // can never be affected by (or accidentally persist) whatever that scope left
+                    // tracked-but-unsaved after a failure. It is also independent of
+                    // PrinterStatistics.LastSyncTime, which keeps its existing "last ACTUAL
+                    // successful sync" meaning used elsewhere for backend-history math.
+                    try
+                    {
+                        using IServiceScope cursorScope = _serviceProvider.CreateScope();
+                        IPrintersRepository cursorPrintersRepo =
+                            cursorScope.ServiceProvider.GetRequiredService<IPrintersRepository>();
+                        await cursorPrintersRepo.MarkStatsSyncAttemptedAsync(printer.Id, DateTime.UtcNow, ct);
+                    }
+                    catch (Exception markEx)
+                    {
+                        _logger.LogWarning(
+                            markEx,
+                            "Failed to advance print-stats-sync rotation cursor for printer '{Name}' (ID: {Id})",
+                            printer.Name,
+                            printer.Id);
+                    }
                 }
             }
 
