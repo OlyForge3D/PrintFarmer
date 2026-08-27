@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -152,7 +153,7 @@ public sealed class SlicePrintBridgeAddToQueueTests
         _importMock.Verify(
             i => i.ImportAsync(
                 It.IsAny<string>(),
-                It.IsAny<string>(),
+                It.IsAny<Stream>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
         _queueMock.Verify(
@@ -203,16 +204,27 @@ public sealed class SlicePrintBridgeAddToQueueTests
         SetupCompletedJobWithGcode(jobId, artifact);
 
         string fakePath = System.IO.Path.Join(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
-        System.IO.File.WriteAllText(fakePath, "; test gcode");
+        const string fakeGcodeContent = "; test gcode";
+        System.IO.File.WriteAllText(fakePath, fakeGcodeContent);
 
         try
         {
             _artifactsMock
-                .Setup(a => a.GetWithPathIfExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync((artifact, fakePath));
+                .Setup(a => a.OpenReadStreamAsync(artifact.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => ArtifactContentStream.Open(
+                    artifact,
+                    () => new FileStream(fakePath, FileMode.Open, FileAccess.Read, FileShare.Read)));
 
+            string? capturedFileName = null;
+            string? capturedContent = null;
             _importMock
-                .Setup(s => s.ImportAsync(artifact.FileName, fakePath, It.IsAny<CancellationToken>()))
+                .Setup(s => s.ImportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+                .Callback<string, Stream, CancellationToken>((fileName, stream, _) =>
+                {
+                    capturedFileName = fileName;
+                    using var reader = new StreamReader(stream, leaveOpen: true);
+                    capturedContent = reader.ReadToEnd();
+                })
                 .ReturnsAsync(new SliceGcodeImportResult(gcodeFileId, true));
 
             _queueMock
@@ -229,11 +241,51 @@ public sealed class SlicePrintBridgeAddToQueueTests
             var response = ok.Value.Should().BeOfType<AddSliceToQueueResponse>().Subject;
             response.PrintJobId.Should().Be(printJobId);
             response.QueuePosition.Should().Be(2);
+
+            // Verify the stream the controller opened from the artifact's storage location is
+            // the exact stream (with the exact bytes) forwarded to the import service — not
+            // just "any stream" — closing the gap between artifact resolution and import.
+            capturedFileName.Should().Be(artifact.FileName);
+            capturedContent.Should().Be(fakeGcodeContent);
         }
         finally
         {
             System.IO.File.Delete(fakePath);
         }
+    }
+
+    // =========================================================================
+    // Artifact bytes cannot be opened (missing/replaced on disk) → 400, no import
+    // =========================================================================
+
+    [Fact]
+    [Trait("Category", "AddToQueue")]
+    public async Task AddToQueue_ArtifactStreamMissing_Returns400WithoutImportOrQueueWrite()
+    {
+        Guid jobId = Guid.NewGuid();
+        Artifact artifact = CreateArtifact(jobId, "gcode", "model.gcode");
+
+        SetupCompletedJobWithGcode(jobId, artifact);
+
+        _artifactsMock
+            .Setup(a => a.OpenReadStreamAsync(artifact.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ArtifactContentStream?)null);
+
+        IActionResult result = await BuildController()
+            .AddToQueueAsync(jobId, new AddSliceToQueueRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<BadRequestObjectResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+
+        _importMock.Verify(
+            i => i.ImportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _queueMock.Verify(
+            q => q.AddJobToQueueAsync(
+                It.IsAny<QueuePrintJobDto>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     // =========================================================================
@@ -258,11 +310,13 @@ public sealed class SlicePrintBridgeAddToQueueTests
         try
         {
             _artifactsMock
-                .Setup(a => a.GetWithPathIfExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync((artifact, fakePath));
+                .Setup(a => a.OpenReadStreamAsync(artifact.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => ArtifactContentStream.Open(
+                    artifact,
+                    () => new FileStream(fakePath, FileMode.Open, FileAccess.Read, FileShare.Read)));
 
             _importMock
-                .Setup(s => s.ImportAsync(It.IsAny<string>(), fakePath, It.IsAny<CancellationToken>()))
+                .Setup(s => s.ImportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SliceGcodeImportResult(gcodeFileId, true));
 
             _spoolmanMock
@@ -319,11 +373,13 @@ public sealed class SlicePrintBridgeAddToQueueTests
         try
         {
             _artifactsMock
-                .Setup(a => a.GetWithPathIfExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync((artifact, fakePath));
+                .Setup(a => a.OpenReadStreamAsync(artifact.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => ArtifactContentStream.Open(
+                    artifact,
+                    () => new FileStream(fakePath, FileMode.Open, FileAccess.Read, FileShare.Read)));
 
             _importMock
-                .Setup(s => s.ImportAsync(It.IsAny<string>(), fakePath, It.IsAny<CancellationToken>()))
+                .Setup(s => s.ImportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SliceGcodeImportResult(gcodeFileId, true));
 
             _spoolmanMock
@@ -445,11 +501,13 @@ public sealed class SlicePrintBridgeAddToQueueTests
         try
         {
             _artifactsMock
-                .Setup(a => a.GetWithPathIfExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync((artifact, fakePath));
+                .Setup(a => a.OpenReadStreamAsync(artifact.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => ArtifactContentStream.Open(
+                    artifact,
+                    () => new FileStream(fakePath, FileMode.Open, FileAccess.Read, FileShare.Read)));
 
             _importMock
-                .Setup(s => s.ImportAsync(It.IsAny<string>(), fakePath, It.IsAny<CancellationToken>()))
+                .Setup(s => s.ImportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SliceGcodeImportResult(gcodeFileId, true));
 
             _queueMock
@@ -521,11 +579,13 @@ public sealed class SlicePrintBridgeAddToQueueTests
         System.IO.File.WriteAllText(fakePath, "; test gcode");
 
         _artifactsMock
-            .Setup(a => a.GetWithPathIfExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((artifact, fakePath));
+            .Setup(a => a.OpenReadStreamAsync(artifact.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => ArtifactContentStream.Open(
+                artifact,
+                () => new FileStream(fakePath, FileMode.Open, FileAccess.Read, FileShare.Read)));
 
         _importMock
-            .Setup(s => s.ImportAsync(It.IsAny<string>(), fakePath, It.IsAny<CancellationToken>()))
+            .Setup(s => s.ImportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SliceGcodeImportResult(gcodeFileId, isNewFile));
 
         _queueMock

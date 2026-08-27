@@ -6,6 +6,10 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Added
 
+- **Post-login backend readiness check** — The app now checks every enabled
+  mobile feature service and SignalR before showing the main interface. If part
+  of the backend is unavailable, the app names the affected services and lets
+  you continue with cached data and available features.
 - **Explicit trust confirmation for self-signed LAN servers** — The first HTTPS
   connection to a private server with a self-signed certificate now requires
   confirming its SHA-256 public-key fingerprint. Confirmed fingerprints are

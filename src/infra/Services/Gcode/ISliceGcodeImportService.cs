@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -24,23 +25,27 @@ public readonly record struct SliceGcodeImportResult(Guid FileId, bool IsNewFile
 public interface ISliceGcodeImportService
 {
     /// <summary>
-    /// Reads the gcode bytes from <paramref name="fullPath"/>, stores them using the
+    /// Reads the gcode bytes from <paramref name="content"/>, stores them using the
     /// standard GcodeFile storage and metadata-extraction pipeline, and returns a
     /// <see cref="SliceGcodeImportResult"/> with the GcodeFile ID and whether the file
     /// was newly created or reused from a previous import with the same content hash.
     /// </summary>
     /// <remarks>
+    /// This service intentionally takes an already-open <see cref="Stream"/> rather than a
+    /// filesystem path: opening the stream is the caller's responsibility (typically via
+    /// <c>IArtifactsService.OpenReadStreamAsync</c>), which avoids a check-then-use gap
+    /// between resolving the artifact's location and reading its bytes.
     /// If the same bytes were already imported (duplicate hash), the existing GcodeFile's
     /// ID is returned with <see cref="SliceGcodeImportResult.IsNewFile"/> set to
     /// <see langword="false"/> instead of creating a duplicate record.
     /// </remarks>
     /// <param name="fileName">Original artifact filename (e.g. "model.gcode").</param>
-    /// <param name="fullPath">Absolute path to the artifact file on disk.</param>
+    /// <param name="content">An open, readable stream over the artifact's bytes. Not disposed by this method.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>
     /// A <see cref="SliceGcodeImportResult"/> containing the GcodeFile ID and whether
     /// a new record was created (<see langword="true"/>) or an existing record was reused
     /// due to a duplicate content hash (<see langword="false"/>).
     /// </returns>
-    Task<SliceGcodeImportResult> ImportAsync(string fileName, string fullPath, CancellationToken ct);
+    Task<SliceGcodeImportResult> ImportAsync(string fileName, Stream content, CancellationToken ct);
 }

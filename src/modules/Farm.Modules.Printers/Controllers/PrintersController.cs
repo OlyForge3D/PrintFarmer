@@ -32,7 +32,6 @@ using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Infrastructure.Idempotency;
-using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using FluentValidation;
 using FluentValidation.Results;

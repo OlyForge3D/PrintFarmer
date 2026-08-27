@@ -8,6 +8,10 @@ protocol SignalRServiceProtocol: AnyObject, Sendable {
     /// returning; safe to call from any actor.
     var connectionState: SignalRConnectionState { get }
     func connect() async throws
+    /// Initial-connect entry point for the post-login readiness gate.
+    /// Cancellation tears down the attempt without recording a user-requested
+    /// disconnect, so normal foreground/path recovery may try again.
+    func connectForReadiness() async throws
     func disconnect() async
 
     /// Idempotent reconnect entry point. Does nothing when already connected
@@ -75,6 +79,10 @@ protocol SignalRServiceProtocol: AnyObject, Sendable {
 }
 
 extension SignalRServiceProtocol {
+    func connectForReadiness() async throws {
+        try await connect()
+    }
+
     /// Default: only connect when the hub is not already live or handshaking.
     ///
     /// `SignalRService` overrides this with a stronger version that runs on

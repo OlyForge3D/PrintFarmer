@@ -464,21 +464,36 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
     public async Task<ArtifactContentStream?> OpenReadStreamAsync(Guid id, CancellationToken ct)
     {
         (Artifact Artifact, string FullPath)? resolved = await GetWithPathAsync(id, ct);
-        if (resolved is null || !File.Exists(resolved.Value.FullPath))
+        if (resolved is null)
         {
             return null;
         }
 
         string fullPath = resolved.Value.FullPath;
-        return ArtifactContentStream.Open(
-            resolved.Value.Artifact,
-            () => new FileStream(
-                fullPath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                bufferSize: 81920,
-                useAsync: true));
+
+        // Deliberately no File.Exists precheck: that would reintroduce a check-then-open
+        // race window between the check and the actual FileStream open. Instead open
+        // directly and treat the outcomes a vanished/replaced file can produce as a
+        // not-found condition, mirroring the hardening applied to artifact reads in #2094.
+        // FileNotFoundException/DirectoryNotFoundException cover deletion; the file being
+        // replaced by a directory in the same window surfaces as UnauthorizedAccessException
+        // rather than DirectoryNotFoundException, so it is caught here too.
+        try
+        {
+            return ArtifactContentStream.Open(
+                resolved.Value.Artifact,
+                () => new FileStream(
+                    fullPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    bufferSize: 81920,
+                    useAsync: true));
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private string ResolveRootPath()

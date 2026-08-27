@@ -474,7 +474,7 @@ struct AttentionView: View {
             capturedLifecycleToken: capturedLifecycleToken,
             currentServerGeneration: { services.activeServerGeneration },
             currentLifecycleToken: { feedViewModel.currentLifecycleToken() },
-            capabilityRefresh: { await services.capabilitiesService.refresh() },
+            capabilityRefresh: { _ = await services.capabilitiesService.refresh() },
             resolvedAttentionEnabled: { services.capabilitiesService.resolved.attentionEnabled },
             getAttentionEnabled: { attentionEnabled },
             setAttentionEnabled: { attentionEnabled = $0 },

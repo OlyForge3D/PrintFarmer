@@ -28,7 +28,14 @@ protocol SystemCapabilitiesServiceProtocol: AnyObject, Sendable {
     /// keep operating as if all features are enabled — matching the
     /// documented contract in #725 that older servers with missing flags
     /// fall back to defaults.
-    func refresh() async
+    @discardableResult
+    func refresh() async -> SystemCapabilitiesRefreshOutcome
+}
+
+enum SystemCapabilitiesRefreshOutcome: Equatable, Sendable {
+    case loaded
+    case legacyDefaults
+    case failed
 }
 
 /// Live implementation backed by the shared `APIClient`.
@@ -52,17 +59,21 @@ final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unche
         self.apiClient = apiClient
     }
 
-    func refresh() async {
+    @discardableResult
+    func refresh() async -> SystemCapabilitiesRefreshOutcome {
         do {
             let response: SystemCapabilities = try await apiClient.get("/api/system/capabilities")
             resolved = response.resolved
+            return .loaded
         } catch NetworkError.notFound {
             // Server predates #725. Documented behavior: keep defaults.
             Self.logger.info("system/capabilities endpoint not present; using defaults")
             resolved = .defaults
+            return .legacyDefaults
         } catch {
             Self.logger.warning("Failed to fetch capabilities: \(error.localizedDescription, privacy: .public)")
             // Fail open — do not disable features because of a transient error.
+            return .failed
         }
     }
 }
@@ -80,7 +91,8 @@ final class StubSystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @u
         resolved = new
     }
 
-    func refresh() async {
-        // no-op
+    @discardableResult
+    func refresh() async -> SystemCapabilitiesRefreshOutcome {
+        .loaded
     }
 }

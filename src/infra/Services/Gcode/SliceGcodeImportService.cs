@@ -10,8 +10,9 @@ namespace Farm.Infrastructure.Services.Gcode;
 
 /// <summary>
 /// Imports a completed slicer gcode artifact into the main-app GcodeFile library.
-/// Reads file bytes from disk and delegates to <see cref="IGcodeFileProcessingService"/>
-/// for storage, metadata extraction, thumbnail extraction, and database persistence.
+/// Reads bytes from a caller-supplied stream (rather than resolving a filesystem path
+/// itself) and delegates to <see cref="IGcodeFileProcessingService"/> for storage,
+/// metadata extraction, thumbnail extraction, and database persistence.
 /// </summary>
 public sealed class SliceGcodeImportService(
     IGcodeFileProcessingService gcodeProcessingService,
@@ -28,10 +29,17 @@ public sealed class SliceGcodeImportService(
         logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
-    public async Task<SliceGcodeImportResult> ImportAsync(string fileName, string fullPath, CancellationToken ct)
+    public async Task<SliceGcodeImportResult> ImportAsync(string fileName, Stream content, CancellationToken ct)
     {
-        // Read the artifact bytes from disk.
-        byte[] bytes = await File.ReadAllBytesAsync(fullPath, ct);
+        ArgumentNullException.ThrowIfNull(content);
+
+        // Read the artifact bytes from the caller-supplied stream. The caller (typically
+        // IArtifactsService.OpenReadStreamAsync) is responsible for opening this stream from
+        // the artifact's storage location, so there is no separate path resolution here that
+        // could go stale between resolution and read.
+        using var buffer = new MemoryStream();
+        await content.CopyToAsync(buffer, ct);
+        byte[] bytes = buffer.ToArray();
 
         // Resolve or create the root gcode virtual folder for organisation.
         FolderNode folder = await _folderService.GetOrCreateFolderAsync("/", "gcode", ct);
