@@ -3,7 +3,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 
-namespace Farm.Web.Api.Services.SignalR;
+namespace Farm.Modules.Observability.Services.SignalR;
 
 public class SignalRTestService(IHubContext<PrinterHub> hubContext) : ISignalRTestService
 {

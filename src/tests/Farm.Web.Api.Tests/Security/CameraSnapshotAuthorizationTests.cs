@@ -14,7 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Farm.Web.Api.Tests.Security;
 
 /// <summary>
-/// Regression coverage for issue #1424: <see cref="Farm.Web.Api.Controllers.CameraSnapshotsController"/>
+/// Regression coverage for issue #1424: <see cref="Farm.Modules.Devices.Controllers.CameraSnapshotsController"/>
 /// must enforce the same <see cref="PrinterGroupAccess"/> scope check that <c>PrintersController</c>
 /// enforces on printer-scoped reads, and the destructive delete must additionally require a
 /// write-level permission and a write-level (Submit) PrinterGroup scope check distinct from the

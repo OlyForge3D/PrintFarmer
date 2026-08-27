@@ -4,7 +4,7 @@ using Farm.Infrastructure.Services.Monitoring;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Observability.Controllers;
 
 [ApiController]
 [Route("api/monitoring")]

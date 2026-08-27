@@ -1,7 +1,7 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using Farm.Infrastructure.Dtos;
 
-namespace Farm.Web.Api.Services.Admin;
+namespace Farm.Modules.Identity.Services.Admin;
 
 /// <summary>
 /// Reads and writes a role's permission grants, joined against the derived permission

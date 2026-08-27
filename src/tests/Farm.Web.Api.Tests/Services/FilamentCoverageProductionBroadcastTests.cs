@@ -1,5 +1,4 @@
-﻿using Farm.Api.Services.PrintQueue;
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -13,6 +12,7 @@ using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Modules.PrintQueue.Services.PrintQueue;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;

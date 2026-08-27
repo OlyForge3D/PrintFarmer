@@ -1,8 +1,8 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.Controllers.Responses;
+using Farm.Modules.Printers.Controllers.Requests;
+using Farm.Modules.PrintQueue.Controllers.Responses;
 using Farm.Web.Api.Tests;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;

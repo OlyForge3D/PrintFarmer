@@ -4,7 +4,7 @@ using System.IO;
 using System.Text;
 using Farm.Infrastructure.IO;
 
-namespace Farm.Web.Api.Tests.Services;
+namespace Farm.Modules.Calibration.Tests.Services;
 
 /// <summary>
 /// Simple in-memory file system for tests. Stores file contents in a concurrent dictionary keyed by full path.

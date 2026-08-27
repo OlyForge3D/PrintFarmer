@@ -1,10 +1,10 @@
 ﻿using System.Text;
-using Farm.Web.Api.Services.Calibration;
-using Farm.Web.Api.Tests.Services;
+using Farm.Modules.Calibration.Services.Calibration;
+using Farm.Modules.Calibration.Tests.Services;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Tests.Services.Calibration;
+namespace Farm.Modules.Calibration.Tests.Services.Calibration;
 
 public sealed class CalibrationBlobStoreTests
 {

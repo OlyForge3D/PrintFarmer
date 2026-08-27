@@ -1,6 +1,6 @@
 ﻿using System.Text.Json;
 
-namespace Farm.Web.Api.Contracts;
+namespace Farm.Modules.Calibration.Contracts;
 
 /// <summary>Safe representation of an authoritative calibration project.</summary>
 public sealed record CalibrationProjectDto(

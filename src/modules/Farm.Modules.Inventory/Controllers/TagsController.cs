@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Api.Controllers;
+namespace Farm.Modules.Inventory.Controllers;
 
 /// <summary>
 /// API endpoints for generic tag management and operations (Phase 3D).

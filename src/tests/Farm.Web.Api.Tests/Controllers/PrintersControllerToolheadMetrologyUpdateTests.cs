@@ -17,7 +17,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// Integration test verifying <c>PUT /api/printers/{id}</c> still applies the
 /// per-toolhead manual metrology fields (offsets, drive type, isDirectDrive,
 /// extruder gear ratio, max volumetric flow, nozzle material/hardness) via
-/// <see cref="Farm.Web.Api.Services.Calibration.CalibrationPrinterUpdateMapper.ApplyToolhead"/>.
+/// <see cref="Farm.Modules.Calibration.Services.Calibration.CalibrationPrinterUpdateMapper.ApplyToolhead"/>.
 /// This regression guards against re-breaking the shared mapper while removing the
 /// dedicated <c>PUT /api/printers/{id}/calibration-setup</c> endpoint (issue #1942):
 /// that endpoint was the only other caller of <c>ApplyToolhead</c>, and the general

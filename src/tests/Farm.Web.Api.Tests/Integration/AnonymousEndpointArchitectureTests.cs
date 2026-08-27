@@ -13,21 +13,21 @@ public sealed class AnonymousEndpointArchitectureTests
     private static readonly IReadOnlyDictionary<string, string> ReviewedAnonymousActions =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["Farm.Web.Api.Controllers.AuthController.LoginAsync [api/auth/login]"] =
+            ["Farm.Modules.Identity.Controllers.AuthController.LoginAsync [api/auth/login]"] =
                 "POST /api/auth/login - establishes the user session.",
-            ["Farm.Web.Api.Controllers.AuthController.RegisterAsync [api/auth/register]"] =
+            ["Farm.Modules.Identity.Controllers.AuthController.RegisterAsync [api/auth/register]"] =
                 "POST /api/auth/register - creates an account before a user can authenticate.",
-            ["Farm.Web.Api.Controllers.AuthController.ExchangeApiKeyAsync [api/auth/api-key/exchange]"] =
+            ["Farm.Modules.Identity.Controllers.AuthController.ExchangeApiKeyAsync [api/auth/api-key/exchange]"] =
                 "POST /api/auth/api-key/exchange - exchanges the supplied API-key credential for a JWT.",
-            ["Farm.Web.Api.Controllers.AuthController.ForgotPasswordAsync [api/auth/forgot-password]"] =
+            ["Farm.Modules.Identity.Controllers.AuthController.ForgotPasswordAsync [api/auth/forgot-password]"] =
                 "POST /api/auth/forgot-password - begins account recovery for a user who cannot authenticate.",
-            ["Farm.Web.Api.Controllers.AuthController.ResetPasswordAsync [api/auth/reset-password]"] =
+            ["Farm.Modules.Identity.Controllers.AuthController.ResetPasswordAsync [api/auth/reset-password]"] =
                 "POST /api/auth/reset-password - uses a single-use recovery token as the credential.",
-            ["Farm.Web.Api.Controllers.AuthController.ConfirmEmailAsync [api/auth/confirm-email]"] =
+            ["Farm.Modules.Identity.Controllers.AuthController.ConfirmEmailAsync [api/auth/confirm-email]"] =
                 "POST /api/auth/confirm-email - uses the issued confirmation token before login.",
-            ["Farm.Web.Api.Controllers.AuthController.PasskeyLoginBeginAsync [api/auth/passkey/login/begin]"] =
+            ["Farm.Modules.Identity.Controllers.AuthController.PasskeyLoginBeginAsync [api/auth/passkey/login/begin]"] =
                 "POST /api/auth/passkey/login/begin - produces options needed to start passkey authentication.",
-            ["Farm.Web.Api.Controllers.AuthController.PasskeyLoginCompleteAsync [api/auth/passkey/login/complete]"] =
+            ["Farm.Modules.Identity.Controllers.AuthController.PasskeyLoginCompleteAsync [api/auth/passkey/login/complete]"] =
                 "POST /api/auth/passkey/login/complete - verifies the signed passkey assertion.",
             ["Farm.Web.Api.Controllers.SetupController.GetSetupStatusAsync [api/setup/status]"] =
                 "GET /api/setup/status - reports whether the installation has an account yet.",
@@ -41,17 +41,17 @@ public sealed class AnonymousEndpointArchitectureTests
                 "GET /api/system/capabilities - supplies non-sensitive login and setup compatibility flags.",
             ["Farm.Web.Api.Controllers.SchemaHealthController.SchemaReadyAsync [api/schema-health/ready]"] =
                 "GET /api/schema-health/ready - supports credential-free deployment readiness probes.",
-            ["Farm.Web.Api.Controllers.FilaManController.GetPrintersAsync [api/filaman/printers]"] =
+            ["Farm.Modules.Printers.Controllers.FilaManController.GetPrintersAsync [api/filaman/printers]"] =
                 "GET /api/filaman/printers - supplies minimal selector metadata to unprovisioned firmware.",
             ["Farm.Web.Api.Controllers.OctoPrintCompatController.GetVersion [api/version]"] =
                 "GET /api/version - exposes non-sensitive compatibility metadata before key configuration.",
             ["Farm.Web.Api.Controllers.OctoPrintCompatController.GetServer [api/server]"] =
                 "GET /api/server - exposes non-sensitive compatibility status before key configuration.",
-            ["Farm.Web.Api.Controllers.InternalDiscoveryEventsController.ProgressAsync [api/internal/discovery/events/progress]"] =
+            ["Farm.Modules.Printers.Controllers.InternalDiscoveryEventsController.ProgressAsync [api/internal/discovery/events/progress]"] =
                 "POST /api/internal/discovery/events/progress - authenticates discovery agents with the shared discovery key.",
-            ["Farm.Web.Api.Controllers.InternalDiscoveryEventsController.PrinterFoundAsync [api/internal/discovery/events/printer-found]"] =
+            ["Farm.Modules.Printers.Controllers.InternalDiscoveryEventsController.PrinterFoundAsync [api/internal/discovery/events/printer-found]"] =
                 "POST /api/internal/discovery/events/printer-found - authenticates discovery agents with the shared discovery key.",
-            ["Farm.Web.Api.Controllers.InternalDiscoveryEventsController.CompletedAsync [api/internal/discovery/events/completed]"] =
+            ["Farm.Modules.Printers.Controllers.InternalDiscoveryEventsController.CompletedAsync [api/internal/discovery/events/completed]"] =
                 "POST /api/internal/discovery/events/completed - authenticates discovery agents with the shared discovery key.",
             ["Farm.Web.Api.Controllers.InternalSlicerHostLookupsController.GetManufacturersAsync [api/internal/slicer-host/catalog/manufacturers]"] =
                 "GET /api/internal/slicer-host/catalog/manufacturers - serves the standalone slicer host only after the configured shared service key is accepted; missing configuration fails with 503 and a missing or invalid key fails with 401 before catalog access.",
@@ -61,21 +61,21 @@ public sealed class AnonymousEndpointArchitectureTests
                 "GET /api/internal/slicer-host/catalog/printer-models/{modelId}/aliases - serves the standalone slicer host only after the configured shared service key is accepted; missing configuration fails with 503 and a missing or invalid key fails with 401 before catalog access.",
             ["Farm.Web.Api.Controllers.InternalSlicerHostLookupsController.GetPrinterAsync [api/internal/slicer-host/printers/{printerId:guid}]"] =
                 "GET /api/internal/slicer-host/printers/{printerId} - returns only the slicer's minimal printer projection after the configured shared service key is accepted; missing configuration fails with 503 and a missing or invalid key fails with 401 before printer access.",
-            ["Farm.Web.Api.Controllers.UnifiedSettingsController.GetSettingsByKeyName [api/settings/{keyName}]"] =
+            ["Farm.Modules.Administration.Controllers.UnifiedSettingsController.GetSettingsByKeyName [api/settings/{keyName}]"] =
                 "GET /api/settings/{keyName} - exposes only the discovery agent's fail-closed section allowlist.",
-            ["Farm.Web.Api.Controllers.UnifiedSettingsController.SendHeartbeat [api/settings/{keyName}/heartbeat]"] =
+            ["Farm.Modules.Administration.Controllers.UnifiedSettingsController.SendHeartbeat [api/settings/{keyName}/heartbeat]"] =
                 "POST /api/settings/{keyName}/heartbeat - accepts only the discovery agent heartbeat section.",
-            ["Farm.Web.Api.Controllers.UsersController.CheckAvailabilityAsync [api/users/availability]"] =
+            ["Farm.Modules.Identity.Controllers.UsersController.CheckAvailabilityAsync [api/users/availability]"] =
                 "GET /api/users/availability - validates registration identifiers before account creation.",
-            ["Farm.Web.Api.Controllers.MonitoringController.VerifySessionAsync [api/monitoring/verify]"] =
+            ["Farm.Modules.Observability.Controllers.MonitoringController.VerifySessionAsync [api/monitoring/verify]"] =
                 "GET /api/monitoring/verify - verifies the monitoring cookie presented by a reverse proxy.",
-            ["Farm.Web.Api.Controllers.NfcDevicesController.HeartbeatAsync [api/nfc-devices/heartbeat]"] =
+            ["Farm.Modules.Devices.Controllers.NfcDevicesController.HeartbeatAsync [api/nfc-devices/heartbeat]"] =
                 "POST /api/nfc-devices/heartbeat - lets unprovisioned NFC firmware announce itself (claim-only, creates a pending device that accepts caller-supplied name/IP/firmware fields until approved); already-approved devices must still present a valid X-Nfc-Device-Token or the heartbeat is rejected without mutating device state.",
-            ["Farm.Web.Api.Controllers.NfcDevicesController.ScanEventAsync [api/nfc-devices/scan]"] =
+            ["Farm.Modules.Devices.Controllers.NfcDevicesController.ScanEventAsync [api/nfc-devices/scan]"] =
                 "POST /api/nfc-devices/scan - requires an approved device presenting a valid X-Nfc-Device-Token header, enforced in the service rather than via [Authorize] since firmware has no user JWT.",
             ["Farm.Web.Api.Controllers.SystemSourceController.GetSource [api/system/source]"] =
                 "GET /api/system/source - keeps corresponding-source availability public to every recipient.",
-            ["Farm.Web.Api.Controllers.GcodeFilesController.GetGcodeThumbnailAsync [api/gcode-files/thumbnail/{id:guid}]"] =
+            ["Farm.Modules.Gcode.Controllers.GcodeFilesController.GetGcodeThumbnailAsync [api/gcode-files/thumbnail/{id:guid}]"] =
                 "GET /api/gcode-files/thumbnail/{id} - supports print-preview image elements without bearer headers.",
             ["Farm.Slicer.Module.Api.Controllers.Model3DFilesController.GetModelThumbnailAsync [api/3d-models/thumbnail/{id:guid}]"] =
                 "GET /api/3d-models/thumbnail/{id} - supports model-card image elements without bearer headers.",

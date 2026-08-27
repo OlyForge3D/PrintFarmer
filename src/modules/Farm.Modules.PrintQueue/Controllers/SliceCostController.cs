@@ -1,9 +1,9 @@
 ﻿using Farm.Infrastructure.Services.Cost;
-using Farm.Web.Api.Controllers.Responses;
+using Farm.Modules.PrintQueue.Controllers.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.PrintQueue.Controllers;
 
 /// <summary>
 /// Exposes Spoolman filament cost data so the frontend can estimate print cost before slicing.

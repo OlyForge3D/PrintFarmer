@@ -1,11 +1,11 @@
 ﻿using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Dtos;
-using Farm.Web.Api.Services.Admin;
+using Farm.Modules.Administration.Services.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers.Admin;
+namespace Farm.Modules.Administration.Controllers.Admin;
 
 /// <summary>
 /// Admin Control Center overview endpoint. Aggregates the existing health-check pipeline

@@ -1,12 +1,12 @@
 ﻿using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Controllers.Admin;
+using Farm.Modules.Administration.Controllers.Admin;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Administration.Tests.Controllers;
 
 public class AdminTelegramControllerTests
 {

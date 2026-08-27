@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.Services.Calibration;
+namespace Farm.Modules.Calibration.Services.Calibration;
 
 public static class CalibrationPrinterUpdateMapper
 {

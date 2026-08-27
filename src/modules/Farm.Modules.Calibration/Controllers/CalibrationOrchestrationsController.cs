@@ -1,12 +1,12 @@
 ﻿using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Security;
-using Farm.Web.Api.Contracts;
-using Farm.Web.Api.Infrastructure;
-using Farm.Web.Api.Services.Calibration;
+using Farm.Modules.Calibration.Contracts;
+using Farm.Modules.Calibration.Infrastructure;
+using Farm.Modules.Calibration.Services.Calibration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Calibration.Controllers;
 
 /// <summary>
 /// Read and advance API for the filament-calibration saga's durable

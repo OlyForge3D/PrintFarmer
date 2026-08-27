@@ -6,18 +6,18 @@ using System.Text.Json;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Security;
+using Farm.Modules.Calibration.Services.Calibration;
+using Farm.Modules.Calibration.Services.Gcode;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
-using Farm.Web.Api.Services.Calibration;
-using Farm.Web.Api.Services.Gcode;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Capabilities;
+namespace Farm.Modules.Calibration.Services.Capabilities;
 
 /// <summary>Builds public and caller-effective capability documents without exposing deployment secrets.</summary>
 public interface ICalibrationCapabilityService

@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.PrinterCalibration;
 using Farm.Slicer.Module.Services;
 
-namespace Farm.Web.Api.Tests.Services.Calibration;
+namespace Farm.Modules.Calibration.Tests.Services.Calibration;
 
 /// <summary>
 /// Test-only helper that keeps hand-built <see cref="ResolvedCalibrationProfile"/> fixtures'

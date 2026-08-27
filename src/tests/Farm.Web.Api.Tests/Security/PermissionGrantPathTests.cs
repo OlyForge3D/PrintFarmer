@@ -77,7 +77,7 @@ public sealed class PermissionGrantPathTests
 
     private static readonly Assembly[] ScannedAssemblies =
     [
-        typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
+        typeof(Farm.Modules.Printers.Controllers.PrintersController).Assembly,
         typeof(Farm.Infrastructure.Services.SignalR.HarvestHub).Assembly,
         typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly,
         // Issue #2040: Farm.Modules.PrintQueue controllers (JobQueueController,
@@ -85,27 +85,27 @@ public sealed class PermissionGrantPathTests
         // moved out of Farm.Web.Api and must be scanned here explicitly, or their
         // [RequirePermission] sites — including the AdminOnlyAllowlist entries for
         // Queue.Reconcile and DispatchSettings.Manage above — silently drop out of this guard.
-        typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
-        typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
-        typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
+        typeof(Farm.Modules.PrintQueue.Controllers.JobQueueController).Assembly,
+        typeof(Farm.Modules.Calibration.Controllers.CalibrationProjectsController).Assembly,
+        typeof(Farm.Modules.Identity.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
         // Issue #2043: Farm.Modules.Devices hosts the NFC/camera controllers, moved out of
         // Farm.Web.Api. Must be scanned here or those grant sites silently drop out.
         // AdminHomeAssistantController ([RequirePermission("home_assistant","admin")]), also
         // named in the issue, ended up owned by Farm.Modules.Administration instead (Phase 14,
         // #2042, landed first and already claimed it) — scanned via its own anchor below.
-        typeof(Farm.Web.Api.Controllers.NfcController).Assembly,
+        typeof(Farm.Modules.Devices.Controllers.NfcController).Assembly,
         // Phase 14 (#2042) moved AdminHomeAssistantController, AdminTelegramController,
         // AdminOverviewController, AdminDataController, SettingsController, and
         // UnifiedSettingsController into Farm.Modules.Administration but did not add an anchor
         // here; discovered during this PR's merge conflict resolution when the assembly this
         // guard scanned via AdminHomeAssistantController silently changed identity. Added now so
         // Farm.Modules.Administration's [RequirePermission] sites stay covered.
-        typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
+        typeof(Farm.Modules.Administration.Controllers.Admin.AdminHomeAssistantController).Assembly,
         // Issue #2088: Farm.Modules.Gcode and Farm.Modules.Inventory were extracted by the
         // module-decomposition epic (#2019, Phases 11/16) but never got an anchor here, so
         // their [RequirePermission] grant sites silently dropped out of this guard.
-        typeof(Farm.Web.Api.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
-        typeof(Farm.Web.Api.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
+        typeof(Farm.Modules.Gcode.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
+        typeof(Farm.Modules.Inventory.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
     ];
 
     [Fact]

@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Inventory.Controllers;
 
 /// <summary>
 /// Spool coverage and runout prediction endpoints (issue #709 — F4). Reuses

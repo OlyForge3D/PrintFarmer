@@ -7,14 +7,14 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Services.Gcode;
+using Farm.Modules.Gcode.Services.Gcode;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Integration;
+namespace Farm.Modules.Gcode.Tests.Integration;
 
 // Integration tests for GcodeFilesService library operations
 // Tests G-code file library management: queries, retrieval, deletion

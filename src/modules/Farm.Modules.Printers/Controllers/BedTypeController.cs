@@ -3,7 +3,7 @@ using Farm.Infrastructure.Services.BedTypes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Printers.Controllers;
 
 /// <summary>
 /// Manages bed surface types — used for printer matching, filtering, and auto-dispatch compatibility.

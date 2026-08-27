@@ -1,7 +1,7 @@
 ﻿using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Farm.Web.Api.Controllers;
+using Farm.Modules.Observability.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -1410,14 +1410,14 @@ public sealed class NotificationPreferencesContractTests
     // -------------------------------------------------------------------------
 
     private static async System.Threading.Tasks.Task<(
-        Farm.Web.Api.Controllers.NotificationsController controller,
+        Farm.Modules.Observability.Controllers.NotificationsController controller,
         Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
         Farm.Infrastructure.Data.AppDbContext dbContext,
         System.Guid userId)>
         BuildAttentionEndpointFixture()
     {
         (Farm.Infrastructure.Data.AppDbContext dbContext, System.Guid userId) = await BuildInMemoryDbWithUserAsync();
-        Farm.Web.Api.Controllers.NotificationsController controller = BuildController(dbContext, userId);
+        NotificationsController controller = BuildController(dbContext, userId);
         var gate = new Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate>(Moq.MockBehavior.Strict);
         gate.Setup(value => value.IsEnabled(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.NativePush)).Returns(true);
         gate.Setup(value => value.IsEnabledAsync(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.NativePush, Moq.It.IsAny<System.Threading.CancellationToken>())).Returns(System.Threading.Tasks.Task.FromResult(true));
@@ -1428,7 +1428,7 @@ public sealed class NotificationPreferencesContractTests
     public async System.Threading.Tasks.Task
         UpdateAttentionPushPreferences_TooManyCategoryKeys_Returns400ProblemDetails()
     {
-        (Farm.Web.Api.Controllers.NotificationsController controller,
+        (NotificationsController controller,
          Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
          Farm.Infrastructure.Data.AppDbContext dbContext,
          _) = await BuildAttentionEndpointFixture();
@@ -1455,7 +1455,7 @@ public sealed class NotificationPreferencesContractTests
     public async System.Threading.Tasks.Task
         UpdateAttentionPushPreferences_CategoryKeyTooLong_Returns400ProblemDetails()
     {
-        (Farm.Web.Api.Controllers.NotificationsController controller,
+        (NotificationsController controller,
          Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
          Farm.Infrastructure.Data.AppDbContext dbContext,
          _) = await BuildAttentionEndpointFixture();
@@ -1479,7 +1479,7 @@ public sealed class NotificationPreferencesContractTests
     public async System.Threading.Tasks.Task
         UpdateAttentionPushPreferences_EmptyCategoryKey_Returns400ProblemDetails()
     {
-        (Farm.Web.Api.Controllers.NotificationsController controller,
+        (NotificationsController controller,
          Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
          Farm.Infrastructure.Data.AppDbContext dbContext,
          _) = await BuildAttentionEndpointFixture();
@@ -1503,7 +1503,7 @@ public sealed class NotificationPreferencesContractTests
     public async System.Threading.Tasks.Task
         UpdateAttentionPushPreferences_AtCardinalityAndKeyLengthLimits_Returns200OK()
     {
-        (Farm.Web.Api.Controllers.NotificationsController controller,
+        (NotificationsController controller,
          Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
          Farm.Infrastructure.Data.AppDbContext dbContext,
          _) = await BuildAttentionEndpointFixture();
@@ -1539,7 +1539,7 @@ public sealed class NotificationPreferencesContractTests
         // The per-request bound is 32 keys; the cumulative bound is 128.
         // A repeated one-key attack cannot reach 128 without going through
         // the real service path each time — this test drives that end-to-end.
-        (Farm.Web.Api.Controllers.NotificationsController controller,
+        (NotificationsController controller,
          Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
          Farm.Infrastructure.Data.AppDbContext dbContext,
          System.Guid userId) = await BuildAttentionEndpointFixture();
@@ -1600,7 +1600,7 @@ public sealed class NotificationPreferencesContractTests
         //   * AttentionCategoryCumulativeJsonBytes = 8 * 1024 = 8192 bytes
         //   * We seed at ~7800 bytes (comfortably under) then submit a
         //     multibyte key whose UTF-8 encoding pushes total past 8192.
-        (Farm.Web.Api.Controllers.NotificationsController controller,
+        (NotificationsController controller,
          Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
          Farm.Infrastructure.Data.AppDbContext dbContext,
          System.Guid userId) = await BuildAttentionEndpointFixture();

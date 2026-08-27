@@ -1,9 +1,9 @@
-﻿using Farm.Web.Api.Services.OctoPrint;
+﻿using Farm.Modules.Devices.Services.OctoPrint;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Farm.Web.Api.Filters;
+namespace Farm.Modules.Devices.Filters;
 
 /// <summary>
 /// Authorization filter that accepts an authenticated user or validates an OctoPrint API key.

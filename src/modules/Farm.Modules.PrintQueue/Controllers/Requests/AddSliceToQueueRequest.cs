@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure;
 
-namespace Farm.Web.Api.Controllers.Requests;
+namespace Farm.Modules.PrintQueue.Controllers.Requests;
 
 /// <summary>
 /// Request body for adding a completed slice job's gcode to the print queue.

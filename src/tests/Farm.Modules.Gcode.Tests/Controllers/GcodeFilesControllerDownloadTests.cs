@@ -3,15 +3,15 @@ using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Quota;
 using Farm.Infrastructure.Services.StorageManagement;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Services.Gcode;
+using Farm.Modules.Gcode.Controllers;
+using Farm.Modules.Gcode.Services.Gcode;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Gcode.Tests.Controllers;
 
 /// <summary>
 /// Regression coverage for issue #1762: G-code downloads must stream from disk via

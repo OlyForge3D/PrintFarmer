@@ -2,13 +2,13 @@
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Exceptions;
 using Farm.Infrastructure.Services.Collections;
-using Farm.Web.Api.Controllers;
+using Farm.Modules.Inventory.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Inventory.Tests.Controllers;
 
 /// <summary>
 /// Controller tests for <see cref="ModelCollectionsController"/> verifying claims

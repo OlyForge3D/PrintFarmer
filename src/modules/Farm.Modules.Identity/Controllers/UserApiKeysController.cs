@@ -11,7 +11,7 @@ using Farm.Infrastructure.Settings;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Identity.Controllers;
 
 [ApiController]
 [Route("api/users/{userId:guid}/apikeys")]

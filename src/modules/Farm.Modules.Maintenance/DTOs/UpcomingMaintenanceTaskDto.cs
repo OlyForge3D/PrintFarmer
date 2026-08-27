@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Farm.Web.Api.Controllers.Responses;
+namespace Farm.Modules.Maintenance.Controllers.Responses;
 
 public record UpcomingMaintenanceTaskDto(
     string Id,

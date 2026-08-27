@@ -3,7 +3,7 @@ using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Tasks;
 using Microsoft.AspNetCore.SignalR;
 
-namespace Farm.Web.Api.Services.Tasks;
+namespace Farm.Modules.Observability.Services.Tasks;
 
 /// <summary>
 /// SignalR implementation of task broadcaster.

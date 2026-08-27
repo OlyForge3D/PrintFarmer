@@ -13,14 +13,14 @@ using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Webhooks;
-using Farm.Web.Api.Controllers.Responses;
-using Farm.Web.Api.Hubs;
+using Farm.Modules.Maintenance.Controllers.Responses;
+using Farm.Modules.Maintenance.Hubs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Maintenance.Controllers;
 
 /// <summary>
 /// API controller for printer maintenance management.

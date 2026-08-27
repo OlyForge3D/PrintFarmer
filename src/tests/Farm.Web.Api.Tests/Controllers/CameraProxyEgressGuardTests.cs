@@ -15,8 +15,8 @@ namespace Farm.Web.Api.Tests.Controllers;
 
 /// <summary>
 /// Regression coverage for issue #1964: the camera-proxy endpoints on both
-/// <see cref="Farm.Web.Api.Controllers.CamerasController"/> and
-/// <see cref="Farm.Web.Api.Controllers.PrintersController"/> must run the caller-supplied
+/// <see cref="Farm.Modules.Devices.Controllers.CamerasController"/> and
+/// <see cref="Farm.Modules.Printers.Controllers.PrintersController"/> must run the caller-supplied
 /// camera target through <c>IEgressGuard</c> before fetching it, exactly like the
 /// <c>PrintersController.TestConnectionAsync</c> path already covered by
 /// <c>PrintersControllerTestConnectionEgressTests</c> (now in Farm.Modules.Printers.Tests). These are HTTP-level tests (not

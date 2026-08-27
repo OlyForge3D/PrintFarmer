@@ -2,18 +2,18 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Cost;
-using Farm.Web.Api.Services.SmartPlug;
+using Farm.Modules.SmartPlug.Services.SmartPlug;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-// Aliases to resolve ambiguity between Farm.Infrastructure.Domain and Farm.Web.Api.Services.SmartPlug
+// Aliases to resolve ambiguity between Farm.Infrastructure.Domain and Farm.Modules.SmartPlug.Services.SmartPlug
 using DomainPowerMonitor = Farm.Infrastructure.Domain.PowerMonitor;
 using DomainPowerReading = Farm.Infrastructure.Domain.PowerReading;
 
-namespace Farm.Web.Api.Services.PowerMonitor;
+namespace Farm.Modules.SmartPlug.Services.PowerMonitor;
 
 /// <summary>
 /// Background service that polls enabled <see cref="DomainPowerMonitor"/> records on a

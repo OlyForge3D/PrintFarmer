@@ -3,7 +3,7 @@ using Farm.Infrastructure.Services.MaterialClusters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Inventory.Controllers;
 
 /// <summary>
 /// Manages material equivalence clusters for grouping equivalent filament types

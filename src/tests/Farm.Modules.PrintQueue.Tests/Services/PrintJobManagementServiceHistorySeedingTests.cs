@@ -2,7 +2,6 @@
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
-using Farm.Api.Services.PrintQueue;
 using Farm.Backend.Plugin.OctoPrint;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
@@ -21,13 +20,14 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
+using Farm.Modules.PrintQueue.Services.PrintQueue;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
-namespace Farm.Web.Api.Tests.Services;
+namespace Farm.Modules.PrintQueue.Tests.Services;
 
 public class PrintJobManagementServiceHistorySeedingTests
 {

@@ -1,8 +1,8 @@
-﻿using Farm.Web.Api.Services.Capabilities;
+﻿using Farm.Modules.Calibration.Services.Capabilities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Infrastructure;
+namespace Farm.Modules.Calibration.Infrastructure;
 
 /// <summary>Applies the additive desktop API contract negotiation used by capability endpoints.</summary>
 public static class ApiContractNegotiation

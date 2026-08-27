@@ -3,6 +3,7 @@ using System.Text.Json;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Tasks;
+using Farm.Modules.Observability.Controllers;
 using Farm.Web.Api.Controllers;
 using FluentValidation;
 using Microsoft.AspNetCore.Http;

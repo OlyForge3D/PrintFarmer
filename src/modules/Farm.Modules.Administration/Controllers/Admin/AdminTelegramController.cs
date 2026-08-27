@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers.Admin;
+namespace Farm.Modules.Administration.Controllers.Admin;
 
 /// <summary>
 /// Admin endpoints for configuring and testing Telegram notifications.

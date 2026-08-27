@@ -5,13 +5,13 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Hubs;
+namespace Farm.Modules.Maintenance.Hubs;
 
 /// <summary>
 /// SignalR hub for broadcasting maintenance alerts and status updates in real-time.
 ///
 /// Group membership is authorization-scoped (issue #1966): the REST surface for maintenance
-/// data is gated behind <c>maintenance:admin</c> (<see cref="Farm.Web.Api.Controllers.MaintenanceController"/>),
+/// data is gated behind <c>maintenance:admin</c> (<see cref="Farm.Modules.Maintenance.Controllers.MaintenanceController"/>),
 /// so this hub must not deliver the same data to every authenticated connection. Farm-wide
 /// membership requires <c>maintenance:admin</c> (or the <c>farm_admin</c> role, which implies
 /// it); per-printer membership requires <see cref="IQueueResourceAuthorizationService.CanAccessPrinterAsync"/>

@@ -8,16 +8,16 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Modules.PrintQueue.Controllers.Requests;
+using Farm.Modules.PrintQueue.Controllers.Responses;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
-using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Services.Gcode.Safety;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.PrintQueue.Controllers;
 
 /// <summary>
 /// Bridges the slicer artifact storage and the printer backend upload capability.

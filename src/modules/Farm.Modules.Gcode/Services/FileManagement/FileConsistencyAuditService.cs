@@ -6,13 +6,14 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.FileManagement;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Infrastructure.Services.FileManagement;
+namespace Farm.Modules.Gcode.Services.FileManagement;
 
 /// <summary>
 /// Periodic background service that audits file consistency between database records and disk.

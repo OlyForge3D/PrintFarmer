@@ -1,12 +1,12 @@
 ﻿using Farm.Infrastructure.Dtos;
-using Farm.Web.Api.Controllers.Admin;
-using Farm.Web.Api.Services.Admin;
+using Farm.Modules.Identity.Controllers.Admin;
+using Farm.Modules.Identity.Services.Admin;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Identity.Tests.Controllers;
 
 /// <summary>
 /// Verifies the permission catalog controller is a thin pass-through to the derivation

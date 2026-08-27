@@ -37,8 +37,8 @@ public sealed class QueueEnqueuePermissionArchitectureTests
         // DatabaseInitializer's resource seed comments). They call PrintApprovalService, which
         // calls AddJobToQueueAsync with a null userId (issue #1666 item 6, tracked separately;
         // acceptable here because the action itself is already farm_admin-gated end to end).
-        "Farm.Web.Api.Controllers.PrintApprovalsController.ApproveAsync",
-        "Farm.Web.Api.Controllers.PrintApprovalsController.RejectAsync",
+        "Farm.Modules.PrintQueue.Controllers.PrintApprovalsController.ApproveAsync",
+        "Farm.Modules.PrintQueue.Controllers.PrintApprovalsController.RejectAsync",
     };
 
     /// <summary>
@@ -55,19 +55,19 @@ public sealed class QueueEnqueuePermissionArchitectureTests
     /// </summary>
     private static readonly HashSet<Assembly> WalkableAssemblies = new()
     {
-        typeof(Farm.Web.Api.Controllers.PrintersController).Assembly, // Farm.Web.Api
+        typeof(Farm.Modules.Printers.Controllers.PrintersController).Assembly, // Farm.Web.Api
         typeof(IJobQueueService).Assembly, // Farm.Infrastructure
-        typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly, // Farm.Modules.PrintQueue
-        typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly, // Farm.Modules.Calibration
-        typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
-        typeof(Farm.Web.Api.Controllers.NfcController).Assembly, // Farm.Modules.Devices
-        typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly, // Farm.Modules.Administration
+        typeof(Farm.Modules.PrintQueue.Controllers.JobQueueController).Assembly, // Farm.Modules.PrintQueue
+        typeof(Farm.Modules.Calibration.Controllers.CalibrationProjectsController).Assembly, // Farm.Modules.Calibration
+        typeof(Farm.Modules.Identity.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
+        typeof(Farm.Modules.Devices.Controllers.NfcController).Assembly, // Farm.Modules.Devices
+        typeof(Farm.Modules.Administration.Controllers.Admin.AdminHomeAssistantController).Assembly, // Farm.Modules.Administration
         // Issue #2088: Farm.Modules.Gcode and Farm.Modules.Inventory were extracted by the
         // module-decomposition epic (#2019, Phases 11/16) but never got an anchor here, so this
         // walk (and the controller-enumeration loop below) silently stopped inspecting those
         // controllers instead of failing loudly.
-        typeof(Farm.Web.Api.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
-        typeof(Farm.Web.Api.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
+        typeof(Farm.Modules.Gcode.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
+        typeof(Farm.Modules.Inventory.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
     };
 
     private static readonly Dictionary<short, OpCode> OpCodesByValue = BuildOpCodeMap();

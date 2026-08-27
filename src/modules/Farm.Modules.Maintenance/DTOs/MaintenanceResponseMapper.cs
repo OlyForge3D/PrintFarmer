@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.DTOs;
+namespace Farm.Modules.Maintenance.DTOs;
 
 /// <summary>
 /// Shared mapping methods for maintenance domain entities to response DTOs.

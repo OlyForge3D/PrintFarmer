@@ -9,16 +9,16 @@ using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services.Discovery;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.Controllers.Responses;
+using Farm.Modules.Printers.Controllers;
+using Farm.Modules.Printers.Controllers.Requests;
+using Farm.Modules.PrintQueue.Controllers.Responses;
 using FluentAssertions;
 using FluentValidation;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Printers.Tests.Controllers;
 
 /// <summary>
 /// Unit-level coverage for the egress vetting wired into
@@ -141,7 +141,7 @@ public sealed class PrintersControllerTestConnectionEgressTests
         var controller = new PrintersController(
             logger: Mock.Of<ILogger<PrintersController>>(),
             printersService: Mock.Of<IPrintersService>(),
-            catalogService: Mock.Of<Farm.Web.Api.Services.Catalog.ICatalogService>(),
+            catalogService: Mock.Of<Farm.Modules.Printers.Services.Catalog.ICatalogService>(),
             validator: Mock.Of<IValidator<CreatePrinterFromDiscoveryDto>>(),
             discoveryProxyService: Mock.Of<IDiscoveryProxyService>(),
             discoverySessions: Mock.Of<IDiscoverySessionRegistry>(),

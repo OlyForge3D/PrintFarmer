@@ -1,7 +1,7 @@
 ﻿using System.IO;
 using Farm.Infrastructure;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Services.Gcode;
+using Farm.Modules.Gcode.Controllers;
+using Farm.Modules.Gcode.Services.Gcode;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Gcode.Tests.Controllers;
 
 public class GcodeLibraryControllerTests
 {

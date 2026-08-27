@@ -10,7 +10,6 @@ using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Users;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Authentication;
 using Moq;
 using Xunit;
 

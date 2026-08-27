@@ -4,7 +4,6 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Api.Services.PrintQueue;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
@@ -19,13 +18,14 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.PrintJobs;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Modules.PrintQueue.Services.PrintQueue;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.PrintJobs;
+namespace Farm.Modules.PrintQueue.Tests.Services.PrintJobs;
 
 /// <summary>
 /// Unit tests for

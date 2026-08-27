@@ -2,14 +2,14 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
-using Farm.Web.Api.Services.SmartPlug;
+using Farm.Modules.SmartPlug.Services.SmartPlug;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using SmartPlugReading = Farm.Web.Api.Services.SmartPlug.PowerReading;
+using SmartPlugReading = Farm.Modules.SmartPlug.Services.SmartPlug.PowerReading;
 
-namespace Farm.Web.Api.Controllers.Admin;
+namespace Farm.Modules.SmartPlug.Controllers.Admin;
 
 /// <summary>
 /// Admin endpoints for managing PowerMonitor configurations and testing smart plug connectivity.

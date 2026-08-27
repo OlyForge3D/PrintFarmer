@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Gcode;
+namespace Farm.Modules.Gcode.Services.Gcode;
 
 /// <summary>
 /// Background service to monitor harvest operations and mark them as completed

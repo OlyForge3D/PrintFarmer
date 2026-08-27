@@ -1,4 +1,4 @@
-﻿namespace Farm.Api.Services.PrintQueue;
+﻿namespace Farm.Modules.PrintQueue.Services.PrintQueue;
 
 internal sealed class ProgressReportingStream : Stream
 {

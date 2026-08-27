@@ -1,8 +1,8 @@
 ﻿using System.Collections.Generic;
 using Farm.Infrastructure;
-using Farm.Web.Api.Controllers.Requests;
+using Farm.Modules.Printers.Controllers.Requests;
 
-namespace Farm.Web.Api.Services.Catalog;
+namespace Farm.Modules.Printers.Services.Catalog;
 
 /// <summary>
 /// Web-specific catalog service interface.

@@ -1,4 +1,4 @@
-﻿using Farm.Web.Api.Controllers.Responses;
+﻿using Farm.Modules.PrintQueue.Controllers.Responses;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Controllers.Responses;

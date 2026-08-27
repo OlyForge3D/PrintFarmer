@@ -9,7 +9,7 @@ using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Controllers;
+using Farm.Modules.Inventory.Controllers;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -17,7 +17,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Inventory.Tests.Controllers;
 
 public class SpoolmanControllerTests
 {

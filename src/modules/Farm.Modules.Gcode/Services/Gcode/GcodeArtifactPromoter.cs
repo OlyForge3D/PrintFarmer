@@ -12,15 +12,16 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Modules.Calibration.Services.Calibration;
+using Farm.Modules.Calibration.Services.Gcode;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
-using Farm.Web.Api.Services.Calibration;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Gcode;
+namespace Farm.Modules.Gcode.Services.Gcode;
 
 /// <summary>
 /// Streams completed slicer artifacts into the G-code library behind a durable, database-idempotent

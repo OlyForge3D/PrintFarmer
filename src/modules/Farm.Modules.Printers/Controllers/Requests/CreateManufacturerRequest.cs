@@ -1,6 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace Farm.Web.Api.Controllers.Requests;
+namespace Farm.Modules.Printers.Controllers.Requests;
 /// <summary>
 /// Request payload for creating a manufacturer.
 /// Frontend sends { "name": "Prusa", "url": "...", "description": "..." } to this shape.

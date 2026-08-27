@@ -3,14 +3,14 @@ using System.Security.Claims;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Contracts.Roles;
 using Farm.Infrastructure.Services.Roles;
-using Farm.Web.Api.Controllers.Admin;
+using Farm.Modules.Identity.Controllers.Admin;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers.Admin;
+namespace Farm.Modules.Identity.Tests.Controllers.Admin;
 
 /// <summary>
 /// Issue #1448: every role-CRUD mutation must require the <c>roles:admin</c> permission (which

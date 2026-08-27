@@ -2,13 +2,13 @@
 using System.Text;
 using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Controllers.Admin;
+using Farm.Modules.Administration.Controllers.Admin;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Administration.Tests.Controllers;
 
 /// <summary>
 /// Unit tests for <see cref="AdminHomeAssistantController"/> covering settings CRUD,

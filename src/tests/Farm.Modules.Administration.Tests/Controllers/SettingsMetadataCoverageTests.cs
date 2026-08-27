@@ -1,11 +1,11 @@
 ﻿using System.Reflection;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Settings;
+using Farm.Modules.Administration.Controllers;
 using Farm.Settings;
-using Farm.Web.Api.Controllers;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Administration.Tests.Controllers;
 
 /// <summary>
 /// Guards which settings sections reach <c>GET /api/settings/metadata</c>.

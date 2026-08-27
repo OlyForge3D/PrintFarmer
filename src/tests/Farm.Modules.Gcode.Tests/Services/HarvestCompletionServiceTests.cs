@@ -1,13 +1,13 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.UnitOfWork;
-using Farm.Web.Api.Services.Gcode;
+using Farm.Modules.Gcode.Services.Gcode;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services;
+namespace Farm.Modules.Gcode.Tests.Services;
 
 public class HarvestCompletionServiceTests
 {

@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Inventory.Controllers;
 
 /// <summary>
 /// CRUD for per-printer filament fallback groups (issue #711, F6).

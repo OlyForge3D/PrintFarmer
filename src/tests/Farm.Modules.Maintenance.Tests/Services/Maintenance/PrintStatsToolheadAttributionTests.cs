@@ -1,14 +1,14 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
-using Farm.Web.Api.Services.Maintenance;
+using Farm.Modules.Maintenance.Services.Maintenance;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.Maintenance;
+namespace Farm.Modules.Maintenance.Tests.Services.Maintenance;
 
 public class PrintStatsToolheadAttributionTests
 {

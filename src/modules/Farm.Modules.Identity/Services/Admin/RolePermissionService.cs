@@ -6,7 +6,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
-namespace Farm.Web.Api.Services.Admin;
+namespace Farm.Modules.Identity.Services.Admin;
 
 /// <summary>
 /// Implements <see cref="IRolePermissionService"/> by joining <see cref="RolePermission"/>

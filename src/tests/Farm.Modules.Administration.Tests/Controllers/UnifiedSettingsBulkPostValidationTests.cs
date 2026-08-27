@@ -3,8 +3,8 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Services.Workers;
+using Farm.Modules.Administration.Controllers;
+using Farm.Modules.Administration.Services.Workers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Administration.Tests.Controllers;
 
 /// <summary>
 /// Regression coverage for issue #954: the bulk <c>POST /api/settings</c> reflection-unwrap

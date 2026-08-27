@@ -1,8 +1,8 @@
-﻿using Farm.Web.Api.Services.Discovery;
+﻿using Farm.Modules.Printers.Services.Discovery;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 
-namespace Farm.Web.Api.Tests.Security;
+namespace Farm.Modules.Printers.Tests.Security;
 
 public sealed class DiscoveryServiceAuthenticatorTests
 {

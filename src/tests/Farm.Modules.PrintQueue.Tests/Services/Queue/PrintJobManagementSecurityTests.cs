@@ -1,5 +1,4 @@
-﻿using Farm.Api.Services.PrintQueue;
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.FileManagement;
@@ -7,12 +6,13 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Modules.PrintQueue.Services.PrintQueue;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Moq;
 
-namespace Farm.Web.Api.Tests.Services.Queue;
+namespace Farm.Modules.PrintQueue.Tests.Services.Queue;
 
 public sealed class PrintJobManagementSecurityTests
 {

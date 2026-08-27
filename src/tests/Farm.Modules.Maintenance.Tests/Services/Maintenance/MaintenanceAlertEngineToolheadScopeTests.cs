@@ -9,8 +9,8 @@ using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Hubs;
-using Farm.Web.Api.Services.Maintenance;
+using Farm.Modules.Maintenance.Hubs;
+using Farm.Modules.Maintenance.Services.Maintenance;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -18,7 +18,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.Maintenance;
+namespace Farm.Modules.Maintenance.Tests.Services.Maintenance;
 
 /// <summary>
 /// Unit tests for the per-toolhead maintenance scope propagation of

@@ -4,11 +4,12 @@ using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
+using Farm.Web.Api.Tests;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Farm.Web.Api.Tests.DataManagement;
+namespace Farm.Modules.Administration.Tests.DataManagement;
 
 public class AdminDataControllerTests : IClassFixture<AdminDataControllerTests.Factory>, IAsyncLifetime
 {

@@ -15,7 +15,7 @@ using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Controllers;
+using Farm.Modules.PrintQueue.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -27,14 +27,14 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.PrintQueue.Tests.Controllers;
 
 /// <summary>
 /// Tests for issue #1729: <see cref="JobQueueController.GetQueueAsync"/> used to authorize each
 /// returned queue overview entry one-at-a-time via <c>CanAccessPrinterAsync</c>, costing 2-4 SQL
 /// queries per printer (N+1 on the polled queue dashboard endpoint). It now performs a single
 /// batched <c>FilterAccessiblePrinterIdsAsync</c> call, mirroring the identical fix already
-/// applied to the sibling <see cref="Farm.Api.Controllers.JobQueueAnalyticsController.GetPrinterQueueSummariesAsync"/>
+/// applied to the sibling <see cref="Farm.Modules.PrintQueue.Controllers.JobQueueAnalyticsController.GetPrinterQueueSummariesAsync"/>
 /// action for #1704/#1496. These tests prove: (1) the controller no longer issues one
 /// authorization call per printer, (2) a farm admin still sees every queue entry via the batched
 /// call's own zero-query claims-based short-circuit, (3) the authorized printer set produced by

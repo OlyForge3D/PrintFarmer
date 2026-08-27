@@ -7,11 +7,11 @@ namespace Farm.Modules.Devices;
 
 /// <summary>
 /// Vertical-slice module for device integrations (issue #2043, epic #2019). Owns the OctoPrint
-/// API-key authentication service (<see cref="Farm.Web.Api.Services.OctoPrint.IOctoPrintAuthService"/>),
-/// the NFC controllers (<see cref="Farm.Web.Api.Controllers.NfcController"/>,
-/// <see cref="Farm.Web.Api.Controllers.NfcDevicesController"/>), and the camera controllers
-/// (<see cref="Farm.Web.Api.Controllers.CamerasController"/>,
-/// <see cref="Farm.Web.Api.Controllers.CameraSnapshotsController"/>). The admin Home Assistant
+/// API-key authentication service (<see cref="Farm.Modules.Devices.Services.OctoPrint.IOctoPrintAuthService"/>),
+/// the NFC controllers (<see cref="Farm.Modules.Devices.Controllers.NfcController"/>,
+/// <see cref="Farm.Modules.Devices.Controllers.NfcDevicesController"/>), and the camera controllers
+/// (<see cref="Farm.Modules.Devices.Controllers.CamerasController"/>,
+/// <see cref="Farm.Modules.Devices.Controllers.CameraSnapshotsController"/>). The admin Home Assistant
 /// controller named in the issue ended up owned by Farm.Modules.Administration instead
 /// (Phase 14, #2042, landed first and already claimed it).
 /// Phase 15 of the Farm.Web.Api decomposition epic -- see docs/MODULE_MIGRATION_PATTERN.md.
@@ -25,9 +25,9 @@ public sealed class DevicesApiModule : IApiModule
     public void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         // OctoPrint API-key authentication service. OctoPrintSettings itself remains bound in
-        // FeatureServicesStartup because Farm.Web.Api.Controllers.OctoPrintCompatController
+        // FeatureServicesStartup because Farm.Modules.Devices.Controllers.OctoPrintCompatController
         // (which is not part of this module) injects IOptions<OctoPrintSettings> directly.
-        _ = services.AddScoped<Farm.Web.Api.Services.OctoPrint.IOctoPrintAuthService, Farm.Web.Api.Services.OctoPrint.OctoPrintAuthService>();
+        _ = services.AddScoped<Farm.Modules.Devices.Services.OctoPrint.IOctoPrintAuthService, Farm.Modules.Devices.Services.OctoPrint.OctoPrintAuthService>();
     }
 
     /// <inheritdoc />

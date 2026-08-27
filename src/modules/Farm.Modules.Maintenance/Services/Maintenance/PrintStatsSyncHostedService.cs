@@ -13,7 +13,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Services.Maintenance;
+namespace Farm.Modules.Maintenance.Services.Maintenance;
 
 /// <summary>
 /// Background service that synchronizes printer statistics from printer APIs for maintenance tracking.

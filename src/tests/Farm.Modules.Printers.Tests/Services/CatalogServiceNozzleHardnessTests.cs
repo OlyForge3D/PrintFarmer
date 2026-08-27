@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services;
+namespace Farm.Modules.Printers.Tests.Services;
 
 /// <summary>
 /// Covers how <see cref="CatalogService"/> threads <see cref="NozzleHardnessOverride"/>

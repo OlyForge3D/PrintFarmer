@@ -1,10 +1,10 @@
 ﻿using Farm.Infrastructure.PrinterCalibration;
-using Farm.Web.Api.Services.Calibration;
+using Farm.Modules.Calibration.Services.Calibration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace Farm.Web.Api.Startup;
+namespace Farm.Modules.Calibration.Startup;
 
 /// <summary>
 /// Chooses how this process resolves calibration profiles for a given deployment topology.

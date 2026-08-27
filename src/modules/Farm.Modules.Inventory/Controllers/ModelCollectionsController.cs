@@ -5,7 +5,7 @@ using Farm.Infrastructure.Services.Collections;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Inventory.Controllers;
 
 /// <summary>
 /// Manages model collections and their membership. Collections group models (referenced

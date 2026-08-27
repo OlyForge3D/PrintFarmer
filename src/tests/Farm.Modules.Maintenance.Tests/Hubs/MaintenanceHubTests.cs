@@ -2,13 +2,13 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Queue;
-using Farm.Web.Api.Hubs;
+using Farm.Modules.Maintenance.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Hubs;
+namespace Farm.Modules.Maintenance.Tests.Hubs;
 
 /// <summary>
 /// Unit tests for the issue #1966 fix: <see cref="MaintenanceHub"/> must not auto-join every

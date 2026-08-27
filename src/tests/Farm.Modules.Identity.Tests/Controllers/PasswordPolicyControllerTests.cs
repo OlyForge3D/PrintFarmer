@@ -2,12 +2,12 @@
 using System.Threading.Tasks;
 using Farm.Infrastructure.Dtos.Auth;
 using Farm.Infrastructure.Services.PasswordPolicy;
-using Farm.Web.Api.Controllers;
+using Farm.Modules.Identity.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests;
+namespace Farm.Modules.Identity.Tests;
 
 public class PasswordPolicyControllerTests
 {

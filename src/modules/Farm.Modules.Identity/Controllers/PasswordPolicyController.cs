@@ -6,7 +6,7 @@ using Farm.Infrastructure.Dtos.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Identity.Controllers;
 
 [ApiController]
 [Route("api/settings/security/password-policy")]

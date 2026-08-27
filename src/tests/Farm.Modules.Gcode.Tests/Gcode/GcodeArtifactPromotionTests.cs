@@ -11,14 +11,15 @@ using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
+using Farm.Modules.Calibration.Services.Calibration;
+using Farm.Modules.Calibration.Services.Gcode;
+using Farm.Modules.Gcode.Services.Gcode;
 using Farm.Slicer.Module.Api.Services;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Metrics;
-using Farm.Web.Api.Services.Calibration;
-using Farm.Web.Api.Services.Gcode;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -28,7 +29,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 
-namespace Farm.Web.Api.Tests.Gcode;
+namespace Farm.Modules.Gcode.Tests.Gcode;
 
 /// <summary>
 /// Covers the <c>Artifact -&gt; GcodeFile</c> promotion boundary: lineage validation, byte equivalence,

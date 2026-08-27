@@ -1,11 +1,11 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Dtos;
-using Farm.Web.Api.Services.Admin;
+using Farm.Modules.Identity.Services.Admin;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers.Admin;
+namespace Farm.Modules.Identity.Controllers.Admin;
 
 /// <summary>
 /// Reads and writes a role's permission grants (#1449), joined against the derived

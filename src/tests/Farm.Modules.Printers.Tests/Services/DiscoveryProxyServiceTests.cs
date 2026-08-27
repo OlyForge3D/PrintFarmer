@@ -8,14 +8,14 @@ using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Services.Discovery;
+using Farm.Modules.Printers.Services.Discovery;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services;
+namespace Farm.Modules.Printers.Tests.Services;
 
 public class DiscoveryProxyServiceTests
 {

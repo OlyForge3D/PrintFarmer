@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Controllers.Admin;
+namespace Farm.Modules.Administration.Controllers.Admin;
 
 /// <summary>
 /// Admin controller for data export/import and backup/restore operations.
