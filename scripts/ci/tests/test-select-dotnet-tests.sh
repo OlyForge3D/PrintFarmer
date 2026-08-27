@@ -2292,16 +2292,17 @@ _check_drift_full_job_snapshot() {
         run: |
           set -euo pipefail
           project_name="${MATRIX_PROJECT##*/}"
-          printf 'name=%s.tgz\n' "$project_name" >> "$GITHUB_OUTPUT"
+          printf 'name=%s\n' "$project_name" >> "$GITHUB_OUTPUT"
+          printf 'path=src/%s/bin/Debug/net10.0\n' "$MATRIX_PROJECT" \
+            >> "$GITHUB_OUTPUT"
 
       - name: Download migration build
         uses: actions/download-artifact@v8
         with:
           name: ${{ steps.migration-build-artifact.outputs.name }}
-          path: ${{ runner.temp }}/dotnet-build
-          skip-decompress: true
+          path: ${{ steps.migration-build-artifact.outputs.path }}
 
-      - name: Extract migration build
+      - name: Verify migration build
         working-directory: src
         env:
           MATRIX_PROJECT: ${{ matrix.project }}
@@ -2309,9 +2310,6 @@ _check_drift_full_job_snapshot() {
           set -euo pipefail
           project_dir="$MATRIX_PROJECT"
           project_name="${MATRIX_PROJECT##*/}"
-          archive="$RUNNER_TEMP/dotnet-build/$project_name.tgz"
-          mkdir -p "$project_dir/bin/Debug"
-          tar -xzf "$archive" -C "$project_dir/bin/Debug"
           test -f "$project_dir/bin/Debug/net10.0/$project_name.dll"
 
       - name: Check EF Core migration drift
