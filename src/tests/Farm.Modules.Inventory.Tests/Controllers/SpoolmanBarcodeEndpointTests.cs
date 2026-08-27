@@ -24,6 +24,20 @@ namespace Farm.Web.Api.Tests.Controllers;
 
 public class SpoolmanBarcodeEndpointTests
 {
+    private sealed class RoutedSpoolmanFactory(Mock<ISpoolmanService> routedSpoolmanServiceMock)
+        : CustomWebApplicationFactory
+    {
+        protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
+        {
+            base.ConfigureWebHost(builder);
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ISpoolmanService>();
+                services.AddSingleton(routedSpoolmanServiceMock.Object);
+            });
+        }
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -107,16 +121,7 @@ public class SpoolmanBarcodeEndpointTests
             .Setup(s => s.GetFilamentByBarcodeAsync(barcode, It.IsAny<CancellationToken>()))
             .ReturnsAsync(filament);
 
-        await using WebApplicationFactory<Program> factory = CustomWebApplicationFactory
-            .CreateWithIsolatedDatabase()
-            .WithWebHostBuilder(builder =>
-            {
-                builder.ConfigureServices(services =>
-                {
-                    services.RemoveAll<ISpoolmanService>();
-                    services.AddSingleton(routedSpoolmanServiceMock.Object);
-                });
-            });
+        await using CustomWebApplicationFactory factory = new RoutedSpoolmanFactory(routedSpoolmanServiceMock);
         using HttpClient client = await CreateAuthenticatedClientAsync(factory);
 
         HttpResponseMessage response = await client.GetAsync($"/api/spoolman/filaments/by-barcode?code={Uri.EscapeDataString(barcode)}");
@@ -450,7 +455,7 @@ public class SpoolmanBarcodeEndpointTests
     }
 
     private static async Task<HttpClient> CreateAuthenticatedClientAsync(
-        WebApplicationFactory<Program> factory,
+        CustomWebApplicationFactory factory,
         string username = "test-admin",
         string email = "test@example.com",
         string password = "TestPassword123!")
