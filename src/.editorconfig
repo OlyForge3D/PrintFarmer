@@ -716,7 +716,7 @@ dotnet_diagnostic.S5332.severity = none
 [modules/Farm.Modules.Observability/Controllers/ObicoServerController.cs]
 dotnet_diagnostic.S5332.severity = none
 
-[api/Services/Discovery/DiscoveryProxyService.cs]
+[modules/Farm.Modules.Printers/Services/Discovery/DiscoveryProxyService.cs]
 dotnet_diagnostic.S5332.severity = none
 
 # SmartPlug providers talk to LAN devices that often only support HTTP (issue #2036).
