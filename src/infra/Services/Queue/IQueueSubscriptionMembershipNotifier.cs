@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Queue;
+﻿namespace Farm.Infrastructure.Services.Queue;
 
 /// <summary>
 /// Notifies queue-reader clients that their authorized SignalR subscription resource

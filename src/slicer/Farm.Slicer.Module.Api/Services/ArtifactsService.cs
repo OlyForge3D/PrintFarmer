@@ -488,6 +488,25 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
             _env.ContentRootPath);
     }
 
+    /// <inheritdoc/>
+    public async Task<bool> ArtifactFileExistsAsync(Guid id, CancellationToken ct)
+    {
+        (Artifact Artifact, string FullPath)? resolved = await GetWithPathAsync(id, ct);
+        return resolved is not null && File.Exists(resolved.Value.FullPath);
+    }
+
+    /// <inheritdoc/>
+    public async Task<byte[]?> ReadArtifactBytesAsync(Guid id, CancellationToken ct)
+    {
+        (Artifact Artifact, string FullPath)? resolved = await GetWithPathAsync(id, ct);
+        if (resolved is null || !File.Exists(resolved.Value.FullPath))
+        {
+            return null;
+        }
+
+        return await File.ReadAllBytesAsync(resolved.Value.FullPath, ct);
+    }
+
     private static string SanitizeFileName(string fileName)
     {
         if (string.IsNullOrWhiteSpace(fileName))

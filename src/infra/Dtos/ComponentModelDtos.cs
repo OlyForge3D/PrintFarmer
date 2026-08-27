@@ -268,10 +268,25 @@ public record CreateNozzleModelDto(
 /// All fields are optional - only provided fields are updated. Send
 /// <c>HardnessOverride: "Auto"</c> to clear a previously pinned hardness.
 /// </summary>
+/// <param name="Name">Name of the nozzle model (e.g., "Undertaker", "Vanadium"); unchanged when omitted.</param>
+/// <param name="ManufacturerId">ID of the manufacturer; unchanged when omitted.</param>
+/// <param name="Diameter">Nozzle diameter in millimeters (e.g., 0.4, 0.6, 0.8); unchanged when omitted.</param>
+/// <param name="MaxTemp">Maximum temperature rating in °C; unchanged when omitted.</param>
+/// <param name="NozzleType">
+/// The nozzle material's name (e.g. "Brass", "HardenedSteel", "Diamond", or any
+/// user-defined <see cref="Farm.Infrastructure.Domain.NozzleMaterial"/> name); resolved
+/// against the <c>NozzleMaterial</c> catalog by exact name. Open string set, not a closed
+/// enum wire value — see epic #1823 / issue #1826. Ignored when
+/// <paramref name="NozzleMaterialId"/> is provided. Unchanged when omitted.
+/// </param>
+/// <param name="HardnessOverride">Per-model hardness override; <c>Auto</c> derives it from the material. Unchanged when omitted.</param>
+/// <param name="NozzleInterface">Nozzle interface type for compatibility matching; unchanged when omitted.</param>
+/// <param name="Description">Optional description; unchanged when omitted.</param>
+/// <param name="Url">Optional product URL; unchanged when omitted.</param>
 /// <param name="NozzleMaterialId">
 /// Optional direct reference to a <c>NozzleMaterial</c> row (built-in or custom). When provided,
 /// this takes precedence over <paramref name="NozzleType"/> and is the only way to select a
-/// custom (non-enum) material added via the Materials CRUD.
+/// custom (non-enum) material added via the Materials CRUD. Unchanged when omitted.
 /// </param>
 public record UpdateNozzleModelDto(
     string? Name = null,

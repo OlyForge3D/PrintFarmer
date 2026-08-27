@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Queue;
+﻿namespace Farm.Infrastructure.Services.Queue;
 
 /// <summary>
 /// Configures retention windows and batching bounds for

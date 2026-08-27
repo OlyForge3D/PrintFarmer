@@ -19,6 +19,13 @@
     <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
     <RunAnalyzersDuringLiveAnalysis>true</RunAnalyzersDuringLiveAnalysis>
     <WarningsAsErrors>Nullable</WarningsAsErrors>
+
+    <!-- #2094: solution-wide build is at 0 warnings (63 fixed at the source; the NoWarn
+         list below covers only genuinely intentional design choices, each documented above).
+         TreatWarningsAsErrors turns any new warning into a hard build failure so future PRs
+         cannot silently regress the baseline and require manual grep-diffing across CI logs
+         (as happened repeatedly on #2085). -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     
     <!-- NuGet warning suppressions for .NET 10 migration -->
     <!-- NU1605: Transitive version downgrades (expected due to mixed 9.x and 10.0 dependencies) -->

@@ -135,6 +135,25 @@ public interface IArtifactsService
     /// </example>
     Task<ArtifactContentStream?> OpenReadStreamAsync(Guid id, CancellationToken ct);
 
+    /// <summary>
+    /// Checks whether an artifact's backing file is present on disk, without exposing the storage
+    /// path to the caller. Prefer this over resolving <see cref="GetWithPathAsync"/> and calling
+    /// file-system APIs directly from a controller.
+    /// </summary>
+    /// <param name="id">The artifact identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><see langword="true"/> when the artifact row and its file both exist.</returns>
+    Task<bool> ArtifactFileExistsAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Reads the full contents of an artifact's backing file, without exposing the storage path to
+    /// the caller.
+    /// </summary>
+    /// <param name="id">The artifact identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The file bytes, or <see langword="null"/> when the artifact row or its file is missing.</returns>
+    Task<byte[]?> ReadArtifactBytesAsync(Guid id, CancellationToken ct);
+
     /// <summary>Persist a text payload as an artifact of the specified kind.</summary>
     /// <param name="content">The text content to persist.</param>
     /// <param name="fileName">The name for the artifact file.</param>

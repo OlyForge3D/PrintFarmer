@@ -211,6 +211,10 @@ public sealed class SlicePrintBridgeAddToQueueTests
                 .Setup(a => a.GetWithPathAsync(artifact.Id, It.IsAny<CancellationToken>()))
                 .ReturnsAsync((artifact, fakePath));
 
+            _artifactsMock
+                .Setup(a => a.ArtifactFileExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+
             _importMock
                 .Setup(s => s.ImportAsync(artifact.FileName, fakePath, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SliceGcodeImportResult(gcodeFileId, true));
@@ -260,6 +264,10 @@ public sealed class SlicePrintBridgeAddToQueueTests
             _artifactsMock
                 .Setup(a => a.GetWithPathAsync(artifact.Id, It.IsAny<CancellationToken>()))
                 .ReturnsAsync((artifact, fakePath));
+
+            _artifactsMock
+                .Setup(a => a.ArtifactFileExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
 
             _importMock
                 .Setup(s => s.ImportAsync(It.IsAny<string>(), fakePath, It.IsAny<CancellationToken>()))
@@ -321,6 +329,10 @@ public sealed class SlicePrintBridgeAddToQueueTests
             _artifactsMock
                 .Setup(a => a.GetWithPathAsync(artifact.Id, It.IsAny<CancellationToken>()))
                 .ReturnsAsync((artifact, fakePath));
+
+            _artifactsMock
+                .Setup(a => a.ArtifactFileExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
 
             _importMock
                 .Setup(s => s.ImportAsync(It.IsAny<string>(), fakePath, It.IsAny<CancellationToken>()))
@@ -448,6 +460,10 @@ public sealed class SlicePrintBridgeAddToQueueTests
                 .Setup(a => a.GetWithPathAsync(artifact.Id, It.IsAny<CancellationToken>()))
                 .ReturnsAsync((artifact, fakePath));
 
+            _artifactsMock
+                .Setup(a => a.ArtifactFileExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+
             _importMock
                 .Setup(s => s.ImportAsync(It.IsAny<string>(), fakePath, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SliceGcodeImportResult(gcodeFileId, true));
@@ -523,6 +539,10 @@ public sealed class SlicePrintBridgeAddToQueueTests
         _artifactsMock
             .Setup(a => a.GetWithPathAsync(artifact.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync((artifact, fakePath));
+
+        _artifactsMock
+            .Setup(a => a.ArtifactFileExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         _importMock
             .Setup(s => s.ImportAsync(It.IsAny<string>(), fakePath, It.IsAny<CancellationToken>()))

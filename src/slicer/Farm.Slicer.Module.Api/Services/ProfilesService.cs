@@ -1065,19 +1065,6 @@ public class ProfilesService(
     }
 
     /// <summary>
-    /// Stages a batch of profile DTOs into entities and commits them in a single
-    /// <c>SaveChangesAsync</c> call instead of one per profile, while preserving today's
-    /// per-profile error isolation.
-    /// </summary>
-    /// <remarks>
-    /// Staging (parse/hash/build) failures for individual DTOs only exclude that profile from
-    /// the batch (counted as skipped) and never abort the rest. If the batched
-    /// <paramref name="addRangeAsync"/> commit itself fails (e.g. a duplicate-hash unique
-    /// constraint violation that the pre-check missed), the batch falls back to inserting each
-    /// staged entity individually via <paramref name="addSingleAsync"/>, so one bad row in a
-    /// batch never drops the other already-valid rows in that same batch.
-    /// </remarks>
-    /// <summary>
     /// Loads the identities of already-persisted OrcaSlicer profiles of one type into a
     /// case-insensitive set, used as the seed's stable idempotency key (#1779).
     /// </summary>
@@ -1108,6 +1095,19 @@ public class ProfilesService(
     private static string ProcessIdentity(string? name, Guid? printerModelId) =>
         $"{(name ?? string.Empty).Trim()}\u001F{printerModelId?.ToString() ?? string.Empty}";
 
+    /// <summary>
+    /// Stages a batch of profile DTOs into entities and commits them in a single
+    /// <c>SaveChangesAsync</c> call instead of one per profile, while preserving today's
+    /// per-profile error isolation.
+    /// </summary>
+    /// <remarks>
+    /// Staging (parse/hash/build) failures for individual DTOs only exclude that profile from
+    /// the batch (counted as skipped) and never abort the rest. If the batched
+    /// <paramref name="addRangeAsync"/> commit itself fails (e.g. a duplicate-hash unique
+    /// constraint violation that the pre-check missed), the batch falls back to inserting each
+    /// staged entity individually via <paramref name="addSingleAsync"/>, so one bad row in a
+    /// batch never drops the other already-valid rows in that same batch.
+    /// </remarks>
     /// <remarks>
     /// De-duplicates on BOTH the content hash and the profile name (#1779). Hash alone is not
     /// sufficient: it is computed over the serialized worker DTO, so any DTO shape change between
@@ -1474,7 +1474,7 @@ public class ProfilesService(
     /// <summary>
     /// Looks up an already-imported OrcaSlicer profile of the given type by name (case-insensitive),
     /// disambiguating same-named candidates against <paramref name="printerModelId"/> using the same
-    /// compatibility rules <see cref="SliceJobController.SelectCompatibleProfile{T}"/> applies (#2004
+    /// compatibility rules <see cref="Farm.Slicer.Module.Api.Controllers.Slicing.SliceJobController.SelectCompatibleProfile{T}(System.Collections.Generic.List{T}, Farm.Slicer.Module.Domain.MachineProfile?, System.Func{T, string?}, System.Func{T, System.Guid?}?)"/> applies (#2004
     /// review finding: <c>Name</c> alone is not a unique key for <see cref="ProcessProfile"/> or
     /// <see cref="FilamentProfile"/> — OrcaSlicer ships same-named profiles scoped to different
     /// printer models via <c>PrinterModelId</c>/<c>CompatiblePrinters</c>). Returns <see langword="null"/>

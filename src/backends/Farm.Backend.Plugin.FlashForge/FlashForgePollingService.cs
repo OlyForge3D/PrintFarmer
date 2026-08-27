@@ -171,6 +171,10 @@ public sealed class FlashForgePollingService(
     /// sites (the 30s reconciliation loop and the per-tick cache-miss fallback) so a single test can
     /// exercise this critical section for both callers at once.
     /// </summary>
+    /// <param name="printerId">The printer whose cache entry is being published.</param>
+    /// <param name="printer">The freshly fetched printer snapshot to publish.</param>
+    /// <param name="capturedGeneration">The invalidation generation observed before the fetch began.</param>
+    /// <param name="state">The per-printer polling state whose <c>CachedPrinter</c> is written.</param>
     /// <param name="onGenerationCheckPassedForTestingOnly">
     /// Test-only seam, always null in production. When supplied, it is invoked synchronously
     /// while <paramref name="state"/>'s <c>gate</c> is still held, immediately after the

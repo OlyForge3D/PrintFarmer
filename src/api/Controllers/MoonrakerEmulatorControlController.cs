@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Authorization;
+﻿using Farm.Infrastructure.Authorization;
 using Farm.Web.Api.Services.Startup;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;

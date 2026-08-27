@@ -47,7 +47,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         // the accept and reject behavior of the send-to-printer safety gate itself.
         _safetyValidatorMock
             .Setup(v => v.Validate(It.IsAny<GcodeSafetyRequest>()))
-            .Returns(GcodeSafetyResult<GcodeSafetyReport>.Success(new GcodeSafetyReport(
+            .Returns(GcodeSafetyResult.Success(new GcodeSafetyReport(
                 GcodeSafetyCheckpoint.BeforeSendToPrinter,
                 "test-sha256",
                 1,
@@ -328,10 +328,10 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         SetupCompletedJobWithGcode(jobId, gcode);
         SetupPrinterExists(printerId);
 
-        // GetWithPathAsync returns a path that does not exist on disk
+        // ReadArtifactBytesAsync returns null when the artifact file is missing from disk.
         _artifactsMock
-            .Setup(a => a.GetWithPathAsync(gcode.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((gcode, Path.Join(_tempDir, "nonexistent.gcode")));
+            .Setup(a => a.ReadArtifactBytesAsync(gcode.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
 
         var request = new SendToPrinterRequest { PrinterId = printerId };
 
@@ -352,8 +352,8 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         SetupPrinterExists(printerId);
 
         _artifactsMock
-            .Setup(a => a.GetWithPathAsync(gcode.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(((Artifact, string)?)null);
+            .Setup(a => a.ReadArtifactBytesAsync(gcode.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
 
         var request = new SendToPrinterRequest { PrinterId = printerId };
 
@@ -448,7 +448,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
 
         _safetyValidatorMock
             .Setup(v => v.Validate(It.IsAny<GcodeSafetyRequest>()))
-            .Returns(GcodeSafetyResult<GcodeSafetyReport>.Failure(
+            .Returns(GcodeSafetyResult.Failure<GcodeSafetyReport>(
                 GcodeSafetyProblemCodes.TemperatureAboveLimit,
                 "M104.S",
                 "Commanded nozzle temperature exceeds the configured ceiling."));
@@ -513,7 +513,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         _safetyValidatorMock
             .Setup(v => v.Validate(It.IsAny<GcodeSafetyRequest>()))
             .Callback<GcodeSafetyRequest>(r => capturedRequest = r)
-            .Returns(GcodeSafetyResult<GcodeSafetyReport>.Success(new GcodeSafetyReport(
+            .Returns(GcodeSafetyResult.Success(new GcodeSafetyReport(
                 GcodeSafetyCheckpoint.BeforeSendToPrinter, "test-sha256", 3, DateTime.UtcNow)));
 
         var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
@@ -565,7 +565,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         _safetyValidatorMock
             .Setup(v => v.Validate(It.IsAny<GcodeSafetyRequest>()))
             .Callback<GcodeSafetyRequest>(r => capturedRequest = r)
-            .Returns(GcodeSafetyResult<GcodeSafetyReport>.Success(new GcodeSafetyReport(
+            .Returns(GcodeSafetyResult.Success(new GcodeSafetyReport(
                 GcodeSafetyCheckpoint.BeforeSendToPrinter, "test-sha256", 3, DateTime.UtcNow)));
 
         var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
@@ -861,7 +861,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         _safetyValidatorMock
             .Setup(v => v.Validate(It.IsAny<GcodeSafetyRequest>()))
             .Callback<GcodeSafetyRequest>(r => capturedGcodeText = r.Gcode)
-            .Returns(GcodeSafetyResult<GcodeSafetyReport>.Success(new GcodeSafetyReport(
+            .Returns(GcodeSafetyResult.Success(new GcodeSafetyReport(
                 GcodeSafetyCheckpoint.BeforeSendToPrinter, "test-sha256", 2, DateTime.UtcNow)));
 
         byte[]? capturedUploadBytes = null;
@@ -1005,6 +1005,14 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         _artifactsMock
             .Setup(a => a.GetWithPathAsync(artifact.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync((artifact, filePath));
+
+        _artifactsMock
+            .Setup(a => a.ArtifactFileExistsAsync(artifact.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(File.Exists(filePath));
+
+        _artifactsMock
+            .Setup(a => a.ReadArtifactBytesAsync(artifact.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => File.Exists(filePath) ? File.ReadAllBytes(filePath) : null);
     }
 
     private string CreateTempGcodeFile(string fileName)

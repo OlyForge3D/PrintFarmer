@@ -63,7 +63,7 @@ public sealed class SlicerHostWorkerCompatibilityServiceTests : IDisposable
 
         _ = snapshot.HasSupportedVersion.Should().BeTrue();
         _ = snapshot.ObservedVersions.Should().Contain(CalibrationContractConstants.SlicerVersion);
-        WorkerCompatibilityPinnedIdentityDto pinned = snapshot.PinnedIdentity.Should().NotBeNull().And.Subject
+        WorkerCompatibilityPinnedIdentityDto? pinned = snapshot.PinnedIdentity.Should().NotBeNull().And.Subject
             as WorkerCompatibilityPinnedIdentityDto;
         _ = pinned!.WorkerId.Should().Be(workerId);
         _ = pinned.Version.Should().Be(CalibrationContractConstants.SlicerVersion);

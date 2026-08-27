@@ -143,7 +143,10 @@ public sealed record GcodeSafetyReport(
 /// <typeparam name="T">The successful payload type.</typeparam>
 public sealed class GcodeSafetyResult<T>
 {
-    private GcodeSafetyResult(bool isValid, T? value, IReadOnlyList<GcodeSafetyProblem> problems)
+    // CA1000: factory construction lives on the non-generic <see cref="GcodeSafetyResult"/> class so
+    // this generic type carries no static members; the constructor stays internal so only that
+    // factory (and this assembly) can create instances.
+    internal GcodeSafetyResult(bool isValid, T? value, IReadOnlyList<GcodeSafetyProblem> problems)
     {
         IsValid = isValid;
         Value = value;
@@ -158,21 +161,32 @@ public sealed class GcodeSafetyResult<T>
 
     /// <summary>The ordered rejection reasons, empty when <see cref="IsValid"/> is <see langword="true"/>.</summary>
     public IReadOnlyList<GcodeSafetyProblem> Problems { get; }
+}
 
+/// <summary>
+/// Non-generic factory methods for <see cref="GcodeSafetyResult{T}"/>. Kept separate from the generic
+/// type so it carries no static members (CA1000: static members on generic types force callers to
+/// specify the type argument to reach them).
+/// </summary>
+public static class GcodeSafetyResult
+{
     /// <summary>Creates a successful result.</summary>
+    /// <typeparam name="T">The successful payload type.</typeparam>
     /// <param name="value">The successful payload.</param>
-    public static GcodeSafetyResult<T> Success(T value) => new(true, value, []);
+    public static GcodeSafetyResult<T> Success<T>(T value) => new(true, value, []);
 
     /// <summary>Creates a failed result from one or more problems.</summary>
+    /// <typeparam name="T">The successful payload type.</typeparam>
     /// <param name="problems">The ordered rejection reasons.</param>
-    public static GcodeSafetyResult<T> Failure(IReadOnlyList<GcodeSafetyProblem> problems) =>
+    public static GcodeSafetyResult<T> Failure<T>(IReadOnlyList<GcodeSafetyProblem> problems) =>
         new(false, default, problems);
 
     /// <summary>Creates a failed result from a single problem.</summary>
+    /// <typeparam name="T">The successful payload type.</typeparam>
     /// <param name="code">A stable, machine-readable problem code.</param>
     /// <param name="field">The field or location the problem was found at.</param>
     /// <param name="message">A human-readable description of the problem.</param>
-    public static GcodeSafetyResult<T> Failure(string code, string field, string message) =>
+    public static GcodeSafetyResult<T> Failure<T>(string code, string field, string message) =>
         new(false, default, [new GcodeSafetyProblem(code, field, message)]);
 }
 
