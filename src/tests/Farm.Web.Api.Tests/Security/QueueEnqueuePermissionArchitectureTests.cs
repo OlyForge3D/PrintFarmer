@@ -62,6 +62,12 @@ public sealed class QueueEnqueuePermissionArchitectureTests
         typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
         typeof(Farm.Web.Api.Controllers.NfcController).Assembly, // Farm.Modules.Devices
         typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly, // Farm.Modules.Administration
+        // Issue #2088: Farm.Modules.Gcode and Farm.Modules.Inventory were extracted by the
+        // module-decomposition epic (#2019, Phases 11/16) but never got an anchor here, so this
+        // walk (and the controller-enumeration loop below) silently stopped inspecting those
+        // controllers instead of failing loudly.
+        typeof(Farm.Web.Api.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
+        typeof(Farm.Web.Api.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
     };
 
     private static readonly Dictionary<short, OpCode> OpCodesByValue = BuildOpCodeMap();

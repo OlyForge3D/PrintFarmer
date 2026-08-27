@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.PrusaLink;
+namespace Farm.Backend.Plugins.Tests.Services.PrusaLink;
 
 /// <summary>
 /// Unit tests for <see cref="PrusaLinkPollingService.SyncPrinterInfoAsync"/>.

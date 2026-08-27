@@ -422,6 +422,7 @@ case_infra_change() {
   assert_contains "matrix identity" "$matrix" "Farm.Modules.Identity.Tests" || return 1
   assert_contains "matrix inventory" "$matrix" "Farm.Modules.Inventory.Tests" || return 1
   assert_contains "matrix administration" "$matrix" "Farm.Modules.Administration.Tests" || return 1
+  assert_contains "matrix backend-plugins" "$matrix" "Farm.Backend.Plugins.Tests" || return 1
   assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
   assert_app_migration_drift "$out" || return 1
 }
@@ -554,6 +555,78 @@ case_mig_slcr_change_selects_infra_tests() {
     select_run >/dev/null 2>&1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix infra via mig-slicer" "$matrix" "Farm.Infrastructure.Tests" || return 1
+}
+
+case_backend_plugins_test_project_change_selects_narrow_bucket() {
+  local out="$1"
+  # tests_backend_plugins bucket (mirrors tests_infra, issue #2034): a change
+  # confined to Farm.Backend.Plugins.Tests's own test files selects only that
+  # project.
+  CHANGED_FILES="src/tests/Farm.Backend.Plugins.Tests/Backends/FlashForgeClientTests.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix backend-plugins tests" "$matrix" "Farm.Backend.Plugins.Tests" || return 1
+  assert_not_contains "no infra" "$matrix" "Farm.Infrastructure.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "no integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  local mig ; mig="$(get_output "$out" mig_matrix)"
+  assert_not_contains "no app mig" "$mig" "AppPg" || return 1
+}
+
+case_backend_core_change_selects_backend_plugins_tests() {
+  local out="$1"
+  # Farm.Backend.Plugin.Core is referenced directly by Farm.Backend.Plugins.Tests
+  # (issue #2034), in addition to Farm.Web.Api.Tests/Slicer.Module.Tests/
+  # Farm.Infrastructure.Tests.
+  CHANGED_FILES="src/backends/Farm.Backend.Plugin.Core/ICapability.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix backend-plugins via backend-core" "$matrix" "Farm.Backend.Plugins.Tests" || return 1
+}
+
+case_backend_plugin_change_selects_backend_plugins_tests() {
+  local out="$1"
+  # Concrete backend plugins (e.g. Moonraker) are referenced directly by
+  # Farm.Backend.Plugins.Tests (issue #2034).
+  CHANGED_FILES="src/backends/Farm.Backend.Plugin.Moonraker/MoonrakerClient.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix backend-plugins via backend-plugin" "$matrix" "Farm.Backend.Plugins.Tests" || return 1
+}
+
+case_mig_app_change_does_not_select_backend_plugins_tests() {
+  local out="$1"
+  # Unlike Farm.Infrastructure.Tests, Farm.Backend.Plugins.Tests (issue #2034)
+  # deliberately has no ProjectReference to any migrations project -- none of
+  # its moved tests touch a DbContext -- so a migrations-only change must NOT
+  # select it.
+  CHANGED_FILES="src/migrations/Farm.Migrations.PostgreSQL/Migrations/20990101_Add.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_not_contains "no backend-plugins via mig-app" "$matrix" "Farm.Backend.Plugins.Tests" || return 1
+}
+
+case_backend_plugins_full_safe_still_includes() {
+  local out="$1"
+  # A discovery-framework change is full-safe (runs ALL_TEST_PROJECTS from the
+  # manifest); confirm Farm.Backend.Plugins.Tests (newly registered in the
+  # manifest, issue #2034) is included in that full-safe set.
+  CHANGED_FILES="src/discovery/IPrinterDiscoveryProbe.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix backend-plugins full-safe" "$matrix" "Farm.Backend.Plugins.Tests" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
 }
 
 case_infra_entity_change_selects_app_drift() {
@@ -3396,6 +3469,11 @@ TESTS=(
   case_slicer_change_selects_infra_tests
   case_mig_app_change_selects_infra_tests
   case_mig_slcr_change_selects_infra_tests
+  case_backend_plugins_test_project_change_selects_narrow_bucket
+  case_backend_core_change_selects_backend_plugins_tests
+  case_backend_plugin_change_selects_backend_plugins_tests
+  case_mig_app_change_does_not_select_backend_plugins_tests
+  case_backend_plugins_full_safe_still_includes
   case_infra_entity_change_selects_app_drift
   case_infra_configuration_change_selects_app_drift
   case_backend_plugin_change

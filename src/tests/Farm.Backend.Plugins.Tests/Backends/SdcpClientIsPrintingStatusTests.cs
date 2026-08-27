@@ -1,6 +1,6 @@
 ﻿using Farm.Backend.Plugin.Sdcp;
 
-namespace Farm.Web.Api.Tests;
+namespace Farm.Backend.Plugins.Tests.Backends;
 
 /// <summary>
 /// Tests that SdcpClient detects an active print job from CurrentStatus codes and
@@ -10,7 +10,7 @@ namespace Farm.Web.Api.Tests;
 /// require a live WebSocket server; those are covered by manual QA or a future integration test suite.
 /// These unit tests validate the detection helper that drives the exception path.
 /// </summary>
-public class SdcpClientBusyTests
+public class SdcpClientIsPrintingStatusTests
 {
     [Theory]
     [InlineData(new[] { 1 })]           // printing

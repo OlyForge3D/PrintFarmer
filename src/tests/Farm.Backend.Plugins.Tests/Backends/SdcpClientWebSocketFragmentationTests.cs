@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Backends;
+namespace Farm.Backend.Plugins.Tests.Backends;
 
 public sealed class SdcpClientWebSocketFragmentationTests
 {

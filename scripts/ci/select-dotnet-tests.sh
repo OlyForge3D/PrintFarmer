@@ -446,6 +446,13 @@ load_changed_files() {
 #                     Farm.Infrastructure.Tests's own test-file changes get
 #                     a narrow bucket, mirroring tests_api, rather than
 #                     falling into tests_other/full-safe.)
+#   tests_backend_plugins — src/tests/Farm.Backend.Plugins.Tests/** (issue
+#                     #2034, Phase 6: Backends/** and the PrusaLink/Sdcp/
+#                     FlashForge/TestEmulator service-cohort tests moved out
+#                     of Farm.Web.Api.Tests. Own test-file changes get a
+#                     narrow bucket, mirroring tests_infra, rather than
+#                     falling into tests_other/full-safe. Matched before the
+#                     generic `src/tests/*` case.)
 #   tests_slicer    — src/tests/Farm.Slicer.Module.Tests/**
 #   tests_orca      — src/tests/Farm.OrcaSlicer.Worker.Tests/**
 #   tests_integration — src/tests/Farm.Web.IntegrationTests/**
@@ -612,6 +619,7 @@ classify_path() {
     src/migrations/Farm.Slicer.Migrations.*)  printf 'migrations_slcr' ; return ;;
     src/tests/Farm.Web.Api.Tests/*)             printf 'tests_api' ; return ;;
     src/tests/Farm.Infrastructure.Tests/*)      printf 'tests_infra' ; return ;;
+    src/tests/Farm.Backend.Plugins.Tests/*)     printf 'tests_backend_plugins' ; return ;;
     src/tests/Farm.Slicer.Module.Tests/*)       printf 'tests_slicer' ; return ;;
     src/tests/Farm.OrcaSlicer.Worker.Tests/*)   printf 'tests_orca' ; return ;;
     src/tests/Farm.Web.IntegrationTests/*)      printf 'tests_integration' ; return ;;
@@ -824,6 +832,7 @@ main() {
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
   local has_tests_integration=0 has_tests_modules=0 has_tests_shared=0 has_tests_smartplug=0 has_tests_infra=0 has_tests_other=0
+  local has_tests_backend_plugins=0
   local has_tests_printqueue=0
   local has_tests_maintenance=0 has_tests_calibration=0 has_tests_devices=0 has_tests_identity=0
   local has_tests_gcode=0 has_tests_inventory=0 has_tests_administration=0 has_tests_observability=0
@@ -859,6 +868,7 @@ main() {
       migrations_slcr) has_mig_slcr=1 ;;
       tests_api)       has_tests_api=1 ;;
       tests_infra)     has_tests_infra=1 ;;
+      tests_backend_plugins) has_tests_backend_plugins=1 ;;
       tests_slicer)    has_tests_slicer=1 ;;
       tests_orca)      has_tests_orca=1 ;;
       tests_integration) has_tests_integration=1 ;;
@@ -947,7 +957,7 @@ main() {
         has_gcode || has_inventory || has_administration || has_observability ||
         has_mig_app || has_mig_slcr ||
         has_tests_api || has_tests_slicer || has_tests_orca ||
-        has_tests_integration || has_tests_smartplug || has_tests_infra || has_tests_printqueue ||
+        has_tests_integration || has_tests_smartplug || has_tests_infra || has_tests_backend_plugins || has_tests_printqueue ||
         has_tests_maintenance || has_tests_calibration || has_tests_devices || has_tests_gcode ||
         has_tests_identity || has_tests_inventory || has_tests_administration || has_tests_observability || has_tools )); then
     want_dotnet_build="true"
@@ -990,8 +1000,9 @@ main() {
     # Farm.Modules.Administration (issue #2042), and Farm.Modules.Observability
     # (issue #2045) also reference
     # Farm.Infrastructure directly, so an infra change must re-run all ten
-    # of their test projects too.
-    test_names+=("Farm.Infrastructure.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests" "Farm.Modules.Devices.Tests" "Farm.Modules.Gcode.Tests" "Farm.Modules.Identity.Tests" "Farm.Modules.Inventory.Tests" "Farm.Modules.Administration.Tests" "Farm.Modules.Observability.Tests")
+    # of their test projects too. Farm.Backend.Plugins.Tests (issue #2034)
+    # also references Farm.Infrastructure directly, so it must run too.
+    test_names+=("Farm.Infrastructure.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests" "Farm.Modules.Devices.Tests" "Farm.Modules.Gcode.Tests" "Farm.Modules.Identity.Tests" "Farm.Modules.Inventory.Tests" "Farm.Modules.Administration.Tests" "Farm.Modules.Observability.Tests" "Farm.Backend.Plugins.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_backend )); then
@@ -1002,8 +1013,10 @@ main() {
     # Farm.Slicer.Module or Farm.Slicer.Module.Tests. Farm.Modules.PrintQueue.Tests
     # (issue #2040) also references Farm.Backend.Plugin.OctoPrint directly (for
     # PrintJobManagementServiceHistorySeedingTests), so a backend-plugin change
-    # must re-run it too.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests" "Farm.Modules.PrintQueue.Tests")
+    # must re-run it too. Farm.Backend.Plugins.Tests (issue #2034) references
+    # every concrete backend plugin directly (Moonraker/PrusaLink/Sdcp/
+    # FlashForge/TestEmulator, not OctoPrint), so it must run too.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Backend.Plugins.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_backend_core )); then
@@ -1011,9 +1024,10 @@ main() {
     # AND transitively by Farm.Slicer.Module.Tests through Farm.Slicer.Module
     # (src/slicer/Farm.Slicer.Module/Farm.Slicer.Module.csproj declares
     # ../../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj),
-    # AND directly by Farm.Infrastructure.Tests (issue #2033). A Core edit
-    # must therefore run all affected test suites.
-    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests")
+    # AND directly by Farm.Infrastructure.Tests (issue #2033) AND directly by
+    # Farm.Backend.Plugins.Tests (issue #2034). A Core edit must therefore run
+    # all affected test suites.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests" "Farm.Infrastructure.Tests" "Farm.Backend.Plugins.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_slicer )); then
@@ -1217,6 +1231,10 @@ main() {
     test_names+=("Farm.Infrastructure.Tests")
     net_test_bucket_hit=1
   fi
+  if (( has_tests_backend_plugins )); then
+    test_names+=("Farm.Backend.Plugins.Tests")
+    net_test_bucket_hit=1
+  fi
   if (( has_tests_slicer )); then
     test_names+=("Farm.Slicer.Module.Tests")
     net_test_bucket_hit=1
@@ -1296,6 +1314,7 @@ main() {
   if (( has_mig_slcr )); then reason+="mig-slicer "; fi
   if (( has_tests_api )); then reason+="tests-api "; fi
   if (( has_tests_infra )); then reason+="tests-infra "; fi
+  if (( has_tests_backend_plugins )); then reason+="tests-backend-plugins "; fi
   if (( has_tests_slicer )); then reason+="tests-slicer "; fi
   if (( has_tests_orca )); then reason+="tests-orca "; fi
   if (( has_tests_integration )); then reason+="tests-integration "; fi

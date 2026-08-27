@@ -3,7 +3,7 @@ using Farm.Infrastructure.Services.SignalR;
 using FluentAssertions;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Backends;
+namespace Farm.Backend.Plugins.Tests.Backends;
 
 /// <summary>
 /// Regression tests for issue #1497: confirms <see cref="PrinterStatusUpdate"/> record equality

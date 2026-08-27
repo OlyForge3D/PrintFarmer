@@ -38,6 +38,12 @@ public sealed class RoleToPermissionMigrationCompletenessTests
         // Farm.Web.Api like every other anchor here. Now that it resolves to
         // Farm.Modules.Administration, added explicitly so that assembly stays scanned.
         typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
+        // Issue #2088: Farm.Modules.Gcode and Farm.Modules.Inventory were extracted by the
+        // module-decomposition epic (#2019, Phases 11/16) but never got an anchor here, so a
+        // reintroduced farm_admin role-name gate on either module's controllers would silently
+        // escape this guard.
+        typeof(Farm.Web.Api.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
+        typeof(Farm.Web.Api.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
     ];
 
     [Fact]

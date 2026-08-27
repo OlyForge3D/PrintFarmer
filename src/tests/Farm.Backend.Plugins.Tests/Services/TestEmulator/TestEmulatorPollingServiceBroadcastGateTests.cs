@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.TestEmulator;
+namespace Farm.Backend.Plugins.Tests.Services.TestEmulator;
 
 /// <summary>
 /// Unit tests for the "printerupdated" broadcast suppression gate wired into
