@@ -540,6 +540,21 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Upload Farm.Modules.Gcode.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Modules.Gcode.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Modules.Gcode.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Upload Farm.Modules.Identity.Tests build
         if: >-
           ${{
@@ -551,6 +566,21 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           path: .artifacts/dotnet-build/Farm.Modules.Identity.Tests.tgz
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload Farm.Modules.Administration.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.Modules.Administration.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: .artifacts/dotnet-build/Farm.Modules.Administration.Tests.tgz
           archive: false
           retention-days: 1
           if-no-files-found: error

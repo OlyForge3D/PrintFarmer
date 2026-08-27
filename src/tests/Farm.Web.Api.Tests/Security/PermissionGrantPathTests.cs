@@ -88,9 +88,18 @@ public sealed class PermissionGrantPathTests
         typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
         typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
         typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
-        // Issue #2043: Farm.Modules.Devices hosts AdminHomeAssistantController
-        // ([RequirePermission("home_assistant","admin")]) plus the NFC/camera controllers, moved
-        // out of Farm.Web.Api. Must be scanned here or those grant sites silently drop out.
+        // Issue #2043: Farm.Modules.Devices hosts the NFC/camera controllers, moved out of
+        // Farm.Web.Api. Must be scanned here or those grant sites silently drop out.
+        // AdminHomeAssistantController ([RequirePermission("home_assistant","admin")]), also
+        // named in the issue, ended up owned by Farm.Modules.Administration instead (Phase 14,
+        // #2042, landed first and already claimed it) — scanned via its own anchor below.
+        typeof(Farm.Web.Api.Controllers.NfcController).Assembly,
+        // Phase 14 (#2042) moved AdminHomeAssistantController, AdminTelegramController,
+        // AdminOverviewController, AdminDataController, SettingsController, and
+        // UnifiedSettingsController into Farm.Modules.Administration but did not add an anchor
+        // here; discovered during this PR's merge conflict resolution when the assembly this
+        // guard scanned via AdminHomeAssistantController silently changed identity. Added now so
+        // Farm.Modules.Administration's [RequirePermission] sites stay covered.
         typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
     ];
 

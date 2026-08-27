@@ -6,6 +6,7 @@ using Farm.Infrastructure.Security;
 using Farm.Web.Api.Services.Calibration;
 using Farm.Web.Api.Services.Gcode;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers;

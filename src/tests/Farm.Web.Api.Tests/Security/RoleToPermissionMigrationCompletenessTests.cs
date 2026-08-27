@@ -29,8 +29,10 @@ public sealed class RoleToPermissionMigrationCompletenessTests
         typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
         // Issue #2043: Farm.Modules.Devices controllers moved out of Farm.Web.Api and must be
         // scanned here explicitly, or a reintroduced farm_admin role-name gate on one of them
-        // would silently escape this guard.
-        typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
+        // would silently escape this guard. AdminHomeAssistantController (also named in the
+        // issue) ended up owned by Farm.Modules.Administration instead (Phase 14, #2042, landed
+        // first), so NfcController anchors the Devices assembly here instead.
+        typeof(Farm.Web.Api.Controllers.NfcController).Assembly,
     ];
 
     [Fact]

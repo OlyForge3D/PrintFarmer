@@ -377,6 +377,7 @@ case_api_change() {
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
   assert_contains "matrix identity" "$matrix" "Farm.Modules.Identity.Tests" || return 1
+  assert_contains "matrix administration" "$matrix" "Farm.Modules.Administration.Tests" || return 1
   assert_api_shard_matrix "api change" "$matrix" "$TEST_MANIFEST" || return 1
   assert_contains "integration opt-in" "$matrix" '"run_integration":"true"' || return 1
   assert_not_contains "no orca for api-only" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
@@ -411,7 +412,9 @@ case_infra_change() {
   assert_contains "matrix printqueue" "$matrix" "Farm.Modules.PrintQueue.Tests" || return 1
   assert_contains "matrix maintenance" "$matrix" "Farm.Modules.Maintenance.Tests" || return 1
   assert_contains "matrix calibration" "$matrix" "Farm.Modules.Calibration.Tests" || return 1
+  assert_contains "matrix gcode" "$matrix" "Farm.Modules.Gcode.Tests" || return 1
   assert_contains "matrix identity" "$matrix" "Farm.Modules.Identity.Tests" || return 1
+  assert_contains "matrix administration" "$matrix" "Farm.Modules.Administration.Tests" || return 1
   assert_app_migration_drift "$out" || return 1
 }
 
@@ -586,6 +589,7 @@ case_slicer_change() {
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
   assert_contains "matrix printqueue" "$matrix" "Farm.Modules.PrintQueue.Tests" || return 1
   assert_contains "matrix calibration" "$matrix" "Farm.Modules.Calibration.Tests" || return 1
+  assert_contains "matrix gcode" "$matrix" "Farm.Modules.Gcode.Tests" || return 1
   local mig ; mig="$(get_output "$out" mig_matrix)"
   assert_contains "mig slicer pg" "$mig" "SlicerPg" || return 1
   assert_contains "mig slicer sql" "$mig" "SlicerSqlServer" || return 1
@@ -726,6 +730,10 @@ case_calibration_change() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix calibration" "$matrix" "Farm.Modules.Calibration.Tests" || return 1
+  # Farm.Modules.Gcode project-references Farm.Modules.Calibration directly
+  # (issue #2039), so a Calibration-only change must also select
+  # Farm.Modules.Gcode.Tests.
+  assert_contains "matrix gcode depends on calibration" "$matrix" "Farm.Modules.Gcode.Tests" || return 1
   # The retained calibration contract-negotiation/health-check/route-table
   # coverage (RouteTableSnapshotTests, CalibrationProfileResolutionContractTests)
   # intentionally stayed in Farm.Web.Api.Tests, so a controller-owning module
@@ -851,6 +859,39 @@ case_devices_mixed_with_unrelated_backend() {
   assert_contains "matrix devices" "$matrix" "Farm.Modules.Devices.Tests" || return 1
 }
 
+case_gcode_change() {
+  local out="$1"
+  CHANGED_FILES="src/modules/Farm.Modules.Gcode/Services/Gcode/GcodeFilesService.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix gcode" "$matrix" "Farm.Modules.Gcode.Tests" || return 1
+  # RouteTableSnapshotTests -- the retained coverage of the gcode module's
+  # route-table surface -- intentionally stayed in Farm.Web.Api.Tests, so a
+  # controller-owning module must select it too.
+  assert_contains "api covers controller" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason gcode" "$reason" "gcode" || return 1
+}
+
+case_test_only_gcode() {
+  local out="$1"
+  CHANGED_FILES="src/tests/Farm.Modules.Gcode.Tests/Services/Gcode/GcodeFilesServiceTests.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix gcode" "$matrix" "Farm.Modules.Gcode.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+}
+
 case_test_only_identity() {
   local out="$1"
   CHANGED_FILES="src/tests/Farm.Modules.Identity.Tests/Controllers/Admin/RolesControllerTests.cs"
@@ -864,6 +905,17 @@ case_test_only_identity() {
   assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
 }
 
+case_gcode_mixed_with_unrelated_backend() {
+  local out="$1"
+  CHANGED_FILES=$'src/modules/Farm.Modules.Gcode/Services/FileManagement/FileConsistencyAuditService.cs\nsrc/backends/Farm.Backends.SomePlugin/SomeFile.cs'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix gcode" "$matrix" "Farm.Modules.Gcode.Tests" || return 1
+}
+
 case_identity_mixed_with_unrelated_backend() {
   local out="$1"
   CHANGED_FILES=$'src/modules/Farm.Modules.Identity/Controllers/Admin/RolesController.cs\nsrc/backends/Farm.Backends.SomePlugin/SomeFile.cs'
@@ -873,6 +925,50 @@ case_identity_mixed_with_unrelated_backend() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
   local matrix ; matrix="$(get_output "$out" matrix)"
   assert_contains "matrix identity" "$matrix" "Farm.Modules.Identity.Tests" || return 1
+}
+
+case_administration_change() {
+  local out="$1"
+  CHANGED_FILES="src/modules/Farm.Modules.Administration/Services/Admin/AdminOverviewService.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix administration" "$matrix" "Farm.Modules.Administration.Tests" || return 1
+  # RouteTableSnapshotTests and the genuine CustomWebApplicationFactory
+  # integration tests (e.g. AdminDataControllerTests) intentionally stayed in
+  # Farm.Web.Api.Tests, so a controller-owning module must select it too.
+  assert_contains "api covers controller" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_not_contains "no orca" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason administration" "$reason" "administration" || return 1
+}
+
+case_test_only_administration() {
+  local out="$1"
+  CHANGED_FILES="src/tests/Farm.Modules.Administration.Tests/Controllers/Admin/AdminDataControllerTests.cs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix administration" "$matrix" "Farm.Modules.Administration.Tests" || return 1
+  assert_not_contains "no api" "$matrix" "Farm.Web.Api.Tests" || return 1
+}
+
+case_administration_mixed_with_unrelated_backend() {
+  local out="$1"
+  CHANGED_FILES=$'src/modules/Farm.Modules.Administration/Controllers/SettingsController.cs\nsrc/backends/Farm.Backends.SomePlugin/SomeFile.cs'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix administration" "$matrix" "Farm.Modules.Administration.Tests" || return 1
 }
 
 
@@ -925,6 +1021,7 @@ case_test_only_api() {
   assert_api_shard_matrix "API test-only change" "$matrix" "$TEST_MANIFEST" || return 1
   assert_not_contains "no slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   assert_contains "matrix identity" "$matrix" "Farm.Modules.Identity.Tests" || return 1
+  assert_contains "matrix administration" "$matrix" "Farm.Modules.Administration.Tests" || return 1
 }
 
 case_test_only_slicer() {
@@ -3088,9 +3185,15 @@ TESTS=(
   case_devices_change
   case_test_only_devices
   case_devices_mixed_with_unrelated_backend
+  case_gcode_change
+  case_test_only_gcode
+  case_gcode_mixed_with_unrelated_backend
   case_identity_change
   case_test_only_identity
   case_identity_mixed_with_unrelated_backend
+  case_administration_change
+  case_test_only_administration
+  case_administration_mixed_with_unrelated_backend
   case_migration_app_change
   case_migration_slicer_change
   case_test_only_api

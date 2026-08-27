@@ -206,9 +206,13 @@ IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 // Farm.Modules.Maintenance (issue #2037) is the first to also move a SignalR hub -- see its
 // MapEndpoints for the MapHub<MaintenanceHub> call that used to live here.
 // Farm.Modules.Devices (issue #2043, Phase 15) is the fifth -- OctoPrint API-key
-// authentication, NFC, cameras, and the admin Home Assistant controller.
+// authentication, NFC, and cameras (the admin Home Assistant controller had already moved to
+// Farm.Modules.Administration by the time this phase merged -- see Phase 14, issue #2042).
 // Farm.Modules.Identity (issue #2041, Phase 13) is the sixth -- user/role/auth
 // management moved out of the monolith.
+// Farm.Modules.Gcode (issue #2039, Phase 11) is the seventh -- Gcode/harvest/promotion.
+// Farm.Modules.Administration (issue #2042, Phase 14) is the eighth -- Admin Control Center
+// overview, data export/import, Home Assistant, Telegram, and settings controllers.
 builder.Services.AddApiModules(
     mvcBuilder,
     builder.Configuration,
@@ -217,7 +221,9 @@ builder.Services.AddApiModules(
     typeof(Farm.Modules.Maintenance.MaintenanceApiModule).Assembly,
     typeof(Farm.Modules.Calibration.CalibrationApiModule).Assembly,
     typeof(Farm.Modules.Devices.DevicesApiModule).Assembly,
-    typeof(Farm.Modules.Identity.IdentityApiModule).Assembly);
+    typeof(Farm.Modules.Gcode.GcodeApiModule).Assembly,
+    typeof(Farm.Modules.Identity.IdentityApiModule).Assembly,
+    typeof(Farm.Modules.Administration.AdministrationApiModule).Assembly);
 
 if (slicerModuleEnabled)
 {
@@ -267,14 +273,9 @@ builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 // Feature services (OctoPrint, File Management, Print Jobs, Maintenance, SPA)
 builder.Services.AddPrintFarmerFeatureServices(builder.Configuration, builder.Environment);
 
-// Artifact -> GcodeFile promotion: scoped promoter plus the reconciler that resolves the unknown
-// outcomes a crash or a transient outage can leave between the slicer and core contexts.
-builder.Services.AddSingleton<Farm.Web.Api.Services.Gcode.GcodePromotionReconcilerState>();
-builder.Services.AddScoped<
-    Farm.Web.Api.Services.Gcode.IGcodeArtifactPromoter,
-    Farm.Web.Api.Services.Gcode.GcodeArtifactPromoter>();
-builder.Services.AddHostedService<
-    Farm.Web.Api.Services.Gcode.GcodePromotionReconciliationService>();
+// Artifact -> GcodeFile promotion (GcodePromotionReconcilerState, IGcodeArtifactPromoter,
+// GcodePromotionReconciliationService) is now registered by Farm.Modules.Gcode's
+// GcodeApiModule (issue #2039, epic #2019).
 
 // Register background services for distributed slicing
 builder.Services.AddPrintFarmerBackgroundServices(builder.Configuration);
