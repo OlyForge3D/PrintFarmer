@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using System.Text.Json;
 using Farm.OrcaSlicer.Worker.Services;
 using FluentAssertions;
