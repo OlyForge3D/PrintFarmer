@@ -94,6 +94,13 @@ public sealed class AuthorizeRolesGateArchitectureTests
         // and this was the first thing to notice Administration was never covered. Added now so
         // Farm.Modules.Administration's controllers stay covered by this role-name-gate guard.
         typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
+        // Issue #2088: Farm.Modules.Gcode and Farm.Modules.Inventory were extracted by the
+        // module-decomposition epic (#2019, Phases 11/16) but never got an anchor in this guard,
+        // leaving both modules' controllers unscanned by this role-name-gate check.
+        // GcodeFilesController and PartsInventoryController anchor their respective assemblies
+        // here, the same pattern used by every other module above.
+        typeof(Farm.Web.Api.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
+        typeof(Farm.Web.Api.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
     ];
 
     /// <summary>
@@ -119,6 +126,12 @@ public sealed class AuthorizeRolesGateArchitectureTests
         typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly,
         typeof(Farm.Web.Api.Controllers.NfcController).Assembly,
         typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
+        // Issue #2088: Farm.Modules.Gcode and Farm.Modules.Inventory anchors, same as
+        // ScannedAssemblies above — this test evaluates policy-alias role gates against the
+        // main API's real AuthorizationOptions, and both modules run inside the main API
+        // process, so they must be listed here too.
+        typeof(Farm.Web.Api.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
+        typeof(Farm.Web.Api.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
     ];
 
     [Fact]
