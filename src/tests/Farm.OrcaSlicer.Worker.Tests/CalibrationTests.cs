@@ -506,6 +506,22 @@ public class CalibrationTests : IDisposable
         parameters.RetractionBandCount.Should().Be(8);
     }
 
+    [Fact]
+    public void CalibrationParameters_Parse_Retraction_ComputedTopBandExactlyAtBound_IsNotClamped()
+    {
+        // The inclusive edge of ClampRetractionTopBand's `> MaxRetractionMm` check: a computed
+        // top band of exactly 10mm (2 + 4*2) must pass through unmodified, not be treated as
+        // out-of-range. Only a computed top band that strictly exceeds 10mm should fall back to
+        // defaults (covered separately by the 17mm case above).
+        string json = """{"start_retraction_mm": 2, "retraction_step_mm": 2, "retraction_band_count": 5}""";
+
+        CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.Retraction);
+
+        parameters.StartRetractionMm.Should().Be(2);
+        parameters.RetractionStepMm.Should().Be(2);
+        parameters.RetractionBandCount.Should().Be(5);
+    }
+
     #endregion
 
     #region FlowRateCalibrationConfigurator — pure parsing
