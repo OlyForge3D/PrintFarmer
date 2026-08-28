@@ -21,6 +21,50 @@ import XCTest
 @MainActor
 final class FarmFilamentCoverageViewModelTests: XCTestCase {
 
+    func testCapabilityDisableClearsCoverageAndStopsFurtherProbes() async {
+        let service = ControlledFilamentCoverageService()
+        let signalR = MockSignalRService()
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configure(coverageService: service)
+        vm.configureSignalR(signalR)
+
+        async let initial: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeSuccess(index: 0, fleet: Self.oneCoverPrinterFleet())
+        _ = await initial
+        XCTAssertEqual(vm.coverageByPrinter.count, 1)
+
+        vm.disableForCapabilityGate()
+        await vm.load()
+
+        XCTAssertTrue(vm.isFeatureDisabled)
+        XCTAssertTrue(vm.coverageByPrinter.isEmpty)
+        XCTAssertNil(vm.lastLoadError)
+        XCTAssertFalse(vm.isShowingStaleCache)
+        XCTAssertEqual(vm.dispatchedRequestCount, 1)
+        XCTAssertEqual(signalR.filamentCoverageSubscriberCount, 0)
+        XCTAssertEqual(signalR.connectionStateSubscriberCount, 0)
+    }
+
+    func testCapabilityDisableDuringCacheSessionLookupDispatchesNoProbe() async {
+        let service = ControlledFilamentCoverageService()
+        let store = SuspendedCurrentSessionFeatureReadCacheStore()
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configure(coverageService: service)
+        vm.configureCache(FilamentCoverageReadCacheAdapter(store: store))
+
+        async let load: Void = vm.load()
+        await store.waitUntilCurrentSessionRequested()
+        vm.disableForCapabilityGate()
+        await store.resumeCurrentSession()
+        _ = await load
+
+        let pendingCount = await service.pendingCount
+        XCTAssertEqual(pendingCount, 0)
+        XCTAssertEqual(vm.dispatchedRequestCount, 0)
+        XCTAssertTrue(vm.isFeatureDisabled)
+    }
+
     // MARK: - Idempotent SignalR configuration + subscription count
 
     func testConfigureSignalRIsIdempotent() {

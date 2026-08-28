@@ -84,7 +84,7 @@ public class ArtifactsBulkUploadTests(CustomWebApplicationFactory factory) : ICl
         _ = result.Should().BeOfType<NotFoundObjectResult>();
     }
 
-    private static IFormFile CreateFormFile(byte[] content, string fileName, string contentType)
+    private static FormFile CreateFormFile(byte[] content, string fileName, string contentType)
     {
         MemoryStream stream = new MemoryStream(content);
         return new FormFile(stream, 0, content.Length, "file", fileName)

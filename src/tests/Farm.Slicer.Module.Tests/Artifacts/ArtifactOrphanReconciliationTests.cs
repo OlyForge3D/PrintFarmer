@@ -759,7 +759,7 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
         CreatedAt = DateTime.UtcNow.AddDays(-2),
     };
 
-    private static IFormFile CreateFormFile(string fileName, string content)
+    private static FormFile CreateFormFile(string fileName, string content)
     {
         byte[] bytes = System.Text.Encoding.UTF8.GetBytes(content);
         return new FormFile(

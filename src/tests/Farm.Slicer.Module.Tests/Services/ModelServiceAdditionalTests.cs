@@ -37,7 +37,7 @@ public class ModelServiceAdditionalTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private IFormFile CreateFormFile(string name, string content, string fileName)
+    private FormFile CreateFormFile(string name, string content, string fileName)
     {
         MemoryStream ms = new MemoryStream(Encoding.UTF8.GetBytes(content));
         _streamsToDispose.Add(ms);

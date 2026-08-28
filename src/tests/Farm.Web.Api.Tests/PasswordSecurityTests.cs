@@ -4,7 +4,7 @@ namespace Farm.Web.Api.Tests;
 
 public class PasswordSecurityTests
 {
-    private readonly IPasswordHashingService _passwordHashingService = new PasswordHashingService();
+    private readonly PasswordHashingService _passwordHashingService = new();
 
     [Fact]
     public void HashPassword_ShouldReturnNonEmptyHash()

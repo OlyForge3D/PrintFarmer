@@ -30,7 +30,7 @@ public class UsersServiceMembershipNotificationTests
     private readonly Mock<IEffectivePermissionsRevocationService> _revocationServiceMock;
     private readonly Mock<IAuthAuditService> _authAuditServiceMock;
     private readonly Mock<IQueueSubscriptionMembershipNotifier> _membershipNotifierMock;
-    private readonly IUsersService _usersService;
+    private readonly UsersService _usersService;
     private readonly CancellationToken _cancellationToken = CancellationToken.None;
     private readonly Guid _actorUserId = Guid.NewGuid();
 

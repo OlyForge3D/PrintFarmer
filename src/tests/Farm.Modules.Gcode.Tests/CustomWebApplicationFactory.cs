@@ -326,7 +326,7 @@ public class CustomWebApplicationFactory : HostFixture<Program>
         await ResetRevisionAsync<OutboxSequenceState>(context, 1);
     }
 
-    private static Task ResetRevisionAsync<TEntity>(AppDbContext context, long revision)
+    private static Task<int> ResetRevisionAsync<TEntity>(AppDbContext context, long revision)
         where TEntity : class, IRevisionedEntity
         => context.Set<TEntity>().ExecuteUpdateAsync(setters => setters.SetProperty(e => e.Revision, revision));
 

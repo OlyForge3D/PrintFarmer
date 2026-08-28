@@ -304,7 +304,7 @@ public sealed class CustomWebApplicationFactoryTests
             Environment.GetEnvironmentVariable);
 
     private static void AssertFactoryEnvironmentUnchanged(
-        IReadOnlyDictionary<string, string?> expected)
+        Dictionary<string, string?> expected)
     {
         foreach (string key in FactoryEnvironmentVariables)
         {

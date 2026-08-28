@@ -434,7 +434,7 @@ public class AdminOverviewServiceTests
         return new HealthReport(entries, TimeSpan.FromMilliseconds(50));
     }
 
-    private static IReadOnlyDictionary<string, object> BuildComprehensiveData(
+    private static Dictionary<string, object> BuildComprehensiveData(
         string databaseStatus = "Healthy")
     {
         return new Dictionary<string, object>

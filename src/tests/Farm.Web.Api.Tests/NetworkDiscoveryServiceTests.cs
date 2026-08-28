@@ -62,10 +62,9 @@ public class NetworkDiscoveryServiceTests
         _ = result.Backend.Should().Be(PrinterBackend.PrusaLink);
     }
 
-    private static object CreatePrinterInfo(string name)
+    private static TestPrinterInfo CreatePrinterInfo(string name)
     {
-        // Use the API internal test helper directly (InternalsVisibleTo enables this).
-        return Farm.Web.Api.Services.TestHelpers.PrinterInfoFactory.Create(name, "Test Manufacturer", "Test Model", "Test Firmware", "1.0.0");
+        return CreateTestPrinterInfo(name, "Test Manufacturer", "Test Model", "Test Firmware", "1.0.0");
     }
 
     [Fact]
@@ -139,19 +138,19 @@ public class NetworkDiscoveryServiceTests
         _ = result.Model.Should().BeNull("because Unknown model should not be set");
     }
 
-    private static object CreatePrinterInfoWithUnknownManufacturer(string name)
+    private static TestPrinterInfo CreatePrinterInfoWithUnknownManufacturer(string name)
     {
-        return Farm.Web.Api.Services.TestHelpers.PrinterInfoFactory.Create(name, "Unknown", "Test Model", "Test Firmware", "1.0.0");
+        return CreateTestPrinterInfo(name, "Unknown", "Test Model", "Test Firmware", "1.0.0");
     }
 
-    private static object CreatePrinterInfoWithUnknownModel(string name)
+    private static TestPrinterInfo CreatePrinterInfoWithUnknownModel(string name)
     {
-        return Farm.Web.Api.Services.TestHelpers.PrinterInfoFactory.Create(name, "Test Manufacturer", "Unknown", "Test Firmware", "1.0.0");
+        return CreateTestPrinterInfo(name, "Test Manufacturer", "Unknown", "Test Firmware", "1.0.0");
     }
 
-    private static object CreatePrinterInfoWithUnknownValues(string name)
+    private static TestPrinterInfo CreatePrinterInfoWithUnknownValues(string name)
     {
-        return Farm.Web.Api.Services.TestHelpers.PrinterInfoFactory.Create(name, "Unknown", "Unknown", "Test Firmware", "1.0.0");
+        return CreateTestPrinterInfo(name, "Unknown", "Unknown", "Test Firmware", "1.0.0");
     }
 
     [Fact]
@@ -189,9 +188,9 @@ public class NetworkDiscoveryServiceTests
         }
     }
 
-    private static object CreatePrinterInfoWithPartialUnknown(string name)
+    private static TestPrinterInfo CreatePrinterInfoWithPartialUnknown(string name)
     {
-        return Farm.Web.Api.Services.TestHelpers.PrinterInfoFactory.Create(name, "MyUnknown Manufacturer", "Model Unknown Type", "Test Firmware", "1.0.0");
+        return CreateTestPrinterInfo(name, "MyUnknown Manufacturer", "Model Unknown Type", "Test Firmware", "1.0.0");
     }
 
     [Fact]
@@ -263,22 +262,54 @@ public class NetworkDiscoveryServiceTests
         _ = result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
     }
 
-    private static object CreatePrinterInfoWithUnknownPrusa(string name)
+    private static TestPrinterInfo CreatePrinterInfoWithUnknownPrusa(string name)
     {
-        return Farm.Web.Api.Services.TestHelpers.PrinterInfoFactory.Create(name, "Prusa Research", "Unknown Prusa", "PrusaLink", "1.0.0");
+        return CreateTestPrinterInfo(name, "Prusa Research", "Unknown Prusa", "PrusaLink", "1.0.0");
     }
 
-    private static object CreatePrinterInfoWithNullManufacturer(string name)
+    private static TestPrinterInfo CreatePrinterInfoWithNullManufacturer(string name)
     {
-        return Farm.Web.Api.Services.TestHelpers.PrinterInfoFactory.Create(name, null, "Valid Model", "Test Firmware", "1.0.0");
+        return CreateTestPrinterInfo(name, null, "Valid Model", "Test Firmware", "1.0.0");
     }
 
-    private static object CreatePrinterInfoWithUnknownManufacturerValidModel(string name)
+    private static TestPrinterInfo CreatePrinterInfoWithUnknownManufacturerValidModel(string name)
     {
-        return Farm.Web.Api.Services.TestHelpers.PrinterInfoFactory.Create(name, "Unknown", "Valid Model Name", "Test Firmware", "1.0.0");
+        return CreateTestPrinterInfo(name, "Unknown", "Valid Model Name", "Test Firmware", "1.0.0");
     }
 
-    // Helper removed: tests now use the API-internal PrinterInfoFactory for deterministic creation.
+    /// <summary>
+    /// Local, reflection-friendly stand-in for a discovered printer's identity fields.
+    /// Replaces the removed <c>Farm.Web.Api.Services.TestHelpers.PrinterInfoFactory</c>
+    /// (issue #2048 / epic #2019 Phase 20): that factory only ever produced instances of
+    /// the shared <c>PrinterInfo</c> type via reflection, which doesn't expose
+    /// Manufacturer/Model/Firmware/Version, so those fields were never actually populated.
+    /// This type exposes them directly so <see cref="InvokeCreateDiscoveredPrinter"/>'s
+    /// reflection-based property reads behave deterministically.
+    /// </summary>
+    private sealed class TestPrinterInfo
+    {
+        public string? Name { get; set; }
+
+        public string? Manufacturer { get; set; }
+
+        public string? Model { get; set; }
+
+        public string? Firmware { get; set; }
+
+        public string? Version { get; set; }
+    }
+
+    private static TestPrinterInfo CreateTestPrinterInfo(string name, string? manufacturer = null, string? model = null, string? firmware = null, string? version = null)
+    {
+        return new TestPrinterInfo
+        {
+            Name = name,
+            Manufacturer = manufacturer,
+            Model = model,
+            Firmware = firmware,
+            Version = version,
+        };
+    }
 
     private static DiscoveredPrinterDto InvokeCreateDiscoveredPrinter(string ipAddress, int port, PrinterBackend backend, object printerInfo)
     {
@@ -355,9 +386,6 @@ public class NetworkDiscoveryServiceTests
 
         return fallback;
     }
-
-    // Removed broad assembly scanning and diagnostic logging in favor of the
-    // API-internal PrinterInfoFactory usage for deterministic tests.
 
     private static void DiagnosticLogLoadedPrinterInfoTypes()
     {

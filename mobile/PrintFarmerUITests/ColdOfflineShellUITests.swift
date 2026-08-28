@@ -6,10 +6,9 @@ import XCTest
 ///
 /// The `--uitesting-cold-offline-shell` bootstrap seeds a present cached
 /// snapshot of the demo fleet (fixed last-confirmed timestamp) into a stub
-/// `FarmSnapshotStoring`, forces the printer service offline, and disables the
-/// attention gate so the legacy `DashboardView` surface is reachable through
-/// the attention fallback. On launch the dashboard hydrates the cached fleet,
-/// the canonical load then fails offline, and the cache is preserved — the
+/// `FarmSnapshotStoring` and forces the printer service offline. Dashboard is
+/// opened from the enabled Attention overflow; it hydrates the cached fleet,
+/// the canonical load then fails offline, and the cache is preserved as the
 /// read-only stale shell.
 ///
 /// Every wait is gated purely on accessibility state (`waitForExistence`);
@@ -21,17 +20,28 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
         ["--uitesting-cold-offline-shell"]
     }
 
-    /// Opens the read-only `DashboardView` cold-offline shell via the
-    /// attention-disabled fallback (the initial Attention tab renders the
-    /// fallback; its "Dashboard" button presents the sheet). Returns the stale
-    /// connection banner, which the read-only shell always mounts.
+    /// Opens the read-only `DashboardView` cold-offline shell through the
+    /// Attention overflow. Returns the stale connection banner, which the
+    /// read-only shell always mounts.
     @discardableResult
     private func openColdOfflineShell() -> XCUIElement {
-        let dashboardButton = app.buttons["attention.fallback.dashboard"]
-        XCTAssertTrue(
-            dashboardButton.waitForExistence(timeout: 15),
-            "Attention-disabled fallback must expose the Dashboard entry point"
+        let attention = operatorDestinationButton(
+            tabTitle: "Attention",
+            sidebarIdentifier: "sidebar.attention",
+            timeout: 8
         )
+        XCTAssertTrue(attention.exists)
+        attention.tap()
+
+        let overflow = app.buttons["attention.overflow"]
+        XCTAssertTrue(
+            overflow.waitForExistence(timeout: 10),
+            "Enabled Attention must expose its overflow menu"
+        )
+        overflow.tap()
+
+        let dashboardButton = app.buttons["attention.overflow.dashboard"]
+        XCTAssertTrue(dashboardButton.waitForExistence(timeout: 5))
         dashboardButton.tap()
 
         let staleBanner = app.buttons["connection-status-bar-stale"]

@@ -66,7 +66,9 @@ keeps its own Keychain-stored credentials.
 After sign-in or session restoration, the app checks each enabled mobile backend
 feature before opening the main interface. If one or more services are
 unavailable, the app names them in an alert and lets you continue with cached
-data and any services that remain available.
+data and any services that remain available. Features disabled by the server's
+`operatorFeatures` capability flags are omitted from navigation and views rather
+than shown as unavailable placeholders.
 
 ### HTTPS Certificate Trust
 

@@ -296,6 +296,87 @@ final class ScanViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testDisabledPrintedPartsSkipsPartResolversAndStillRoutesSpoolBarcode() async {
+        let (viewModel, partsService, barcodeService, _) = makeSubject()
+        viewModel.setPrintedPartsInventoryEnabled(false)
+        barcodeService.filamentToResolve = makeFilament(id: 3, name: "PLA Black")
+
+        await viewModel.dispatch("012345678905")
+
+        XCTAssertTrue(partsService.resolveBinCodes.isEmpty)
+        XCTAssertTrue(partsService.resolvePartBarcodes.isEmpty)
+        XCTAssertEqual(barcodeService.resolveBarcodes, ["012345678905"])
+        XCTAssertEqual(viewModel.pendingSpoolBarcode, "012345678905")
+        XCTAssertNil(viewModel.pendingOutcome)
+    }
+
+    @MainActor
+    func testDisablingPrintedPartsClearsPublishedPartOutcome() async {
+        let (viewModel, partsService, _, _) = makeSubject()
+        partsService.resolveBinError = NetworkError.notFound
+        partsService.partToResolve = makePart(sku: "SKU-01")
+        await viewModel.dispatch("SKU-01")
+        XCTAssertNotNil(viewModel.pendingOutcome)
+        XCTAssertFalse(viewModel.recentScans.isEmpty)
+
+        viewModel.setPrintedPartsInventoryEnabled(false)
+
+        XCTAssertNil(viewModel.pendingOutcome)
+        XCTAssertTrue(viewModel.recentScans.isEmpty)
+    }
+
+    @MainActor
+    func testDisablingPrintedPartsDuringResolverContinuesToSpoolRouting() async {
+        let (viewModel, partsService, barcodeService, _) = makeSubject()
+        let gate = CallOrderGate()
+        let resolverEntered = expectation(description: "bin resolver entered")
+        partsService.resolveBinGate = {
+            resolverEntered.fulfill()
+            await gate.wait(1)
+        }
+        partsService.resolveBinError = NetworkError.notFound
+        barcodeService.filamentToResolve = makeFilament(id: 3, name: "PLA Black")
+
+        let dispatchTask = Task { await viewModel.dispatch("012345678905") }
+        await fulfillment(of: [resolverEntered], timeout: 1)
+        viewModel.setPrintedPartsInventoryEnabled(false)
+        await gate.release(1)
+        await dispatchTask.value
+
+        XCTAssertEqual(partsService.resolveBinCodes, ["012345678905"])
+        XCTAssertTrue(partsService.resolvePartBarcodes.isEmpty)
+        XCTAssertEqual(barcodeService.resolveBarcodes, ["012345678905"])
+        XCTAssertEqual(viewModel.pendingSpoolBarcode, "012345678905")
+        XCTAssertNil(viewModel.pendingOutcome)
+    }
+
+    @MainActor
+    func testRapidPrintedPartsDisableAndReenableContinuesToSpoolRouting() async {
+        let (viewModel, partsService, barcodeService, _) = makeSubject()
+        let gate = CallOrderGate()
+        let resolverEntered = expectation(description: "bin resolver entered")
+        partsService.resolveBinGate = {
+            resolverEntered.fulfill()
+            await gate.wait(1)
+        }
+        partsService.resolveBinError = NetworkError.notFound
+        barcodeService.filamentToResolve = makeFilament(id: 3, name: "PLA Black")
+
+        let dispatchTask = Task { await viewModel.dispatch("012345678905") }
+        await fulfillment(of: [resolverEntered], timeout: 1)
+        viewModel.setPrintedPartsInventoryEnabled(false)
+        viewModel.setPrintedPartsInventoryEnabled(true)
+        await gate.release(1)
+        await dispatchTask.value
+
+        XCTAssertEqual(partsService.resolveBinCodes, ["012345678905"])
+        XCTAssertTrue(partsService.resolvePartBarcodes.isEmpty)
+        XCTAssertEqual(barcodeService.resolveBarcodes, ["012345678905"])
+        XCTAssertEqual(viewModel.pendingSpoolBarcode, "012345678905")
+        XCTAssertNil(viewModel.pendingOutcome)
+    }
+
+    @MainActor
     func testDispatchUnrecognizedCodeSetsUnknownOutcome() async {
         let (viewModel, partsService, barcodeService, _) = makeSubject()
         partsService.resolveBinError = NetworkError.notFound
