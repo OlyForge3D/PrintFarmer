@@ -197,6 +197,57 @@ public sealed class CalibrationOrchestrationSagaServiceTests
     }
 
     [Fact]
+    public async Task AdvanceAsync_InputShapingSlicingStep_KeepsOtherParamsKeysAlongsideFirmwareFlavor()
+    {
+        // Review finding on issue #2139: BuildSliceSubmissionBody's firmware_flavor extraction
+        // previously reassigned calibration["params"] to the very JsonObject already stored at
+        // that key whenever other keys remained (the Count > 0 branch), which is unverifiable by
+        // reading alone whether System.Text.Json.Nodes.JsonObject's indexer setter tolerates
+        // re-parenting a node under the key it already occupies. The fix leaves that object
+        // untouched instead of reassigning it. This test exercises exactly that path: a
+        // specification carrying firmware_flavor plus another key, so params must survive
+        // non-empty and non-null.
+        await using AppDbContext db = CreateContext();
+        CalibrationProjectService projectService = CreateProjectService(db);
+        FakeSliceSubmissionGateway sliceGateway = new();
+        CalibrationOrchestrationSagaService saga = CreateSaga(
+            db,
+            projectService,
+            sliceGateway,
+            new FakePrintDispatchGateway());
+        CalibrationActor actor = CreateActor();
+        (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(
+            actor,
+            projectService,
+            methodName: CalibrationMethodNames.InputShaping,
+            specification: JsonSerializer.SerializeToElement(new { firmware_flavor = "marlin", notes_ref = 42 }));
+
+        JsonNode? capturedRequestBody = null;
+        sliceGateway.SubmitBehavior = submission =>
+        {
+            capturedRequestBody = submission.RequestBody;
+            return SliceSubmissionResult.Ok(Guid.NewGuid());
+        };
+
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // created -> cloning-profile
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // cloning-profile -> slicing
+        CalibrationApiResult<CalibrationOrchestrationDto> thirdAdvance =
+            await AdvanceAsync(saga, orchestrationId, actor); // slicing -> awaiting-slice
+        _ = thirdAdvance.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.AwaitingSlice);
+
+        _ = capturedRequestBody.Should().NotBeNull();
+        JsonObject calibration = (JsonObject)capturedRequestBody!["calibration"]!;
+        _ = calibration["firmwareFlavor"]!.GetValue<string>().Should().Be("marlin");
+        _ = calibration["params"].Should().NotBeNull(
+            "a non-firmware_flavor key must survive in params, not be nulled out along with " +
+            "firmware_flavor");
+        JsonObject remainingParams = (JsonObject)calibration["params"]!;
+        _ = remainingParams.ContainsKey("notes_ref").Should().BeTrue();
+        _ = remainingParams.ContainsKey("firmware_flavor").Should().BeFalse(
+            "firmware_flavor must still be removed from params even when other keys remain");
+    }
+
+    [Fact]
     public async Task AdvanceAsync_SlicingRejectedWithBadRequest_FailsTerminallyWithoutRetrying()
     {
         // Regression coverage for a review finding on issue #2139: a client-side validation

@@ -337,6 +337,22 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             // configuration. Defense-in-depth: refuse explicitly here even though the API
             // boundary (SliceJobController) already validates this, rather than silently slicing
             // a tower the operator has no firmware-specific guidance to act on.
+            //
+            // Deliberately client-declared, not derived from the machine profile's gcode_flavor
+            // (review finding on issue #2139, unlike ValidateCorneringFirmwareFlavorAsync /
+            // ApplyPressureAdvanceTowerGcodeAsync / ApplyRetractionTowerGcodeAsync above): those
+            // three methods derive flavor from gcode_flavor because they inject flavor-specific
+            // gcode (M205/SQUARE_CORNER_VELOCITY, SET_PRESSURE_ADVANCE/M900, SET_RETRACTION/M207)
+            // that must match the machine actually being sliced for, so an unresolved or wrong
+            // flavor there means a syntactically wrong command lands in the gcode. Input shaping
+            // emits no flavor-specific gcode at all - the bundled ringing-tower resource is copied
+            // byte-for-byte regardless of flavor - so there is nothing here for gcode_flavor to
+            // make correct or incorrect. FirmwareFlavor exists solely so the operator's own
+            // measurement/report reflects which firmware's convention (Klipper's frequency/damping
+            // pair vs. Marlin's M593 parameters) they intend to apply the result to; it is
+            // persisted verbatim on the job's CalibrationParamsJson (see
+            // SliceJobController.BuildCalibrationParamsJson) and readable back from the job record,
+            // so it is not silently dropped even though no downstream step branches on it.
             CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, method);
             if (!InputShapingFirmwareFlavors.IsSupported(parameters.FirmwareFlavor))
             {

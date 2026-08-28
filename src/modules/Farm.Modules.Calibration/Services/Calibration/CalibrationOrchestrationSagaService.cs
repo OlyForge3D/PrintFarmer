@@ -583,7 +583,20 @@ public sealed class CalibrationOrchestrationSagaService(
         {
             calibration["firmwareFlavor"] = firmwareFlavorNode?.DeepClone();
             inputShapingParams.Remove("firmware_flavor");
-            calibration["params"] = inputShapingParams.Count > 0 ? inputShapingParams : null;
+
+            // Deliberately reassign calibration["params"] only when it must become null (every key
+            // was firmware_flavor). Re-assigning a JsonObject to the same key it is already the
+            // value of (the Count > 0 branch a prior revision of this fix took) is unverifiable by
+            // inspection alone - review finding on issue #2139: whether System.Text.Json.Nodes'
+            // JsonObject indexer setter tolerates re-parenting a node under the key it already
+            // occupies depends on internal ordering of its detach-old/assign-new-parent steps, which
+            // is not part of the public contract. Leaving inputShapingParams as the untouched,
+            // already-assigned value for calibration["params"] sidesteps the question entirely: no
+            // reassignment happens unless the object is being replaced with null.
+            if (inputShapingParams.Count == 0)
+            {
+                calibration["params"] = null;
+            }
         }
 
         bodyObject["calibration"] = calibration;
