@@ -8379,7 +8379,15 @@ public sealed class NativePushDispatcherTests
             if (Interlocked.Increment(ref _callCount) == 1)
             {
                 entered.TrySetResult();
+
+                // IServiceScopeFactory.CreateScope() is a synchronous interface member, so this
+                // cannot be an await; per the class doc comment above, the gated first call is
+                // always driven from a background Task.Run, never from the test method's own
+                // thread, so this deliberately blocks that background thread rather than the
+                // caller under test.
+#pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
                 release.Task.GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
             }
 
             return inner.CreateScope();

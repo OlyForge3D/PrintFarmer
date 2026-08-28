@@ -125,7 +125,7 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
         return printer.Id;
     }
 
-    private (List<int> counts, List<double> durations) ListenForScanMetrics(Action recordEvents)
+    private async Task<(List<int> counts, List<double> durations)> ListenForScanMetricsAsync(Func<Task> recordEvents)
     {
         List<int> counts = new();
         List<double> durations = new();
@@ -160,13 +160,13 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
         });
         listener.Start();
 
-        recordEvents();
+        await recordEvents();
 
         return (counts, durations);
     }
 
     [Fact(DisplayName = "ScanAsync records scanned count and duration once per pass")]
-    public void ScanAsync_RecordsScannedCountAndDuration_OncePerPass()
+    public async Task ScanAsync_RecordsScannedCountAndDuration_OncePerPass()
     {
         Guid printerA = SeedAcknowledgedPrinter(1);
         Guid printerB = SeedAcknowledgedPrinter(2);
@@ -174,8 +174,8 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
 
         BedClearAcknowledgementExpiryService sut = CreateSut();
 
-        (List<int> counts, List<double> durations) = ListenForScanMetrics(() =>
-            sut.ScanAsync(CancellationToken.None).GetAwaiter().GetResult());
+        (List<int> counts, List<double> durations) = await ListenForScanMetricsAsync(() =>
+            sut.ScanAsync(CancellationToken.None));
 
         _ = counts.Should().ContainSingle().Which.Should().Be(3, "exactly 3 acknowledged printers were scanned");
         _ = durations.Should().ContainSingle();
@@ -185,12 +185,12 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
     }
 
     [Fact(DisplayName = "ScanAsync records a zero scanned count when nothing is acknowledged")]
-    public void ScanAsync_RecordsZeroScannedCount_WhenNoAcknowledgedPrinters()
+    public async Task ScanAsync_RecordsZeroScannedCount_WhenNoAcknowledgedPrinters()
     {
         BedClearAcknowledgementExpiryService sut = CreateSut();
 
-        (List<int> counts, List<double> durations) = ListenForScanMetrics(() =>
-            sut.ScanAsync(CancellationToken.None).GetAwaiter().GetResult());
+        (List<int> counts, List<double> durations) = await ListenForScanMetricsAsync(() =>
+            sut.ScanAsync(CancellationToken.None));
 
         _ = counts.Should().ContainSingle().Which.Should().Be(0, "no printers had an outstanding acknowledgement");
         _ = durations.Should().ContainSingle();
@@ -198,7 +198,7 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
     }
 
     [Fact(DisplayName = "ScanAsync only scans printers with an outstanding acknowledgement")]
-    public void ScanAsync_OnlyScansPrintersWithOutstandingAcknowledgement()
+    public async Task ScanAsync_OnlyScansPrintersWithOutstandingAcknowledgement()
     {
         Guid acknowledged = SeedAcknowledgedPrinter(1);
 
@@ -222,8 +222,8 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
 
         BedClearAcknowledgementExpiryService sut = CreateSut();
 
-        (List<int> counts, _) = ListenForScanMetrics(() =>
-            sut.ScanAsync(CancellationToken.None).GetAwaiter().GetResult());
+        (List<int> counts, _) = await ListenForScanMetricsAsync(() =>
+            sut.ScanAsync(CancellationToken.None));
 
         _ = counts.Should().ContainSingle().Which.Should().Be(1);
         _ = _fakeAckService.InvalidatedPrinterIds.Should().BeEquivalentTo(new[] { acknowledged });

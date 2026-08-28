@@ -441,9 +441,14 @@ public class ObicoFailureDetectionServiceTests
     {
         public static CapturedRequest From(HttpRequestMessage request)
         {
+            // The request content here is always a fully-buffered in-memory StringContent built
+            // synchronously by the code under test (never a network/file stream), so
+            // ReadAsStream() performs no I/O and is safe to read synchronously — unlike
+            // ReadAsStringAsync().GetAwaiter().GetResult(), which VSTHRD002 (rightly) flags as a
+            // problematic synchronous wait on a task that could, in general, block on real I/O.
             string body = request.Content == null
                 ? string.Empty
-                : request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                : new StreamReader(request.Content.ReadAsStream(), Encoding.UTF8).ReadToEnd();
 
             return new CapturedRequest(
                 request.Method,
