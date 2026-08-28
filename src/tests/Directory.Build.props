@@ -49,7 +49,6 @@
            positives (Moq Setup/Returns callbacks, Task.Run/Task.Factory.StartNew awaited later
            via Task.WhenAll) suppressed with a scoped #pragma warning disable/restore IDISP013
            plus an explanatory comment at each site. -->
-      VSTHRD003;<!-- Avoid awaiting foreign Tasks (30) -->
       CA1032;   <!-- Implement standard exception constructors (26) -->
       IDISP017; <!-- Prefer using-declaration (24) -->
       SA1414;   <!-- Tuple types in signatures should have element names (18) -->

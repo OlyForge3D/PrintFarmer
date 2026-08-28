@@ -352,7 +352,9 @@ public class MoonrakerSnapmakerU1CameraTests
                     return Task.FromResult(_stopInvocations[index]);
                 }
 
+#pragma warning disable VSTHRD003 // returns a TaskCompletionSource's task the test controls to synchronize a fake stop-signal; not a foreign/UI-thread task.
                 return _stopSignals[index].Task;
+#pragma warning restore VSTHRD003
             }
         }
 
@@ -464,7 +466,9 @@ public class MoonrakerSnapmakerU1CameraTests
                     _timerSignals.Add(new(TaskCreationOptions.RunContinuationsAsynchronously));
                 }
 
+#pragma warning disable VSTHRD003 // returns a TaskCompletionSource's task the test controls to synchronize a fake timer signal; not a foreign/UI-thread task.
                 return _timerSignals[index].Task;
+#pragma warning restore VSTHRD003
             }
         }
 
@@ -596,7 +600,9 @@ public class MoonrakerSnapmakerU1CameraTests
                     _fireSettled.TrySetResult();
                 }
 
+#pragma warning disable VSTHRD003 // _fireSettled is a TaskCompletionSource this test fixture controls to signal that timer-fire callback processing settled; not a foreign/UI-thread task.
                 await _fireSettled.Task.ConfigureAwait(false);
+#pragma warning restore VSTHRD003
                 return new TimerFireResult(CallbackInvoked: callbackInvoked, WasAlreadyCompleted: previous != 0);
             }
         }

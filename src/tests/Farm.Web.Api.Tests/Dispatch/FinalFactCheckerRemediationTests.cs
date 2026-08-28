@@ -72,7 +72,9 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             .Returns(async () =>
             {
                 enteredBackend.SetResult();
+#pragma warning disable VSTHRD003 // releaseBackend is a TaskCompletionSource this test controls to hold the mocked backend call open; not a foreign/UI-thread task.
                 await releaseBackend.Task;
+#pragma warning restore VSTHRD003
                 return BackendControlOutcome.Accepted();
             });
 
