@@ -99,6 +99,9 @@ public static class CalibrationPrinterUpdateMapper
         changed |= Set(update.MaxTravelSpeed, printer.MaxTravelSpeed, value => printer.MaxTravelSpeed = value);
         changed |= Set(update.MaxAcceleration, printer.MaxAcceleration, value => printer.MaxAcceleration = value);
         changed |= Set(update.MaxTravelAcceleration, printer.MaxTravelAcceleration, value => printer.MaxTravelAcceleration = value);
+        changed |= Set(update.MaxJerk, printer.MaxJerk, value => printer.MaxJerk = value);
+        changed |= Set(update.JunctionDeviation, printer.JunctionDeviation, value => printer.JunctionDeviation = value);
+        changed |= Set(update.SquareCornerVelocity, printer.SquareCornerVelocity, value => printer.SquareCornerVelocity = value);
         changed |= Set(update.CalibrationHasHeatedBed, printer.CalibrationHasHeatedBed, value => printer.CalibrationHasHeatedBed = value);
         changed |= Set(update.CalibrationHasEnclosure, printer.CalibrationHasEnclosure, value => printer.CalibrationHasEnclosure = value);
         changed |= Set(update.HasHeatedChamber, printer.HasHeatedChamber, value => printer.HasHeatedChamber = value);

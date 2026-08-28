@@ -78,6 +78,26 @@
 /// <c>OrcaSlicingPipelineService.PrepareCalibrationModel</c>) rather than silently reusing the
 /// pass1/2 parser and producing near-identical, uncalibrated G-code for every block.
 /// </para>
+/// <para>
+/// <see cref="Cornering"/> (issue #2138): cornering calibrates jerk (classic Marlin), junction
+/// deviation (Marlin 2's <c>M205 J</c>), or Klipper's <c>SQUARE_CORNER_VELOCITY</c> — three
+/// firmware-specific motion-planner concepts, unlike every other catalogued method here, which
+/// are filament properties. Per the architecture decision recorded on issue #2138 (and shared
+/// with #2139/#2140), this method is <strong>report-only</strong>: the calibration saga never
+/// carries it into a filament-profile-clone/patch step, and the operator may separately, and
+/// explicitly, record the resulting value onto the printer's own
+/// <c>MaxJerk</c>/<c>JunctionDeviation</c>/<c>SquareCornerVelocity</c> fields (mirroring
+/// <c>MaxAcceleration</c>) through the ordinary admin-gated printer update endpoint — never
+/// automatically from this calibration flow. The bundled resource
+/// (<c>resources/calib/cornering/SCV-V2.drc</c>) is, like <see cref="TemperatureTower"/>'s and
+/// <see cref="MaximumVolumetricSpeed"/>'s <c>.drc</c> resources, an opaque OrcaSlicer binary
+/// format that is copied unmodified rather than parsed and rewritten. Because jerk/junction
+/// deviation and square corner velocity are meaningless outside Marlin/Marlin-2/Klipper
+/// firmware, <c>OrcaSlicingPipelineService</c> validates the target printer's <c>gcode_flavor</c>
+/// before slicing and refuses explicitly — rather than silently slicing a test result the
+/// operator's firmware cannot even apply — for any other flavor (reprapfirmware, smoothie,
+/// sprinter, etc.).
+/// </para>
 /// </remarks>
 public enum CalibrationMethod
 {
@@ -109,6 +129,13 @@ public enum CalibrationMethod
     /// resource format and the permissive-ceiling configurator this method needs.
     /// </summary>
     MaximumVolumetricSpeed,
+
+    /// <summary>
+    /// Cornering (jerk / junction deviation / Klipper square corner velocity) calibration
+    /// (issue #2138). See the type-level remarks for the report-only write-back model and the
+    /// firmware-flavor gate this method needs.
+    /// </summary>
+    Cornering,
 }
 
 /// <summary>
@@ -127,6 +154,7 @@ public static class CalibrationMethods
             ["flow_rate_yolo_recommended"] = CalibrationMethod.FlowRateYoloRecommended,
             ["flow_rate_yolo_perfectionist"] = CalibrationMethod.FlowRateYoloPerfectionist,
             ["max_volumetric_speed"] = CalibrationMethod.MaximumVolumetricSpeed,
+            ["cornering"] = CalibrationMethod.Cornering,
         };
 
     private static readonly Dictionary<CalibrationMethod, string> MethodToWireName =
@@ -138,6 +166,7 @@ public static class CalibrationMethods
             [CalibrationMethod.FlowRateYoloRecommended] = "flow_rate_yolo_recommended",
             [CalibrationMethod.FlowRateYoloPerfectionist] = "flow_rate_yolo_perfectionist",
             [CalibrationMethod.MaximumVolumetricSpeed] = "max_volumetric_speed",
+            [CalibrationMethod.Cornering] = "cornering",
         };
 
     /// <summary>
@@ -218,6 +247,7 @@ public static class CalibrationMethods
         CalibrationMethod.FlowRateYoloRecommended => "Orca-LinearFlow.3mf",
         CalibrationMethod.FlowRateYoloPerfectionist => "Orca-LinearFlow_fine.3mf",
         CalibrationMethod.MaximumVolumetricSpeed => "SpeedTestStructure.drc",
+        CalibrationMethod.Cornering => "SCV-V2.drc",
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 
@@ -233,6 +263,7 @@ public static class CalibrationMethods
         CalibrationMethod.FlowRateYoloRecommended => Path.Combine("filament_flow", "Orca-LinearFlow.3mf"),
         CalibrationMethod.FlowRateYoloPerfectionist => Path.Combine("filament_flow", "Orca-LinearFlow_fine.3mf"),
         CalibrationMethod.MaximumVolumetricSpeed => Path.Combine("volumetric_speed", "SpeedTestStructure.drc"),
+        CalibrationMethod.Cornering => Path.Combine("cornering", "SCV-V2.drc"),
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 }

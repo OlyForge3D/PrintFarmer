@@ -410,6 +410,80 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     }
 
     /// <summary>
+    /// Firmware flavors this worker recognizes as supporting cornering calibration (issue
+    /// #2138), matching OrcaSlicer's <c>gcode_flavor</c> config key values case-insensitively.
+    /// Marlin (classic jerk, <c>M205 X/Y</c>) and Marlin 2 (junction deviation, <c>M205 J</c>)
+    /// are both accepted under the same flavor name OrcaSlicer uses for the modern Marlin
+    /// fork family; Klipper (<c>SQUARE_CORNER_VELOCITY</c>) is its own distinct motion-planner
+    /// concept. Every other flavor (RepRapFirmware, Smoothieware, Sprinter, Mach3/4, etc.) has
+    /// no equivalent tunable this worker can attribute a cornering measurement to, so it is
+    /// refused explicitly by <see cref="ValidateCorneringFirmwareFlavorAsync"/> rather than
+    /// silently treated as a no-op.
+    /// </summary>
+    private static readonly string[] CorneringSupportedGcodeFlavors = ["marlin", "marlin2", "klipper"];
+
+    /// <summary>
+    /// Refuses to proceed with a cornering calibration slice (issue #2138) unless the target
+    /// printer's <c>gcode_flavor</c> is one this worker knows how to attribute jerk, junction
+    /// deviation, or square corner velocity to. Cornering is the only catalogued calibration
+    /// method that measures the printer's own motion planner rather than a filament property, so
+    /// — unlike every other method here — its applicability depends on firmware flavor. A
+    /// mismatch here would otherwise silently produce a "successful" slice/print whose recorded
+    /// observation the operator's firmware cannot actually apply; per the architecture decision
+    /// on issue #2138 this must fail loudly instead.
+    /// </summary>
+    /// <param name="job">The claimed job, used only for the failure message's correlation.</param>
+    /// <param name="machineJsonPath">Path of the emitted machine document to read <c>gcode_flavor</c> from.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidOperationException">
+    /// The machine document's <c>gcode_flavor</c> is missing, blank, or not one of
+    /// <see cref="CorneringSupportedGcodeFlavors"/>.
+    /// </exception>
+    internal static async Task ValidateCorneringFirmwareFlavorAsync(
+        DistributedSlicingJob job,
+        string machineJsonPath,
+        CancellationToken cancellationToken)
+    {
+        string machineJsonContent = await File.ReadAllTextAsync(machineJsonPath, cancellationToken);
+        string? gcodeFlavor = ReadGcodeFlavor(machineJsonContent);
+
+        bool supported = gcodeFlavor is not null
+            && CorneringSupportedGcodeFlavors.Contains(gcodeFlavor, StringComparer.OrdinalIgnoreCase);
+        if (!supported)
+        {
+            throw new InvalidOperationException(
+                $"Cornering calibration (job {job.Id}) is not supported for gcode flavor " +
+                $"'{gcodeFlavor ?? "(unset)"}'. Only Marlin/Marlin2 (jerk / junction deviation via " +
+                "M205) and Klipper (SQUARE_CORNER_VELOCITY) are supported; refusing rather than " +
+                "silently slicing a result the printer's firmware cannot apply.");
+        }
+    }
+
+    /// <summary>
+    /// Reads the machine document's <c>gcode_flavor</c> value, tolerating OrcaSlicer's
+    /// single-element-array encoding the same way <see cref="OrcaRawValueParser.ParseStringValue"/>
+    /// does for every other raw profile value.
+    /// </summary>
+    private static string? ReadGcodeFlavor(string machineJson)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(machineJson);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("gcode_flavor", out JsonElement flavorElement))
+            {
+                return OrcaRawValueParser.ParseStringValue(flavorElement);
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Sets (or appends to any existing) <c>layer_change_gcode</c> key on a process profile JSON
     /// document. Appending rather than clobbering preserves any custom gcode the selected process
     /// profile already carries.
@@ -1407,6 +1481,17 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         if (isKnownCalibrationMethod && calibrationMethod == CalibrationMethod.MaximumVolumetricSpeed)
         {
             await ApplyMaxVolumetricSpeedCeilingAsync(job, filamentJson, cancellationToken);
+        }
+
+        // Cornering calibration (issue #2138): jerk, junction deviation, and Klipper's
+        // SQUARE_CORNER_VELOCITY are firmware-specific motion-planner concepts with no shared
+        // representation, unlike every other catalogued method here. Refuse explicitly, before
+        // slicing, for any gcode flavor other than the ones this worker knows how to interpret,
+        // rather than silently producing a "successful" slice/print whose result the operator's
+        // firmware cannot even apply.
+        if (isKnownCalibrationMethod && calibrationMethod == CalibrationMethod.Cornering)
+        {
+            await ValidateCorneringFirmwareFlavorAsync(job, machineJson, cancellationToken);
         }
 
         await WarnIfProcessCannotSatisfyGateAsync(job, machineJson, processJson, cancellationToken);

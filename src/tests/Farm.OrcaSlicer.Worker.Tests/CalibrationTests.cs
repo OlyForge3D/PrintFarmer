@@ -148,6 +148,120 @@ public class CalibrationTests : IDisposable
         CalibrationMethods.IsSlicerSupported(CalibrationMethod.MaximumVolumetricSpeed).Should().BeTrue();
     }
 
+    [Theory]
+    [InlineData("cornering", CalibrationMethod.Cornering)]
+    [InlineData("CORNERING", CalibrationMethod.Cornering)]
+    public void TryParse_Cornering_ReturnsCorneringMethod(string wireName, CalibrationMethod expected)
+    {
+        bool parsed = CalibrationMethods.TryParse(wireName, out CalibrationMethod method);
+
+        parsed.Should().BeTrue();
+        method.Should().Be(expected);
+    }
+
+    [Fact]
+    public void DefaultModelFileName_Cornering_ReturnsScvV2Drc()
+    {
+        // Verified against a local OrcaSlicer install: resources/calib/cornering/SCV-V2.drc.
+        CalibrationMethods.DefaultModelFileName(CalibrationMethod.Cornering).Should().Be("SCV-V2.drc");
+    }
+
+    [Fact]
+    public void RelativeResourcePath_Cornering_ResolvesUnderCorneringDirectory()
+    {
+        CalibrationMethods.RelativeResourcePath(CalibrationMethod.Cornering).Should()
+            .Be(Path.Combine("cornering", "SCV-V2.drc"));
+    }
+
+    [Fact]
+    public void IsSlicerSupported_Cornering_ReturnsTrue()
+    {
+        // Cornering is a built, catalogued method (issue #2138) — its resource is copied via the
+        // generic fallback path in PrepareCalibrationModel like TemperatureTower/MaxVolumetricSpeed.
+        CalibrationMethods.IsSlicerSupported(CalibrationMethod.Cornering).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ClientAcceptedWireNames_IncludesCornering()
+    {
+        CalibrationMethods.ClientAcceptedWireNames.Should().Contain("cornering");
+    }
+
+    #endregion
+
+    #region CorneringFirmwareFlavorGate
+
+    [Theory]
+    [InlineData("marlin")]
+    [InlineData("Marlin")]
+    [InlineData("marlin2")]
+    [InlineData("MARLIN2")]
+    [InlineData("klipper")]
+    [InlineData("Klipper")]
+    public async Task ValidateCorneringFirmwareFlavorAsync_SupportedFlavor_DoesNotThrow(string gcodeFlavor)
+    {
+        string machineJsonPath = WriteMachineJsonWithGcodeFlavor(gcodeFlavor);
+        DistributedSlicingJob job = new();
+
+        Func<Task> act = () => OrcaSlicingPipelineService.ValidateCorneringFirmwareFlavorAsync(
+            job, machineJsonPath, CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Theory]
+    [InlineData("reprapfirmware")]
+    [InlineData("smoothieware")]
+    [InlineData("sprinter")]
+    [InlineData("")]
+    [InlineData(null)]
+    public async Task ValidateCorneringFirmwareFlavorAsync_UnsupportedOrMissingFlavor_ThrowsExplicitly(string? gcodeFlavor)
+    {
+        // Per Dallas's architecture decision on #2138: an unsupported or missing firmware
+        // flavor must be refused explicitly (InvalidOperationException), never a silent no-op.
+        string machineJsonPath = gcodeFlavor is null
+            ? WriteMachineJsonWithoutGcodeFlavor()
+            : WriteMachineJsonWithGcodeFlavor(gcodeFlavor);
+        DistributedSlicingJob job = new();
+
+        Func<Task> act = () => OrcaSlicingPipelineService.ValidateCorneringFirmwareFlavorAsync(
+            job, machineJsonPath, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"*{job.Id}*");
+    }
+
+    [Fact]
+    public async Task ValidateCorneringFirmwareFlavorAsync_SingleElementArrayEncoding_IsTolerated()
+    {
+        // OrcaSlicer sometimes encodes scalar config values as single-element JSON arrays;
+        // OrcaRawValueParser.ParseStringValue already tolerates this for every other raw value,
+        // and the cornering gate reuses it for gcode_flavor.
+        string machineJsonPath = Path.Combine(_tempDir, $"machine-{Guid.NewGuid():N}.json");
+        File.WriteAllText(machineJsonPath, """{"gcode_flavor": ["klipper"]}""");
+        DistributedSlicingJob job = new();
+
+        Func<Task> act = () => OrcaSlicingPipelineService.ValidateCorneringFirmwareFlavorAsync(
+            job, machineJsonPath, CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    private string WriteMachineJsonWithGcodeFlavor(string gcodeFlavor)
+    {
+        string path = Path.Combine(_tempDir, $"machine-{Guid.NewGuid():N}.json");
+        string json = JsonSerializer.Serialize(new Dictionary<string, string> { ["gcode_flavor"] = gcodeFlavor });
+        File.WriteAllText(path, json);
+        return path;
+    }
+
+    private string WriteMachineJsonWithoutGcodeFlavor()
+    {
+        string path = Path.Combine(_tempDir, $"machine-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, """{"printer_model": "generic"}""");
+        return path;
+    }
+
     #endregion
 
     #region TemperatureTowerGcodeBuilder
