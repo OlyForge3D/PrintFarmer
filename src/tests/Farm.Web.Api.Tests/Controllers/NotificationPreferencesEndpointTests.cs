@@ -45,11 +45,6 @@ public sealed class NotificationPreferencesEndpointTests : IClassFixture<CustomW
     private HttpClient? _anonClient;
     private HttpClient? _authClient;
 
-    private static readonly JsonSerializerOptions ResponseJson = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
-
     public NotificationPreferencesEndpointTests(CustomWebApplicationFactory factory)
     {
         _factory = factory;

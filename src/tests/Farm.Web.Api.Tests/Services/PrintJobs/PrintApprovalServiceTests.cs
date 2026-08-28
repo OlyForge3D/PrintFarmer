@@ -258,7 +258,7 @@ public class PrintApprovalServiceTests : IDisposable
     private class StubJobQueueService : IJobQueueService
     {
         public List<QueuePrintJobDto> EnqueuedJobs { get; } = new();
-        public bool ShouldFailEnqueue { get; set; }
+        public bool ShouldFailEnqueue { get; }
 
         public Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, Guid? userId, CancellationToken ct)
         {

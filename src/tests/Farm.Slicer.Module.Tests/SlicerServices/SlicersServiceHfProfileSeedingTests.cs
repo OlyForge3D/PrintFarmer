@@ -214,8 +214,6 @@ public class SlicersServiceHfProfileSeedingTests
 
         public List<ProcessProfile> ExistingSystemProcessProfiles { get; } = new();
 
-        public void MarkLockCompleted(string key) => _locks[key] = "completed";
-
         public void AddHierarchyGroup(string printerModel, string machineProfileName)
         {
             _hierarchy[printerModel] = new List<MachineProfileDto>

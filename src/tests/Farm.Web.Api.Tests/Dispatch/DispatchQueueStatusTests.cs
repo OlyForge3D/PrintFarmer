@@ -61,39 +61,40 @@ public class DispatchQueueStatusTests : IClassFixture<CustomWebApplicationFactor
 
     private sealed class QueueStatusResponse
     {
+        // Set accessor is populated via JSON deserialization (reflection), invisible to the
+        // analyzer, even though only the getter is read directly.
+#pragma warning disable S1144
         public int PendingUnassignedJobs { get; set; }
-        public int TotalQueuedJobs { get; set; }
-        public int IdlePrinters { get; set; }
-        public int BusyPrinters { get; set; }
+#pragma warning restore S1144
         public List<PrinterQueueDepth> PrinterQueueDepths { get; set; } = [];
     }
 
     private sealed class PrinterQueueDepth
     {
+        // Set accessors are populated via JSON deserialization (reflection), invisible to the
+        // analyzer, even though only the getters are read directly.
+#pragma warning disable S1144
         public Guid PrinterId { get; set; }
-        public string PrinterName { get; set; } = string.Empty;
         public int QueueDepth { get; set; }
-        public bool IsPrinting { get; set; }
-        public bool IsAvailable { get; set; }
+#pragma warning restore S1144
+        public string PrinterName { get; set; } = string.Empty;
     }
 
     private sealed class DispatchHistoryResponse
     {
+        // Set accessors are populated via JSON deserialization (reflection), invisible to the
+        // analyzer, even though only the getters are read directly.
+#pragma warning disable S1144
         public int TotalCount { get; set; }
         public int Page { get; set; }
         public int PageSize { get; set; }
+#pragma warning restore S1144
         public List<DispatchHistoryEntry> Items { get; set; } = [];
     }
 
     private sealed class DispatchHistoryEntry
     {
-        public Guid Id { get; set; }
-        public Guid PrintJobId { get; set; }
-        public Guid PrinterId { get; set; }
         public string Action { get; set; } = string.Empty;
-        public double? Score { get; set; }
-        public string? Reason { get; set; }
-        public DateTime CreatedAtUtc { get; set; }
     }
 
     // =========================================================================

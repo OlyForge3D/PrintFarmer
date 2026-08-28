@@ -243,12 +243,15 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime, I
     /// <summary>Helper record matching the anonymous type returned by artifact upload.</summary>
     private sealed record ArtifactUploadResponse
     {
+        // Id/SizeBytes are populated by JSON deserialization (reflection), which the analyzer
+        // cannot see, so it misreports the init accessor as unused even though the getter is
+        // read elsewhere in this file.
+#pragma warning disable S1144
         public Guid Id { get; init; }
-        public Guid JobId { get; init; }
         public string FileName { get; init; } = string.Empty;
         public string ContentType { get; init; } = string.Empty;
         public long SizeBytes { get; init; }
-        public DateTime CreatedAt { get; init; }
+#pragma warning restore S1144
     }
 
     private Guid GetWorkerId() =>

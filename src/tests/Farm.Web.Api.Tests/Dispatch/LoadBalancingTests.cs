@@ -78,13 +78,11 @@ public class LoadBalancingTests : IClassFixture<CustomWebApplicationFactory>, IA
 
     private sealed class SettingsWithStrategyDto
     {
-        public bool AutoDispatchEnabled { get; set; }
-        public AutoDispatchMode AutoDispatchMode { get; set; }
-        public int IdleThresholdSeconds { get; set; }
-        public double MinimumScoreThreshold { get; set; }
-        public int MaxConcurrentDispatches { get; set; }
+        // Set accessor is populated via JSON deserialization (reflection), invisible to the
+        // analyzer, even though only the getter is read directly.
+#pragma warning disable S1144
         public LoadBalancingStrategy? LoadBalancingStrategy { get; set; }
-        public DateTime UpdatedAt { get; set; }
+#pragma warning restore S1144
     }
 
     private sealed class BatchDispatchRequest
@@ -96,21 +94,18 @@ public class LoadBalancingTests : IClassFixture<CustomWebApplicationFactory>, IA
 
     private sealed class BatchDispatchResponse
     {
-        public int TotalCount { get; set; }
-        public int DispatchedCount { get; set; }
-        public int FailedCount { get; set; }
-        public int SkippedCount { get; set; }
         public List<BatchDispatchItemResult> Results { get; set; } = [];
     }
 
     private sealed class BatchDispatchItemResult
     {
+        // Set accessors are populated via JSON deserialization (reflection), invisible to the
+        // analyzer, even though only the getters are read directly.
+#pragma warning disable S1144
         public Guid JobId { get; set; }
-        public string Status { get; set; } = string.Empty;
         public Guid? PrinterId { get; set; }
-        public string? PrinterName { get; set; }
-        public double? Score { get; set; }
-        public string? Reason { get; set; }
+#pragma warning restore S1144
+        public string Status { get; set; } = string.Empty;
     }
 
     // =========================================================================
