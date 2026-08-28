@@ -896,6 +896,38 @@ public sealed class CalibrationProjectServiceTests
     }
 
     [Theory]
+    [InlineData(25)]
+    [InlineData(1)]
+    [InlineData(60)]
+    public async Task AppendObservationAsync_MaxVolumetricSpeedInRange_Succeeds(decimal maxVolumetricSpeed)
+    {
+        // Issue #2135: max_volumetric_speed now has a defined measurement range, mirroring
+        // temperature/flow_ratio/pressure_advance's existing coverage.
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, $"mvs-in-range-{maxVolumetricSpeed}"),
+            actor,
+            CancellationToken.None);
+        Guid attemptId = await AddAttemptAsync(
+            db,
+            project.Value!.Id,
+            actor.Subject,
+            sequence: 1,
+            CalibrationMethodNames.MaximumVolumetricSpeed);
+
+        CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
+            attemptId,
+            CreateMeasurementRequest($"mvs-in-range-{maxVolumetricSpeed}", "max_volumetric_speed_mm3_s", maxVolumetricSpeed),
+            actor,
+            CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status201Created);
+    }
+
+    [Theory]
     [InlineData(-0.01)]
     [InlineData(10.01)]
     public async Task AppendObservationAsync_RetractionLengthOutOfRange_ReturnsValidationError(decimal retractionLengthMm)
@@ -918,6 +950,36 @@ public sealed class CalibrationProjectServiceTests
         CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
             attemptId,
             CreateMeasurementRequest($"retraction-out-of-range-{retractionLengthMm}", "retraction_length_mm", retractionLengthMm),
+            actor,
+            CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        _ = result.Code.Should().Be("observation_measurement_out_of_range");
+    }
+
+    [Theory]
+    [InlineData(0.99)]
+    [InlineData(60.01)]
+    public async Task AppendObservationAsync_MaxVolumetricSpeedOutOfRange_ReturnsValidationError(decimal maxVolumetricSpeed)
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, $"mvs-out-of-range-{maxVolumetricSpeed}"),
+            actor,
+            CancellationToken.None);
+        Guid attemptId = await AddAttemptAsync(
+            db,
+            project.Value!.Id,
+            actor.Subject,
+            sequence: 1,
+            CalibrationMethodNames.MaximumVolumetricSpeed);
+
+        CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
+            attemptId,
+            CreateMeasurementRequest($"mvs-out-of-range-{maxVolumetricSpeed}", "max_volumetric_speed_mm3_s", maxVolumetricSpeed),
             actor,
             CancellationToken.None);
 
