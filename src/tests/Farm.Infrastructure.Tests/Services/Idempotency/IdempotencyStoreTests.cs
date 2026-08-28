@@ -556,8 +556,18 @@ public class IdempotencyStoreTests : IDisposable
     /// exposes PostgreSQL error codes without requiring an Npgsql dependency in the
     /// test assembly.
     /// </summary>
+    /// <remarks>
+    /// This type implements CA1032's four standard exception constructors, but the
+    /// single-<see cref="string"/> overload intentionally deviates from the usual
+    /// "message" convention: for this test double, that argument is the SQLSTATE
+    /// (used by every call site in this file), not the exception message, which stays
+    /// fixed at "simulated provider failure". Call <see cref="FakeSqlStateException(string, Exception)"/>
+    /// instead if a caller needs to control the message.
+    /// </remarks>
     private sealed class FakeSqlStateException : DbException
     {
+        /// <param name="sqlState">The SQLSTATE to surface via <see cref="SqlState"/>. This is
+        /// NOT the exception message — see the type-level remarks.</param>
         public FakeSqlStateException(string sqlState)
             : base("simulated provider failure")
         {
