@@ -226,3 +226,56 @@ string substitution (not a blind re-dump) so the diff is auditable as
 No `/api/*` contract change, no behavior change, no test dropped or
 duplicated (verify the moved-file count matches the new project's test
 count exactly), no new required CI check names.
+
+## Target invariant (Phase 20 guardrail, epic close-out)
+
+Phase 20 (#2048) is the epic's final, cleanup-only phase — no further module
+extraction happens here. It removed the last test-only product code that had
+accumulated in `Farm.Web.Api` (`Services/TestHelpers/PrinterInfoFactory.cs`,
+`TestStartupFilter.cs` — both zero-reference or test-only, never belonging in
+the API DLL) and added a permanent guardrail so the host cannot silently
+re-accumulate the kind of code this epic spent 19 phases removing.
+
+**Guardrail test:**
+`src/tests/Farm.Web.Api.Tests/Architecture/HostNamespaceGuardrailArchitectureTests.cs`
+reflects over `typeof(Program).Assembly.GetTypes()` and asserts every
+non-nested type under a `Farm.Web.Api.Controllers` or `Farm.Web.Api.Services`
+namespace (or sub-namespace) is on an explicit allowlist of the host's actual
+current scope. A new controller/service landing in the host without a
+reviewed allowlist entry fails this test immediately, forcing the same
+choice the epic made 11 times: move it into a `Farm.Modules.*` module, or
+justify — in the allowlist comment — why it is genuinely host-scoped
+(`Program.cs`/`ProgramHelpers.cs` wiring, `Startup/**`, `Middleware/**`,
+`Infrastructure/**`, `Health/**`, `Authorization/**`,
+`Validators/CreateManualTaskValidator.cs`, and the small set of controllers
+and `Services/Startup`, `Services/StorageManagement`, `Services/SlicerHost`
+types that were never module candidates).
+
+The allowlist reflects the **actual** host-scoped surface as measured at
+Phase 20, not the epic's original phase-planning snapshot — some controllers
+that snapshot named as staying (e.g. `BackgroundServicesController`,
+`SignalRTestController`) had since moved into `Farm.Modules.Observability` in
+earlier phases, while other controllers not named in that snapshot
+(`AssetsController`, `CalibrationCapabilitiesController`,
+`InternalSlicerHostLookupsController`, `LibrarySyncController`,
+`OctoPrintCompatController`, `PredictionController`,
+`PrintProjectTemplatesController`, `ReportExportController`,
+`SystemLogsController`) are genuinely host-scoped. Enforcing today's real
+boundary — rather than the stale aspirational one — is what makes the
+guardrail actually catch regressions instead of immediately failing or
+under-protecting.
+
+**Final measured `src/api` size** (production `.cs` files only, excluding
+`obj`/`bin`): **63 files / ~8,515 LOC**, down from the epic's 61,068 LOC /
+255-file starting point and comfortably inside the ≤10,000 LOC target; just
+above the ≤60-file target (63 vs. 60) after accounting for a handful of
+controllers/services that were always legitimately host-scoped and were
+never candidates for module extraction — see the epic's own non-goal
+("no further module extraction — cleanup only") for why this phase does not
+chase the file count further.
+
+**Manifest schema recap:** no new module or test project is introduced by
+this phase, so `scripts/ci/dotnet-test-manifest.json` needs no new entry;
+the existing `Farm.Web.Api.Tests` entry already covers the guardrail test.
+CI continues to assert every `*.Tests.csproj` is registered in the manifest
+exactly once (`scripts/ci/tests/test-dotnet-test-manifest.sh`).
