@@ -197,6 +197,55 @@ public sealed class CalibrationOrchestrationSagaServiceTests
     }
 
     [Fact]
+    public async Task AdvanceAsync_SlicingRejectedWithBadRequest_FailsTerminallyWithoutRetrying()
+    {
+        // Regression coverage for a review finding on issue #2139: a client-side validation
+        // rejection (e.g. input_shaping's missing/unsupported firmware_flavor, or any other
+        // deterministic 400 from SliceJobController) will fail identically on every retry, since
+        // the saga rebuilds the exact same request body from the same recorded attempt input each
+        // time. Before this fix, RunSlicingStepAsync treated every gateway failure as Retryable
+        // regardless of cause, so a deterministic rejection still entered the exponential-backoff
+        // retry loop and delayed the operator-visible refusal by minutes for no chance of a
+        // different outcome. IsTerminal on SliceSubmissionResult now lets the gateway signal a
+        // deterministic failure so the saga can fail the step immediately instead.
+        await using AppDbContext db = CreateContext();
+        CalibrationProjectService projectService = CreateProjectService(db);
+        FakeSliceSubmissionGateway sliceGateway = new()
+        {
+            SubmitBehavior = _ => SliceSubmissionResult.Failed(
+                "unsupported_input_shaping_firmware_flavor",
+                "Calibration method 'input_shaping' requires calibration.firmwareFlavor to be one of: klipper, marlin.",
+                isTerminal: true),
+        };
+        CalibrationOrchestrationSagaService saga = CreateSaga(
+            db,
+            projectService,
+            sliceGateway,
+            new FakePrintDispatchGateway());
+        CalibrationActor actor = CreateActor();
+        (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(
+            actor,
+            projectService,
+            methodName: CalibrationMethodNames.InputShaping,
+            specification: JsonSerializer.SerializeToElement(new { firmware_flavor = "unsupported" }));
+
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // created -> cloning-profile
+        _ = await AdvanceAsync(saga, orchestrationId, actor); // cloning-profile -> slicing
+
+        // slicing -> terminal failure on the very first submission attempt, not a retry.
+        CalibrationApiResult<CalibrationOrchestrationDto> result =
+            await AdvanceAsync(saga, orchestrationId, actor);
+
+        _ = result.Value!.Status.Should().Be(
+            nameof(CalibrationOrchestrationStatus.Failed),
+            "a deterministic rejection must fail the step immediately instead of scheduling a retry");
+        _ = result.Value!.RetryCount.Should().Be(
+            0,
+            "the step must not have consumed any retry budget - it never entered the retry path at all");
+        _ = result.Value!.NextRetryAtUtc.Should().BeNull();
+    }
+
+    [Fact]
     public async Task AdvanceAsync_SlicingFailsThenSucceeds_RetriesWithinBudget()
     {
         await using AppDbContext db = CreateContext();

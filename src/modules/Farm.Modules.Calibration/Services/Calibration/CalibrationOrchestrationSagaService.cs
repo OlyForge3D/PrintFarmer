@@ -414,6 +414,17 @@ public sealed class CalibrationOrchestrationSagaService(
                 retryCount: orchestration.RetryCount);
         }
 
+        if (result.IsTerminal)
+        {
+            // A deterministic rejection (issue #2139: e.g. a missing/unsupported input-shaping
+            // firmware flavor gets HTTP 400 from SliceJobController) will fail identically on
+            // every retry, since the request body is rebuilt from the same recorded attempt
+            // input each time. Entering the exponential-backoff retry loop here would delay the
+            // operator-visible refusal by minutes for no chance of a different outcome - fail the
+            // step immediately instead.
+            return StepOutcome.TerminalFailure(result.ErrorCode ?? "slice_submission_failed", result.ErrorDetail);
+        }
+
         return StepOutcome.Retryable(
             orchestration.RetryCount,
             CalibrationSagaSteps.Slicing,

@@ -81,15 +81,14 @@ public sealed record CalibrationParameters
     /// flavor unparseable. Per-key extraction keeps every existing numeric method's net *outcome*
     /// the same for a non-numeric value at a numeric key (that key alone falls back to its own
     /// default — every default is already within its own valid range, so the observable result
-    /// matches the old whole-payload fallback), but two edge cases differ mechanically: (1) the
-    /// old code fell back to defaults for *every* key on the first bad value, whereas this reverts
-    /// only the offending key, so a payload mixing one bad numeric key with other good numeric
-    /// keys now keeps the good ones instead of losing them too; (2) duplicate JSON keys resolve to
-    /// the *last* occurrence under the old <c>Dictionary&lt;string, double&gt;</c> deserialization
-    /// but the *first* occurrence under <c>JsonElement.TryGetProperty</c> here. Neither
-    /// difference is observable through this class's public surface today, since every numeric
-    /// value is subsequently clamped to the method's valid range regardless of which path produced
-    /// it.
+    /// matches the old whole-payload fallback) and for duplicate JSON keys (both the old
+    /// <c>Dictionary&lt;string, double&gt;</c> deserialization and <c>JsonElement.TryGetProperty</c>
+    /// here resolve duplicates to the *last* occurrence). The one edge case that does differ
+    /// mechanically: the old code fell back to defaults for *every* key on the first bad value,
+    /// whereas this reverts only the offending key, so a payload mixing one bad numeric key with
+    /// other good numeric keys now keeps the good ones instead of losing them too. This difference
+    /// is not observable through this class's public surface today, since every numeric value is
+    /// subsequently clamped to the method's valid range regardless of which path produced it.
     /// </remarks>
     public static CalibrationParameters Parse(string? calibrationParamsJson, CalibrationMethod method)
     {

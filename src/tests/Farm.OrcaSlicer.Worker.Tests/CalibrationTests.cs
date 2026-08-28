@@ -579,9 +579,10 @@ public class CalibrationTests : IDisposable
     [InlineData("""{"start_temperature": "NaN"}""")]
     public void CalibrationParameters_Parse_OutOfRangeOrNonFiniteTemperature_FallsBackToDefault(string json)
     {
-        // "NaN" as a JSON string fails Dictionary<string,double> deserialization entirely and
-        // falls back to defaults via the malformed-JSON path; numeric out-of-range values fall
-        // back via the bounds check. Either way the result must be the safe default.
+        // A non-numeric value at a numeric key falls back to that key's own default under the
+        // per-key JsonElement parse (see CalibrationParameters.Parse's <remarks>); numeric
+        // out-of-range values fall back via the bounds check. Either way the result must be the
+        // safe default.
         CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.TemperatureTower);
 
         parameters.StartTemperatureC.Should().Be(230);
@@ -614,9 +615,10 @@ public class CalibrationTests : IDisposable
     [Theory]
     [InlineData("""{"start_advance": -1}""")] // below the CalibrationMeasurementRanges.PressureAdvance minimum (0.0)
     [InlineData("""{"start_advance": 2.5}""")] // above the CalibrationMeasurementRanges.PressureAdvance maximum (2.0)
-    [InlineData("""{"start_advance": "NaN"}""")] // non-numeric value for a numeric key: the whole map fails to
-                                                 // deserialize (JSON has no bare NaN/Infinity literal) and Parse
-                                                 // falls back to defaults for every key, same as malformed JSON
+    [InlineData("""{"start_advance": "NaN"}""")] // non-numeric value for a numeric key: only this
+                                                 // key falls back to its own default under the
+                                                 // per-key JsonElement parse (other keys, if any,
+                                                 // are unaffected)
     public void CalibrationParameters_Parse_PressureAdvanceTower_OutOfRangeStartAdvance_FallsBackToDefault(string json)
     {
         // Mirrors Farm.Modules.Calibration.Services.Calibration.CalibrationMeasurementRanges.PressureAdvance
