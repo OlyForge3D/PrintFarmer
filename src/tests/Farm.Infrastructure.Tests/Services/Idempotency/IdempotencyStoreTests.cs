@@ -556,9 +556,26 @@ public class IdempotencyStoreTests : IDisposable
     /// exposes PostgreSQL error codes without requiring an Npgsql dependency in the
     /// test assembly.
     /// </summary>
-    private sealed class FakeSqlStateException(string sqlState) : DbException("simulated provider failure")
+    private sealed class FakeSqlStateException : DbException
     {
-        public override string SqlState { get; } = sqlState;
+        public FakeSqlStateException(string sqlState)
+            : base("simulated provider failure")
+        {
+            SqlState = sqlState;
+        }
+
+        public FakeSqlStateException()
+            : this(string.Empty)
+        {
+        }
+
+        public FakeSqlStateException(string message, Exception innerException)
+            : base(message, innerException)
+        {
+            SqlState = string.Empty;
+        }
+
+        public override string SqlState { get; }
     }
 
     /// <summary>

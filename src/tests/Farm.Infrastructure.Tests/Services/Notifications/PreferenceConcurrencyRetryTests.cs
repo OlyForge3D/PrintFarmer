@@ -263,12 +263,56 @@ public sealed class PreferenceConcurrencyRetryTests
         }).ToArray();
     }
 
-    private sealed class ArbitraryWrapperException(string message, Exception inner)
-        : Exception(message, inner);
+    private sealed class ArbitraryWrapperException : Exception
+    {
+        public ArbitraryWrapperException()
+        {
+        }
 
-    private sealed class SqliteExceptionLookAlike(string message) : Exception(message);
+        public ArbitraryWrapperException(string message)
+            : base(message)
+        {
+        }
 
-    private sealed class DbExceptionLookAlike(string message) : System.Data.Common.DbException(message);
+        public ArbitraryWrapperException(string message, Exception innerException)
+            : base(message, innerException)
+        {
+        }
+    }
+
+    private sealed class SqliteExceptionLookAlike : Exception
+    {
+        public SqliteExceptionLookAlike()
+        {
+        }
+
+        public SqliteExceptionLookAlike(string message)
+            : base(message)
+        {
+        }
+
+        public SqliteExceptionLookAlike(string message, Exception innerException)
+            : base(message, innerException)
+        {
+        }
+    }
+
+    private sealed class DbExceptionLookAlike : System.Data.Common.DbException
+    {
+        public DbExceptionLookAlike()
+        {
+        }
+
+        public DbExceptionLookAlike(string message)
+            : base(message)
+        {
+        }
+
+        public DbExceptionLookAlike(string message, Exception innerException)
+            : base(message, innerException)
+        {
+        }
+    }
 
     private sealed class CountingFactory : IDbContextFactory<AppDbContext>, IDisposable
     {

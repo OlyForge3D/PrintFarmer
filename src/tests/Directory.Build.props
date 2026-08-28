@@ -49,9 +49,15 @@
            positives (Moq Setup/Returns callbacks, Task.Run/Task.Factory.StartNew awaited later
            via Task.WhenAll) suppressed with a scoped #pragma warning disable/restore IDISP013
            plus an explanatory comment at each site. -->
+      <!-- CA1032 (Implement standard exception constructors) fully cleared across src/tests/
+           — see #2106 burn-down. All 13 distinct instances (26 build-log lines, doubled by the
+           same duplicate-line effect noted for IDISP013 above) were on private nested
+           test-double exception types (e.g. FakeSqlException, ArbitraryWrapperException) used
+           to simulate provider-specific exception shapes; each was fixed directly by adding the
+           missing parameterless/message/message+innerException constructors delegating to the
+           base Exception/DbException constructors. -->
       S1144;    <!-- Unused private types or members (36) -->
       VSTHRD003;<!-- Avoid awaiting foreign Tasks (30) -->
-      CA1032;   <!-- Implement standard exception constructors (26) -->
       IDISP017; <!-- Prefer using-declaration (24) -->
       SA1414;   <!-- Tuple types in signatures should have element names (18) -->
       CA1862;   <!-- Use case-insensitive string comparison methods (18) -->

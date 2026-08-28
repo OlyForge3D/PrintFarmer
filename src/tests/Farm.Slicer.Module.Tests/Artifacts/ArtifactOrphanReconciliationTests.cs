@@ -777,7 +777,22 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
     private static void SetStale(string path) =>
         File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(-5));
 
-    private sealed class SimulatedHardTerminationException : Exception;
+    private sealed class SimulatedHardTerminationException : Exception
+    {
+        public SimulatedHardTerminationException()
+        {
+        }
+
+        public SimulatedHardTerminationException(string message)
+            : base(message)
+        {
+        }
+
+        public SimulatedHardTerminationException(string message, Exception innerException)
+            : base(message, innerException)
+        {
+        }
+    }
 
     public void Dispose()
     {
