@@ -6,7 +6,7 @@ using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Security;
 
-public sealed class CalibrationPersistenceAuthorizationTests : IAsyncLifetime
+public sealed class CalibrationPersistenceAuthorizationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new(
         new Dictionary<string, string?>
@@ -29,6 +29,8 @@ public sealed class CalibrationPersistenceAuthorizationTests : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Fact]
     public async Task CalibrationPersistence_AnonymousCaller_ReturnsAuthenticationRequired()

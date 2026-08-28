@@ -15,7 +15,7 @@ using Moq;
 
 namespace Farm.Web.Api.Tests.Services.Spoolman;
 
-public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime
+public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime, IDisposable
 {
     private static readonly DateTimeOffset Now =
         new(2026, 7, 21, 12, 0, 0, TimeSpan.Zero);
@@ -48,6 +48,8 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime
     {
         await _connection.DisposeAsync();
     }
+
+    public void Dispose() => _connection?.Dispose();
 
     [Fact]
     public async Task ProjectAsync_SourceCollision_ProducesIndependentHistories()

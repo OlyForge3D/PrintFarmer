@@ -20,7 +20,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// filenames, or OrcaSlicer stderr) when <see cref="Farm.Infrastructure.Security.PrintFarmerPermissions.IsFarmAdmin"/>
 /// is true for the requesting principal.
 /// </summary>
-public sealed class SliceJobErrorDetailVisibilityTests : IAsyncLifetime
+public sealed class SliceJobErrorDetailVisibilityTests : IAsyncLifetime, IDisposable
 {
     private const string RealErrorDetail =
         "OrcaSlicer exited with code 1: failed to resolve profile '/data/worker/profiles/FilAr PLA Bronce.json'";
@@ -30,6 +30,8 @@ public sealed class SliceJobErrorDetailVisibilityTests : IAsyncLifetime
     public async Task InitializeAsync() => await _factory.ResetDatabaseAsync();
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Fact(DisplayName = "The owning non-admin user sees a generic error message and a null ErrorDetail")]
     public async Task GetStatus_AsOwningNonAdmin_HidesErrorDetail()

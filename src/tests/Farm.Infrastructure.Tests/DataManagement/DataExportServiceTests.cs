@@ -9,7 +9,7 @@ using Moq;
 
 namespace Farm.Infrastructure.Tests.DataManagement;
 
-public class DataExportServiceTests
+public class DataExportServiceTests : IDisposable
 {
     private readonly AppDbContext _context;
     private readonly Mock<ILogger<DataExportService>> _loggerMock;
@@ -25,6 +25,8 @@ public class DataExportServiceTests
         _loggerMock = new Mock<ILogger<DataExportService>>();
         _exportService = new DataExportService(_context, _loggerMock.Object);
     }
+
+    public void Dispose() => _context.Dispose();
 
     [Fact]
     public async Task ExportCatalogAsync_WithData_ReturnsValidCatalog()

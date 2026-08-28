@@ -19,7 +19,7 @@ namespace Farm.Web.Api.Tests.Security;
 /// - the vetted client used for the OctoPrint/Moonraker probe path does not follow redirects to
 ///   internal addresses.
 /// </summary>
-public sealed class PrintersControllerTestConnectionAuthorizationTests : IAsyncLifetime
+public sealed class PrintersControllerTestConnectionAuthorizationTests : IAsyncLifetime, IDisposable
 {
     private readonly SpyHttpMessageHandler _spyHandler = new(_ => new HttpResponseMessage(HttpStatusCode.OK)
     {
@@ -35,6 +35,12 @@ public sealed class PrintersControllerTestConnectionAuthorizationTests : IAsyncL
     }
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose()
+    {
+        _factory?.Dispose();
+        _spyHandler.Dispose();
+    }
 
     [Fact]
     public async Task NonAdminUser_TestConnection_ReturnsForbiddenWithoutOutboundCall()

@@ -19,7 +19,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// added for issue #1650 (Moonraker file thumbnails previously leaked the backend's internal
 /// base URL directly to the browser).
 /// </summary>
-public sealed class PrintersControllerFileThumbnailContractTests : IAsyncLifetime
+public sealed class PrintersControllerFileThumbnailContractTests : IAsyncLifetime, IDisposable
 {
     private readonly Mock<IPrintersService> _printers = new(MockBehavior.Strict);
     private readonly FileThumbnailContractFactory _factory;
@@ -38,6 +38,12 @@ public sealed class PrintersControllerFileThumbnailContractTests : IAsyncLifetim
     {
         _client.Dispose();
         await _factory.DisposeAsync();
+    }
+
+    public void Dispose()
+    {
+        _client?.Dispose();
+        _factory.Dispose();
     }
 
     [Fact]

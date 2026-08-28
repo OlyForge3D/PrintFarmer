@@ -13,7 +13,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// <summary>
 /// Integration tests for OrcaSlicer bundle preview endpoint.
 /// </summary>
-public class OrcaBundlePreviewTests : IAsyncLifetime
+public class OrcaBundlePreviewTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient _client = null!;
@@ -29,7 +29,13 @@ public class OrcaBundlePreviewTests : IAsyncLifetime
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
     {
         _client?.Dispose();
         _factory?.Dispose();

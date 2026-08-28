@@ -10,7 +10,7 @@ using TestDbHelpers = Farm.Testing.Shared.AppDbTestHelpers;
 
 namespace Farm.Infrastructure.Tests.Infrastructure;
 
-public sealed class SpoolRestockShiftPlanPersistenceTests : IAsyncLifetime
+public sealed class SpoolRestockShiftPlanPersistenceTests : IAsyncLifetime, IDisposable
 {
     private SqliteConnection _connection = null!;
 
@@ -23,6 +23,8 @@ public sealed class SpoolRestockShiftPlanPersistenceTests : IAsyncLifetime
     }
 
     public async Task DisposeAsync() => await _connection.DisposeAsync();
+
+    public void Dispose() => _connection.Dispose();
 
     [Fact]
     public async Task CompileAsync_ConcurrentPasses_LeaveOneOpenRestockOccurrence()

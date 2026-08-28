@@ -14,7 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.Security;
 
-public sealed class SlicerResourceAuthorizationTests : IAsyncLifetime
+public sealed class SlicerResourceAuthorizationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new(
         new Dictionary<string, string?>
@@ -26,6 +26,8 @@ public sealed class SlicerResourceAuthorizationTests : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Fact]
     public async Task GetSliceJobAsync_WithoutQueueReadPermission_ReturnsPermissionDenied()

@@ -13,13 +13,15 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.Security;
 
-public sealed class HubAuthorizationIntegrationTests : IAsyncLifetime
+public sealed class HubAuthorizationIntegrationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Theory]
     [InlineData("/hubs/printers/negotiate?negotiateVersion=1")]

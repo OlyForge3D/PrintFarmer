@@ -17,7 +17,7 @@ namespace Farm.Web.Api.Tests.Security;
 /// <item>farm_admin still reaches every one of them, unconditionally.</item>
 /// </list>
 /// </summary>
-public sealed class RoleToPermissionMigrationTests : IAsyncLifetime
+public sealed class RoleToPermissionMigrationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new(
         new Dictionary<string, string?>
@@ -50,6 +50,8 @@ public sealed class RoleToPermissionMigrationTests : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Theory]
     [MemberData(nameof(MigratedRouteCases))]

@@ -24,13 +24,15 @@ namespace Farm.Slicer.Module.Tests.Security;
 /// </summary>
 [Trait("Category", "Integration")]
 [Trait("Category", "Regression")]
-public class RoleToPermissionMigrationSlicerModuleTests : IAsyncLifetime
+public class RoleToPermissionMigrationSlicerModuleTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
 
     public async Task InitializeAsync() => await _factory.ResetDatabaseAsync();
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Fact]
     public async Task WorkersReset_NonAdminWithoutPermission_Returns403()

@@ -16,7 +16,7 @@ namespace Farm.Slicer.Module.Tests.SlicerServices;
 /// and that the dispatcher can select the worker for a capability-constrained job.
 /// </summary>
 [Trait("Category", "Integration")]
-public class WorkerRegistrationDispatcherIntegrationTests : IAsyncLifetime
+public class WorkerRegistrationDispatcherIntegrationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;
 
@@ -30,7 +30,13 @@ public class WorkerRegistrationDispatcherIntegrationTests : IAsyncLifetime
         await _factory.ResetDatabaseAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
     {
         _factory?.Dispose();
     }
