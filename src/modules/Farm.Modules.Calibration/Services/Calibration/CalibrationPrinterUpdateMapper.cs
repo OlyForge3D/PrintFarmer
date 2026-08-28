@@ -77,6 +77,54 @@ public static class CalibrationPrinterUpdateMapper
         return null;
     }
 
+    /// <summary>
+    /// Bounds validation for the new cornering calibration fields
+    /// (<see cref="UpdatePrinterDto.MaxJerk"/>, <see cref="UpdatePrinterDto.JunctionDeviation"/>,
+    /// <see cref="UpdatePrinterDto.SquareCornerVelocity"/>). These are motion-planner tunables
+    /// recorded via the admin-gated <c>PUT /api/printers/{id}</c> endpoint (issue #2138); a
+    /// negative or non-finite value has no physical meaning and must be rejected with 400 rather
+    /// than silently persisted, since it could later be embedded into slicer/firmware
+    /// configuration downstream.
+    /// </summary>
+    /// <returns>A problem payload (suitable for <c>BadRequest</c>) on the first violation, or
+    /// <see langword="null"/> if every present field is within bounds.</returns>
+    public static object? ValidatePrinterMetrology(UpdatePrinterDto update)
+    {
+        if (update.MaxJerk is { } maxJerk && maxJerk < 0)
+        {
+            return new
+            {
+                error = "invalid_printer_metrology",
+                field = "maxJerk",
+                message = "maxJerk must be zero or a positive integer.",
+            };
+        }
+
+        if (update.JunctionDeviation is { } junctionDeviation &&
+            (!double.IsFinite(junctionDeviation) || junctionDeviation < 0))
+        {
+            return new
+            {
+                error = "invalid_printer_metrology",
+                field = "junctionDeviation",
+                message = "junctionDeviation must be a finite value of zero or greater.",
+            };
+        }
+
+        if (update.SquareCornerVelocity is { } squareCornerVelocity &&
+            (!double.IsFinite(squareCornerVelocity) || squareCornerVelocity < 0))
+        {
+            return new
+            {
+                error = "invalid_printer_metrology",
+                field = "squareCornerVelocity",
+                message = "squareCornerVelocity must be a finite value of zero or greater.",
+            };
+        }
+
+        return null;
+    }
+
     public static bool ApplyPrinter(Printer printer, UpdatePrinterDto update)
     {
         bool changed = false;
@@ -99,6 +147,9 @@ public static class CalibrationPrinterUpdateMapper
         changed |= Set(update.MaxTravelSpeed, printer.MaxTravelSpeed, value => printer.MaxTravelSpeed = value);
         changed |= Set(update.MaxAcceleration, printer.MaxAcceleration, value => printer.MaxAcceleration = value);
         changed |= Set(update.MaxTravelAcceleration, printer.MaxTravelAcceleration, value => printer.MaxTravelAcceleration = value);
+        changed |= Set(update.MaxJerk, printer.MaxJerk, value => printer.MaxJerk = value);
+        changed |= Set(update.JunctionDeviation, printer.JunctionDeviation, value => printer.JunctionDeviation = value);
+        changed |= Set(update.SquareCornerVelocity, printer.SquareCornerVelocity, value => printer.SquareCornerVelocity = value);
         changed |= Set(update.CalibrationHasHeatedBed, printer.CalibrationHasHeatedBed, value => printer.CalibrationHasHeatedBed = value);
         changed |= Set(update.CalibrationHasEnclosure, printer.CalibrationHasEnclosure, value => printer.CalibrationHasEnclosure = value);
         changed |= Set(update.HasHeatedChamber, printer.HasHeatedChamber, value => printer.HasHeatedChamber = value);

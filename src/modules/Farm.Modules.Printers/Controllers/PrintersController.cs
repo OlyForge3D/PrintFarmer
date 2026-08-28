@@ -1773,6 +1773,13 @@ public class PrintersController(
             }
         }
 
+        // Validate cornering calibration field bounds (issue #2138) up front, same rationale as
+        // the toolhead metrology check above.
+        if (Farm.Modules.Calibration.Services.Calibration.CalibrationPrinterUpdateMapper.ValidatePrinterMetrology(dto) is { } metrologyProblem)
+        {
+            return BadRequest(metrologyProblem);
+        }
+
         // Capture decrypted credentials BEFORE any modifications to avoid phantom changes
         // from PopulateCredential's decrypt → EncryptSensitiveFieldsOnTrackedEntities's re-encrypt cycle
         string? originalApiKey = p.ApiKey;

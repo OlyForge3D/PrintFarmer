@@ -60,7 +60,8 @@ public sealed class DatabaseMigrationTests
             "20260825185839_DropDeadCalibrationOrchestrationColumns",
             "20260826051847_AddPrinterModelAliasNormalizedLookup",
             "20260827005237_EnforceNormalizedPrinterModelAliasUniqueness",
-            "20260827161050_AddPrinterRotationCursors");
+            "20260827161050_AddPrinterRotationCursors",
+            "20260828155919_AddPrinterCorneringFields");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -594,7 +595,8 @@ public sealed class DatabaseMigrationTests
             "20260825185839_DropDeadCalibrationOrchestrationColumns",
             "20260826051847_AddPrinterModelAliasNormalizedLookup",
             "20260827005237_EnforceNormalizedPrinterModelAliasUniqueness",
-            "20260827161050_AddPrinterRotationCursors");
+            "20260827161050_AddPrinterRotationCursors",
+            "20260828155919_AddPrinterCorneringFields");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1130,6 +1132,7 @@ public sealed class DatabaseMigrationTests
                 "20260826051825_AddPrinterModelAliasNormalizedLookup",
                 "20260827005201_EnforceNormalizedPrinterModelAliasUniqueness",
                 "20260827161010_AddPrinterRotationCursors",
+                "20260828155834_AddPrinterCorneringFields",
             ]
             :
             [
@@ -1155,6 +1158,7 @@ public sealed class DatabaseMigrationTests
                 "20260826051836_AddPrinterModelAliasNormalizedLookup",
                 "20260827005219_EnforceNormalizedPrinterModelAliasUniqueness",
                 "20260827161031_AddPrinterRotationCursors",
+                "20260828155858_AddPrinterCorneringFields",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");
