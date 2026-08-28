@@ -148,8 +148,10 @@ public class CalibrationTests : IDisposable
     [Fact]
     public void IsSlicerSupported_PressureAdvanceTower_ReturnsTrue()
     {
-        // Issue #2136: unlike the YOLO methods, pressure advance tower is fully slicer-supported —
+        // Issue #2136: pressure advance tower is fully slicer-supported —
         // OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync implements it.
+        // (Both YOLO flow-calibration methods are also slicer-supported as of issues
+        // #2141/#2142 — see the dedicated ClientAcceptedWireNames tests below.)
         CalibrationMethods.IsSlicerSupported(CalibrationMethod.PressureAdvanceTower).Should().BeTrue();
     }
 
@@ -1051,6 +1053,40 @@ public class CalibrationTests : IDisposable
             [1] = 0.985,
             [2] = 0.945,
         });
+    }
+
+    [Fact]
+    public void PrepareCalibrationModel_YoloPerfectionistMethod_UnparseableObjectName_ThrowsWithoutLeakingPath()
+    {
+        // Issue #2142 acceptance criterion (control case): an unparseable object name in the
+        // bundled resource must still refuse loudly through the real pipeline entrypoint, not
+        // just the shared static configurator tested in isolation above — and the failure must
+        // not disclose internal worker filesystem paths, mirroring every other calibration
+        // method's equivalent control test in this file.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-yolo-perfectionist-badname-" + Guid.NewGuid().ToString("N"));
+        string resourcePath = Path.Combine(calibResourcesRoot, "filament_flow", "Orca-LinearFlow_fine.3mf");
+        Directory.CreateDirectory(Path.GetDirectoryName(resourcePath)!);
+        CreateSynthetic3mfAt(resourcePath, [("1", "flowrate_0.005"), ("2", "Body_2")]);
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.FlowRateYoloPerfectionist),
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.98 },
+            },
+        };
+
+        Action act = () => pipeline.PrepareCalibrationModel(job, workDir);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Body_2*")
+            .Which.Message.Should().NotContain(
+                calibResourcesRoot,
+                "the exception message must not disclose internal worker filesystem paths");
     }
 
     [Fact]
