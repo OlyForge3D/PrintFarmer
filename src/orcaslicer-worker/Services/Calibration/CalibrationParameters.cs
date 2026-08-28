@@ -70,6 +70,30 @@ public sealed record CalibrationParameters
     public string? FirmwareFlavor { get; init; }
 
     /// <summary>
+    /// Permissive <c>filament_max_volumetric_speed</c> ceiling applied before slicing a VFA
+    /// (resonance speed) calibration (issue #2140), in mm³/s. Verified against upstream source
+    /// (<c>CalibUtils::calib_VFA</c>, <c>src/slic3r/Utils/CalibUtils.cpp</c> in
+    /// OrcaSlicer/OrcaSlicer): <c>filament_config.set_key_value("filament_max_volumetric_speed",
+    /// new ConfigOptionFloats{200})</c> — VFA's own outer-wall speed sweep runs faster than
+    /// <see cref="MaxVolumetricSpeedCeilingMm3s"/>'s 50 would allow, so upstream raises this
+    /// method's ceiling separately rather than reusing the max-volumetric-speed method's value.
+    /// <para>
+    /// Exactly as documented for <see cref="MaxVolumetricSpeedCeilingMm3s"/>, this ceiling is not
+    /// upstream's sweep mechanism: VFA's actual per-layer outer wall speed ramp comes from the
+    /// same live, in-process <c>Print::set_calib_params</c>/<c>calib_mode()</c> override
+    /// (<c>GCode.cpp</c>'s <c>case CalibMode::Calib_VFA_Tower</c>), set only by the GUI wizard
+    /// immediately before slicing, never persisted to the 3MF project file, and with no CLI flag
+    /// — so it is not reachable from this worker's separate-process, CLI-driven pipeline (see the
+    /// fuller explanation on <see cref="Farm.Slicer.Module.Models.CalibrationMethod"/>). This
+    /// ceiling remains a safety margin only: it keeps OrcaSlicer's ordinary flow-based auto
+    /// speed-limiting from clamping the client-selected process profile's print speed below what
+    /// the bundled tower geometry needs while slicing proceeds at that profile's own constant
+    /// speed.
+    /// </para>
+    /// </summary>
+    public double VfaMaxVolumetricSpeedCeilingMm3s { get; init; } = 200;
+
+    /// <summary>
     /// Pressure advance (Klipper) / linear advance (Marlin) value of the bottom-most pressure
     /// advance tower band. See <see cref="Farm.OrcaSlicer.Worker.Services.Calibration.PressureAdvanceTowerGcodeBuilder"/>.
     /// </summary>
@@ -169,6 +193,15 @@ public sealed record CalibrationParameters
                 FirmwareFlavor = ReadStringOrDefault(root, "firmware_flavor", defaults.FirmwareFlavor),
             },
             CalibrationMethod.PressureAdvanceTower => BuildPressureAdvanceTowerParameters(defaults, root),
+            CalibrationMethod.Vfa => defaults with
+            {
+                VfaMaxVolumetricSpeedCeilingMm3s = ReadOrDefault(
+                    root,
+                    "vfa_max_volumetric_speed_ceiling_mm3s",
+                    defaults.VfaMaxVolumetricSpeedCeilingMm3s,
+                    MinVfaVolumetricSpeedCeilingBoundMm3s,
+                    MaxVfaVolumetricSpeedCeilingBoundMm3s),
+            },
             _ => defaults,
         };
     }
@@ -284,6 +317,12 @@ public sealed record CalibrationParameters
     // unusual filaments/nozzles while still rejecting adversarial or malformed input.
     private const double MinVolumetricSpeedCeilingBoundMm3s = 1;
     private const double MaxVolumetricSpeedCeilingBoundMm3s = 100;
+
+    // Upstream's constant ceiling for VFA specifically is 200mm³/s (CalibUtils::calib_VFA), a
+    // separate, higher value than MaximumVolumetricSpeed's own 50mm³/s ceiling above; the bounds
+    // below give a little headroom while still rejecting adversarial or malformed input.
+    private const double MinVfaVolumetricSpeedCeilingBoundMm3s = 1;
+    private const double MaxVfaVolumetricSpeedCeilingBoundMm3s = 250;
 
     /// <summary>
     /// Reads <paramref name="key"/> from <paramref name="root"/>, falling back to

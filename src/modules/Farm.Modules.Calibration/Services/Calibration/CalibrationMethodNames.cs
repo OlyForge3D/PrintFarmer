@@ -70,6 +70,15 @@ public enum CalibrationMethod
     /// filament-profile-clone patch step and no settable <c>Printer</c> field for this method.
     /// </summary>
     InputShaping = 14,
+
+    /// <summary>
+    /// VFA (Vertical Fine Artifacts / resonance speed) sweep. Like <see cref="Cornering"/>, this
+    /// measures the printer's motion system (frame/belt resonance) rather than a filament
+    /// property, and its output is a diagnosis — the speed range that produced visible
+    /// banding — rather than a settable value, so it is report-only: see the architecture
+    /// decision on issue #2140.
+    /// </summary>
+    Vfa = 15,
 }
 
 /// <summary>Canonical wire names for <see cref="CalibrationMethod"/>.</summary>
@@ -120,6 +129,12 @@ public static class CalibrationMethodNames
     /// <summary>Input shaping / resonance-compensation calibration (issue #2139).</summary>
     public const string InputShaping = "input_shaping";
 
+    /// <summary>
+    /// VFA (Vertical Fine Artifacts / resonance speed) sweep. Report-only: see the type-level
+    /// <see cref="CalibrationMethod"/> remarks and issue #2140's architecture decision.
+    /// </summary>
+    public const string Vfa = "vfa";
+
     private static readonly Dictionary<string, CalibrationMethod> ByName =
         new(StringComparer.Ordinal)
         {
@@ -137,6 +152,7 @@ public static class CalibrationMethodNames
             [FinalVerification] = CalibrationMethod.FinalVerification,
             [Cornering] = CalibrationMethod.Cornering,
             [InputShaping] = CalibrationMethod.InputShaping,
+            [Vfa] = CalibrationMethod.Vfa,
         };
 
     /// <summary>Gets every supported canonical method name, in stable order.</summary>
@@ -156,6 +172,7 @@ public static class CalibrationMethodNames
         FinalVerification,
         Cornering,
         InputShaping,
+        Vfa,
     ];
 
     /// <summary>Maps a method to its canonical wire name.</summary>
@@ -178,6 +195,7 @@ public static class CalibrationMethodNames
         CalibrationMethod.FinalVerification => FinalVerification,
         CalibrationMethod.Cornering => Cornering,
         CalibrationMethod.InputShaping => InputShaping,
+        CalibrationMethod.Vfa => Vfa,
         _ => throw new ArgumentOutOfRangeException(
             nameof(method),
             method,
@@ -215,6 +233,7 @@ public static class CalibrationMethodNames
         CalibrationMethod.FinalVerification => "verification",
         CalibrationMethod.Cornering => "cornering",
         CalibrationMethod.InputShaping => "input_shaping",
+        CalibrationMethod.Vfa => "resonance_speed",
         _ => throw new ArgumentOutOfRangeException(
             nameof(method),
             method,
@@ -263,7 +282,8 @@ public static class CalibrationMethodSteps
         CalibrationMethod.Shrinkage or
         CalibrationMethod.FinalVerification or
         CalibrationMethod.Cornering or
-        CalibrationMethod.InputShaping => DefaultSequence,
+        CalibrationMethod.InputShaping or
+        CalibrationMethod.Vfa => DefaultSequence,
         _ => throw new ArgumentOutOfRangeException(
             nameof(method),
             method,

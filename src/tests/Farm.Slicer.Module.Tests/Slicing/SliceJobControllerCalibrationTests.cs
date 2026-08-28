@@ -405,6 +405,49 @@ public sealed class SliceJobControllerCalibrationTests
             Times.Never);
     }
 
+    [Fact]
+    public async Task SubmitAsync_VfaMethod_CreatesOrdinarySliceJobWithNoCalibrationSagaFields()
+    {
+        // Issue #2140 acceptance: the vfa wire name must submit end to end like every other built
+        // calibration method, not just parse, and — like Cornering (#2138) — must never carry
+        // saga fields, since VFA is report-only.
+        SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out Mock<ISliceJobEventService> events);
+        SliceJob? added = null;
+        _ = repository
+            .Setup(instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()))
+            .Callback<SliceJob, CancellationToken>((job, _) => added = job)
+            .Returns(Task.CompletedTask);
+
+        var request = new SubmitSliceJobRequest
+        {
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            Priority = 1,
+            Calibration = new CalibrationRequest
+            {
+                Method = "vfa",
+                Params = new Dictionary<string, double> { ["vfa_max_volumetric_speed_ceiling_mm3s"] = 180 },
+            },
+        };
+
+        IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
+
+        _ = result.Should().BeOfType<CreatedResult>();
+        _ = added.Should().NotBeNull();
+        _ = added!.CalibrationMethod.Should().Be("vfa");
+        _ = added.CalibrationParamsJson.Should().NotBeNullOrEmpty();
+
+        _ = added.CalibrationProjectId.Should().BeNull();
+        _ = added.CalibrationAttemptId.Should().BeNull();
+        _ = added.CalibrationOrchestrationId.Should().BeNull();
+
+        _ = added.ModelFileUrl.Should().Be("calibration:vfa");
+        _ = added.ModelFileName.Should().Be(CalibrationMethods.DefaultModelFileName(CalibrationMethod.Vfa));
+
+        events.Verify(
+            instance => instance.NotifyJobQueuedAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     private static SliceJobController CreateController(
         out Mock<ISliceJobRepository> repository,
         out Mock<ISliceJobEventService> events)

@@ -275,7 +275,15 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// (<c>SpeedTestStructure.drc</c>) is an opaque OrcaSlicer binary format (confirmed by magic
     /// bytes, not a ZIP/3MF archive), so — like the temperature tower's <c>.drc</c> resource — it
     /// cannot be parsed and rewritten the way <see cref="FlowRateCalibrationConfigurator"/>
-    /// rewrites 3MF metadata; it falls through to the generic copy below.
+    /// rewrites 3MF metadata; it falls through to the generic copy below. VFA (resonance speed,
+    /// issue #2140) needs no per-model changes for the same reason: its bundled resource
+    /// (<c>vfa.drc</c>) is likewise an opaque, unrewritable binary — confirmed against upstream
+    /// OrcaSlicer's resource tree and its <c>calib_VFA</c>/<c>Calib_VFA_Tower</c> mechanism (see
+    /// the <c>CalibrationMethod</c> type remarks for the full citation trail) — so it too falls
+    /// through to the generic copy below, and its own permissive ceiling is injected into the
+    /// filament profile in <see cref="RunOrcaSlicerAsync"/> via
+    /// <see cref="ApplyVfaMaxVolumetricSpeedCeilingAsync"/>, mirroring max volumetric speed rather
+    /// than <see cref="FlowRateCalibrationConfigurator"/>'s per-object 3MF rewriting.
     /// </summary>
     internal string PrepareCalibrationModel(DistributedSlicingJob job, string workDir)
     {
@@ -726,6 +734,46 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         {
             string filamentJsonContent = await File.ReadAllTextAsync(path, cancellationToken);
             string updatedFilamentJsonContent = InjectMaxVolumetricSpeedCeiling(filamentJsonContent, parameters.MaxVolumetricSpeedCeilingMm3s);
+            await File.WriteAllTextAsync(path, updatedFilamentJsonContent, cancellationToken);
+            updatedDocuments.Add(updatedFilamentJsonContent);
+        }
+
+        job.FilamentProfileSha256 = ComputeProfileSetSha256(updatedDocuments);
+    }
+
+    /// <summary>
+    /// Sets the VFA (resonance speed) calibration's permissive <c>filament_max_volumetric_speed</c>
+    /// ceiling (issue #2140) on the filament profile(s) on disk and recomputes
+    /// <see cref="DistributedSlicingJob.FilamentProfileSha256"/> so the recorded digest matches the
+    /// mutated content. This mirrors <see cref="ApplyMaxVolumetricSpeedCeilingAsync"/> exactly —
+    /// same JSON key, same <see cref="InjectMaxVolumetricSpeedCeiling"/> helper, same reasoning for
+    /// why no <c>layer_change_gcode</c> injection is attempted — but with the higher ceiling
+    /// upstream's own <c>CalibUtils::calib_VFA</c> uses (200mm³/s, versus max-volumetric-speed's
+    /// 50mm³/s), since VFA's outer-wall sweep runs faster. See
+    /// <see cref="CalibrationParameters.VfaMaxVolumetricSpeedCeilingMm3s"/> and the
+    /// <c>CalibrationMethod</c> type remarks for the full citation trail, including why upstream's
+    /// actual per-layer speed ramp itself is not reachable from this worker's CLI-driven pipeline.
+    /// </summary>
+    /// <param name="job">The claimed job whose <see cref="DistributedSlicingJob.FilamentProfileSha256"/> is updated.</param>
+    /// <param name="filamentJsonPath">
+    /// The value of <c>profilePaths["filament"]</c>: either a single filament JSON path, or — for a
+    /// multi-extruder job — a <c>;</c>-joined list of per-extruder paths, matching the
+    /// <c>--load-filaments</c> argument format produced by <see cref="GenerateProfileJsonFilesAsync"/>.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    internal static async Task ApplyVfaMaxVolumetricSpeedCeilingAsync(
+        DistributedSlicingJob job,
+        string filamentJsonPath,
+        CancellationToken cancellationToken)
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, CalibrationMethod.Vfa);
+
+        string[] paths = filamentJsonPath.Split(';', StringSplitOptions.RemoveEmptyEntries);
+        var updatedDocuments = new List<string>(paths.Length);
+        foreach (string path in paths)
+        {
+            string filamentJsonContent = await File.ReadAllTextAsync(path, cancellationToken);
+            string updatedFilamentJsonContent = InjectMaxVolumetricSpeedCeiling(filamentJsonContent, parameters.VfaMaxVolumetricSpeedCeilingMm3s);
             await File.WriteAllTextAsync(path, updatedFilamentJsonContent, cancellationToken);
             updatedDocuments.Add(updatedFilamentJsonContent);
         }
@@ -1847,6 +1895,16 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         if (isKnownCalibrationMethod && calibrationMethod == CalibrationMethod.MaximumVolumetricSpeed)
         {
             await ApplyMaxVolumetricSpeedCeilingAsync(job, filamentJson, cancellationToken);
+        }
+
+        // VFA (resonance speed) calibration (issue #2140): same permissive-ceiling rationale as
+        // MaximumVolumetricSpeed above, applied before the profile is handed to OrcaSlicer, but
+        // with the higher ceiling upstream's own CalibUtils::calib_VFA uses (200mm3/s vs 50mm3/s)
+        // since VFA's outer-wall sweep runs faster. See ApplyVfaMaxVolumetricSpeedCeilingAsync and
+        // the CalibrationMethod type remarks for the full citation trail.
+        if (isKnownCalibrationMethod && calibrationMethod == CalibrationMethod.Vfa)
+        {
+            await ApplyVfaMaxVolumetricSpeedCeilingAsync(job, filamentJson, cancellationToken);
         }
 
         // Cornering calibration (issue #2138): jerk, junction deviation, and Klipper's
