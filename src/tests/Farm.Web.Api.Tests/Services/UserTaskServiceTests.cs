@@ -992,7 +992,9 @@ public class UserTaskServiceTests
 
     private static async Task<bool> WaitForSignalAsync(Task signal, TimeSpan timeout)
     {
+#pragma warning disable VSTHRD003 // signal is a caller-supplied Task (typically a TaskCompletionSource) this helper waits on with a timeout; not a foreign/UI-thread task in the deadlock sense the rule targets.
         Task completedTask = await Task.WhenAny(signal, Task.Delay(timeout));
+#pragma warning restore VSTHRD003
         return completedTask == signal;
     }
 

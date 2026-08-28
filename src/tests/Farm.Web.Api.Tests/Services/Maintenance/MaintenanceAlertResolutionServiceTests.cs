@@ -553,7 +553,9 @@ public sealed class MaintenanceAlertResolutionServiceTests : IDisposable
             async Task<MaintenanceAlertResolutionResult?> ResolveAsync(
                 string resolvedBy)
             {
+#pragma warning disable VSTHRD003 // start is a TaskCompletionSource this test controls to line up concurrent ResolveAsync calls at the same instant; not a foreign/UI-thread task.
                 await start.Task;
+#pragma warning restore VSTHRD003
                 await using var context = new AppDbContext(options);
                 var service = new MaintenanceAlertResolutionService(context);
                 return await service.ResolveWithLogAsync(

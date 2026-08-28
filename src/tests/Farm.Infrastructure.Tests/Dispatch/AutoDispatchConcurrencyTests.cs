@@ -1455,7 +1455,9 @@ public class AutoDispatchConcurrencyTests : IDisposable
                     using CancellationTokenRegistration registration = cancellationToken.Register(
                         () => cancellationObserved.TrySetResult());
                     dispatchEntered.TrySetResult();
+#pragma warning disable VSTHRD003 // releaseDispatch is a TaskCompletionSource this test controls to hold the dispatch open while it observes cancellation; not a foreign/UI-thread task.
                     await releaseDispatch.Task;
+#pragma warning restore VSTHRD003
                     cancellationToken.ThrowIfCancellationRequested();
                     return new QueuedPrintJobDto();
                 });
@@ -1660,7 +1662,9 @@ public class AutoDispatchConcurrencyTests : IDisposable
 
             Task complete = Task.Run(async () =>
             {
+#pragma warning disable VSTHRD003 // startRace is a TaskCompletionSource this test uses to line up two racing Task.Run bodies at the same instant; not a foreign/UI-thread task.
                 await startRace.Task;
+#pragma warning restore VSTHRD003
                 completedWithInlineRerun = trigger.TryCompleteProcessing(
                     first,
                     allowRerun: true,
@@ -1668,7 +1672,9 @@ public class AutoDispatchConcurrencyTests : IDisposable
             });
             Task enqueue = Task.Run(async () =>
             {
+#pragma warning disable VSTHRD003 // startRace is a TaskCompletionSource this test uses to line up two racing Task.Run bodies at the same instant; not a foreign/UI-thread task.
                 await startRace.Task;
+#pragma warning restore VSTHRD003
                 trigger.NotifyJobQueued(printerId);
             });
 

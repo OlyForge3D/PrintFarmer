@@ -374,7 +374,9 @@ public sealed class ProfileFamilyServiceTests
             _ = firstRequestCommitted.TrySetResult(true);
         }
 
+#pragma warning disable VSTHRD003 // secondClone was started earlier in this method; awaiting it here is the FluentAssertions ThrowAsync idiom for asserting the pending call observes concurrency conflict, not a foreign/UI-thread task.
         Func<Task> act = async () => _ = await secondClone;
+#pragma warning restore VSTHRD003
 
         await act.Should()
             .ThrowAsync<ProfileFamilyConflictException>()
@@ -1825,7 +1827,9 @@ public sealed class ProfileFamilyServiceTests
 
         _ = await firstEdit;
         _ = firstCommitted.TrySetResult();
+#pragma warning disable VSTHRD003 // secondEdit was started earlier in this method; awaiting it here is the FluentAssertions ThrowAsync idiom for asserting the pending call observes concurrency conflict, not a foreign/UI-thread task.
         Func<Task> secondAct = async () => await secondEdit;
+#pragma warning restore VSTHRD003
         _ = await secondAct.Should().ThrowAsync<ProfileFamilyConcurrencyException>();
 
         await using SlicerDbContext assertionContext = new(options);
@@ -1895,7 +1899,9 @@ public sealed class ProfileFamilyServiceTests
         await deleteService.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
         _ = deleteCommitted.TrySetResult();
 
+#pragma warning disable VSTHRD003 // render was started earlier in this method; awaiting it here is the FluentAssertions ThrowAsync idiom for asserting the pending call observes the concurrent delete, not a foreign/UI-thread task.
         Func<Task> renderAct = async () => await render;
+#pragma warning restore VSTHRD003
         _ = await renderAct.Should().ThrowAsync<ProfileFamilyConcurrentlyDeletedException>();
         renderWorker.Verify(
             client => client.DeleteBundleAsync(null, familyId, It.IsAny<CancellationToken>()),

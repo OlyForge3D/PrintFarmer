@@ -1332,7 +1332,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 .Returns(async () =>
                 {
                     backendEntered.TrySetResult(true);
+#pragma warning disable VSTHRD003 // releaseBackend is a TaskCompletionSource this test controls to hold the mocked upload/print call open; not a foreign/UI-thread task.
                     await releaseBackend.Task;
+#pragma warning restore VSTHRD003
                     return UploadAndPrintResult.Ok("cancel-race-start");
                 });
             printers.Setup(service => service.ExecuteControlAsync(
@@ -2374,7 +2376,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 .Returns(async () =>
                 {
                     backendEntered.TrySetResult(true);
+#pragma warning disable VSTHRD003 // releaseBackend is a TaskCompletionSource this test controls to hold the mocked upload/print call open; not a foreign/UI-thread task.
                     await releaseBackend.Task;
+#pragma warning restore VSTHRD003
                     return UploadAndPrintResult.Ok("dispatch-etag-winner");
                 });
             var storage = new Mock<IStoragePathService>();
@@ -2559,7 +2563,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             .Returns(async () =>
             {
                 winnerEntered.TrySetResult(true);
+#pragma warning disable VSTHRD003 // releaseWinner is a TaskCompletionSource this test controls to hold the mocked spool lookup open; not a foreign/UI-thread task.
                 await releaseWinner.Task;
+#pragma warning restore VSTHRD003
                 return (SpoolmanSpoolDto?)null;
             });
         var loserSpoolman = new Mock<ISpoolmanService>();
@@ -2569,7 +2575,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             .Returns(async () =>
             {
                 loserEntered.TrySetResult(true);
+#pragma warning disable VSTHRD003 // releaseLoser is a TaskCompletionSource this test controls to hold the mocked spool lookup open; not a foreign/UI-thread task.
                 await releaseLoser.Task;
+#pragma warning restore VSTHRD003
                 return (SpoolmanSpoolDto?)null;
             });
         var management = new Mock<IPrintJobManagementService>();

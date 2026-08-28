@@ -78,7 +78,9 @@ public class SystemProfileReconciliationServiceTests
         await svc.ReconcileAsync(CancellationToken.None);
 
         await svc.StartAsync(CancellationToken.None);
+#pragma warning disable VSTHRD003 // ExecuteTask is BackgroundService's own framework-owned task started by StartAsync; awaiting it here is the standard test pattern for driving a hosted service to completion.
         await svc.ExecuteTask!;
+#pragma warning restore VSTHRD003
         await svc.StopAsync(CancellationToken.None);
 
         Assert.True(svc.ExecuteTask.IsCompletedSuccessfully);
@@ -100,7 +102,9 @@ public class SystemProfileReconciliationServiceTests
         _ = profiles.Setup(p => p.SeedSystemProfilesFromWorkerAsync(It.IsAny<HttpClient>(), It.IsAny<CancellationToken>()))
             .Returns(async () =>
             {
+#pragma warning disable VSTHRD003 // gate is a TaskCompletionSource this test controls to hold the mocked reconciliation open; not a foreign/UI-thread task.
                 await gate.Task;
+#pragma warning restore VSTHRD003
                 return new { imported = 0 };
             });
 

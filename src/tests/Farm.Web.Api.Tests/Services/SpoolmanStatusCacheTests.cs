@@ -34,7 +34,9 @@ public sealed class SpoolmanStatusCacheTests
             .Returns(() =>
             {
                 requestStarted.SetResult();
+#pragma warning disable VSTHRD003 // releaseRequest is a TaskCompletionSource this test controls to hold the mocked spool lookup open; not a foreign/UI-thread task.
                 return releaseRequest.Task;
+#pragma warning restore VSTHRD003
             });
 #pragma warning restore IDISP013
         using ServiceProvider services = BuildServices(spoolman.Object);
@@ -109,7 +111,9 @@ public sealed class SpoolmanStatusCacheTests
             .Returns(() =>
             {
                 requestStarted.SetResult();
+#pragma warning disable VSTHRD003 // releaseRequest is a TaskCompletionSource this test controls to hold the mocked spool lookup open; not a foreign/UI-thread task.
                 return releaseRequest.Task;
+#pragma warning restore VSTHRD003
             });
 #pragma warning restore IDISP013
         using ServiceProvider services = BuildServices(spoolman.Object);
@@ -124,7 +128,9 @@ public sealed class SpoolmanStatusCacheTests
         Task<SpoolmanSpoolDto?> follower = cache.GetSpoolAsync(21, CancellationToken.None);
         leaderCancellation.Cancel();
 
+#pragma warning disable VSTHRD003 // leader was started earlier in this method; awaiting it here asserts the pending call observes cancellation, not a foreign/UI-thread task.
         _ = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => leader);
+#pragma warning restore VSTHRD003
 
         var expected = new SpoolmanSpoolDto(21, "PETG", "PETG", 600, null, false);
         releaseRequest.SetResult(expected);

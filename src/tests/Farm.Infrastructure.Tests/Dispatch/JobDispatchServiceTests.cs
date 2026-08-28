@@ -349,7 +349,9 @@ public sealed class JobDispatchServiceTests : IDisposable
             .Returns(() =>
             {
                 downstreamEntered.TrySetResult();
+#pragma warning disable VSTHRD003 // releaseDownstream is a TaskCompletionSource this test controls to hold the downstream call open; not a foreign/UI-thread task.
                 return releaseDownstream.Task;
+#pragma warning restore VSTHRD003
             });
         JobDispatchService service = CreateService(
             management,

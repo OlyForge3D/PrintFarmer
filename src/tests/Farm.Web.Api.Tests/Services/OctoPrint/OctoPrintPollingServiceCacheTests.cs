@@ -256,7 +256,9 @@ public class OctoPrintPollingServiceCacheTests : IDisposable
             .Returns(() =>
             {
                 fetchStarted.TrySetResult();
+#pragma warning disable VSTHRD003 // fetchResult is a TaskCompletionSource this test controls to hold the mocked repository call open; not a foreign/UI-thread task.
                 return fetchResult.Task;
+#pragma warning restore VSTHRD003
             });
 
         using CancellationTokenSource cts = new();
@@ -334,7 +336,9 @@ public class OctoPrintPollingServiceCacheTests : IDisposable
             .Returns(() =>
             {
                 fetchStarted.TrySetResult();
+#pragma warning disable VSTHRD003 // fetchResult is a TaskCompletionSource this test controls to hold the mocked repository call open; not a foreign/UI-thread task.
                 return fetchResult.Task;
+#pragma warning restore VSTHRD003
             });
 
         Task reconcileTask = (Task)_reconcilePrintersOnceAsync.Invoke(_service, [CancellationToken.None])!;
@@ -400,7 +404,9 @@ public class OctoPrintPollingServiceCacheTests : IDisposable
             .Returns(() =>
             {
                 fetchStarted.TrySetResult();
+#pragma warning disable VSTHRD003 // fetchResult is a TaskCompletionSource this test controls to hold the mocked repository call open; not a foreign/UI-thread task.
                 return fetchResult.Task;
+#pragma warning restore VSTHRD003
             });
 
         Task reconcileTask = (Task)_reconcilePrintersOnceAsync.Invoke(_service, [CancellationToken.None])!;

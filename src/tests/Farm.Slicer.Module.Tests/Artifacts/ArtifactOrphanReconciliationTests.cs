@@ -252,7 +252,9 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
                 async (artifact, _) =>
                 {
                     repositoryEntered.SetResult(artifact);
+#pragma warning disable VSTHRD003 // allowRepositoryCommit is a TaskCompletionSource this test controls to hold the mocked repository commit open; not a foreign/UI-thread task.
                     await allowRepositoryCommit.Task;
+#pragma warning restore VSTHRD003
                     return artifact;
                 });
         using ArtifactsMetrics metrics = new();
@@ -320,7 +322,9 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
                 async (artifact, _) =>
                 {
                     repositoryEntered.SetResult(artifact);
+#pragma warning disable VSTHRD003 // allowRepositoryCommit is a TaskCompletionSource this test controls to hold the mocked repository commit open; not a foreign/UI-thread task.
                     await allowRepositoryCommit.Task;
+#pragma warning restore VSTHRD003
                     return artifact;
                 });
         using ArtifactsMetrics metrics = new();

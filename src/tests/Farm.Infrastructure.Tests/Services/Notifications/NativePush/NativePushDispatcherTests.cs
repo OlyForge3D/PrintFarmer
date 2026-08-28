@@ -2779,7 +2779,9 @@ public sealed class NativePushDispatcherTests
         await cancelledLookupEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         cancellation.Cancel();
 
+#pragma warning disable VSTHRD003 // cancelledResolution was started earlier in this method; awaiting it here is the FluentAssertions ThrowAsync idiom for asserting the pending call observes cancellation, not a foreign/UI-thread task.
         Func<Task> awaitCancelledResolution = async () => await cancelledResolution;
+#pragma warning restore VSTHRD003
         await awaitCancelledResolution.Should().ThrowAsync<OperationCanceledException>();
 
         await sut.DispatchAsync(
@@ -4922,7 +4924,9 @@ public sealed class NativePushDispatcherTests
         await firstSettlementWait.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         firstCts.Cancel();
+#pragma warning disable VSTHRD003 // r2First was started earlier in this method; awaiting it here is the FluentAssertions ThrowAsync idiom for asserting the pending call observes cancellation, not a foreign/UI-thread task.
         Func<Task> awaitCancelledFirst = async () => await r2First;
+#pragma warning restore VSTHRD003
         await awaitCancelledFirst.Should().ThrowAsync<OperationCanceledException>();
 
         // R2 retry (same v2, global). On the buggy version-blind design
@@ -5041,7 +5045,9 @@ public sealed class NativePushDispatcherTests
         await firstSettlementWait.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         firstCts.Cancel();
+#pragma warning disable VSTHRD003 // r2First was started earlier in this method; awaiting it here is the FluentAssertions ThrowAsync idiom for asserting the pending call observes cancellation, not a foreign/UI-thread task.
         Func<Task> awaitCancelledFirst = async () => await r2First;
+#pragma warning restore VSTHRD003
         await awaitCancelledFirst.Should().ThrowAsync<OperationCanceledException>();
 
         Task r2Retry = sut.DispatchAsync(
@@ -5151,7 +5157,9 @@ public sealed class NativePushDispatcherTests
 
         await gate.WaitForPausedAsync().WaitAsync(TimeSpan.FromSeconds(30));
         firstCts.Cancel();
+#pragma warning disable VSTHRD003 // r2First was started earlier in this method; awaiting it here is the FluentAssertions ThrowAsync idiom for asserting the pending call observes cancellation, not a foreign/UI-thread task.
         Func<Task> awaitCancelledFirst = async () => await r2First;
+#pragma warning restore VSTHRD003
         await awaitCancelledFirst.Should().ThrowAsync<OperationCanceledException>();
         gate.DisarmPause();
         gate.ReleasePause();
@@ -5983,7 +5991,9 @@ public sealed class NativePushDispatcherTests
             // token, not the sender's own — matching the interface contract
             // that the dispatcher never relies solely on the sender.
             readyToCancel.TrySetResult();
+#pragma warning disable VSTHRD003 // releaseSender is a TaskCompletionSource this test controls to hold the send open; not a foreign/UI-thread task.
             await releaseSender.Task;
+#pragma warning restore VSTHRD003
             Interlocked.Increment(ref tryStartCalls);
             if (!(await transportStart.TryStartAsync(CancellationToken.None)).IsPermitted)
             {

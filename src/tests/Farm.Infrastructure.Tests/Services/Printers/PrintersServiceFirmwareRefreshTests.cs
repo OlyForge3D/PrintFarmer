@@ -587,7 +587,9 @@ public sealed class PrintersServiceFirmwareRefreshTests
             .Returns(async (CancellationToken token) =>
             {
                 requestAEnteredSaveSignal.TrySetResult();
+#pragma warning disable VSTHRD003 // releaseRequestASaveSignal is a TaskCompletionSource this test controls to hold the save open; not a foreign/UI-thread task.
                 await releaseRequestASaveSignal.Task;
+#pragma warning restore VSTHRD003
                 return await dbA.SaveChangesAsync(token);
             });
         PrintersService serviceA = CreateService(dbA, unitOfWorkA.Object);

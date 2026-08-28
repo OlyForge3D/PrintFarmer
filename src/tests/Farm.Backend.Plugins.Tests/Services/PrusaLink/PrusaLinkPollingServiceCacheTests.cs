@@ -231,7 +231,9 @@ public class PrusaLinkPollingServiceCacheTests : IDisposable
             .Returns(async () =>
             {
                 fetchStarted.SetResult();
+#pragma warning disable VSTHRD003 // releaseFetch is a TaskCompletionSource this test controls to deterministically pause the fetch; not a foreign/UI-thread task.
                 await releaseFetch.Task;
+#pragma warning restore VSTHRD003
                 return stale;
             });
 
