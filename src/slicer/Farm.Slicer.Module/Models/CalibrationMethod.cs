@@ -20,9 +20,32 @@
 /// not blocked by anything (upstream OrcaSlicer already implements both —
 /// <c>Plater::calib_max_vol_speed</c>/<c>Plater::calib_retraction</c> and their
 /// <c>CalibMode::Calib_Vol_speed_Tower</c>/<c>CalibMode::Calib_Retraction_tower</c> modes exist
-/// in <c>calib_dlg.cpp</c>). "Retraction" still has no resource resolver, configurator, or
-/// pipeline wiring in this repo. "Max volumetric speed" gained all three in issue #2135; see
+/// in <c>calib_dlg.cpp</c>); both are now built — see <see cref="Retraction"/> and
 /// <see cref="MaximumVolumetricSpeed"/>.
+/// </para>
+/// <para>
+/// <see cref="Retraction"/> (issue #2137): the bundled <c>retraction_tower.drc</c> resource is a
+/// single raw Draco mesh with no per-object names or metadata — unlike the flow-rate towers'
+/// 3MF resources, there is nothing here for a <c>FlowRateCalibrationConfigurator</c>-style
+/// per-object rewrite to target. Upstream's native sweep
+/// (<c>CalibMode::Calib_Retraction_tower</c> in <c>GCode.cpp</c>) mutates the slicing engine's
+/// internal <c>retraction_length</c> config directly per layer, a hook the CLI-driven worker
+/// cannot reach. The worker instead reimplements the sweep via a <c>layer_change_gcode</c>
+/// injection (mirroring <see cref="TemperatureTower"/>'s <c>M104</c> approach) that issues
+/// <c>M207 S...</c> once per Z-band, and forces the machine profile's
+/// <c>use_firmware_retraction</c> setting on for these jobs — <c>M207</c> only takes effect when
+/// firmware retraction is enabled, since software retraction bakes the retraction length into
+/// <c>G1 E...</c> moves at slice time instead of reading it live. Enabling firmware retraction
+/// also forces every extruder's <c>wipe</c> setting off: upstream's <c>PrintConfig::validate()</c>
+/// hard-rejects <c>use_firmware_retraction=1</c> combined with any extruder's <c>wipe=1</c>
+/// (real vendor profiles commonly ship wipe enabled), and that check runs even in CLI mode, so
+/// leaving it untouched would fail slicing outright rather than merely producing a bad result.
+/// This produces a per-band
+/// <em>retraction length</em> result; write-back into a filament profile (as opposed to a
+/// machine profile) is the calibration-consumer's job and is intentionally out of scope for the
+/// worker — see the issue for the recommendation that a future desktop-side workflow store the
+/// selected band's length as a filament override, analogous to how flow-rate results are
+/// consumed today.
 /// </para>
 /// <para>
 /// <see cref="MaximumVolumetricSpeed"/> (issue #2135): upstream's <c>CalibUtils::calib_max_vol_speed</c>
@@ -128,6 +151,14 @@ public enum CalibrationMethod
     FlowRateYoloPerfectionist,
 
     /// <summary>
+    /// Retraction tower calibration (issue #2137). See the type-level remarks for how the worker
+    /// reimplements upstream's native per-band sweep via injected <c>layer_change_gcode</c> plus
+    /// a forced <c>use_firmware_retraction</c> machine-profile setting, and for the deliberate
+    /// out-of-scope note on filament-profile write-back.
+    /// </summary>
+    Retraction,
+
+    /// <summary>
     /// Maximum volumetric speed calibration (issue #2135). See the type-level remarks for the
     /// resource format and the permissive-ceiling configurator this method needs.
     /// </summary>
@@ -164,6 +195,7 @@ public static class CalibrationMethods
             ["temperature_tower"] = CalibrationMethod.TemperatureTower,
             ["flow_rate_yolo_recommended"] = CalibrationMethod.FlowRateYoloRecommended,
             ["flow_rate_yolo_perfectionist"] = CalibrationMethod.FlowRateYoloPerfectionist,
+            ["retraction"] = CalibrationMethod.Retraction,
             ["max_volumetric_speed"] = CalibrationMethod.MaximumVolumetricSpeed,
 
             // Matches Farm.Modules.Calibration.Services.Calibration.CalibrationMethodNames.PressureAdvanceTower
@@ -180,6 +212,7 @@ public static class CalibrationMethods
             [CalibrationMethod.TemperatureTower] = "temperature_tower",
             [CalibrationMethod.FlowRateYoloRecommended] = "flow_rate_yolo_recommended",
             [CalibrationMethod.FlowRateYoloPerfectionist] = "flow_rate_yolo_perfectionist",
+            [CalibrationMethod.Retraction] = "retraction",
             [CalibrationMethod.MaximumVolumetricSpeed] = "max_volumetric_speed",
             [CalibrationMethod.PressureAdvanceTower] = "pressure_advance_tower",
             [CalibrationMethod.Cornering] = "cornering",
@@ -267,6 +300,7 @@ public static class CalibrationMethods
         CalibrationMethod.TemperatureTower => "temperature_tower.drc",
         CalibrationMethod.FlowRateYoloRecommended => "Orca-LinearFlow.3mf",
         CalibrationMethod.FlowRateYoloPerfectionist => "Orca-LinearFlow_fine.3mf",
+        CalibrationMethod.Retraction => "retraction_tower.drc",
         CalibrationMethod.MaximumVolumetricSpeed => "SpeedTestStructure.drc",
         CalibrationMethod.PressureAdvanceTower => "tower_with_seam.drc",
         CalibrationMethod.Cornering => "SCV-V2.drc",
@@ -284,6 +318,7 @@ public static class CalibrationMethods
         CalibrationMethod.TemperatureTower => Path.Combine("temperature_tower", "temperature_tower.drc"),
         CalibrationMethod.FlowRateYoloRecommended => Path.Combine("filament_flow", "Orca-LinearFlow.3mf"),
         CalibrationMethod.FlowRateYoloPerfectionist => Path.Combine("filament_flow", "Orca-LinearFlow_fine.3mf"),
+        CalibrationMethod.Retraction => Path.Join("retraction", "retraction_tower.drc"),
         CalibrationMethod.MaximumVolumetricSpeed => Path.Combine("volumetric_speed", "SpeedTestStructure.drc"),
         CalibrationMethod.PressureAdvanceTower => Path.Combine("pressure_advance", "tower_with_seam.drc"),
         CalibrationMethod.Cornering => Path.Combine("cornering", "SCV-V2.drc"),

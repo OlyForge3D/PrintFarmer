@@ -863,6 +863,39 @@ public sealed class CalibrationProjectServiceTests
     }
 
     [Theory]
+    [InlineData(0.0)]
+    [InlineData(0.3)]
+    [InlineData(10.0)]
+    public async Task AppendObservationAsync_RetractionLengthInRange_Succeeds(decimal retractionLengthMm)
+    {
+        // Mirrors AppendObservationAsync_PressureAdvanceInRange_Succeeds: issue #2137 added
+        // CalibrationMeasurementRanges.RetractionLength (retraction_length_mm, 0.0..10.0mm) but no
+        // test previously exercised D8's ValidateMeasurementRange for the "retraction" kind.
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, $"retraction-in-range-{retractionLengthMm}"),
+            actor,
+            CancellationToken.None);
+        Guid attemptId = await AddAttemptAsync(
+            db,
+            project.Value!.Id,
+            actor.Subject,
+            sequence: 1,
+            CalibrationMethodNames.Retraction);
+
+        CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
+            attemptId,
+            CreateMeasurementRequest($"retraction-in-range-{retractionLengthMm}", "retraction_length_mm", retractionLengthMm),
+            actor,
+            CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status201Created);
+    }
+
+    [Theory]
     [InlineData(25)]
     [InlineData(1)]
     [InlineData(60)]
@@ -892,6 +925,36 @@ public sealed class CalibrationProjectServiceTests
             CancellationToken.None);
 
         _ = result.StatusCode.Should().Be(StatusCodes.Status201Created);
+    }
+
+    [Theory]
+    [InlineData(-0.01)]
+    [InlineData(10.01)]
+    public async Task AppendObservationAsync_RetractionLengthOutOfRange_ReturnsValidationError(decimal retractionLengthMm)
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, $"retraction-out-of-range-{retractionLengthMm}"),
+            actor,
+            CancellationToken.None);
+        Guid attemptId = await AddAttemptAsync(
+            db,
+            project.Value!.Id,
+            actor.Subject,
+            sequence: 1,
+            CalibrationMethodNames.Retraction);
+
+        CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
+            attemptId,
+            CreateMeasurementRequest($"retraction-out-of-range-{retractionLengthMm}", "retraction_length_mm", retractionLengthMm),
+            actor,
+            CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        _ = result.Code.Should().Be("observation_measurement_out_of_range");
     }
 
     [Theory]

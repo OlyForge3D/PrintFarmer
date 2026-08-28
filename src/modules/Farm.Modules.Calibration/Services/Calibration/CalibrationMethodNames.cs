@@ -294,6 +294,9 @@ public static class CalibrationMeasurementRanges
     /// <summary>Plausible pressure advance (linear advance) coefficient range.</summary>
     public static readonly CalibrationMeasurementRange PressureAdvance = new("pressure_advance", 0.0m, 2.0m);
 
+    /// <summary>Plausible retraction length range in millimetres.</summary>
+    public static readonly CalibrationMeasurementRange RetractionLength = new("retraction_length_mm", 0.0m, 10.0m);
+
     /// <summary>
     /// Plausible maximum volumetric speed range in mm³/s for a user-reported calibration
     /// <em>observation</em> — the value the user settles on after inspecting the printed tower,
@@ -315,6 +318,7 @@ public static class CalibrationMeasurementRanges
         "temperature" => Temperature,
         "flow" => FlowRatio,
         "pressure_advance" => PressureAdvance,
+        "retraction" => RetractionLength,
         "max_volumetric_speed" => MaximumVolumetricSpeed,
         _ => null,
     };

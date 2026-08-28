@@ -265,16 +265,17 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// <summary>
     /// Resolves and prepares the local calibration model for <paramref name="job"/> (issue #1938),
     /// applying per-object flow-ratio overrides for the flow-rate methods. The temperature tower
-    /// and max volumetric speed and pressure advance tower (issue #2136) methods need no
-    /// per-model changes here; their per-band/permissive configuration is injected into the
-    /// process/filament profile in <see cref="RunOrcaSlicerAsync"/> (see
-    /// <see cref="ApplyTemperatureTowerGcodeAsync"/> and
-    /// <see cref="ApplyPressureAdvanceTowerGcodeAsync"/>). Max volumetric speed's bundled
-    /// resource (<c>SpeedTestStructure.drc</c>) is an opaque OrcaSlicer binary format (confirmed
-    /// by magic bytes, not a ZIP/3MF archive), so — like the temperature tower's <c>.drc</c>
-    /// resource — it cannot be parsed and rewritten the way
-    /// <see cref="FlowRateCalibrationConfigurator"/> rewrites 3MF metadata; it falls through to
-    /// the generic copy below.
+    /// and retraction tower methods need no per-model changes here; their per-band configuration
+    /// is injected into the process (and, for retraction, machine) profile in
+    /// <see cref="RunOrcaSlicerAsync"/>. The max volumetric speed and pressure advance tower
+    /// (issue #2136) methods likewise need no per-model changes: their permissive/per-band
+    /// configuration is injected into the filament/process profile in
+    /// <see cref="RunOrcaSlicerAsync"/> (see <see cref="ApplyTemperatureTowerGcodeAsync"/> and
+    /// <see cref="ApplyPressureAdvanceTowerGcodeAsync"/>). Max volumetric speed's bundled resource
+    /// (<c>SpeedTestStructure.drc</c>) is an opaque OrcaSlicer binary format (confirmed by magic
+    /// bytes, not a ZIP/3MF archive), so — like the temperature tower's <c>.drc</c> resource — it
+    /// cannot be parsed and rewritten the way <see cref="FlowRateCalibrationConfigurator"/>
+    /// rewrites 3MF metadata; it falls through to the generic copy below.
     /// </summary>
     internal string PrepareCalibrationModel(DistributedSlicingJob job, string workDir)
     {
@@ -468,6 +469,66 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     }
 
     /// <summary>
+    /// Injects the retraction tower's per-band <c>layer_change_gcode</c> hook (issue #2137) into
+    /// the process profile on disk, and forces the machine profile's
+    /// <c>use_firmware_retraction</c> setting on — see <see cref="RetractionTowerGcodeBuilder"/>
+    /// for why the injected firmware-retraction-length command has no effect without it.
+    /// Recomputes both <see cref="DistributedSlicingJob.ProcessProfileSha256"/> and
+    /// <see cref="DistributedSlicingJob.MachineProfileSha256"/> so the recorded digests match the
+    /// mutated content.
+    /// </summary>
+    /// <remarks>
+    /// Firmware-flavour decision (mirrors <see cref="ApplyPressureAdvanceTowerGcodeAsync"/> for the
+    /// exact same reason): the runtime command that sets the firmware's retraction length differs
+    /// by firmware (<c>M207 S...</c> on Marlin/Marlin2, <c>SET_RETRACTION RETRACT_LENGTH=...</c> on
+    /// Klipper — Klipper does not recognize <c>M207</c>/<c>M208</c> at all), so this reads the
+    /// machine profile's <c>gcode_flavor</c> field and resolves it via
+    /// <see cref="PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor"/> (reused rather than
+    /// duplicated: it is a general firmware-flavour resolver, not specific to pressure advance).
+    /// Any other flavour (or a missing/unparsable machine profile) is refused with an explicit
+    /// <see cref="InvalidOperationException"/> here, before the OrcaSlicer binary ever runs — this
+    /// calibration method must never silently slice a tower that never varies retraction at all.
+    /// </remarks>
+    internal static async Task ApplyRetractionTowerGcodeAsync(
+        DistributedSlicingJob job,
+        string processJsonPath,
+        string machineJsonPath,
+        CancellationToken cancellationToken)
+    {
+        string machineJsonContent = await File.ReadAllTextAsync(machineJsonPath, cancellationToken);
+
+        string? gcodeFlavor = PressureAdvanceTowerGcodeBuilder.ReadGcodeFlavor(machineJsonContent);
+        CalibrationFirmwareFlavor? flavor = PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor(gcodeFlavor);
+        if (flavor is null)
+        {
+            // Truncate the untrusted, client-influenced gcode_flavor value before echoing it into
+            // the exception message: an adversarial machine profile could otherwise smuggle an
+            // arbitrarily large string into job failure telemetry/logs.
+            string flavorForMessage = gcodeFlavor is null ? "(unset)" : TruncateForMessage(gcodeFlavor);
+            throw new InvalidOperationException(
+                $"Retraction tower calibration requires a Klipper or Marlin/Marlin2 machine profile " +
+                $"(gcode_flavor); the resolved firmware flavour '{flavorForMessage}' is not supported.");
+        }
+
+        CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, CalibrationMethod.Retraction);
+        string layerChangeGcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            flavor.Value,
+            parameters.StartRetractionMm,
+            parameters.RetractionStepMm,
+            parameters.RetractionBandHeightMm,
+            parameters.RetractionBandCount);
+
+        string processJsonContent = await File.ReadAllTextAsync(processJsonPath, cancellationToken);
+        string updatedProcessJsonContent = InjectLayerChangeGcode(processJsonContent, layerChangeGcode);
+        await File.WriteAllTextAsync(processJsonPath, updatedProcessJsonContent, cancellationToken);
+        job.ProcessProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedProcessJsonContent);
+
+        string updatedMachineJsonContent = EnableFirmwareRetraction(machineJsonContent);
+        await File.WriteAllTextAsync(machineJsonPath, updatedMachineJsonContent, cancellationToken);
+        job.MachineProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedMachineJsonContent);
+    }
+
+    /// <summary>
     /// Injects the pressure advance tower's per-band <c>layer_change_gcode</c> hook (issue #2136)
     /// into the process profile on disk and recomputes <see cref="DistributedSlicingJob.ProcessProfileSha256"/>
     /// so the recorded digest matches the mutated content.
@@ -541,6 +602,55 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string updatedProcessJsonContent = InjectLayerChangeGcode(processJsonContent, layerChangeGcode);
         await File.WriteAllTextAsync(processJsonPath, updatedProcessJsonContent, cancellationToken);
         job.ProcessProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedProcessJsonContent);
+    }
+
+    /// <summary>
+    /// Sets <c>use_firmware_retraction</c> on a machine profile JSON document, so the retraction
+    /// tower's injected <c>M207</c> gcode (see <see cref="RetractionTowerGcodeBuilder"/>) has any
+    /// physical effect. Stored as the string <c>"1"</c> to match the settings-dictionary string
+    /// convention <see cref="SettingsDictToNativeJson"/> emits for other keys in this profile
+    /// format.
+    /// <para>
+    /// Also forces <c>wipe</c> (a per-extruder <c>coBools</c> array) off. OrcaSlicer's own config
+    /// validator (<c>PrintConfig::validate</c>) hard-rejects the combination of
+    /// <c>use_firmware_retraction=true</c> with any extruder's <c>wipe=true</c> — a real vendor
+    /// machine profile (BambuLab/Prusa/Creality/Voron all ship <c>wipe</c> enabled) would
+    /// otherwise cause the CLI to exit before slicing with <c>CLI_INVALID_VALUES_IN_3MF</c>,
+    /// while every unit test in this repo (which never invokes the real OrcaSlicer CLI) stayed
+    /// green. Retraction calibration jobs don't need wipe-while-retracting, so disabling it here
+    /// is safe for the duration of the calibration slice.
+    /// </para>
+    /// </summary>
+    internal static string EnableFirmwareRetraction(string machineJson)
+    {
+        JsonNode rootNode = JsonNode.Parse(machineJson)
+            ?? throw new InvalidOperationException("Machine profile JSON is empty.");
+        if (rootNode is not JsonObject rootObject)
+        {
+            throw new InvalidOperationException("Machine profile JSON root must be an object.");
+        }
+
+        rootObject["use_firmware_retraction"] = "1";
+
+        if (rootObject["wipe"] is JsonArray existingWipe)
+        {
+            var disabledWipe = new JsonArray();
+            for (int i = 0; i < existingWipe.Count; i++)
+            {
+                disabledWipe.Add(JsonValue.Create("0"));
+            }
+
+            rootObject["wipe"] = disabledWipe;
+        }
+        else
+        {
+            // Missing (defaults to false per this repo's own settings metadata) or a
+            // non-array shape we don't otherwise recognize: write an explicit single-extruder
+            // "off" array rather than relying on upstream's default resolution.
+            rootObject["wipe"] = new JsonArray(JsonValue.Create("0"));
+        }
+
+        return rootObject.ToJsonString();
     }
 
     /// <summary>
@@ -1677,16 +1787,24 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string processJson = profilePaths["process"];
         string filamentJson = profilePaths["filament"];
 
-        // Temperature tower calibration (issue #1938) and pressure advance tower calibration
-        // (issue #2136): inject the per-band layer_change_gcode hook here, before the profile is
-        // handed to OrcaSlicer, so the gate check below and the slice itself both see the final,
-        // calibration-aware process profile.
+        // Temperature tower / retraction tower calibration (issues #1938, #2137) and pressure
+        // advance tower calibration (issue #2136): inject the per-band layer_change_gcode hook
+        // here, before the profile is handed to OrcaSlicer, so the gate check below and the
+        // slice itself both see the final, calibration-aware process (and, for retraction,
+        // machine) profile.
         bool isKnownCalibrationMethod = CalibrationMethods.TryParse(job.CalibrationMethod, out CalibrationMethod calibrationMethod);
-        if (isKnownCalibrationMethod && (calibrationMethod == CalibrationMethod.TemperatureTower || calibrationMethod == CalibrationMethod.PressureAdvanceTower))
+        if (isKnownCalibrationMethod
+            && (calibrationMethod == CalibrationMethod.TemperatureTower
+                || calibrationMethod == CalibrationMethod.Retraction
+                || calibrationMethod == CalibrationMethod.PressureAdvanceTower))
         {
             if (calibrationMethod == CalibrationMethod.TemperatureTower)
             {
                 await ApplyTemperatureTowerGcodeAsync(job, processJson, cancellationToken);
+            }
+            else if (calibrationMethod == CalibrationMethod.Retraction)
+            {
+                await ApplyRetractionTowerGcodeAsync(job, processJson, machineJson, cancellationToken);
             }
             else if (calibrationMethod == CalibrationMethod.PressureAdvanceTower)
             {
