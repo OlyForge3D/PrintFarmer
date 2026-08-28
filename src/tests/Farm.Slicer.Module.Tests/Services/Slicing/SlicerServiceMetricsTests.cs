@@ -22,7 +22,7 @@ public class SlicerServiceMetricsTests : IDisposable
     public void Constructor_InitializesAllMetrics()
     {
         // Act
-        var metrics = new SlicerServiceMetrics();
+        using var metrics = new SlicerServiceMetrics();
 
         // Assert - verify all metrics are created and not null
         Assert.NotNull(metrics.JobsSubmittedTotal);
@@ -45,8 +45,6 @@ public class SlicerServiceMetricsTests : IDisposable
         Assert.NotNull(metrics.ApiKeyRotationsTotal);
         Assert.NotNull(metrics.ApiKeyRotationFailuresTotal);
         Assert.NotNull(metrics.JobFailuresByReason);
-
-        metrics.Dispose();
     }
 
     #endregion
@@ -513,8 +511,11 @@ public class SlicerServiceMetricsTests : IDisposable
         // Arrange
         var metrics = new SlicerServiceMetrics();
 
-        // Act
+        // Act - IDISP017: intentionally not a using-declaration; this test exercises the
+        // explicit Dispose() call itself, which a using-declaration would hide.
+#pragma warning disable IDISP017
         metrics.Dispose();
+#pragma warning restore IDISP017
 
         // Assert - no exception on disposal
         Assert.True(true);
@@ -526,9 +527,13 @@ public class SlicerServiceMetricsTests : IDisposable
         // Arrange
         var metrics = new SlicerServiceMetrics();
 
-        // Act - dispose multiple times
+        // Act - dispose multiple times. IDISP017: intentionally not a using-declaration -
+        // this test exercises idempotent double-Dispose() behavior directly, which a
+        // using-declaration (single implicit Dispose() call) cannot express.
+#pragma warning disable IDISP017
         metrics.Dispose();
         metrics.Dispose();
+#pragma warning restore IDISP017
 
         // Assert - no exception on second dispose
         Assert.True(true);

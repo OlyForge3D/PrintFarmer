@@ -148,14 +148,12 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime, IDisposable
         await _harvestRepository.SaveChangesAsync();
 
         // Assert - Verify persistence in new context to ensure actual DB save
-        AppDbContext newContext = new AppDbContext(_dbOptions);
+        using AppDbContext newContext = new AppDbContext(_dbOptions);
         EfHarvestRepository newRepo = new EfHarvestRepository(newContext);
 
         GcodeHarvestOperation? persistedOp = await newRepo.GetOperationByIdAsync(operationId);
         _ = persistedOp.Should().NotBeNull();
         _ = persistedOp!.Status.Should().Be(GcodeHarvestStatus.Cancelled);
         _ = persistedOp.CompletedAt.Should().NotBeNull();
-
-        newContext.Dispose();
     }
 }

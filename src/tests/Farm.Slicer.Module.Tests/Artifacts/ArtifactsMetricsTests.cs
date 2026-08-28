@@ -48,7 +48,7 @@ public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClass
         IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         _ = scope.ServiceProvider.GetRequiredService<ArtifactsMetrics>();
 
-        MeterListener meterListener = new MeterListener();
+        using MeterListener meterListener = new MeterListener();
         List<long> counterValues = new List<long>();
         List<long> histogramValues = new List<long>();
 
@@ -94,8 +94,6 @@ public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClass
 
         _ = counterValues.Should().Contain(1, "upload counter should record increment of 1");
         _ = histogramValues.Should().Contain(content.Length, "histogram should record exact file size");
-
-        meterListener.Dispose();
     }
 
     [Fact(DisplayName = "Storage gauge reflects cumulative size")]
@@ -106,7 +104,7 @@ public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClass
         IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         _ = scope.ServiceProvider.GetRequiredService<ArtifactsMetrics>();
 
-        MeterListener meterListener = new MeterListener();
+        using MeterListener meterListener = new MeterListener();
         List<long> gaugeValues = new List<long>();
 
         meterListener.InstrumentPublished = (instrument, listener) =>
@@ -156,8 +154,6 @@ public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClass
 
         _ = (finalGaugeValue - initialGaugeValue).Should().Be(expectedIncrease,
             "gauge should reflect cumulative size of both uploads");
-
-        meterListener.Dispose();
     }
 
     [Fact(DisplayName = "Multiple uploads increment counter correctly")]
@@ -167,7 +163,7 @@ public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClass
         using IServiceScope scope = _factory.Services.CreateScope();
         IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
 
-        MeterListener meterListener = new MeterListener();
+        using MeterListener meterListener = new MeterListener();
         long counterTotal = 0;
 
         meterListener.InstrumentPublished = (instrument, listener) =>
@@ -206,7 +202,5 @@ public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClass
         // other collection in the assembly runs concurrently with this one (see the collection
         // definition), so nothing else can be recording uploads on this counter right now.
         _ = counterTotal.Should().Be(5, "counter should increment for each upload");
-
-        meterListener.Dispose();
     }
 }

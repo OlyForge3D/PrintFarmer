@@ -620,7 +620,6 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
             publishedPath,
             stagingPath,
             stagingStream.SafeFileHandle);
-        stagingStream.Dispose();
         File.Delete(stagingPath);
 
         (await File.ReadAllTextAsync(publishedPath)).Should().Be("pinned");
@@ -658,7 +657,6 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
                 stagingPath,
                 stagingStream.SafeFileHandle);
         publish.Should().Throw<IOException>();
-        stagingStream.Dispose();
         File.Delete(stagingPath);
 
         File.Exists(publishedPath).Should().BeFalse();
