@@ -679,14 +679,15 @@ public class CalibrationTests : IDisposable
     [Fact]
     public void PrepareCalibrationModel_RetractionMethod_CopiesResourceUnmodified()
     {
-        // Mirrors PrepareCalibrationModel_TemperatureTowerMethod_CopiesResourceUnmodified: the
-        // bundled retraction_tower.drc resource is a single raw Draco mesh with no per-object
-        // names to configure (issue #2137), so — like TemperatureTower — the worker must copy it
-        // unmodified here and inject its per-band gcode later, in RunOrcaSlicerAsync.
+        // Mirrors PrepareCalibrationModel_TemperatureTowerMethod_CopiesResourceUnmodified, but
+        // compares raw bytes rather than text: the bundled retraction_tower.drc resource is a
+        // binary Draco mesh (issue #2137), and a text-based round trip could mask corruption from
+        // an encoding conversion that a byte-for-byte comparison would catch immediately.
         string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-retraction");
         string towerPath = Path.Combine(calibResourcesRoot, "retraction", "retraction_tower.drc");
         Directory.CreateDirectory(Path.GetDirectoryName(towerPath)!);
-        File.WriteAllText(towerPath, "fake-retraction-tower-resource");
+        byte[] fakeDracoBytes = [0x44, 0x52, 0x41, 0x43, 0x4F, 0x00, 0xFF, 0xFE, 0x80, 0x01, 0x02, 0x03];
+        File.WriteAllBytes(towerPath, fakeDracoBytes);
 
         OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
         string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
@@ -699,7 +700,7 @@ public class CalibrationTests : IDisposable
         string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
 
         File.Exists(preparedPath).Should().BeTrue();
-        File.ReadAllText(preparedPath).Should().Be("fake-retraction-tower-resource");
+        File.ReadAllBytes(preparedPath).Should().Equal(fakeDracoBytes, "a binary Draco mesh must survive the copy byte-for-byte, not just as valid text");
     }
 
     [Theory]
