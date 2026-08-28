@@ -3,7 +3,7 @@ using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using FluentValidation;
 
-namespace Farm.Web.Api.Validators;
+namespace Farm.Modules.Printers.Validators;
 
 /// <summary>
 /// Validates printer creation requests to ensure data integrity and security

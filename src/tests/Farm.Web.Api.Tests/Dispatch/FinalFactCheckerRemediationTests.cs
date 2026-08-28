@@ -21,8 +21,8 @@ using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Tests.Dispatch;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Controllers.Requests;
+using Farm.Modules.Printers.Controllers;
+using Farm.Modules.Printers.Controllers.Requests;
 using FluentAssertions;
 using FluentValidation;
 using Microsoft.AspNetCore.Http;
@@ -1208,7 +1208,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         var controller = new PrintersController(
             logger: Mock.Of<Microsoft.Extensions.Logging.ILogger<PrintersController>>(),
             printersService: printers,
-            catalogService: Mock.Of<Farm.Web.Api.Services.Catalog.ICatalogService>(),
+            catalogService: Mock.Of<Farm.Modules.Printers.Services.Catalog.ICatalogService>(),
             validator: Mock.Of<IValidator<CreatePrinterFromDiscoveryDto>>(),
             discoveryProxyService: Mock.Of<
                 Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService>(),

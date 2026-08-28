@@ -1,10 +1,10 @@
 ﻿using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Services.Gcode;
+using Farm.Modules.Gcode.Services.Gcode;
 using FluentAssertions;
 using Moq;
 
-namespace Farm.Web.Api.Tests.Services;
+namespace Farm.Modules.Gcode.Tests.Services;
 
 /// <summary>
 /// Tests for PersistedGcodeUploadSettingsAdapter which bridges IGcodeUploadSettings

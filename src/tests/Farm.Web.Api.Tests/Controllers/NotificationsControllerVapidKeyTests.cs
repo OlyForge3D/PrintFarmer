@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.Notifications;
+using Farm.Modules.Observability.Controllers;
 using Farm.Web.Api.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;

@@ -21,8 +21,9 @@ AdminHomeAssistantController, AdminTelegramController}, SettingsController,
 UnifiedSettingsController, AdminOverviewService, and
 DiscoveryHeartbeatMonitorService out of Farm.Web.Api. Registers via
 IApiModule (see Farm.Modules.Abstractions, issue #2035). Phase 14 of the
-module-decomposition epic #2019 -- namespaces are intentionally unchanged from
-their prior Farm.Web.Api location (move-first-rename-last).
+module-decomposition epic #2019. Namespaces were renamed from
+Farm.Web.Api.* to Farm.Modules.Administration.* by Phase 19 (issue #2047),
+completing the move-first-rename-last strategy.
 DiscoveryHeartbeatMonitorService is not explicitly named by issue #2042, but
 moved alongside UnifiedSettingsController (its only consumer) to avoid a
 circular Farm.Web.Api -> Farm.Modules.Administration -> Farm.Web.Api

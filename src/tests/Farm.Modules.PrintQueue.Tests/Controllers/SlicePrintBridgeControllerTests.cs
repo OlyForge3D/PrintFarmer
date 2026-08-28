@@ -7,12 +7,12 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Modules.PrintQueue.Controllers;
+using Farm.Modules.PrintQueue.Controllers.Requests;
+using Farm.Modules.PrintQueue.Controllers.Responses;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Services.Gcode.Safety;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -21,7 +21,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.PrintQueue.Tests.Controllers;
 
 /// <summary>
 /// Unit tests for <see cref="SlicePrintBridgeController"/>.

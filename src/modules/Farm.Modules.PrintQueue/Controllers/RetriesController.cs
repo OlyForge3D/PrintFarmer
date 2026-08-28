@@ -3,12 +3,12 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Interfaces;
-using Farm.Web.Api.DTOs.Retries;
+using Farm.Modules.PrintQueue.DTOs.Retries;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.PrintQueue.Controllers;
 
 /// <summary>
 /// REST API endpoints for managing job retry logic

@@ -1,4 +1,6 @@
-﻿namespace Farm.Web.Api.Services.Gcode.Safety;
+﻿using Farm.Web.Api.Services.Gcode.Safety;
+
+namespace Farm.Modules.Gcode.Services.Gcode.Safety;
 
 /// <summary>
 /// Deterministic decimal planar geometry used to keep every emitted coordinate inside the

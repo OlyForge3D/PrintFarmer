@@ -1,8 +1,9 @@
-﻿using Farm.Web.Api.Services.Gcode.Safety;
+﻿using Farm.Modules.Gcode.Services.Gcode.Safety;
+using Farm.Web.Api.Services.Gcode.Safety;
 using FluentAssertions;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.Gcode.Safety;
+namespace Farm.Modules.Gcode.Tests.Services.Gcode.Safety;
 
 /// <summary>
 /// Extraction-correctness tests for <see cref="GcodeSafetyValidator"/>, the general,

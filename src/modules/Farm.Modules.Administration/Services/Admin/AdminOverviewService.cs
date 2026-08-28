@@ -8,7 +8,7 @@ using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Admin;
+namespace Farm.Modules.Administration.Services.Admin;
 
 /// <summary>
 /// Aggregates <see cref="HealthCheckService"/> results into a single admin overview snapshot.

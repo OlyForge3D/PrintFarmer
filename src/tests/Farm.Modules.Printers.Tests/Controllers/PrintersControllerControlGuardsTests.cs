@@ -10,8 +10,8 @@ using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Controllers.Requests;
+using Farm.Modules.Printers.Controllers;
+using Farm.Modules.Printers.Controllers.Requests;
 using FluentValidation;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -19,7 +19,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Printers.Tests.Controllers;
 
 /// <summary>
 /// Unit tests for the server-side capability guards on PrintersController control endpoints
@@ -113,7 +113,7 @@ public class PrintersControllerControlGuardsTests
         var controller = new PrintersController(
             logger: Mock.Of<ILogger<PrintersController>>(),
             printersService: printersService.Object,
-            catalogService: Mock.Of<Farm.Web.Api.Services.Catalog.ICatalogService>(),
+            catalogService: Mock.Of<Farm.Modules.Printers.Services.Catalog.ICatalogService>(),
             validator: Mock.Of<IValidator<CreatePrinterFromDiscoveryDto>>(),
             discoveryProxyService: Mock.Of<Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService>(),
             discoverySessions: Mock.Of<Farm.Infrastructure.Services.Discovery.IDiscoverySessionRegistry>(),

@@ -4,10 +4,11 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Tests;
 using FluentAssertions;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Administration.Tests.Controllers;
 
 /// <summary>
 /// Security regression coverage for issue #950: the three <c>[AllowAnonymous]</c> endpoints on

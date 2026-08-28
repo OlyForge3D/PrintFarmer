@@ -1,4 +1,4 @@
-﻿using Farm.Web.Api.Services.Workers;
+﻿using Farm.Modules.Observability.Services.Workers;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Services;

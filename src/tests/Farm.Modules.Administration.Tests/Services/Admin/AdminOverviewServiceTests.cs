@@ -5,14 +5,14 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Web.Api.Services.Admin;
+using Farm.Modules.Administration.Services.Admin;
 using FluentAssertions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.Admin;
+namespace Farm.Modules.Administration.Tests.Services.Admin;
 
 /// <summary>
 /// Unit tests for <see cref="AdminOverviewService"/>. These verify that the aggregation:

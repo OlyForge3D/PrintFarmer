@@ -1,5 +1,5 @@
-﻿using Farm.Web.Api.Services.PowerMonitor;
-using Farm.Web.Api.Services.SmartPlug;
+﻿using Farm.Modules.SmartPlug.Services.PowerMonitor;
+using Farm.Modules.SmartPlug.Services.SmartPlug;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.PowerMonitor;
+namespace Farm.Modules.SmartPlug.Tests.Services.PowerMonitor;
 
 /// <summary>
 /// Validates that <see cref="PowerMonitorPollingService"/> correctly resolves scoped

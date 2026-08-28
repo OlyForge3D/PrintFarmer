@@ -1,8 +1,8 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Catalog;
-using Farm.Web.Api.Controllers.Requests;
+using Farm.Modules.Printers.Controllers.Requests;
 
-namespace Farm.Web.Api.Services.Catalog;
+namespace Farm.Modules.Printers.Services.Catalog;
 
 /// <summary>
 /// API adapter that wraps Infrastructure ICatalogService.

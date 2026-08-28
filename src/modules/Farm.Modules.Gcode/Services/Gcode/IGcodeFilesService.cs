@@ -7,10 +7,10 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Quota;
-using Farm.Web.Api.DTOs;
+using Farm.Modules.Gcode.DTOs;
 using Microsoft.AspNetCore.Http;
 
-namespace Farm.Web.Api.Services.Gcode;
+namespace Farm.Modules.Gcode.Services.Gcode;
 
 /// <summary>
 /// Unified service for managing G-code files with both file browser and library operations.

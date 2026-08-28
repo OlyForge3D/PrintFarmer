@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace Farm.Web.Api.DTOs.SignalR;
+namespace Farm.Modules.PrintQueue.DTOs.SignalR;
 
 public sealed record DispatchUploadProgressDto
 {

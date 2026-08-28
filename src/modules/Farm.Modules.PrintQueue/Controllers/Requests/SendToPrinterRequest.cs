@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Controllers.Requests;
+﻿namespace Farm.Modules.PrintQueue.Controllers.Requests;
 
 /// <summary>
 /// Request body for sending a completed slice job's gcode to a printer.

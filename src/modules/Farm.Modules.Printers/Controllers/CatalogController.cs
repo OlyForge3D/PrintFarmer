@@ -4,13 +4,13 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Exceptions;
 using Farm.Infrastructure.Normalization;
-using Farm.Web.Api.Controllers.Requests;
+using Farm.Modules.Printers.Controllers.Requests;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Printers.Controllers;
 
 /// <summary>
 /// Provides endpoints for managing printer manufacturer and model catalog data.

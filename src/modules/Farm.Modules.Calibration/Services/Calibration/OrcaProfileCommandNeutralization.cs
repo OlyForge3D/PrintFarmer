@@ -2,7 +2,7 @@
 using System.Text;
 using System.Text.Json;
 
-namespace Farm.Web.Api.Services.Calibration;
+namespace Farm.Modules.Calibration.Services.Calibration;
 
 /// <summary>
 /// The rule that decides which native upstream-Orca profile keys can carry arbitrary commands,

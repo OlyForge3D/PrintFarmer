@@ -4,13 +4,13 @@ using Farm.Infrastructure.Dtos.Maintenance;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Maintenance;
-using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.DTOs;
+using Farm.Modules.Maintenance.Controllers.Requests;
+using Farm.Modules.Maintenance.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Maintenance.Controllers;
 
 /// <summary>
 /// API controller for maintenance components (global parts inventory).

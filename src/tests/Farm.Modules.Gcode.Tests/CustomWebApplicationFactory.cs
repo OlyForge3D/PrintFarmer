@@ -15,12 +15,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Tests;
+namespace Farm.Modules.Gcode.Tests;
 
 /// <summary>
 /// Slicer-on <see cref="HostFixture{TEntryPoint}"/> sub-fixture for
 /// <c>Farm.Modules.Gcode.Tests</c> (issue #2039, epic #2019). This module's
-/// <see cref="Farm.Web.Api.Controllers.GcodeFilesController"/>/<c>GcodeLibraryController</c>
+/// <see cref="Farm.Modules.Gcode.Controllers.GcodeFilesController"/>/<c>GcodeLibraryController</c>
 /// integration coverage needs the slicer module registered (artifact-to-gcode promotion depends
 /// on it), so — unlike <c>SlicerDisabledWebApplicationFactory</c> — this factory always leaves
 /// <c>AddSlicerModule</c> enabled. Deliberately a narrow subset of

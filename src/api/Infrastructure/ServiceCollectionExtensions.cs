@@ -29,9 +29,8 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
+using Farm.Modules.Printers.Services.Discovery;
 using Farm.Web.Api.Extensions;
-using Farm.Web.Api.Services.Authentication;
-using Farm.Web.Api.Services.Discovery;
 using Farm.Web.Api.Services.SlicerHost;
 using Farm.Web.Api.Services.Startup;
 using Farm.Web.Api.Services.StorageManagement;
@@ -540,7 +539,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Catalog.ICatalogService, Farm.Infrastructure.Services.Catalog.CatalogService>();
 
         // Register API adapter that wraps Infrastructure service to work with request DTOs
-        _ = services.AddScoped<Services.Catalog.ICatalogService, Services.Catalog.CatalogServiceAdapter>();
+        _ = services.AddScoped<Farm.Modules.Printers.Services.Catalog.ICatalogService, Farm.Modules.Printers.Services.Catalog.CatalogServiceAdapter>();
 
         _ = services.AddScoped<Farm.Infrastructure.Services.Filament.IFilamentTypeService, Farm.Infrastructure.Services.Filament.FilamentTypeService>();
 
@@ -630,7 +629,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IMultiPrinterStatusCoordinator, Farm.Infrastructure.Services.Printers.MultiPrinterStatusCoordinator>();
 
         // Register SignalR printer status broadcaster - abstracts real-time broadcasting for any UI implementation
-        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterStatusBroadcaster, Services.Printers.SignalRPrinterStatusBroadcaster>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterStatusBroadcaster, Farm.Modules.Printers.Services.Printers.SignalRPrinterStatusBroadcaster>();
 
         // Register LocationService from Infrastructure layer - location management service
         _ = services.AddScoped<Farm.Infrastructure.Services.Locations.ILocationService, Farm.Infrastructure.Services.Locations.LocationService>();
@@ -691,7 +690,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Sync.ILibrarySyncService, Farm.Infrastructure.Services.Sync.LibrarySyncService>();
 
         // Task services (user task management)
-        _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.ITaskBroadcaster, Services.Tasks.SignalRTaskBroadcaster>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.ITaskBroadcaster, Farm.Modules.Observability.Services.Tasks.SignalRTaskBroadcaster>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.IUserTaskService, Farm.Infrastructure.Services.Tasks.UserTaskService>();
 
         // Shift-plan compiler (issue #713): materializes attention, maintenance,
@@ -754,7 +753,7 @@ public static class ServiceCollectionExtensions
     {
         _ = services.AddScoped<Farm.Infrastructure.Services.Setup.ISetupService, Farm.Infrastructure.Services.Setup.SetupService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.SchemaHealth.ISchemaHealthService, Farm.Infrastructure.Services.SchemaHealth.SchemaHealthService>();
-        _ = services.AddScoped<Farm.Infrastructure.Services.SignalR.ISignalRTestService, Services.SignalR.SignalRTestService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.SignalR.ISignalRTestService, Farm.Modules.Observability.Services.SignalR.SignalRTestService>();
     }
 
     private static void RegisterBackendClientPlugins(IServiceCollection services, IConfiguration configuration)

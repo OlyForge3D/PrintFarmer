@@ -5,12 +5,13 @@ using System.Text.Json.Serialization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
-using Farm.Web.Api.Controllers.Admin;
+using Farm.Modules.Identity.Controllers.Admin;
+using Farm.Web.Api.Tests;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Identity.Tests.Controllers;
 
 /// <summary>
 /// Integration tests for <see cref="SecurityAuditController"/>.

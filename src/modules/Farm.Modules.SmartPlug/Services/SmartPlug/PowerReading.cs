@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Services.SmartPlug;
+﻿namespace Farm.Modules.SmartPlug.Services.SmartPlug;
 
 /// <summary>
 /// Instantaneous power reading from a smart plug device.

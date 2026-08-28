@@ -1,17 +1,17 @@
-﻿using Farm.Api.Controllers;
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Exceptions;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Tags;
+using Farm.Modules.Inventory.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Inventory.Tests.Controllers;
 
 public class TagsControllerTests
 {

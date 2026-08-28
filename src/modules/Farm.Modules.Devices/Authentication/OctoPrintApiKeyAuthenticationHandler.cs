@@ -1,11 +1,11 @@
 ﻿using System.Security.Claims;
 using System.Text.Encodings.Web;
-using Farm.Web.Api.Services.OctoPrint;
+using Farm.Modules.Devices.Services.OctoPrint;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Authentication;
+namespace Farm.Modules.Devices.Authentication;
 
 /// <summary>
 /// Constants identifying the OctoPrint API key authentication scheme, so it can be
@@ -19,7 +19,7 @@ public static class OctoPrintApiKeyDefaults
 
 /// <summary>
 /// Real ASP.NET Core authentication scheme for the OctoPrint-compatible <c>X-Api-Key</c>
-/// header. Unlike the legacy <see cref="Farm.Web.Api.Filters.OctoPrintApiKeyAttribute"/>
+/// header. Unlike the legacy <see cref="Farm.Modules.Devices.Filters.OctoPrintApiKeyAttribute"/>
 /// (an MVC authorization filter), this handler runs as part of the standard authentication
 /// pipeline, so a validated key produces a genuine <see cref="ClaimsPrincipal"/> for the
 /// key's owning user *before* ASP.NET Core's authorization middleware evaluates

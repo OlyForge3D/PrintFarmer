@@ -18,8 +18,9 @@ FilaMan firmware read endpoint. Moves Services/Catalog/**,
 Services/Discovery/**, Services/Printers/**, Validators/CreatePrinterValidator.cs,
 and 8 controllers out of Farm.Web.Api as part of issue #2046 (Phase 18 of epic
 #2019), following the move-first-rename-last module migration pattern.
-Namespaces remain unchanged (`Farm.Web.Api.Controllers`/
-`Farm.Web.Api.Services.*`). PrintersController moves as-is with no internal
+Namespaces were renamed from `Farm.Web.Api.Controllers`/`Farm.Web.Api.Services.*`
+to `Farm.Modules.Printers.Controllers`/`Farm.Modules.Printers.Services.*` by
+Phase 19 (issue #2047). PrintersController moves as-is with no internal
 decomposition (out of scope; a follow-up epic). Underlying services remain
 registered by Farm.Infrastructure / Farm.Web.Api host-wide DI and are not
 moved in this phase.</Description>
@@ -35,14 +36,14 @@ moved in this phase.</Description>
     <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Core\Farm.Backend.Plugin.Core.csproj" />
     <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
     <!-- PrintersController's test-connection and camera-URL actions reuse the
-         shared TestConnectionResponse / CameraUrlResult DTOs, which stayed
-         under the (unchanged) Farm.Web.Api.Controllers.Responses namespace
-         but physically moved into Farm.Modules.PrintQueue during Phase 8
-         (#2036). -->
+         shared TestConnectionResponse / CameraUrlResult DTOs, which physically
+         moved into Farm.Modules.PrintQueue during Phase 8 (#2036) and now live
+         under Farm.Modules.PrintQueue.Controllers.Responses following the
+         Phase 19 (#2047) namespace rename. -->
     <ProjectReference Include="..\Farm.Modules.PrintQueue\Farm.Modules.PrintQueue.csproj" />
     <!-- PrintersController's toolhead-metrology update path calls
-         CalibrationPrinterUpdateMapper (Farm.Web.Api.Services.Calibration,
-         unchanged namespace), which physically lives in
+         CalibrationPrinterUpdateMapper (Farm.Modules.Calibration.Services.Calibration
+         following the Phase 19 (#2047) namespace rename), which physically lives in
          Farm.Modules.Calibration since Phase 11 (#2039). -->
     <ProjectReference Include="..\Farm.Modules.Calibration\Farm.Modules.Calibration.csproj" />
   </ItemGroup>

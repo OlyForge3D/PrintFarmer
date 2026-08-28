@@ -12,6 +12,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Testing.Shared;
+using Farm.Web.Api.Tests;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -22,14 +23,14 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Inventory.Tests.Controllers;
 
 /// <summary>
 /// Integration tests for <c>/api/printers/filament-coverage</c> and
 /// <c>/api/printers/{id}/filament-coverage</c> (issue #709). Focused on the
 /// controller pipeline: authorization, JSON contract (camelCase + string
 /// enums), and fleet performance envelope. Deep coverage math is covered by
-/// <see cref="Services.FilamentCoverageServiceTests"/>.
+/// <see cref="Farm.Web.Api.Tests.Services.FilamentCoverageServiceTests"/>.
 /// </summary>
 [Trait("Category", "Integration")]
 public class FilamentCoverageControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime

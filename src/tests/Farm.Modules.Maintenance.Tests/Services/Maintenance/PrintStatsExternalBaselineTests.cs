@@ -10,7 +10,7 @@ using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Security;
-using Farm.Web.Api.Services.Maintenance;
+using Farm.Modules.Maintenance.Services.Maintenance;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,7 +19,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.Maintenance;
+namespace Farm.Modules.Maintenance.Tests.Services.Maintenance;
 
 /// <summary>
 /// Regression coverage for issue #711 round-5 BLOCKER: the external-backend baseline used for

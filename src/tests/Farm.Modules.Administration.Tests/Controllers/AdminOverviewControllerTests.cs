@@ -1,12 +1,12 @@
 ﻿using Farm.Infrastructure.Dtos;
-using Farm.Web.Api.Controllers.Admin;
-using Farm.Web.Api.Services.Admin;
+using Farm.Modules.Administration.Controllers.Admin;
+using Farm.Modules.Administration.Services.Admin;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Administration.Tests.Controllers;
 
 /// <summary>
 /// Verifies the admin overview controller is a thin pass-through to the aggregation service:

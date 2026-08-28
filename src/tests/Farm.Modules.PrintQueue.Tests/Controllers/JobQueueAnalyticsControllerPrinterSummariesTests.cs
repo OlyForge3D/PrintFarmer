@@ -1,18 +1,18 @@
-﻿using Farm.Api.Controllers;
-using Farm.Infrastructure.Authorization;
+﻿using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Modules.PrintQueue.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.PrintQueue.Tests.Controllers;
 
 /// <summary>
 /// Tests for <see cref="JobQueueAnalyticsController.GetPrinterQueueSummariesAsync"/> (PR 1146,

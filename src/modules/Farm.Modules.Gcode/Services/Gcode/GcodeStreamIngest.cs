@@ -1,7 +1,7 @@
 ﻿using System;
 using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.Services.Gcode;
+namespace Farm.Modules.Gcode.Services.Gcode;
 
 /// <summary>
 /// Immutable lineage stamped onto a G-code file that was produced by promoting a slicer artifact.

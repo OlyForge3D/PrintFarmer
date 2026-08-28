@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Identity.Controllers;
 
 /// <summary>
 /// Manages print quotas and user balances for cost/count/weight limiting.

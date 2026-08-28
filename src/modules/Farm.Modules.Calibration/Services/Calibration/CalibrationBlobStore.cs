@@ -6,7 +6,7 @@ using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.Formats.Webp;
 
-namespace Farm.Web.Api.Services.Calibration;
+namespace Farm.Modules.Calibration.Services.Calibration;
 
 /// <summary>Configuration limits for private calibration-photo storage.</summary>
 public sealed class CalibrationBlobStorageOptions

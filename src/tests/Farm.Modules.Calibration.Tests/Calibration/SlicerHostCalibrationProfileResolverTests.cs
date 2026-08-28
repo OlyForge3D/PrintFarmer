@@ -3,12 +3,12 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.PrinterCalibration;
-using Farm.Web.Api.Services.Calibration;
+using Farm.Modules.Calibration.Services.Calibration;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Tests.Calibration;
+namespace Farm.Modules.Calibration.Tests.Calibration;
 
 /// <summary>
 /// Behaviour of the split-deployment resolver adapter: it must forward the end user's own bearer

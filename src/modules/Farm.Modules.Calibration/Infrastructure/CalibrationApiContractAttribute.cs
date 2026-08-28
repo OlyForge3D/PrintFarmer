@@ -1,6 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc.Filters;
 
-namespace Farm.Web.Api.Infrastructure;
+namespace Farm.Modules.Calibration.Infrastructure;
 
 /// <summary>
 /// Applies the additive Desktop API contract negotiation to calibration

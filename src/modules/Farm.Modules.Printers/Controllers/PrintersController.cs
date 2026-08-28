@@ -28,8 +28,8 @@ using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.Controllers.Responses;
+using Farm.Modules.Printers.Controllers.Requests;
+using Farm.Modules.PrintQueue.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Infrastructure.Idempotency;
 using Farm.Web.Api.Services;
@@ -45,7 +45,7 @@ using MoonrakerEndpointResolution = Farm.Infrastructure.Services.Printers.Moonra
 using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.MoonrakerOnboardingResolver;
 using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerToolAttributionCapability;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Printers.Controllers;
 
 /// <summary>
 /// API controller for managing printers and printer-related operations.
@@ -1766,7 +1766,7 @@ public class PrintersController(
         {
             foreach (UpdateToolheadDto toolheadDto in dto.Toolheads)
             {
-                if (Services.Calibration.CalibrationPrinterUpdateMapper.ValidateToolheadMetrology(toolheadDto) is { } problem)
+                if (Farm.Modules.Calibration.Services.Calibration.CalibrationPrinterUpdateMapper.ValidateToolheadMetrology(toolheadDto) is { } problem)
                 {
                     return BadRequest(problem);
                 }
@@ -2063,7 +2063,7 @@ public class PrintersController(
             }
         }
 
-        capabilityChanged |= Services.Calibration.CalibrationPrinterUpdateMapper.ApplyPrinter(p, dto);
+        capabilityChanged |= Farm.Modules.Calibration.Services.Calibration.CalibrationPrinterUpdateMapper.ApplyPrinter(p, dto);
 
         // Only update LastCapabilityUpdate if capability fields actually changed
         if (capabilityChanged)
@@ -2141,7 +2141,7 @@ public class PrintersController(
                         toolheadChanged = true;
                     }
 
-                    toolheadChanged |= Services.Calibration.CalibrationPrinterUpdateMapper.ApplyToolhead(
+                    toolheadChanged |= Farm.Modules.Calibration.Services.Calibration.CalibrationPrinterUpdateMapper.ApplyToolhead(
                         toolhead,
                         toolheadDto);
 

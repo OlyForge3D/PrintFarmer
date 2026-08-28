@@ -1,5 +1,5 @@
 ﻿using System.Reflection;
-using Farm.Web.Api.Services.Calibration;
+using Farm.Modules.Calibration.Services.Calibration;
 using FluentAssertions;
 
 namespace Farm.Modules.Calibration.Tests.Calibration;

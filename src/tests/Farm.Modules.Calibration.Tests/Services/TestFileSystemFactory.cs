@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
-namespace Farm.Web.Api.Tests.Services;
+namespace Farm.Modules.Calibration.Tests.Services;
 
 /// <summary>
 /// Small helper to create pre-seeded TestFileSystem instances for common test scenarios.

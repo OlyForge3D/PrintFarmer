@@ -2,7 +2,7 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Web.Api.Services.Catalog;
+using Farm.Modules.Printers.Services.Catalog;
 using Farm.Web.Api.Services.SlicerHost;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

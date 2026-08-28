@@ -1,12 +1,12 @@
 ﻿using System.Linq;
 using System.Reflection;
 using Farm.Infrastructure.Authorization;
-using Farm.Web.Api.Controllers;
+using Farm.Modules.Inventory.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Inventory.Tests.Controllers;
 
 /// <summary>
 /// Issue #711 round-5 FIX 4 (updated for issue #1451): fallback-group configuration mutations

@@ -23,13 +23,13 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Quota;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.DTOs;
+using Farm.Modules.Gcode.DTOs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Gcode;
+namespace Farm.Modules.Gcode.Services.Gcode;
 
 /// <summary>
 /// Service for managing G-code file operations including upload, listing, metadata extraction,

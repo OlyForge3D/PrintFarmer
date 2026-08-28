@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Controllers.Responses;
+﻿namespace Farm.Modules.PrintQueue.Controllers.Responses;
 
 /// <summary>
 /// Response returned after successfully adding a completed slice job to the print queue.

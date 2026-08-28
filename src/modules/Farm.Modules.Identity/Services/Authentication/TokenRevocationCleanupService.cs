@@ -3,7 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Authentication;
+namespace Farm.Modules.Identity.Services.Authentication;
 
 /// <summary>
 /// Background service that periodically cleans up expired token revocations.

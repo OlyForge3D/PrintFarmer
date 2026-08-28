@@ -6,7 +6,7 @@ using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Observability.Controllers;
 
 /// <summary>
 /// Manage webhook subscriptions for receiving event notifications via HTTP POST

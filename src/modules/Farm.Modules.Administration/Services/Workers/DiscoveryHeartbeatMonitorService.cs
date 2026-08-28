@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Workers;
+namespace Farm.Modules.Administration.Services.Workers;
 
 /// <summary>
 /// Monitors the discovery microservice heartbeat and reports its status

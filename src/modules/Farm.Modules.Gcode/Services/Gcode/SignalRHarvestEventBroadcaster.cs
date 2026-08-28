@@ -5,7 +5,7 @@ using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 
-namespace Farm.Web.Api.Services.Gcode;
+namespace Farm.Modules.Gcode.Services.Gcode;
 
 /// <summary>
 /// SignalR implementation of harvest event broadcaster.

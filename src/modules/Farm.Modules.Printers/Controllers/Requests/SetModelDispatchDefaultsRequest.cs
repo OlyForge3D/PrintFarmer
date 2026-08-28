@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.Controllers.Requests;
+namespace Farm.Modules.Printers.Controllers.Requests;
 
 /// <summary>
 /// Request to set dispatch defaults on a printer model.

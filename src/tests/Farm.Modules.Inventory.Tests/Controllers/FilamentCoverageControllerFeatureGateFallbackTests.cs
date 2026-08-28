@@ -6,7 +6,7 @@ using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Controllers;
+using Farm.Modules.Inventory.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Inventory.Tests.Controllers;
 
 /// <summary>
 /// Proves that <see cref="FilamentCoverageController"/> — a representative migrated,

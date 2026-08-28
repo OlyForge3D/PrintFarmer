@@ -1,13 +1,13 @@
 ﻿using System.Collections.Concurrent;
 using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.Interfaces;
-using Farm.Web.Api.Services.Workers;
+using Farm.Modules.Observability.Services.Workers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 
-namespace Farm.Web.Api.Tests.Services;
+namespace Farm.Modules.Observability.Tests.Services;
 
 public class HistorySeedingBackgroundServiceRuntimeToggleTests
 {

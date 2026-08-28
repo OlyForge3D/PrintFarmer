@@ -11,7 +11,7 @@ using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.OctoPrint;
+namespace Farm.Modules.Devices.Services.OctoPrint;
 
 public interface IOctoPrintAuthService
 {
@@ -22,7 +22,7 @@ public interface IOctoPrintAuthService
     /// <summary>
     /// Resolves an <c>X-Api-Key</c> header value to a genuine <see cref="ClaimsPrincipal"/> for
     /// the key's owning user, suitable for use as an authentication result (see
-    /// <see cref="Farm.Web.Api.Authentication.OctoPrintApiKeyAuthenticationHandler"/>). Returns
+    /// <see cref="Farm.Modules.Devices.Authentication.OctoPrintApiKeyAuthenticationHandler"/>). Returns
     /// <c>null</c> for a missing, invalid, expired, wrong-purpose, ownerless, or inactive-owner
     /// key. The global admin key (<c>OctoPrint:GlobalApiKey</c>) is deliberately never resolved
     /// here — it has no owning user account to build a real, ACL-checkable identity from, so it
@@ -174,7 +174,7 @@ public class OctoPrintAuthService(
 
     /// <summary>
     /// Local copy of the OctoPrintApiKey authentication scheme name. Kept as a plain string
-    /// (rather than referencing Farm.Web.Api.Authentication.OctoPrintApiKeyDefaults directly)
+    /// (rather than referencing Farm.Modules.Devices.Authentication.OctoPrintApiKeyDefaults directly)
     /// to avoid a dependency from this service namespace onto the Authentication namespace;
     /// the two must stay in sync, which
     /// <c>OctoPrintApiKeyAuthenticationHandlerTests</c> guards against drifting.

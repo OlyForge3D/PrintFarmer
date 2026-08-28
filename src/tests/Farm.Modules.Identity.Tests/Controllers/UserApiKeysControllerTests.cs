@@ -8,14 +8,14 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Controllers;
+using Farm.Modules.Identity.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Identity.Tests.Controllers;
 
 public class UserApiKeysControllerTests
 {

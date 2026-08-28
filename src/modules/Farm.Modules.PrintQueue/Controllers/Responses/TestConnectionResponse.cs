@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Controllers.Responses;
+﻿namespace Farm.Modules.PrintQueue.Controllers.Responses;
 
 /// <summary>
 /// Response from testing connectivity to a printer backend.

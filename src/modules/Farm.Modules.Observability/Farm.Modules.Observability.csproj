@@ -17,10 +17,11 @@ Obico server integration, failure detection, user tasks, background-service
 diagnostics, and SignalR connectivity testing. Moves Services/Workers/**,
 Services/Tasks/**, Services/SignalR/**, and 14 controllers out of Farm.Web.Api as
 part of issue #2045 (Phase 17 of epic #2019), following the move-first-rename-last
-module migration pattern. Namespaces remain unchanged (`Farm.Web.Api.Controllers`/
-`Farm.Web.Api.Services.*`). Underlying services remain registered by
-Farm.Infrastructure / Farm.Web.Api host-wide DI and are not moved in this
-phase.</Description>
+module migration pattern. Namespaces were renamed from `Farm.Web.Api.Controllers`/
+`Farm.Web.Api.Services.*` to `Farm.Modules.Observability.Controllers`/
+`Farm.Modules.Observability.Services.*` by Phase 19 (issue #2047). Underlying
+services remain registered by Farm.Infrastructure / Farm.Web.Api host-wide DI and
+are not moved in this phase.</Description>
   </PropertyGroup>
 
   <ItemGroup>

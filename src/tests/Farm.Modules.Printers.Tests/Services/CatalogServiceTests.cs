@@ -7,13 +7,13 @@ using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Catalog.Caching;
-using Farm.Web.Api.Services.Catalog;
+using Farm.Modules.Printers.Services.Catalog;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services;
+namespace Farm.Modules.Printers.Tests.Services;
 
 public class CatalogServiceTests
 {

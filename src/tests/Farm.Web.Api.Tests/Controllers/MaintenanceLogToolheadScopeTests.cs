@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Modules.Maintenance.Controllers;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;

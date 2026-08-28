@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Devices.Controllers;
 
 /// <summary>
 /// Manages NFC reader/writer devices (ESP32 + PN532) for filament spool tracking.

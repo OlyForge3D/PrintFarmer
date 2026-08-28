@@ -44,11 +44,11 @@ public static class BackgroundServicesStartup
 
         // History Seeding - Periodically seeds job history from connected printers
         // This captures jobs dispatched outside of PrintFarmer (e.g., via Mainsail/Fluidd)
-        services.Configure<Farm.Web.Api.Services.Workers.HistorySeedingSettings>(configuration.GetSection(Farm.Web.Api.Services.Workers.HistorySeedingSettings.SectionName));
-        services.AddHostedService<Farm.Web.Api.Services.Workers.HistorySeedingBackgroundService>();
+        services.Configure<Farm.Modules.Observability.Services.Workers.HistorySeedingSettings>(configuration.GetSection(Farm.Modules.Observability.Services.Workers.HistorySeedingSettings.SectionName));
+        services.AddHostedService<Farm.Modules.Observability.Services.Workers.HistorySeedingBackgroundService>();
 
         // Active External Job Sync - faster cadence for non-terminal externally-started jobs
-        services.AddHostedService<Farm.Web.Api.Services.Workers.ActiveExternalJobSyncBackgroundService>();
+        services.AddHostedService<Farm.Modules.Observability.Services.Workers.ActiveExternalJobSyncBackgroundService>();
 
         // Register asset service for OrcaSlicer printer images and bed textures
         services.AddSingleton<IAssetService, AssetService>();

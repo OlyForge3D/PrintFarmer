@@ -7,9 +7,9 @@ namespace Farm.Modules.SmartPlug;
 
 /// <summary>
 /// Vertical-slice module for smart-plug electricity monitoring (issue #2036, epic #2019).
-/// Owns the <see cref="Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController"/>
-/// controller, the <see cref="Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider"/>
-/// implementations, and the <see cref="Farm.Web.Api.Services.PowerMonitor.PowerMonitorPollingService"/>
+/// Owns the <see cref="Farm.Modules.SmartPlug.Controllers.Admin.AdminPowerMonitorsController"/>
+/// controller, the <see cref="Farm.Modules.SmartPlug.Services.SmartPlug.ISmartPlugProvider"/>
+/// implementations, and the <see cref="Farm.Modules.SmartPlug.Services.PowerMonitor.PowerMonitorPollingService"/>
 /// background poller. This is the pilot module for the Farm.Web.Api decomposition epic --
 /// the smallest module, chosen to prove the move-a-module pattern before it is repeated for
 /// the remaining ten modules (see docs/MODULE_MIGRATION_PATTERN.md).
@@ -22,10 +22,10 @@ public sealed class SmartPlugApiModule : IApiModule
     /// <inheritdoc />
     public void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.KasaSmartPlugProvider>();
-        _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.TasmotaSmartPlugProvider>();
-        _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.ShellySmartPlugProvider>();
-        _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.HomeAssistantSmartPlugProvider>();
+        _ = services.AddSingleton<Farm.Modules.SmartPlug.Services.SmartPlug.ISmartPlugProvider, Farm.Modules.SmartPlug.Services.SmartPlug.KasaSmartPlugProvider>();
+        _ = services.AddSingleton<Farm.Modules.SmartPlug.Services.SmartPlug.ISmartPlugProvider, Farm.Modules.SmartPlug.Services.SmartPlug.TasmotaSmartPlugProvider>();
+        _ = services.AddSingleton<Farm.Modules.SmartPlug.Services.SmartPlug.ISmartPlugProvider, Farm.Modules.SmartPlug.Services.SmartPlug.ShellySmartPlugProvider>();
+        _ = services.AddSingleton<Farm.Modules.SmartPlug.Services.SmartPlug.ISmartPlugProvider, Farm.Modules.SmartPlug.Services.SmartPlug.HomeAssistantSmartPlugProvider>();
 
         // Smart plug HTTP client shared by Tasmota, Shelly, and HomeAssistant providers (5s
         // timeout for LAN devices).
@@ -36,7 +36,7 @@ public sealed class SmartPlugApiModule : IApiModule
 
         // Electricity Module - poll enabled PowerMonitor records, persist PowerReading rows,
         // and aggregate KwhUsed for completed print jobs.
-        _ = services.AddHostedService<Farm.Web.Api.Services.PowerMonitor.PowerMonitorPollingService>();
+        _ = services.AddHostedService<Farm.Modules.SmartPlug.Services.PowerMonitor.PowerMonitorPollingService>();
     }
 
     /// <inheritdoc />

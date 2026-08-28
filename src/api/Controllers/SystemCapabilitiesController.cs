@@ -1,8 +1,9 @@
 ﻿using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.FeatureFlags;
 using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Modules.Calibration.Infrastructure;
+using Farm.Modules.Calibration.Services.Capabilities;
 using Farm.Web.Api.Infrastructure;
-using Farm.Web.Api.Services.Capabilities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;

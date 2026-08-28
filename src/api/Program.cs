@@ -20,7 +20,6 @@ using Farm.Slicer.Integration;
 using Farm.Web.Api;
 using Farm.Web.Api.Authorization;
 using Farm.Web.Api.Health;
-using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Infrastructure.OpenApi;
 using Farm.Web.Api.Infrastructure.Temp;

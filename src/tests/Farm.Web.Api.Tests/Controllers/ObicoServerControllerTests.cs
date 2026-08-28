@@ -4,6 +4,7 @@ using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
+using Farm.Modules.Observability.Controllers;
 using Farm.Web.Api.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;

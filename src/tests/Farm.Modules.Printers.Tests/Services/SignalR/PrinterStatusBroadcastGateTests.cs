@@ -3,7 +3,7 @@ using Farm.Infrastructure.Services.SignalR;
 using FluentAssertions;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.SignalR;
+namespace Farm.Modules.Printers.Tests.Services.SignalR;
 
 /// <summary>
 /// Unit tests for <see cref="PrinterStatusBroadcastGate"/> — the payload-complete equality gate

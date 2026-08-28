@@ -1,6 +1,6 @@
 ﻿using System.Text;
 using Farm.Infrastructure.Authorization;
-using Farm.Web.Api.Authentication;
+using Farm.Modules.Devices.Authentication;
 using Farm.Web.Api.Authorization;
 using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authentication;

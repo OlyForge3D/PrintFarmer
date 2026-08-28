@@ -3,7 +3,7 @@ using Farm.Infrastructure.Services.PrinterGroups;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Printers.Controllers;
 
 /// <summary>
 /// Manages printer groups — curated sets of identical printers for dispatch targeting.

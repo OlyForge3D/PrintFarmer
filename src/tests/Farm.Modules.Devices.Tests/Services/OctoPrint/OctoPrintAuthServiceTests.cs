@@ -4,7 +4,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Services.OctoPrint;
+using Farm.Modules.Devices.Services.OctoPrint;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.OctoPrint;
+namespace Farm.Modules.Devices.Tests.Services.OctoPrint;
 
 public class OctoPrintAuthServiceTests : IDisposable
 {

@@ -6,7 +6,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 
-namespace Farm.Web.Api.Services.Printers;
+namespace Farm.Modules.Printers.Services.Printers;
 
 /// <summary>
 /// SignalR implementation of printer status broadcaster.

@@ -2,14 +2,14 @@
 using System.Text;
 using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Services.SmartPlug;
+using Farm.Modules.SmartPlug.Services.SmartPlug;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
 
-namespace Farm.Web.Api.Tests.Services.SmartPlug;
+namespace Farm.Modules.SmartPlug.Tests.Services.SmartPlug;
 
 /// <summary>
 /// Unit tests for <see cref="HomeAssistantSmartPlugProvider"/> covering token validation,

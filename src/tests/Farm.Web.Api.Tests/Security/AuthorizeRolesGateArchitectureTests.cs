@@ -43,7 +43,7 @@ namespace Farm.Web.Api.Tests.Security;
 /// module-decomposition epic (#2019) — a controller does not stop being an "API controller" for
 /// this guard's purposes just because it now lives in its own assembly; each module phase MUST
 /// add its controller assembly here (see #2037 review of the Maintenance move, which found the
-/// SmartPlug module's <see cref="Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController"/>
+/// SmartPlug module's <see cref="Farm.Modules.SmartPlug.Controllers.Admin.AdminPowerMonitorsController"/>
 /// had been missed by phase 8). SignalR Hub methods (e.g. <c>HarvestHub</c>) are not
 /// <see cref="ControllerBase"/>-derived and are out of scope for "API controllers" as the issue
 /// describes them.
@@ -65,26 +65,26 @@ public sealed class AuthorizeRolesGateArchitectureTests
 
     private static readonly Assembly[] ScannedAssemblies =
     [
-        typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
+        typeof(Farm.Modules.Printers.Controllers.PrintersController).Assembly,
         typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly,
         // Issue #2040: Farm.Modules.PrintQueue is hosted by the main API (Farm.Web.Api), not the
         // slicer host, and must be scanned here for the same reason it was added to
         // QueueEnqueuePermissionArchitectureTests.WalkableAssemblies — controllers that moved out
         // of Farm.Web.Api into a module assembly silently drop out of an assembly-array-based
         // scan unless the new assembly is added explicitly.
-        typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
+        typeof(Farm.Modules.PrintQueue.Controllers.JobQueueController).Assembly,
         // Module-decomposition epic (#2019): controllers that moved out of Farm.Web.Api into
         // their own assembly are still "API controllers" for this guard's purposes.
-        typeof(Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController).Assembly,
-        typeof(Farm.Web.Api.Controllers.MaintenanceController).Assembly,
-        typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
-        typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly,
+        typeof(Farm.Modules.SmartPlug.Controllers.Admin.AdminPowerMonitorsController).Assembly,
+        typeof(Farm.Modules.Maintenance.Controllers.MaintenanceController).Assembly,
+        typeof(Farm.Modules.Calibration.Controllers.CalibrationProjectsController).Assembly,
+        typeof(Farm.Modules.Identity.Controllers.Admin.RolesController).Assembly,
         // Issue #2043: Farm.Modules.Devices hosts the OctoPrint-compat auth surface plus the
         // NFC/camera device controllers. Must be scanned for the same reason PrintQueue/Identity
         // are above. Admin/AdminHomeAssistantController, also named in the issue, ended up owned
         // by Farm.Modules.Administration instead (Phase 14, #2042, landed first and already
         // claimed it), so NfcController anchors the Devices assembly here instead.
-        typeof(Farm.Web.Api.Controllers.NfcController).Assembly,
+        typeof(Farm.Modules.Devices.Controllers.NfcController).Assembly,
         // Phase 14 (#2042) moved AdminHomeAssistantController, AdminTelegramController,
         // AdminOverviewController, AdminDataController, and UnifiedSettingsController into
         // Farm.Modules.Administration but never added an anchor for that assembly here. The
@@ -93,14 +93,14 @@ public sealed class AuthorizeRolesGateArchitectureTests
         // controller into Farm.Modules.Administration, the anchor's identity silently changed
         // and this was the first thing to notice Administration was never covered. Added now so
         // Farm.Modules.Administration's controllers stay covered by this role-name-gate guard.
-        typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
+        typeof(Farm.Modules.Administration.Controllers.Admin.AdminHomeAssistantController).Assembly,
         // Issue #2088: Farm.Modules.Gcode and Farm.Modules.Inventory were extracted by the
         // module-decomposition epic (#2019, Phases 11/16) but never got an anchor in this guard,
         // leaving both modules' controllers unscanned by this role-name-gate check.
         // GcodeFilesController and PartsInventoryController anchor their respective assemblies
         // here, the same pattern used by every other module above.
-        typeof(Farm.Web.Api.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
-        typeof(Farm.Web.Api.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
+        typeof(Farm.Modules.Gcode.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
+        typeof(Farm.Modules.Inventory.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
     ];
 
     /// <summary>
@@ -118,20 +118,20 @@ public sealed class AuthorizeRolesGateArchitectureTests
     /// </summary>
     private static readonly HashSet<Assembly> MainApiHostedAssemblies =
     [
-        typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
-        typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
-        typeof(Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController).Assembly,
-        typeof(Farm.Web.Api.Controllers.MaintenanceController).Assembly,
-        typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
-        typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly,
-        typeof(Farm.Web.Api.Controllers.NfcController).Assembly,
-        typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
+        typeof(Farm.Modules.Printers.Controllers.PrintersController).Assembly,
+        typeof(Farm.Modules.PrintQueue.Controllers.JobQueueController).Assembly,
+        typeof(Farm.Modules.SmartPlug.Controllers.Admin.AdminPowerMonitorsController).Assembly,
+        typeof(Farm.Modules.Maintenance.Controllers.MaintenanceController).Assembly,
+        typeof(Farm.Modules.Calibration.Controllers.CalibrationProjectsController).Assembly,
+        typeof(Farm.Modules.Identity.Controllers.Admin.RolesController).Assembly,
+        typeof(Farm.Modules.Devices.Controllers.NfcController).Assembly,
+        typeof(Farm.Modules.Administration.Controllers.Admin.AdminHomeAssistantController).Assembly,
         // Issue #2088: Farm.Modules.Gcode and Farm.Modules.Inventory anchors, same as
         // ScannedAssemblies above — this test evaluates policy-alias role gates against the
         // main API's real AuthorizationOptions, and both modules run inside the main API
         // process, so they must be listed here too.
-        typeof(Farm.Web.Api.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
-        typeof(Farm.Web.Api.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
+        typeof(Farm.Modules.Gcode.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
+        typeof(Farm.Modules.Inventory.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
     ];
 
     [Fact]

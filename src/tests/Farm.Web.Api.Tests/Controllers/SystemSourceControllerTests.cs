@@ -1,6 +1,6 @@
 ﻿using System.Reflection;
+using Farm.Modules.PrintQueue.Controllers.Responses;
 using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Controllers.Responses;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

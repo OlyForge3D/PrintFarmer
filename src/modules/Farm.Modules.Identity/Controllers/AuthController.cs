@@ -20,7 +20,7 @@ using RegisterRequest = Farm.Infrastructure.Contracts.Auth.RegisterRequest;
 using ResetPasswordRequest = Farm.Infrastructure.Contracts.Auth.ResetPasswordRequest;
 using UserDto = Farm.Infrastructure.Contracts.Auth.UserDto;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Identity.Controllers;
 
 [ApiController]
 [Route("api/auth")]

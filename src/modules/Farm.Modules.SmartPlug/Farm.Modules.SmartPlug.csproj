@@ -7,9 +7,9 @@
     <Description>Vertical-slice module for smart-plug power monitoring: SmartPlug provider
 implementations (Kasa/Tasmota/Shelly/HomeAssistant), the PowerMonitor polling background
 service, and the admin power-monitors controller. Registers via IApiModule (see
-Farm.Modules.Abstractions, issue #2035). Pilot for the module-decomposition epic #2019 --
-namespaces are intentionally unchanged from their prior Farm.Web.Api location
-(move-first-rename-last).</Description>
+Farm.Modules.Abstractions, issue #2035). Pilot for the module-decomposition epic #2019.
+Namespaces were renamed from Farm.Web.Api.* to Farm.Modules.SmartPlug.* by Phase 19
+(issue #2047), completing the move-first-rename-last strategy.</Description>
   </PropertyGroup>
 
   <ItemGroup>

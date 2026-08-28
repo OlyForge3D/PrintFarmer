@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Controllers.Responses;
+﻿namespace Farm.Modules.PrintQueue.Controllers.Responses;
 
 /// <summary>
 /// Response returned from the slice-cost per-gram endpoint.

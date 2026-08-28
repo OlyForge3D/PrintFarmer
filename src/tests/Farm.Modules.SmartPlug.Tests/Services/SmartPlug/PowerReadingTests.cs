@@ -1,6 +1,6 @@
-﻿using Farm.Web.Api.Services.SmartPlug;
+﻿using Farm.Modules.SmartPlug.Services.SmartPlug;
 
-namespace Farm.Web.Api.Tests.Services.SmartPlug;
+namespace Farm.Modules.SmartPlug.Tests.Services.SmartPlug;
 
 /// <summary>
 /// Unit tests for <see cref="PowerReading"/> value type correctness.

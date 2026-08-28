@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.DTOs;
+﻿namespace Farm.Modules.Maintenance.DTOs;
 
 /// <summary>
 /// Response DTO for a maintenance plan. Excludes navigation entities that carry sensitive data.

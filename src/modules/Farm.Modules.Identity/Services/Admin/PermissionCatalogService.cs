@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Web.Api.Services.Admin;
+namespace Farm.Modules.Identity.Services.Admin;
 
 /// <summary>
 /// Derives the permission catalog by walking <see cref="EndpointDataSource"/> for

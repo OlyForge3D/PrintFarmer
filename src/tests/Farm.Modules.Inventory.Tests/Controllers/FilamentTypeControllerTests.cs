@@ -6,13 +6,13 @@ using Farm.Infrastructure.Services.Filament;
 using Farm.Infrastructure.Services.OpenFilamentDb;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.Startup;
-using Farm.Web.Api.Controllers;
+using Farm.Modules.Inventory.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Inventory.Tests.Controllers;
 
 public class FilamentTypeControllerTests
 {

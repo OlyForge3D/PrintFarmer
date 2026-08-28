@@ -7,7 +7,6 @@ using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Testing.Shared;
-using Farm.Web.Api.Services.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;

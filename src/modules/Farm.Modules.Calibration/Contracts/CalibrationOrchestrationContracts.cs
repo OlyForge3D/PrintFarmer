@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Contracts;
+﻿namespace Farm.Modules.Calibration.Contracts;
 
 /// <summary>
 /// Durable saga checkpoint for one calibration attempt's execution run. This is a byproduct of

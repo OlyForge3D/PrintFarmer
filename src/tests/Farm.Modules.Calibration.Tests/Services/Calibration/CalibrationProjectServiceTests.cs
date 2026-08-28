@@ -3,14 +3,14 @@ using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.PrinterCalibration;
-using Farm.Web.Api.Contracts;
-using Farm.Web.Api.Services.Calibration;
+using Farm.Modules.Calibration.Contracts;
+using Farm.Modules.Calibration.Services.Calibration;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Farm.Web.Api.Tests.Services.Calibration;
+namespace Farm.Modules.Calibration.Tests.Services.Calibration;
 
 public sealed class CalibrationProjectServiceTests
 {

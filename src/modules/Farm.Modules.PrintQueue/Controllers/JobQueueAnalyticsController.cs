@@ -12,7 +12,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Api.Controllers;
+namespace Farm.Modules.PrintQueue.Controllers;
 
 /// <summary>
 /// API endpoints for print queue analytics and historical data

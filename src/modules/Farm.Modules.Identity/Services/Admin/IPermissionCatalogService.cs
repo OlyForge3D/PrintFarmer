@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Dtos;
 
-namespace Farm.Web.Api.Services.Admin;
+namespace Farm.Modules.Identity.Services.Admin;
 
 /// <summary>
 /// Derives the permission catalog from routed endpoint metadata rather than a hardcoded

@@ -1,7 +1,7 @@
 ﻿using System;
 using System.ComponentModel.DataAnnotations;
 
-namespace Farm.Web.Api.Controllers.Requests;
+namespace Farm.Modules.Printers.Controllers.Requests;
 
 /// <summary>
 /// Request DTO for assigning a printer to a location.

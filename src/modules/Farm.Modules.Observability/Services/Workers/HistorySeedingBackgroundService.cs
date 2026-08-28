@@ -5,7 +5,7 @@ using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Services.Workers;
+namespace Farm.Modules.Observability.Services.Workers;
 
 /// <summary>
 /// Configuration settings for the history seeding background service.
