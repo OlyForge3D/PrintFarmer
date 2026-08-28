@@ -1051,7 +1051,8 @@ public sealed class ProfileFamilyService(
         {
             await _workerClient.DeleteBundleAsync(null, familyId, CancellationToken.None);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is HttpRequestException or InvalidOperationException or OperationCanceledException)
         {
             failures.Add(ex);
             _logger.LogError(
@@ -1071,7 +1072,9 @@ public sealed class ProfileFamilyService(
                     CancellationToken.None);
                 await _catalogService.InvalidateModelAliasesAsync(modelId, CancellationToken.None);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (
+                ex is DbUpdateException or System.Data.Common.DbException or ArgumentException
+                    or InvalidOperationException or OperationCanceledException)
             {
                 failures.Add(ex);
                 _logger.LogError(

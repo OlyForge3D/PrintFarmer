@@ -1995,6 +1995,40 @@ public sealed class ProfileFamilyServiceTests
     }
 
     [Fact]
+    public async Task RenderFamilyAsync_ConcurrentDeleteAliasCleanupThrowsUnexpectedException_PropagatesUnexpectedException()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ConcurrentDeleteOnSaveDbContext(options);
+        _ = dbContext.Database.EnsureCreated();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        Mock<IProfileFamilyWorkerClient> worker = EditWorker();
+        _ = worker
+            .Setup(client => client.DeleteBundleAsync(null, familyId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Mock<IPrinterModelAliasService> aliases = EditAliases(modelId, "Farm Test");
+        _ = aliases
+            .Setup(service => service.RemoveModelAliasAsync(
+                modelId, "Farm Test", "OrcaSlicer", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new NotSupportedException("unexpected alias cleanup failure"));
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            Catalog(modelId),
+            aliases,
+            EchoRenderer(),
+            worker);
+
+        dbContext.DeleteFamilyOnNextSave = true;
+        Func<Task> act = async () => await service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        (await act.Should().ThrowExactlyAsync<NotSupportedException>())
+            .Which.Message.Should().Be("unexpected alias cleanup failure");
+    }
+
+    [Fact]
     public async Task RenderFamilyAsync_ConcurrencyConflictButFamilyStillExists_Throws409_WithoutBundleRemoval()
     {
         // #2087: a DbUpdateConcurrencyException whose row still exists (a concurrent modification, not a
