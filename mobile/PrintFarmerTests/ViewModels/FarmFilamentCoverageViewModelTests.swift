@@ -46,6 +46,25 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(signalR.connectionStateSubscriberCount, 0)
     }
 
+    func testCapabilityDisableDuringCacheSessionLookupDispatchesNoProbe() async {
+        let service = ControlledFilamentCoverageService()
+        let store = SuspendedCurrentSessionFeatureReadCacheStore()
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configure(coverageService: service)
+        vm.configureCache(FilamentCoverageReadCacheAdapter(store: store))
+
+        async let load: Void = vm.load()
+        await store.waitUntilCurrentSessionRequested()
+        vm.disableForCapabilityGate()
+        await store.resumeCurrentSession()
+        _ = await load
+
+        let pendingCount = await service.pendingCount
+        XCTAssertEqual(pendingCount, 0)
+        XCTAssertEqual(vm.dispatchedRequestCount, 0)
+        XCTAssertTrue(vm.isFeatureDisabled)
+    }
+
     // MARK: - Idempotent SignalR configuration + subscription count
 
     func testConfigureSignalRIsIdempotent() {

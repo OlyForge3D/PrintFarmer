@@ -293,6 +293,7 @@ final class FarmFilamentCoverageViewModel {
         // #817 discipline) so a mid-flight server/user switch cannot make this
         // write land in the new namespace. `nil` when no cache is wired.
         let capturedCacheSession = await coverageCache?.currentSession()
+        guard !Task.isCancelled, cvEpoch == coverageAuthorityEpoch else { return }
 
         requestGeneration &+= 1
         let myGen = requestGeneration

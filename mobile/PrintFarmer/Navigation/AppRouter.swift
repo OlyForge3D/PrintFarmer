@@ -120,10 +120,19 @@ final class AppRouter {
 
     func invalidatePendingNavigation() {
         navigationEpoch &+= 1
+        printersPath = NavigationPath()
+        jobsPath = NavigationPath()
+        notificationsPath = NavigationPath()
+        inventoryPath = NavigationPath()
+        scanPath = NavigationPath()
+        dashboardSheetPath = NavigationPath()
+        maintenanceSheetPath = NavigationPath()
+        notificationsSheetPath = NavigationPath()
         pendingNFCReadyPrinterId = nil
         pendingSpoolHighlightId = nil
         pendingAttentionItemId = nil
         pendingFilamentSwap = nil
+        notificationRoutingError = nil
     }
 
     func routeNotification(

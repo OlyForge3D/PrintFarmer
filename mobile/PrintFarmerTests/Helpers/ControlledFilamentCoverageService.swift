@@ -109,3 +109,93 @@ actor ControlledFilamentCoverageService: FilamentCoverageServiceProtocol {
         pendingWaiters = remaining
     }
 }
+
+actor SuspendedCurrentSessionFeatureReadCacheStore: FeatureReadCacheStoring {
+    private var currentSessionContinuation: CheckedContinuation<FarmSnapshotSession?, Never>?
+    private var requestWaiters: [CheckedContinuation<Void, Never>] = []
+    private var didRequestCurrentSession = false
+
+    func currentSession() async -> FarmSnapshotSession? {
+        didRequestCurrentSession = true
+        requestWaiters.forEach { $0.resume() }
+        requestWaiters.removeAll()
+        return await withCheckedContinuation { continuation in
+            currentSessionContinuation = continuation
+        }
+    }
+
+    func waitUntilCurrentSessionRequested() async {
+        guard !didRequestCurrentSession else { return }
+        await withCheckedContinuation { continuation in
+            requestWaiters.append(continuation)
+        }
+    }
+
+    func resumeCurrentSession() {
+        currentSessionContinuation?.resume(returning: nil)
+        currentSessionContinuation = nil
+    }
+
+    func hydrate<Payload: Codable & Sendable & Equatable>(
+        recordKey: String,
+        as type: Payload.Type
+    ) async -> FeatureReadCacheHydration<Payload> {
+        .absent
+    }
+
+    func commitSnapshot<Payload: Codable & Sendable & Equatable>(
+        _ payload: Payload,
+        recordKey: String,
+        lastUpdatedAtMillis: Int64,
+        capturedSession: FarmSnapshotSession
+    ) async -> FeatureReadCacheCommitResult {
+        .committed
+    }
+
+    func commitDisabled(
+        recordKey: String,
+        lastUpdatedAtMillis: Int64,
+        capturedSession: FarmSnapshotSession
+    ) async -> FeatureReadCacheCommitResult {
+        .committed
+    }
+}
+
+actor RecordingFeatureReadCacheStore: FeatureReadCacheStoring {
+    private let session = FarmSnapshotSession(
+        serverID: UUID(),
+        userID: UUID(),
+        generation: 1,
+        token: 1
+    )
+    private(set) var disabledCommitCount = 0
+
+    func currentSession() async -> FarmSnapshotSession? {
+        session
+    }
+
+    func hydrate<Payload: Codable & Sendable & Equatable>(
+        recordKey: String,
+        as type: Payload.Type
+    ) async -> FeatureReadCacheHydration<Payload> {
+        .absent
+    }
+
+    func commitSnapshot<Payload: Codable & Sendable & Equatable>(
+        _ payload: Payload,
+        recordKey: String,
+        lastUpdatedAtMillis: Int64,
+        capturedSession: FarmSnapshotSession
+    ) async -> FeatureReadCacheCommitResult {
+        .committed
+    }
+
+    func commitDisabled(
+        recordKey: String,
+        lastUpdatedAtMillis: Int64,
+        capturedSession: FarmSnapshotSession
+    ) async -> FeatureReadCacheCommitResult {
+        disabledCommitCount += 1
+        return .committed
+    }
+}

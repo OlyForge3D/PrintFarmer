@@ -45,6 +45,25 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertEqual(signalR.connectionStateSubscriberCount, 0)
     }
 
+    func testCapabilityDisableDuringCacheSessionLookupDispatchesNoProbe() async {
+        let service = ControlledFilamentCoverageService()
+        let store = SuspendedCurrentSessionFeatureReadCacheStore()
+        let vm = PrinterFilamentCoverageViewModel(printerId: printerA)
+        vm.configure(coverageService: service)
+        vm.configureCache(FilamentCoverageReadCacheAdapter(store: store))
+
+        async let load: Void = vm.load()
+        await store.waitUntilCurrentSessionRequested()
+        vm.disableForCapabilityGate()
+        await store.resumeCurrentSession()
+        _ = await load
+
+        let pendingCount = await service.pendingCount
+        XCTAssertEqual(pendingCount, 0)
+        XCTAssertEqual(vm.dispatchedRequestCount, 0)
+        XCTAssertTrue(vm.isFeatureDisabled)
+    }
+
     // MARK: - Invalidation filtering
 
     /// A scoped invalidation for a DIFFERENT printer must not cause a
@@ -220,8 +239,10 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
 
     func testGenericNotFoundStopsAtNotFoundStateNotFeatureDisabled() async {
         let service = ControlledFilamentCoverageService()
+        let store = RecordingFeatureReadCacheStore()
         let vm = PrinterFilamentCoverageViewModel(printerId: printerA)
         vm.configure(coverageService: service)
+        vm.configureCache(FilamentCoverageReadCacheAdapter(store: store))
 
         async let l: Void = vm.load()
         await service.awaitPending(count: 1)
@@ -232,6 +253,8 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertFalse(vm.isFeatureDisabled,
                        "Generic 404 (printer gone) must be distinct from feature-disabled.")
         XCTAssertNil(vm.coverage)
+        let disabledCommitCount = await store.disabledCommitCount
+        XCTAssertEqual(disabledCommitCount, 0)
     }
 
     // MARK: - Subscription accounting on reconfiguration

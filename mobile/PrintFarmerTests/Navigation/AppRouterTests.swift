@@ -192,9 +192,14 @@ final class AppRouterTests: XCTestCase {
     func testPendingPrinterNavigationIsInvalidatedWhenServerChanges() async {
         let router = AppRouter()
 
+        router.dashboardSheetPath.append(AppDestination.printerDetail(id: printerId))
+        router.maintenanceSheetPath.append(AppDestination.maintenanceAnalytics)
+        router.notificationsSheetPath.append(AppDestination.jobDetail(id: printerId))
         router.navigate(to: .printerDetail(id: printerId), capabilities: capabilities)
         router.navigate(to: .attentionItem(id: "attention-1"), capabilities: capabilities)
         router.navigate(to: .spoolDetail(id: 42), capabilities: capabilities)
+        router.jobsPath.append(AppDestination.jobDetail(id: printerId))
+        router.scanPath.append(AppDestination.jobDetail(id: printerId))
         router.navigate(
             to: .filamentSwap(printerId: printerId, toolheadIndex: 1, jobId: nil),
             capabilities: capabilities
@@ -203,6 +208,13 @@ final class AppRouterTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(120))
 
         XCTAssertTrue(router.printersPath.isEmpty)
+        XCTAssertTrue(router.jobsPath.isEmpty)
+        XCTAssertTrue(router.notificationsPath.isEmpty)
+        XCTAssertTrue(router.inventoryPath.isEmpty)
+        XCTAssertTrue(router.scanPath.isEmpty)
+        XCTAssertTrue(router.dashboardSheetPath.isEmpty)
+        XCTAssertTrue(router.maintenanceSheetPath.isEmpty)
+        XCTAssertTrue(router.notificationsSheetPath.isEmpty)
         XCTAssertNil(router.pendingAttentionItemId)
         XCTAssertNil(router.pendingSpoolHighlightId)
         XCTAssertNil(router.pendingFilamentSwap)

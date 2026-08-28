@@ -205,6 +205,7 @@ final class PrinterFilamentCoverageViewModel {
         // Capture the cache session BEFORE the round-trip so a mid-flight switch
         // cannot land this write in the new namespace. `nil` when no cache wired.
         let capturedCacheSession = await coverageCache?.currentSession()
+        guard !Task.isCancelled, cvEpoch == coverageAuthorityEpoch else { return }
 
         requestGeneration &+= 1
         let myGen = requestGeneration
@@ -231,13 +232,8 @@ final class PrinterFilamentCoverageViewModel {
                 }
             case .notFound:
                 commitNotFound(generation: myGen)
-                // A gated-404 records a disabled tombstone so older cached
-                // coverage cannot resurface (criterion 7).
                 if lastCommittedGeneration == myGen {
                     isShowingStaleCache = false
-                    if let cache = coverageCache, let session = capturedCacheSession {
-                        _ = await cache.recordPrinterDisabled(id: printerId, capturedSession: session)
-                    }
                 }
             default:
                 commitError(error, generation: myGen)
