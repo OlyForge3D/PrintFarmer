@@ -39,6 +39,21 @@ public class BuildTransformFlagsTests
         result.HasCustomPosition.Should().BeFalse();
     }
 
+    [Theory(DisplayName = "Regression #2148: valid but non-object JSON falls back rather than throwing")]
+    [InlineData("[1, 2, 3]")]
+    [InlineData("\"just a string\"")]
+    [InlineData("42")]
+    [InlineData("true")]
+    [InlineData("null")]
+    public void BuildTransformFlags_NonObjectRoot_ReturnsEmptyNoPosition(string json)
+    {
+        TransformResult result = OrcaSlicingPipelineService.BuildTransformFlags(json);
+
+        result.Flags.Should().BeEmpty();
+        result.HasCustomPosition.Should().BeFalse();
+        result.HasNonUniformScale.Should().BeFalse();
+    }
+
     [Fact]
     public void BuildTransformFlags_IdentityTransform_ReturnsEmptyFlags()
     {
