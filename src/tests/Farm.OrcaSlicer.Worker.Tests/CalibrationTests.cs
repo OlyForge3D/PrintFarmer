@@ -961,6 +961,7 @@ public class CalibrationTests : IDisposable
 
     [Fact]
     public void PrepareCalibrationModel_YoloPerfectionistMethod_ThrowsBecauseDeltaOverridesAreNotYetSupported()
+    {
         // FlowRateYoloPerfectionist remains gated (issue #2142) even though the same delta-based
         // naming scheme is now supported for FlowRateYoloRecommended (issue #2141) — the worker
         // must still fail loudly here instead of silently copying the resource unmodified (which
