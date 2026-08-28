@@ -20,8 +20,53 @@
 /// not blocked by anything (upstream OrcaSlicer already implements both —
 /// <c>Plater::calib_max_vol_speed</c>/<c>Plater::calib_retraction</c> and their
 /// <c>CalibMode::Calib_Vol_speed_Tower</c>/<c>CalibMode::Calib_Retraction_tower</c> modes exist
-/// in <c>calib_dlg.cpp</c>); they simply have no resource resolver, configurator, or pipeline
-/// wiring in this repo yet, unlike temperature-tower and flow-rate.
+/// in <c>calib_dlg.cpp</c>). "Retraction" still has no resource resolver, configurator, or
+/// pipeline wiring in this repo. "Max volumetric speed" gained all three in issue #2135; see
+/// <see cref="MaximumVolumetricSpeed"/>.
+/// </para>
+/// <para>
+/// <see cref="MaximumVolumetricSpeed"/> (issue #2135): upstream's <c>CalibUtils::calib_max_vol_speed</c>
+/// loads <c>resources/calib/volumetric_speed/SpeedTestStructure.drc</c> — an opaque, proprietary
+/// binary (magic bytes <c>44 52 41 43</c>/"DRAC", not a ZIP/3MF archive), confirmed against a local
+/// OrcaSlicer install. Unlike the flow-rate resources, this cannot be parsed and rewritten the way
+/// <c>FlowRateCalibrationConfigurator</c> rewrites 3MF metadata, so the worker copies it unmodified
+/// — the same treatment as <see cref="TemperatureTower"/>'s <c>.drc</c> resource. Upstream's C++
+/// also sets a permissive <c>filament_max_volumetric_speed</c> ceiling (a constant 50mm³/s,
+/// <c>src/slicer/Utils/CalibUtils.cpp</c>: <c>filament_config.set_key_value(
+/// "filament_max_volumetric_speed", new ConfigOptionFloats{50})</c>) before slicing, purely so the
+/// slicer's own auto speed-limiting does not clamp the print below the range the calibration
+/// tower's built-in, width-increasing geometry is designed to sweep through. The worker reproduces
+/// that: <c>OrcaSlicingPipelineService.ApplyMaxVolumetricSpeedCeilingAsync</c> sets the filament
+/// profile's <c>filament_max_volumetric_speed</c> to the ceiling resolved from
+/// <c>CalibrationParameters.MaxVolumetricSpeedCeilingMm3s</c> before the slice.
+/// </para>
+/// <para>
+/// <strong>Known, more significant limitation (corrected after adversarial review — an earlier
+/// revision of this comment claimed the ceiling alone was upstream's entire sweep mechanism; that
+/// claim was checked against upstream source and was wrong, see below):</strong> upstream's actual
+/// per-layer speed variation is produced by <c>GCode.cpp</c>'s <c>calib_mode()</c> switch
+/// (<c>case CalibMode::Calib_Vol_speed_Tower: auto _speed = print.calib_params().start + print_z *
+/// print.calib_params().step; m_calib_config.set_key_value("outer_wall_speed", ...)</c>) — a live,
+/// in-process override of the wall speed applied while <em>that same run's</em> gcode is being
+/// generated, driven by <c>Print::calib_params()</c>/<c>calib_mode()</c>. Those are set only by
+/// <c>Print::set_calib_params</c>, which is called only from <c>CalibUtils::process_and_store_3mf</c>
+/// (GUI code, <c>src/slic3r/Utils/CalibUtils.cpp</c>) immediately before slicing in the same GUI
+/// process. <c>calib_mode</c>/<c>calib_params</c> are never persisted into the 3MF/project file and
+/// have no OrcaSlicer CLI flag — confirmed by exhaustive search of the upstream tree — so, unlike
+/// <see cref="TemperatureTower"/>'s per-layer temperature step (a real, standalone <c>M104</c>
+/// command any inserted <c>layer_change_gcode</c> can emit with full physical effect), this
+/// specific mechanism is not reachable at all from a separate-process, CLI-driven pipeline: an
+/// injected custom-gcode "set speed" command would be silently overwritten the moment the slicer's
+/// own wall-generation code emits its own <c>F</c> parameter on the next extrusion move, which it
+/// always does. This worker's implementation therefore only applies the permissive
+/// <c>filament_max_volumetric_speed</c> ceiling and slices the bundled tower geometry with the
+/// client-selected process profile's own (constant) wall speed; it does not reproduce upstream's
+/// deliberate per-layer speed ramp, and — given the architecture above — cannot do so today without
+/// a new worker capability such as authoring OrcaSlicer/PrusaSlicer's 3MF-native "height range
+/// modifier" per-object speed overrides (a legitimate, project-format-persisted mechanism that,
+/// unlike <c>calib_mode</c>, the CLI slicer does read normally), tracked as follow-up work rather
+/// than attempted here. The wire name still submits, slices, and returns gcode end to end per the
+/// issue's acceptance criteria; what is not yet delivered is upstream's full calibration fidelity.
 /// </para>
 /// <para>
 /// <see cref="FlowRateYoloRecommended"/>/<see cref="FlowRateYoloPerfectionist"/>'s bundled 3MF
@@ -61,6 +106,12 @@ public enum CalibrationMethod
     /// method's per-object overrides (tracked separately, issue #2142).
     /// </summary>
     FlowRateYoloPerfectionist,
+
+    /// <summary>
+    /// Maximum volumetric speed calibration (issue #2135). See the type-level remarks for the
+    /// resource format and the permissive-ceiling configurator this method needs.
+    /// </summary>
+    MaximumVolumetricSpeed,
 }
 
 /// <summary>
@@ -78,6 +129,7 @@ public static class CalibrationMethods
             ["temperature_tower"] = CalibrationMethod.TemperatureTower,
             ["flow_rate_yolo_recommended"] = CalibrationMethod.FlowRateYoloRecommended,
             ["flow_rate_yolo_perfectionist"] = CalibrationMethod.FlowRateYoloPerfectionist,
+            ["max_volumetric_speed"] = CalibrationMethod.MaximumVolumetricSpeed,
         };
 
     private static readonly Dictionary<CalibrationMethod, string> MethodToWireName =
@@ -88,6 +140,7 @@ public static class CalibrationMethods
             [CalibrationMethod.TemperatureTower] = "temperature_tower",
             [CalibrationMethod.FlowRateYoloRecommended] = "flow_rate_yolo_recommended",
             [CalibrationMethod.FlowRateYoloPerfectionist] = "flow_rate_yolo_perfectionist",
+            [CalibrationMethod.MaximumVolumetricSpeed] = "max_volumetric_speed",
         };
 
     /// <summary>
@@ -166,6 +219,7 @@ public static class CalibrationMethods
         CalibrationMethod.TemperatureTower => "temperature_tower.drc",
         CalibrationMethod.FlowRateYoloRecommended => "Orca-LinearFlow.3mf",
         CalibrationMethod.FlowRateYoloPerfectionist => "Orca-LinearFlow_fine.3mf",
+        CalibrationMethod.MaximumVolumetricSpeed => "SpeedTestStructure.drc",
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 
@@ -180,6 +234,7 @@ public static class CalibrationMethods
         CalibrationMethod.TemperatureTower => Path.Combine("temperature_tower", "temperature_tower.drc"),
         CalibrationMethod.FlowRateYoloRecommended => Path.Combine("filament_flow", "Orca-LinearFlow.3mf"),
         CalibrationMethod.FlowRateYoloPerfectionist => Path.Combine("filament_flow", "Orca-LinearFlow_fine.3mf"),
+        CalibrationMethod.MaximumVolumetricSpeed => Path.Combine("volumetric_speed", "SpeedTestStructure.drc"),
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 }

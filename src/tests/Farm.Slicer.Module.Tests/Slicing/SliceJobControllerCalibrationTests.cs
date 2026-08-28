@@ -197,6 +197,48 @@ public sealed class SliceJobControllerCalibrationTests
         repository.Verify(instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact]
+    public async Task SubmitAsync_MaxVolumetricSpeedMethod_CreatesOrdinarySliceJobWithNoCalibrationSagaFields()
+    {
+        // Issue #2135 acceptance: the wire name must submit end to end like every other built
+        // calibration method, not just parse.
+        SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out Mock<ISliceJobEventService> events);
+        SliceJob? added = null;
+        _ = repository
+            .Setup(instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()))
+            .Callback<SliceJob, CancellationToken>((job, _) => added = job)
+            .Returns(Task.CompletedTask);
+
+        var request = new SubmitSliceJobRequest
+        {
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            Priority = 1,
+            Calibration = new CalibrationRequest
+            {
+                Method = "max_volumetric_speed",
+                Params = new Dictionary<string, double> { ["max_volumetric_speed_ceiling_mm3s"] = 40 },
+            },
+        };
+
+        IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
+
+        _ = result.Should().BeOfType<CreatedResult>();
+        _ = added.Should().NotBeNull();
+        _ = added!.CalibrationMethod.Should().Be("max_volumetric_speed");
+        _ = added.CalibrationParamsJson.Should().NotBeNullOrEmpty();
+
+        _ = added.CalibrationProjectId.Should().BeNull();
+        _ = added.CalibrationAttemptId.Should().BeNull();
+        _ = added.CalibrationOrchestrationId.Should().BeNull();
+
+        _ = added.ModelFileUrl.Should().Be("calibration:max_volumetric_speed");
+        _ = added.ModelFileName.Should().Be(CalibrationMethods.DefaultModelFileName(CalibrationMethod.MaximumVolumetricSpeed));
+
+        events.Verify(
+            instance => instance.NotifyJobQueuedAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     private static SliceJobController CreateController(
         out Mock<ISliceJobRepository> repository,
         out Mock<ISliceJobEventService> events)
