@@ -248,8 +248,6 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime, I
         // read elsewhere in this file.
 #pragma warning disable S1144
         public Guid Id { get; init; }
-        public string FileName { get; init; } = string.Empty;
-        public string ContentType { get; init; } = string.Empty;
         public long SizeBytes { get; init; }
 #pragma warning restore S1144
     }

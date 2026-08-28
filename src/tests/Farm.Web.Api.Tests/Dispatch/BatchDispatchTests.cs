@@ -68,8 +68,8 @@ public class BatchDispatchTests : IClassFixture<CustomWebApplicationFactory>, IA
         public Dictionary<Guid, string> JobETags { get; set; } = [];
     }
 
-    // JSON-deserialized from the batch-dispatch HTTP response; setters are populated via
-    // reflection (invisible to the analyzer) even though only the getters are read directly.
+    // Set accessors are populated via JSON deserialization (reflection), invisible to the
+    // analyzer, even though only the getters are read directly.
 #pragma warning disable S1144
     private sealed class BatchDispatchResponse
     {
@@ -83,7 +83,6 @@ public class BatchDispatchTests : IClassFixture<CustomWebApplicationFactory>, IA
     private sealed class BatchDispatchItemResult
     {
         public Guid JobId { get; set; }
-        public string Status { get; set; } = string.Empty;
     }
 #pragma warning restore S1144
 

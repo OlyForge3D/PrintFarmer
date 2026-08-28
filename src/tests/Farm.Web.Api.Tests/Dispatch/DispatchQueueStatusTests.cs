@@ -77,7 +77,6 @@ public class DispatchQueueStatusTests : IClassFixture<CustomWebApplicationFactor
         public Guid PrinterId { get; set; }
         public int QueueDepth { get; set; }
 #pragma warning restore S1144
-        public string PrinterName { get; set; } = string.Empty;
     }
 
     private sealed class DispatchHistoryResponse
@@ -89,12 +88,7 @@ public class DispatchQueueStatusTests : IClassFixture<CustomWebApplicationFactor
         public int Page { get; set; }
         public int PageSize { get; set; }
 #pragma warning restore S1144
-        public List<DispatchHistoryEntry> Items { get; set; } = [];
-    }
-
-    private sealed class DispatchHistoryEntry
-    {
-        public string Action { get; set; } = string.Empty;
+        public List<object> Items { get; set; } = [];
     }
 
     // =========================================================================

@@ -122,16 +122,17 @@ public class PrintApprovalServiceTests : IDisposable
         // Arrange
         PrintJob printJob = await CreateValidPrintJobAsync();
         Guid approvalId = await _service.CreatePendingApprovalAsync(printJob.Id, null, "testuser");
+        _queueService.ShouldFailEnqueue = true;
 
         // Act
         bool result = await _service.ApproveAsync(approvalId, "approver");
 
         // Assert
-        result.Should().BeTrue(); // Approval service just removes the approval, doesn't enqueue
+        result.Should().BeFalse("the approval should not succeed when enqueueing the print job fails");
 
-        // Approval should be removed
+        // Approval should NOT be removed when enqueueing fails
         PrintApproval? approval = await _repository.GetAsync(approvalId);
-        approval.Should().BeNull();
+        approval.Should().NotBeNull();
     }
 
     [Fact]
@@ -258,7 +259,7 @@ public class PrintApprovalServiceTests : IDisposable
     private class StubJobQueueService : IJobQueueService
     {
         public List<QueuePrintJobDto> EnqueuedJobs { get; } = new();
-        public bool ShouldFailEnqueue { get; }
+        public bool ShouldFailEnqueue { get; set; }
 
         public Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, Guid? userId, CancellationToken ct)
         {

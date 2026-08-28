@@ -105,7 +105,6 @@ public class LoadBalancingTests : IClassFixture<CustomWebApplicationFactory>, IA
         public Guid JobId { get; set; }
         public Guid? PrinterId { get; set; }
 #pragma warning restore S1144
-        public string Status { get; set; } = string.Empty;
     }
 
     // =========================================================================
