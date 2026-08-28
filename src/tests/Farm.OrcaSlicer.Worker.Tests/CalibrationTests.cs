@@ -292,8 +292,33 @@ public class CalibrationTests : IDisposable
             bandHeightMm: 5,
             bandCount: 8);
 
-        IEnumerable<double> lengths = Enumerable.Range(0, 8).Select(band => 0.2 + (band * 0.2));
-        lengths.Distinct().Should().HaveCount(8);
+        IEnumerable<double> conditionalLengths = System.Text.RegularExpressions.Regex
+            .Matches(gcode, @"\{(?:if|elsif) layer_z >= [\d.]+\}(?<retraction>[\d.]+)")
+            .Select(m => double.Parse(m.Groups["retraction"].Value, System.Globalization.CultureInfo.InvariantCulture));
+        double elseLength = double.Parse(
+            System.Text.RegularExpressions.Regex.Match(gcode, @"\{else\}(?<retraction>[\d.]+)\{endif\}").Groups["retraction"].Value,
+            System.Globalization.CultureInfo.InvariantCulture);
+        List<double> emittedLengths = conditionalLengths.Append(elseLength).ToList();
+
+        emittedLengths.Should().HaveCount(8, "one retraction length per band, including the else/band-0 fallback");
+        emittedLengths.Distinct().Should().HaveCount(8, "each band must have a visibly distinct retraction length in the emitted gcode");
+    }
+
+    [Fact]
+    public void BuildLayerChangeGcode_Retraction_SingleBand_EmitsUnconditionalM207WithoutOrphanedElse()
+    {
+        // A one-band tower has no threshold to branch on. Naively falling through the same
+        // {if}/{elsif}/{else} cascade used for bandCount > 1 would emit a bare
+        // "M207 S{else}0.2{endif}" with no matching {if} — a placeholder-syntax error that
+        // OrcaSlicer's gcode processor rejects. The builder must special-case this instead.
+        string gcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            startRetractionMm: 0.3,
+            retractionStepMm: 0.2,
+            bandHeightMm: 5,
+            bandCount: 1);
+
+        gcode.Should().Be("M207 S0.3\n");
+        gcode.Should().NotContain("{if").And.NotContain("{elsif").And.NotContain("{else").And.NotContain("{endif");
     }
 
     [Fact]
@@ -400,14 +425,60 @@ public class CalibrationTests : IDisposable
     [Theory]
     [InlineData("""{"start_retraction_mm": 99999}""")]
     [InlineData("""{"start_retraction_mm": -1}""")]
-    [InlineData("""{"retraction_band_count": 0}""")]
-    [InlineData("""{"retraction_band_count": -5}""")]
-    public void CalibrationParameters_Parse_Retraction_OutOfRangeValue_FallsBackToDefault(string json)
+    public void CalibrationParameters_Parse_Retraction_OutOfRangeStartRetraction_FallsBackToDefault(string json)
     {
         CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.Retraction);
 
-        parameters.StartRetractionMm.Should().BeInRange(0, 10);
-        parameters.RetractionBandCount.Should().BeInRange(1, 50);
+        parameters.StartRetractionMm.Should().Be(0.2, "an adversarial or out-of-range start_retraction_mm must never reach the gcode builder");
+    }
+
+    [Theory]
+    [InlineData("""{"retraction_step_mm": 99999}""")]
+    [InlineData("""{"retraction_step_mm": -1}""")]
+    public void CalibrationParameters_Parse_Retraction_OutOfRangeStep_FallsBackToDefault(string json)
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.Retraction);
+
+        parameters.RetractionStepMm.Should().Be(0.2, "an adversarial or out-of-range retraction_step_mm must never reach the gcode builder");
+    }
+
+    [Theory]
+    [InlineData("""{"retraction_band_height_mm": 99999}""")]
+    [InlineData("""{"retraction_band_height_mm": 0}""")]
+    public void CalibrationParameters_Parse_Retraction_OutOfRangeBandHeight_FallsBackToDefault(string json)
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.Retraction);
+
+        parameters.RetractionBandHeightMm.Should().Be(5, "an adversarial or out-of-range retraction_band_height_mm must never reach the gcode builder");
+    }
+
+    [Theory]
+    [InlineData("""{"retraction_band_count": 100000}""")] // absurdly large: would blow up gcode-template generation
+    [InlineData("""{"retraction_band_count": 0}""")] // below the minimum of 1
+    [InlineData("""{"retraction_band_count": -5}""")]
+    public void CalibrationParameters_Parse_Retraction_OutOfRangeBandCount_FallsBackToDefault(string json)
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.Retraction);
+
+        parameters.RetractionBandCount.Should().Be(8, "an adversarial or out-of-range retraction_band_count must never reach the gcode builder");
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_Retraction_InRangeFieldsButOutOfRangeComputedTopBand_FallsBackToAllDefaults()
+    {
+        // Each individual field below passes its own per-field bound check (start <= 10,
+        // step <= 5, band count <= 50), but the *computed* top-band retraction they combine to
+        // (8 + 9*1 = 17mm) exceeds MaxRetractionMm (10mm) — a value no real printer's firmware
+        // retraction range would ever need. This must fall back to the full default set, not
+        // silently clamp only the offending field while leaving the others client-controlled.
+        string json = """{"start_retraction_mm": 8, "retraction_step_mm": 1, "retraction_band_count": 10}""";
+
+        CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.Retraction);
+
+        parameters.StartRetractionMm.Should().Be(0.2);
+        parameters.RetractionStepMm.Should().Be(0.2);
+        parameters.RetractionBandHeightMm.Should().Be(5);
+        parameters.RetractionBandCount.Should().Be(8);
     }
 
     #endregion
@@ -736,7 +807,10 @@ public class CalibrationTests : IDisposable
         string processJsonPath = Path.Combine(_tempDir, $"process-{Guid.NewGuid():N}.json");
         string machineJsonPath = Path.Combine(_tempDir, $"machine-{Guid.NewGuid():N}.json");
         await File.WriteAllTextAsync(processJsonPath, """{"name": "Test Process"}""");
-        await File.WriteAllTextAsync(machineJsonPath, """{"name": "Test Machine", "use_firmware_retraction": "0"}""");
+        // Mirrors a real vendor machine profile (BambuLab/Prusa/Creality/Voron all ship wipe
+        // enabled): use_firmware_retraction=1 combined with any extruder's wipe=1 is a hard
+        // config-validation error in OrcaSlicer, so the pipeline must also force wipe off.
+        await File.WriteAllTextAsync(machineJsonPath, """{"name": "Test Machine", "use_firmware_retraction": "0", "wipe": ["1"]}""");
         var job = new DistributedSlicingJob
         {
             CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.Retraction),
@@ -767,6 +841,9 @@ public class CalibrationTests : IDisposable
         machineDoc.RootElement.GetProperty("use_firmware_retraction").GetString().Should().Be(
             "1",
             "M207-driven retraction only takes effect when firmware retraction is enabled on the printer profile");
+        machineDoc.RootElement.GetProperty("wipe").EnumerateArray().Select(e => e.GetString()).Should().AllBe(
+            "0",
+            "OrcaSlicer's config validator hard-rejects use_firmware_retraction=1 combined with any extruder's wipe=1");
         job.MachineProfileSha256.Should().NotBeNullOrEmpty();
         job.MachineProfileSha256.Should().Be(
             NativeSlicerProfiles.ComputeSha256(updatedMachineContent),
@@ -783,6 +860,26 @@ public class CalibrationTests : IDisposable
         using JsonDocument doc = JsonDocument.Parse(updated);
         doc.RootElement.GetProperty("use_firmware_retraction").GetString().Should().Be("1");
         doc.RootElement.GetProperty("name").GetString().Should().Be("Test Machine");
+        // No "wipe" key was present at all: rather than rely on upstream resolving the missing
+        // key to its documented false default, an explicit single-extruder "off" array is
+        // written so this is defensible even if that upstream default ever changes.
+        doc.RootElement.GetProperty("wipe").EnumerateArray().Select(e => e.GetString()).Should().Equal("0");
+    }
+
+    [Fact]
+    public void EnableFirmwareRetraction_MultiExtruderWipeEnabled_ForcesEveryExtruderOffPreservingArrayLength()
+    {
+        // Real multi-extruder vendor profiles (e.g. an IDEX or multi-toolhead machine) carry one
+        // wipe entry per extruder. Forcing wipe off must preserve that length rather than
+        // collapsing it to a single entry, which would desync it from other per-extruder arrays
+        // (nozzle_diameter, extruder_colour, ...) the same profile carries.
+        string machineJson = """{"name": "Dual Extruder Machine", "wipe": ["1", "1"]}""";
+
+        string updated = OrcaSlicingPipelineService.EnableFirmwareRetraction(machineJson);
+
+        using JsonDocument doc = JsonDocument.Parse(updated);
+        doc.RootElement.GetProperty("use_firmware_retraction").GetString().Should().Be("1");
+        doc.RootElement.GetProperty("wipe").EnumerateArray().Select(e => e.GetString()).Should().Equal("0", "0");
     }
 
     private static OrcaSlicingPipelineService CreatePipeline(string calibResourcesRoot)

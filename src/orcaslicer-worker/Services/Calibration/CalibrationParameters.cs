@@ -63,24 +63,44 @@ public sealed record CalibrationParameters
             return defaults;
         }
 
-        return method switch
+        switch (method)
         {
-            CalibrationMethod.TemperatureTower => defaults with
-            {
-                StartTemperatureC = ReadOrDefault(values, "start_temperature", defaults.StartTemperatureC, MinTemperatureC, MaxTemperatureC),
-                TemperatureStepC = ReadOrDefault(values, "temperature_step", defaults.TemperatureStepC, MinTemperatureStepC, MaxTemperatureStepC),
-                BandHeightMm = ReadOrDefault(values, "band_height_mm", defaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm),
-                BandCount = (int)ReadOrDefault(values, "band_count", defaults.BandCount, MinBandCount, MaxBandCount),
-            },
-            CalibrationMethod.Retraction => defaults with
-            {
-                StartRetractionMm = ReadOrDefault(values, "start_retraction_mm", defaults.StartRetractionMm, MinRetractionMm, MaxRetractionMm),
-                RetractionStepMm = ReadOrDefault(values, "retraction_step_mm", defaults.RetractionStepMm, MinRetractionStepMm, MaxRetractionStepMm),
-                RetractionBandHeightMm = ReadOrDefault(values, "retraction_band_height_mm", defaults.RetractionBandHeightMm, MinRetractionBandHeightMm, MaxRetractionBandHeightMm),
-                RetractionBandCount = (int)ReadOrDefault(values, "retraction_band_count", defaults.RetractionBandCount, MinRetractionBandCount, MaxRetractionBandCount),
-            },
-            _ => defaults,
-        };
+            case CalibrationMethod.TemperatureTower:
+                return defaults with
+                {
+                    StartTemperatureC = ReadOrDefault(values, "start_temperature", defaults.StartTemperatureC, MinTemperatureC, MaxTemperatureC),
+                    TemperatureStepC = ReadOrDefault(values, "temperature_step", defaults.TemperatureStepC, MinTemperatureStepC, MaxTemperatureStepC),
+                    BandHeightMm = ReadOrDefault(values, "band_height_mm", defaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm),
+                    BandCount = (int)ReadOrDefault(values, "band_count", defaults.BandCount, MinBandCount, MaxBandCount),
+                };
+            case CalibrationMethod.Retraction:
+                CalibrationParameters parsed = defaults with
+                {
+                    StartRetractionMm = ReadOrDefault(values, "start_retraction_mm", defaults.StartRetractionMm, MinRetractionMm, MaxRetractionMm),
+                    RetractionStepMm = ReadOrDefault(values, "retraction_step_mm", defaults.RetractionStepMm, MinRetractionStepMm, MaxRetractionStepMm),
+                    RetractionBandHeightMm = ReadOrDefault(values, "retraction_band_height_mm", defaults.RetractionBandHeightMm, MinRetractionBandHeightMm, MaxRetractionBandHeightMm),
+                    RetractionBandCount = (int)ReadOrDefault(values, "retraction_band_count", defaults.RetractionBandCount, MinRetractionBandCount, MaxRetractionBandCount),
+                };
+                return ClampRetractionTopBand(parsed, defaults);
+            default:
+                return defaults;
+        }
+    }
+
+    /// <summary>
+    /// Per-field bounds checking in <see cref="ReadOrDefault"/> only constrains
+    /// <c>StartRetractionMm</c>, not the retraction length the top band reaches
+    /// (<c>StartRetractionMm + (RetractionBandCount - 1) * RetractionStepMm</c>). A client could
+    /// otherwise combine in-range individual values (e.g. a high start, a large step, and many
+    /// bands) into a top-band retraction far beyond <see cref="MaxRetractionMm"/> — well outside
+    /// any printer's real firmware-retraction range. If the computed top band exceeds that bound,
+    /// discard the whole parameter set and fall back to <paramref name="defaults"/> rather than
+    /// silently clamping one field and leaving the others client-controlled.
+    /// </summary>
+    private static CalibrationParameters ClampRetractionTopBand(CalibrationParameters parameters, CalibrationParameters defaults)
+    {
+        double topBandRetractionMm = parameters.StartRetractionMm + ((parameters.RetractionBandCount - 1) * parameters.RetractionStepMm);
+        return topBandRetractionMm > MaxRetractionMm ? defaults : parameters;
     }
 
     // Bounds below are deliberately generous but finite: they exist only to reject adversarial or

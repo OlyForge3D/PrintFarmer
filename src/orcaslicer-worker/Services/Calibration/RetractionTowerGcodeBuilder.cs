@@ -59,6 +59,14 @@ public static class RetractionTowerGcodeBuilder
             throw new ArgumentOutOfRangeException(nameof(bandHeightMm), bandHeightMm, "Band height must be positive.");
         }
 
+        if (bandCount == 1)
+        {
+            // A single band has no threshold to branch on: emitting a conditional chain here
+            // would produce a bare "{else}...{endif}" with no matching "{if}", which OrcaSlicer's
+            // gcode-placeholder processor rejects. Emit a plain, unconditional M207 instead.
+            return $"M207 S{Math.Round(startRetractionMm, 4).ToString(CultureInfo.InvariantCulture)}\n";
+        }
+
         var sb = new StringBuilder();
         sb.Append("M207 S");
 

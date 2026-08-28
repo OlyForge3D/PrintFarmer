@@ -36,7 +36,12 @@
 /// <c>M207 S...</c> once per Z-band, and forces the machine profile's
 /// <c>use_firmware_retraction</c> setting on for these jobs — <c>M207</c> only takes effect when
 /// firmware retraction is enabled, since software retraction bakes the retraction length into
-/// <c>G1 E...</c> moves at slice time instead of reading it live. This produces a per-band
+/// <c>G1 E...</c> moves at slice time instead of reading it live. Enabling firmware retraction
+/// also forces every extruder's <c>wipe</c> setting off: upstream's <c>PrintConfig::validate()</c>
+/// hard-rejects <c>use_firmware_retraction=1</c> combined with any extruder's <c>wipe=1</c>
+/// (real vendor profiles commonly ship wipe enabled), and that check runs even in CLI mode, so
+/// leaving it untouched would fail slicing outright rather than merely producing a bad result.
+/// This produces a per-band
 /// <em>retraction length</em> result; write-back into a filament profile (as opposed to a
 /// machine profile) is the calibration-consumer's job and is intentionally out of scope for the
 /// worker — see the issue for the recommendation that a future desktop-side workflow store the

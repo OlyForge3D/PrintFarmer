@@ -378,6 +378,16 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// physical effect. Stored as the string <c>"1"</c> to match the settings-dictionary string
     /// convention <see cref="SettingsDictToNativeJson"/> emits for other keys in this profile
     /// format.
+    /// <para>
+    /// Also forces <c>wipe</c> (a per-extruder <c>coBools</c> array) off. OrcaSlicer's own config
+    /// validator (<c>PrintConfig::validate</c>) hard-rejects the combination of
+    /// <c>use_firmware_retraction=true</c> with any extruder's <c>wipe=true</c> — a real vendor
+    /// machine profile (BambuLab/Prusa/Creality/Voron all ship <c>wipe</c> enabled) would
+    /// otherwise cause the CLI to exit before slicing with <c>CLI_INVALID_VALUES_IN_3MF</c>,
+    /// while every unit test in this repo (which never invokes the real OrcaSlicer CLI) stayed
+    /// green. Retraction calibration jobs don't need wipe-while-retracting, so disabling it here
+    /// is safe for the duration of the calibration slice.
+    /// </para>
     /// </summary>
     internal static string EnableFirmwareRetraction(string machineJson)
     {
@@ -389,6 +399,25 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
 
         rootObject["use_firmware_retraction"] = "1";
+
+        if (rootObject["wipe"] is JsonArray existingWipe)
+        {
+            var disabledWipe = new JsonArray();
+            for (int i = 0; i < existingWipe.Count; i++)
+            {
+                disabledWipe.Add(JsonValue.Create("0"));
+            }
+
+            rootObject["wipe"] = disabledWipe;
+        }
+        else
+        {
+            // Missing (defaults to false per this repo's own settings metadata) or a
+            // non-array shape we don't otherwise recognize: write an explicit single-extruder
+            // "off" array rather than relying on upstream's default resolution.
+            rootObject["wipe"] = new JsonArray(JsonValue.Create("0"));
+        }
+
         return rootObject.ToJsonString();
     }
 
