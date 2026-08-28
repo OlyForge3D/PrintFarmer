@@ -541,6 +541,16 @@ public sealed class CalibrationOrchestrationSagaService(
     /// request that sets <c>calibration.method</c> alongside any of them, so this saga must never
     /// forward them even if a stored input happened to contain one.
     /// </summary>
+    /// <remarks>
+    /// Issue #2139: <see cref="CalibrationMethod.InputShaping"/> is the one method whose
+    /// specification carries a string <c>firmware_flavor</c> value rather than purely numeric
+    /// parameters. <c>calibration.params</c> binds to
+    /// <c>Farm.Slicer.Module.Contracts.CalibrationRequest.Params</c>
+    /// (<c>Dictionary&lt;string, double&gt;?</c>), so a string value left there would fail to bind
+    /// and the API would never see it. It must instead be lifted to the request's dedicated
+    /// <c>calibration.firmwareFlavor</c> sibling field, the same field <c>SliceJobController</c>
+    /// validates directly against <c>InputShapingFirmwareFlavors.IsSupported</c>.
+    /// </remarks>
     private static JsonObject BuildSliceSubmissionBody(CalibrationAttempt attempt, CalibrationMethod method)
     {
         JsonNode? parsedBody = JsonNode.Parse(attempt.InputJson);
@@ -549,11 +559,23 @@ public sealed class CalibrationOrchestrationSagaService(
         bodyObject.Remove("calibrationAttemptId");
         bodyObject.Remove("calibrationOrchestrationId");
         JsonNode? specification = JsonNode.Parse(attempt.SpecificationJson);
-        bodyObject["calibration"] = new JsonObject
+
+        var calibration = new JsonObject
         {
             ["method"] = CalibrationMethodNames.ToName(method),
             ["params"] = specification?.DeepClone(),
         };
+
+        if (method == CalibrationMethod.InputShaping &&
+            calibration["params"] is JsonObject inputShapingParams &&
+            inputShapingParams.TryGetPropertyValue("firmware_flavor", out JsonNode? firmwareFlavorNode))
+        {
+            calibration["firmwareFlavor"] = firmwareFlavorNode?.DeepClone();
+            inputShapingParams.Remove("firmware_flavor");
+            calibration["params"] = inputShapingParams.Count > 0 ? inputShapingParams : null;
+        }
+
+        bodyObject["calibration"] = calibration;
         return bodyObject;
     }
 

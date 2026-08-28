@@ -239,13 +239,29 @@ public class CalibrationTests : IDisposable
     }
 
     [Fact]
-    public void CalibrationParameters_Parse_MixedNumericAndFirmwareFlavor_BothParseIndependently()
+    public void CalibrationParameters_Parse_TemperatureTowerWithExtraneousFirmwareFlavorKey_NumericFieldsStillParseCorrectly()
     {
-        // A single CalibrationParamsJson payload can now legally mix numeric keys (used by other
-        // methods) with the string firmware_flavor key (issue #2139) — confirms the per-key
-        // JsonDocument-based parse doesn't regress numeric parsing when a string value is present
-        // elsewhere in the same object, unlike the old whole-payload Dictionary<string,double>
-        // deserialization, which would have thrown and fallen back to all defaults.
+        // Regression coverage for the Parse rewrite (issue #2139): a payload combining an
+        // unrelated method's numeric field with a string firmware_flavor key must not regress the
+        // numeric method's own parsing. Under the old whole-payload Dictionary<string,double>
+        // deserialization this JSON would have thrown on the string value and silently fallen back
+        // to *all* TemperatureTower defaults, hiding the client-supplied start_temperature entirely.
+        CalibrationParameters parameters = CalibrationParameters.Parse(
+            """{"start_temperature": 220, "firmware_flavor": "marlin"}""",
+            CalibrationMethod.TemperatureTower);
+
+        parameters.StartTemperatureC.Should().Be(
+            220,
+            "the per-key JsonDocument-based parse must extract start_temperature correctly even " +
+            "when an unrelated string key is present elsewhere in the same JSON object");
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_InputShapingIgnoresUnrelatedNumericKeys()
+    {
+        // InputShaping's Parse case only reads firmware_flavor — it has no numeric parameters of
+        // its own (report-only, issue #2139) — so a stray numeric key from another method's
+        // vocabulary must not cause a throw or otherwise interfere with FirmwareFlavor parsing.
         CalibrationParameters parameters = CalibrationParameters.Parse(
             """{"start_temperature": 220, "firmware_flavor": "marlin"}""",
             CalibrationMethod.InputShaping);

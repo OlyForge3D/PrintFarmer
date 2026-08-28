@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using System.Text.Json.Nodes;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Modules.Calibration.Contracts;
@@ -131,6 +132,68 @@ public sealed class CalibrationOrchestrationSagaServiceTests
             await AdvanceAsync(saga, orchestrationId, actor);
         _ = thirdAdvance.StatusCode.Should().Be(StatusCodes.Status409Conflict);
         _ = thirdAdvance.Code.Should().Be("calibration_orchestration_terminally_failed");
+    }
+
+    [Fact]
+    public async Task AdvanceAsync_InputShapingSlicingStep_ThreadsFirmwareFlavorOntoRequestAndOmitsItFromParams()
+    {
+        // Regression coverage for a review finding on issue #2139: before this fix,
+        // BuildSliceSubmissionBody unconditionally rebuilt the "calibration" node as
+        // {method, params}, so an input_shaping attempt's firmware_flavor never reached the API's
+        // dedicated CalibrationRequest.FirmwareFlavor field. Because InputShaping is now a
+        // recognized CalibrationMethodNames entry, RunCloningProfileStep's TryParse succeeds where
+        // it previously failed fast - so without this fix the saga would proceed to slicing and
+        // have every submission rejected by the API's firmware-flavor validation, retrying with
+        // exponential backoff until the retry budget was exhausted instead of failing fast.
+        await using AppDbContext db = CreateContext();
+        CalibrationProjectService projectService = CreateProjectService(db);
+        FakeSliceSubmissionGateway sliceGateway = new();
+        CalibrationOrchestrationSagaService saga = CreateSaga(
+            db,
+            projectService,
+            sliceGateway,
+            new FakePrintDispatchGateway());
+        CalibrationActor actor = CreateActor();
+        (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(
+            actor,
+            projectService,
+            methodName: CalibrationMethodNames.InputShaping,
+            specification: JsonSerializer.SerializeToElement(new { firmware_flavor = "klipper" }));
+
+        JsonNode? capturedRequestBody = null;
+        sliceGateway.SubmitBehavior = submission =>
+        {
+            capturedRequestBody = submission.RequestBody;
+            return SliceSubmissionResult.Ok(Guid.NewGuid());
+        };
+
+        // created -> cloning-profile: InputShaping now parses successfully (issue #2139), so this
+        // hop advances instead of failing terminally with "unknown_calibration_method".
+        CalibrationApiResult<CalibrationOrchestrationDto> firstAdvance =
+            await AdvanceAsync(saga, orchestrationId, actor);
+        _ = firstAdvance.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.CloningProfile);
+
+        // cloning-profile -> slicing: submits the slice request body built by BuildSliceSubmissionBody.
+        CalibrationApiResult<CalibrationOrchestrationDto> secondAdvance =
+            await AdvanceAsync(saga, orchestrationId, actor);
+        _ = secondAdvance.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.Slicing);
+
+        // slicing -> awaiting-slice: this is the hop that calls ISliceSubmissionGateway.SubmitAsync.
+        CalibrationApiResult<CalibrationOrchestrationDto> thirdAdvance =
+            await AdvanceAsync(saga, orchestrationId, actor);
+        _ = thirdAdvance.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.AwaitingSlice);
+
+        _ = capturedRequestBody.Should().NotBeNull();
+        JsonObject calibration = (JsonObject)capturedRequestBody!["calibration"]!;
+        _ = calibration["method"]!.GetValue<string>().Should().Be(CalibrationMethodNames.InputShaping);
+        _ = calibration["firmwareFlavor"]!.GetValue<string>().Should().Be(
+            "klipper",
+            "firmware_flavor must be lifted out of params and promoted to the dedicated " +
+            "calibration.firmwareFlavor field the API validates");
+        _ = calibration["params"].Should().BeNull(
+            "firmware_flavor was the only key in params, so params must be emptied out (not left " +
+            "holding a string value that CalibrationRequest.Params - a Dictionary<string, double> - " +
+            "cannot bind)");
     }
 
     [Fact]
@@ -571,7 +634,8 @@ public sealed class CalibrationOrchestrationSagaServiceTests
     private static async Task<(Guid OrchestrationId, Guid AttemptId)> CreateProjectAndAttemptAsync(
         CalibrationActor actor,
         ICalibrationProjectService projectService,
-        string methodName)
+        string methodName,
+        JsonElement? specification = null)
     {
         CalibrationApiResult<CalibrationProjectDto> project = await projectService.CreateProjectAsync(
             new CalibrationProjectCreateRequest
@@ -604,7 +668,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
                 Method = methodName,
                 DefinitionVersion = "1",
                 Input = JsonSerializer.SerializeToElement(new { modelUrl = "https://example.test/model.3mf" }),
-                Specification = JsonSerializer.SerializeToElement(new { targetTemperatureC = 210 }),
+                Specification = specification ?? JsonSerializer.SerializeToElement(new { targetTemperatureC = 210 }),
                 ProfileSnapshotIds = JsonSerializer.SerializeToElement(Array.Empty<Guid>()),
                 PrinterConfigurationRevision = 1,
             },
