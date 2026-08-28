@@ -225,6 +225,45 @@ public class CalibrationTests : IDisposable
         CalibrationMethods.ClientAcceptedWireNames.Should().Contain("cornering");
     }
 
+    [Theory]
+    [InlineData("vfa", CalibrationMethod.Vfa)]
+    [InlineData("VFA", CalibrationMethod.Vfa)]
+    public void TryParse_Vfa_ReturnsVfaMethod(string wireName, CalibrationMethod expected)
+    {
+        bool parsed = CalibrationMethods.TryParse(wireName, out CalibrationMethod method);
+
+        parsed.Should().BeTrue();
+        method.Should().Be(expected);
+    }
+
+    [Fact]
+    public void DefaultModelFileName_Vfa_ReturnsVfaDrc()
+    {
+        // Verified against upstream OrcaSlicer/OrcaSlicer's resource tree: resources/calib/vfa/vfa.drc.
+        CalibrationMethods.DefaultModelFileName(CalibrationMethod.Vfa).Should().Be("vfa.drc");
+    }
+
+    [Fact]
+    public void RelativeResourcePath_Vfa_ResolvesUnderVfaDirectory()
+    {
+        CalibrationMethods.RelativeResourcePath(CalibrationMethod.Vfa).Should()
+            .Be(Path.Combine("vfa", "vfa.drc"));
+    }
+
+    [Fact]
+    public void IsSlicerSupported_Vfa_ReturnsTrue()
+    {
+        // VFA is a built, catalogued method (issue #2140) — its resource is copied via the generic
+        // fallback path in PrepareCalibrationModel like Cornering/MaxVolumetricSpeed.
+        CalibrationMethods.IsSlicerSupported(CalibrationMethod.Vfa).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ClientAcceptedWireNames_IncludesVfa()
+    {
+        CalibrationMethods.ClientAcceptedWireNames.Should().Contain("vfa");
+    }
+
     #endregion
 
     #region CorneringFirmwareFlavorGate
@@ -2230,6 +2269,146 @@ public class CalibrationTests : IDisposable
         doc.RootElement.GetProperty("name").GetString().Should().Be("Test Filament");
         doc.RootElement.GetProperty("filament_flow_ratio")[0].GetString().Should().Be("0.98");
         doc.RootElement.GetProperty("filament_max_volumetric_speed")[0].GetString().Should().Be("42.5");
+    }
+
+    [Fact]
+    public void PrepareCalibrationModel_VfaMethod_CopiesResourceUnmodified()
+    {
+        // Issue #2140: vfa.drc is an opaque OrcaSlicer binary format (confirmed by magic bytes
+        // against the upstream resource tree, not a ZIP/3MF archive), so — like
+        // MaximumVolumetricSpeed's and Cornering's .drc resources — the worker must copy it
+        // unmodified rather than attempt to parse and rewrite it.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-vfa");
+        string vfaPath = Path.Combine(calibResourcesRoot, "vfa", "vfa.drc");
+        Directory.CreateDirectory(Path.GetDirectoryName(vfaPath)!);
+        File.WriteAllText(vfaPath, "fake-vfa-resource");
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.Vfa),
+        };
+
+        string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
+
+        File.Exists(preparedPath).Should().BeTrue();
+        File.ReadAllText(preparedPath).Should().Be("fake-vfa-resource");
+    }
+
+    [Fact]
+    public async Task ApplyVfaMaxVolumetricSpeedCeilingAsync_SetsCeilingAndRecomputesDigest()
+    {
+        // Regression coverage for the pipeline's filament-profile injection wiring: a unit test on
+        // the shared JSON helper alone does not prove the ceiling actually reaches the filament
+        // profile on disk, or that the recorded digest is recomputed to match.
+        string filamentJsonPath = Path.Combine(_tempDir, $"filament-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(filamentJsonPath, """{"name": "Test Filament"}""");
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.Vfa),
+            CalibrationParamsJson = """{"vfa_max_volumetric_speed_ceiling_mm3s": 180}""",
+        };
+
+        await OrcaSlicingPipelineService.ApplyVfaMaxVolumetricSpeedCeilingAsync(job, filamentJsonPath, CancellationToken.None);
+
+        string updatedContent = await File.ReadAllTextAsync(filamentJsonPath);
+        using JsonDocument doc = JsonDocument.Parse(updatedContent);
+        JsonElement ceilingElement = doc.RootElement.GetProperty("filament_max_volumetric_speed");
+        ceilingElement.ValueKind.Should().Be(JsonValueKind.Array, "OrcaSlicer stores filament settings as single-element arrays");
+        ceilingElement[0].GetString().Should().Be(
+            "180",
+            "the pipeline must inject the exact ceiling computed from the job's CalibrationParamsJson, " +
+            "not the 200mm³/s default — a bug that ignores the client-supplied override would otherwise " +
+            "go undetected because the default also happens to be a plausible ceiling");
+        job.FilamentProfileSha256.Should().NotBeNullOrEmpty();
+        job.FilamentProfileSha256.Should().Be(
+            NativeSlicerProfiles.ComputeSha256(updatedContent),
+            "the recorded digest must match the mutated filament profile content, not the original");
+    }
+
+    [Fact]
+    public async Task ApplyVfaMaxVolumetricSpeedCeilingAsync_DefaultParams_Uses200Mm3sUpstreamCeiling()
+    {
+        // Issue #2140: verified against upstream source (CalibUtils::calib_VFA) that the VFA
+        // ceiling default is 200mm³/s, distinct from MaximumVolumetricSpeed's 50mm³/s default —
+        // this must not silently regress to the wrong method's default.
+        string filamentJsonPath = Path.Combine(_tempDir, $"filament-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(filamentJsonPath, """{"name": "Test Filament"}""");
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.Vfa),
+        };
+
+        await OrcaSlicingPipelineService.ApplyVfaMaxVolumetricSpeedCeilingAsync(job, filamentJsonPath, CancellationToken.None);
+
+        string updatedContent = await File.ReadAllTextAsync(filamentJsonPath);
+        using JsonDocument doc = JsonDocument.Parse(updatedContent);
+        doc.RootElement.GetProperty("filament_max_volumetric_speed")[0].GetString().Should().Be("200");
+    }
+
+    [Fact]
+    public async Task ApplyVfaMaxVolumetricSpeedCeilingAsync_MultiExtruder_SetsCeilingOnEveryFilamentAndRecomputesSetDigest()
+    {
+        // Mirrors ApplyMaxVolumetricSpeedCeilingAsync_MultiExtruder_SetsCeilingOnEveryFilamentAndRecomputesSetDigest:
+        // GenerateProfileJsonFilesAsync joins per-extruder filament paths with ';' (matching the
+        // --load-filaments CLI argument shape) when profile.ExtruderFilamentProfiles has more than
+        // one entry, and RunOrcaSlicerAsync passes that joined string straight through as
+        // profilePaths["filament"].
+        string filamentPathA = Path.Combine(_tempDir, $"filament-a-{Guid.NewGuid():N}.json");
+        string filamentPathB = Path.Combine(_tempDir, $"filament-b-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(filamentPathA, """{"name": "Filament A"}""");
+        await File.WriteAllTextAsync(filamentPathB, """{"name": "Filament B", "filament_flow_ratio": ["0.97"]}""");
+        string joinedFilamentPath = string.Join(';', filamentPathA, filamentPathB);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.Vfa),
+            CalibrationParamsJson = """{"vfa_max_volumetric_speed_ceiling_mm3s": 210}""",
+        };
+
+        await OrcaSlicingPipelineService.ApplyVfaMaxVolumetricSpeedCeilingAsync(job, joinedFilamentPath, CancellationToken.None);
+
+        string updatedA = await File.ReadAllTextAsync(filamentPathA);
+        string updatedB = await File.ReadAllTextAsync(filamentPathB);
+        using JsonDocument docA = JsonDocument.Parse(updatedA);
+        using JsonDocument docB = JsonDocument.Parse(updatedB);
+        docA.RootElement.GetProperty("filament_max_volumetric_speed")[0].GetString().Should().Be("210");
+        docB.RootElement.GetProperty("filament_max_volumetric_speed")[0].GetString().Should().Be("210");
+        docB.RootElement.GetProperty("filament_flow_ratio")[0].GetString().Should().Be(
+            "0.97", "injecting the ceiling must not clobber a filament's other existing keys");
+
+        job.FilamentProfileSha256.Should().Be(
+            NativeSlicerProfiles.ComputeSha256(string.Join('\0', updatedA, updatedB)),
+            "the multi-filament digest must follow the same \\0-joined-set convention " +
+            "GenerateProfileJsonFilesAsync uses (ComputeProfileSetSha256), not a hash of a single document");
+    }
+
+    [Theory]
+    [InlineData(-5)]
+    [InlineData(0)]
+    [InlineData(500)]
+    public void CalibrationParametersParse_VfaCeilingOutOfBounds_FallsBackToUpstream200Mm3sDefault(double outOfBoundsCeiling)
+    {
+        string calibrationParamsJson = JsonSerializer.Serialize(
+            new Dictionary<string, double> { ["vfa_max_volumetric_speed_ceiling_mm3s"] = outOfBoundsCeiling });
+
+        CalibrationParameters parameters = CalibrationParameters.Parse(calibrationParamsJson, CalibrationMethod.Vfa);
+
+        parameters.VfaMaxVolumetricSpeedCeilingMm3s.Should().Be(200);
+    }
+
+    [Fact]
+    public void CalibrationParametersParse_VfaCeilingNonNumericValue_FallsBackToUpstream200Mm3sDefault()
+    {
+        // "NaN" as a JSON string fails Dictionary<string,double> deserialization entirely (JSON has
+        // no bare NaN/Infinity literal), so the whole params map falls back to defaults — mirrors
+        // the equivalent MaximumVolumetricSpeed/temperature-tower coverage above.
+        const string calibrationParamsJson = """{"vfa_max_volumetric_speed_ceiling_mm3s": "NaN"}""";
+
+        CalibrationParameters parameters = CalibrationParameters.Parse(calibrationParamsJson, CalibrationMethod.Vfa);
+
+        parameters.VfaMaxVolumetricSpeedCeilingMm3s.Should().Be(200);
     }
 
     private static OrcaSlicingPipelineService CreatePipeline(string calibResourcesRoot)

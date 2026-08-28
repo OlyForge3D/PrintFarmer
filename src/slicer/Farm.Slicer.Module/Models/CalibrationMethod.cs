@@ -124,6 +124,38 @@
 /// operator's firmware cannot even apply — for any other flavor (reprapfirmware, smoothie,
 /// sprinter, etc.).
 /// </para>
+/// <para>
+/// <see cref="Vfa"/> (Vertical Fine Artifacts / resonance speed, issue #2140): VFA sweeps outer
+/// wall speed across a tall tower to find the printer's resonance band (the range that produces
+/// visible ringing/banding), so — like <see cref="Cornering"/> — it measures the printer's motion
+/// system rather than a filament property, and the architecture decision recorded on issue #2140
+/// makes it <strong>report-only</strong>: the calibration saga never carries it into a
+/// filament-profile-clone/patch step, and there is no settable field to write back at all (the
+/// operator's takeaway is a speed range to avoid, not a value to apply). The bundled resource
+/// (<c>resources/calib/vfa/vfa.drc</c>, verified against the upstream OrcaSlicer resource tree)
+/// is, like <see cref="MaximumVolumetricSpeed"/>'s and <see cref="Cornering"/>'s <c>.drc</c>
+/// resources, an opaque binary format copied unmodified rather than parsed and rewritten.
+/// Upstream's actual per-layer speed ramp for this tower uses the exact same in-process
+/// mechanism documented above for <see cref="MaximumVolumetricSpeed"/> —
+/// <c>GCode.cpp</c>'s <c>calib_mode()</c> switch (<c>case CalibMode::Calib_VFA_Tower</c>) drives
+/// <c>m_calib_config.set_key_value("outer_wall_speed", ...)</c> from <c>Print::calib_params()</c>,
+/// which is set only by the GUI's <c>CalibUtils::calib_VFA</c>/<c>process_and_store_3mf</c>
+/// immediately before slicing, is never persisted to the 3MF project file, and has no CLI flag —
+/// so, exactly as for <see cref="MaximumVolumetricSpeed"/>, it is not reachable from this
+/// separate-process, CLI-driven worker. (This is why this method's implementation is closer in
+/// shape to <see cref="MaximumVolumetricSpeed"/>'s permissive-ceiling configurator than to
+/// <c>FlowRateCalibrationConfigurator</c>'s per-object 3MF rewriting — the bundled resource here
+/// is an opaque tower, not a 3MF with per-object metadata to patch.) Upstream's
+/// <c>CalibUtils::calib_VFA</c> also raises <c>filament_max_volumetric_speed</c> to 200 (versus
+/// <see cref="MaximumVolumetricSpeed"/>'s 50) so the sweep's higher wall speeds are never
+/// throttled by the slicer's own volumetric-speed limiter; the worker reproduces that ceiling via
+/// <c>OrcaSlicingPipelineService.ApplyVfaMaxVolumetricSpeedCeilingAsync</c>, gated by
+/// <c>CalibrationParameters.VfaMaxVolumetricSpeedCeilingMm3s</c>, and otherwise slices the bundled
+/// tower geometry with the client-selected process profile's own constant wall speed — the wire
+/// name still submits, slices, and returns gcode end to end per the issue's acceptance criteria,
+/// while upstream's per-layer speed ramp itself remains unreproduced for the same structural
+/// reason as <see cref="MaximumVolumetricSpeed"/>.
+/// </para>
 /// </remarks>
 public enum CalibrationMethod
 {
@@ -178,6 +210,14 @@ public enum CalibrationMethod
     /// firmware-flavor gate this method needs.
     /// </summary>
     Cornering,
+
+    /// <summary>
+    /// VFA (Vertical Fine Artifacts / resonance speed) calibration (issue #2140). See the
+    /// type-level remarks for the report-only write-back model and why this method's
+    /// permissive-ceiling implementation mirrors <see cref="MaximumVolumetricSpeed"/> rather than
+    /// <c>FlowRateCalibrationConfigurator</c>'s per-object 3MF rewriting.
+    /// </summary>
+    Vfa,
 }
 
 /// <summary>
@@ -202,6 +242,7 @@ public static class CalibrationMethods
             // so the two catalogues do not diverge further (issue #2136).
             ["pressure_advance_tower"] = CalibrationMethod.PressureAdvanceTower,
             ["cornering"] = CalibrationMethod.Cornering,
+            ["vfa"] = CalibrationMethod.Vfa,
         };
 
     private static readonly Dictionary<CalibrationMethod, string> MethodToWireName =
@@ -216,6 +257,7 @@ public static class CalibrationMethods
             [CalibrationMethod.MaximumVolumetricSpeed] = "max_volumetric_speed",
             [CalibrationMethod.PressureAdvanceTower] = "pressure_advance_tower",
             [CalibrationMethod.Cornering] = "cornering",
+            [CalibrationMethod.Vfa] = "vfa",
         };
 
     /// <summary>
@@ -304,6 +346,7 @@ public static class CalibrationMethods
         CalibrationMethod.MaximumVolumetricSpeed => "SpeedTestStructure.drc",
         CalibrationMethod.PressureAdvanceTower => "tower_with_seam.drc",
         CalibrationMethod.Cornering => "SCV-V2.drc",
+        CalibrationMethod.Vfa => "vfa.drc",
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 
@@ -322,6 +365,7 @@ public static class CalibrationMethods
         CalibrationMethod.MaximumVolumetricSpeed => Path.Combine("volumetric_speed", "SpeedTestStructure.drc"),
         CalibrationMethod.PressureAdvanceTower => Path.Combine("pressure_advance", "tower_with_seam.drc"),
         CalibrationMethod.Cornering => Path.Combine("cornering", "SCV-V2.drc"),
+        CalibrationMethod.Vfa => Path.Combine("vfa", "vfa.drc"),
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 }
