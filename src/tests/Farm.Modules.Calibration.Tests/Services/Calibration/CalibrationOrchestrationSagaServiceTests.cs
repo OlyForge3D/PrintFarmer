@@ -246,6 +246,39 @@ public sealed class CalibrationOrchestrationSagaServiceTests
     }
 
     [Fact]
+    public async Task AdvanceAsync_CorneringMethod_ReportOnly_NoFilamentCloningSpecialCase()
+    {
+        // Issue #2138 architecture decision: cornering (jerk / junction deviation / Klipper
+        // square corner velocity) is report-only for the calibration flow itself. This asserts
+        // the saga treats "cornering" exactly like every other catalogued method through the
+        // cloning-profile hop — RunCloningProfileStep never runs a filament-profile-clone patch
+        // step for ANY method today, so cornering inherits report-only behavior for free, with no
+        // method-specific branch added to the saga.
+        await using AppDbContext db = CreateContext();
+        CalibrationProjectService projectService = CreateProjectService(db);
+        FakeSliceSubmissionGateway sliceGateway = new();
+        FakePrintDispatchGateway printGateway = new();
+        CalibrationOrchestrationSagaService saga = CreateSaga(db, projectService, sliceGateway, printGateway);
+        CalibrationActor actor = CreateActor();
+        (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(
+            actor, projectService, methodName: CalibrationMethodNames.Cornering);
+
+        Guid sliceJobId = Guid.NewGuid();
+        sliceGateway.SubmitBehavior = _ => SliceSubmissionResult.Ok(sliceJobId);
+
+        // created -> cloning-profile
+        CalibrationApiResult<CalibrationOrchestrationDto> result = await AdvanceAsync(saga, orchestrationId, actor);
+        _ = result.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.CloningProfile);
+        _ = result.Value!.Status.Should().Be(nameof(CalibrationOrchestrationStatus.Running));
+
+        // cloning-profile -> slicing: the method parses cleanly and advances straight to slicing,
+        // with no filament-profile write-back attempted or required in between.
+        result = await AdvanceAsync(saga, orchestrationId, actor);
+        _ = result.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.Slicing);
+        _ = result.Value!.Status.Should().Be(nameof(CalibrationOrchestrationStatus.Running));
+    }
+
+    [Fact]
     public async Task AdvanceAsync_SlicingFailsThenSucceeds_RetriesWithinBudget()
     {
         await using AppDbContext db = CreateContext();

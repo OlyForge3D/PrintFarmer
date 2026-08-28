@@ -20,9 +20,32 @@
 /// not blocked by anything (upstream OrcaSlicer already implements both —
 /// <c>Plater::calib_max_vol_speed</c>/<c>Plater::calib_retraction</c> and their
 /// <c>CalibMode::Calib_Vol_speed_Tower</c>/<c>CalibMode::Calib_Retraction_tower</c> modes exist
-/// in <c>calib_dlg.cpp</c>). "Retraction" still has no resource resolver, configurator, or
-/// pipeline wiring in this repo. "Max volumetric speed" gained all three in issue #2135; see
+/// in <c>calib_dlg.cpp</c>); both are now built — see <see cref="Retraction"/> and
 /// <see cref="MaximumVolumetricSpeed"/>.
+/// </para>
+/// <para>
+/// <see cref="Retraction"/> (issue #2137): the bundled <c>retraction_tower.drc</c> resource is a
+/// single raw Draco mesh with no per-object names or metadata — unlike the flow-rate towers'
+/// 3MF resources, there is nothing here for a <c>FlowRateCalibrationConfigurator</c>-style
+/// per-object rewrite to target. Upstream's native sweep
+/// (<c>CalibMode::Calib_Retraction_tower</c> in <c>GCode.cpp</c>) mutates the slicing engine's
+/// internal <c>retraction_length</c> config directly per layer, a hook the CLI-driven worker
+/// cannot reach. The worker instead reimplements the sweep via a <c>layer_change_gcode</c>
+/// injection (mirroring <see cref="TemperatureTower"/>'s <c>M104</c> approach) that issues
+/// <c>M207 S...</c> once per Z-band, and forces the machine profile's
+/// <c>use_firmware_retraction</c> setting on for these jobs — <c>M207</c> only takes effect when
+/// firmware retraction is enabled, since software retraction bakes the retraction length into
+/// <c>G1 E...</c> moves at slice time instead of reading it live. Enabling firmware retraction
+/// also forces every extruder's <c>wipe</c> setting off: upstream's <c>PrintConfig::validate()</c>
+/// hard-rejects <c>use_firmware_retraction=1</c> combined with any extruder's <c>wipe=1</c>
+/// (real vendor profiles commonly ship wipe enabled), and that check runs even in CLI mode, so
+/// leaving it untouched would fail slicing outright rather than merely producing a bad result.
+/// This produces a per-band
+/// <em>retraction length</em> result; write-back into a filament profile (as opposed to a
+/// machine profile) is the calibration-consumer's job and is intentionally out of scope for the
+/// worker — see the issue for the recommendation that a future desktop-side workflow store the
+/// selected band's length as a filament override, analogous to how flow-rate results are
+/// consumed today.
 /// </para>
 /// <para>
 /// <see cref="MaximumVolumetricSpeed"/> (issue #2135): upstream's <c>CalibUtils::calib_max_vol_speed</c>
@@ -73,10 +96,33 @@
 /// resources (<c>Orca-LinearFlow.3mf</c>/<c>Orca-LinearFlow_fine.3mf</c>) encode per-object flow
 /// ratios as baseline-relative deltas (for example <c>flowrate_0.01</c>, <c>flowrate_m0.01</c>),
 /// not the absolute percentages (<c>flowrate_95</c>) that <c>FlowRateCalibrationConfigurator</c>
-/// parses for <see cref="FlowRatePass1"/>/<see cref="FlowRatePass2"/>. Until a delta-aware
-/// configurator exists, the worker deliberately fails these two methods loudly (see
-/// <c>OrcaSlicingPipelineService.PrepareCalibrationModel</c>) rather than silently reusing the
-/// pass1/2 parser and producing near-identical, uncalibrated G-code for every block.
+/// parses for <see cref="FlowRatePass1"/>/<see cref="FlowRatePass2"/>. Issue #2141 shipped
+/// <c>FlowRateDeltaCalibrationConfigurator</c>, a dedicated delta-aware configurator that applies
+/// <c>baseline + delta</c> per object (baseline being the source filament profile's current
+/// <c>filament_flow_ratio</c>), and wired it in for <see cref="FlowRateYoloRecommended"/> only.
+/// <see cref="FlowRateYoloPerfectionist"/> is tracked separately (issue #2142) and still fails
+/// loudly in <c>OrcaSlicingPipelineService.PrepareCalibrationModel</c> rather than silently
+/// reusing the pass1/2 parser and producing near-identical, uncalibrated G-code for every block.
+/// </para>
+/// <para>
+/// <see cref="Cornering"/> (issue #2138): cornering calibrates jerk (classic Marlin), junction
+/// deviation (Marlin 2's <c>M205 J</c>), or Klipper's <c>SQUARE_CORNER_VELOCITY</c> — three
+/// firmware-specific motion-planner concepts, unlike every other catalogued method here, which
+/// are filament properties. Per the architecture decision recorded on issue #2138 (and shared
+/// with #2139/#2140), this method is <strong>report-only</strong>: the calibration saga never
+/// carries it into a filament-profile-clone/patch step, and the operator may separately, and
+/// explicitly, record the resulting value onto the printer's own
+/// <c>MaxJerk</c>/<c>JunctionDeviation</c>/<c>SquareCornerVelocity</c> fields (mirroring
+/// <c>MaxAcceleration</c>) through the ordinary admin-gated printer update endpoint — never
+/// automatically from this calibration flow. The bundled resource
+/// (<c>resources/calib/cornering/SCV-V2.drc</c>) is, like <see cref="TemperatureTower"/>'s and
+/// <see cref="MaximumVolumetricSpeed"/>'s <c>.drc</c> resources, an opaque OrcaSlicer binary
+/// format that is copied unmodified rather than parsed and rewritten. Because jerk/junction
+/// deviation and square corner velocity are meaningless outside Marlin/Marlin-2/Klipper
+/// firmware, <c>OrcaSlicingPipelineService</c> validates the target printer's <c>gcode_flavor</c>
+/// before slicing and refuses explicitly — rather than silently slicing a test result the
+/// operator's firmware cannot even apply — for any other flavor (reprapfirmware, smoothie,
+/// sprinter, etc.).
 /// </para>
 /// <para>
 /// <see cref="InputShaping"/> (issue #2139): report-only per the architecture decision recorded
@@ -114,17 +160,25 @@ public enum CalibrationMethod
 
     /// <summary>
     /// Flow rate calibration using OrcaSlicer's linear-regression "YOLO (Recommended)" method
-    /// (coarse pass). See the type-level remarks for why the worker does not yet slice this
-    /// method's per-object overrides.
+    /// (coarse pass). Slicer-supported via <c>FlowRateDeltaCalibrationConfigurator</c> (issue
+    /// #2141); see the type-level remarks.
     /// </summary>
     FlowRateYoloRecommended,
 
     /// <summary>
     /// Flow rate calibration using OrcaSlicer's linear-regression "YOLO (Perfectionist)" method
     /// (fine pass). See the type-level remarks for why the worker does not yet slice this
-    /// method's per-object overrides.
+    /// method's per-object overrides (tracked separately, issue #2142).
     /// </summary>
     FlowRateYoloPerfectionist,
+
+    /// <summary>
+    /// Retraction tower calibration (issue #2137). See the type-level remarks for how the worker
+    /// reimplements upstream's native per-band sweep via injected <c>layer_change_gcode</c> plus
+    /// a forced <c>use_firmware_retraction</c> machine-profile setting, and for the deliberate
+    /// out-of-scope note on filament-profile write-back.
+    /// </summary>
+    Retraction,
 
     /// <summary>
     /// Maximum volumetric speed calibration (issue #2135). See the type-level remarks for the
@@ -146,6 +200,13 @@ public enum CalibrationMethod
     /// (<c>M900 K</c>) — see <c>PressureAdvanceTowerGcodeBuilder</c> in the OrcaSlicer worker.
     /// </summary>
     PressureAdvanceTower,
+
+    /// <summary>
+    /// Cornering (jerk / junction deviation / Klipper square corner velocity) calibration
+    /// (issue #2138). See the type-level remarks for the report-only write-back model and the
+    /// firmware-flavor gate this method needs.
+    /// </summary>
+    Cornering,
 }
 
 /// <summary>
@@ -163,12 +224,14 @@ public static class CalibrationMethods
             ["temperature_tower"] = CalibrationMethod.TemperatureTower,
             ["flow_rate_yolo_recommended"] = CalibrationMethod.FlowRateYoloRecommended,
             ["flow_rate_yolo_perfectionist"] = CalibrationMethod.FlowRateYoloPerfectionist,
+            ["retraction"] = CalibrationMethod.Retraction,
             ["max_volumetric_speed"] = CalibrationMethod.MaximumVolumetricSpeed,
             ["input_shaping"] = CalibrationMethod.InputShaping,
 
             // Matches Farm.Modules.Calibration.Services.Calibration.CalibrationMethodNames.PressureAdvanceTower
             // so the two catalogues do not diverge further (issue #2136).
             ["pressure_advance_tower"] = CalibrationMethod.PressureAdvanceTower,
+            ["cornering"] = CalibrationMethod.Cornering,
         };
 
     private static readonly Dictionary<CalibrationMethod, string> MethodToWireName =
@@ -179,15 +242,17 @@ public static class CalibrationMethods
             [CalibrationMethod.TemperatureTower] = "temperature_tower",
             [CalibrationMethod.FlowRateYoloRecommended] = "flow_rate_yolo_recommended",
             [CalibrationMethod.FlowRateYoloPerfectionist] = "flow_rate_yolo_perfectionist",
+            [CalibrationMethod.Retraction] = "retraction",
             [CalibrationMethod.MaximumVolumetricSpeed] = "max_volumetric_speed",
             [CalibrationMethod.InputShaping] = "input_shaping",
             [CalibrationMethod.PressureAdvanceTower] = "pressure_advance_tower",
+            [CalibrationMethod.Cornering] = "cornering",
         };
 
     /// <summary>
     /// The wire names of every calibration method <see cref="TryParse"/> recognizes, including
-    /// <see cref="CalibrationMethod.FlowRateYoloRecommended"/>/<see cref="CalibrationMethod.FlowRateYoloPerfectionist"/>,
-    /// which parse successfully but are not yet slicer-supported (see <see cref="IsSlicerSupported"/>).
+    /// <see cref="CalibrationMethod.FlowRateYoloPerfectionist"/>, which parses successfully but is
+    /// not yet slicer-supported (see <see cref="IsSlicerSupported"/>).
     /// Do not surface this list as "supported methods" in a client-facing error message — use
     /// <see cref="ClientAcceptedWireNames"/> for that.
     /// </summary>
@@ -208,9 +273,8 @@ public static class CalibrationMethods
     /// catalogue. A name that isn't catalogued at all (for example <c>"pa_pattern"</c> or
     /// <c>"pa_line"</c>, both intentionally excluded — see the licensing note on
     /// <see cref="CalibrationMethod"/>) returns <see langword="false"/>. Note this does
-    /// <em>not</em> mean the parsed method is ready for the worker to slice today: two
-    /// catalogued methods (<see cref="CalibrationMethod.FlowRateYoloRecommended"/> and
-    /// <see cref="CalibrationMethod.FlowRateYoloPerfectionist"/>) parse successfully but are
+    /// <em>not</em> mean the parsed method is ready for the worker to slice today:
+    /// <see cref="CalibrationMethod.FlowRateYoloPerfectionist"/> parses successfully but is
     /// not yet slicer-supported — see <see cref="IsSlicerSupported"/> and
     /// <see cref="ClientAcceptedWireNames"/> for the check that actually gates client
     /// submission.
@@ -235,13 +299,13 @@ public static class CalibrationMethods
 
     /// <summary>
     /// Whether the worker can actually slice a job for <paramref name="method"/> today.
-    /// <see cref="CalibrationMethod.FlowRateYoloRecommended"/> and
-    /// <see cref="CalibrationMethod.FlowRateYoloPerfectionist"/> are catalogued (issue #2051) so
-    /// their wire names round-trip and their resource metadata is available, but the worker
-    /// cannot yet apply their delta-based per-object flow-ratio overrides (see the
-    /// <see cref="CalibrationMethod"/> type remarks) and would only fail late, after dispatch.
+    /// <see cref="CalibrationMethod.FlowRateYoloRecommended"/> now has a delta-aware configurator
+    /// (issue #2141 — <c>FlowRateDeltaCalibrationConfigurator</c>) and is slicer-supported.
+    /// <see cref="CalibrationMethod.FlowRateYoloPerfectionist"/> remains catalogued (issue #2051)
+    /// — its wire name and resource metadata are available — but is tracked separately (issue
+    /// #2142) and still cannot be sliced: the worker would only fail late, after dispatch.
     /// Callers that accept a client-supplied method — chiefly the slice-job submission
-    /// endpoint — must reject these methods with <see langword="false"/> here, at the API
+    /// endpoint — must reject that method with <see langword="false"/> here, at the API
     /// boundary, instead of letting <see cref="TryParse"/> alone gate acceptance.
     /// </summary>
     /// <param name="method">A method that already parsed successfully via <see cref="TryParse"/>.</param>
@@ -252,8 +316,8 @@ public static class CalibrationMethods
     /// slicer-supported without an entry here — the worker's
     /// <c>OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync</c> implements it.
     /// </remarks>
-    public static bool IsSlicerSupported(CalibrationMethod method) => method is not (
-        CalibrationMethod.FlowRateYoloRecommended or CalibrationMethod.FlowRateYoloPerfectionist);
+    public static bool IsSlicerSupported(CalibrationMethod method) =>
+        method is not CalibrationMethod.FlowRateYoloPerfectionist;
 
     /// <summary>
     /// A descriptive placeholder model file name for a calibration job, used in place of a
@@ -267,9 +331,11 @@ public static class CalibrationMethods
         CalibrationMethod.TemperatureTower => "temperature_tower.drc",
         CalibrationMethod.FlowRateYoloRecommended => "Orca-LinearFlow.3mf",
         CalibrationMethod.FlowRateYoloPerfectionist => "Orca-LinearFlow_fine.3mf",
+        CalibrationMethod.Retraction => "retraction_tower.drc",
         CalibrationMethod.MaximumVolumetricSpeed => "SpeedTestStructure.drc",
         CalibrationMethod.InputShaping => "ringing_tower.drc",
         CalibrationMethod.PressureAdvanceTower => "tower_with_seam.drc",
+        CalibrationMethod.Cornering => "SCV-V2.drc",
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 
@@ -284,9 +350,11 @@ public static class CalibrationMethods
         CalibrationMethod.TemperatureTower => Path.Combine("temperature_tower", "temperature_tower.drc"),
         CalibrationMethod.FlowRateYoloRecommended => Path.Combine("filament_flow", "Orca-LinearFlow.3mf"),
         CalibrationMethod.FlowRateYoloPerfectionist => Path.Combine("filament_flow", "Orca-LinearFlow_fine.3mf"),
+        CalibrationMethod.Retraction => Path.Join("retraction", "retraction_tower.drc"),
         CalibrationMethod.MaximumVolumetricSpeed => Path.Combine("volumetric_speed", "SpeedTestStructure.drc"),
         CalibrationMethod.InputShaping => Path.Combine("input_shaping", "ringing_tower.drc"),
         CalibrationMethod.PressureAdvanceTower => Path.Combine("pressure_advance", "tower_with_seam.drc"),
+        CalibrationMethod.Cornering => Path.Combine("cornering", "SCV-V2.drc"),
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 }

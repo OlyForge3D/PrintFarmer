@@ -261,6 +261,24 @@ public class CalibrationCandidateDto
 
     public int? MaxTravelAcceleration { get; init; }
 
+    /// <summary>
+    /// Marlin (classic) jerk in millimeters per second (issue #2138). Recorded only via an
+    /// explicit, separate admin action on <c>PUT /api/printers/{id}</c> — never automatically
+    /// written by the report-only cornering calibration flow. See <see cref="Printer.MaxJerk"/>.
+    /// </summary>
+    public int? MaxJerk { get; init; }
+
+    /// <summary>
+    /// Marlin 2 junction deviation in millimeters (issue #2138). See <see cref="MaxJerk"/> remarks.
+    /// </summary>
+    public double? JunctionDeviation { get; init; }
+
+    /// <summary>
+    /// Klipper square corner velocity in millimeters per second (issue #2138). See
+    /// <see cref="MaxJerk"/> remarks.
+    /// </summary>
+    public double? SquareCornerVelocity { get; init; }
+
     public int PhysicalToolheadCount { get; init; }
 
     public int? ActiveToolheadIndex { get; init; }
@@ -337,6 +355,9 @@ public sealed class CalibrationContextDto : CalibrationCandidateDto
         MaxTravelSpeed = candidate.MaxTravelSpeed;
         MaxAcceleration = candidate.MaxAcceleration;
         MaxTravelAcceleration = candidate.MaxTravelAcceleration;
+        MaxJerk = candidate.MaxJerk;
+        JunctionDeviation = candidate.JunctionDeviation;
+        SquareCornerVelocity = candidate.SquareCornerVelocity;
         PhysicalToolheadCount = candidate.PhysicalToolheadCount;
         ActiveToolheadIndex = candidate.ActiveToolheadIndex;
         Toolheads = candidate.Toolheads;
@@ -462,6 +483,15 @@ public sealed class PrinterConfigurationSnapshotDto
     public int? MaxAcceleration { get; init; }
 
     public int? MaxTravelAcceleration { get; init; }
+
+    /// <summary>Marlin (classic) jerk in millimeters per second (issue #2138).</summary>
+    public int? MaxJerk { get; init; }
+
+    /// <summary>Marlin 2 junction deviation in millimeters (issue #2138).</summary>
+    public double? JunctionDeviation { get; init; }
+
+    /// <summary>Klipper square corner velocity in millimeters per second (issue #2138).</summary>
+    public double? SquareCornerVelocity { get; init; }
 
     public CalibrationFirmwareIdentityDto Firmware { get; init; } =
         new("Unknown", "Unknown", "unknown", null, null, null, null, false);

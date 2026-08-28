@@ -22,6 +22,18 @@ public sealed record CalibrationParameters
     /// <summary>Total number of temperature tower bands.</summary>
     public int BandCount { get; init; } = 9;
 
+    /// <summary>Retraction length of the bottom-most retraction tower band, in millimetres.</summary>
+    public double StartRetractionMm { get; init; } = 0.2;
+
+    /// <summary>Retraction length increase applied per band above band 0, in millimetres.</summary>
+    public double RetractionStepMm { get; init; } = 0.2;
+
+    /// <summary>Print height of each retraction tower band, in millimetres.</summary>
+    public double RetractionBandHeightMm { get; init; } = 5;
+
+    /// <summary>Total number of retraction tower bands.</summary>
+    public int RetractionBandCount { get; init; } = 8;
+
     /// <summary>
     /// Permissive <c>filament_max_volumetric_speed</c> ceiling applied before slicing a max
     /// volumetric speed calibration (issue #2135), in mm³/s. Verified against upstream source
@@ -134,6 +146,15 @@ public sealed record CalibrationParameters
                 BandHeightMm = ReadOrDefault(root, "band_height_mm", defaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm),
                 BandCount = (int)ReadOrDefault(root, "band_count", defaults.BandCount, MinBandCount, MaxBandCount),
             },
+            CalibrationMethod.Retraction => ClampRetractionTopBand(
+                defaults with
+                {
+                    StartRetractionMm = ReadOrDefault(root, "start_retraction_mm", defaults.StartRetractionMm, MinRetractionMm, MaxRetractionMm),
+                    RetractionStepMm = ReadOrDefault(root, "retraction_step_mm", defaults.RetractionStepMm, MinRetractionStepMm, MaxRetractionStepMm),
+                    RetractionBandHeightMm = ReadOrDefault(root, "retraction_band_height_mm", defaults.RetractionBandHeightMm, MinRetractionBandHeightMm, MaxRetractionBandHeightMm),
+                    RetractionBandCount = (int)ReadOrDefault(root, "retraction_band_count", defaults.RetractionBandCount, MinRetractionBandCount, MaxRetractionBandCount),
+                },
+                defaults),
             CalibrationMethod.MaximumVolumetricSpeed => defaults with
             {
                 MaxVolumetricSpeedCeilingMm3s = ReadOrDefault(
@@ -150,6 +171,22 @@ public sealed record CalibrationParameters
             CalibrationMethod.PressureAdvanceTower => BuildPressureAdvanceTowerParameters(defaults, root),
             _ => defaults,
         };
+    }
+
+    /// <summary>
+    /// Per-field bounds checking in <see cref="ReadOrDefault"/> only constrains
+    /// <c>StartRetractionMm</c>, not the retraction length the top band reaches
+    /// (<c>StartRetractionMm + (RetractionBandCount - 1) * RetractionStepMm</c>). A client could
+    /// otherwise combine in-range individual values (e.g. a high start, a large step, and many
+    /// bands) into a top-band retraction far beyond <see cref="MaxRetractionMm"/> — well outside
+    /// any printer's real firmware-retraction range. If the computed top band exceeds that bound,
+    /// discard the whole parameter set and fall back to <paramref name="defaults"/> rather than
+    /// silently clamping one field and leaving the others client-controlled.
+    /// </summary>
+    private static CalibrationParameters ClampRetractionTopBand(CalibrationParameters parameters, CalibrationParameters defaults)
+    {
+        double topBandRetractionMm = parameters.StartRetractionMm + ((parameters.RetractionBandCount - 1) * parameters.RetractionStepMm);
+        return topBandRetractionMm > MaxRetractionMm ? defaults : parameters;
     }
 
     // Resolves the pressure advance tower's parameters, then either clamps AdvanceStep so the
@@ -224,6 +261,17 @@ public sealed record CalibrationParameters
     private const double MaxBandHeightMm = 200;
     private const double MinBandCount = 1;
     private const double MaxBandCount = 50;
+
+    // Same rationale as the temperature-tower bounds above, sized for a retraction-length sweep
+    // (millimetres, not Celsius) rather than temperature.
+    private const double MinRetractionMm = 0;
+    private const double MaxRetractionMm = 10;
+    private const double MinRetractionStepMm = 0.01;
+    private const double MaxRetractionStepMm = 5;
+    private const double MinRetractionBandHeightMm = 0.1;
+    private const double MaxRetractionBandHeightMm = 200;
+    private const double MinRetractionBandCount = 1;
+    private const double MaxRetractionBandCount = 50;
 
     // Matches Farm.Modules.Calibration.Services.Calibration.CalibrationMeasurementRanges.PressureAdvance
     // (0.0-2.0) so the worker's own bounds-checking never diverges from the saga layer's.
