@@ -47,16 +47,10 @@ enum UITestBootstrap {
     /// authenticated operator shell as before.
     static let unauthenticatedLaunchArgument = "--uitesting-unauthenticated"
 
-    /// Additional launch argument that forces the shared operator feature
-    /// gate (#725) to resolve with `attentionEnabled == false` under the
-    /// authenticated bootstrap. When present alongside `launchArgument`,
-    /// the bootstrap wires the demo services but overrides
-    /// `capabilitiesService` with a `StubSystemCapabilitiesService` seeded
-    /// to a disabled snapshot, so `AttentionView` renders its
-    /// feature-disabled fallback and exposes the legacy Notifications /
-    /// Dashboard / Maintenance sheets. Required by issue #727 UI tests
-    /// which need deterministic access to the fallback Notifications sheet.
-    static let attentionDisabledLaunchArgument = "--uitesting-attention-disabled"
+    /// Additional launch argument that disables every operator feature whose
+    /// visibility is covered by issue #2117.
+    static let operatorFeaturesDisabledLaunchArgument =
+        "--uitesting-operator-features-disabled"
     static let attentionActionsLaunchArgument = "--uitesting-attention-actions"
     #if DEBUG
     static let shiftTaskMutationErrorLaunchArgument =
@@ -89,9 +83,8 @@ enum UITestBootstrap {
     /// On launch `DashboardViewModel` hydrates the cached fleet, the
     /// canonical load then fails, and the cache is preserved — so XCUI can
     /// prove the read-only stale shell, cached card projection, and the
-    /// visible last-confirmed timestamp. Also forces the attention gate off
-    /// so the `DashboardView` surface is reachable. Production code never
-    /// touches this argument.
+    /// visible last-confirmed timestamp. Production code never touches this
+    /// argument.
     static let coldOfflineShellLaunchArgument =
         "--uitesting-cold-offline-shell"
 
@@ -112,10 +105,9 @@ enum UITestBootstrap {
         case authenticated
         /// Signed-out state so login-flow tests see `LoginView`.
         case unauthenticated
-        /// Pre-authenticated demo operator shell with the operator
-        /// feature gate forced to disabled — `AttentionView` renders the
-        /// fallback so the legacy Notifications sheet is reachable.
-        case authenticatedAttentionDisabled
+        /// Pre-authenticated shell with Attention, filament coverage, shift
+        /// Tasks, and printed-parts inventory disabled.
+        case authenticatedOperatorFeaturesDisabled
         /// F2-U2 feed with failure media, stable-ID destinations, and
         /// server-backed failure + maintenance actions.
         case authenticatedAttentionActions
@@ -131,7 +123,7 @@ enum UITestBootstrap {
         case authenticatedFilamentCoverageScenario
         /// Authenticated shell seeded with a cached farm snapshot + offline
         /// printer service so the cold-offline read-only stale shell renders
-        /// (#817). Implies the attention gate is disabled.
+        /// (#817).
         case authenticatedColdOfflineShell
     }
 
@@ -180,8 +172,8 @@ enum UITestBootstrap {
         if arguments.contains(filamentCoverageScenarioLaunchArgument) {
             return .authenticatedFilamentCoverageScenario
         }
-        if arguments.contains(attentionDisabledLaunchArgument) {
-            return .authenticatedAttentionDisabled
+        if arguments.contains(operatorFeaturesDisabledLaunchArgument) {
+            return .authenticatedOperatorFeaturesDisabled
         }
         #if DEBUG
         if arguments.contains(shiftTaskMutationErrorLaunchArgument) {
@@ -269,10 +261,9 @@ enum UITestBootstrap {
         // in the UI-test bundle.
         //
         // Scope is intentionally narrow: only modes where a UI test asserts
-        // the harvest flow. `.authenticatedAttentionDisabled` and
-        // `.authenticatedColdOfflineShell` install their own capabilities
-        // stubs below and stay at production defaults — their tests do not
-        // exercise harvest.
+        // the harvest flow. `.authenticatedOperatorFeaturesDisabled` stays at
+        // production defaults and then explicitly disables the affected
+        // operator features below.
         let harvestEnabledDemoModes: Set<UITestBootstrap.Mode> = {
             var set: Set<UITestBootstrap.Mode> = [.authenticated]
             #if DEBUG
@@ -286,14 +277,12 @@ enum UITestBootstrap {
             services.capabilitiesService = StubSystemCapabilitiesService(resolved: enabled)
         }
 
-        // #727: `.authenticatedAttentionDisabled` swaps the demo
-        // capabilities service for one whose resolved snapshot has
-        // `attentionEnabled == false`. `AttentionView.task` then reads
-        // that snapshot and renders `disabledFallback`, which is the
-        // only surface that exposes the legacy Notifications sheet.
-        if mode == .authenticatedAttentionDisabled {
+        if mode == .authenticatedOperatorFeaturesDisabled {
             var disabled = ResolvedSystemCapabilities.defaults
             disabled.attentionEnabled = false
+            disabled.filamentCoverageEnabled = false
+            disabled.shiftPlanEnabled = false
+            disabled.printedPartsInventoryEnabled = false
             services.capabilitiesService = StubSystemCapabilitiesService(resolved: disabled)
         }
         if mode == .authenticatedAttentionActions {
@@ -342,20 +331,21 @@ enum UITestBootstrap {
             )
         }
         #endif
-        // #817: force the attention gate off (so the `DashboardView` surface
-        // is reachable via the legacy fallback) and make the canonical fleet
-        // load fail offline, so the pre-seeded cached snapshot is preserved as
-        // the read-only stale shell instead of being replaced by live data.
+        // #817: make the canonical fleet load fail offline, so the pre-seeded
+        // cached snapshot is preserved as the read-only stale shell instead of
+        // being replaced by live data. Dashboard remains reachable from the
+        // enabled Attention overflow.
         if mode == .authenticatedColdOfflineShell {
-            var disabled = ResolvedSystemCapabilities.defaults
-            disabled.attentionEnabled = false
-            services.capabilitiesService = StubSystemCapabilitiesService(resolved: disabled)
+            services.capabilitiesService = StubSystemCapabilitiesService(
+                resolved: .defaults
+            )
             services.printerService = DemoPrinterService(offlineError: NetworkError.noConnection)
         }
 
         let auth = AuthViewModel(services: services)
         switch mode {
-        case .authenticated, .authenticatedAttentionDisabled, .authenticatedAttentionActions:
+        case .authenticated, .authenticatedOperatorFeaturesDisabled,
+             .authenticatedAttentionActions:
             auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
         case .unauthenticated:
             break

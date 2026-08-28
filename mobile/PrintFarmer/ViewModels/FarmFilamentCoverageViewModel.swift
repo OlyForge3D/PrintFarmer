@@ -116,6 +116,17 @@ final class FarmFilamentCoverageViewModel {
         coverageAuthorityEpoch &+= 1
     }
 
+    func disableForCapabilityGate() {
+        coverageAuthorityEpoch &+= 1
+        coverageService = nil
+        tearDownSignalR()
+        coverageByPrinter = [:]
+        isFeatureDisabled = true
+        lastLoadError = nil
+        isShowingStaleCache = false
+        cacheLastUpdatedAtMillis = nil
+    }
+
     /// Wire the #789 fleet read-cache. Additive: when never called the view model
     /// behaves exactly as it did pre-#789. Safe to call more than once.
     func configureCache(_ cache: FilamentCoverageReadCacheAdapter) {
@@ -282,6 +293,7 @@ final class FarmFilamentCoverageViewModel {
         // #817 discipline) so a mid-flight server/user switch cannot make this
         // write land in the new namespace. `nil` when no cache is wired.
         let capturedCacheSession = await coverageCache?.currentSession()
+        guard !Task.isCancelled, cvEpoch == coverageAuthorityEpoch else { return }
 
         requestGeneration &+= 1
         let myGen = requestGeneration

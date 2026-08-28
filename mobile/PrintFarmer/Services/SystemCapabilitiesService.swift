@@ -25,9 +25,8 @@ protocol SystemCapabilitiesServiceProtocol: AnyObject, Sendable {
     ///
     /// This method never throws. On failure (404, network error, decode
     /// error) the resolved snapshot is left at its default so callers can
-    /// keep operating as if all features are enabled — matching the
-    /// documented contract in #725 that older servers with missing flags
-    /// fall back to defaults.
+    /// keep operating with the documented per-feature defaults used for
+    /// older servers and missing flags.
     @discardableResult
     func refresh() async -> SystemCapabilitiesRefreshOutcome
 }
@@ -40,19 +39,18 @@ enum SystemCapabilitiesRefreshOutcome: Equatable, Sendable {
 
 /// Live implementation backed by the shared `APIClient`.
 ///
-/// F1 (#706): This lets `AttentionView` (and, later, F2's attention feed)
-/// consult the shared gate contract from #725 without inventing a
-/// parallel boolean. When `attentionEnabled` resolves to `false`, or
-/// when `/api/attention` returns ProblemDetails with `code:
-/// "featureDisabled"`, clients render the safe fallback that still
-/// exposes the retained `DashboardView` / `NotificationsView` /
-/// `MaintenanceView` source screens.
+/// Views and navigation consult this shared gate rather than inventing
+/// parallel booleans. Capability-disabled features are removed from the
+/// operator shell; endpoint failures for enabled features remain visible to
+/// their owning views.
 @MainActor
 @Observable
 final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unchecked Sendable {
     private static let logger = Logger(subsystem: "com.printfarmer.ios", category: "SystemCapabilities")
 
     @ObservationIgnored private let apiClient: APIClient
+    @ObservationIgnored private var issuedRefreshGeneration: UInt64 = 0
+    @ObservationIgnored private var appliedRefreshGeneration: UInt64 = 0
     private(set) var resolved: ResolvedSystemCapabilities = .defaults
 
     init(apiClient: APIClient) {
@@ -61,13 +59,20 @@ final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unche
 
     @discardableResult
     func refresh() async -> SystemCapabilitiesRefreshOutcome {
+        issuedRefreshGeneration &+= 1
+        let generation = issuedRefreshGeneration
+
         do {
             let response: SystemCapabilities = try await apiClient.get("/api/system/capabilities")
+            guard !Task.isCancelled, generation > appliedRefreshGeneration else { return .loaded }
+            appliedRefreshGeneration = generation
             resolved = response.resolved
             return .loaded
         } catch NetworkError.notFound {
             // Server predates #725. Documented behavior: keep defaults.
             Self.logger.info("system/capabilities endpoint not present; using defaults")
+            guard !Task.isCancelled, generation > appliedRefreshGeneration else { return .legacyDefaults }
+            appliedRefreshGeneration = generation
             resolved = .defaults
             return .legacyDefaults
         } catch {
