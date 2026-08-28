@@ -312,28 +312,55 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             return FlowRateCalibrationConfigurator.ApplyPerObjectFlowRatios(sourcePath, workDir, _logger);
         }
 
-        if (method is CalibrationMethod.FlowRateYoloRecommended)
+        if (method is CalibrationMethod.FlowRateYoloRecommended or CalibrationMethod.FlowRateYoloPerfectionist)
         {
-            // The YOLO flow-ratio resources encode per-object flow ratios as baseline-relative
-            // deltas (e.g. "flowrate_0.01", "flowrate_m0.01"), not the absolute percentages (e.g.
-            // "flowrate_95") FlowRateCalibrationConfigurator parses for pass1/pass2 — see
-            // CalibrationMethod.cs for the full investigation (issue #2051). Issue #2141 added
-            // FlowRateDeltaCalibrationConfigurator, which applies baseline + delta per object
-            // instead of reusing that absolute-percentage parser.
+            // Both YOLO flow-ratio resources encode per-object flow ratios as baseline-relative
+            // deltas (e.g. "flowrate_0.01"/"flowrate_m0.01" for Recommended's 0.01 steps,
+            // "flowrate_0.005"/"flowrate_m0.035" for Perfectionist's finer 0.005 steps), not the
+            // absolute percentages (e.g. "flowrate_95") FlowRateCalibrationConfigurator parses for
+            // pass1/pass2 — see CalibrationMethod.cs for the full investigation (issue #2051).
+            // Issue #2141 added FlowRateDeltaCalibrationConfigurator, which applies baseline +
+            // delta per object instead of reusing that absolute-percentage parser; issue #2142
+            // confirmed its regex already tolerates Perfectionist's extra decimal place unmodified
+            // and wired Perfectionist into the same call.
             double baselineFlowRatio = ResolveBaselineFlowRatio(job);
             return FlowRateDeltaCalibrationConfigurator.ApplyPerObjectFlowRatioDeltas(
                 sourcePath, workDir, baselineFlowRatio, _logger);
         }
 
-        if (method is CalibrationMethod.FlowRateYoloPerfectionist)
+        if (method is CalibrationMethod.InputShaping)
         {
-            // Tracked separately (issue #2142): same delta-based naming scheme as Recommended, but
-            // not yet wired to FlowRateDeltaCalibrationConfigurator. Fail loudly instead of slicing
-            // an uncalibrated result until that follow-up ships.
-            throw new InvalidOperationException(
-                $"Calibration method '{job.CalibrationMethod}' is catalogued but not yet slicer-supported: " +
-                "its bundled resource uses a delta-based per-object naming scheme the worker cannot apply " +
-                "overrides for. A dedicated configurator wiring is required before this method can be used.");
+            // Input shaping (issue #2139) is report-only and firmware-specific: the resonance
+            // frequency/damping-factor result the operator measures off the printed ringing
+            // tower only means something once it is applied to their own firmware
+            // (Klipper's [input_shaper] vs Marlin's M593), and this worker never writes firmware
+            // configuration. Defense-in-depth: refuse explicitly here even though the API
+            // boundary (SliceJobController) already validates this, rather than silently slicing
+            // a tower the operator has no firmware-specific guidance to act on.
+            //
+            // Deliberately client-declared, not derived from the machine profile's gcode_flavor
+            // (review finding on issue #2139, unlike ValidateCorneringFirmwareFlavorAsync /
+            // ApplyPressureAdvanceTowerGcodeAsync / ApplyRetractionTowerGcodeAsync above): those
+            // three methods derive flavor from gcode_flavor because they inject flavor-specific
+            // gcode (M205/SQUARE_CORNER_VELOCITY, SET_PRESSURE_ADVANCE/M900, SET_RETRACTION/M207)
+            // that must match the machine actually being sliced for, so an unresolved or wrong
+            // flavor there means a syntactically wrong command lands in the gcode. Input shaping
+            // emits no flavor-specific gcode at all - the bundled ringing-tower resource is copied
+            // byte-for-byte regardless of flavor - so there is nothing here for gcode_flavor to
+            // make correct or incorrect. FirmwareFlavor exists solely so the operator's own
+            // measurement/report reflects which firmware's convention (Klipper's frequency/damping
+            // pair vs. Marlin's M593 parameters) they intend to apply the result to; it is
+            // persisted verbatim on the job's CalibrationParamsJson (see
+            // SliceJobController.BuildCalibrationParamsJson) and readable back from the job record,
+            // so it is not silently dropped even though no downstream step branches on it.
+            CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, method);
+            if (!InputShapingFirmwareFlavors.IsSupported(parameters.FirmwareFlavor))
+            {
+                throw new InvalidOperationException(
+                    $"Calibration method '{job.CalibrationMethod}' requires a supported firmware flavor " +
+                    $"(one of: {string.Join(", ", InputShapingFirmwareFlavors.Supported)}); " +
+                    $"got '{parameters.FirmwareFlavor}'.");
+            }
         }
 
         string destinationPath = Path.Combine(workDir, Path.GetFileName(sourcePath));
@@ -2297,14 +2324,26 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 using JsonDocument doc = JsonDocument.Parse(line);
                 JsonElement root = doc.RootElement;
 
+                if (root.ValueKind != JsonValueKind.Object)
+                {
+                    // OrcaSlicer can emit valid but non-object JSON (e.g. a bare scalar) on the
+                    // progress channel; there is nothing to extract, so treat it like the
+                    // non-JSON diagnostics handled by the catch below.
+                    continue;
+                }
+
                 int totalPercent = root.TryGetProperty("total_percent", out JsonElement tp)
-                    ? tp.GetInt32()
+                    && tp.ValueKind == JsonValueKind.Number
+                    && tp.TryGetInt32(out int parsedPercent)
+                    ? parsedPercent
                     : -1;
                 string message = root.TryGetProperty("message", out JsonElement msg)
+                    && msg.ValueKind == JsonValueKind.String
                     ? msg.GetString() ?? "Slicing..."
                     : "Slicing...";
 
-                if (root.TryGetProperty("warning", out JsonElement warn))
+                if (root.TryGetProperty("warning", out JsonElement warn)
+                    && warn.ValueKind == JsonValueKind.String)
                 {
                     _logger.LogWarning(
                         "OrcaSlicer warning for job {JobId}: {Warning}",
@@ -2992,6 +3031,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         {
             using JsonDocument doc = JsonDocument.Parse(modelTransformJson);
             JsonElement root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                // Valid but non-object JSON (e.g. a bare array or scalar) carries no
+                // rotation/scale/position to extract; treat it like the malformed input handled
+                // by the catch below instead of letting TryGetProperty throw.
+                return new TransformResult(string.Empty, false, false);
+            }
+
             StringBuilder flags = new();
             bool hasCustomPosition = false;
             bool hasNonUniformScale = false;

@@ -858,7 +858,8 @@ public class OrcaProfilesService : ISlicerProfilesService
         try
         {
             using JsonDocument document = JsonDocument.Parse(profileJson);
-            return document.RootElement.TryGetProperty(
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty(
                     "name",
                     out JsonElement nameElement)
                 && nameElement.ValueKind == JsonValueKind.String

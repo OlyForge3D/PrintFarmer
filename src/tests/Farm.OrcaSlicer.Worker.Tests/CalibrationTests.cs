@@ -57,6 +57,8 @@ public class CalibrationTests : IDisposable
     [InlineData("PRESSURE_ADVANCE_TOWER", CalibrationMethod.PressureAdvanceTower)]
     [InlineData("max_volumetric_speed", CalibrationMethod.MaximumVolumetricSpeed)]
     [InlineData("MAX_VOLUMETRIC_SPEED", CalibrationMethod.MaximumVolumetricSpeed)]
+    [InlineData("input_shaping", CalibrationMethod.InputShaping)]
+    [InlineData("INPUT_SHAPING", CalibrationMethod.InputShaping)]
     public void TryParse_SupportedWireName_ReturnsExpectedMethod(string wireName, CalibrationMethod expected)
     {
         bool parsed = CalibrationMethods.TryParse(wireName, out CalibrationMethod method);
@@ -94,20 +96,23 @@ public class CalibrationTests : IDisposable
     }
 
     [Fact]
-    public void ClientAcceptedWireNames_ExcludesOnlyPerfectionistYoloMethod()
+    public void ClientAcceptedWireNames_IncludesBothYoloMethods()
     {
-        // Issue #2141: FlowRateYoloRecommended is now slicer-supported and must appear in the
-        // list a controller advertises to clients as "supported methods". FlowRateYoloPerfectionist
-        // remains gated (issue #2142) and must not appear, or the API would recommend a method it
-        // immediately rejects.
+        // Issue #2141/#2142: both FlowRateYoloRecommended and FlowRateYoloPerfectionist are now
+        // slicer-supported and must appear in the list a controller advertises to clients as
+        // "supported methods" — neither is gated any longer.
         CalibrationMethods.ClientAcceptedWireNames.Should()
             .Contain("flow_rate_yolo_recommended")
-            .And.NotContain("flow_rate_yolo_perfectionist")
+            .And.Contain("flow_rate_yolo_perfectionist")
             .And.Contain("retraction", "issue #2137 makes retraction a fully slicer-supported method");
 
         // Issue #2135: max volumetric speed is now fully slicer-supported, so it must be
         // advertised to clients like every other built method.
         CalibrationMethods.ClientAcceptedWireNames.Should().Contain("max_volumetric_speed");
+
+        // Issue #2139: input shaping is report-only but fully slicer-supported (the worker
+        // slices the bundled ringing tower unmodified), so it must be advertised too.
+        CalibrationMethods.ClientAcceptedWireNames.Should().Contain("input_shaping");
 
         foreach (string wireName in CalibrationMethods.ClientAcceptedWireNames)
         {
@@ -116,7 +121,7 @@ public class CalibrationTests : IDisposable
         }
 
         CalibrationMethods.ClientAcceptedWireNames.Should()
-            .HaveCount(CalibrationMethods.SupportedWireNames.Count - 1);
+            .HaveCount(CalibrationMethods.SupportedWireNames.Count);
     }
 
     [Theory]
@@ -161,8 +166,10 @@ public class CalibrationTests : IDisposable
     [Fact]
     public void IsSlicerSupported_PressureAdvanceTower_ReturnsTrue()
     {
-        // Issue #2136: unlike the YOLO methods, pressure advance tower is fully slicer-supported —
+        // Issue #2136: pressure advance tower is fully slicer-supported —
         // OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync implements it.
+        // (Both YOLO flow-calibration methods are also slicer-supported as of issues
+        // #2141/#2142 — see the dedicated ClientAcceptedWireNames tests below.)
         CalibrationMethods.IsSlicerSupported(CalibrationMethod.PressureAdvanceTower).Should().BeTrue();
     }
 
@@ -184,6 +191,28 @@ public class CalibrationTests : IDisposable
     public void IsSlicerSupported_MaxVolumetricSpeed_ReturnsTrue()
     {
         CalibrationMethods.IsSlicerSupported(CalibrationMethod.MaximumVolumetricSpeed).Should().BeTrue();
+    }
+
+    [Fact]
+    public void DefaultModelFileName_InputShaping_ReturnsRingingTowerDrc()
+    {
+        // Verified against a local OrcaSlicer install: resources/calib/input_shaping/ringing_tower.drc.
+        CalibrationMethods.DefaultModelFileName(CalibrationMethod.InputShaping).Should().Be("ringing_tower.drc");
+    }
+
+    [Fact]
+    public void RelativeResourcePath_InputShaping_ResolvesUnderInputShapingDirectory()
+    {
+        CalibrationMethods.RelativeResourcePath(CalibrationMethod.InputShaping).Should()
+            .Be(Path.Combine("input_shaping", "ringing_tower.drc"));
+    }
+
+    [Fact]
+    public void IsSlicerSupported_InputShaping_ReturnsTrue()
+    {
+        // Report-only (issue #2139) does not mean unsupported: the worker can and does slice the
+        // bundled ringing tower unmodified, exactly like TemperatureTower/MaximumVolumetricSpeed.
+        CalibrationMethods.IsSlicerSupported(CalibrationMethod.InputShaping).Should().BeTrue();
     }
 
     [Theory]
@@ -262,6 +291,99 @@ public class CalibrationTests : IDisposable
     public void ClientAcceptedWireNames_IncludesVfa()
     {
         CalibrationMethods.ClientAcceptedWireNames.Should().Contain("vfa");
+    }
+
+    #endregion
+
+    #region InputShapingFirmwareFlavors
+
+    [Theory]
+    [InlineData("klipper")]
+    [InlineData("KLIPPER")]
+    [InlineData("Klipper")]
+    [InlineData("marlin")]
+    [InlineData("MARLIN")]
+    [InlineData(" klipper ")]
+    public void IsSupported_KnownFirmwareFlavorAnyCase_ReturnsTrue(string firmwareFlavor)
+    {
+        InputShapingFirmwareFlavors.IsSupported(firmwareFlavor).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("reprap")]
+    [InlineData("smoothieware")]
+    [InlineData("klippper")]
+    public void IsSupported_UnsupportedOrMissingFirmwareFlavor_ReturnsFalse(string? firmwareFlavor)
+    {
+        InputShapingFirmwareFlavors.IsSupported(firmwareFlavor).Should().BeFalse();
+    }
+
+    #endregion
+
+    #region CalibrationParameters — FirmwareFlavor
+
+    [Fact]
+    public void CalibrationParameters_Parse_InputShapingWithFirmwareFlavor_ParsesFlavor()
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(
+            """{"firmware_flavor": "klipper"}""",
+            CalibrationMethod.InputShaping);
+
+        parameters.FirmwareFlavor.Should().Be("klipper");
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_InputShapingWithoutParams_FirmwareFlavorIsNull()
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(null, CalibrationMethod.InputShaping);
+
+        parameters.FirmwareFlavor.Should().BeNull();
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_InputShapingWithNonStringFlavor_FallsBackToNull()
+    {
+        // A malformed client payload (firmware_flavor as a number) must not throw — it simply
+        // fails to populate FirmwareFlavor, which the worker then refuses explicitly.
+        CalibrationParameters parameters = CalibrationParameters.Parse(
+            """{"firmware_flavor": 42}""",
+            CalibrationMethod.InputShaping);
+
+        parameters.FirmwareFlavor.Should().BeNull();
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_TemperatureTowerWithExtraneousFirmwareFlavorKey_NumericFieldsStillParseCorrectly()
+    {
+        // Regression coverage for the Parse rewrite (issue #2139): a payload combining an
+        // unrelated method's numeric field with a string firmware_flavor key must not regress the
+        // numeric method's own parsing. Under the old whole-payload Dictionary<string,double>
+        // deserialization this JSON would have thrown on the string value and silently fallen back
+        // to *all* TemperatureTower defaults, hiding the client-supplied start_temperature entirely.
+        CalibrationParameters parameters = CalibrationParameters.Parse(
+            """{"start_temperature": 220, "firmware_flavor": "marlin"}""",
+            CalibrationMethod.TemperatureTower);
+
+        parameters.StartTemperatureC.Should().Be(
+            220,
+            "the per-key JsonDocument-based parse must extract start_temperature correctly even " +
+            "when an unrelated string key is present elsewhere in the same JSON object");
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_InputShapingIgnoresUnrelatedNumericKeys()
+    {
+        // InputShaping's Parse case only reads firmware_flavor — it has no numeric parameters of
+        // its own (report-only, issue #2139) — so a stray numeric key from another method's
+        // vocabulary must not cause a throw or otherwise interfere with FirmwareFlavor parsing.
+        CalibrationParameters parameters = CalibrationParameters.Parse(
+            """{"start_temperature": 220, "firmware_flavor": "marlin"}""",
+            CalibrationMethod.InputShaping);
+
+        parameters.FirmwareFlavor.Should().Be("marlin");
     }
 
     #endregion
@@ -808,9 +930,10 @@ public class CalibrationTests : IDisposable
     [InlineData("""{"start_temperature": "NaN"}""")]
     public void CalibrationParameters_Parse_OutOfRangeOrNonFiniteTemperature_FallsBackToDefault(string json)
     {
-        // "NaN" as a JSON string fails Dictionary<string,double> deserialization entirely and
-        // falls back to defaults via the malformed-JSON path; numeric out-of-range values fall
-        // back via the bounds check. Either way the result must be the safe default.
+        // A non-numeric value at a numeric key falls back to that key's own default under the
+        // per-key JsonElement parse (see CalibrationParameters.Parse's <remarks>); numeric
+        // out-of-range values fall back via the bounds check. Either way the result must be the
+        // safe default.
         CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.TemperatureTower);
 
         parameters.StartTemperatureC.Should().Be(230);
@@ -942,9 +1065,10 @@ public class CalibrationTests : IDisposable
     [Theory]
     [InlineData("""{"start_advance": -1}""")] // below the CalibrationMeasurementRanges.PressureAdvance minimum (0.0)
     [InlineData("""{"start_advance": 2.5}""")] // above the CalibrationMeasurementRanges.PressureAdvance maximum (2.0)
-    [InlineData("""{"start_advance": "NaN"}""")] // non-numeric value for a numeric key: the whole map fails to
-                                                 // deserialize (JSON has no bare NaN/Infinity literal) and Parse
-                                                 // falls back to defaults for every key, same as malformed JSON
+    [InlineData("""{"start_advance": "NaN"}""")] // non-numeric value for a numeric key: only this
+                                                 // key falls back to its own default under the
+                                                 // per-key JsonElement parse (other keys, if any,
+                                                 // are unaffected)
     public void CalibrationParameters_Parse_PressureAdvanceTower_OutOfRangeStartAdvance_FallsBackToDefault(string json)
     {
         // Mirrors Farm.Modules.Calibration.Services.Calibration.CalibrationMeasurementRanges.PressureAdvance
@@ -1141,6 +1265,9 @@ public class CalibrationTests : IDisposable
     [InlineData("flow_rate_m1.5", -1.5)]
     [InlineData("flow-rate_2", 2.0)]
     [InlineData("FLOWRATE_M0.02", -0.02)]
+    [InlineData("flowrate_0.005", 0.005)]
+    [InlineData("flowrate_m0.035", -0.035)]
+    [InlineData("flowrate_m0.005", -0.005)]
     [InlineData("Body_1", null)]
     [InlineData(null, null)]
     public void TryParseFlowDelta_ParsesSignedBaselineRelativeDelta(string? objectName, double? expectedDelta)
@@ -1148,6 +1275,10 @@ public class CalibrationTests : IDisposable
         // Issue #2141: unlike FlowRateCalibrationConfigurator.TryParseFlowRatio (which divides an
         // embedded percentage by 100), this must return the raw additive delta unscaled — the
         // "m" prefix stands in for a minus sign that cannot appear in a 3MF object name.
+        // Issue #2142 (Perfectionist): the finer 0.005 step size means object names carry three
+        // decimal places (e.g. "flowrate_0.005", "flowrate_m0.035") rather than Recommended's two
+        // (e.g. "flowrate_0.01") — the regex's "\d+(?:\.\d+)?" group is not limited to a fixed
+        // decimal count, so these must parse without any parser change.
         double? delta = FlowRateDeltaCalibrationConfigurator.TryParseFlowDelta(objectName);
 
         delta.Should().Be(expectedDelta);
@@ -1222,6 +1353,47 @@ public class CalibrationTests : IDisposable
             [1] = 0.99,
             [2] = 0.97,
             [3] = 1.03,
+        });
+    }
+
+    [Fact]
+    public void ApplyPerObjectFlowRatioDeltas_ThreeDecimalPerfectionistDeltas_AppliesBaselinePlusDelta()
+    {
+        // Issue #2142 acceptance criterion: Perfectionist's finer 0.005 step size means bundled
+        // object names carry three decimal places (e.g. "flowrate_0.005", "flowrate_m0.035")
+        // rather than Recommended's two (e.g. "flowrate_0.01") — this must parse and apply
+        // correctly, both positive and negative, without any parser change.
+        (string Id, string Name)[] objects =
+        [
+            ("1", "flowrate_0.005"),
+            ("2", "flowrate_m0.005"),
+            ("3", "flowrate_m0.035"),
+        ];
+        string source3mf = CreateSynthetic3mf(objects);
+
+        string resultPath = FlowRateDeltaCalibrationConfigurator.ApplyPerObjectFlowRatioDeltas(
+            source3mf,
+            _tempDir,
+            baselineFlowRatio: 0.98,
+            NullLogger.Instance);
+
+        using ZipArchive archive = ZipFile.OpenRead(resultPath);
+        ZipArchiveEntry configEntry = archive.GetEntry("Metadata/Slic3r_PE_model.config")!;
+        string configXml = ReadEntryText(configEntry);
+
+        System.Xml.Linq.XDocument doc = System.Xml.Linq.XDocument.Parse(configXml);
+        Dictionary<int, double> flowRatiosById = doc.Root!.Elements("object")
+            .ToDictionary(
+                o => int.Parse(o.Attribute("id")!.Value, System.Globalization.CultureInfo.InvariantCulture),
+                o => double.Parse(
+                    o.Elements("metadata").First(m => m.Attribute("key")!.Value == "flow_ratio").Attribute("value")!.Value,
+                    System.Globalization.CultureInfo.InvariantCulture));
+
+        flowRatiosById.Should().BeEquivalentTo(new Dictionary<int, double>
+        {
+            [1] = 0.985,
+            [2] = 0.975,
+            [3] = 0.945,
         });
     }
 
@@ -1435,17 +1607,18 @@ public class CalibrationTests : IDisposable
     }
 
     [Fact]
-    public void PrepareCalibrationModel_YoloPerfectionistMethod_ThrowsBecauseDeltaOverridesAreNotYetSupported()
+    public void PrepareCalibrationModel_YoloPerfectionistMethod_AppliesBaselinePlusDeltaFlowRatios()
     {
-        // FlowRateYoloPerfectionist remains gated (issue #2142) even though the same delta-based
-        // naming scheme is now supported for FlowRateYoloRecommended (issue #2141) — the worker
-        // must still fail loudly here instead of silently copying the resource unmodified (which
-        // would slice an uncalibrated result) or misapplying the pass1/2 absolute-percentage
-        // parser (see CalibrationMethod.cs remarks, issue #2051).
-        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-yolo-" + Guid.NewGuid().ToString("N"));
+        // Issue #2142 acceptance criterion: FlowRateYoloPerfectionist must now actually apply the
+        // bundled resource's per-object flow-ratio deltas (baseline + delta) end to end through
+        // the real pipeline entrypoint, using Perfectionist's finer three-decimal-place naming
+        // (e.g. "flowrate_0.005", "flowrate_m0.035") — mirroring
+        // PrepareCalibrationModel_YoloRecommendedMethod_AppliesBaselinePlusDeltaFlowRatios below,
+        // which is the equivalent golden-path coverage for Recommended (issue #2141).
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-yolo-perfectionist-" + Guid.NewGuid().ToString("N"));
         string resourcePath = Path.Combine(calibResourcesRoot, "filament_flow", "Orca-LinearFlow_fine.3mf");
         Directory.CreateDirectory(Path.GetDirectoryName(resourcePath)!);
-        CreateSynthetic3mfAt(resourcePath, [("1", "flowrate_0.01"), ("2", "flowrate_m0.01")]);
+        CreateSynthetic3mfAt(resourcePath, [("1", "flowrate_0.005"), ("2", "flowrate_m0.035")]);
 
         OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
         string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
@@ -1453,17 +1626,63 @@ public class CalibrationTests : IDisposable
         var job = new DistributedSlicingJob
         {
             CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.FlowRateYoloPerfectionist),
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.98 },
+            },
+        };
+
+        string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
+
+        File.Exists(preparedPath).Should().BeTrue();
+        using ZipArchive archive = ZipFile.OpenRead(preparedPath);
+        ZipArchiveEntry configEntry = archive.GetEntry("Metadata/Slic3r_PE_model.config")!;
+        string configXml = ReadEntryText(configEntry);
+        System.Xml.Linq.XDocument doc = System.Xml.Linq.XDocument.Parse(configXml);
+        Dictionary<int, double> flowRatiosById = doc.Root!.Elements("object")
+            .ToDictionary(
+                o => int.Parse(o.Attribute("id")!.Value, System.Globalization.CultureInfo.InvariantCulture),
+                o => double.Parse(
+                    o.Elements("metadata").First(m => m.Attribute("key")!.Value == "flow_ratio").Attribute("value")!.Value,
+                    System.Globalization.CultureInfo.InvariantCulture));
+
+        flowRatiosById.Should().BeEquivalentTo(new Dictionary<int, double>
+        {
+            [1] = 0.985,
+            [2] = 0.945,
+        });
+    }
+
+    [Fact]
+    public void PrepareCalibrationModel_YoloPerfectionistMethod_UnparseableObjectName_ThrowsWithoutLeakingPath()
+    {
+        // Issue #2142 acceptance criterion (control case): an unparseable object name in the
+        // bundled resource must still refuse loudly through the real pipeline entrypoint, not
+        // just the shared static configurator tested in isolation above — and the failure must
+        // not disclose internal worker filesystem paths, mirroring every other calibration
+        // method's equivalent control test in this file.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-yolo-perfectionist-badname-" + Guid.NewGuid().ToString("N"));
+        string resourcePath = Path.Combine(calibResourcesRoot, "filament_flow", "Orca-LinearFlow_fine.3mf");
+        Directory.CreateDirectory(Path.GetDirectoryName(resourcePath)!);
+        CreateSynthetic3mfAt(resourcePath, [("1", "flowrate_0.005"), ("2", "Body_2")]);
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.FlowRateYoloPerfectionist),
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.98 },
+            },
         };
 
         Action act = () => pipeline.PrepareCalibrationModel(job, workDir);
 
         act.Should().Throw<InvalidOperationException>()
-            .Which.Message.Should().Contain(
-                "not yet slicer-supported",
-                "the message must explain *why* the job failed (delta-based overrides are not yet " +
-                "supported), not just that it failed with some InvalidOperationException — a caller " +
-                "cannot otherwise distinguish this from an unrelated internal error")
-            .And.NotContain(
+            .WithMessage("*Body_2*")
+            .Which.Message.Should().NotContain(
                 calibResourcesRoot,
                 "the exception message must not disclose internal worker filesystem paths");
     }
@@ -2188,6 +2407,78 @@ public class CalibrationTests : IDisposable
 
         File.Exists(preparedPath).Should().BeTrue();
         File.ReadAllText(preparedPath).Should().Be("fake-mvs-resource");
+    }
+
+    [Theory]
+    [InlineData("klipper")]
+    [InlineData("marlin")]
+    [InlineData("KLIPPER")]
+    public void PrepareCalibrationModel_InputShapingMethod_SupportedFirmwareFlavor_CopiesResourceUnmodified(string firmwareFlavor)
+    {
+        // Issue #2139: ringing_tower.drc is an opaque OrcaSlicer binary format (confirmed by magic
+        // bytes against a local install, not a ZIP/3MF archive), so — like the temperature
+        // tower's and max volumetric speed's .drc resources — the worker must copy it unmodified
+        // rather than attempt to parse and rewrite it. Report-only: no per-object rewriting, no
+        // profile injection, just the resource.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-is-" + Guid.NewGuid().ToString("N"));
+        string ringingTowerPath = Path.Combine(calibResourcesRoot, "input_shaping", "ringing_tower.drc");
+        Directory.CreateDirectory(Path.GetDirectoryName(ringingTowerPath)!);
+        File.WriteAllText(ringingTowerPath, "fake-ringing-tower-resource");
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.InputShaping),
+            CalibrationParamsJson = $$"""{"firmware_flavor": "{{firmwareFlavor}}"}""",
+        };
+
+        string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
+
+        File.Exists(preparedPath).Should().BeTrue();
+        File.ReadAllText(preparedPath).Should().Be("fake-ringing-tower-resource");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("""{}""")]
+    [InlineData("""{"firmware_flavor": ""}""")]
+    [InlineData("""{"firmware_flavor": "reprap"}""")]
+    [InlineData("""{"firmware_flavor": "smoothieware"}""")]
+    public void PrepareCalibrationModel_InputShapingMethod_UnsupportedOrMissingFirmwareFlavor_ThrowsExplicitRefusal(
+        string? calibrationParamsJson)
+    {
+        // Issue #2139: input shaping is firmware-specific — the operator must apply the result
+        // (frequency/damping-factor) to their own firmware config, and Klipper's [input_shaper]
+        // vs. Marlin's M593 need different guidance. A missing or unrecognized firmware flavor
+        // must fail loudly here, before the worker slices a tower the operator has no
+        // firmware-specific guidance to act on — not silently default to either flavor and not
+        // silently no-op.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-is-refuse-" + Guid.NewGuid().ToString("N"));
+        string ringingTowerPath = Path.Combine(calibResourcesRoot, "input_shaping", "ringing_tower.drc");
+        Directory.CreateDirectory(Path.GetDirectoryName(ringingTowerPath)!);
+        File.WriteAllText(ringingTowerPath, "fake-ringing-tower-resource");
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.InputShaping),
+            CalibrationParamsJson = calibrationParamsJson,
+        };
+
+        Action act = () => pipeline.PrepareCalibrationModel(job, workDir);
+
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain(
+                "firmware flavor",
+                "the message must explain that a supported firmware flavor is required, not just that " +
+                "it failed with some InvalidOperationException")
+            .And.NotContain(
+                calibResourcesRoot,
+                "the exception message must not disclose internal worker filesystem paths");
     }
 
     [Fact]

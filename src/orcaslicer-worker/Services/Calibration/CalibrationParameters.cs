@@ -59,6 +59,17 @@ public sealed record CalibrationParameters
     public double MaxVolumetricSpeedCeilingMm3s { get; init; } = 50;
 
     /// <summary>
+    /// Target firmware flavor for an input shaping / resonance-compensation calibration (issue
+    /// #2139), from <c>calibration.firmwareFlavor</c>. Report-only: the worker never writes
+    /// firmware configuration itself, but it must know which firmware the operator targets so it
+    /// can refuse an unsupported or missing flavor explicitly (see
+    /// <see cref="InputShapingFirmwareFlavors.IsSupported"/>) rather than silently slicing a
+    /// ringing tower the operator has no firmware-specific guidance to act on.
+    /// <see langword="null"/> means the client did not supply one at all.
+    /// </summary>
+    public string? FirmwareFlavor { get; init; }
+
+    /// <summary>
     /// Permissive <c>filament_max_volumetric_speed</c> ceiling applied before slicing a VFA
     /// (resonance speed) calibration (issue #2140), in mm³/s. Verified against upstream source
     /// (<c>CalibUtils::calib_VFA</c>, <c>src/slic3r/Utils/CalibUtils.cpp</c> in
@@ -92,24 +103,46 @@ public sealed record CalibrationParameters
     public double AdvanceStep { get; init; } = 0.002;
 
     /// <summary>
-    /// Parses a job's <c>CalibrationParamsJson</c> (a flat <c>string, double</c> JSON object) into
-    /// strongly typed parameters for <paramref name="method"/>, applying that method's defaults for
-    /// any key that is absent or the JSON itself is null/blank.
+    /// Parses a job's <c>CalibrationParamsJson</c> into strongly typed parameters for
+    /// <paramref name="method"/>, applying that method's defaults for any key that is absent,
+    /// the wrong JSON kind, or the JSON itself is null/blank/malformed.
     /// </summary>
+    /// <remarks>
+    /// Parses per-key via <see cref="JsonDocument"/> rather than deserializing the whole payload
+    /// into a single <c>Dictionary&lt;string, double&gt;</c> (as earlier revisions did), because
+    /// <see cref="CalibrationMethod.InputShaping"/> (issue #2139) needs a string <see cref="FirmwareFlavor"/>
+    /// alongside every other method's numeric-only params in the same JSON object; a
+    /// whole-payload <c>Dictionary&lt;string, double&gt;</c> deserialization throws and falls back
+    /// to <em>all</em> defaults the instant any key holds a string, which would make a firmware
+    /// flavor unparseable. Per-key extraction keeps every existing numeric method's net *outcome*
+    /// the same for duplicate JSON keys (both the old <c>Dictionary&lt;string, double&gt;</c>
+    /// deserialization and <c>JsonElement.TryGetProperty</c> here resolve duplicates to the *last*
+    /// occurrence). Two edge cases do differ mechanically from the old whole-payload behavior: (1)
+    /// a non-numeric value at a numeric key falls back only for that key here, whereas the old
+    /// dictionary deserialization would throw for the whole payload - but since that key's fallback
+    /// is always its own valid default, this is not observable through this class's public surface;
+    /// (2) the old code fell back to defaults for *every* key the instant any one key held a bad
+    /// value, whereas this reverts only the offending key, so a payload mixing one bad numeric key
+    /// with other good numeric keys now keeps the good keys' actual submitted values instead of
+    /// silently discarding them for defaults too - this second case IS an observable behavior
+    /// change (an intentional improvement, not a regression), since a good key's submitted value is
+    /// not itself clamped or otherwise forced back to the default.
+    /// </remarks>
     public static CalibrationParameters Parse(string? calibrationParamsJson, CalibrationMethod method)
     {
         var defaults = new CalibrationParameters();
-        Dictionary<string, double> values = [];
+        JsonElement root = default;
+        bool hasRoot = false;
         if (!string.IsNullOrWhiteSpace(calibrationParamsJson))
         {
             try
             {
-                // An empty map falls through to the method's own defaults below, same as absent
-                // JSON: every method-specific default (e.g. the pressure advance tower's
-                // 5mm/20-band shape, vs. the temperature tower's 10mm/9-band shape) must be
-                // applied via the switch below, not by returning the record's own field defaults
-                // directly — those are shaped for the temperature tower only.
-                values = JsonSerializer.Deserialize<Dictionary<string, double>>(calibrationParamsJson) ?? [];
+                using JsonDocument document = JsonDocument.Parse(calibrationParamsJson);
+                if (document.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    root = document.RootElement.Clone();
+                    hasRoot = true;
+                }
             }
             catch (JsonException)
             {
@@ -117,38 +150,53 @@ public sealed record CalibrationParameters
             }
         }
 
+        if (!hasRoot)
+        {
+            // Null/blank/malformed params still need to run through the method-specific switch
+            // below so each method's own defaults (e.g. PressureAdvanceTowerDefaults) are applied
+            // rather than this record's base property initializers, which belong to TemperatureTower.
+            // An empty object makes every ReadOrDefault/ReadStringOrDefault key lookup miss and fall
+            // back, which is exactly the same outcome as a present-but-empty "{}" payload.
+            using JsonDocument emptyDocument = JsonDocument.Parse("{}");
+            root = emptyDocument.RootElement.Clone();
+        }
+
         return method switch
         {
             CalibrationMethod.TemperatureTower => defaults with
             {
-                StartTemperatureC = ReadOrDefault(values, "start_temperature", defaults.StartTemperatureC, MinTemperatureC, MaxTemperatureC),
-                TemperatureStepC = ReadOrDefault(values, "temperature_step", defaults.TemperatureStepC, MinTemperatureStepC, MaxTemperatureStepC),
-                BandHeightMm = ReadOrDefault(values, "band_height_mm", defaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm),
-                BandCount = (int)ReadOrDefault(values, "band_count", defaults.BandCount, MinBandCount, MaxBandCount),
+                StartTemperatureC = ReadOrDefault(root, "start_temperature", defaults.StartTemperatureC, MinTemperatureC, MaxTemperatureC),
+                TemperatureStepC = ReadOrDefault(root, "temperature_step", defaults.TemperatureStepC, MinTemperatureStepC, MaxTemperatureStepC),
+                BandHeightMm = ReadOrDefault(root, "band_height_mm", defaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm),
+                BandCount = (int)ReadOrDefault(root, "band_count", defaults.BandCount, MinBandCount, MaxBandCount),
             },
             CalibrationMethod.Retraction => ClampRetractionTopBand(
                 defaults with
                 {
-                    StartRetractionMm = ReadOrDefault(values, "start_retraction_mm", defaults.StartRetractionMm, MinRetractionMm, MaxRetractionMm),
-                    RetractionStepMm = ReadOrDefault(values, "retraction_step_mm", defaults.RetractionStepMm, MinRetractionStepMm, MaxRetractionStepMm),
-                    RetractionBandHeightMm = ReadOrDefault(values, "retraction_band_height_mm", defaults.RetractionBandHeightMm, MinRetractionBandHeightMm, MaxRetractionBandHeightMm),
-                    RetractionBandCount = (int)ReadOrDefault(values, "retraction_band_count", defaults.RetractionBandCount, MinRetractionBandCount, MaxRetractionBandCount),
+                    StartRetractionMm = ReadOrDefault(root, "start_retraction_mm", defaults.StartRetractionMm, MinRetractionMm, MaxRetractionMm),
+                    RetractionStepMm = ReadOrDefault(root, "retraction_step_mm", defaults.RetractionStepMm, MinRetractionStepMm, MaxRetractionStepMm),
+                    RetractionBandHeightMm = ReadOrDefault(root, "retraction_band_height_mm", defaults.RetractionBandHeightMm, MinRetractionBandHeightMm, MaxRetractionBandHeightMm),
+                    RetractionBandCount = (int)ReadOrDefault(root, "retraction_band_count", defaults.RetractionBandCount, MinRetractionBandCount, MaxRetractionBandCount),
                 },
                 defaults),
             CalibrationMethod.MaximumVolumetricSpeed => defaults with
             {
                 MaxVolumetricSpeedCeilingMm3s = ReadOrDefault(
-                    values,
+                    root,
                     "max_volumetric_speed_ceiling_mm3s",
                     defaults.MaxVolumetricSpeedCeilingMm3s,
                     MinVolumetricSpeedCeilingBoundMm3s,
                     MaxVolumetricSpeedCeilingBoundMm3s),
             },
-            CalibrationMethod.PressureAdvanceTower => BuildPressureAdvanceTowerParameters(defaults, values),
+            CalibrationMethod.InputShaping => defaults with
+            {
+                FirmwareFlavor = ReadStringOrDefault(root, "firmware_flavor", defaults.FirmwareFlavor),
+            },
+            CalibrationMethod.PressureAdvanceTower => BuildPressureAdvanceTowerParameters(defaults, root),
             CalibrationMethod.Vfa => defaults with
             {
                 VfaMaxVolumetricSpeedCeilingMm3s = ReadOrDefault(
-                    values,
+                    root,
                     "vfa_max_volumetric_speed_ceiling_mm3s",
                     defaults.VfaMaxVolumetricSpeedCeilingMm3s,
                     MinVfaVolumetricSpeedCeilingBoundMm3s,
@@ -182,12 +230,12 @@ public sealed record CalibrationParameters
     // BandCount=50 from compounding to an out-of-range 26.5 on the topmost band -- a real
     // hardware-safety gap, since this value is embedded directly into a SET_PRESSURE_ADVANCE/M900
     // K gcode command sent to the printer.
-    private static CalibrationParameters BuildPressureAdvanceTowerParameters(CalibrationParameters defaults, Dictionary<string, double> values)
+    private static CalibrationParameters BuildPressureAdvanceTowerParameters(CalibrationParameters defaults, JsonElement root)
     {
-        double startAdvance = ReadOrDefault(values, "start_advance", PressureAdvanceTowerDefaults.StartAdvance, MinAdvance, MaxAdvance);
-        double advanceStep = ReadOrDefault(values, "advance_step", PressureAdvanceTowerDefaults.AdvanceStep, MinAdvanceStep, MaxAdvanceStep);
-        double bandHeightMm = ReadOrDefault(values, "band_height_mm", PressureAdvanceTowerDefaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm);
-        int bandCount = (int)ReadOrDefault(values, "band_count", PressureAdvanceTowerDefaults.BandCount, MinBandCount, MaxBandCount);
+        double startAdvance = ReadOrDefault(root, "start_advance", PressureAdvanceTowerDefaults.StartAdvance, MinAdvance, MaxAdvance);
+        double advanceStep = ReadOrDefault(root, "advance_step", PressureAdvanceTowerDefaults.AdvanceStep, MinAdvanceStep, MaxAdvanceStep);
+        double bandHeightMm = ReadOrDefault(root, "band_height_mm", PressureAdvanceTowerDefaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm);
+        int bandCount = (int)ReadOrDefault(root, "band_count", PressureAdvanceTowerDefaults.BandCount, MinBandCount, MaxBandCount);
 
         if (bandCount > 1)
         {
@@ -277,15 +325,17 @@ public sealed record CalibrationParameters
     private const double MaxVfaVolumetricSpeedCeilingBoundMm3s = 250;
 
     /// <summary>
-    /// Reads <paramref name="key"/> from <paramref name="values"/>, falling back to
-    /// <paramref name="fallback"/> when the key is absent, non-finite (NaN/Infinity — never
-    /// producible by valid client JSON but defensively rejected anyway), or outside
-    /// [<paramref name="min"/>, <paramref name="max"/>]. This keeps a single adversarial or
-    /// malformed value from forcing unbounded loop counts or nonsensical gcode temperatures.
+    /// Reads <paramref name="key"/> from <paramref name="root"/>, falling back to
+    /// <paramref name="fallback"/> when the key is absent, not a JSON number, non-finite
+    /// (NaN/Infinity — never producible by valid client JSON but defensively rejected anyway), or
+    /// outside [<paramref name="min"/>, <paramref name="max"/>]. This keeps a single adversarial
+    /// or malformed value from forcing unbounded loop counts or nonsensical gcode temperatures.
     /// </summary>
-    private static double ReadOrDefault(Dictionary<string, double> values, string key, double fallback, double min, double max)
+    private static double ReadOrDefault(JsonElement root, string key, double fallback, double min, double max)
     {
-        if (!values.TryGetValue(key, out double value))
+        if (!root.TryGetProperty(key, out JsonElement element)
+            || element.ValueKind != JsonValueKind.Number
+            || !element.TryGetDouble(out double value))
         {
             return fallback;
         }
@@ -296,5 +346,20 @@ public sealed record CalibrationParameters
         }
 
         return value;
+    }
+
+    /// <summary>
+    /// Reads <paramref name="key"/> from <paramref name="root"/> as a string, falling back to
+    /// <paramref name="fallback"/> when the key is absent, blank, or not a JSON string.
+    /// </summary>
+    private static string? ReadStringOrDefault(JsonElement root, string key, string? fallback)
+    {
+        if (!root.TryGetProperty(key, out JsonElement element) || element.ValueKind != JsonValueKind.String)
+        {
+            return fallback;
+        }
+
+        string? value = element.GetString();
+        return string.IsNullOrWhiteSpace(value) ? fallback : value;
     }
 }

@@ -137,6 +137,18 @@ public class CalibrationRequest
     /// the method's defaults.
     /// </summary>
     public Dictionary<string, double>? Params { get; set; }
+
+    /// <summary>
+    /// The firmware flavor an input shaping / resonance-compensation calibration (issue #2139,
+    /// wire name <c>"input_shaping"</c>) targets — <c>"klipper"</c> or <c>"marlin"</c>
+    /// (case-insensitive). Required for that method, since the calibration result is report-only
+    /// and firmware-specific (Klipper's <c>[input_shaper]</c> vs. Marlin's <c>M593</c>). No other
+    /// method validates or reads this value — if supplied alongside a different
+    /// <see cref="Method"/> it is still persisted into <c>CalibrationParamsJson</c> but has no
+    /// effect, since only <see cref="Farm.Slicer.Module.Models.CalibrationMethod.InputShaping"/>'s
+    /// parse path looks for it.
+    /// </summary>
+    public string? FirmwareFlavor { get; set; }
 }
 
 /// <summary>
