@@ -1484,41 +1484,6 @@ public class PrintablesImportServiceTests : IDisposable
         }
     }
 
-    private sealed class CountingHttpMessageHandler(string responseJson) : HttpMessageHandler
-    {
-        private readonly List<HttpResponseMessage> _sentResponses = [];
-
-        public int PostCount { get; private set; }
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            if (request.Method == HttpMethod.Post)
-            {
-                PostCount++;
-            }
-
-            HttpResponseMessage response = new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(responseJson, Encoding.UTF8, "application/json"),
-            };
-            _sentResponses.Add(response);
-            return Task.FromResult(response);
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                foreach (HttpResponseMessage response in _sentResponses)
-                {
-                    response.Dispose();
-                }
-            }
-
-            base.Dispose(disposing);
-        }
-    }
-
     private sealed class TransientThenSuccessHandler(int failCount, string successJson) : HttpMessageHandler
     {
         private readonly List<HttpResponseMessage> _sentResponses = [];
@@ -1562,20 +1527,4 @@ public class PrintablesImportServiceTests : IDisposable
         }
     }
 
-    private sealed class RequestRecordingHttpMessageHandler(string responseJson) : HttpMessageHandler
-    {
-        public string LastRequestBody { get; private set; } = string.Empty;
-
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            LastRequestBody = request.Content is null
-                ? string.Empty
-                : await request.Content.ReadAsStringAsync(cancellationToken);
-
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(responseJson, Encoding.UTF8, "application/json"),
-            };
-        }
-    }
 }

@@ -40,10 +40,4 @@ public class WorkerRegistrationDispatcherIntegrationTests : IAsyncLifetime, IDis
     {
         _factory?.Dispose();
     }
-
-    private class RegResponse
-    {
-        public Guid Id { get; set; }
-        public string ApiKey { get; set; } = string.Empty;
-    }
 }

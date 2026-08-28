@@ -68,6 +68,9 @@ public class BatchDispatchTests : IClassFixture<CustomWebApplicationFactory>, IA
         public Dictionary<Guid, string> JobETags { get; set; } = [];
     }
 
+    // Set accessors are populated via JSON deserialization (reflection), invisible to the
+    // analyzer, even though only the getters are read directly.
+#pragma warning disable S1144
     private sealed class BatchDispatchResponse
     {
         public int TotalCount { get; set; }
@@ -80,12 +83,8 @@ public class BatchDispatchTests : IClassFixture<CustomWebApplicationFactory>, IA
     private sealed class BatchDispatchItemResult
     {
         public Guid JobId { get; set; }
-        public string Status { get; set; } = string.Empty;
-        public Guid? PrinterId { get; set; }
-        public string? PrinterName { get; set; }
-        public double? Score { get; set; }
-        public string? Reason { get; set; }
     }
+#pragma warning restore S1144
 
     // =========================================================================
     // DATA SEEDING HELPERS

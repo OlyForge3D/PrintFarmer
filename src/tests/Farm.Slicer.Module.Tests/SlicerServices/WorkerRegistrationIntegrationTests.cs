@@ -307,6 +307,10 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
         _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
+    // Id/Status are populated by JSON deserialization (reflection), which the analyzer cannot
+    // see, so it misreports the setter as unused even though the getter is read elsewhere in
+    // this file.
+#pragma warning disable S1144
     private class RegistrationResult
     {
         public Guid Id { get; set; }
@@ -317,10 +321,7 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
     {
         public Guid Id { get; set; }
         public string Name { get; set; } = string.Empty;
-        public int SlicerType { get; set; }
-        public string? Version { get; set; }
-        public string? Host { get; set; }
         public string? Status { get; set; }
-        public int MaxConcurrentJobs { get; set; }
     }
+#pragma warning restore S1144
 }

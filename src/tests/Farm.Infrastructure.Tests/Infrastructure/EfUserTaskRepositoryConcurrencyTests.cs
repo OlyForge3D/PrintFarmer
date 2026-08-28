@@ -374,11 +374,4 @@ public class EfUserTaskRepositoryConcurrencyTests
             => Task.FromResult(new ShiftPlanSourceResult([_spec], OriginWatermark: null));
     }
 
-    private sealed class NoSpecSource(IReadOnlyCollection<UserTaskSourceKind> ownedKinds) : IShiftPlanTaskSource
-    {
-        public string SourceName => "nospec";
-        public IReadOnlyCollection<UserTaskSourceKind> OwnedKinds { get; } = ownedKinds;
-        public Task<ShiftPlanSourceResult> ProduceAsync(CancellationToken ct)
-            => Task.FromResult(new ShiftPlanSourceResult([], OriginWatermark: null));
-    }
 }
