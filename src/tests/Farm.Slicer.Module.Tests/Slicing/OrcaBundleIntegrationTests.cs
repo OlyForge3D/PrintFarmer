@@ -301,7 +301,9 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime, IDisposable
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         string lowered = "bambu lab";
+#pragma warning disable CA1862 // string.Equals(string, StringComparison.OrdinalIgnoreCase) is not translatable by the EF Core SQLite provider; ToLower() is the provider-translatable idiom for a case-insensitive predicate here.
         Manufacturer? existingManufacturer = await db.Manufacturers.FirstOrDefaultAsync(m => m.Name.ToLower() == lowered);
+#pragma warning restore CA1862
         if (existingManufacturer == null)
         {
             existingManufacturer = new Manufacturer
@@ -314,7 +316,9 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime, IDisposable
             _ = await db.SaveChangesAsync();
         }
 
+#pragma warning disable CA1862 // string.Equals(string, StringComparison.OrdinalIgnoreCase) is not translatable by the EF Core SQLite provider; ToLower() is the provider-translatable idiom for a case-insensitive predicate here.
         bool existsModel = await db.PrinterModels.AnyAsync(m => m.ManufacturerId == existingManufacturer.Id && m.Name.ToLower() == "x1 carbon");
+#pragma warning restore CA1862
         if (!existsModel)
         {
             PrinterModel printerModel = new PrinterModel
@@ -342,7 +346,9 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime, IDisposable
         foreach (string? t in types)
         {
             string lowered = t.ToLowerInvariant();
+#pragma warning disable CA1862 // string.Equals(string, StringComparison.OrdinalIgnoreCase) is not translatable by the EF Core SQLite provider; ToLower() is the provider-translatable idiom for a case-insensitive predicate here.
             bool exists = await db.FilamentTypes.AnyAsync(f => f.Name.ToLower() == lowered);
+#pragma warning restore CA1862
             if (!exists)
             {
                 _ = db.FilamentTypes.Add(new FilamentType
@@ -366,7 +372,9 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime, IDisposable
         foreach (string? name in desired)
         {
             string lowered = name.ToLowerInvariant();
+#pragma warning disable CA1862 // string.Equals(string, StringComparison.OrdinalIgnoreCase) is not translatable by the EF Core SQLite provider; ToLower() is the provider-translatable idiom for a case-insensitive predicate here.
             FilamentType? existing = await db.FilamentTypes.FirstOrDefaultAsync(f => f.Name.ToLower() == lowered);
+#pragma warning restore CA1862
             if (existing == null)
             {
                 FilamentType ft = new FilamentType { Id = Guid.NewGuid(), Name = name, IsActive = true };
