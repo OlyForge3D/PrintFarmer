@@ -56,17 +56,19 @@ final class SystemCapabilitiesTests: XCTestCase {
 
     // MARK: - Decoding
 
-    func testDecodesFullCamelCasePayload() throws {
+    func testDecodesCanonicalNestedCamelCasePayload() throws {
         let json = """
         {
-            "attentionEnabled": false,
-            "nativePushEnabled": true,
-            "filamentCoverageEnabled": false,
-            "guidedSwapEnabled": false,
-            "multiSlotFallbackEnabled": false,
-            "shiftPlanEnabled": false,
-            "printedPartsInventoryEnabled": false,
-            "offlineWriteReplayEnabled": false
+            "operatorFeatures": {
+                "attentionEnabled": false,
+                "nativePushEnabled": true,
+                "filamentCoverageEnabled": false,
+                "guidedSwapEnabled": false,
+                "multiSlotFallbackEnabled": false,
+                "shiftPlanEnabled": false,
+                "printedPartsInventoryEnabled": false,
+                "offlineWriteReplayEnabled": false
+            }
         }
         """.data(using: .utf8)!
 
@@ -102,8 +104,10 @@ final class SystemCapabilitiesTests: XCTestCase {
         // default of `false` (#1000).
         let json = """
         {
-            "attentionEnabled": false,
-            "nativePushEnabled": true
+            "operatorFeatures": {
+                "attentionEnabled": false,
+                "nativePushEnabled": true
+            }
         }
         """.data(using: .utf8)!
 
@@ -118,6 +122,48 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertTrue(resolved.shiftPlanEnabled)
         XCTAssertFalse(resolved.printedPartsInventoryEnabled)
         XCTAssertTrue(resolved.offlineWriteReplayEnabled)
+    }
+
+    func testLegacyTopLevelFlagsRemainSupported() throws {
+        let json = """
+        {
+            "attentionEnabled": false,
+            "nativePushEnabled": true,
+            "shiftPlanEnabled": false
+        }
+        """.data(using: .utf8)!
+
+        let resolved = try JSONDecoder()
+            .decode(SystemCapabilities.self, from: json)
+            .resolved
+
+        XCTAssertFalse(resolved.attentionEnabled)
+        XCTAssertTrue(resolved.nativePushEnabled)
+        XCTAssertFalse(resolved.shiftPlanEnabled)
+        XCTAssertFalse(resolved.printedPartsInventoryEnabled)
+    }
+
+    func testCanonicalNestedFlagsTakePrecedenceAndLegacyFillsNestedOmissions() throws {
+        let json = """
+        {
+            "attentionEnabled": true,
+            "filamentCoverageEnabled": true,
+            "shiftPlanEnabled": false,
+            "operatorFeatures": {
+                "attentionEnabled": false,
+                "filamentCoverageEnabled": false
+            }
+        }
+        """.data(using: .utf8)!
+
+        let resolved = try JSONDecoder()
+            .decode(SystemCapabilities.self, from: json)
+            .resolved
+
+        XCTAssertFalse(resolved.attentionEnabled)
+        XCTAssertFalse(resolved.filamentCoverageEnabled)
+        XCTAssertFalse(resolved.shiftPlanEnabled)
+        XCTAssertFalse(resolved.printedPartsInventoryEnabled)
     }
 
     // MARK: - APIError.code (ProblemDetails extension)
@@ -161,8 +207,10 @@ final class SystemCapabilitiesTests: XCTestCase {
     func testRefreshUpdatesResolvedOnSuccessfulResponse() async {
         mockAPIClient.stubResponse(json: """
         {
-            "attentionEnabled": false,
-            "nativePushEnabled": true
+            "operatorFeatures": {
+                "attentionEnabled": false,
+                "nativePushEnabled": true
+            }
         }
         """)
 
@@ -211,7 +259,11 @@ final class SystemCapabilitiesTests: XCTestCase {
         // subsequent transport error must NOT flip it back to the
         // enabled default (fail-open means "don't touch existing state").
         mockAPIClient.stubResponse(json: """
-        { "attentionEnabled": false }
+        {
+            "operatorFeatures": {
+                "attentionEnabled": false
+            }
+        }
         """)
 
         let service = SystemCapabilitiesService(apiClient: apiClient)
@@ -223,6 +275,122 @@ final class SystemCapabilitiesTests: XCTestCase {
 
         XCTAssertFalse(service.resolved.attentionEnabled,
                        "Existing resolved snapshot must persist through transient errors")
+    }
+
+    func testOlderSuccessfulRefreshCannotOverwriteNewerCapabilities() async {
+        let olderRequest = AsyncBarrier()
+        let calls = SystemCapabilitiesRequestOrdinal()
+        addTeardownBlock { olderRequest.close() }
+        mockAPIClient.asyncRequestHandler = { request in
+            if await calls.next() == 1 {
+                await olderRequest.arriveAndWait()
+                return (
+                    TestData.httpResponse(url: request.url, statusCode: 200),
+                    Data(#"{"operatorFeatures":{"attentionEnabled":true,"filamentCoverageEnabled":true,"shiftPlanEnabled":true}}"#.utf8)
+                )
+            }
+            return (
+                TestData.httpResponse(url: request.url, statusCode: 200),
+                Data(#"{"operatorFeatures":{"attentionEnabled":false,"filamentCoverageEnabled":false,"shiftPlanEnabled":false}}"#.utf8)
+            )
+        }
+
+        let service = SystemCapabilitiesService(apiClient: apiClient)
+        let olderRefresh = Task { await service.refresh() }
+        await olderRequest.waitUntilArrived()
+
+        let newerOutcome = await service.refresh()
+        XCTAssertEqual(newerOutcome, .loaded)
+        XCTAssertFalse(service.resolved.attentionEnabled)
+        XCTAssertFalse(service.resolved.filamentCoverageEnabled)
+        XCTAssertFalse(service.resolved.shiftPlanEnabled)
+
+        olderRequest.release()
+        let olderOutcome = await olderRefresh.value
+        XCTAssertEqual(olderOutcome, .loaded)
+        XCTAssertFalse(service.resolved.attentionEnabled)
+        XCTAssertFalse(service.resolved.filamentCoverageEnabled)
+        XCTAssertFalse(service.resolved.shiftPlanEnabled)
+    }
+
+    func testOlderLegacy404CannotOverwriteNewerCapabilities() async {
+        let olderRequest = AsyncBarrier()
+        let calls = SystemCapabilitiesRequestOrdinal()
+        addTeardownBlock { olderRequest.close() }
+        mockAPIClient.asyncRequestHandler = { request in
+            if await calls.next() == 1 {
+                await olderRequest.arriveAndWait()
+                return (
+                    TestData.httpResponse(url: request.url, statusCode: 404),
+                    Data("{}".utf8)
+                )
+            }
+            return (
+                TestData.httpResponse(url: request.url, statusCode: 200),
+                Data(#"{"operatorFeatures":{"attentionEnabled":false,"filamentCoverageEnabled":false,"shiftPlanEnabled":false}}"#.utf8)
+            )
+        }
+
+        let service = SystemCapabilitiesService(apiClient: apiClient)
+        let olderRefresh = Task { await service.refresh() }
+        await olderRequest.waitUntilArrived()
+
+        let newerOutcome = await service.refresh()
+        XCTAssertEqual(newerOutcome, .loaded)
+        XCTAssertFalse(service.resolved.attentionEnabled)
+        XCTAssertFalse(service.resolved.filamentCoverageEnabled)
+        XCTAssertFalse(service.resolved.shiftPlanEnabled)
+
+        olderRequest.release()
+        let olderOutcome = await olderRefresh.value
+        XCTAssertEqual(olderOutcome, .legacyDefaults)
+        XCTAssertFalse(service.resolved.attentionEnabled)
+        XCTAssertFalse(service.resolved.filamentCoverageEnabled)
+        XCTAssertFalse(service.resolved.shiftPlanEnabled)
+    }
+
+    func testCompletedDisabledRefreshPublishesWhileNewerRefreshIsStillInFlight() async {
+        let olderRequest = AsyncBarrier()
+        let newerRequest = AsyncBarrier()
+        let calls = SystemCapabilitiesRequestOrdinal()
+        addTeardownBlock {
+            olderRequest.close()
+            newerRequest.close()
+        }
+        mockAPIClient.asyncRequestHandler = { request in
+            if await calls.next() == 1 {
+                await olderRequest.arriveAndWait()
+                return (
+                    TestData.httpResponse(url: request.url, statusCode: 200),
+                    Data(#"{"operatorFeatures":{"attentionEnabled":false,"filamentCoverageEnabled":false,"shiftPlanEnabled":false}}"#.utf8)
+                )
+            }
+            await newerRequest.arriveAndWait()
+            return (
+                TestData.httpResponse(url: request.url, statusCode: 200),
+                Data(#"{"operatorFeatures":{"attentionEnabled":true,"filamentCoverageEnabled":true,"shiftPlanEnabled":true}}"#.utf8)
+            )
+        }
+
+        let service = SystemCapabilitiesService(apiClient: apiClient)
+        let olderRefresh = Task { await service.refresh() }
+        await olderRequest.waitUntilArrived()
+        let newerRefresh = Task { await service.refresh() }
+        await newerRequest.waitUntilArrived()
+
+        olderRequest.release()
+        let olderOutcome = await olderRefresh.value
+        XCTAssertEqual(olderOutcome, .loaded)
+        XCTAssertFalse(service.resolved.attentionEnabled)
+        XCTAssertFalse(service.resolved.filamentCoverageEnabled)
+        XCTAssertFalse(service.resolved.shiftPlanEnabled)
+
+        newerRequest.release()
+        let newerOutcome = await newerRefresh.value
+        XCTAssertEqual(newerOutcome, .loaded)
+        XCTAssertTrue(service.resolved.attentionEnabled)
+        XCTAssertTrue(service.resolved.filamentCoverageEnabled)
+        XCTAssertTrue(service.resolved.shiftPlanEnabled)
     }
 
     // MARK: - Stub
@@ -263,5 +431,14 @@ final class SystemCapabilitiesTests: XCTestCase {
         // refresh() must be a no-op on the stub.
         await stub.refresh()
         XCTAssertFalse(stub.resolved.attentionEnabled)
+    }
+}
+
+private actor SystemCapabilitiesRequestOrdinal {
+    private var value = 0
+
+    func next() -> Int {
+        value += 1
+        return value
     }
 }

@@ -3,24 +3,34 @@ import SwiftUI
 /// Scan tab entry — the operator's scan station (#714, F9).
 ///
 /// A single generic camera scan type-dispatches to whichever physical
-/// entity was scanned: a `printfarmer://printer/...` QR opens the printer
-/// detail, a bin barcode opens `BinScanResultView`, a printed-part SKU
-/// barcode opens `PartScanResultView`, and anything else falls back to the
-/// existing spool-barcode intake flow. NFC printer tags continue to be
-/// handled implicitly by iOS via the app's deep-link scheme — no manual
-/// entry is required for those, and no new NFC formats were introduced
-/// for bins/parts (QR/barcode only, matching the backend's barcode-based
-/// bin/SKU identity).
+/// entity was scanned. Printer and spool destinations are always available;
+/// printed-part bins and SKUs participate only when the backend capability
+/// enables printed-parts inventory.
 struct ScanView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @State private var viewModel = ScanViewModel()
     @State private var showBarcodeIntake = false
-    @State private var partsInventoryEnabled = true
     @State private var showPartLookup = false
     @State private var showPrinterLookup = false
     @State private var partLookupSelection: PartInventoryResponse?
     @State private var showOfflineQueue = false
+
+    private var partsInventoryEnabled: Bool {
+        services.capabilitiesService.resolved.printedPartsInventoryEnabled
+    }
+
+    private var scanDescription: String {
+        partsInventoryEnabled
+            ? "Scan a printer, bin, part, or spool code. PrintFarmer figures out what it is."
+            : "Scan a printer or spool code. PrintFarmer figures out what it is."
+    }
+
+    private var scanHint: String {
+        partsInventoryEnabled
+            ? "Scans a printer, bin, part, or spool code and opens the matching screen."
+            : "Scans a printer or spool code and opens the matching screen."
+    }
 
     var body: some View {
         @Bindable var router = router
@@ -70,11 +80,18 @@ struct ScanView: View {
             .sheet(item: $viewModel.pendingOutcome) { outcome in
                 switch outcome {
                 case .bin(let bin):
-                    BinScanResultView(bin: bin)
+                    if partsInventoryEnabled {
+                        BinScanResultView(bin: bin)
+                    }
                 case .part(let part):
-                    PartScanResultView(part: part)
+                    if partsInventoryEnabled {
+                        PartScanResultView(part: part)
+                    }
                 case .unknownCode(let code):
-                    UnrecognizedScanView(code: code)
+                    UnrecognizedScanView(
+                        code: code,
+                        printedPartsInventoryEnabled: partsInventoryEnabled
+                    )
                 }
             }
             .sheet(isPresented: Binding(
@@ -86,23 +103,33 @@ struct ScanView: View {
                 }
             }
             .sheet(isPresented: $showPartLookup) {
-                PartLookupView(partsInventoryService: services.partsInventoryService) { part in
-                    partLookupSelection = part
-                    showPartLookup = false
+                if partsInventoryEnabled {
+                    PartLookupView(partsInventoryService: services.partsInventoryService) { part in
+                        partLookupSelection = part
+                        showPartLookup = false
+                    }
                 }
             }
             .sheet(item: $partLookupSelection) { part in
-                PartScanResultView(part: part)
+                if partsInventoryEnabled {
+                    PartScanResultView(part: part)
+                }
             }
             .sheet(isPresented: $showPrinterLookup) {
                 PrinterLookupView(printerService: services.printerService) { printer in
                     showPrinterLookup = false
-                    router.navigate(to: .printerDetail(id: printer.id))
+                    router.navigate(
+                        to: .printerDetail(id: printer.id),
+                        capabilities: services.capabilitiesService.resolved
+                    )
                 }
             }
             .onChange(of: viewModel.pendingDeepLinkDestination) { _, destination in
                 guard let destination else { return }
-                router.navigate(to: destination)
+                router.navigate(
+                    to: destination,
+                    capabilities: services.capabilitiesService.resolved
+                )
                 viewModel.pendingDeepLinkDestination = nil
             }
             .task {
@@ -110,10 +137,16 @@ struct ScanView: View {
                     scanner: services.barcodeScannerService,
                     partsInventoryService: services.partsInventoryService,
                     barcodeIntakeService: services.barcodeIntakeService,
-                    spoolService: services.spoolService
+                    spoolService: services.spoolService,
+                    printedPartsInventoryEnabled: partsInventoryEnabled
                 )
                 await services.capabilitiesService.refresh()
-                partsInventoryEnabled = services.capabilitiesService.resolved.printedPartsInventoryEnabled
+            }
+            .onChange(of: partsInventoryEnabled) { _, isEnabled in
+                viewModel.setPrintedPartsInventoryEnabled(isEnabled)
+                guard !isEnabled else { return }
+                showPartLookup = false
+                partLookupSelection = nil
             }
             .onAppear { viewModel.isViewActive = true }
             .onDisappear { viewModel.isViewActive = false }
@@ -137,7 +170,7 @@ struct ScanView: View {
                         .font(.headline)
                         .foregroundStyle(Color.pfTextPrimary)
 
-                    Text("Scan a printer, bin, part, or spool code. PrintFarmer figures out what it is.")
+                    Text(scanDescription)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -150,7 +183,7 @@ struct ScanView: View {
             .disabled(viewModel.isScanning || !viewModel.isScannerAvailable)
             .accessibilityIdentifier("scan.primary")
             .accessibilityLabel("Scan")
-            .accessibilityHint("Scans a printer, bin, part, or spool code and opens the matching screen.")
+            .accessibilityHint(scanHint)
             .accessibilityAddTraits(.isButton)
         }
     }
@@ -168,13 +201,15 @@ struct ScanView: View {
                 showBarcodeIntake = true
             }
 
-            quickActionRow(
-                icon: "cube.box",
-                title: "Log Printed Parts",
-                description: "Look up a printed-part SKU and record a manual stock adjustment.",
-                identifier: "scan.quickAction.parts"
-            ) {
-                showPartLookup = true
+            if partsInventoryEnabled {
+                quickActionRow(
+                    icon: "cube.box",
+                    title: "Log Printed Parts",
+                    description: "Look up a printed-part SKU and record a manual stock adjustment.",
+                    identifier: "scan.quickAction.parts"
+                ) {
+                    showPartLookup = true
+                }
             }
 
             quickActionRow(
@@ -244,7 +279,11 @@ struct ScanView: View {
         } header: {
             Text("NFC Printer Tags")
         } footer: {
-            Text("iOS handles NFC printer tags automatically. Bins and parts use QR/barcode only.")
+            Text(
+                partsInventoryEnabled
+                    ? "iOS handles NFC printer tags automatically. Bins and parts use QR/barcode only."
+                    : "iOS handles NFC printer tags automatically."
+            )
         }
     }
 
@@ -288,15 +327,22 @@ struct ScanView: View {
 /// or known spool barcode.
 private struct UnrecognizedScanView: View {
     let code: String
+    let printedPartsInventoryEnabled: Bool
 
     @Environment(\.dismiss) private var dismiss
+
+    private var description: String {
+        printedPartsInventoryEnabled
+            ? "\"\(code)\" didn't match a printer, bin, part, or known spool barcode."
+            : "\"\(code)\" didn't match a printer or known spool barcode."
+    }
 
     var body: some View {
         NavigationStack {
             ContentUnavailableView {
                 Label("Unrecognized Code", systemImage: "questionmark.circle")
             } description: {
-                Text("\"\(code)\" didn't match a printer, bin, part, or known spool barcode.")
+                Text(description)
             }
             .navigationTitle("Unrecognized")
             #if os(iOS)

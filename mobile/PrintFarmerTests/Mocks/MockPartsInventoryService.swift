@@ -30,6 +30,7 @@ final class MockPartsInventoryService: PartsInventoryServiceProtocol, @unchecked
     /// deterministically prove "exactly one POST" under rapid/delayed
     /// double-submit rather than a sequential-call reimplementation.
     var harvestGate: (() async -> Void)?
+    var resolveBinGate: (() async -> Void)?
 
     var listPartsError: Error?
     var resolvePartError: Error?
@@ -81,6 +82,7 @@ final class MockPartsInventoryService: PartsInventoryServiceProtocol, @unchecked
 
     func resolveBinByBarcode(_ code: String) async throws -> BinResponse {
         resolveBinCodes.append(code)
+        if let resolveBinGate { await resolveBinGate() }
         if let resolveBinError { throw resolveBinError }
         guard let binToResolve else { throw NetworkError.notFound }
         return binToResolve

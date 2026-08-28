@@ -160,7 +160,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
     //
     // Contract these tests enforce:
     //   1. Open a legacy fallback sheet from the Attention overflow (or
-    //      the disabled-attention fallback for Notifications).
+    //      every still-reachable legacy sheet).
     //   2. Push a NESTED destination inside that sheet's NavigationStack.
     //   3. Dismiss the sheet.
     //   4. Reopen it. It MUST land on its documented root; the previously
@@ -473,207 +473,86 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
     }
 }
 
-// MARK: - #727 Notifications-fallback coverage
-//
-// The legacy Notifications sheet is only reachable from
-// `AttentionView.disabledFallback`, which renders when the operator
-// feature gate resolves `attentionEnabled == false`. This subclass
-// launches with the deterministic attention-disabled bootstrap so the
-// fallback surface is guaranteed to be on screen.
+// MARK: - #2117 capability-driven visibility
 @MainActor
-final class AttentionDisabledFallbackUITests: PrintFarmerUITestCase {
+final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
 
     override var additionalLaunchArguments: [String] {
-        // Contract with UITestBootstrap.attentionDisabledLaunchArgument.
+        // Contract with UITestBootstrap.operatorFeaturesDisabledLaunchArgument.
         // UI test targets cannot import the app target, so this literal
-        // is verified by `test_attentionDisabledLaunchArgument_matchesUITestsHarness`.
-        ["--uitesting-attention-disabled"]
+        // is verified by the corresponding UITestBootstrap unit test.
+        ["--uitesting-operator-features-disabled"]
     }
 
-    // Reuse the strict helpers via file-scope private extensions would
-    // require exposing them; the fallback flow is a single scenario so
-    // it's cheapest to inline the strict contract here.
-
-    private func openFallbackNotifications(
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        // The disabled fallback is the AttentionView.disabledFallback
-        // surface, exposed at the Attention destination root. On iPhone
-        // this is a tab; on iPad it is the default sidebar column.
-        let tabAttention = app.tabBars.buttons["Attention"]
-        if tabAttention.waitForExistence(timeout: 5) {
-            tabAttention.tap()
-        } else if app.navigationBars["Attention"].waitForExistence(timeout: 3) {
-            // iPad regular width — Attention nav bar already visible
-            // because it is the default destination.
-        } else if app.buttons["sidebar.attention"].waitForExistence(timeout: 2) {
-            app.buttons["sidebar.attention"].tap()
-        } else {
-            XCTFail("Attention destination is not reachable under disabled-attention bootstrap",
-                    file: file, line: line)
-            return
-        }
-
-        let fallbackNotificationsButton = app.buttons["attention.fallback.notifications"]
-        if !fallbackNotificationsButton.waitForExistence(timeout: 10) {
-            let dump = app.debugDescription
-            XCTFail("Fallback Notifications button (id='attention.fallback.notifications') must be on screen under --uitesting-attention-disabled. App hierarchy:\n\(dump)",
-                    file: file, line: line)
-            return
-        }
-
-        XCTAssertEqual(fallbackNotificationsButton.label, "Notifications", file: file, line: line)
-        XCTAssertGreaterThanOrEqual(fallbackNotificationsButton.frame.width, 44, file: file, line: line)
-        XCTAssertGreaterThanOrEqual(fallbackNotificationsButton.frame.height, 44, file: file, line: line)
-
-        guard fallbackNotificationsButton.isHittable else {
-            XCTFail("attention.fallback.notifications is not hittable — fallback surface is present but obscured",
-                    file: file, line: line)
-            return
-        }
-        fallbackNotificationsButton.tap()
-        XCTAssertTrue(
-            app.navigationBars["Notifications"].waitForExistence(timeout: 5),
-            "Notifications fallback sheet did not present after tapping attention.fallback.notifications",
-            file: file, line: line
+    func testDisabledDestinationsAreAbsentAndFarmIsSelected() {
+        let farm = operatorDestinationButton(
+            tabTitle: "Farm",
+            sidebarIdentifier: "sidebar.farm",
+            timeout: 8
         )
+        XCTAssertTrue(farm.exists)
+        XCTAssertTrue(farm.isSelected)
+
+        revealSidebarIfCollapsed()
+        XCTAssertFalse(app.tabBars.buttons["Attention"].exists)
+        XCTAssertFalse(app.buttons["sidebar.attention"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Tasks"].exists)
+        XCTAssertFalse(app.buttons["sidebar.tasks"].exists)
+        XCTAssertFalse(app.buttons["attention.fallback.notifications"].exists)
     }
 
-    /// Pushes a nested `JobDetailView` from the fallback Notifications
-    /// sheet. Uses the deterministic first-notification row emitted by
-    /// `DemoNotificationService`, which carries a `jobId`.
-    private func pushFirstNotificationJobDetail(
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> Bool {
-        // Any notification whose `jobId` is non-nil pushes a jobDetail
-        // destination when tapped (see `NotificationsView.handleTap`).
-        // notif-001 is the first row in `DemoData.notifications` and its
-        // `jobId == DemoData.job1ID`.
-        let identifier = "notifications.row.notif-001"
-        let row = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
-        guard row.waitForExistence(timeout: 3) else {
-            XCTFail("Deterministic notification row '\(identifier)' is missing — DemoNotificationService fixture drift",
-                    file: file, line: line)
-            return false
-        }
-        row.tap()
+    func testPrintedPartsAreAbsentWhileSpoolInventoryRemainsVisible() {
+        let inventory = operatorDestinationButton(
+            tabTitle: "Inventory",
+            sidebarIdentifier: "sidebar.inventory",
+            timeout: 8
+        )
+        XCTAssertTrue(inventory.exists)
+        inventory.tap()
 
-        // The push targets JobDetailView, whose navigationTitle is the
-        // job's name (falls back to 'Job' if unloaded). The global
-        // 'Notifications' back button — a nav-bar button whose label
-        // reads 'Notifications' anywhere in the hierarchy — is the
-        // child sentinel this test relies on. Its absence here is a
-        // hard failure: without a pushed child there is nothing to
-        // regress in the #727 fallback flow.
-        let childSentinel = app.navigationBars.buttons["Notifications"]
-        guard childSentinel.waitForExistence(timeout: 5) else {
-            XCTFail("Nested Notifications → job detail push did not surface the global 'Notifications' back button within 5s — the child sentinel this test depends on never appeared",
-                    file: file, line: line)
-            return false
-        }
-        return true
+        XCTAssertTrue(app.navigationBars["Spool Inventory"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.segmentedControls["inventory.segmentPicker"].exists)
+        XCTAssertFalse(app.buttons["Printed Parts"].exists)
     }
 
-    func testNotificationsFallbackSheetResetsPushedJobDetailAfterDismissal() {
-        // The child sentinel is the identical query used before
-        // dismissal AND after reopen: any nav bar back button labeled
-        // 'Notifications'. On the Notifications root this must be
-        // absent (a root has no parent to point back to). When a
-        // nested JobDetailView is pushed, the pushed screen's back
-        // button carries this label. Using the SAME query both times
-        // is what makes this test non-vacuous — a scoped query after
-        // reopen would trivially return absent whenever the top bar
-        // is not titled 'Notifications' and silently pass on the
-        // exact bug #727 fixes.
-        let childSentinel = app.navigationBars.buttons["Notifications"]
-        let notificationsRootBar = app.navigationBars["Notifications"]
+    func testPrintedPartsScanActionIsAbsentWhileSpoolActionRemainsVisible() {
+        let scan = operatorDestinationButton(
+            tabTitle: "Scan",
+            sidebarIdentifier: "sidebar.scan",
+            timeout: 8
+        )
+        XCTAssertTrue(scan.exists)
+        scan.tap()
 
-        // 1. Open the fallback Notifications sheet.
-        openFallbackNotifications()
+        XCTAssertTrue(app.buttons["scan.quickAction.spool"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["scan.quickAction.parts"].exists)
+    }
+
+    func testFilamentCoverageIsAbsentFromFarmAndPrinterDetail() {
+        let farm = operatorDestinationButton(
+            tabTitle: "Farm",
+            sidebarIdentifier: "sidebar.farm",
+            timeout: 8
+        )
+        XCTAssertTrue(farm.exists)
+        farm.tap()
+
+        let firstCard = app.buttons
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "farm-card-"))
+            .firstMatch
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.descendants(matching: .any)["filament-coverage-badge-covers"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["filament-coverage-badge-runout-eta"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["filament-coverage-badge-runout-no-eta"].exists)
+
+        firstCard.tap()
         XCTAssertTrue(
-            notificationsRootBar.waitForExistence(timeout: 5),
-            "Notifications fallback root did not present — cannot exercise the #727 regression path"
+            app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH %@", "printer.detail.root."))
+                .firstMatch
+                .waitForExistence(timeout: 8)
         )
-        guard notificationsRootBar.exists else { return }
-
-        // 2. Push nested job detail. pushFirstNotificationJobDetail
-        // now fails loudly on a missing row OR a missing child
-        // sentinel; we only stop here after those failures are
-        // reported so the acceptance path never silently passes.
-        guard pushFirstNotificationJobDetail() else { return }
-
-        // 3. Confirm the child sentinel is present before dismissal
-        // using the identical query used after reopen.
-        XCTAssertTrue(
-            childSentinel.waitForExistence(timeout: 5),
-            "Nested Notifications → job detail push did not surface the global 'Notifications' back button — child sentinel absent before dismissal"
-        )
-
-        // 4. Dismiss while nested. Swipe on the top nav bar (which is
-        // the job detail bar, not 'Notifications').
-        //
-        // The drag distance is relative to the full app frame height
-        // (rather than a fixed point offset) because iPad presents this
-        // sheet as a centered form sheet rather than iPhone's full-card
-        // sheet — a fixed offset tuned for one device class can undershoot
-        // the interactive-dismiss threshold on the other and leave the
-        // synthetic gesture flaky. Retrying the swipe a couple of times
-        // guards against a single dropped/undetected drag gesture in the
-        // simulator without weakening the assertion below, which still
-        // requires the fallback surface to be back on screen.
-        let currentBar = app.navigationBars.element(boundBy: 0)
-        guard currentBar.waitForExistence(timeout: 3) else {
-            XCTFail("No navigation bar on screen to swipe-dismiss the nested Notifications sheet")
-            return
-        }
-        let fallbackNotificationsButton = app.buttons["attention.fallback.notifications"]
-        var dismissed = false
-        for attempt in 0..<3 {
-            let start = currentBar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            let end = start.withOffset(CGVector(dx: 0, dy: app.frame.height))
-            start.press(forDuration: 0.1, thenDragTo: end)
-
-            if fallbackNotificationsButton.waitForExistence(timeout: attempt == 0 ? 3 : 5) {
-                dismissed = true
-                break
-            }
-        }
-
-        // The fallback Notifications button (an unambiguous sentinel of
-        // the disabled-attention fallback surface) must be back on screen.
-        XCTAssertTrue(
-            dismissed,
-            "Dismissing the nested Notifications fallback did not return to the disabled-attention fallback surface after retrying the swipe gesture"
-        )
-        guard dismissed else { return }
-
-        // 5. Reopen. Notifications sheet MUST land at its root.
-        openFallbackNotifications()
-
-        // 5a. Root visibility is a positive precondition — without it
-        // any assertion about the child sentinel would be vacuous.
-        XCTAssertTrue(
-            notificationsRootBar.waitForExistence(timeout: 5),
-            "Reopened fallback Notifications sheet did not present its root — #727 regression indicator"
-        )
-
-        // 5b. The root-bar expectation above is the post-dismissal UI-idle
-        // barrier. If a stale child were restored, this root bar would no
-        // longer be the visible navigation surface.
-        XCTAssertTrue(
-            notificationsRootBar.exists,
-            "Notifications root disappeared after reopen — a stale child was restored"
-        )
-
-        // 5c. The IDENTICAL global sentinel used before dismissal
-        // must now be absent. Using the same query proves the
-        // pushed child is truly gone — this is the #727 contract.
-        XCTAssertFalse(
-            childSentinel.exists,
-            "Reopened fallback Notifications sheet retained the pushed job-detail child (global 'Notifications' back button still present) — #727 regression"
-        )
+        XCTAssertFalse(app.descendants(matching: .any)["filament-coverage-section"].exists)
     }
 
     // MARK: - Printer Detail v2 operator-first order + Advanced demotion (#712)

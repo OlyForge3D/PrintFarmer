@@ -57,7 +57,10 @@ struct PFarmApp: App {
                 .preferredColorScheme(themeManager.preferredColorScheme)
                 .onOpenURL { url in
                     if let destination = DeepLinkHandler.parse(url: url) {
-                        router.navigate(to: destination)
+                        router.navigate(
+                            to: destination,
+                            capabilities: services.capabilitiesService.resolved
+                        )
                     }
                 }
                 .onChange(of: serverRegistry.activeServerID) {
@@ -73,7 +76,8 @@ struct PFarmApp: App {
                     if !DemoMode.shared.isActive {
                         router.routeNotification(
                             userInfo: userInfo ?? [:],
-                            activeOriginServerId: serverRegistry.activeServer?.originServerId
+                            activeOriginServerId: serverRegistry.activeServer?.originServerId,
+                            capabilities: services.capabilitiesService.resolved
                         )
                     }
                 }
@@ -84,11 +88,17 @@ struct PFarmApp: App {
                        let userInfo,
                        let printerIdString = userInfo["printerId"] as? String,
                        let printerId = UUID(uuidString: printerIdString) {
-                        router.navigate(to: .printerReady(id: printerId))
+                        router.navigate(
+                            to: .printerReady(id: printerId),
+                            capabilities: services.capabilitiesService.resolved
+                        )
                     } else {
                         // F1 (#706): notification-tap without a printer ID lands
                         // on Attention where the notification itself lives.
-                        router.selectedTab = .attention
+                        router.selectTab(
+                            .attention,
+                            capabilities: services.capabilitiesService.resolved
+                        )
                     }
                 }
                 #endif
@@ -125,14 +135,18 @@ struct PFarmApp: App {
                         if !DemoMode.shared.isActive, let userInfo = pendingRemoteTap {
                             router.routeNotification(
                                 userInfo: userInfo,
-                                activeOriginServerId: serverRegistry.activeServer?.originServerId
+                                activeOriginServerId: serverRegistry.activeServer?.originServerId,
+                                capabilities: services.capabilitiesService.resolved
                             )
                         }
                         let pendingLocalTap = PushNotificationManager.shared.consumePendingLocalTap()
                         if !DemoMode.shared.isActive, let userInfo = pendingLocalTap,
                            let printerIdString = userInfo["printerId"] as? String,
                            let printerId = UUID(uuidString: printerIdString) {
-                            router.navigate(to: .printerReady(id: printerId))
+                            router.navigate(
+                                to: .printerReady(id: printerId),
+                                capabilities: services.capabilitiesService.resolved
+                            )
                         }
                         await PushNotificationManager.shared.refreshPermissionStatus()
                         if PushNotificationManager.shared.pushEnabled {

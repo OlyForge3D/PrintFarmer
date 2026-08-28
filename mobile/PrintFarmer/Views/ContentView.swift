@@ -8,28 +8,44 @@ import SwiftUI
 /// Printer Detail → Advanced.
 struct ContentView: View {
     @Environment(AppRouter.self) private var router
+    @Environment(ServiceContainer.self) private var services
     @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
-        if sizeClass == .regular {
-            iPadLayout
-        } else {
-            compactLayout
+        let capabilities = services.capabilitiesService.resolved
+
+        Group {
+            if sizeClass == .regular {
+                iPadLayout(capabilities: capabilities)
+            } else {
+                compactLayout(capabilities: capabilities)
+            }
+        }
+        .onAppear {
+            router.reconcileCapabilities(capabilities)
+        }
+        .onChange(of: capabilities) { _, newCapabilities in
+            router.reconcileCapabilities(newCapabilities)
         }
     }
 
     // MARK: - Compact (iPhone)
 
-    private var compactLayout: some View {
-        @Bindable var router = router
+    private func compactLayout(capabilities: ResolvedSystemCapabilities) -> some View {
+        let selection = Binding(
+            get: { router.resolvedTab(for: capabilities) },
+            set: { router.selectTab($0, capabilities: capabilities) }
+        )
 
-        return TabView(selection: $router.selectedTab) {
-            AttentionView()
-                .tabItem { Label("Attention", systemImage: "bell.badge") }
-                .tag(AppTab.attention)
-                .badge(router.notificationBadgeCount)
-                .accessibilityIdentifier("tab.attention")
+        return TabView(selection: selection) {
+            if capabilities.attentionEnabled {
+                AttentionView()
+                    .tabItem { Label("Attention", systemImage: "bell.badge") }
+                    .tag(AppTab.attention)
+                    .badge(router.notificationBadgeCount)
+                    .accessibilityIdentifier("tab.attention")
+            }
 
             PrinterListView()
                 .tabItem { Label("Farm", systemImage: "printer") }
@@ -37,10 +53,12 @@ struct ContentView: View {
                 .badge(router.pendingReadyCount)
                 .accessibilityIdentifier("tab.farm")
 
-            ShiftTasksView()
-                .tabItem { Label("Tasks", systemImage: "checklist") }
-                .tag(AppTab.tasks)
-                .accessibilityIdentifier("tab.tasks")
+            if capabilities.shiftPlanEnabled {
+                ShiftTasksView()
+                    .tabItem { Label("Tasks", systemImage: "checklist") }
+                    .tag(AppTab.tasks)
+                    .accessibilityIdentifier("tab.tasks")
+            }
 
             ScanView()
                 .tabItem { Label("Scan", systemImage: "barcode.viewfinder") }
@@ -55,17 +73,39 @@ struct ContentView: View {
 
     // MARK: - Regular (iPad)
 
-    private var iPadLayout: some View {
+    private func iPadLayout(capabilities: ResolvedSystemCapabilities) -> some View {
         @Bindable var router = router
 
         return NavigationSplitView(columnVisibility: $router.sidebarVisibility) {
             List {
                 Section {
-                    sidebarAttentionButton
+                    if capabilities.attentionEnabled {
+                        sidebarAttentionButton(capabilities: capabilities)
+                    }
                     sidebarFarmButton
-                    sidebarButton(tab: .tasks, title: "Tasks", icon: "checklist", identifier: "sidebar.tasks")
-                    sidebarButton(tab: .scan, title: "Scan", icon: "barcode.viewfinder", identifier: "sidebar.scan")
-                    sidebarButton(tab: .inventory, title: "Inventory", icon: "cylinder.fill", identifier: "sidebar.inventory")
+                    if capabilities.shiftPlanEnabled {
+                        sidebarButton(
+                            tab: .tasks,
+                            title: "Tasks",
+                            icon: "checklist",
+                            identifier: "sidebar.tasks",
+                            capabilities: capabilities
+                        )
+                    }
+                    sidebarButton(
+                        tab: .scan,
+                        title: "Scan",
+                        icon: "barcode.viewfinder",
+                        identifier: "sidebar.scan",
+                        capabilities: capabilities
+                    )
+                    sidebarButton(
+                        tab: .inventory,
+                        title: "Inventory",
+                        icon: "cylinder.fill",
+                        identifier: "sidebar.inventory",
+                        capabilities: capabilities
+                    )
                 } header: {
                     Text("Operator")
                 }
@@ -73,14 +113,20 @@ struct ContentView: View {
             .listStyle(.sidebar)
             .navigationTitle("PrintFarmer")
         } detail: {
-            tabContentView(for: router.selectedTab)
+            tabContentView(for: router.resolvedTab(for: capabilities))
         }
         .navigationSplitViewStyle(.balanced)
     }
 
-    private func sidebarButton(tab: AppTab, title: String, icon: String, identifier: String) -> some View {
+    private func sidebarButton(
+        tab: AppTab,
+        title: String,
+        icon: String,
+        identifier: String,
+        capabilities: ResolvedSystemCapabilities
+    ) -> some View {
         Button {
-            router.selectedTab = tab
+            router.selectTab(tab, capabilities: capabilities)
         } label: {
             Label(title, systemImage: icon)
                 .frame(minHeight: 44)
@@ -120,9 +166,11 @@ struct ContentView: View {
         .accessibilityIdentifier("sidebar.farm")
     }
 
-    private var sidebarAttentionButton: some View {
+    private func sidebarAttentionButton(
+        capabilities: ResolvedSystemCapabilities
+    ) -> some View {
         Button {
-            router.selectedTab = .attention
+            router.selectTab(.attention, capabilities: capabilities)
         } label: {
             HStack {
                 Label("Attention", systemImage: "bell.badge")
