@@ -19,6 +19,16 @@
       test exercises the exact code under test rather than a parallel copy of it.
     -->
     <InternalsVisibleTo Include="Farm.Web.IntegrationTests" />
+
+    <!--
+      Issue #2136: Farm.Slicer.Module.Tests bridges to this assembly via the existing
+      `extern alias OrcaWorker` pattern (see ProfileFamilyEndToEndHttpTests.cs) to drive
+      OrcaSlicingPipelineService.PrepareCalibrationModel/ApplyPressureAdvanceTowerGcodeAsync
+      after a real submit -> persist -> DbSlicerJobQueue claim/mapping chain, proving the
+      worker-facing pipeline stages compose correctly with the module's own production queue
+      mapping rather than a hand-built DistributedSlicingJob.
+    -->
+    <InternalsVisibleTo Include="Farm.Slicer.Module.Tests" />
   </ItemGroup>
   <!-- Note: Health check and System.Text.Json packages removed - available via project references -->
   <ItemGroup>

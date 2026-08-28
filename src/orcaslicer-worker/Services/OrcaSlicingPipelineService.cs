@@ -265,13 +265,16 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// <summary>
     /// Resolves and prepares the local calibration model for <paramref name="job"/> (issue #1938),
     /// applying per-object flow-ratio overrides for the flow-rate methods. The temperature tower
-    /// and max volumetric speed methods need no per-model changes here; their per-band/permissive
-    /// configuration is injected into the process/filament profile in
-    /// <see cref="RunOrcaSlicerAsync"/>. Max volumetric speed's bundled resource
-    /// (<c>SpeedTestStructure.drc</c>) is an opaque OrcaSlicer binary format (confirmed by magic
-    /// bytes, not a ZIP/3MF archive), so — like the temperature tower's <c>.drc</c> resource — it
-    /// cannot be parsed and rewritten the way <see cref="FlowRateCalibrationConfigurator"/>
-    /// rewrites 3MF metadata; it falls through to the generic copy below.
+    /// and max volumetric speed and pressure advance tower (issue #2136) methods need no
+    /// per-model changes here; their per-band/permissive configuration is injected into the
+    /// process/filament profile in <see cref="RunOrcaSlicerAsync"/> (see
+    /// <see cref="ApplyTemperatureTowerGcodeAsync"/> and
+    /// <see cref="ApplyPressureAdvanceTowerGcodeAsync"/>). Max volumetric speed's bundled
+    /// resource (<c>SpeedTestStructure.drc</c>) is an opaque OrcaSlicer binary format (confirmed
+    /// by magic bytes, not a ZIP/3MF archive), so — like the temperature tower's <c>.drc</c>
+    /// resource — it cannot be parsed and rewritten the way
+    /// <see cref="FlowRateCalibrationConfigurator"/> rewrites 3MF metadata; it falls through to
+    /// the generic copy below.
     /// </summary>
     internal string PrepareCalibrationModel(DistributedSlicingJob job, string workDir)
     {
@@ -361,6 +364,90 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         await File.WriteAllTextAsync(processJsonPath, updatedProcessJsonContent, cancellationToken);
         job.ProcessProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedProcessJsonContent);
     }
+
+    /// <summary>
+    /// Injects the pressure advance tower's per-band <c>layer_change_gcode</c> hook (issue #2136)
+    /// into the process profile on disk and recomputes <see cref="DistributedSlicingJob.ProcessProfileSha256"/>
+    /// so the recorded digest matches the mutated content.
+    /// </summary>
+    /// <remarks>
+    /// Firmware-flavour decision: pressure advance's command syntax differs by firmware
+    /// (<c>SET_PRESSURE_ADVANCE ADVANCE=...</c> on Klipper, <c>M900 K...</c> on Marlin/Marlin2), so
+    /// this reads the machine profile's <c>gcode_flavor</c> field — the pipeline's existing
+    /// firmware-flavour notion (see <c>OrcaProfilesService.GcodeDialect</c>) — and resolves it via
+    /// <see cref="PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor"/>. Any other flavour
+    /// (or a missing/unparsable machine profile) is refused with an explicit
+    /// <see cref="InvalidOperationException"/> here, before the OrcaSlicer binary ever runs — this
+    /// calibration method must never silently slice a tower that changes nothing. Bambu Lab (BBL)
+    /// machines that resolve to the Marlin flavour are refused separately, by <c>printer_model</c>:
+    /// upstream OrcaSlicer inherits <c>gcode_flavor: "marlin"</c> for BBL machines but its own
+    /// gcode writer branches on a distinct <c>is_bbl_printers</c> flag ahead of flavour, emitting a
+    /// different command (<c>M900 K{v} L1000 M10</c>) than generic Marlin — see
+    /// <see cref="PressureAdvanceTowerGcodeBuilder.IsBambuLabPrinterModel"/>. The BBL check is
+    /// intentionally scoped to the Marlin flavour only: a Klipper-flashed BBL machine is a real,
+    /// supported configuration whose <c>gcode_flavor</c> already resolves to Klipper, so
+    /// <c>SET_PRESSURE_ADVANCE</c> is the correct command for it and must not be refused.
+    /// </remarks>
+    internal static async Task ApplyPressureAdvanceTowerGcodeAsync(
+        DistributedSlicingJob job,
+        string processJsonPath,
+        string machineJsonPath,
+        CancellationToken cancellationToken)
+    {
+        string machineJsonContent = await File.ReadAllTextAsync(machineJsonPath, cancellationToken);
+
+        string? gcodeFlavor = PressureAdvanceTowerGcodeBuilder.ReadGcodeFlavor(machineJsonContent);
+        CalibrationFirmwareFlavor? flavor = PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor(gcodeFlavor);
+        if (flavor is null)
+        {
+            // Truncate the untrusted, client-influenced gcode_flavor value before echoing it into
+            // the exception message: an adversarial machine profile could otherwise smuggle an
+            // arbitrarily large string into job failure telemetry/logs.
+            string flavorForMessage = gcodeFlavor is null ? "(unset)" : TruncateForMessage(gcodeFlavor);
+            throw new InvalidOperationException(
+                $"Pressure advance tower calibration requires a Klipper or Marlin/Marlin2 machine profile " +
+                $"(gcode_flavor); the resolved firmware flavour '{flavorForMessage}' is not supported.");
+        }
+
+        string? printerModel = PressureAdvanceTowerGcodeBuilder.ReadPrinterModel(machineJsonContent);
+        if (flavor.Value == CalibrationFirmwareFlavor.Marlin && PressureAdvanceTowerGcodeBuilder.IsBambuLabPrinterModel(printerModel))
+        {
+            // Bambu Lab (BBL) machine profiles inherit gcode_flavor: "marlin" from upstream
+            // OrcaSlicer's fdm_machine_common, so they resolve to the generic Marlin branch below
+            // and would emit a bare "M900 K{v}" -- but upstream OrcaSlicer's own gcode writer
+            // branches on a distinct is_bbl_printers flag before gcode_flavor and emits
+            // "M900 K{v} L1000 M10" for BBL specifically. Since this builder does not (yet) emit
+            // that dialect, refuse explicitly rather than silently slicing a tower with the wrong
+            // command for this hardware. A Klipper-flashed BBL machine resolves to the Klipper
+            // branch above instead, and is not affected by this check.
+            // See PressureAdvanceTowerGcodeBuilder.IsBambuLabPrinterModel.
+            throw new InvalidOperationException(
+                $"Pressure advance tower calibration does not yet support Bambu Lab (BBL) machine " +
+                $"profiles (printer_model '{TruncateForMessage(printerModel!)}'); BBL requires a distinct " +
+                $"M900 K{{v}} L1000 M10 dialect that this calibration method does not emit.");
+        }
+
+        CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, CalibrationMethod.PressureAdvanceTower);
+        string layerChangeGcode = PressureAdvanceTowerGcodeBuilder.BuildLayerChangeGcode(
+            flavor.Value,
+            parameters.StartAdvance,
+            parameters.AdvanceStep,
+            parameters.BandHeightMm,
+            parameters.BandCount);
+
+        string processJsonContent = await File.ReadAllTextAsync(processJsonPath, cancellationToken);
+        string updatedProcessJsonContent = InjectLayerChangeGcode(processJsonContent, layerChangeGcode);
+        await File.WriteAllTextAsync(processJsonPath, updatedProcessJsonContent, cancellationToken);
+        job.ProcessProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedProcessJsonContent);
+    }
+
+    /// <summary>
+    /// Truncates an untrusted, machine-profile-supplied string before it is embedded into an
+    /// exception message: an adversarial machine profile could otherwise smuggle an arbitrarily
+    /// large value into job failure telemetry/logs.
+    /// </summary>
+    private static string TruncateForMessage(string value) =>
+        value.Length > 64 ? string.Concat(value.AsSpan(0, 64), "…") : value;
 
     /// <summary>
     /// Sets the max volumetric speed calibration's permissive <c>filament_max_volumetric_speed</c>
@@ -1409,13 +1496,21 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string processJson = profilePaths["process"];
         string filamentJson = profilePaths["filament"];
 
-        // Temperature tower calibration (issue #1938): inject the per-band layer_change_gcode
-        // hook here, before the profile is handed to OrcaSlicer, so the slice itself sees the
-        // final, calibration-aware process profile.
+        // Temperature tower calibration (issue #1938) and pressure advance tower calibration
+        // (issue #2136): inject the per-band layer_change_gcode hook here, before the profile is
+        // handed to OrcaSlicer, so the gate check below and the slice itself both see the final,
+        // calibration-aware process profile.
         bool isKnownCalibrationMethod = CalibrationMethods.TryParse(job.CalibrationMethod, out CalibrationMethod calibrationMethod);
-        if (isKnownCalibrationMethod && calibrationMethod == CalibrationMethod.TemperatureTower)
+        if (isKnownCalibrationMethod && (calibrationMethod == CalibrationMethod.TemperatureTower || calibrationMethod == CalibrationMethod.PressureAdvanceTower))
         {
-            await ApplyTemperatureTowerGcodeAsync(job, processJson, cancellationToken);
+            if (calibrationMethod == CalibrationMethod.TemperatureTower)
+            {
+                await ApplyTemperatureTowerGcodeAsync(job, processJson, cancellationToken);
+            }
+            else if (calibrationMethod == CalibrationMethod.PressureAdvanceTower)
+            {
+                await ApplyPressureAdvanceTowerGcodeAsync(job, processJson, machineJson, cancellationToken);
+            }
         }
 
         // Max volumetric speed calibration (issue #2135): apply the permissive
