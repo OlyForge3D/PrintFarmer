@@ -1047,40 +1047,43 @@ public sealed class ProfileFamilyService(
     {
         List<Exception> failures = [];
 
-        try
+        IReadOnlyList<Exception> workerFailures = await ObserveCleanupOperationAsync(
+            () => _workerClient.DeleteBundleAsync(null, familyId, CancellationToken.None));
+        foreach (Exception failure in workerFailures)
         {
-            await _workerClient.DeleteBundleAsync(null, familyId, CancellationToken.None);
-        }
-        catch (Exception ex) when (
-            ex is HttpRequestException or InvalidOperationException or OperationCanceledException)
-        {
-            failures.Add(ex);
+            failures.Add(failure);
             _logger.LogError(
-                ex,
+                failure,
                 "Failed to remove orphaned worker bundle for profile family {FamilyId}",
                 familyId);
         }
 
         if (printerModelId is Guid modelId)
         {
-            try
-            {
-                await _aliasService.RemoveModelAliasAsync(
+            IReadOnlyList<Exception> aliasFailures = await ObserveCleanupOperationAsync(
+                () => _aliasService.RemoveModelAliasAsync(
                     modelId,
                     targetName,
                     "OrcaSlicer",
-                    CancellationToken.None);
-                await _catalogService.InvalidateModelAliasesAsync(modelId, CancellationToken.None);
-            }
-            catch (Exception ex) when (
-                ex is DbUpdateException or System.Data.Common.DbException or ArgumentException
-                    or InvalidOperationException or OperationCanceledException)
+                    CancellationToken.None));
+            foreach (Exception failure in aliasFailures)
             {
-                failures.Add(ex);
+                failures.Add(failure);
                 _logger.LogError(
-                    ex,
+                    failure,
                     "Failed to remove orphaned target alias '{TargetName}' for profile family {FamilyId}",
                     LogSanitizer.Sanitize(targetName),
+                    familyId);
+            }
+
+            IReadOnlyList<Exception> cacheFailures = await ObserveCleanupOperationAsync(
+                () => _catalogService.InvalidateModelAliasesAsync(modelId, CancellationToken.None));
+            foreach (Exception failure in cacheFailures)
+            {
+                failures.Add(failure);
+                _logger.LogError(
+                    failure,
+                    "Failed to invalidate model alias cache for profile family {FamilyId}",
                     familyId);
             }
         }
@@ -1091,6 +1094,31 @@ public sealed class ProfileFamilyService(
                 $"Profile family '{familyId}' was deleted concurrently, but cleanup of its installed artifacts failed.",
                 new AggregateException(failures));
         }
+    }
+
+    /// <summary>
+    /// Converts synchronous and asynchronous cleanup failures into inspectable faulted tasks without a
+    /// catch-all clause, allowing the caller to continue with the remaining compensation steps.
+    /// </summary>
+    private static async Task<IReadOnlyList<Exception>> ObserveCleanupOperationAsync(Func<Task> operation)
+    {
+        Task operationTask = InvokeCleanupOperationAsync(operation);
+        await operationTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+        if (operationTask.Exception is AggregateException aggregateException)
+        {
+            return aggregateException.Flatten().InnerExceptions;
+        }
+
+        return operationTask.IsCanceled ? [new TaskCanceledException(operationTask)] : [];
+    }
+
+    /// <summary>
+    /// Ensures an exception thrown while the dependency creates its task is represented by the returned task.
+    /// </summary>
+    private static async Task InvokeCleanupOperationAsync(Func<Task> operation)
+    {
+        await operation();
     }
 
     /// <summary>

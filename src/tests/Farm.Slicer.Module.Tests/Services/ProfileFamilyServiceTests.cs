@@ -1995,7 +1995,50 @@ public sealed class ProfileFamilyServiceTests
     }
 
     [Fact]
-    public async Task RenderFamilyAsync_ConcurrentDeleteAliasCleanupThrowsUnexpectedException_PropagatesUnexpectedException()
+    public async Task RenderFamilyAsync_ConcurrentDeleteWorkerCleanupThrowsUnexpectedException_AttemptsRemainingCleanup()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ConcurrentDeleteOnSaveDbContext(options);
+        _ = dbContext.Database.EnsureCreated();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        Mock<IProfileFamilyWorkerClient> worker = EditWorker();
+        _ = worker
+            .Setup(client => client.DeleteBundleAsync(null, familyId, It.IsAny<CancellationToken>()))
+            .Throws(new NotSupportedException("unexpected worker cleanup failure"));
+        Mock<IPrinterModelAliasService> aliases = EditAliases(modelId, "Farm Test");
+        Mock<ICatalogServiceAdapter> catalog = Catalog(modelId);
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            catalog,
+            aliases,
+            EchoRenderer(),
+            worker);
+
+        dbContext.DeleteFamilyOnNextSave = true;
+        Func<Task> act = async () => await service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        ProfileFamilyCleanupException exception =
+            (await act.Should().ThrowAsync<ProfileFamilyCleanupException>()).Which;
+        exception.InnerException.Should().BeOfType<AggregateException>()
+            .Which.InnerExceptions.Should()
+            .ContainSingle(failure => failure is NotSupportedException
+                && failure.Message == "unexpected worker cleanup failure");
+        aliases.Verify(
+            service => service.RemoveModelAliasAsync(
+                modelId, "Farm Test", "OrcaSlicer", It.IsAny<CancellationToken>()),
+            Times.Once);
+        catalog.Verify(
+            service => service.InvalidateModelAliasesAsync(modelId, It.IsAny<CancellationToken>()),
+            Times.Exactly(2),
+            "the forward render and the cleanup must each invalidate the alias cache");
+    }
+
+    [Fact]
+    public async Task RenderFamilyAsync_ConcurrentDeleteAliasCleanupThrowsUnexpectedException_DoesNotRestoreDeletedFamily()
     {
         await using SqliteConnection connection = new("Data Source=:memory:");
         await connection.OpenAsync();
@@ -2014,9 +2057,10 @@ public sealed class ProfileFamilyServiceTests
             .Setup(service => service.RemoveModelAliasAsync(
                 modelId, "Farm Test", "OrcaSlicer", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new NotSupportedException("unexpected alias cleanup failure"));
+        Mock<ICatalogServiceAdapter> catalog = Catalog(modelId);
         ProfileFamilyService service = CreateService(
             dbContext,
-            Catalog(modelId),
+            catalog,
             aliases,
             EchoRenderer(),
             worker);
@@ -2024,8 +2068,28 @@ public sealed class ProfileFamilyServiceTests
         dbContext.DeleteFamilyOnNextSave = true;
         Func<Task> act = async () => await service.RenderFamilyAsync(familyId, CancellationToken.None);
 
-        (await act.Should().ThrowExactlyAsync<NotSupportedException>())
-            .Which.Message.Should().Be("unexpected alias cleanup failure");
+        ProfileFamilyCleanupException exception =
+            (await act.Should().ThrowAsync<ProfileFamilyCleanupException>()).Which;
+        exception.InnerException.Should().BeOfType<AggregateException>()
+            .Which.InnerExceptions.Should()
+            .ContainSingle(failure => failure is NotSupportedException
+               && failure.Message == "unexpected alias cleanup failure");
+        worker.Verify(
+            service => service.WriteBundleAsync(
+               It.IsAny<ProfileFamilyWorkerTarget>(),
+               It.IsAny<ProfileFamilyBundleDto>(),
+               It.IsAny<CancellationToken>()),
+            Times.Once,
+            "cleanup failure must not enter the generic render handler and restore a deleted family");
+        aliases.Verify(
+            service => service.EnsureModelAliasAsync(
+               modelId, "Farm Test", "OrcaSlicer", It.IsAny<CancellationToken>()),
+            Times.Once,
+            "cleanup failure must not restore the deleted family's alias");
+        catalog.Verify(
+            service => service.InvalidateModelAliasesAsync(modelId, It.IsAny<CancellationToken>()),
+            Times.Exactly(2),
+            "the cleanup invalidation must still run after alias removal fails, in addition to the forward invalidation");
     }
 
     [Fact]
