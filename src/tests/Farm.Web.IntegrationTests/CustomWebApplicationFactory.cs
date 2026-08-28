@@ -163,8 +163,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             {
                 try
                 {
+                    // CreateHost overrides WebApplicationFactory<T>.CreateHost, a synchronous
+                    // virtual base method whose signature this factory cannot change, so the
+                    // seed work it triggers can't be awaited here. It runs once per factory
+                    // instance against a fresh/in-memory database, never the ASP.NET Core
+                    // request pipeline, so there is no real deadlock risk.
+#pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
                     initializer.InitializeAsync("sqlite", 3, 2).GetAwaiter().GetResult();
                     initializer.SeedAllAsync().GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
                 }
                 catch { /* best-effort */ }
             }
