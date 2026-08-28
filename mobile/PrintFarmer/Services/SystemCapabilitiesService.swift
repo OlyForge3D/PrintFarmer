@@ -49,7 +49,8 @@ final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unche
     private static let logger = Logger(subsystem: "com.printfarmer.ios", category: "SystemCapabilities")
 
     @ObservationIgnored private let apiClient: APIClient
-    @ObservationIgnored private var refreshGeneration: UInt64 = 0
+    @ObservationIgnored private var issuedRefreshGeneration: UInt64 = 0
+    @ObservationIgnored private var appliedRefreshGeneration: UInt64 = 0
     private(set) var resolved: ResolvedSystemCapabilities = .defaults
 
     init(apiClient: APIClient) {
@@ -58,18 +59,20 @@ final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unche
 
     @discardableResult
     func refresh() async -> SystemCapabilitiesRefreshOutcome {
-        refreshGeneration &+= 1
-        let generation = refreshGeneration
+        issuedRefreshGeneration &+= 1
+        let generation = issuedRefreshGeneration
 
         do {
             let response: SystemCapabilities = try await apiClient.get("/api/system/capabilities")
-            guard !Task.isCancelled, generation == refreshGeneration else { return .loaded }
+            guard !Task.isCancelled, generation > appliedRefreshGeneration else { return .loaded }
+            appliedRefreshGeneration = generation
             resolved = response.resolved
             return .loaded
         } catch NetworkError.notFound {
             // Server predates #725. Documented behavior: keep defaults.
             Self.logger.info("system/capabilities endpoint not present; using defaults")
-            guard !Task.isCancelled, generation == refreshGeneration else { return .legacyDefaults }
+            guard !Task.isCancelled, generation > appliedRefreshGeneration else { return .legacyDefaults }
+            appliedRefreshGeneration = generation
             resolved = .defaults
             return .legacyDefaults
         } catch {

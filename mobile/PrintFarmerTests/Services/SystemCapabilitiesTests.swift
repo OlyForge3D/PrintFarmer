@@ -349,6 +349,50 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertFalse(service.resolved.shiftPlanEnabled)
     }
 
+    func testCompletedDisabledRefreshPublishesWhileNewerRefreshIsStillInFlight() async {
+        let olderRequest = AsyncBarrier()
+        let newerRequest = AsyncBarrier()
+        let calls = SystemCapabilitiesRequestOrdinal()
+        addTeardownBlock {
+            olderRequest.close()
+            newerRequest.close()
+        }
+        mockAPIClient.asyncRequestHandler = { request in
+            if await calls.next() == 1 {
+                await olderRequest.arriveAndWait()
+                return (
+                    TestData.httpResponse(url: request.url, statusCode: 200),
+                    Data(#"{"operatorFeatures":{"attentionEnabled":false,"filamentCoverageEnabled":false,"shiftPlanEnabled":false}}"#.utf8)
+                )
+            }
+            await newerRequest.arriveAndWait()
+            return (
+                TestData.httpResponse(url: request.url, statusCode: 200),
+                Data(#"{"operatorFeatures":{"attentionEnabled":true,"filamentCoverageEnabled":true,"shiftPlanEnabled":true}}"#.utf8)
+            )
+        }
+
+        let service = SystemCapabilitiesService(apiClient: apiClient)
+        let olderRefresh = Task { await service.refresh() }
+        await olderRequest.waitUntilArrived()
+        let newerRefresh = Task { await service.refresh() }
+        await newerRequest.waitUntilArrived()
+
+        olderRequest.release()
+        let olderOutcome = await olderRefresh.value
+        XCTAssertEqual(olderOutcome, .loaded)
+        XCTAssertFalse(service.resolved.attentionEnabled)
+        XCTAssertFalse(service.resolved.filamentCoverageEnabled)
+        XCTAssertFalse(service.resolved.shiftPlanEnabled)
+
+        newerRequest.release()
+        let newerOutcome = await newerRefresh.value
+        XCTAssertEqual(newerOutcome, .loaded)
+        XCTAssertTrue(service.resolved.attentionEnabled)
+        XCTAssertTrue(service.resolved.filamentCoverageEnabled)
+        XCTAssertTrue(service.resolved.shiftPlanEnabled)
+    }
+
     // MARK: - Stub
 
     func testStubReturnsCallerSuppliedSnapshot() {
