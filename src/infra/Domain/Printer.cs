@@ -322,6 +322,31 @@ public class Printer : IRevisionedEntity
     public int? MaxTravelAcceleration { get; set; }
 
     /// <summary>
+    /// Marlin (classic) jerk setting in millimeters per second, as set via <c>M205 X/Y</c>.
+    /// Recorded only as an explicit, separate admin action (issue #2138) — never automatically
+    /// written by the cornering calibration flow, which is report-only. Mutually meaningful with
+    /// <see cref="JunctionDeviation"/>/<see cref="SquareCornerVelocity"/> only in the sense that
+    /// exactly one of the three corresponds to the printer's actual firmware flavor; the other
+    /// two are simply left unset.
+    /// </summary>
+    public int? MaxJerk { get; set; }
+
+    /// <summary>
+    /// Marlin 2 junction deviation setting in millimeters, as set via <c>M205 J</c>. Recorded
+    /// only as an explicit, separate admin action (issue #2138) — never automatically written by
+    /// the cornering calibration flow, which is report-only. See <see cref="MaxJerk"/> remarks.
+    /// </summary>
+    public double? JunctionDeviation { get; set; }
+
+    /// <summary>
+    /// Klipper square corner velocity setting in millimeters per second, as set via
+    /// <c>SQUARE_CORNER_VELOCITY</c>. Recorded only as an explicit, separate admin action (issue
+    /// #2138) — never automatically written by the cornering calibration flow, which is
+    /// report-only. See <see cref="MaxJerk"/> remarks.
+    /// </summary>
+    public double? SquareCornerVelocity { get; set; }
+
+    /// <summary>
     /// Explicit heated-bed value for calibration. This is separate from legacy catalog defaults.
     /// </summary>
     public bool? CalibrationHasHeatedBed { get; set; }

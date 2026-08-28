@@ -5945,6 +5945,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("INTEGER");
 
+                    b.Property<double?>("JunctionDeviation")
+                        .HasColumnType("REAL");
+
                     b.Property<DateTime?>("LastZOffsetCalibrationAt")
                         .HasColumnType("TEXT");
 
@@ -5973,6 +5976,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("REAL");
 
                     b.Property<int?>("MaxChamberTemp")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MaxJerk")
                         .HasColumnType("INTEGER");
 
                     b.Property<int?>("MaxPrintSpeed")
@@ -6026,6 +6032,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
+
+                    b.Property<double?>("SquareCornerVelocity")
+                        .HasColumnType("REAL");
 
                     b.Property<bool>("SupportsAutoLeveling")
                         .HasColumnType("INTEGER");

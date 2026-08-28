@@ -265,16 +265,17 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// <summary>
     /// Resolves and prepares the local calibration model for <paramref name="job"/> (issue #1938),
     /// applying per-object flow-ratio overrides for the flow-rate methods. The temperature tower
-    /// and max volumetric speed and pressure advance tower (issue #2136) methods need no
-    /// per-model changes here; their per-band/permissive configuration is injected into the
-    /// process/filament profile in <see cref="RunOrcaSlicerAsync"/> (see
-    /// <see cref="ApplyTemperatureTowerGcodeAsync"/> and
-    /// <see cref="ApplyPressureAdvanceTowerGcodeAsync"/>). Max volumetric speed's bundled
-    /// resource (<c>SpeedTestStructure.drc</c>) is an opaque OrcaSlicer binary format (confirmed
-    /// by magic bytes, not a ZIP/3MF archive), so — like the temperature tower's <c>.drc</c>
-    /// resource — it cannot be parsed and rewritten the way
-    /// <see cref="FlowRateCalibrationConfigurator"/> rewrites 3MF metadata; it falls through to
-    /// the generic copy below.
+    /// and retraction tower methods need no per-model changes here; their per-band configuration
+    /// is injected into the process (and, for retraction, machine) profile in
+    /// <see cref="RunOrcaSlicerAsync"/>. The max volumetric speed and pressure advance tower
+    /// (issue #2136) methods likewise need no per-model changes: their permissive/per-band
+    /// configuration is injected into the filament/process profile in
+    /// <see cref="RunOrcaSlicerAsync"/> (see <see cref="ApplyTemperatureTowerGcodeAsync"/> and
+    /// <see cref="ApplyPressureAdvanceTowerGcodeAsync"/>). Max volumetric speed's bundled resource
+    /// (<c>SpeedTestStructure.drc</c>) is an opaque OrcaSlicer binary format (confirmed by magic
+    /// bytes, not a ZIP/3MF archive), so — like the temperature tower's <c>.drc</c> resource — it
+    /// cannot be parsed and rewritten the way <see cref="FlowRateCalibrationConfigurator"/>
+    /// rewrites 3MF metadata; it falls through to the generic copy below.
     /// </summary>
     internal string PrepareCalibrationModel(DistributedSlicingJob job, string workDir)
     {
@@ -460,6 +461,66 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     }
 
     /// <summary>
+    /// Injects the retraction tower's per-band <c>layer_change_gcode</c> hook (issue #2137) into
+    /// the process profile on disk, and forces the machine profile's
+    /// <c>use_firmware_retraction</c> setting on — see <see cref="RetractionTowerGcodeBuilder"/>
+    /// for why the injected firmware-retraction-length command has no effect without it.
+    /// Recomputes both <see cref="DistributedSlicingJob.ProcessProfileSha256"/> and
+    /// <see cref="DistributedSlicingJob.MachineProfileSha256"/> so the recorded digests match the
+    /// mutated content.
+    /// </summary>
+    /// <remarks>
+    /// Firmware-flavour decision (mirrors <see cref="ApplyPressureAdvanceTowerGcodeAsync"/> for the
+    /// exact same reason): the runtime command that sets the firmware's retraction length differs
+    /// by firmware (<c>M207 S...</c> on Marlin/Marlin2, <c>SET_RETRACTION RETRACT_LENGTH=...</c> on
+    /// Klipper — Klipper does not recognize <c>M207</c>/<c>M208</c> at all), so this reads the
+    /// machine profile's <c>gcode_flavor</c> field and resolves it via
+    /// <see cref="PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor"/> (reused rather than
+    /// duplicated: it is a general firmware-flavour resolver, not specific to pressure advance).
+    /// Any other flavour (or a missing/unparsable machine profile) is refused with an explicit
+    /// <see cref="InvalidOperationException"/> here, before the OrcaSlicer binary ever runs — this
+    /// calibration method must never silently slice a tower that never varies retraction at all.
+    /// </remarks>
+    internal static async Task ApplyRetractionTowerGcodeAsync(
+        DistributedSlicingJob job,
+        string processJsonPath,
+        string machineJsonPath,
+        CancellationToken cancellationToken)
+    {
+        string machineJsonContent = await File.ReadAllTextAsync(machineJsonPath, cancellationToken);
+
+        string? gcodeFlavor = PressureAdvanceTowerGcodeBuilder.ReadGcodeFlavor(machineJsonContent);
+        CalibrationFirmwareFlavor? flavor = PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor(gcodeFlavor);
+        if (flavor is null)
+        {
+            // Truncate the untrusted, client-influenced gcode_flavor value before echoing it into
+            // the exception message: an adversarial machine profile could otherwise smuggle an
+            // arbitrarily large string into job failure telemetry/logs.
+            string flavorForMessage = gcodeFlavor is null ? "(unset)" : TruncateForMessage(gcodeFlavor);
+            throw new InvalidOperationException(
+                $"Retraction tower calibration requires a Klipper or Marlin/Marlin2 machine profile " +
+                $"(gcode_flavor); the resolved firmware flavour '{flavorForMessage}' is not supported.");
+        }
+
+        CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, CalibrationMethod.Retraction);
+        string layerChangeGcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            flavor.Value,
+            parameters.StartRetractionMm,
+            parameters.RetractionStepMm,
+            parameters.RetractionBandHeightMm,
+            parameters.RetractionBandCount);
+
+        string processJsonContent = await File.ReadAllTextAsync(processJsonPath, cancellationToken);
+        string updatedProcessJsonContent = InjectLayerChangeGcode(processJsonContent, layerChangeGcode);
+        await File.WriteAllTextAsync(processJsonPath, updatedProcessJsonContent, cancellationToken);
+        job.ProcessProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedProcessJsonContent);
+
+        string updatedMachineJsonContent = EnableFirmwareRetraction(machineJsonContent);
+        await File.WriteAllTextAsync(machineJsonPath, updatedMachineJsonContent, cancellationToken);
+        job.MachineProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedMachineJsonContent);
+    }
+
+    /// <summary>
     /// Injects the pressure advance tower's per-band <c>layer_change_gcode</c> hook (issue #2136)
     /// into the process profile on disk and recomputes <see cref="DistributedSlicingJob.ProcessProfileSha256"/>
     /// so the recorded digest matches the mutated content.
@@ -536,6 +597,55 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     }
 
     /// <summary>
+    /// Sets <c>use_firmware_retraction</c> on a machine profile JSON document, so the retraction
+    /// tower's injected <c>M207</c> gcode (see <see cref="RetractionTowerGcodeBuilder"/>) has any
+    /// physical effect. Stored as the string <c>"1"</c> to match the settings-dictionary string
+    /// convention <see cref="SettingsDictToNativeJson"/> emits for other keys in this profile
+    /// format.
+    /// <para>
+    /// Also forces <c>wipe</c> (a per-extruder <c>coBools</c> array) off. OrcaSlicer's own config
+    /// validator (<c>PrintConfig::validate</c>) hard-rejects the combination of
+    /// <c>use_firmware_retraction=true</c> with any extruder's <c>wipe=true</c> — a real vendor
+    /// machine profile (BambuLab/Prusa/Creality/Voron all ship <c>wipe</c> enabled) would
+    /// otherwise cause the CLI to exit before slicing with <c>CLI_INVALID_VALUES_IN_3MF</c>,
+    /// while every unit test in this repo (which never invokes the real OrcaSlicer CLI) stayed
+    /// green. Retraction calibration jobs don't need wipe-while-retracting, so disabling it here
+    /// is safe for the duration of the calibration slice.
+    /// </para>
+    /// </summary>
+    internal static string EnableFirmwareRetraction(string machineJson)
+    {
+        JsonNode rootNode = JsonNode.Parse(machineJson)
+            ?? throw new InvalidOperationException("Machine profile JSON is empty.");
+        if (rootNode is not JsonObject rootObject)
+        {
+            throw new InvalidOperationException("Machine profile JSON root must be an object.");
+        }
+
+        rootObject["use_firmware_retraction"] = "1";
+
+        if (rootObject["wipe"] is JsonArray existingWipe)
+        {
+            var disabledWipe = new JsonArray();
+            for (int i = 0; i < existingWipe.Count; i++)
+            {
+                disabledWipe.Add(JsonValue.Create("0"));
+            }
+
+            rootObject["wipe"] = disabledWipe;
+        }
+        else
+        {
+            // Missing (defaults to false per this repo's own settings metadata) or a
+            // non-array shape we don't otherwise recognize: write an explicit single-extruder
+            // "off" array rather than relying on upstream's default resolution.
+            rootObject["wipe"] = new JsonArray(JsonValue.Create("0"));
+        }
+
+        return rootObject.ToJsonString();
+    }
+
+    /// <summary>
     /// Truncates an untrusted, machine-profile-supplied string before it is embedded into an
     /// exception message: an adversarial machine profile could otherwise smuggle an arbitrarily
     /// large value into job failure telemetry/logs.
@@ -607,6 +717,85 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             JsonValue.Create(ceilingMm3s.ToString(CultureInfo.InvariantCulture)));
 
         return rootObject.ToJsonString();
+    }
+
+    /// <summary>
+    /// Firmware flavors this worker recognizes as supporting cornering calibration (issue
+    /// #2138), matching OrcaSlicer's <c>gcode_flavor</c> config key values case-insensitively.
+    /// Marlin (classic jerk, <c>M205 X/Y</c>) and Marlin 2 (junction deviation, <c>M205 J</c>)
+    /// are both accepted under the same flavor name OrcaSlicer uses for the modern Marlin
+    /// fork family; Klipper (<c>SQUARE_CORNER_VELOCITY</c>) is its own distinct motion-planner
+    /// concept. Every other flavor (RepRapFirmware, Smoothieware, Sprinter, Mach3/4, etc.) has
+    /// no equivalent tunable this worker can attribute a cornering measurement to, so it is
+    /// refused explicitly by <see cref="ValidateCorneringFirmwareFlavorAsync"/> rather than
+    /// silently treated as a no-op.
+    /// </summary>
+    private static readonly string[] CorneringSupportedGcodeFlavors = ["marlin", "marlin2", "klipper"];
+
+    /// <summary>
+    /// Refuses to proceed with a cornering calibration slice (issue #2138) unless the target
+    /// printer's <c>gcode_flavor</c> is one this worker knows how to attribute jerk, junction
+    /// deviation, or square corner velocity to. Cornering is the only catalogued calibration
+    /// method that measures the printer's own motion planner rather than a filament property, so
+    /// — unlike every other method here — its applicability depends on firmware flavor. A
+    /// mismatch here would otherwise silently produce a "successful" slice/print whose recorded
+    /// observation the operator's firmware cannot actually apply; per the architecture decision
+    /// on issue #2138 this must fail loudly instead.
+    /// </summary>
+    /// <param name="job">The claimed job, used only for the failure message's correlation.</param>
+    /// <param name="machineJsonPath">Path of the emitted machine document to read <c>gcode_flavor</c> from.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidOperationException">
+    /// The machine document's <c>gcode_flavor</c> is missing, blank, or not one of
+    /// <see cref="CorneringSupportedGcodeFlavors"/>.
+    /// </exception>
+    internal static async Task ValidateCorneringFirmwareFlavorAsync(
+        DistributedSlicingJob job,
+        string machineJsonPath,
+        CancellationToken cancellationToken)
+    {
+        string machineJsonContent = await File.ReadAllTextAsync(machineJsonPath, cancellationToken);
+        string? gcodeFlavor = ReadGcodeFlavor(machineJsonContent);
+
+        bool supported = gcodeFlavor is not null
+            && CorneringSupportedGcodeFlavors.Contains(gcodeFlavor, StringComparer.OrdinalIgnoreCase);
+        if (!supported)
+        {
+            // Truncate the untrusted, client-influenced gcode_flavor value before echoing it into
+            // the exception message: an adversarial machine profile could otherwise smuggle an
+            // arbitrarily large string into job failure telemetry/logs (same rationale as the
+            // pressure advance tower gate above).
+            string flavorForMessage = gcodeFlavor is null ? "(unset)" : TruncateForMessage(gcodeFlavor);
+            throw new InvalidOperationException(
+                $"Cornering calibration (job {job.Id}) is not supported for gcode flavor " +
+                $"'{flavorForMessage}'. Only Marlin/Marlin2 (jerk / junction deviation via " +
+                "M205) and Klipper (SQUARE_CORNER_VELOCITY) are supported; refusing rather than " +
+                "silently slicing a result the printer's firmware cannot apply.");
+        }
+    }
+
+    /// <summary>
+    /// Reads the machine document's <c>gcode_flavor</c> value, tolerating OrcaSlicer's
+    /// single-element-array encoding the same way <see cref="OrcaRawValueParser.ParseStringValue"/>
+    /// does for every other raw profile value.
+    /// </summary>
+    private static string? ReadGcodeFlavor(string machineJson)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(machineJson);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("gcode_flavor", out JsonElement flavorElement))
+            {
+                return OrcaRawValueParser.ParseStringValue(flavorElement);
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -1590,16 +1779,24 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string processJson = profilePaths["process"];
         string filamentJson = profilePaths["filament"];
 
-        // Temperature tower calibration (issue #1938) and pressure advance tower calibration
-        // (issue #2136): inject the per-band layer_change_gcode hook here, before the profile is
-        // handed to OrcaSlicer, so the gate check below and the slice itself both see the final,
-        // calibration-aware process profile.
+        // Temperature tower / retraction tower calibration (issues #1938, #2137) and pressure
+        // advance tower calibration (issue #2136): inject the per-band layer_change_gcode hook
+        // here, before the profile is handed to OrcaSlicer, so the gate check below and the
+        // slice itself both see the final, calibration-aware process (and, for retraction,
+        // machine) profile.
         bool isKnownCalibrationMethod = CalibrationMethods.TryParse(job.CalibrationMethod, out CalibrationMethod calibrationMethod);
-        if (isKnownCalibrationMethod && (calibrationMethod == CalibrationMethod.TemperatureTower || calibrationMethod == CalibrationMethod.PressureAdvanceTower))
+        if (isKnownCalibrationMethod
+            && (calibrationMethod == CalibrationMethod.TemperatureTower
+                || calibrationMethod == CalibrationMethod.Retraction
+                || calibrationMethod == CalibrationMethod.PressureAdvanceTower))
         {
             if (calibrationMethod == CalibrationMethod.TemperatureTower)
             {
                 await ApplyTemperatureTowerGcodeAsync(job, processJson, cancellationToken);
+            }
+            else if (calibrationMethod == CalibrationMethod.Retraction)
+            {
+                await ApplyRetractionTowerGcodeAsync(job, processJson, machineJson, cancellationToken);
             }
             else if (calibrationMethod == CalibrationMethod.PressureAdvanceTower)
             {
@@ -1615,6 +1812,17 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         if (isKnownCalibrationMethod && calibrationMethod == CalibrationMethod.MaximumVolumetricSpeed)
         {
             await ApplyMaxVolumetricSpeedCeilingAsync(job, filamentJson, cancellationToken);
+        }
+
+        // Cornering calibration (issue #2138): jerk, junction deviation, and Klipper's
+        // SQUARE_CORNER_VELOCITY are firmware-specific motion-planner concepts with no shared
+        // representation, unlike every other catalogued method here. Refuse explicitly, before
+        // slicing, for any gcode flavor other than the ones this worker knows how to interpret,
+        // rather than silently producing a "successful" slice/print whose result the operator's
+        // firmware cannot even apply.
+        if (isKnownCalibrationMethod && calibrationMethod == CalibrationMethod.Cornering)
+        {
+            await ValidateCorneringFirmwareFlavorAsync(job, machineJson, cancellationToken);
         }
 
         await WarnIfProcessCannotSatisfyGateAsync(job, machineJson, processJson, cancellationToken);

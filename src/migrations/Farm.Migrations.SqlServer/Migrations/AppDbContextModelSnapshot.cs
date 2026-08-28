@@ -5988,6 +5988,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("bit");
 
+                    b.Property<double?>("JunctionDeviation")
+                        .HasColumnType("float");
+
                     b.Property<DateTime?>("LastZOffsetCalibrationAt")
                         .HasColumnType("datetime2");
 
@@ -6016,6 +6019,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("float");
 
                     b.Property<int?>("MaxChamberTemp")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MaxJerk")
                         .HasColumnType("int");
 
                     b.Property<int?>("MaxPrintSpeed")
@@ -6069,6 +6075,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
+
+                    b.Property<double?>("SquareCornerVelocity")
+                        .HasColumnType("float");
 
                     b.Property<bool>("SupportsAutoLeveling")
                         .HasColumnType("bit");

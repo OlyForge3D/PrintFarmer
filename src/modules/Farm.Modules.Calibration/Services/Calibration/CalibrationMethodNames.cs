@@ -52,6 +52,14 @@ public enum CalibrationMethod
 
     /// <summary>Final verification against a linked imported asset or normal model.</summary>
     FinalVerification = 12,
+
+    /// <summary>
+    /// Cornering (jerk / junction deviation / Klipper square corner velocity) sweep. Unlike
+    /// every other catalogued method, this measures the printer's motion system rather than a
+    /// filament property, so it is report-only: see <see cref="CalibrationMethodNames"/> remarks
+    /// and issue #2138 for the write-back model.
+    /// </summary>
+    Cornering = 13,
 }
 
 /// <summary>Canonical wire names for <see cref="CalibrationMethod"/>.</summary>
@@ -93,6 +101,12 @@ public static class CalibrationMethodNames
     /// <summary>Final verification from a linked asset.</summary>
     public const string FinalVerification = "final_verification";
 
+    /// <summary>
+    /// Cornering (jerk / junction deviation / Klipper square corner velocity) sweep. Report-only:
+    /// see the type-level <see cref="CalibrationMethod"/> remarks and issue #2138.
+    /// </summary>
+    public const string Cornering = "cornering";
+
     private static readonly Dictionary<string, CalibrationMethod> ByName =
         new(StringComparer.Ordinal)
         {
@@ -108,6 +122,7 @@ public static class CalibrationMethodNames
             [MaximumVolumetricSpeed] = CalibrationMethod.MaximumVolumetricSpeed,
             [Shrinkage] = CalibrationMethod.Shrinkage,
             [FinalVerification] = CalibrationMethod.FinalVerification,
+            [Cornering] = CalibrationMethod.Cornering,
         };
 
     /// <summary>Gets every supported canonical method name, in stable order.</summary>
@@ -125,6 +140,7 @@ public static class CalibrationMethodNames
         MaximumVolumetricSpeed,
         Shrinkage,
         FinalVerification,
+        Cornering,
     ];
 
     /// <summary>Maps a method to its canonical wire name.</summary>
@@ -145,6 +161,7 @@ public static class CalibrationMethodNames
         CalibrationMethod.MaximumVolumetricSpeed => MaximumVolumetricSpeed,
         CalibrationMethod.Shrinkage => Shrinkage,
         CalibrationMethod.FinalVerification => FinalVerification,
+        CalibrationMethod.Cornering => Cornering,
         _ => throw new ArgumentOutOfRangeException(
             nameof(method),
             method,
@@ -180,6 +197,7 @@ public static class CalibrationMethodNames
         CalibrationMethod.MaximumVolumetricSpeed => "max_volumetric_speed",
         CalibrationMethod.Shrinkage => "shrinkage",
         CalibrationMethod.FinalVerification => "verification",
+        CalibrationMethod.Cornering => "cornering",
         _ => throw new ArgumentOutOfRangeException(
             nameof(method),
             method,
@@ -226,7 +244,8 @@ public static class CalibrationMethodSteps
         CalibrationMethod.Retraction or
         CalibrationMethod.MaximumVolumetricSpeed or
         CalibrationMethod.Shrinkage or
-        CalibrationMethod.FinalVerification => DefaultSequence,
+        CalibrationMethod.FinalVerification or
+        CalibrationMethod.Cornering => DefaultSequence,
         _ => throw new ArgumentOutOfRangeException(
             nameof(method),
             method,
@@ -275,6 +294,9 @@ public static class CalibrationMeasurementRanges
     /// <summary>Plausible pressure advance (linear advance) coefficient range.</summary>
     public static readonly CalibrationMeasurementRange PressureAdvance = new("pressure_advance", 0.0m, 2.0m);
 
+    /// <summary>Plausible retraction length range in millimetres.</summary>
+    public static readonly CalibrationMeasurementRange RetractionLength = new("retraction_length_mm", 0.0m, 10.0m);
+
     /// <summary>
     /// Plausible maximum volumetric speed range in mm³/s for a user-reported calibration
     /// <em>observation</em> — the value the user settles on after inspecting the printed tower,
@@ -296,6 +318,7 @@ public static class CalibrationMeasurementRanges
         "temperature" => Temperature,
         "flow" => FlowRatio,
         "pressure_advance" => PressureAdvance,
+        "retraction" => RetractionLength,
         "max_volumetric_speed" => MaximumVolumetricSpeed,
         _ => null,
     };
