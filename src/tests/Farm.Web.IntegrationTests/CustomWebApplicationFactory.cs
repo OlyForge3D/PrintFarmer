@@ -169,12 +169,12 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
                     // first triggers host creation (typically the test's own thread, via the
                     // first CreateClient()/Services access), not a background thread. xUnit does
                     // install its own SynchronizationContext (AsyncTestSyncContext) during test
-                    // execution, unlike a plain console app, but its Post() dispatches
-                    // continuations via ThreadPool.QueueUserWorkItem rather than requiring the
-                    // original (potentially blocked) thread to pump them, so it does not create
-                    // the classic single-threaded-context deadlock that WinForms/WPF/ASP.NET
-                    // Classic contexts do. This is exercised end-to-end (no hang) by
-                    // CustomWebApplicationFactoryTests.
+                    // execution, unlike a plain console app, but it dispatches await
+                    // continuations through xUnit's own worker infrastructure rather than
+                    // requiring the blocked test thread itself to pump them, so it does not
+                    // create the classic single-threaded-context deadlock that
+                    // WinForms/WPF/ASP.NET Classic contexts do. This is exercised end-to-end
+                    // (no hang) by CustomWebApplicationFactoryTests.
 #pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
                     initializer.InitializeAsync("sqlite", 3, 2).GetAwaiter().GetResult();
                     initializer.SeedAllAsync().GetAwaiter().GetResult();

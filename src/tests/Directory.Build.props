@@ -92,10 +92,10 @@
            `IAsyncLifetime.InitializeAsync`, `void`-returning test methods and helper methods
            that only existed to bridge to a synchronous caller were converted to `async Task`
            with a real `await`, and one mocked-HTTP-content read used `HttpContent.ReadAsStream()`
-           instead of an async read, since the content there is always built synchronously by the
-           code under test from data already fully buffered in memory (never a network/file
-           stream), regardless of whether it's a `MultipartFormDataContent`/`ByteArrayContent`
-           pair or the request carries no content at all (e.g. a GET). Two instances are a
+           instead of an async read: some requests carry no content at all (e.g. a GET), and when
+           one does, it's always built synchronously by the code under test from data already
+           fully buffered in memory (never a network/file stream) as a
+           `MultipartFormDataContent`/`ByteArrayContent` pair. Two instances are a
            deliberately blocking wait inside a method overriding a fixed synchronous base signature
            that cannot be made async — `IServiceScopeFactory.CreateScope()` and
            `WebApplicationFactory<T>.CreateHost()` respectively — suppressed with a scoped
@@ -110,8 +110,8 @@
            registers its diagnostic actions once per code block, gated solely on whether the
            owning member (not the delegate type) already has an async-compatible return type; a
            lambda is not its own code block, so a synchronous wait nested inside one is skipped
-           entirely whenever its enclosing member is itself `async`, and analyzed (and flagged)
-           exactly like any other wait when it is not. Every surviving callback site above sits
+           entirely whenever its enclosing member already has an async-compatible return type,
+           and analyzed (and flagged) like any other wait when it does not. Every surviving callback site above sits
            inside an `async Task` test method, which is why none of them are flagged, and the same
            lambda body — unchanged — is flagged when moved into a non-async method: verified with
            an isolated, throwaway repro (not committed) that reproduced VSTHRD002 on an identical
@@ -125,7 +125,6 @@
            functions so every synchronous wait is diagnosed) — a future package bump could turn
            all of these into build failures, at which point they'll need the same async
            conversion already applied elsewhere in this tier, not a suppression. -->
-
       IDISP024; <!-- Don't call GC.SuppressFinalize when no finalizer exists (16) -->
       CA2025;   <!-- Do not pass 'IDisposable' instances into unawaited tasks (14) -->
       IDISP007; <!-- Don't dispose an injected dependency (12) -->
