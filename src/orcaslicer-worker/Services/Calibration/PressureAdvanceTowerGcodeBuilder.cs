@@ -127,6 +127,14 @@ public static class PressureAdvanceTowerGcodeBuilder
             throw new ArgumentOutOfRangeException(nameof(bandHeightMm), bandHeightMm, "Band height must be positive.");
         }
 
+        if (bandCount == 1)
+        {
+            // A single band has no threshold to branch on -- emit the bare command so the
+            // template is never a bare "{else}...{endif}" with no preceding "{if}", which
+            // OrcaSlicer's custom-gcode template parser rejects as malformed.
+            return BuildSetAdvanceCommand(flavor, startAdvance);
+        }
+
         var builder = new StringBuilder();
         for (int band = bandCount - 1; band >= 1; band--)
         {

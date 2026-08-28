@@ -366,9 +366,15 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         CalibrationFirmwareFlavor? flavor = PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor(gcodeFlavor);
         if (flavor is null)
         {
+            // Truncate the untrusted, client-influenced gcode_flavor value before echoing it into
+            // the exception message: an adversarial machine profile could otherwise smuggle an
+            // arbitrarily large string into job failure telemetry/logs.
+            string flavorForMessage = gcodeFlavor is null
+                ? "(unset)"
+                : gcodeFlavor.Length > 64 ? string.Concat(gcodeFlavor.AsSpan(0, 64), "…") : gcodeFlavor;
             throw new InvalidOperationException(
                 $"Pressure advance tower calibration requires a Klipper or Marlin/Marlin2 machine profile " +
-                $"(gcode_flavor); the resolved firmware flavour '{gcodeFlavor ?? "(unset)"}' is not supported.");
+                $"(gcode_flavor); the resolved firmware flavour '{flavorForMessage}' is not supported.");
         }
 
         CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, CalibrationMethod.PressureAdvanceTower);

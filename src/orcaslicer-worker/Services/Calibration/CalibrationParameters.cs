@@ -66,14 +66,43 @@ public sealed record CalibrationParameters
                 BandHeightMm = ReadOrDefault(values, "band_height_mm", defaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm),
                 BandCount = (int)ReadOrDefault(values, "band_count", defaults.BandCount, MinBandCount, MaxBandCount),
             },
-            CalibrationMethod.PressureAdvanceTower => defaults with
-            {
-                StartAdvance = ReadOrDefault(values, "start_advance", PressureAdvanceTowerDefaults.StartAdvance, MinAdvance, MaxAdvance),
-                AdvanceStep = ReadOrDefault(values, "advance_step", PressureAdvanceTowerDefaults.AdvanceStep, MinAdvanceStep, MaxAdvanceStep),
-                BandHeightMm = ReadOrDefault(values, "band_height_mm", PressureAdvanceTowerDefaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm),
-                BandCount = (int)ReadOrDefault(values, "band_count", PressureAdvanceTowerDefaults.BandCount, MinBandCount, MaxBandCount),
-            },
+            CalibrationMethod.PressureAdvanceTower => BuildPressureAdvanceTowerParameters(defaults, values),
             _ => defaults,
+        };
+    }
+
+    // Resolves the pressure advance tower's parameters, then clamps AdvanceStep so the tallest
+    // band's compounded advance value (StartAdvance + (BandCount - 1) * AdvanceStep) never exceeds
+    // MaxAdvance. Each individual field is already bounds-checked in isolation by ReadOrDefault,
+    // but that alone does not stop e.g. StartAdvance=2.0, AdvanceStep=0.5, BandCount=50 from
+    // compounding to an out-of-range 26.5 on the topmost band -- a real hardware-safety gap, since
+    // this value is embedded directly into a SET_PRESSURE_ADVANCE/M900 K gcode command sent to the
+    // printer.
+    private static CalibrationParameters BuildPressureAdvanceTowerParameters(CalibrationParameters defaults, Dictionary<string, double> values)
+    {
+        double startAdvance = ReadOrDefault(values, "start_advance", PressureAdvanceTowerDefaults.StartAdvance, MinAdvance, MaxAdvance);
+        double advanceStep = ReadOrDefault(values, "advance_step", PressureAdvanceTowerDefaults.AdvanceStep, MinAdvanceStep, MaxAdvanceStep);
+        double bandHeightMm = ReadOrDefault(values, "band_height_mm", PressureAdvanceTowerDefaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm);
+        int bandCount = (int)ReadOrDefault(values, "band_count", PressureAdvanceTowerDefaults.BandCount, MinBandCount, MaxBandCount);
+
+        if (bandCount > 1)
+        {
+            // Only ever shrink the step, never grow it back up to MinAdvanceStep: when
+            // startAdvance already leaves little or no headroom below MaxAdvance (e.g.
+            // startAdvance == MaxAdvance), the only safe step is at or near zero, so the
+            // safety cap must be allowed to go below MinAdvanceStep -- the invariant that the
+            // topmost band never exceeds MaxAdvance takes priority over the "steps are at
+            // least MinAdvanceStep" convenience floor.
+            double maxStepForBounds = Math.Max(0.0, (MaxAdvance - startAdvance) / (bandCount - 1));
+            advanceStep = Math.Min(advanceStep, maxStepForBounds);
+        }
+
+        return defaults with
+        {
+            StartAdvance = startAdvance,
+            AdvanceStep = advanceStep,
+            BandHeightMm = bandHeightMm,
+            BandCount = bandCount,
         };
     }
 

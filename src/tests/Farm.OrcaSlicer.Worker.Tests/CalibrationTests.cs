@@ -258,6 +258,23 @@ public class CalibrationTests : IDisposable
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
+    [Theory]
+    [InlineData(CalibrationFirmwareFlavor.Klipper, "SET_PRESSURE_ADVANCE ADVANCE=0.02")]
+    [InlineData(CalibrationFirmwareFlavor.Marlin, "M900 K0.02")]
+    public void BuildLayerChangeGcode_SingleBand_EmitsBareCommandWithoutMalformedElseEndif(
+        CalibrationFirmwareFlavor flavor, string expectedCommand)
+    {
+        // Regression: a single band has no threshold to branch on. Emitting the usual
+        // "{else}...{endif}" wrapper with no preceding "{if}" would be a malformed OrcaSlicer
+        // custom-gcode template that the slicer's parser rejects; a lone band must instead emit
+        // the bare command with no conditional wrapper at all.
+        string gcode = PressureAdvanceTowerGcodeBuilder.BuildLayerChangeGcode(
+            flavor, startAdvance: 0.02, advanceStep: 0.01, bandHeightMm: 5, bandCount: 1);
+
+        gcode.Should().Be(expectedCommand + "\n");
+        gcode.Should().NotContain("{if").And.NotContain("{else}").And.NotContain("{endif}");
+    }
+
     #endregion
 
     #region TemperatureTowerGcodeBuilder
@@ -383,6 +400,24 @@ public class CalibrationTests : IDisposable
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void CalibrationParameters_Parse_BlankJson_RoutesThroughMethodSwitchAndReturnsDefaults(string blankJson)
+    {
+        // Regression for the Parse refactor (issue #2136): blank/whitespace input must still route
+        // through the method switch below, not short-circuit and return the record's raw field
+        // defaults directly -- those two things happen to agree for TemperatureTower (whose own
+        // field defaults ARE its method defaults), but must not silently diverge for a method whose
+        // defaults differ (see the PressureAdvanceTower case in this region).
+        CalibrationParameters parameters = CalibrationParameters.Parse(blankJson, CalibrationMethod.TemperatureTower);
+
+        parameters.StartTemperatureC.Should().Be(230);
+        parameters.TemperatureStepC.Should().Be(5);
+        parameters.BandHeightMm.Should().Be(10);
+        parameters.BandCount.Should().Be(9);
+    }
+
+    [Theory]
     [InlineData("""{"band_count": 100000}""")] // absurdly large: would blow up gcode-template generation
     [InlineData("""{"band_count": 0}""")] // below the minimum of 1
     [InlineData("""{"band_count": -5}""")]
@@ -442,6 +477,25 @@ public class CalibrationTests : IDisposable
         CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.PressureAdvanceTower);
 
         parameters.StartAdvance.Should().Be(0.0);
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_PressureAdvanceTower_CompoundingAdvanceClampedToMaxAdvance()
+    {
+        // Regression: each of StartAdvance/AdvanceStep/BandCount is individually in-bounds, but
+        // their compounded effect on the tallest band (StartAdvance + (BandCount - 1) *
+        // AdvanceStep) must never exceed the shared CalibrationMeasurementRanges.PressureAdvance
+        // maximum of 2.0 -- that value is embedded directly into a SET_PRESSURE_ADVANCE/M900 K
+        // gcode command sent to the printer, so an unclamped compounding overflow is a real
+        // hardware-safety gap, not just a cosmetic one.
+        string json = """{"start_advance": 2.0, "advance_step": 0.5, "band_count": 50}""";
+
+        CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.PressureAdvanceTower);
+
+        parameters.BandCount.Should().Be(50);
+        parameters.StartAdvance.Should().Be(2.0);
+        double topmostBandAdvance = parameters.StartAdvance + ((parameters.BandCount - 1) * parameters.AdvanceStep);
+        topmostBandAdvance.Should().BeLessThanOrEqualTo(2.0);
     }
 
     #endregion
@@ -827,13 +881,40 @@ public class CalibrationTests : IDisposable
         Func<Task> act = () => OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync(
             job, processJsonPath, machineJsonPath, CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>(
+        var exceptionAssertions = await act.Should().ThrowAsync<InvalidOperationException>(
             "an unsupported or missing firmware flavour must be refused explicitly instead of " +
             "silently slicing a pressure advance tower that never changes the advance value");
+        exceptionAssertions.Which.Message.Should().ContainAll("gcode_flavor", "Klipper", "Marlin");
         (await File.ReadAllTextAsync(processJsonPath)).Should().Be(
             originalProcessJson,
             "the process profile must not be mutated when the firmware flavour is refused");
         job.ProcessProfileSha256.Should().BeNull("no digest should be recorded for a job that was refused");
+    }
+
+    [Fact]
+    public async Task ApplyPressureAdvanceTowerGcodeAsync_ExtremelyLongGcodeFlavor_TruncatesValueInExceptionMessage()
+    {
+        // Regression: gcode_flavor comes from an untrusted-ish machine profile blob. Echoing it
+        // unbounded into the exception message (which can surface into job failure telemetry/logs)
+        // would let an adversarial profile smuggle an arbitrarily large string into those logs.
+        string processJsonPath = Path.Combine(_tempDir, $"process-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(processJsonPath, """{"name": "Test Process"}""");
+        string machineJsonPath = Path.Combine(_tempDir, $"machine-{Guid.NewGuid():N}.json");
+        string hugeFlavor = new('x', 5000);
+        await File.WriteAllTextAsync(
+            machineJsonPath,
+            JsonSerializer.Serialize(new { name = "Test Machine", gcode_flavor = hugeFlavor }));
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.PressureAdvanceTower),
+        };
+
+        Func<Task> act = () => OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync(
+            job, processJsonPath, machineJsonPath, CancellationToken.None);
+
+        var exceptionAssertions = await act.Should().ThrowAsync<InvalidOperationException>();
+        exceptionAssertions.Which.Message.Length.Should().BeLessThan(500);
+        exceptionAssertions.Which.Message.Should().NotContain(hugeFlavor);
     }
 
     private static OrcaSlicingPipelineService CreatePipeline(string calibResourcesRoot)
