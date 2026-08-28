@@ -61,6 +61,20 @@ public sealed class PrinterModelAliasServiceTests
     /// </summary>
     private sealed class FakeSqlException : DbException
     {
+        public FakeSqlException()
+        {
+        }
+
+        public FakeSqlException(string message)
+            : base(message)
+        {
+        }
+
+        public FakeSqlException(string message, Exception innerException)
+            : base(message, innerException)
+        {
+        }
+
         public FakeSqlException(int number, int unrelatedErrorCode)
         {
             Number = number;
