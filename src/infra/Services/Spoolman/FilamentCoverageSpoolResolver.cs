@@ -21,6 +21,8 @@ public sealed class FilamentCoverageSpoolResolver(
     AppDbContext? db = null,
     IMutationWatermarkReader? watermarkReader = null) : IFilamentCoverageSpoolResolver
 {
+    private const int MaxConcurrentSourceRequests = 4;
+
     internal const string ReasonSpoolmanUnconfigured = "spoolman-unconfigured";
     internal const string ReasonSourceUnavailable = "spool-source-unavailable";
     internal const string ReasonSpoolNotFound = "spool-not-found";
@@ -259,13 +261,29 @@ public sealed class FilamentCoverageSpoolResolver(
             request.SpoolIds.UnionWith(spoolIds);
         }
 
-        Dictionary<SourceKey, Dictionary<int, FilamentCoverageSpoolSnapshot>> resolvedSources = [];
-        foreach ((SourceKey key, SourceRequest request) in requests)
-        {
-            resolvedSources[key] = key.Native
-                ? await ResolveNativeAsync(request, originWatermark, ct).ConfigureAwait(false)
-                : await ResolveCentralAsync(request.SpoolIds, originWatermark, ct).ConfigureAwait(false);
-        }
+        // Distinct spool sources are independent HTTP adapters. Resolve them in
+        // parallel without allowing a large farm to create unbounded fan-out.
+        using SemaphoreSlim sourceRequestGate = new(MaxConcurrentSourceRequests);
+        Task<KeyValuePair<SourceKey, Dictionary<int, FilamentCoverageSpoolSnapshot>>>[] pendingSources =
+            requests.Select(async pair =>
+            {
+                await sourceRequestGate.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    Dictionary<int, FilamentCoverageSpoolSnapshot> resolved = pair.Key.Native
+                        ? await ResolveNativeAsync(pair.Value, originWatermark, ct).ConfigureAwait(false)
+                        : await ResolveCentralAsync(pair.Value.SpoolIds, originWatermark, ct).ConfigureAwait(false);
+                    return KeyValuePair.Create(pair.Key, resolved);
+                }
+                finally
+                {
+                    _ = sourceRequestGate.Release();
+                }
+            }).ToArray();
+        KeyValuePair<SourceKey, Dictionary<int, FilamentCoverageSpoolSnapshot>>[] completedSources =
+            await Task.WhenAll(pendingSources).ConfigureAwait(false);
+        Dictionary<SourceKey, Dictionary<int, FilamentCoverageSpoolSnapshot>> resolvedSources =
+            completedSources.ToDictionary();
 
         Dictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result = [];
         foreach (Printer printer in printers)

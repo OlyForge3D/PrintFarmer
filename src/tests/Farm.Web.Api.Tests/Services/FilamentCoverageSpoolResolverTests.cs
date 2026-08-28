@@ -1,4 +1,6 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics;
+using System.Globalization;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
@@ -245,6 +247,113 @@ public class FilamentCoverageSpoolResolverTests
         nativeB.As<ISupportsSpoolman>().Verify(
             n => n.GetSpoolmanSpoolsAsync(printerB.ServerUrl, It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_DistinctNativeSources_ResolveConcurrently()
+    {
+        TaskCompletionSource<bool> sourceAStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<bool> sourceBStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<bool> releaseSources = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Mock<IBackendClient> native = new();
+        native.As<ISupportsSpoolman>()
+            .Setup(service => service.GetSpoolmanSpoolsAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (string baseUrl, CancellationToken ct) =>
+            {
+                TaskCompletionSource<bool> started = baseUrl.Contains("moon-a", StringComparison.Ordinal)
+                    ? sourceAStarted
+                    : sourceBStarted;
+                _ = started.TrySetResult(true);
+                await releaseSources.Task.WaitAsync(ct);
+                int spoolId = ReferenceEquals(started, sourceAStarted) ? 1 : 2;
+                return JsonSerializer.Serialize(new[]
+                {
+                    new { id = spoolId, remaining_weight = 100, material = "PLA" },
+                });
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(service => service.GetClient((int)PrinterBackend.Moonraker))
+            .Returns(native.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+        Printer printerA = PrinterWithSpool("http://moon-a.local", PrinterBackend.Moonraker, 1);
+        Printer printerB = PrinterWithSpool("http://moon-b.local", PrinterBackend.Moonraker, 2);
+
+        Task<IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>>> resolving =
+            resolver.ResolveAsync([printerA, printerB], CancellationToken.None);
+        try
+        {
+            await Task.WhenAll(sourceAStarted.Task, sourceBStarted.Task)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            _ = releaseSources.TrySetResult(true);
+        }
+
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result =
+            await resolving;
+        result[printerA.Id][1].Spool!.RemainingWeightG.Should().Be(100);
+        result[printerB.Id][2].Spool!.RemainingWeightG.Should().Be(100);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ManyDistinctNativeSources_CompletesWellUnderReadinessTimeout()
+    {
+        // Regression evidence for issue #2118: the mobile client's own readiness/health
+        // probe (ServerManagementViewModel.check) uses a 5s per-request timeout. Before
+        // the bounded-concurrency fix, ResolveAsync awaited each distinct spool source
+        // sequentially, so a fleet with enough independent sources could blow past that
+        // budget even though every individual source was healthy. This test proves the
+        // fixed, bounded-concurrency (max 4) path stays well under that timeout for a
+        // source count whose *sequential* total would have exceeded it.
+        const int sourceCount = 20;
+        const int perSourceDelayMs = 300;
+        TimeSpan readinessTimeout = TimeSpan.FromSeconds(5);
+        TimeSpan hypotheticalSequentialDuration = TimeSpan.FromMilliseconds(sourceCount * perSourceDelayMs);
+        hypotheticalSequentialDuration.Should().BeGreaterThan(readinessTimeout,
+            "the scenario is only meaningful evidence if the old sequential path would have missed the readiness budget");
+
+        Mock<IBackendClient> native = new();
+        native.As<ISupportsSpoolman>()
+            .Setup(service => service.GetSpoolmanSpoolsAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (string baseUrl, CancellationToken ct) =>
+            {
+                await Task.Delay(perSourceDelayMs, ct);
+                int spoolId = int.Parse(baseUrl.Split('-')[^1].Split('.')[0], CultureInfo.InvariantCulture);
+                return JsonSerializer.Serialize(new[]
+                {
+                    new { id = spoolId, remaining_weight = 100, material = "PLA" },
+                });
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(service => service.GetClient((int)PrinterBackend.Moonraker))
+            .Returns(native.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+        List<Printer> printers = Enumerable.Range(1, sourceCount)
+            .Select(i => PrinterWithSpool($"http://moon-{i}.local", PrinterBackend.Moonraker, i))
+            .ToList();
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result =
+            await resolver.ResolveAsync(printers, CancellationToken.None);
+        stopwatch.Stop();
+
+        stopwatch.Elapsed.Should().BeLessThan(readinessTimeout);
+        result.Should().HaveCount(sourceCount);
+        for (int i = 1; i <= sourceCount; i++)
+        {
+            result[printers[i - 1].Id][i].Spool!.RemainingWeightG.Should().Be(100);
+        }
     }
 
     [Fact]
