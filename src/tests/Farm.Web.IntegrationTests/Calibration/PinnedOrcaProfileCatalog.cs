@@ -95,9 +95,9 @@ internal static class PinnedOrcaProfileCatalog
     /// </exception>
     internal static PinnedOrcaProfileSelection Select(JsonElement root)
     {
-        IReadOnlyList<ProfileCandidate> machines = ReadCandidates(root, "machineProfiles");
-        IReadOnlyList<ProfileCandidate> processes = ReadCandidates(root, "processProfiles");
-        IReadOnlyList<ProfileCandidate> filaments = ReadCandidates(root, "filamentProfiles");
+        List<ProfileCandidate> machines = ReadCandidates(root, "machineProfiles");
+        List<ProfileCandidate> processes = ReadCandidates(root, "processProfiles");
+        List<ProfileCandidate> filaments = ReadCandidates(root, "filamentProfiles");
 
         List<EligibleMachine> eligibleMachines = machines
             .Where(candidate => TryReadNozzleDiameter(candidate.Settings, out _))
@@ -189,7 +189,7 @@ internal static class PinnedOrcaProfileCatalog
         !string.IsNullOrEmpty(machine.Manufacturer) &&
         string.Equals(candidate.Manufacturer, machine.Manufacturer, StringComparison.OrdinalIgnoreCase);
 
-    private static IReadOnlyList<ProfileCandidate> ReadCandidates(JsonElement root, string groupName)
+    private static List<ProfileCandidate> ReadCandidates(JsonElement root, string groupName)
     {
         if (!root.TryGetProperty(groupName, out JsonElement group) ||
             group.ValueKind != JsonValueKind.Object)
@@ -242,7 +242,7 @@ internal static class PinnedOrcaProfileCatalog
     /// accepted too so an upstream naming-policy change can't silently make every profile look
     /// "universal" and reintroduce the incompatible-tuple bug this catalogue exists to prevent.
     /// </summary>
-    private static IReadOnlyList<string> ReadCompatiblePrinters(JsonElement profile)
+    private static List<string> ReadCompatiblePrinters(JsonElement profile)
     {
         if (!TryGetCompatiblePrintersElement(profile, out JsonElement element) ||
             element.ValueKind != JsonValueKind.Array)
