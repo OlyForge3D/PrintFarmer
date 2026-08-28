@@ -327,11 +327,18 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// <summary>
     /// Resolves the source filament profile's current <c>filament_flow_ratio</c> — the baseline
     /// that <see cref="FlowRateDeltaCalibrationConfigurator"/> adds each object's delta to (issue
-    /// #2141). Both the digest-verified native profile path (<see cref="DistributedSlicingJob.NativeProfiles"/>)
-    /// and the named-profile resolution path (<c>job.Profile</c>) are populated by the job poller
-    /// before <see cref="ProcessJobAsync"/> ever runs (see <c>HttpJobPollerService</c>), so both
-    /// are available here even though profile *files* are not materialized to disk until
-    /// <see cref="RunOrcaSlicerAsync"/>.
+    /// #2141).
+    /// <para>
+    /// This must mirror the branch <see cref="RunOrcaSlicerAsync"/> takes when materializing
+    /// profiles for the actual slice: when <see cref="DistributedSlicingJob.NativeProfiles"/> is
+    /// non-null, it is written to disk verbatim and <c>job.Profile</c> is never consulted — so the
+    /// baseline must come from <c>NativeProfiles.FilamentJson</c> in that case too, or the
+    /// calibration would silently measure against a filament profile OrcaSlicer never actually
+    /// slices with. Only when <c>NativeProfiles</c> is null does <c>job.Profile</c> get
+    /// materialized (see <see cref="GenerateProfileJsonFilesAsync"/>), which itself prefers
+    /// <c>ExtruderFilamentProfiles[0]</c> over <c>FilamentProfile</c> whenever an extruder profile
+    /// is present.
+    /// </para>
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// Thrown when no filament profile was resolved for the job, or the resolved profile carries
@@ -341,9 +348,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// </exception>
     internal static double ResolveBaselineFlowRatio(DistributedSlicingJob job)
     {
-        double? resolved = job.Profile?.FilamentProfile?.FlowRatio
-            ?? (job.Profile?.ExtruderFilamentProfiles is { Count: > 0 } extruders ? extruders[0].FlowRatio : null)
-            ?? TryParseNativeFilamentFlowRatio(job.NativeProfiles?.FilamentJson);
+        double? resolved = job.NativeProfiles is not null
+            ? TryParseNativeFilamentFlowRatio(job.NativeProfiles.FilamentJson)
+            : ResolveProfileFlowRatio(job.Profile);
 
         if (resolved is not { } baselineFlowRatio)
         {
@@ -354,6 +361,25 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
 
         return baselineFlowRatio;
+    }
+
+    /// <summary>
+    /// Resolves <c>filament_flow_ratio</c> from a worker-cache-resolved <see cref="SlicerProfileDto"/>,
+    /// preferring <see cref="SlicerProfileDto.ExtruderFilamentProfiles"/> (index 0) over
+    /// <see cref="SlicerProfileDto.FilamentProfile"/> — matching the precedence
+    /// <see cref="GenerateProfileJsonFilesAsync"/> applies when materializing the filament JSON
+    /// actually handed to OrcaSlicer for this job.
+    /// </summary>
+    private static double? ResolveProfileFlowRatio(SlicerProfileDto? profile)
+    {
+        if (profile is null)
+        {
+            return null;
+        }
+
+        return profile.ExtruderFilamentProfiles is { Count: > 0 } extruders
+            ? extruders[0].FlowRatio
+            : profile.FilamentProfile?.FlowRatio;
     }
 
     /// <summary>
@@ -378,7 +404,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             string? raw = flowRatioElement.ValueKind switch
             {
                 JsonValueKind.Array => flowRatioElement.GetArrayLength() > 0
-                    ? flowRatioElement[0].GetString()
+                    ? ExtractScalarText(flowRatioElement[0])
                     : null,
                 JsonValueKind.String => flowRatioElement.GetString(),
                 JsonValueKind.Number => flowRatioElement.GetRawText(),
@@ -394,6 +420,19 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         {
             return null;
         }
+
+        // Extracts a parseable scalar from an array element without assuming its JSON kind: a
+        // hand-edited native profile could plausibly store `["1.05"]` (string, the normal case) or
+        // `[1.05]` (number). Calling GetString() unconditionally throws InvalidOperationException
+        // for the latter — this returns null instead, so an unexpected shape falls through to the
+        // "no baseline resolved" refusal rather than crashing the job with a raw framework
+        // exception.
+        static string? ExtractScalarText(JsonElement element) => element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Number => element.GetRawText(),
+            _ => null,
+        };
     }
 
     /// <summary>

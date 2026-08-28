@@ -704,7 +704,222 @@ public class CalibrationTests : IDisposable
         Action act = () => pipeline.PrepareCalibrationModel(job, workDir);
 
         act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*filament_flow_ratio*")
+            .Which.Message.Should().Contain(
+                "Select a filament profile that carries a flow ratio, or refuse rather than guessing one",
+                "the refusal message must explain the fix (pick a profile with a flow ratio), not just " +
+                "name the missing field");
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_ExtruderFilamentProfilesPresent_PrefersExtruderZeroOverFilamentProfile()
+    {
+        // GenerateProfileJsonFilesAsync (issue #2141 review finding) prefers
+        // ExtruderFilamentProfiles[0] over FilamentProfile whenever an extruder profile is present
+        // — the baseline resolution must mirror that precedence or it would report a flow ratio
+        // that is not the one OrcaSlicer actually slices with.
+        var job = new DistributedSlicingJob
+        {
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.5 },
+                ExtruderFilamentProfiles = [new FilamentProfileDto { FlowRatio = 0.98 }],
+            },
+        };
+
+        OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job).Should().Be(0.98);
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NoExtruderProfiles_FallsBackToFilamentProfile()
+    {
+        var job = new DistributedSlicingJob
+        {
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.93 },
+            },
+        };
+
+        OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job).Should().Be(0.93);
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NativeProfilesPresent_PrefersNativeOverJobProfile()
+    {
+        // RunOrcaSlicerAsync writes NativeProfiles verbatim and never consults job.Profile when
+        // NativeProfiles is non-null — so the baseline must come from NativeProfiles.FilamentJson
+        // in that case, even when job.Profile also carries a (different, worker-cache-resolved)
+        // flow ratio. Preferring job.Profile here would silently measure against a filament
+        // profile OrcaSlicer never actually slices with (issue #2141 review finding).
+        var job = new DistributedSlicingJob
+        {
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.5 },
+            },
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: """{"filament_flow_ratio": "0.98"}""",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job).Should().Be(0.98);
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NativeProfilesPresentAsArray_ParsesFirstElement()
+    {
+        var job = new DistributedSlicingJob
+        {
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: """{"filament_flow_ratio": ["0.965", "1.0"]}""",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job).Should().Be(0.965);
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NativeProfilesArrayElementIsNumberNotString_ParsesWithoutCrashing()
+    {
+        // A hand-edited native profile could plausibly store filament_flow_ratio as an array of
+        // *numbers* (`[1.05]`) rather than OrcaSlicer's normal array-of-strings shape
+        // (`["1.05"]`). Blindly calling JsonElement.GetString() on a Number element throws
+        // InvalidOperationException, which the surrounding catch (JsonException) does not catch —
+        // that would crash the job with a raw framework exception instead of either parsing the
+        // number or cleanly falling through to the "no baseline resolved" refusal.
+        var job = new DistributedSlicingJob
+        {
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: """{"filament_flow_ratio": [1.05]}""",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job).Should().Be(1.05);
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NativeProfilesArrayElementUnrecognizedKind_ThrowsRatherThanGuessing()
+    {
+        // An array element that is neither a string nor a number (e.g. a nested object or bool) is
+        // genuinely unparseable; the worker must refuse rather than silently falling back to
+        // job.Profile, since RunOrcaSlicerAsync would still slice with NativeProfiles verbatim.
+        var job = new DistributedSlicingJob
+        {
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.5 },
+            },
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: """{"filament_flow_ratio": [true]}""",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        Action act = () => OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job);
+
+        act.Should().Throw<InvalidOperationException>()
             .WithMessage("*filament_flow_ratio*");
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NativeProfilesMissingFlowRatioProperty_ThrowsRatherThanGuessing()
+    {
+        var job = new DistributedSlicingJob
+        {
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: "{}",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        Action act = () => OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*filament_flow_ratio*");
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NativeProfilesMalformedJson_ThrowsRatherThanGuessing()
+    {
+        var job = new DistributedSlicingJob
+        {
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: "{ not valid json",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        Action act = () => OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*filament_flow_ratio*");
+    }
+
+    [Fact]
+    public void PrepareCalibrationModel_YoloRecommendedMethod_NativeProfilesPresent_UsesNativeBaselineOverJobProfile()
+    {
+        // End-to-end variant of ResolveBaselineFlowRatio_NativeProfilesPresent_PrefersNativeOverJobProfile
+        // through the full PrepareCalibrationModel path, proving the pipeline wiring (not just the
+        // helper in isolation) resolves the baseline OrcaSlicer will actually slice with.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-yolo-native-" + Guid.NewGuid().ToString("N"));
+        string resourcePath = Path.Combine(calibResourcesRoot, "filament_flow", "Orca-LinearFlow.3mf");
+        Directory.CreateDirectory(Path.GetDirectoryName(resourcePath)!);
+        CreateSynthetic3mfAt(resourcePath, [("1", "flowrate_0.01")]);
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.FlowRateYoloRecommended),
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.5 },
+            },
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: """{"filament_flow_ratio": "0.98"}""",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
+
+        using ZipArchive archive = ZipFile.OpenRead(preparedPath);
+        ZipArchiveEntry configEntry = archive.GetEntry("Metadata/Slic3r_PE_model.config")!;
+        string configXml = ReadEntryText(configEntry);
+        System.Xml.Linq.XDocument doc = System.Xml.Linq.XDocument.Parse(configXml);
+        double appliedFlowRatio = double.Parse(
+            doc.Root!.Elements("object").Single()
+                .Elements("metadata").First(m => m.Attribute("key")!.Value == "flow_ratio").Attribute("value")!.Value,
+            System.Globalization.CultureInfo.InvariantCulture);
+
+        // baseline 0.98 (native) + delta 0.01, NOT baseline 0.5 (job.Profile) + delta 0.01.
+        appliedFlowRatio.Should().Be(0.99);
     }
 
     [Fact]

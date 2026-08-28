@@ -136,19 +136,10 @@ public static partial class FlowRateDeltaCalibrationConfigurator
                     "Calibration resource has no printable objects; cannot apply per-object flow-ratio overrides.");
             }
 
-            IReadOnlyDictionary<int, double> flowRatios;
-            try
-            {
-                flowRatios = ResolveObjectFlowRatios(objects, baselineFlowRatio);
-            }
-            catch (InvalidOperationException ex)
-            {
-                logger.LogError(
-                    ex,
-                    "Failed to resolve delta-based per-object flow ratios for calibration project '{Path}'.",
-                    source3mfPath);
-                throw;
-            }
+            // Resolution failures are not caught here: HttpJobPollerService already logs the
+            // failed job's exception once (job-level catch), so logging again on the way up would
+            // duplicate the same stack trace in the logs for no benefit.
+            IReadOnlyDictionary<int, double> flowRatios = ResolveObjectFlowRatios(objects, baselineFlowRatio);
 
             ZipArchiveEntry? configEntry = archive.GetEntry("Metadata/Slic3r_PE_model.config");
             string? existingConfigXml = configEntry is null ? null : FlowRateCalibrationConfigurator.ReadEntryText(configEntry);
