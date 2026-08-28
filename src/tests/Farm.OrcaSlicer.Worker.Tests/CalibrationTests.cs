@@ -469,7 +469,9 @@ public class CalibrationTests : IDisposable
     [Theory]
     [InlineData("""{"start_advance": -1}""")] // below the CalibrationMeasurementRanges.PressureAdvance minimum (0.0)
     [InlineData("""{"start_advance": 2.5}""")] // above the CalibrationMeasurementRanges.PressureAdvance maximum (2.0)
-    [InlineData("""{"start_advance": "NaN"}""")]
+    [InlineData("""{"start_advance": "NaN"}""")] // non-numeric value for a numeric key: the whole map fails to
+                                                 // deserialize (JSON has no bare NaN/Infinity literal) and Parse
+                                                 // falls back to defaults for every key, same as malformed JSON
     public void CalibrationParameters_Parse_PressureAdvanceTower_OutOfRangeStartAdvance_FallsBackToDefault(string json)
     {
         // Mirrors Farm.Modules.Calibration.Services.Calibration.CalibrationMeasurementRanges.PressureAdvance
@@ -482,20 +484,39 @@ public class CalibrationTests : IDisposable
     [Fact]
     public void CalibrationParameters_Parse_PressureAdvanceTower_CompoundingAdvanceClampedToMaxAdvance()
     {
-        // Regression: each of StartAdvance/AdvanceStep/BandCount is individually in-bounds, but
-        // their compounded effect on the tallest band (StartAdvance + (BandCount - 1) *
-        // AdvanceStep) must never exceed the shared CalibrationMeasurementRanges.PressureAdvance
-        // maximum of 2.0 -- that value is embedded directly into a SET_PRESSURE_ADVANCE/M900 K
-        // gcode command sent to the printer, so an unclamped compounding overflow is a real
-        // hardware-safety gap, not just a cosmetic one.
-        string json = """{"start_advance": 2.0, "advance_step": 0.5, "band_count": 50}""";
+        // Regression: each of StartAdvance/AdvanceStep/BandCount is individually in-bounds, and
+        // there is genuine headroom below MaxAdvance, so the combination should be honoured by
+        // shrinking AdvanceStep rather than refused -- the topmost band's compounded effect
+        // (StartAdvance + (BandCount - 1) * AdvanceStep) must never exceed the shared
+        // CalibrationMeasurementRanges.PressureAdvance maximum of 2.0, since that value is
+        // embedded directly into a SET_PRESSURE_ADVANCE/M900 K gcode command sent to the printer.
+        string json = """{"start_advance": 0.0, "advance_step": 0.5, "band_count": 50}""";
 
         CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.PressureAdvanceTower);
 
         parameters.BandCount.Should().Be(50);
-        parameters.StartAdvance.Should().Be(2.0);
+        parameters.StartAdvance.Should().Be(0.0);
+        parameters.AdvanceStep.Should().BeLessThan(0.5); // clamped down from the requested step
+        parameters.AdvanceStep.Should().BeGreaterThan(0.0); // still a genuine, distinguishable sweep
         double topmostBandAdvance = parameters.StartAdvance + ((parameters.BandCount - 1) * parameters.AdvanceStep);
         topmostBandAdvance.Should().BeLessThanOrEqualTo(2.0);
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_PressureAdvanceTower_NoHeadroomForDistinguishableSweep_ThrowsRatherThanSilentlyProducingIdenticalBands()
+    {
+        // Regression: if StartAdvance already leaves no room for even the smallest meaningful
+        // AdvanceStep across BandCount bands, silently clamping AdvanceStep to (near) zero would
+        // produce a "tower" whose bands all emit the same advance value -- a calibration print
+        // that runs to completion and reports success while measuring nothing distinguishable.
+        // That is exactly the silent-no-op failure mode this calibration method must refuse
+        // instead of hiding, so this must throw rather than return a degenerate result.
+        string json = """{"start_advance": 2.0, "advance_step": 0.5, "band_count": 50}""";
+
+        Action act = () => CalibrationParameters.Parse(json, CalibrationMethod.PressureAdvanceTower);
+
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().ContainAll("start_advance", "band_count");
     }
 
     #endregion
@@ -719,6 +740,63 @@ public class CalibrationTests : IDisposable
         File.ReadAllText(preparedPath).Should().Be("fake-pa-tower-resource");
     }
 
+    [Fact]
+    public async Task PrepareCalibrationModelThenApplyPressureAdvanceTowerGcodeAsync_EndToEndAcrossBothPipelineStages_ProducesModelAndInjectedGcodeFromTheSameJob()
+    {
+        // Cross-stage regression (issue #2136 acceptance criterion: "wire name submits/slices/
+        // returns gcode end to end"). The two tests above cover PrepareCalibrationModel and
+        // ApplyPressureAdvanceTowerGcodeAsync in isolation; this test drives the SAME job instance
+        // through both real pipeline entrypoints in the order OrcaSlicingPipelineService itself
+        // calls them (model preparation, then process-profile gcode injection ahead of the actual
+        // OrcaSlicer CLI invocation), proving the two stages compose correctly end to end rather
+        // than merely each behaving correctly alone. It intentionally does not invoke the real
+        // OrcaSlicer binary -- that is exercised by the worker's own CLI-integration coverage, and
+        // duplicating it here would only reintroduce the process-execution flakiness the rest of
+        // this suite deliberately avoids by testing the pipeline's C# wiring directly.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-pa-e2e");
+        string towerPath = Path.Combine(calibResourcesRoot, "pressure_advance", "tower_with_seam.drc");
+        Directory.CreateDirectory(Path.GetDirectoryName(towerPath)!);
+        File.WriteAllText(towerPath, "fake-pa-tower-resource");
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.PressureAdvanceTower),
+            CalibrationParamsJson = """{"start_advance": 0.0, "advance_step": 0.01, "band_height_mm": 5, "band_count": 4}""",
+        };
+
+        // Stage 1: model resolution/preparation, exactly as OrcaSlicingPipelineService performs it
+        // before handing the job to the OrcaSlicer CLI.
+        string preparedModelPath = pipeline.PrepareCalibrationModel(job, workDir);
+
+        File.Exists(preparedModelPath).Should().BeTrue("the prepared 3MF/resource must exist before slicing can proceed");
+        File.ReadAllText(preparedModelPath).Should().Be("fake-pa-tower-resource");
+
+        // Stage 2: process-profile gcode injection, exactly as OrcaSlicingPipelineService performs
+        // it (via RunOrcaSlicerAsync) immediately before invoking the OrcaSlicer CLI with the
+        // prepared model from stage 1 and the mutated process profile from this stage.
+        string processJsonPath = Path.Combine(_tempDir, $"process-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(processJsonPath, """{"name": "Test Process"}""");
+        string machineJsonPath = Path.Combine(_tempDir, $"machine-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(machineJsonPath, """{"name": "Test Machine", "gcode_flavor": "klipper"}""");
+
+        await OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync(job, processJsonPath, machineJsonPath, CancellationToken.None);
+
+        string updatedProcessContent = await File.ReadAllTextAsync(processJsonPath);
+        using JsonDocument doc = JsonDocument.Parse(updatedProcessContent);
+        string layerChangeGcode = doc.RootElement.GetProperty("layer_change_gcode").GetString()!;
+        layerChangeGcode.Should().Contain(
+            "SET_PRESSURE_ADVANCE",
+            "the same job's CalibrationParamsJson (parsed once, upstream of both stages) must drive " +
+            "the actual injected gcode -- proving the prepared model and the injected gcode both " +
+            "trace back to one coherent calibration request, not two independently-configured stages");
+        job.ProcessProfileSha256.Should().Be(
+            NativeSlicerProfiles.ComputeSha256(updatedProcessContent),
+            "the job's recorded digest must reflect the process profile as mutated by stage 2, " +
+            "ready for the OrcaSlicer CLI invocation that would follow with the stage-1 model path");
+    }
+
     [Theory]
     [InlineData(CalibrationMethod.FlowRateYoloRecommended, "Orca-LinearFlow.3mf")]
     [InlineData(CalibrationMethod.FlowRateYoloPerfectionist, "Orca-LinearFlow_fine.3mf")]
@@ -915,6 +993,54 @@ public class CalibrationTests : IDisposable
         var exceptionAssertions = await act.Should().ThrowAsync<InvalidOperationException>();
         exceptionAssertions.Which.Message.Length.Should().BeLessThan(500);
         exceptionAssertions.Which.Message.Should().NotContain(hugeFlavor);
+    }
+
+    [Theory]
+    [InlineData("Bambu Lab X1 Carbon 0.4 nozzle")]
+    [InlineData("bambu lab a1 mini")] // case-insensitive match
+    public async Task ApplyPressureAdvanceTowerGcodeAsync_BambuLabPrinterModel_ThrowsRatherThanSilentlyMisappliesMarlinCommand(string printerModel)
+    {
+        // Regression (Bishop review finding, re-review @ f2c1ae50d): upstream OrcaSlicer's Bambu
+        // Lab (BBL) machine profiles inherit gcode_flavor: "marlin" from fdm_machine_common, so
+        // without this check a BBL job would resolve to the ordinary Marlin branch and emit a
+        // bare "M900 K{v}" -- but upstream's own GCodeWriter::set_pressure_advance branches on a
+        // distinct is_bbl_printers flag *before* gcode_flavor and emits "M900 K{v} L1000 M10" for
+        // BBL specifically. Silently treating BBL as generic Marlin would therefore slice a tower
+        // with the wrong command for that hardware -- exactly the silent-mis-slice outcome this
+        // calibration method must never produce. Must be refused explicitly instead.
+        string processJsonPath = Path.Combine(_tempDir, $"process-{Guid.NewGuid():N}.json");
+        const string originalProcessJson = """{"name": "Test Process"}""";
+        await File.WriteAllTextAsync(processJsonPath, originalProcessJson);
+        string machineJsonPath = Path.Combine(_tempDir, $"machine-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(
+            machineJsonPath,
+            JsonSerializer.Serialize(new { name = "Test Machine", gcode_flavor = "marlin", printer_model = printerModel }));
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.PressureAdvanceTower),
+        };
+
+        Func<Task> act = () => OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync(
+            job, processJsonPath, machineJsonPath, CancellationToken.None);
+
+        var exceptionAssertions = await act.Should().ThrowAsync<InvalidOperationException>(
+            "a Bambu Lab machine profile must be refused explicitly instead of silently treated as generic Marlin");
+        exceptionAssertions.Which.Message.Should().ContainAll("Bambu Lab", printerModel);
+        (await File.ReadAllTextAsync(processJsonPath)).Should().Be(
+            originalProcessJson,
+            "the process profile must not be mutated when a Bambu Lab machine is refused");
+        job.ProcessProfileSha256.Should().BeNull("no digest should be recorded for a job that was refused");
+    }
+
+    [Theory]
+    [InlineData("Bambu Lab X1 Carbon 0.4 nozzle", true)]
+    [InlineData("BAMBU LAB P1S", true)]
+    [InlineData("Prusa MK4S", false)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    public void IsBambuLabPrinterModel_IdentifiesBambuLabModelsOnly(string? printerModel, bool expected)
+    {
+        PressureAdvanceTowerGcodeBuilder.IsBambuLabPrinterModel(printerModel).Should().Be(expected);
     }
 
     private static OrcaSlicingPipelineService CreatePipeline(string calibResourcesRoot)

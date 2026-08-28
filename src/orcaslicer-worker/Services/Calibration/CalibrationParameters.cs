@@ -71,13 +71,14 @@ public sealed record CalibrationParameters
         };
     }
 
-    // Resolves the pressure advance tower's parameters, then clamps AdvanceStep so the tallest
-    // band's compounded advance value (StartAdvance + (BandCount - 1) * AdvanceStep) never exceeds
-    // MaxAdvance. Each individual field is already bounds-checked in isolation by ReadOrDefault,
-    // but that alone does not stop e.g. StartAdvance=2.0, AdvanceStep=0.5, BandCount=50 from
-    // compounding to an out-of-range 26.5 on the topmost band -- a real hardware-safety gap, since
-    // this value is embedded directly into a SET_PRESSURE_ADVANCE/M900 K gcode command sent to the
-    // printer.
+    // Resolves the pressure advance tower's parameters, then either clamps AdvanceStep so the
+    // tallest band's compounded advance value (StartAdvance + (BandCount - 1) * AdvanceStep)
+    // never exceeds MaxAdvance, or refuses the combination outright when no clamp can produce a
+    // meaningful sweep. Each individual field is already bounds-checked in isolation by
+    // ReadOrDefault, but that alone does not stop e.g. StartAdvance=2.0, AdvanceStep=0.5,
+    // BandCount=50 from compounding to an out-of-range 26.5 on the topmost band -- a real
+    // hardware-safety gap, since this value is embedded directly into a SET_PRESSURE_ADVANCE/M900
+    // K gcode command sent to the printer.
     private static CalibrationParameters BuildPressureAdvanceTowerParameters(CalibrationParameters defaults, Dictionary<string, double> values)
     {
         double startAdvance = ReadOrDefault(values, "start_advance", PressureAdvanceTowerDefaults.StartAdvance, MinAdvance, MaxAdvance);
@@ -87,13 +88,27 @@ public sealed record CalibrationParameters
 
         if (bandCount > 1)
         {
-            // Only ever shrink the step, never grow it back up to MinAdvanceStep: when
-            // startAdvance already leaves little or no headroom below MaxAdvance (e.g.
-            // startAdvance == MaxAdvance), the only safe step is at or near zero, so the
-            // safety cap must be allowed to go below MinAdvanceStep -- the invariant that the
-            // topmost band never exceeds MaxAdvance takes priority over the "steps are at
-            // least MinAdvanceStep" convenience floor.
-            double maxStepForBounds = Math.Max(0.0, (MaxAdvance - startAdvance) / (bandCount - 1));
+            // The headroom between StartAdvance and MaxAdvance, spread across BandCount - 1
+            // steps, is the largest step that keeps the topmost band in bounds.
+            double maxStepForBounds = (MaxAdvance - startAdvance) / (bandCount - 1);
+            if (maxStepForBounds < MinAdvanceStep)
+            {
+                // There is no room for even the smallest meaningful step: silently clamping here
+                // would produce a "tower" whose bands all emit (near-)identical advance values --
+                // a calibration print that runs to completion and reports success while measuring
+                // nothing, exactly the silent-no-op failure mode this method must refuse instead
+                // of hiding. Reject explicitly so the caller sees a clear reason instead of a
+                // seemingly successful but useless print.
+                throw new InvalidOperationException(
+                    $"Pressure advance tower parameters cannot produce a meaningful sweep: start_advance " +
+                    $"({startAdvance}) leaves no room for a distinguishable advance_step across " +
+                    $"band_count ({bandCount}) bands within the supported [{MinAdvance}, {MaxAdvance}] range. " +
+                    $"Lower start_advance or band_count.");
+            }
+
+            // Only ever shrink the step, never grow it back up to a value the client didn't ask
+            // for: the invariant that the topmost band never exceeds MaxAdvance takes priority
+            // over honouring a client-requested step that would overflow it.
             advanceStep = Math.Min(advanceStep, maxStepForBounds);
         }
 

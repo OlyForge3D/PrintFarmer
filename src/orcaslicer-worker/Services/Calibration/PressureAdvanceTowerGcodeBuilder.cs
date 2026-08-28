@@ -76,7 +76,35 @@ public static class PressureAdvanceTowerGcodeBuilder
     /// Returns <see langword="null"/> for missing/malformed JSON or a missing/non-string field —
     /// callers treat that the same as any other unresolved flavour.
     /// </summary>
-    public static string? ReadGcodeFlavor(string? machineProfileJson)
+    public static string? ReadGcodeFlavor(string? machineProfileJson) => ReadTopLevelString(machineProfileJson, "gcode_flavor");
+
+    /// <summary>
+    /// Reads the machine profile JSON's top-level <c>printer_model</c> string, if present. Used to
+    /// detect Bambu Lab (BBL) machines, which upstream OrcaSlicer branches on separately from
+    /// <c>gcode_flavor</c> (see <see cref="IsBambuLabPrinterModel"/>).
+    /// </summary>
+    public static string? ReadPrinterModel(string? machineProfileJson) => ReadTopLevelString(machineProfileJson, "printer_model");
+
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="printerModel"/> identifies a Bambu Lab
+    /// (BBL) machine (e.g. <c>"Bambu Lab X1 Carbon 0.4 nozzle"</c>).
+    /// </summary>
+    /// <remarks>
+    /// BBL machine profiles inherit <c>gcode_flavor: "marlin"</c> from
+    /// <c>fdm_machine_common</c> in upstream OrcaSlicer, but upstream's own
+    /// <c>GCodeWriter::set_pressure_advance</c> branches on a distinct <c>is_bbl_printers</c> flag
+    /// *before* consulting <c>gcode_flavor</c> at all, emitting
+    /// <c>M900 K{v} L1000 M10 ; Override pressure advance value</c> rather than the generic Marlin
+    /// <c>M900 K{v}</c>. Treating BBL's inherited "marlin" flavour as ordinary Marlin would
+    /// therefore silently slice a tower with the wrong command for that hardware — exactly the
+    /// silent-mis-slice outcome this calibration method must never produce. Since neither this
+    /// builder nor <see cref="CalibrationFirmwareFlavor"/> emit BBL's distinct dialect yet, BBL
+    /// machines are refused explicitly by the caller instead.
+    /// </remarks>
+    public static bool IsBambuLabPrinterModel(string? printerModel) =>
+        !string.IsNullOrWhiteSpace(printerModel) && printerModel.TrimStart().StartsWith("Bambu Lab", StringComparison.OrdinalIgnoreCase);
+
+    private static string? ReadTopLevelString(string? machineProfileJson, string propertyName)
     {
         if (string.IsNullOrWhiteSpace(machineProfileJson))
         {
@@ -87,10 +115,10 @@ public static class PressureAdvanceTowerGcodeBuilder
         {
             using JsonDocument document = JsonDocument.Parse(machineProfileJson);
             if (document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty("gcode_flavor", out JsonElement flavorElement)
-                && flavorElement.ValueKind == JsonValueKind.String)
+                && document.RootElement.TryGetProperty(propertyName, out JsonElement valueElement)
+                && valueElement.ValueKind == JsonValueKind.String)
             {
-                return flavorElement.GetString();
+                return valueElement.GetString();
             }
         }
         catch (JsonException)
