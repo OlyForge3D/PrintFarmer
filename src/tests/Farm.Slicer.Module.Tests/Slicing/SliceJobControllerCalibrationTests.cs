@@ -42,24 +42,26 @@ public sealed class SliceJobControllerCalibrationTests
         _ = problem.Extensions["code"].Should().Be("unsupported_calibration_method");
         _ = problem.Detail.Should().Contain("flow_rate_pass_1").And.Contain("temperature_tower");
 
-        // Issue #2141: FlowRateYoloRecommended is now slicer-supported and appears in
-        // ClientAcceptedWireNames, so it may legitimately show up in the "Supported methods" list
-        // surfaced for an unrelated unsupported-method error. FlowRateYoloPerfectionist remains
-        // gated (issue #2142) and must never appear in that list, or a client would be told to
-        // retry with a method that request would also reject.
-        _ = problem.Detail.Should().NotContain("flow_rate_yolo_perfectionist");
+        // Issue #2141/#2142: both FlowRateYoloRecommended and FlowRateYoloPerfectionist are now
+        // slicer-supported and appear in ClientAcceptedWireNames, so both may legitimately show
+        // up in the "Supported methods" list surfaced for an unrelated unsupported-method error.
+        _ = problem.Detail.Should().Contain("flow_rate_yolo_recommended").And.Contain("flow_rate_yolo_perfectionist");
     }
 
     [Fact]
-    public async Task SubmitAsync_CataloguedButNotYetSlicerSupportedMethod_ReturnsInvalidRequestBeforeQueueing()
+    public async Task SubmitAsync_FlowRateYoloPerfectionistMethod_CreatesOrdinarySliceJob()
     {
-        // Issue #2142: FlowRateYoloPerfectionist parses successfully (its wire name/resource
-        // metadata is catalogued), but the worker cannot yet apply its delta-based per-object
-        // overrides. Rejecting here, at the API boundary, matters: without it the job would be
-        // queued, claimed by a worker, and only fail late in
-        // OrcaSlicingPipelineService.PrepareCalibrationModel — wasting a worker slot and a job
-        // record for a request that could never have succeeded.
+        // Issue #2142 acceptance criterion: flow_rate_yolo_perfectionist must be accepted and
+        // create an ordinary slice job, exactly like flow_rate_yolo_recommended (issue #2141) — it
+        // must never be rejected as "not yet slicer-supported" now that the worker has a
+        // delta-aware configurator wired in for it too.
         SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out Mock<ISliceJobEventService> events);
+        SliceJob? added = null;
+        _ = repository
+            .Setup(instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()))
+            .Callback<SliceJob, CancellationToken>((job, _) => added = job)
+            .Returns(Task.CompletedTask);
+
         var request = new SubmitSliceJobRequest
         {
             SlicerEngine = SlicerEngineType.OrcaSlicer,
@@ -69,16 +71,20 @@ public sealed class SliceJobControllerCalibrationTests
 
         IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
 
-        var objectResult = result.Should().BeOfType<ObjectResult>().Subject;
-        _ = objectResult.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
-        var problem = objectResult.Value.Should().BeOfType<ProblemDetails>().Subject;
-        _ = problem.Extensions["code"].Should().Be("calibration_method_not_yet_supported");
-        repository.Verify(
-            instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+        _ = result.Should().BeOfType<CreatedResult>();
+        _ = added.Should().NotBeNull();
+        _ = added!.CalibrationMethod.Should().Be("flow_rate_yolo_perfectionist");
+
+        // The defining constraint from issue #1938: this must remain an ordinary slice job so
+        // SlicePrintBridgeController's IsCalibrationSlice(job) gate never trips and
+        // send-to-printer keeps accepting it.
+        _ = added.CalibrationProjectId.Should().BeNull();
+        _ = added.CalibrationAttemptId.Should().BeNull();
+        _ = added.CalibrationOrchestrationId.Should().BeNull();
+
         events.Verify(
             instance => instance.NotifyJobQueuedAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);
     }
 
     [Fact]

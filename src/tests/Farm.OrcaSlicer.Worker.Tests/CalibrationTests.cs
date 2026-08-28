@@ -94,15 +94,14 @@ public class CalibrationTests : IDisposable
     }
 
     [Fact]
-    public void ClientAcceptedWireNames_ExcludesOnlyPerfectionistYoloMethod()
+    public void ClientAcceptedWireNames_IncludesBothYoloMethods()
     {
-        // Issue #2141: FlowRateYoloRecommended is now slicer-supported and must appear in the
-        // list a controller advertises to clients as "supported methods". FlowRateYoloPerfectionist
-        // remains gated (issue #2142) and must not appear, or the API would recommend a method it
-        // immediately rejects.
+        // Issue #2141/#2142: both FlowRateYoloRecommended and FlowRateYoloPerfectionist are now
+        // slicer-supported and must appear in the list a controller advertises to clients as
+        // "supported methods" — neither is gated any longer.
         CalibrationMethods.ClientAcceptedWireNames.Should()
             .Contain("flow_rate_yolo_recommended")
-            .And.NotContain("flow_rate_yolo_perfectionist")
+            .And.Contain("flow_rate_yolo_perfectionist")
             .And.Contain("retraction", "issue #2137 makes retraction a fully slicer-supported method");
 
         // Issue #2135: max volumetric speed is now fully slicer-supported, so it must be
@@ -116,7 +115,7 @@ public class CalibrationTests : IDisposable
         }
 
         CalibrationMethods.ClientAcceptedWireNames.Should()
-            .HaveCount(CalibrationMethods.SupportedWireNames.Count - 1);
+            .HaveCount(CalibrationMethods.SupportedWireNames.Count);
     }
 
     [Theory]
@@ -161,8 +160,10 @@ public class CalibrationTests : IDisposable
     [Fact]
     public void IsSlicerSupported_PressureAdvanceTower_ReturnsTrue()
     {
-        // Issue #2136: unlike the YOLO methods, pressure advance tower is fully slicer-supported —
+        // Issue #2136: pressure advance tower is fully slicer-supported —
         // OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync implements it.
+        // (Both YOLO flow-calibration methods are also slicer-supported as of issues
+        // #2141/#2142 — see the dedicated ClientAcceptedWireNames tests below.)
         CalibrationMethods.IsSlicerSupported(CalibrationMethod.PressureAdvanceTower).Should().BeTrue();
     }
 
@@ -1102,6 +1103,9 @@ public class CalibrationTests : IDisposable
     [InlineData("flow_rate_m1.5", -1.5)]
     [InlineData("flow-rate_2", 2.0)]
     [InlineData("FLOWRATE_M0.02", -0.02)]
+    [InlineData("flowrate_0.005", 0.005)]
+    [InlineData("flowrate_m0.035", -0.035)]
+    [InlineData("flowrate_m0.005", -0.005)]
     [InlineData("Body_1", null)]
     [InlineData(null, null)]
     public void TryParseFlowDelta_ParsesSignedBaselineRelativeDelta(string? objectName, double? expectedDelta)
@@ -1109,6 +1113,10 @@ public class CalibrationTests : IDisposable
         // Issue #2141: unlike FlowRateCalibrationConfigurator.TryParseFlowRatio (which divides an
         // embedded percentage by 100), this must return the raw additive delta unscaled — the
         // "m" prefix stands in for a minus sign that cannot appear in a 3MF object name.
+        // Issue #2142 (Perfectionist): the finer 0.005 step size means object names carry three
+        // decimal places (e.g. "flowrate_0.005", "flowrate_m0.035") rather than Recommended's two
+        // (e.g. "flowrate_0.01") — the regex's "\d+(?:\.\d+)?" group is not limited to a fixed
+        // decimal count, so these must parse without any parser change.
         double? delta = FlowRateDeltaCalibrationConfigurator.TryParseFlowDelta(objectName);
 
         delta.Should().Be(expectedDelta);
@@ -1183,6 +1191,47 @@ public class CalibrationTests : IDisposable
             [1] = 0.99,
             [2] = 0.97,
             [3] = 1.03,
+        });
+    }
+
+    [Fact]
+    public void ApplyPerObjectFlowRatioDeltas_ThreeDecimalPerfectionistDeltas_AppliesBaselinePlusDelta()
+    {
+        // Issue #2142 acceptance criterion: Perfectionist's finer 0.005 step size means bundled
+        // object names carry three decimal places (e.g. "flowrate_0.005", "flowrate_m0.035")
+        // rather than Recommended's two (e.g. "flowrate_0.01") — this must parse and apply
+        // correctly, both positive and negative, without any parser change.
+        (string Id, string Name)[] objects =
+        [
+            ("1", "flowrate_0.005"),
+            ("2", "flowrate_m0.005"),
+            ("3", "flowrate_m0.035"),
+        ];
+        string source3mf = CreateSynthetic3mf(objects);
+
+        string resultPath = FlowRateDeltaCalibrationConfigurator.ApplyPerObjectFlowRatioDeltas(
+            source3mf,
+            _tempDir,
+            baselineFlowRatio: 0.98,
+            NullLogger.Instance);
+
+        using ZipArchive archive = ZipFile.OpenRead(resultPath);
+        ZipArchiveEntry configEntry = archive.GetEntry("Metadata/Slic3r_PE_model.config")!;
+        string configXml = ReadEntryText(configEntry);
+
+        System.Xml.Linq.XDocument doc = System.Xml.Linq.XDocument.Parse(configXml);
+        Dictionary<int, double> flowRatiosById = doc.Root!.Elements("object")
+            .ToDictionary(
+                o => int.Parse(o.Attribute("id")!.Value, System.Globalization.CultureInfo.InvariantCulture),
+                o => double.Parse(
+                    o.Elements("metadata").First(m => m.Attribute("key")!.Value == "flow_ratio").Attribute("value")!.Value,
+                    System.Globalization.CultureInfo.InvariantCulture));
+
+        flowRatiosById.Should().BeEquivalentTo(new Dictionary<int, double>
+        {
+            [1] = 0.985,
+            [2] = 0.975,
+            [3] = 0.945,
         });
     }
 
@@ -1396,17 +1445,18 @@ public class CalibrationTests : IDisposable
     }
 
     [Fact]
-    public void PrepareCalibrationModel_YoloPerfectionistMethod_ThrowsBecauseDeltaOverridesAreNotYetSupported()
+    public void PrepareCalibrationModel_YoloPerfectionistMethod_AppliesBaselinePlusDeltaFlowRatios()
     {
-        // FlowRateYoloPerfectionist remains gated (issue #2142) even though the same delta-based
-        // naming scheme is now supported for FlowRateYoloRecommended (issue #2141) — the worker
-        // must still fail loudly here instead of silently copying the resource unmodified (which
-        // would slice an uncalibrated result) or misapplying the pass1/2 absolute-percentage
-        // parser (see CalibrationMethod.cs remarks, issue #2051).
-        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-yolo-" + Guid.NewGuid().ToString("N"));
+        // Issue #2142 acceptance criterion: FlowRateYoloPerfectionist must now actually apply the
+        // bundled resource's per-object flow-ratio deltas (baseline + delta) end to end through
+        // the real pipeline entrypoint, using Perfectionist's finer three-decimal-place naming
+        // (e.g. "flowrate_0.005", "flowrate_m0.035") — mirroring
+        // PrepareCalibrationModel_YoloRecommendedMethod_AppliesBaselinePlusDeltaFlowRatios below,
+        // which is the equivalent golden-path coverage for Recommended (issue #2141).
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-yolo-perfectionist-" + Guid.NewGuid().ToString("N"));
         string resourcePath = Path.Combine(calibResourcesRoot, "filament_flow", "Orca-LinearFlow_fine.3mf");
         Directory.CreateDirectory(Path.GetDirectoryName(resourcePath)!);
-        CreateSynthetic3mfAt(resourcePath, [("1", "flowrate_0.01"), ("2", "flowrate_m0.01")]);
+        CreateSynthetic3mfAt(resourcePath, [("1", "flowrate_0.005"), ("2", "flowrate_m0.035")]);
 
         OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
         string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
@@ -1414,17 +1464,63 @@ public class CalibrationTests : IDisposable
         var job = new DistributedSlicingJob
         {
             CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.FlowRateYoloPerfectionist),
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.98 },
+            },
+        };
+
+        string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
+
+        File.Exists(preparedPath).Should().BeTrue();
+        using ZipArchive archive = ZipFile.OpenRead(preparedPath);
+        ZipArchiveEntry configEntry = archive.GetEntry("Metadata/Slic3r_PE_model.config")!;
+        string configXml = ReadEntryText(configEntry);
+        System.Xml.Linq.XDocument doc = System.Xml.Linq.XDocument.Parse(configXml);
+        Dictionary<int, double> flowRatiosById = doc.Root!.Elements("object")
+            .ToDictionary(
+                o => int.Parse(o.Attribute("id")!.Value, System.Globalization.CultureInfo.InvariantCulture),
+                o => double.Parse(
+                    o.Elements("metadata").First(m => m.Attribute("key")!.Value == "flow_ratio").Attribute("value")!.Value,
+                    System.Globalization.CultureInfo.InvariantCulture));
+
+        flowRatiosById.Should().BeEquivalentTo(new Dictionary<int, double>
+        {
+            [1] = 0.985,
+            [2] = 0.945,
+        });
+    }
+
+    [Fact]
+    public void PrepareCalibrationModel_YoloPerfectionistMethod_UnparseableObjectName_ThrowsWithoutLeakingPath()
+    {
+        // Issue #2142 acceptance criterion (control case): an unparseable object name in the
+        // bundled resource must still refuse loudly through the real pipeline entrypoint, not
+        // just the shared static configurator tested in isolation above — and the failure must
+        // not disclose internal worker filesystem paths, mirroring every other calibration
+        // method's equivalent control test in this file.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-yolo-perfectionist-badname-" + Guid.NewGuid().ToString("N"));
+        string resourcePath = Path.Combine(calibResourcesRoot, "filament_flow", "Orca-LinearFlow_fine.3mf");
+        Directory.CreateDirectory(Path.GetDirectoryName(resourcePath)!);
+        CreateSynthetic3mfAt(resourcePath, [("1", "flowrate_0.005"), ("2", "Body_2")]);
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.FlowRateYoloPerfectionist),
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.98 },
+            },
         };
 
         Action act = () => pipeline.PrepareCalibrationModel(job, workDir);
 
         act.Should().Throw<InvalidOperationException>()
-            .Which.Message.Should().Contain(
-                "not yet slicer-supported",
-                "the message must explain *why* the job failed (delta-based overrides are not yet " +
-                "supported), not just that it failed with some InvalidOperationException — a caller " +
-                "cannot otherwise distinguish this from an unrelated internal error")
-            .And.NotContain(
+            .WithMessage("*Body_2*")
+            .Which.Message.Should().NotContain(
                 calibResourcesRoot,
                 "the exception message must not disclose internal worker filesystem paths");
     }
