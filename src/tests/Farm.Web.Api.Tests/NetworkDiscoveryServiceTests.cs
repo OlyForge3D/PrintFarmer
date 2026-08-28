@@ -62,7 +62,7 @@ public class NetworkDiscoveryServiceTests
         _ = result.Backend.Should().Be(PrinterBackend.PrusaLink);
     }
 
-    private static object CreatePrinterInfo(string name)
+    private static TestPrinterInfo CreatePrinterInfo(string name)
     {
         return CreateTestPrinterInfo(name, "Test Manufacturer", "Test Model", "Test Firmware", "1.0.0");
     }
@@ -138,17 +138,17 @@ public class NetworkDiscoveryServiceTests
         _ = result.Model.Should().BeNull("because Unknown model should not be set");
     }
 
-    private static object CreatePrinterInfoWithUnknownManufacturer(string name)
+    private static TestPrinterInfo CreatePrinterInfoWithUnknownManufacturer(string name)
     {
         return CreateTestPrinterInfo(name, "Unknown", "Test Model", "Test Firmware", "1.0.0");
     }
 
-    private static object CreatePrinterInfoWithUnknownModel(string name)
+    private static TestPrinterInfo CreatePrinterInfoWithUnknownModel(string name)
     {
         return CreateTestPrinterInfo(name, "Test Manufacturer", "Unknown", "Test Firmware", "1.0.0");
     }
 
-    private static object CreatePrinterInfoWithUnknownValues(string name)
+    private static TestPrinterInfo CreatePrinterInfoWithUnknownValues(string name)
     {
         return CreateTestPrinterInfo(name, "Unknown", "Unknown", "Test Firmware", "1.0.0");
     }
@@ -188,7 +188,7 @@ public class NetworkDiscoveryServiceTests
         }
     }
 
-    private static object CreatePrinterInfoWithPartialUnknown(string name)
+    private static TestPrinterInfo CreatePrinterInfoWithPartialUnknown(string name)
     {
         return CreateTestPrinterInfo(name, "MyUnknown Manufacturer", "Model Unknown Type", "Test Firmware", "1.0.0");
     }
@@ -262,17 +262,17 @@ public class NetworkDiscoveryServiceTests
         _ = result.Model.Should().BeNull("because manufacturer is null, so model should also be null");
     }
 
-    private static object CreatePrinterInfoWithUnknownPrusa(string name)
+    private static TestPrinterInfo CreatePrinterInfoWithUnknownPrusa(string name)
     {
         return CreateTestPrinterInfo(name, "Prusa Research", "Unknown Prusa", "PrusaLink", "1.0.0");
     }
 
-    private static object CreatePrinterInfoWithNullManufacturer(string name)
+    private static TestPrinterInfo CreatePrinterInfoWithNullManufacturer(string name)
     {
         return CreateTestPrinterInfo(name, null, "Valid Model", "Test Firmware", "1.0.0");
     }
 
-    private static object CreatePrinterInfoWithUnknownManufacturerValidModel(string name)
+    private static TestPrinterInfo CreatePrinterInfoWithUnknownManufacturerValidModel(string name)
     {
         return CreateTestPrinterInfo(name, "Unknown", "Valid Model Name", "Test Firmware", "1.0.0");
     }
@@ -299,7 +299,7 @@ public class NetworkDiscoveryServiceTests
         public string? Version { get; set; }
     }
 
-    private static object CreateTestPrinterInfo(string name, string? manufacturer = null, string? model = null, string? firmware = null, string? version = null)
+    private static TestPrinterInfo CreateTestPrinterInfo(string name, string? manufacturer = null, string? model = null, string? firmware = null, string? version = null)
     {
         return new TestPrinterInfo
         {
