@@ -28,10 +28,13 @@
 /// resources (<c>Orca-LinearFlow.3mf</c>/<c>Orca-LinearFlow_fine.3mf</c>) encode per-object flow
 /// ratios as baseline-relative deltas (for example <c>flowrate_0.01</c>, <c>flowrate_m0.01</c>),
 /// not the absolute percentages (<c>flowrate_95</c>) that <c>FlowRateCalibrationConfigurator</c>
-/// parses for <see cref="FlowRatePass1"/>/<see cref="FlowRatePass2"/>. Until a delta-aware
-/// configurator exists, the worker deliberately fails these two methods loudly (see
-/// <c>OrcaSlicingPipelineService.PrepareCalibrationModel</c>) rather than silently reusing the
-/// pass1/2 parser and producing near-identical, uncalibrated G-code for every block.
+/// parses for <see cref="FlowRatePass1"/>/<see cref="FlowRatePass2"/>. Issue #2141 shipped
+/// <c>FlowRateDeltaCalibrationConfigurator</c>, a dedicated delta-aware configurator that applies
+/// <c>baseline + delta</c> per object (baseline being the source filament profile's current
+/// <c>filament_flow_ratio</c>), and wired it in for <see cref="FlowRateYoloRecommended"/> only.
+/// <see cref="FlowRateYoloPerfectionist"/> is tracked separately (issue #2142) and still fails
+/// loudly in <c>OrcaSlicingPipelineService.PrepareCalibrationModel</c> rather than silently
+/// reusing the pass1/2 parser and producing near-identical, uncalibrated G-code for every block.
 /// </para>
 /// </remarks>
 public enum CalibrationMethod
@@ -47,15 +50,15 @@ public enum CalibrationMethod
 
     /// <summary>
     /// Flow rate calibration using OrcaSlicer's linear-regression "YOLO (Recommended)" method
-    /// (coarse pass). See the type-level remarks for why the worker does not yet slice this
-    /// method's per-object overrides.
+    /// (coarse pass). Slicer-supported via <c>FlowRateDeltaCalibrationConfigurator</c> (issue
+    /// #2141); see the type-level remarks.
     /// </summary>
     FlowRateYoloRecommended,
 
     /// <summary>
     /// Flow rate calibration using OrcaSlicer's linear-regression "YOLO (Perfectionist)" method
     /// (fine pass). See the type-level remarks for why the worker does not yet slice this
-    /// method's per-object overrides.
+    /// method's per-object overrides (tracked separately, issue #2142).
     /// </summary>
     FlowRateYoloPerfectionist,
 }
@@ -89,8 +92,8 @@ public static class CalibrationMethods
 
     /// <summary>
     /// The wire names of every calibration method <see cref="TryParse"/> recognizes, including
-    /// <see cref="CalibrationMethod.FlowRateYoloRecommended"/>/<see cref="CalibrationMethod.FlowRateYoloPerfectionist"/>,
-    /// which parse successfully but are not yet slicer-supported (see <see cref="IsSlicerSupported"/>).
+    /// <see cref="CalibrationMethod.FlowRateYoloPerfectionist"/>, which parses successfully but is
+    /// not yet slicer-supported (see <see cref="IsSlicerSupported"/>).
     /// Do not surface this list as "supported methods" in a client-facing error message — use
     /// <see cref="ClientAcceptedWireNames"/> for that.
     /// </summary>
@@ -111,9 +114,8 @@ public static class CalibrationMethods
     /// catalogue. A name that isn't catalogued at all (for example <c>"pa_pattern"</c> or
     /// <c>"pa_line"</c>, both intentionally excluded — see the licensing note on
     /// <see cref="CalibrationMethod"/>) returns <see langword="false"/>. Note this does
-    /// <em>not</em> mean the parsed method is ready for the worker to slice today: two
-    /// catalogued methods (<see cref="CalibrationMethod.FlowRateYoloRecommended"/> and
-    /// <see cref="CalibrationMethod.FlowRateYoloPerfectionist"/>) parse successfully but are
+    /// <em>not</em> mean the parsed method is ready for the worker to slice today:
+    /// <see cref="CalibrationMethod.FlowRateYoloPerfectionist"/> parses successfully but is
     /// not yet slicer-supported — see <see cref="IsSlicerSupported"/> and
     /// <see cref="ClientAcceptedWireNames"/> for the check that actually gates client
     /// submission.
@@ -138,19 +140,19 @@ public static class CalibrationMethods
 
     /// <summary>
     /// Whether the worker can actually slice a job for <paramref name="method"/> today.
-    /// <see cref="CalibrationMethod.FlowRateYoloRecommended"/> and
-    /// <see cref="CalibrationMethod.FlowRateYoloPerfectionist"/> are catalogued (issue #2051) so
-    /// their wire names round-trip and their resource metadata is available, but the worker
-    /// cannot yet apply their delta-based per-object flow-ratio overrides (see the
-    /// <see cref="CalibrationMethod"/> type remarks) and would only fail late, after dispatch.
+    /// <see cref="CalibrationMethod.FlowRateYoloRecommended"/> now has a delta-aware configurator
+    /// (issue #2141 — <c>FlowRateDeltaCalibrationConfigurator</c>) and is slicer-supported.
+    /// <see cref="CalibrationMethod.FlowRateYoloPerfectionist"/> remains catalogued (issue #2051)
+    /// — its wire name and resource metadata are available — but is tracked separately (issue
+    /// #2142) and still cannot be sliced: the worker would only fail late, after dispatch.
     /// Callers that accept a client-supplied method — chiefly the slice-job submission
-    /// endpoint — must reject these methods with <see langword="false"/> here, at the API
+    /// endpoint — must reject that method with <see langword="false"/> here, at the API
     /// boundary, instead of letting <see cref="TryParse"/> alone gate acceptance.
     /// </summary>
     /// <param name="method">A method that already parsed successfully via <see cref="TryParse"/>.</param>
     /// <returns><see langword="true"/> when the worker can slice this method today.</returns>
-    public static bool IsSlicerSupported(CalibrationMethod method) => method is not (
-        CalibrationMethod.FlowRateYoloRecommended or CalibrationMethod.FlowRateYoloPerfectionist);
+    public static bool IsSlicerSupported(CalibrationMethod method) =>
+        method is not CalibrationMethod.FlowRateYoloPerfectionist;
 
     /// <summary>
     /// A descriptive placeholder model file name for a calibration job, used in place of a
