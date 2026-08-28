@@ -52,6 +52,8 @@ public class CalibrationTests : IDisposable
     [InlineData("FLOW_RATE_YOLO_RECOMMENDED", CalibrationMethod.FlowRateYoloRecommended)]
     [InlineData("max_volumetric_speed", CalibrationMethod.MaximumVolumetricSpeed)]
     [InlineData("MAX_VOLUMETRIC_SPEED", CalibrationMethod.MaximumVolumetricSpeed)]
+    [InlineData("input_shaping", CalibrationMethod.InputShaping)]
+    [InlineData("INPUT_SHAPING", CalibrationMethod.InputShaping)]
     public void TryParse_SupportedWireName_ReturnsExpectedMethod(string wireName, CalibrationMethod expected)
     {
         bool parsed = CalibrationMethods.TryParse(wireName, out CalibrationMethod method);
@@ -102,6 +104,10 @@ public class CalibrationTests : IDisposable
         // advertised to clients like every other built method.
         CalibrationMethods.ClientAcceptedWireNames.Should().Contain("max_volumetric_speed");
 
+        // Issue #2139: input shaping is report-only but fully slicer-supported (the worker
+        // slices the bundled ringing tower unmodified), so it must be advertised too.
+        CalibrationMethods.ClientAcceptedWireNames.Should().Contain("input_shaping");
+
         foreach (string wireName in CalibrationMethods.ClientAcceptedWireNames)
         {
             CalibrationMethods.TryParse(wireName, out CalibrationMethod method).Should().BeTrue();
@@ -146,6 +152,105 @@ public class CalibrationTests : IDisposable
     public void IsSlicerSupported_MaxVolumetricSpeed_ReturnsTrue()
     {
         CalibrationMethods.IsSlicerSupported(CalibrationMethod.MaximumVolumetricSpeed).Should().BeTrue();
+    }
+
+    [Fact]
+    public void DefaultModelFileName_InputShaping_ReturnsRingingTowerDrc()
+    {
+        // Verified against a local OrcaSlicer install: resources/calib/input_shaping/ringing_tower.drc.
+        CalibrationMethods.DefaultModelFileName(CalibrationMethod.InputShaping).Should().Be("ringing_tower.drc");
+    }
+
+    [Fact]
+    public void RelativeResourcePath_InputShaping_ResolvesUnderInputShapingDirectory()
+    {
+        CalibrationMethods.RelativeResourcePath(CalibrationMethod.InputShaping).Should()
+            .Be(Path.Combine("input_shaping", "ringing_tower.drc"));
+    }
+
+    [Fact]
+    public void IsSlicerSupported_InputShaping_ReturnsTrue()
+    {
+        // Report-only (issue #2139) does not mean unsupported: the worker can and does slice the
+        // bundled ringing tower unmodified, exactly like TemperatureTower/MaximumVolumetricSpeed.
+        CalibrationMethods.IsSlicerSupported(CalibrationMethod.InputShaping).Should().BeTrue();
+    }
+
+    #endregion
+
+    #region InputShapingFirmwareFlavors
+
+    [Theory]
+    [InlineData("klipper")]
+    [InlineData("KLIPPER")]
+    [InlineData("Klipper")]
+    [InlineData("marlin")]
+    [InlineData("MARLIN")]
+    [InlineData(" klipper ")]
+    public void IsSupported_KnownFirmwareFlavorAnyCase_ReturnsTrue(string firmwareFlavor)
+    {
+        InputShapingFirmwareFlavors.IsSupported(firmwareFlavor).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("reprap")]
+    [InlineData("smoothieware")]
+    [InlineData("klippper")]
+    public void IsSupported_UnsupportedOrMissingFirmwareFlavor_ReturnsFalse(string? firmwareFlavor)
+    {
+        InputShapingFirmwareFlavors.IsSupported(firmwareFlavor).Should().BeFalse();
+    }
+
+    #endregion
+
+    #region CalibrationParameters — FirmwareFlavor
+
+    [Fact]
+    public void CalibrationParameters_Parse_InputShapingWithFirmwareFlavor_ParsesFlavor()
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(
+            """{"firmware_flavor": "klipper"}""",
+            CalibrationMethod.InputShaping);
+
+        parameters.FirmwareFlavor.Should().Be("klipper");
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_InputShapingWithoutParams_FirmwareFlavorIsNull()
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(null, CalibrationMethod.InputShaping);
+
+        parameters.FirmwareFlavor.Should().BeNull();
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_InputShapingWithNonStringFlavor_FallsBackToNull()
+    {
+        // A malformed client payload (firmware_flavor as a number) must not throw — it simply
+        // fails to populate FirmwareFlavor, which the worker then refuses explicitly.
+        CalibrationParameters parameters = CalibrationParameters.Parse(
+            """{"firmware_flavor": 42}""",
+            CalibrationMethod.InputShaping);
+
+        parameters.FirmwareFlavor.Should().BeNull();
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_MixedNumericAndFirmwareFlavor_BothParseIndependently()
+    {
+        // A single CalibrationParamsJson payload can now legally mix numeric keys (used by other
+        // methods) with the string firmware_flavor key (issue #2139) — confirms the per-key
+        // JsonDocument-based parse doesn't regress numeric parsing when a string value is present
+        // elsewhere in the same object, unlike the old whole-payload Dictionary<string,double>
+        // deserialization, which would have thrown and fallen back to all defaults.
+        CalibrationParameters parameters = CalibrationParameters.Parse(
+            """{"start_temperature": 220, "firmware_flavor": "marlin"}""",
+            CalibrationMethod.InputShaping);
+
+        parameters.FirmwareFlavor.Should().Be("marlin");
     }
 
     #endregion
@@ -609,6 +714,78 @@ public class CalibrationTests : IDisposable
 
         File.Exists(preparedPath).Should().BeTrue();
         File.ReadAllText(preparedPath).Should().Be("fake-mvs-resource");
+    }
+
+    [Theory]
+    [InlineData("klipper")]
+    [InlineData("marlin")]
+    [InlineData("KLIPPER")]
+    public void PrepareCalibrationModel_InputShapingMethod_SupportedFirmwareFlavor_CopiesResourceUnmodified(string firmwareFlavor)
+    {
+        // Issue #2139: ringing_tower.drc is an opaque OrcaSlicer binary format (confirmed by magic
+        // bytes against a local install, not a ZIP/3MF archive), so — like the temperature
+        // tower's and max volumetric speed's .drc resources — the worker must copy it unmodified
+        // rather than attempt to parse and rewrite it. Report-only: no per-object rewriting, no
+        // profile injection, just the resource.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-is-" + Guid.NewGuid().ToString("N"));
+        string ringingTowerPath = Path.Combine(calibResourcesRoot, "input_shaping", "ringing_tower.drc");
+        Directory.CreateDirectory(Path.GetDirectoryName(ringingTowerPath)!);
+        File.WriteAllText(ringingTowerPath, "fake-ringing-tower-resource");
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.InputShaping),
+            CalibrationParamsJson = $$"""{"firmware_flavor": "{{firmwareFlavor}}"}""",
+        };
+
+        string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
+
+        File.Exists(preparedPath).Should().BeTrue();
+        File.ReadAllText(preparedPath).Should().Be("fake-ringing-tower-resource");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("""{}""")]
+    [InlineData("""{"firmware_flavor": ""}""")]
+    [InlineData("""{"firmware_flavor": "reprap"}""")]
+    [InlineData("""{"firmware_flavor": "smoothieware"}""")]
+    public void PrepareCalibrationModel_InputShapingMethod_UnsupportedOrMissingFirmwareFlavor_ThrowsExplicitRefusal(
+        string? calibrationParamsJson)
+    {
+        // Issue #2139: input shaping is firmware-specific — the operator must apply the result
+        // (frequency/damping-factor) to their own firmware config, and Klipper's [input_shaper]
+        // vs. Marlin's M593 need different guidance. A missing or unrecognized firmware flavor
+        // must fail loudly here, before the worker slices a tower the operator has no
+        // firmware-specific guidance to act on — not silently default to either flavor and not
+        // silently no-op.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-is-refuse-" + Guid.NewGuid().ToString("N"));
+        string ringingTowerPath = Path.Combine(calibResourcesRoot, "input_shaping", "ringing_tower.drc");
+        Directory.CreateDirectory(Path.GetDirectoryName(ringingTowerPath)!);
+        File.WriteAllText(ringingTowerPath, "fake-ringing-tower-resource");
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.InputShaping),
+            CalibrationParamsJson = calibrationParamsJson,
+        };
+
+        Action act = () => pipeline.PrepareCalibrationModel(job, workDir);
+
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain(
+                "firmware flavor",
+                "the message must explain that a supported firmware flavor is required, not just that " +
+                "it failed with some InvalidOperationException")
+            .And.NotContain(
+                calibResourcesRoot,
+                "the exception message must not disclose internal worker filesystem paths");
     }
 
     [Fact]

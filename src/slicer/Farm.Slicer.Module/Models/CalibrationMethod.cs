@@ -78,6 +78,28 @@
 /// <c>OrcaSlicingPipelineService.PrepareCalibrationModel</c>) rather than silently reusing the
 /// pass1/2 parser and producing near-identical, uncalibrated G-code for every block.
 /// </para>
+/// <para>
+/// <see cref="InputShaping"/> (issue #2139): report-only per the architecture decision recorded
+/// on that issue (Dallas). Input shaping compensates for mechanical resonance in the printer
+/// frame, and the result is applied to <em>firmware</em> — Klipper's <c>[input_shaper]</c>
+/// (typically measured via <c>SHAPER_CALIBRATE</c>/<c>TEST_RESONANCES</c> with an accelerometer,
+/// or read off a printed ringing tower) or Marlin's <c>M593</c> ZV input shaping — never to a
+/// slicer or filament setting PrintFarmer can write. There is deliberately no settable field for
+/// this method anywhere (no <c>Printer</c> column, no filament-profile-clone patch step): the
+/// worker only slices the bundled ringing-tower resource so the operator can print and measure
+/// it, and the result is captured purely as a <c>CalibrationObservation</c> the operator
+/// acts on themselves in their firmware config. Upstream's bundled resource
+/// (<c>resources/calib/input_shaping/ringing_tower.drc</c>, confirmed against a local OrcaSlicer
+/// install: DRAC magic bytes, not a ZIP/3MF archive) is opaque like <see cref="TemperatureTower"/>
+/// and <see cref="MaximumVolumetricSpeed"/>'s <c>.drc</c> resources, so the worker copies it
+/// unmodified rather than attempting to parse and rewrite it. Because the measured result is
+/// firmware-specific (a Klipper shaper frequency/damping-ratio pair vs. Marlin's coarser
+/// <c>M593</c> parameters), a calibration job for this method must name the firmware flavor it
+/// targets (<c>"klipper"</c> or <c>"marlin"</c>, via <c>CalibrationParameters.FirmwareFlavor</c>);
+/// an unsupported or missing flavor is refused explicitly by
+/// <c>OrcaSlicingPipelineService.PrepareCalibrationModel</c> rather than silently slicing a tower
+/// the operator has no firmware-specific guidance to act on.
+/// </para>
 /// </remarks>
 public enum CalibrationMethod
 {
@@ -109,6 +131,13 @@ public enum CalibrationMethod
     /// resource format and the permissive-ceiling configurator this method needs.
     /// </summary>
     MaximumVolumetricSpeed,
+
+    /// <summary>
+    /// Input shaping / resonance-compensation calibration (issue #2139). Report-only: see the
+    /// type-level remarks for why this method never writes a filament profile, a
+    /// <c>Printer</c> field, or firmware configuration, and requires a firmware flavor.
+    /// </summary>
+    InputShaping,
 }
 
 /// <summary>
@@ -127,6 +156,7 @@ public static class CalibrationMethods
             ["flow_rate_yolo_recommended"] = CalibrationMethod.FlowRateYoloRecommended,
             ["flow_rate_yolo_perfectionist"] = CalibrationMethod.FlowRateYoloPerfectionist,
             ["max_volumetric_speed"] = CalibrationMethod.MaximumVolumetricSpeed,
+            ["input_shaping"] = CalibrationMethod.InputShaping,
         };
 
     private static readonly Dictionary<CalibrationMethod, string> MethodToWireName =
@@ -138,6 +168,7 @@ public static class CalibrationMethods
             [CalibrationMethod.FlowRateYoloRecommended] = "flow_rate_yolo_recommended",
             [CalibrationMethod.FlowRateYoloPerfectionist] = "flow_rate_yolo_perfectionist",
             [CalibrationMethod.MaximumVolumetricSpeed] = "max_volumetric_speed",
+            [CalibrationMethod.InputShaping] = "input_shaping",
         };
 
     /// <summary>
@@ -218,6 +249,7 @@ public static class CalibrationMethods
         CalibrationMethod.FlowRateYoloRecommended => "Orca-LinearFlow.3mf",
         CalibrationMethod.FlowRateYoloPerfectionist => "Orca-LinearFlow_fine.3mf",
         CalibrationMethod.MaximumVolumetricSpeed => "SpeedTestStructure.drc",
+        CalibrationMethod.InputShaping => "ringing_tower.drc",
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 
@@ -233,6 +265,42 @@ public static class CalibrationMethods
         CalibrationMethod.FlowRateYoloRecommended => Path.Combine("filament_flow", "Orca-LinearFlow.3mf"),
         CalibrationMethod.FlowRateYoloPerfectionist => Path.Combine("filament_flow", "Orca-LinearFlow_fine.3mf"),
         CalibrationMethod.MaximumVolumetricSpeed => Path.Combine("volumetric_speed", "SpeedTestStructure.drc"),
+        CalibrationMethod.InputShaping => Path.Combine("input_shaping", "ringing_tower.drc"),
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
+}
+
+/// <summary>
+/// Canonical firmware flavors <see cref="CalibrationMethod.InputShaping"/> calibration (issue
+/// #2139) supports. Defined here — in <c>Farm.Slicer.Module</c>, referenced by both the API
+/// project (<c>SliceJobController</c>, which validates a client's request) and the worker project
+/// (<c>CalibrationParameters</c>, which re-validates defense-in-depth before slicing) — so the two
+/// layers share one source of truth instead of maintaining duplicate lists that could drift.
+/// </summary>
+public static class InputShapingFirmwareFlavors
+{
+    /// <summary>
+    /// Klipper: input shaping is tuned via the <c>SHAPER_CALIBRATE</c>/<c>TEST_RESONANCES</c>
+    /// macros (typically with an accelerometer, or by measuring a printed ringing tower) and
+    /// applied through the <c>[input_shaper]</c> config section.
+    /// </summary>
+    public const string Klipper = "klipper";
+
+    /// <summary>
+    /// Marlin: input shaping is configured via the <c>M593</c> ZV input shaping G-code command.
+    /// </summary>
+    public const string Marlin = "marlin";
+
+    /// <summary>The full set of supported firmware flavor wire values, in stable order.</summary>
+    public static readonly IReadOnlyList<string> Supported = [Klipper, Marlin];
+
+    /// <summary>
+    /// Whether <paramref name="firmwareFlavor"/> names a firmware flavor input shaping
+    /// calibration supports. Comparison is case-insensitive and trims surrounding whitespace; a
+    /// null, blank, or unrecognized value returns <see langword="false"/> — callers must refuse
+    /// those explicitly rather than silently defaulting to either supported flavor.
+    /// </summary>
+    public static bool IsSupported(string? firmwareFlavor) =>
+        !string.IsNullOrWhiteSpace(firmwareFlavor)
+        && Supported.Contains(firmwareFlavor.Trim(), StringComparer.OrdinalIgnoreCase);
 }

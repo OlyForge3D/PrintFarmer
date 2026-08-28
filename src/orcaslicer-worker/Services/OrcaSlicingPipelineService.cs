@@ -315,6 +315,25 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 "overrides for. A dedicated configurator is required before this method can be used.");
         }
 
+        if (method is CalibrationMethod.InputShaping)
+        {
+            // Input shaping (issue #2139) is report-only and firmware-specific: the resonance
+            // frequency/damping-factor result the operator measures off the printed ringing
+            // tower only means something once it is applied to their own firmware
+            // (Klipper's [input_shaper] vs Marlin's M593), and this worker never writes firmware
+            // configuration. Defense-in-depth: refuse explicitly here even though the API
+            // boundary (SliceJobController) already validates this, rather than silently slicing
+            // a tower the operator has no firmware-specific guidance to act on.
+            CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, method);
+            if (!InputShapingFirmwareFlavors.IsSupported(parameters.FirmwareFlavor))
+            {
+                throw new InvalidOperationException(
+                    $"Calibration method '{job.CalibrationMethod}' requires a supported firmware flavor " +
+                    $"(one of: {string.Join(", ", InputShapingFirmwareFlavors.Supported)}); " +
+                    $"got '{parameters.FirmwareFlavor}'.");
+            }
+        }
+
         string destinationPath = Path.Combine(workDir, Path.GetFileName(sourcePath));
         File.Copy(sourcePath, destinationPath, overwrite: true);
         return destinationPath;

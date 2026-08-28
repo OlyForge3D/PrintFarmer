@@ -47,10 +47,33 @@ public sealed record CalibrationParameters
     public double MaxVolumetricSpeedCeilingMm3s { get; init; } = 50;
 
     /// <summary>
-    /// Parses a job's <c>CalibrationParamsJson</c> (a flat <c>string, double</c> JSON object) into
-    /// strongly typed parameters for <paramref name="method"/>, applying that method's defaults for
-    /// any key that is absent or the JSON itself is null/blank.
+    /// Target firmware flavor for an input shaping / resonance-compensation calibration (issue
+    /// #2139), from <c>calibration.firmwareFlavor</c>. Report-only: the worker never writes
+    /// firmware configuration itself, but it must know which firmware the operator targets so it
+    /// can refuse an unsupported or missing flavor explicitly (see
+    /// <see cref="InputShapingFirmwareFlavors.IsSupported"/>) rather than silently slicing a
+    /// ringing tower the operator has no firmware-specific guidance to act on.
+    /// <see langword="null"/> means the client did not supply one at all.
     /// </summary>
+    public string? FirmwareFlavor { get; init; }
+
+    /// <summary>
+    /// Parses a job's <c>CalibrationParamsJson</c> into strongly typed parameters for
+    /// <paramref name="method"/>, applying that method's defaults for any key that is absent,
+    /// the wrong JSON kind, or the JSON itself is null/blank/malformed.
+    /// </summary>
+    /// <remarks>
+    /// Parses per-key via <see cref="JsonDocument"/> rather than deserializing the whole payload
+    /// into a single <c>Dictionary&lt;string, double&gt;</c> (as earlier revisions did), because
+    /// <see cref="CalibrationMethod.InputShaping"/> (issue #2139) needs a string <see cref="FirmwareFlavor"/>
+    /// alongside every other method's numeric-only params in the same JSON object; a
+    /// whole-payload <c>Dictionary&lt;string, double&gt;</c> deserialization throws and falls back
+    /// to <em>all</em> defaults the instant any key holds a string, which would make a firmware
+    /// flavor unparseable. Per-key extraction keeps every existing numeric method's behavior
+    /// unchanged (a non-numeric value at a numeric key still falls back to that key's own
+    /// default, exactly as the old whole-payload catch-all did) while adding string support only
+    /// where a method actually asks for it.
+    /// </remarks>
     public static CalibrationParameters Parse(string? calibrationParamsJson, CalibrationMethod method)
     {
         var defaults = new CalibrationParameters();
@@ -59,10 +82,11 @@ public sealed record CalibrationParameters
             return defaults;
         }
 
-        Dictionary<string, double>? values;
+        JsonElement root;
         try
         {
-            values = JsonSerializer.Deserialize<Dictionary<string, double>>(calibrationParamsJson);
+            using JsonDocument document = JsonDocument.Parse(calibrationParamsJson);
+            root = document.RootElement.Clone();
         }
         catch (JsonException)
         {
@@ -70,7 +94,7 @@ public sealed record CalibrationParameters
             return defaults;
         }
 
-        if (values is null)
+        if (root.ValueKind != JsonValueKind.Object)
         {
             return defaults;
         }
@@ -79,19 +103,23 @@ public sealed record CalibrationParameters
         {
             CalibrationMethod.TemperatureTower => defaults with
             {
-                StartTemperatureC = ReadOrDefault(values, "start_temperature", defaults.StartTemperatureC, MinTemperatureC, MaxTemperatureC),
-                TemperatureStepC = ReadOrDefault(values, "temperature_step", defaults.TemperatureStepC, MinTemperatureStepC, MaxTemperatureStepC),
-                BandHeightMm = ReadOrDefault(values, "band_height_mm", defaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm),
-                BandCount = (int)ReadOrDefault(values, "band_count", defaults.BandCount, MinBandCount, MaxBandCount),
+                StartTemperatureC = ReadOrDefault(root, "start_temperature", defaults.StartTemperatureC, MinTemperatureC, MaxTemperatureC),
+                TemperatureStepC = ReadOrDefault(root, "temperature_step", defaults.TemperatureStepC, MinTemperatureStepC, MaxTemperatureStepC),
+                BandHeightMm = ReadOrDefault(root, "band_height_mm", defaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm),
+                BandCount = (int)ReadOrDefault(root, "band_count", defaults.BandCount, MinBandCount, MaxBandCount),
             },
             CalibrationMethod.MaximumVolumetricSpeed => defaults with
             {
                 MaxVolumetricSpeedCeilingMm3s = ReadOrDefault(
-                    values,
+                    root,
                     "max_volumetric_speed_ceiling_mm3s",
                     defaults.MaxVolumetricSpeedCeilingMm3s,
                     MinVolumetricSpeedCeilingBoundMm3s,
                     MaxVolumetricSpeedCeilingBoundMm3s),
+            },
+            CalibrationMethod.InputShaping => defaults with
+            {
+                FirmwareFlavor = ReadStringOrDefault(root, "firmware_flavor", defaults.FirmwareFlavor),
             },
             _ => defaults,
         };
@@ -115,15 +143,17 @@ public sealed record CalibrationParameters
     private const double MaxVolumetricSpeedCeilingBoundMm3s = 100;
 
     /// <summary>
-    /// Reads <paramref name="key"/> from <paramref name="values"/>, falling back to
-    /// <paramref name="fallback"/> when the key is absent, non-finite (NaN/Infinity — never
-    /// producible by valid client JSON but defensively rejected anyway), or outside
-    /// [<paramref name="min"/>, <paramref name="max"/>]. This keeps a single adversarial or
-    /// malformed value from forcing unbounded loop counts or nonsensical gcode temperatures.
+    /// Reads <paramref name="key"/> from <paramref name="root"/>, falling back to
+    /// <paramref name="fallback"/> when the key is absent, not a JSON number, non-finite
+    /// (NaN/Infinity — never producible by valid client JSON but defensively rejected anyway), or
+    /// outside [<paramref name="min"/>, <paramref name="max"/>]. This keeps a single adversarial
+    /// or malformed value from forcing unbounded loop counts or nonsensical gcode temperatures.
     /// </summary>
-    private static double ReadOrDefault(Dictionary<string, double> values, string key, double fallback, double min, double max)
+    private static double ReadOrDefault(JsonElement root, string key, double fallback, double min, double max)
     {
-        if (!values.TryGetValue(key, out double value))
+        if (!root.TryGetProperty(key, out JsonElement element)
+            || element.ValueKind != JsonValueKind.Number
+            || !element.TryGetDouble(out double value))
         {
             return fallback;
         }
@@ -134,5 +164,20 @@ public sealed record CalibrationParameters
         }
 
         return value;
+    }
+
+    /// <summary>
+    /// Reads <paramref name="key"/> from <paramref name="root"/> as a string, falling back to
+    /// <paramref name="fallback"/> when the key is absent, blank, or not a JSON string.
+    /// </summary>
+    private static string? ReadStringOrDefault(JsonElement root, string key, string? fallback)
+    {
+        if (!root.TryGetProperty(key, out JsonElement element) || element.ValueKind != JsonValueKind.String)
+        {
+            return fallback;
+        }
+
+        string? value = element.GetString();
+        return string.IsNullOrWhiteSpace(value) ? fallback : value;
     }
 }
