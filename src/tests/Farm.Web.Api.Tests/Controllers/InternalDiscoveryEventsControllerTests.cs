@@ -119,7 +119,7 @@ public class InternalDiscoveryEventsControllerTests : IClassFixture<InternalDisc
 
         HttpResponseMessage response = await client.SendAsync(request);
 
-        await AssertControllerReachedWithSessionNotFound(response);
+        await AssertControllerReachedWithSessionNotFoundAsync(response);
     }
 
     [Fact]
@@ -147,7 +147,7 @@ public class InternalDiscoveryEventsControllerTests : IClassFixture<InternalDisc
 
         HttpResponseMessage response = await client.SendAsync(request);
 
-        await AssertControllerReachedWithSessionNotFound(response);
+        await AssertControllerReachedWithSessionNotFoundAsync(response);
     }
 
     [Fact]
@@ -166,7 +166,7 @@ public class InternalDiscoveryEventsControllerTests : IClassFixture<InternalDisc
 
         HttpResponseMessage response = await client.SendAsync(request);
 
-        await AssertControllerReachedWithSessionNotFound(response);
+        await AssertControllerReachedWithSessionNotFoundAsync(response);
     }
 
     [Fact]
@@ -260,7 +260,7 @@ public class InternalDiscoveryEventsControllerTests : IClassFixture<InternalDisc
         return request;
     }
 
-    private static async Task AssertControllerReachedWithSessionNotFound(HttpResponseMessage response)
+    private static async Task AssertControllerReachedWithSessionNotFoundAsync(HttpResponseMessage response)
     {
         // 404 with ProblemDetails code=resource_not_found is emitted only by the controller
         // action itself (see InternalDiscoveryEventsController.DiscoveryProblem). Any other

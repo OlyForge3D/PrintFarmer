@@ -41,7 +41,7 @@ public sealed class SdcpClientBusyTests
             BuildStatusBroadcast(currentStatus: [1])
         ]);
 
-        await using var env = await CreateSdcpMultiResponseServer(responseQueue);
+        await using var env = await CreateSdcpMultiResponseServerAsync(responseQueue);
 
         Func<Task> act = async () => await env.Client.StartPrintAsync(env.BaseUrl, "test.gcode");
 
@@ -62,7 +62,7 @@ public sealed class SdcpClientBusyTests
             BuildStatusBroadcast(currentStatus: [9])
         ]);
 
-        await using var env = await CreateSdcpMultiResponseServer(responseQueue);
+        await using var env = await CreateSdcpMultiResponseServerAsync(responseQueue);
 
         Func<Task> act = async () => await env.Client.StartPrintAsync(env.BaseUrl, "test.gcode");
 
@@ -83,7 +83,7 @@ public sealed class SdcpClientBusyTests
             BuildStatusBroadcast(currentStatus: [0])
         ]);
 
-        await using var env = await CreateSdcpMultiResponseServer(responseQueue);
+        await using var env = await CreateSdcpMultiResponseServerAsync(responseQueue);
 
         bool result = await env.Client.StartPrintAsync(env.BaseUrl, "test.gcode");
 
@@ -97,7 +97,7 @@ public sealed class SdcpClientBusyTests
     /// Creates a Kestrel WebSocket server that serves pre-queued response payloads,
     /// one per WebSocket connection, in FIFO order.
     /// </summary>
-    private static async Task<SdcpTestEnvironment> CreateSdcpMultiResponseServer(
+    private static async Task<SdcpTestEnvironment> CreateSdcpMultiResponseServerAsync(
         ConcurrentQueue<string> responseQueue)
     {
         int port = GetFreeTcpPort();

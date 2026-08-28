@@ -1414,7 +1414,7 @@ public sealed class NotificationPreferencesContractTests
         Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
         Farm.Infrastructure.Data.AppDbContext dbContext,
         System.Guid userId)>
-        BuildAttentionEndpointFixture()
+        BuildAttentionEndpointFixtureAsync()
     {
         (Farm.Infrastructure.Data.AppDbContext dbContext, System.Guid userId) = await BuildInMemoryDbWithUserAsync();
         NotificationsController controller = BuildController(dbContext, userId);
@@ -1431,7 +1431,7 @@ public sealed class NotificationPreferencesContractTests
         (NotificationsController controller,
          Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
          Farm.Infrastructure.Data.AppDbContext dbContext,
-         _) = await BuildAttentionEndpointFixture();
+         _) = await BuildAttentionEndpointFixtureAsync();
         await using AppDbContextGuard guard = new(dbContext);
 
         var payload = new AttentionPushPreferencesDto();
@@ -1458,7 +1458,7 @@ public sealed class NotificationPreferencesContractTests
         (NotificationsController controller,
          Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
          Farm.Infrastructure.Data.AppDbContext dbContext,
-         _) = await BuildAttentionEndpointFixture();
+         _) = await BuildAttentionEndpointFixtureAsync();
         await using AppDbContextGuard guard = new(dbContext);
 
         var payload = new AttentionPushPreferencesDto();
@@ -1482,7 +1482,7 @@ public sealed class NotificationPreferencesContractTests
         (NotificationsController controller,
          Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
          Farm.Infrastructure.Data.AppDbContext dbContext,
-         _) = await BuildAttentionEndpointFixture();
+         _) = await BuildAttentionEndpointFixtureAsync();
         await using AppDbContextGuard guard = new(dbContext);
 
         var payload = new AttentionPushPreferencesDto();
@@ -1506,7 +1506,7 @@ public sealed class NotificationPreferencesContractTests
         (NotificationsController controller,
          Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
          Farm.Infrastructure.Data.AppDbContext dbContext,
-         _) = await BuildAttentionEndpointFixture();
+         _) = await BuildAttentionEndpointFixtureAsync();
         await using AppDbContextGuard guard = new(dbContext);
 
         var payload = new AttentionPushPreferencesDto();
@@ -1542,7 +1542,7 @@ public sealed class NotificationPreferencesContractTests
         (NotificationsController controller,
          Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
          Farm.Infrastructure.Data.AppDbContext dbContext,
-         System.Guid userId) = await BuildAttentionEndpointFixture();
+         System.Guid userId) = await BuildAttentionEndpointFixtureAsync();
         await using AppDbContextGuard guard = new(dbContext);
 
         // Drive N=128 one-key requests. Each PUT adds exactly ONE unique
@@ -1603,7 +1603,7 @@ public sealed class NotificationPreferencesContractTests
         (NotificationsController controller,
          Moq.Mock<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate> gate,
          Farm.Infrastructure.Data.AppDbContext dbContext,
-         System.Guid userId) = await BuildAttentionEndpointFixture();
+         System.Guid userId) = await BuildAttentionEndpointFixtureAsync();
         await using AppDbContextGuard guard = new(dbContext);
 
         // Build the persisted state through the service so it goes through

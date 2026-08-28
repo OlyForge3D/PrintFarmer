@@ -43,7 +43,7 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
         _factory?.Dispose();
     }
 
-    private async Task<(Guid ManufacturerId, Guid ModelId)> SeedCatalog(string prefix = "Test")
+    private async Task<(Guid ManufacturerId, Guid ModelId)> SeedCatalogAsync(string prefix = "Test")
     {
         await using AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope();
         AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -86,7 +86,7 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
     [Fact]
     public async Task CreatePrinter_MultiMaterialTrue_CreatesFourMmuGateToolheads()
     {
-        (Guid mfgId, Guid modelId) = await SeedCatalog("MMU");
+        (Guid mfgId, Guid modelId) = await SeedCatalogAsync("MMU");
 
         // Seed a model template with MultiMaterial=true so CreatePrinterFromDto picks it up
         await using (AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope())
@@ -119,7 +119,7 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
     [Fact]
     public async Task CreatePrinter_MultiMaterialTrue_MmuGatesAreNotPrimary()
     {
-        (Guid mfgId, Guid modelId) = await SeedCatalog("NotPrimary");
+        (Guid mfgId, Guid modelId) = await SeedCatalogAsync("NotPrimary");
 
         await using (AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope())
         {
@@ -191,7 +191,7 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
     [Fact]
     public async Task CreatePrinter_MultiMaterialFalse_NoMmuGatesCreated()
     {
-        (Guid mfgId, Guid modelId) = await SeedCatalog("NoMMU");
+        (Guid mfgId, Guid modelId) = await SeedCatalogAsync("NoMMU");
 
         CreatePrinterFromDiscoveryDto dto = CreatePrinterDto("Single Extruder", mfgId, modelId, false);
         PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(dto, CancellationToken.None);

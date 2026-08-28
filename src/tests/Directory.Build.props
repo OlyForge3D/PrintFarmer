@@ -76,7 +76,11 @@
            test), suppressed with a scoped #pragma warning disable/restore IDISP017 plus an
            explanatory comment at each site, since a using-declaration cannot express repeated or
            directly-observed Dispose() calls. -->
-      VSTHRD200;<!-- Use Async suffix for async methods (18) -->
+      <!-- VSTHRD200 (Use Async suffix for async methods) fully cleared across src/tests/ —
+           see #2106 burn-down. Each flagged async method/local function was renamed to end
+           in "Async" and every call site was updated accordingly; this is a purely
+           mechanical naming-convention fix with zero behavioral impact, so no suppressions
+           were required. -->
       VSTHRD002;<!-- Avoid problematic synchronous waits (16) -->
       IDISP024; <!-- Don't call GC.SuppressFinalize when no finalizer exists (16) -->
       CA2025;   <!-- Do not pass 'IDisposable' instances into unawaited tasks (14) -->

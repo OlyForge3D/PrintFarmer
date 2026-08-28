@@ -154,7 +154,7 @@ public class MoonrakerSnapmakerU1CameraTests
 
         bool firstStart = await manager.EnsureMonitorStartedAsync("http://u1.local", null, CancellationToken.None);
         await clock.FirstTimerCreated.WaitAsync(TimeSpan.FromSeconds(1));
-        Task<RecordingJsonRpcClient.StopInvocation> stopAttempt = rpc.StopInvocationAt(0);
+        Task<RecordingJsonRpcClient.StopInvocation> stopAttempt = rpc.StopInvocationAtAsync(0);
         ControlledTimeProvider.TimerFireResult fired = await clock.ReleaseLatestTimerAndAwaitAsync();
         fired.CallbackInvoked.Should().BeTrue("the authoritative idle-stop timer must execute");
         await stopAttempt.WaitAsync(TimeSpan.FromSeconds(10));
@@ -213,7 +213,7 @@ public class MoonrakerSnapmakerU1CameraTests
         r2.Should().BeTrue();
         r3.Should().BeTrue();
         rpc.Count("camera.start_monitor").Should().Be(1);
-        await clock.TimerCreatedAt(2).WaitAsync(TimeSpan.FromSeconds(1));
+        await clock.TimerCreatedAtAsync(2).WaitAsync(TimeSpan.FromSeconds(1));
 
         // Firing obsolete timers is a no-op because their backing CancellationTokenSource was
         // cancelled (not merely disposed), so Task.Delay disposed those timers already.
@@ -227,7 +227,7 @@ public class MoonrakerSnapmakerU1CameraTests
         rpc.Count("camera.stop_monitor").Should().Be(0, "stale timers must not stop the monitor");
 
         // Only the authoritative latest idle-stop timer should stop the monitor.
-        Task<RecordingJsonRpcClient.StopInvocation> firstStopAttempt = rpc.StopInvocationAt(0);
+        Task<RecordingJsonRpcClient.StopInvocation> firstStopAttempt = rpc.StopInvocationAtAsync(0);
         ControlledTimeProvider.TimerFireResult latest = await clock.ReleaseLatestTimerAndAwaitAsync();
         latest.CallbackInvoked.Should().BeTrue("the latest authoritative timer must execute");
         RecordingJsonRpcClient.StopInvocation stop = await firstStopAttempt.WaitAsync(TimeSpan.FromSeconds(1));
@@ -258,12 +258,12 @@ public class MoonrakerSnapmakerU1CameraTests
 
         // Fire timer[0]; stop fails → RescheduleStopRetry creates timer[1] (retry backoff).
         clock.ReleaseTimerAt(0);
-        await clock.TimerCreatedAt(1).WaitAsync(TimeSpan.FromSeconds(1));
+        await clock.TimerCreatedAtAsync(1).WaitAsync(TimeSpan.FromSeconds(1));
 
         // Access camera before retry fires; ScheduleIdleStop cancels timer[1] and creates timer[2].
         bool restarted = await manager.EnsureMonitorStartedAsync("http://u1.local", null, CancellationToken.None);
         restarted.Should().BeTrue();
-        await clock.TimerCreatedAt(2).WaitAsync(TimeSpan.FromSeconds(1));
+        await clock.TimerCreatedAtAsync(2).WaitAsync(TimeSpan.FromSeconds(1));
 
         // timer[1] (retry) is now disposed; firing it must be a no-op.
         ControlledTimeProvider.TimerFireResult staleRetry = await clock.ReleaseTimerAtAndAwaitAsync(1);
@@ -272,7 +272,7 @@ public class MoonrakerSnapmakerU1CameraTests
         rpc.Count("camera.stop_monitor").Should().Be(1, "only the failed idle-stop attempt has run so far");
 
         // Fire the new authoritative idle-stop timer[2]; stop succeeds.
-        Task<RecordingJsonRpcClient.StopInvocation> secondStopAttempt = rpc.StopInvocationAt(1);
+        Task<RecordingJsonRpcClient.StopInvocation> secondStopAttempt = rpc.StopInvocationAtAsync(1);
         ControlledTimeProvider.TimerFireResult authoritative = await clock.ReleaseLatestTimerAndAwaitAsync();
         authoritative.CallbackInvoked.Should().BeTrue("the latest authoritative timer must execute");
         RecordingJsonRpcClient.StopInvocation successfulStop = await secondStopAttempt.WaitAsync(TimeSpan.FromSeconds(1));
@@ -338,7 +338,7 @@ public class MoonrakerSnapmakerU1CameraTests
             }
         }
 
-        public Task<StopInvocation> StopInvocationAt(int index)
+        public Task<StopInvocation> StopInvocationAtAsync(int index)
         {
             lock (_stopSync)
             {
@@ -457,7 +457,7 @@ public class MoonrakerSnapmakerU1CameraTests
         }
 
         /// <summary>Returns a task that completes when the timer at <paramref name="index"/> (0-based) has been created.</summary>
-        public Task TimerCreatedAt(int index)
+        public Task TimerCreatedAtAsync(int index)
         {
             lock (_sync)
             {

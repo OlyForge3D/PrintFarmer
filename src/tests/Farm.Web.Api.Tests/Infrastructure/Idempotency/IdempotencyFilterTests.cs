@@ -129,7 +129,7 @@ public class IdempotencyFilterTests : IDisposable
         string responseBody,
         string responseContentType = "application/json")
     {
-        Task<ResourceExecutedContext> Next()
+        Task<ResourceExecutedContext> NextAsync()
         {
             context.HttpContext.Response.StatusCode = statusCode;
             context.HttpContext.Response.ContentType = responseContentType;
@@ -138,7 +138,7 @@ public class IdempotencyFilterTests : IDisposable
             return Task.FromResult(new ResourceExecutedContext(context, context.Filters));
         }
 
-        await filter.OnResourceExecutionAsync(context, Next);
+        await filter.OnResourceExecutionAsync(context, NextAsync);
     }
 
     private static async Task RunAsync(
@@ -149,7 +149,7 @@ public class IdempotencyFilterTests : IDisposable
         Action onExecute,
         string responseContentType = "application/json")
     {
-        Task<ResourceExecutedContext> Next()
+        Task<ResourceExecutedContext> NextAsync()
         {
             onExecute();
             context.HttpContext.Response.StatusCode = statusCode;
@@ -159,7 +159,7 @@ public class IdempotencyFilterTests : IDisposable
             return Task.FromResult(new ResourceExecutedContext(context, context.Filters));
         }
 
-        await filter.OnResourceExecutionAsync(context, Next);
+        await filter.OnResourceExecutionAsync(context, NextAsync);
     }
 
     [Fact]

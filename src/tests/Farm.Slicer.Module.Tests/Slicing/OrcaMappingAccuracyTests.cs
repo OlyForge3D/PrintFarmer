@@ -48,7 +48,7 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime, IDisposable
     public async Task FuzzyMatching_NameVariations_MatchesCorrectly()
     {
         // Arrange - Seed with known printer model
-        await SeedBambuLabPrinters();
+        await SeedBambuLabPrintersAsync();
 
         string bundleJson = """
         {
@@ -94,7 +94,7 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime, IDisposable
     public async Task ConfidenceScoring_ExactMatch_RanksHighest()
     {
         // Arrange - Seed with multiple similar printer models
-        await SeedSimilarPrinterModels();
+        await SeedSimilarPrinterModelsAsync();
 
         string bundleJson = """
         {
@@ -140,7 +140,7 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime, IDisposable
     public async Task CompatibilityChecking_BedSize_ExcludesIncompatible()
     {
         // Arrange - Seed with printers of different bed sizes
-        await SeedPrintersWithDifferentBedSizes();
+        await SeedPrintersWithDifferentBedSizesAsync();
 
         string bundleJson = """
         {
@@ -177,7 +177,7 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime, IDisposable
     public async Task NozzleDiameterMatching_RequiresExactMatch()
     {
         // Arrange - Seed with printers having different nozzle sizes
-        await SeedPrintersWithDifferentNozzles();
+        await SeedPrintersWithDifferentNozzlesAsync();
 
         string bundleJson = """
         {
@@ -377,7 +377,7 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime, IDisposable
     }
 
     // Helper methods for database seeding
-    private async Task<Manufacturer> EnsureManufacturerExists(string name)
+    private async Task<Manufacturer> EnsureManufacturerExistsAsync(string name)
     {
         using IServiceScope scope = _factory.Services.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -403,10 +403,10 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime, IDisposable
         return manufacturer;
     }
 
-    private async Task SeedBambuLabPrinters()
+    private async Task SeedBambuLabPrintersAsync()
     {
         // Ensure manufacturer exists (idempotent)
-        Manufacturer manufacturer = await EnsureManufacturerExists("Bambu Lab");
+        Manufacturer manufacturer = await EnsureManufacturerExistsAsync("Bambu Lab");
 
         using IServiceScope scope = _factory.Services.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -449,9 +449,9 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime, IDisposable
         _ = await db.SaveChangesAsync();
     }
 
-    private async Task SeedSimilarPrinterModels()
+    private async Task SeedSimilarPrinterModelsAsync()
     {
-        Manufacturer manufacturer = await EnsureManufacturerExists("Prusa Research");
+        Manufacturer manufacturer = await EnsureManufacturerExistsAsync("Prusa Research");
 
         using IServiceScope scope = _factory.Services.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -493,9 +493,9 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime, IDisposable
         _ = await db.SaveChangesAsync();
     }
 
-    private async Task SeedPrintersWithDifferentBedSizes()
+    private async Task SeedPrintersWithDifferentBedSizesAsync()
     {
-        Manufacturer manufacturer = await EnsureManufacturerExists("Generic Manufacturer");
+        Manufacturer manufacturer = await EnsureManufacturerExistsAsync("Generic Manufacturer");
 
         using IServiceScope scope = _factory.Services.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -537,9 +537,9 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime, IDisposable
         _ = await db.SaveChangesAsync();
     }
 
-    private async Task SeedPrintersWithDifferentNozzles()
+    private async Task SeedPrintersWithDifferentNozzlesAsync()
     {
-        Manufacturer manufacturer = await EnsureManufacturerExists("Generic Manufacturer");
+        Manufacturer manufacturer = await EnsureManufacturerExistsAsync("Generic Manufacturer");
 
         using IServiceScope scope = _factory.Services.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

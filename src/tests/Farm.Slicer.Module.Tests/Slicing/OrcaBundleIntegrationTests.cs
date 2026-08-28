@@ -48,7 +48,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime, IDisposable
     public async Task Import_WithMapping_ResolvesPrinterModels()
     {
         // Arrange - Seed database with known printer models
-        await SeedPrinterModels();
+        await SeedPrinterModelsAsync();
 
         string bundleJson = """
         {
@@ -96,7 +96,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime, IDisposable
     public async Task Import_WithFilamentMapping_ResolvesMaterials()
     {
         // Arrange - Seed database with known filament types
-        await SeedFilamentTypes();
+        await SeedFilamentTypesAsync();
 
         string bundleJson = """
         {
@@ -150,7 +150,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime, IDisposable
     public async Task Export_WithSpecificFilamentTypes_FiltersCorrectly()
     {
         // Arrange - Seed database with multiple filament types
-        Guid[] filamentTypeIds = await SeedMultipleFilamentTypes();
+        Guid[] filamentTypeIds = await SeedMultipleFilamentTypesAsync();
 
         ExportOrcaBundleRequest exportRequest = new ExportOrcaBundleRequest
         {
@@ -294,7 +294,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime, IDisposable
 
     // Helper methods for database seeding
 
-    private async Task SeedPrinterModels()
+    private async Task SeedPrinterModelsAsync()
     {
         // Ensure manufacturer and model exist without causing UNIQUE constraint collisions
         using IServiceScope scope = _factory.Services.CreateScope();
@@ -337,7 +337,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime, IDisposable
         }
     }
 
-    private async Task SeedFilamentTypes()
+    private async Task SeedFilamentTypesAsync()
     {
         using IServiceScope scope = _factory.Services.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -362,7 +362,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime, IDisposable
         _ = await db.SaveChangesAsync();
     }
 
-    private async Task<Guid[]> SeedMultipleFilamentTypes()
+    private async Task<Guid[]> SeedMultipleFilamentTypesAsync()
     {
         using IServiceScope scope = _factory.Services.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

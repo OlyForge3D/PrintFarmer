@@ -34,7 +34,7 @@ public sealed class SdcpClientParsingTests
             new { Name = "/local/benchy.gcode", UsedSize = 2048, TotalSize = 8000000, StorageType = 0, Type = 1 },
         ]);
 
-        await using var env = await CreateSdcpServer(responsePayload);
+        await using var env = await CreateSdcpServerAsync(responsePayload);
 
         string[] files = await env.Client.GetFileListAsync(env.BaseUrl);
 
@@ -51,7 +51,7 @@ public sealed class SdcpClientParsingTests
             new { Name = "/local/subfolder", UsedSize = 0, TotalSize = 8000000, StorageType = 0, Type = 0 },
         ]);
 
-        await using var env = await CreateSdcpServer(responsePayload);
+        await using var env = await CreateSdcpServerAsync(responsePayload);
 
         ISupportsFileList fileListClient = env.Client;
         List<PrinterFileInfo> result = await fileListClient.GetFileListAsync(env.BaseUrl);
@@ -69,7 +69,7 @@ public sealed class SdcpClientParsingTests
     {
         string responsePayload = BuildFileListResponse(ack: 0, entries: []);
 
-        await using var env = await CreateSdcpServer(responsePayload);
+        await using var env = await CreateSdcpServerAsync(responsePayload);
 
         string[] files = await env.Client.GetFileListAsync(env.BaseUrl);
 
@@ -83,7 +83,7 @@ public sealed class SdcpClientParsingTests
             new { Name = "/local/model.gcode", UsedSize = 1024, TotalSize = 8000000, StorageType = 0, Type = 1 },
         ]);
 
-        await using var env = await CreateSdcpServer(responsePayload);
+        await using var env = await CreateSdcpServerAsync(responsePayload);
 
         string[] files = await env.Client.GetFileListAsync(env.BaseUrl);
 
@@ -98,7 +98,7 @@ public sealed class SdcpClientParsingTests
             new { Name = "/local/folder2", UsedSize = 0, TotalSize = 8000000, StorageType = 0, Type = 0 },
         ]);
 
-        await using var env = await CreateSdcpServer(responsePayload);
+        await using var env = await CreateSdcpServerAsync(responsePayload);
 
         string[] files = await env.Client.GetFileListAsync(env.BaseUrl);
 
@@ -116,7 +116,7 @@ public sealed class SdcpClientParsingTests
             ack: 0, taskId: taskId, filename: "benchy.gcode",
             status: 1, startTime: 1700000000, endTime: 1700003600);
 
-        await using var env = await CreateSdcpHistoryServer(idsResponse, new Dictionary<string, string>
+        await using var env = await CreateSdcpHistoryServerAsync(idsResponse, new Dictionary<string, string>
         {
             [taskId] = detailResponse
         });
@@ -150,7 +150,7 @@ public sealed class SdcpClientParsingTests
             ack: 0, taskId: taskId, filename: "failed.gcode",
             status: 3, startTime: 1700000000, endTime: 1700001800);
 
-        await using var env = await CreateSdcpHistoryServer(idsResponse, new Dictionary<string, string>
+        await using var env = await CreateSdcpHistoryServerAsync(idsResponse, new Dictionary<string, string>
         {
             [taskId] = detailResponse
         });
@@ -173,7 +173,7 @@ public sealed class SdcpClientParsingTests
             ack: 0, taskId: taskId, filename: "broken.gcode",
             status: 2, startTime: 1700000000, endTime: 1700000500);
 
-        await using var env = await CreateSdcpHistoryServer(idsResponse, new Dictionary<string, string>
+        await using var env = await CreateSdcpHistoryServerAsync(idsResponse, new Dictionary<string, string>
         {
             [taskId] = detailResponse
         });
@@ -196,7 +196,7 @@ public sealed class SdcpClientParsingTests
             ack: 0, taskId: taskId, filename: "mystery.gcode",
             status: 99, startTime: 1700000000, endTime: 1700000100);
 
-        await using var env = await CreateSdcpHistoryServer(idsResponse, new Dictionary<string, string>
+        await using var env = await CreateSdcpHistoryServerAsync(idsResponse, new Dictionary<string, string>
         {
             [taskId] = detailResponse
         });
@@ -215,7 +215,7 @@ public sealed class SdcpClientParsingTests
     {
         string idsResponse = BuildHistoryIdsResponse(ack: 0, taskIds: []);
 
-        await using var env = await CreateSdcpHistoryServer(idsResponse, new Dictionary<string, string>());
+        await using var env = await CreateSdcpHistoryServerAsync(idsResponse, new Dictionary<string, string>());
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
@@ -231,7 +231,7 @@ public sealed class SdcpClientParsingTests
     {
         string idsResponse = BuildHistoryIdsResponse(ack: 1, taskIds: ["task-001"]);
 
-        await using var env = await CreateSdcpHistoryServer(idsResponse, new Dictionary<string, string>());
+        await using var env = await CreateSdcpHistoryServerAsync(idsResponse, new Dictionary<string, string>());
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
@@ -243,7 +243,7 @@ public sealed class SdcpClientParsingTests
     [Fact]
     public async Task GetHistoryListAsync_BlankIdsResponse_IsUnavailable()
     {
-        await using var env = await CreateSdcpHistoryServer(
+        await using var env = await CreateSdcpHistoryServerAsync(
             string.Empty,
             new Dictionary<string, string>());
 
@@ -273,7 +273,7 @@ public sealed class SdcpClientParsingTests
                 },
             },
         });
-        await using var env = await CreateSdcpHistoryServer(
+        await using var env = await CreateSdcpHistoryServerAsync(
             idsResponse,
             new Dictionary<string, string>());
 
@@ -319,7 +319,7 @@ public sealed class SdcpClientParsingTests
             status: 1,
             startTime: 1700000200,
             endTime: 1700000300);
-        await using var env = await CreateSdcpHistoryServer(
+        await using var env = await CreateSdcpHistoryServerAsync(
             idsResponse,
             new Dictionary<string, string>
             {
@@ -370,7 +370,7 @@ public sealed class SdcpClientParsingTests
                     taskId.AsSpan("task-".Length),
                     System.Globalization.CultureInfo.InvariantCulture),
                 endTime: 1700001000));
-        await using var env = await CreateSdcpHistoryServer(idsResponse, details);
+        await using var env = await CreateSdcpHistoryServerAsync(idsResponse, details);
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
@@ -392,7 +392,7 @@ public sealed class SdcpClientParsingTests
     [Fact]
     public async Task GetHistoryJobAsync_MalformedDetail_ThrowsInvalidData()
     {
-        await using var env = await CreateSdcpServer("not-json");
+        await using var env = await CreateSdcpServerAsync("not-json");
         ISupportsHistory historyClient = env.Client;
 
         Func<Task> action = async () => await historyClient.GetHistoryJobAsync(
@@ -407,7 +407,7 @@ public sealed class SdcpClientParsingTests
     [Fact]
     public async Task GetHistoryJobAsync_BlankDetail_ThrowsInvalidData()
     {
-        await using var env = await CreateSdcpServer(string.Empty);
+        await using var env = await CreateSdcpServerAsync(string.Empty);
         ISupportsHistory historyClient = env.Client;
 
         Func<Task> action = async () => await historyClient.GetHistoryJobAsync(
@@ -429,7 +429,7 @@ public sealed class SdcpClientParsingTests
             status: 1,
             startTime: 1700000000,
             endTime: 1700001000);
-        await using var env = await CreateSdcpServer(detail);
+        await using var env = await CreateSdcpServerAsync(detail);
         ISupportsHistory historyClient = env.Client;
 
         Func<Task> action = async () => await historyClient.GetHistoryJobAsync(
@@ -454,7 +454,7 @@ public sealed class SdcpClientParsingTests
             ["task-c"] = BuildHistoryDetailResponse(0, "task-c", "c.gcode", 2, 1700003000, 1700003100),
         };
 
-        await using var env = await CreateSdcpHistoryServer(idsResponse, details);
+        await using var env = await CreateSdcpHistoryServerAsync(idsResponse, details);
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
@@ -477,7 +477,7 @@ public sealed class SdcpClientParsingTests
             ack: 0, taskId: taskId, filename: "inprogress.gcode",
             status: 1, startTime: 1700000000, endTime: 0);
 
-        await using var env = await CreateSdcpHistoryServer(idsResponse, new Dictionary<string, string>
+        await using var env = await CreateSdcpHistoryServerAsync(idsResponse, new Dictionary<string, string>
         {
             [taskId] = detailResponse
         });
@@ -529,7 +529,7 @@ public sealed class SdcpClientParsingTests
 
         string idsResponse = BuildHistoryIdsResponse(ack: 0, taskIds: [taskId]);
 
-        await using var env = await CreateSdcpHistoryServer(idsResponse, new Dictionary<string, string>
+        await using var env = await CreateSdcpHistoryServerAsync(idsResponse, new Dictionary<string, string>
         {
             [taskId] = detailResponse
         });
@@ -558,7 +558,7 @@ public sealed class SdcpClientParsingTests
             ["task-new"] = BuildHistoryDetailResponse(0, "task-new", "new.gcode", 1, 1717200000, 1717203600),
         };
 
-        await using var env = await CreateSdcpHistoryServer(idsResponse, details);
+        await using var env = await CreateSdcpHistoryServerAsync(idsResponse, details);
 
         // Filter since March 1, 2024
         DateTime sinceDate = new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -575,7 +575,7 @@ public sealed class SdcpClientParsingTests
     [Fact]
     public async Task GetHistoryListAsync_ExhaustedWebSocketCandidates_ThrowsTransportFailure()
     {
-        await using SdcpTestEnvironment env = await CreateRejectingSdcpServer();
+        await using SdcpTestEnvironment env = await CreateRejectingSdcpServerAsync();
         ISupportsHistory historyClient = env.Client;
 
         Func<Task> action = async () => await historyClient.GetHistoryListAsync(
@@ -592,7 +592,7 @@ public sealed class SdcpClientParsingTests
     [Fact]
     public async Task GetHistoryListAsync_SilentWebSocket_ThrowsTimeout()
     {
-        await using SdcpTestEnvironment env = await CreateSilentSdcpServer();
+        await using SdcpTestEnvironment env = await CreateSilentSdcpServerAsync();
         ISupportsHistory historyClient = env.Client;
 
         Func<Task> action = async () => await historyClient.GetHistoryListAsync(
@@ -609,7 +609,7 @@ public sealed class SdcpClientParsingTests
     [Fact]
     public async Task UploadAndStartPrintAsync_NonzeroStartAck_IsFailedBeforeStart()
     {
-        await using SdcpTestEnvironment env = await CreateSdcpStartServer(startAck: 1);
+        await using SdcpTestEnvironment env = await CreateSdcpStartServerAsync(startAck: 1);
         await using var content = new MemoryStream(Encoding.UTF8.GetBytes("G28\n"));
 
         UploadAndPrintResult result = await env.Client.UploadAndStartPrintAsync(
@@ -625,7 +625,7 @@ public sealed class SdcpClientParsingTests
     public async Task UploadAndStartPrintAsync_LostStartAckWhilePrinting_RemainsUnknown()
     {
         (SdcpTestEnvironment env, Func<int> statusRequestCount) =
-            await CreateSdcpLostStartAckServer();
+            await CreateSdcpLostStartAckServerAsync();
         await using (env)
         await using (var content =
             new MemoryStream(Encoding.UTF8.GetBytes("G28\n")))
@@ -650,7 +650,7 @@ public sealed class SdcpClientParsingTests
     {
         string responsePayload = BuildCommandAckResponse(cmd: 259, ack: 0);
 
-        await using var env = await CreateSdcpServer(responsePayload);
+        await using var env = await CreateSdcpServerAsync(responsePayload);
 
         ISupportsFileDelete deleteClient = env.Client;
         bool result = await deleteClient.DeleteFileAsync(env.BaseUrl, "/local/model.gcode", credential: null, CancellationToken.None);
@@ -663,7 +663,7 @@ public sealed class SdcpClientParsingTests
     {
         string responsePayload = BuildCommandAckResponse(cmd: 259, ack: 1);
 
-        await using var env = await CreateSdcpServer(responsePayload);
+        await using var env = await CreateSdcpServerAsync(responsePayload);
 
         ISupportsFileDelete deleteClient = env.Client;
         bool result = await deleteClient.DeleteFileAsync(env.BaseUrl, "/local/missing.gcode", credential: null, CancellationToken.None);
@@ -838,7 +838,7 @@ public sealed class SdcpClientParsingTests
     /// Creates a Kestrel-hosted WebSocket server that responds with a single payload
     /// when a file-list request comes in.
     /// </summary>
-    private static async Task<SdcpTestEnvironment> CreateSdcpServer(string responsePayload)
+    private static async Task<SdcpTestEnvironment> CreateSdcpServerAsync(string responsePayload)
     {
         int port = GetFreeTcpPort();
 
@@ -882,7 +882,7 @@ public sealed class SdcpClientParsingTests
         return new SdcpTestEnvironment(app, client, baseUrl);
     }
 
-    private static async Task<SdcpTestEnvironment> CreateSdcpStartServer(int startAck)
+    private static async Task<SdcpTestEnvironment> CreateSdcpStartServerAsync(int startAck)
     {
         int port = GetFreeTcpPort();
 
@@ -954,7 +954,7 @@ public sealed class SdcpClientParsingTests
     }
 
     private static async Task<(SdcpTestEnvironment Environment, Func<int> StatusRequestCount)>
-        CreateSdcpLostStartAckServer()
+        CreateSdcpLostStartAckServerAsync()
     {
         int port = GetFreeTcpPort();
         int statusRequestCount = 0;
@@ -1022,7 +1022,7 @@ public sealed class SdcpClientParsingTests
     /// first returns the IDs response, then returns the appropriate detail response
     /// for each subsequent request based on the TaskId in the request.
     /// </summary>
-    private static async Task<SdcpTestEnvironment> CreateSdcpHistoryServer(
+    private static async Task<SdcpTestEnvironment> CreateSdcpHistoryServerAsync(
         string idsResponse, Dictionary<string, string> detailResponses)
     {
         int port = GetFreeTcpPort();
@@ -1098,7 +1098,7 @@ public sealed class SdcpClientParsingTests
         return new SdcpTestEnvironment(app, client, baseUrl);
     }
 
-    private static async Task<SdcpTestEnvironment> CreateSilentSdcpServer()
+    private static async Task<SdcpTestEnvironment> CreateSilentSdcpServerAsync()
     {
         int port = GetFreeTcpPort();
         WebApplicationBuilder builder = WebApplication.CreateBuilder(
@@ -1145,7 +1145,7 @@ public sealed class SdcpClientParsingTests
             $"http://127.0.0.1:{port}");
     }
 
-    private static async Task<SdcpTestEnvironment> CreateRejectingSdcpServer()
+    private static async Task<SdcpTestEnvironment> CreateRejectingSdcpServerAsync()
     {
         int port = GetFreeTcpPort();
         WebApplicationBuilder builder = WebApplication.CreateBuilder(
