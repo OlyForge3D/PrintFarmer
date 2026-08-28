@@ -194,7 +194,7 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
     public async Task PerCameraEndpoint_MatchingRoleCaller_IsNotDeniedByGroupCheck(string suffix)
     {
         (Guid printerId, Guid cameraId, Guid allowedRoleId) = await SeedRestrictedFixtureWithRoleAsync();
-        using HttpClient client = CreateClientWithRole(allowedRoleId);
+        using HttpClient client = await CreateClientWithRoleAsync(allowedRoleId);
 
         HttpResponseMessage response = await client.GetAsync(BuildCameraUrl(cameraId, suffix));
 
@@ -214,7 +214,7 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
     public async Task GetCamerasByPrinter_MatchingRoleCaller_IsNotDeniedByGroupCheck()
     {
         (Guid printerId, _, Guid allowedRoleId) = await SeedRestrictedFixtureWithRoleAsync();
-        using HttpClient client = CreateClientWithRole(allowedRoleId);
+        using HttpClient client = await CreateClientWithRoleAsync(allowedRoleId);
 
         HttpResponseMessage response = await client.GetAsync($"/api/cameras/by-printer/{printerId}");
 
@@ -225,7 +225,7 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
     public async Task DetectEndpoints_MatchingRoleCaller_IsNotDeniedByGroupCheck()
     {
         (Guid printerId, _, Guid allowedRoleId) = await SeedRestrictedFixtureWithRoleAsync();
-        using HttpClient client = CreateClientWithRole(allowedRoleId);
+        using HttpClient client = await CreateClientWithRoleAsync(allowedRoleId);
 
         HttpResponseMessage response = await client.PostAsJsonAsync(
             "/api/cameras/detect-endpoints",
@@ -241,7 +241,7 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
     public async Task ListEndpoint_MatchingRoleCaller_SeesRestrictedCamera(string suffix)
     {
         (_, Guid cameraId, Guid allowedRoleId) = await SeedRestrictedFixtureWithRoleAsync();
-        using HttpClient client = CreateClientWithRole(allowedRoleId);
+        using HttpClient client = await CreateClientWithRoleAsync(allowedRoleId);
 
         HttpResponseMessage response = await client.GetAsync($"/api/cameras{suffix}");
 
@@ -589,13 +589,13 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
         return client;
     }
 
-    private HttpClient CreateClientWithRole(Guid roleId)
+    private async Task<HttpClient> CreateClientWithRoleAsync(Guid roleId)
     {
         Guid actorId = Guid.NewGuid();
         HttpClient client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Id", actorId.ToString());
         client.DefaultRequestHeaders.Add("X-Test-Roles", "matching-role");
-        EnsureUserRoleAsync(actorId, roleId).GetAwaiter().GetResult();
+        await EnsureUserRoleAsync(actorId, roleId);
         return client;
     }
 

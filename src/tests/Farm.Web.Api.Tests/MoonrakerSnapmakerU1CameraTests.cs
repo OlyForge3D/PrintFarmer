@@ -132,9 +132,9 @@ public class MoonrakerSnapmakerU1CameraTests
 
         bool started = await manager.EnsureMonitorStartedAsync("http://u1.local", null, CancellationToken.None);
         await clock.FirstTimerCreated.WaitAsync(TimeSpan.FromSeconds(1));
-        clock.ReleaseLatestTimer();
+        _ = await clock.ReleaseLatestTimerAndAwaitAsync();
         await clock.SecondTimerCreated.WaitAsync(TimeSpan.FromSeconds(1));
-        clock.ReleaseLatestTimer();
+        _ = await clock.ReleaseLatestTimerAndAwaitAsync();
         await rpc.StopObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
 
         started.Should().BeTrue();
@@ -257,7 +257,7 @@ public class MoonrakerSnapmakerU1CameraTests
         started.Should().BeTrue();
 
         // Fire timer[0]; stop fails → RescheduleStopRetry creates timer[1] (retry backoff).
-        clock.ReleaseTimerAt(0);
+        _ = await clock.ReleaseTimerAtAndAwaitAsync(0);
         await clock.TimerCreatedAtAsync(1).WaitAsync(TimeSpan.FromSeconds(1));
 
         // Access camera before retry fires; ScheduleIdleStop cancels timer[1] and creates timer[2].
@@ -506,17 +506,6 @@ public class MoonrakerSnapmakerU1CameraTests
             return timer;
         }
 
-        public void ReleaseLatestTimer()
-        {
-            ControlledTimer? timer;
-            lock (_sync)
-            {
-                timer = _timers.LastOrDefault();
-            }
-
-            timer?.Fire();
-        }
-
         public async Task<TimerFireResult> ReleaseLatestTimerAndAwaitAsync()
         {
             ControlledTimer? timer;
@@ -531,18 +520,6 @@ public class MoonrakerSnapmakerU1CameraTests
             }
 
             return await timer.FireAndAwaitAsync().ConfigureAwait(false);
-        }
-
-        /// <summary>Fires the timer at <paramref name="index"/> (0-based). No-op if the timer has already been disposed.</summary>
-        public void ReleaseTimerAt(int index)
-        {
-            ControlledTimer? timer;
-            lock (_sync)
-            {
-                timer = index < _timers.Count ? _timers[index] : null;
-            }
-
-            timer?.Fire();
         }
 
         public async Task<TimerFireResult> ReleaseTimerAtAndAwaitAsync(int index)
@@ -577,11 +554,6 @@ public class MoonrakerSnapmakerU1CameraTests
             {
                 Dispose();
                 return ValueTask.CompletedTask;
-            }
-
-            public void Fire()
-            {
-                _ = FireAndAwaitAsync().GetAwaiter().GetResult();
             }
 
             public async Task<TimerFireResult> FireAndAwaitAsync()

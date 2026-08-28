@@ -163,8 +163,22 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             {
                 try
                 {
+                    // CreateHost overrides WebApplicationFactory<T>.CreateHost, a synchronous
+                    // virtual base method whose signature this factory cannot change, so the
+                    // seed work it triggers can't be awaited here. This runs on whichever thread
+                    // first triggers host creation (typically the test's own thread, via the
+                    // first CreateClient()/Services access), not a background thread. xUnit does
+                    // install its own SynchronizationContext (AsyncTestSyncContext) during test
+                    // execution, unlike a plain console app, but it dispatches await
+                    // continuations through xUnit's own worker infrastructure rather than
+                    // requiring the blocked test thread itself to pump them, so it does not
+                    // create the classic single-threaded-context deadlock that
+                    // WinForms/WPF/ASP.NET Classic contexts do. This is exercised end-to-end
+                    // (no hang) by CustomWebApplicationFactoryTests.
+#pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
                     initializer.InitializeAsync("sqlite", 3, 2).GetAwaiter().GetResult();
                     initializer.SeedAllAsync().GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
                 }
                 catch { /* best-effort */ }
             }

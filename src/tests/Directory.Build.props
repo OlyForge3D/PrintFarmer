@@ -81,7 +81,50 @@
            in "Async" and every call site was updated accordingly; this is a purely
            mechanical naming-convention fix with zero behavioral impact, so no suppressions
            were required. -->
-      VSTHRD002;<!-- Avoid problematic synchronous waits (16) -->
+      <!-- VSTHRD002 (Avoid problematic synchronous waits) fully cleared across src/tests/ —
+           see #2106 burn-down. All 14 distinct instances (the issue's original "16" estimate
+           was close but not exact; 12 were in projects that ship in farm-web.sln, plus 2 more
+           in Farm.Web.IntegrationTests, which is excluded from that solution's default
+           `dotnet test` run via IsTestProject=false unless RunIntegrationTests=true but still
+           inherits this file's NoWarn and was rebuilt/tested separately to confirm) were
+           `.GetAwaiter().GetResult()`/`.Wait()` calls on tasks from otherwise-synchronous test
+           code and were fixed directly: xUnit constructor-based async seeding was moved to
+           `IAsyncLifetime.InitializeAsync`, `void`-returning test methods and helper methods
+           that only existed to bridge to a synchronous caller were converted to `async Task`
+           with a real `await`, and one mocked-HTTP-content read used `HttpContent.ReadAsStream()`
+           instead of an async read: some requests carry no content at all (e.g. a GET), and when
+           one does, it's always built synchronously by the code under test from data already
+           fully buffered in memory (never a network/file stream) as a
+           `MultipartFormDataContent`/`ByteArrayContent` pair. Two instances are a
+           deliberately blocking wait inside a method overriding a fixed synchronous base signature
+           that cannot be made async — `IServiceScopeFactory.CreateScope()` and
+           `WebApplicationFactory<T>.CreateHost()` respectively — suppressed with a scoped
+           #pragma warning disable/restore VSTHRD002 plus an explanatory comment at each site
+           (their risk justifications differ and are documented individually at the call site,
+           not repeated here). Dozens of other `.GetAwaiter().GetResult()` calls remain in
+           `Func<HttpRequestMessage, HttpResponseMessage>`-typed fake-HTTP-handler callbacks
+           (e.g. SpoolmanServiceTests, MoonrakerClientBusyTests, DirectApnsNativePushSenderTests)
+           and are not flagged, but this is a gap in analysis, not a design exemption for the
+           pattern — do not treat this as safe to copy into a non-async member. The pinned
+           `Microsoft.VisualStudio.Threading.Analyzers` 18.7.23's VSTHRD002UseJtfRunAnalyzer
+           registers its diagnostic actions once per code block, gated solely on whether the
+           owning member (not the delegate type) already has an async-compatible return type; a
+           lambda is not its own code block, so a synchronous wait nested inside one is skipped
+           entirely whenever its enclosing member already has an async-compatible return type,
+           and analyzed (and flagged) like any other wait when it does not. Every surviving callback site above sits
+           inside an `async Task` test method, which is why none of them are flagged, and the same
+           lambda body — unchanged — is flagged when moved into a non-async method: verified with
+           an isolated, throwaway repro (not committed) that reproduced VSTHRD002 on an identical
+           `Func<int, int>` callback once its enclosing method was no longer `async`, and did not
+           reproduce it when the enclosing method was `async`; a literal
+           `Task.FromResult(...).GetAwaiter().GetResult()` was flagged in both cases when its own
+           enclosing member was non-async, and `CreateHost` above (non-async, no enclosing lambda)
+           is flagged too, so the analyzer is not simply skipping tasks it can prove are already
+           complete. This is a known analyzer limitation, not a documented exemption, and later
+           analyzer releases have closed it (upstream's VSTHRD002 now explicitly covers nested
+           functions so every synchronous wait is diagnosed) — a future package bump could turn
+           all of these into build failures, at which point they'll need the same async
+           conversion already applied elsewhere in this tier, not a suppression. -->
       IDISP024; <!-- Don't call GC.SuppressFinalize when no finalizer exists (16) -->
       CA2025;   <!-- Do not pass 'IDisposable' instances into unawaited tasks (14) -->
       IDISP007; <!-- Don't dispose an injected dependency (12) -->

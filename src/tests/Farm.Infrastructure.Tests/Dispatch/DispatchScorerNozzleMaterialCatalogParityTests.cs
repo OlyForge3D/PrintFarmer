@@ -31,7 +31,7 @@ namespace Farm.Infrastructure.Tests.Dispatch;
 /// <see cref="NozzleType"/> member so no material's hardness classification regresses silently.
 /// </para>
 /// </summary>
-public sealed class DispatchScorerNozzleMaterialCatalogParityTests : IDisposable
+public sealed class DispatchScorerNozzleMaterialCatalogParityTests : IAsyncLifetime, IDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly AppDbContext _context;
@@ -58,14 +58,19 @@ public sealed class DispatchScorerNozzleMaterialCatalogParityTests : IDisposable
             CreatedAt = DateTime.UtcNow,
         });
         _context.SaveChanges();
+    }
 
+    public async Task InitializeAsync()
+    {
         // Seed via the real production seeding path (not hand-built fixtures) so this test
         // actually exercises the same catalog rows a fresh local/dev database would have.
         Mock<IYamlSeedDataReader> reader = new();
         Mock<ILogger<DataSeedService>> logger = new();
         DataSeedService seedService = new(_context, reader.Object, logger.Object);
-        seedService.SeedNozzleMaterialsAsync().GetAwaiter().GetResult();
+        await seedService.SeedNozzleMaterialsAsync();
     }
+
+    public Task DisposeAsync() => Task.CompletedTask;
 
     public void Dispose()
     {

@@ -257,7 +257,7 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime, IDisposable
     public async Task ReadEndpoint_MatchingRoleCaller_IsNotDeniedByGroupCheck(string suffix)
     {
         (Guid printerId, Guid allowedRoleId) = await SeedRestrictedPrinterWithRoleAsync();
-        using HttpClient client = CreateClientWithRole(Guid.NewGuid(), allowedRoleId, "matching-role");
+        using HttpClient client = await CreateClientWithRoleAsync(Guid.NewGuid(), allowedRoleId, "matching-role");
 
         HttpResponseMessage response = await client.GetAsync(BuildUrl(printerId, suffix));
 
@@ -320,12 +320,12 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime, IDisposable
         return client;
     }
 
-    private HttpClient CreateClientWithRole(Guid actorId, Guid roleId, string roleName)
+    private async Task<HttpClient> CreateClientWithRoleAsync(Guid actorId, Guid roleId, string roleName)
     {
         HttpClient client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Id", actorId.ToString());
         client.DefaultRequestHeaders.Add("X-Test-Roles", roleName);
-        EnsureUserRoleAsync(actorId, roleId).GetAwaiter().GetResult();
+        await EnsureUserRoleAsync(actorId, roleId);
         return client;
     }
 

@@ -430,12 +430,12 @@ public class ApiKeyExchangeServiceTests
             })]);
     }
 
-    private (JsonWebToken Jwt, ApiKeyExchangeResult Result) ExchangeAndRead(ApiKey key, User owner)
+    private async Task<(JsonWebToken Jwt, ApiKeyExchangeResult Result)> ExchangeAndReadAsync(ApiKey key, User owner)
     {
         _mockApiKeyRepository.Setup(r => r.GetByKeyHashAsync(It.IsAny<string>())).ReturnsAsync(key);
         _mockUsersRepository.Setup(r => r.GetUserEntityAsync(owner.Id, It.IsAny<CancellationToken>())).ReturnsAsync(owner);
 
-        ApiKeyExchangeResult result = _service.ExchangeApiKeyAsync("raw-desktop-key", null, null).GetAwaiter().GetResult();
+        ApiKeyExchangeResult result = await _service.ExchangeApiKeyAsync("raw-desktop-key", null, null);
         result.Success.Should().BeTrue();
 
         JsonWebTokenHandler handler = new();
@@ -465,7 +465,7 @@ public class ApiKeyExchangeServiceTests
     [InlineData(ApiKeyScope.QueueStart, "QueueStart", "queue:start")]
     [InlineData(ApiKeyScope.QueueCancel, "QueueCancel", "queue:cancel")]
     [InlineData(ApiKeyScope.QueueAcknowledgeBedClear, "QueueAcknowledgeBedClear", "queue:acknowledge-bed-clear")]
-    public void ExchangeApiKeyAsync_EachAuthorizedScope_EmitsItsScopeAndExactlyItsPermission(
+    public async Task ExchangeApiKeyAsync_EachAuthorizedScope_EmitsItsScopeAndExactlyItsPermission(
         ApiKeyScope scope,
         string expectedScopeName,
         string expectedPermission)
@@ -474,7 +474,7 @@ public class ApiKeyExchangeServiceTests
         SetOwnerAuthorization(userId, permissions: [expectedPermission]);
 
         (JsonWebToken jwt, ApiKeyExchangeResult result) =
-            ExchangeAndRead(CreateDesktopKey(scope, userId), CreateActiveOwner(userId));
+            await ExchangeAndReadAsync(CreateDesktopKey(scope, userId), CreateActiveOwner(userId));
 
         ScopeClaims(jwt).Should().Equal(expectedScopeName);
         PermissionClaims(jwt).Should().Equal(expectedPermission);
@@ -490,7 +490,7 @@ public class ApiKeyExchangeServiceTests
     /// mint <c>calibration:publish</c> against an operator's explicit deny.
     /// </summary>
     [Fact]
-    public void ExchangeApiKeyAsync_ResourceAdminOwnerWithExplicitDeny_DropsOnlyTheDeniedScope()
+    public async Task ExchangeApiKeyAsync_ResourceAdminOwnerWithExplicitDeny_DropsOnlyTheDeniedScope()
     {
         Guid userId = Guid.NewGuid();
         SetOwnerAuthorization(
@@ -498,7 +498,7 @@ public class ApiKeyExchangeServiceTests
             permissions: ["calibration:admin"],
             denied: [PrintFarmerPermissions.Calibration.Publish]);
 
-        (JsonWebToken jwt, ApiKeyExchangeResult result) = ExchangeAndRead(
+        (JsonWebToken jwt, ApiKeyExchangeResult result) = await ExchangeAndReadAsync(
             CreateDesktopKey(ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationPublish, userId),
             CreateActiveOwner(userId));
 
@@ -514,7 +514,7 @@ public class ApiKeyExchangeServiceTests
     /// A permission the owner holds but did not select on the key must never be minted.
     /// </summary>
     [Fact]
-    public void ExchangeApiKeyAsync_UnselectedOwnerPermissions_AreNeverEmitted()
+    public async Task ExchangeApiKeyAsync_UnselectedOwnerPermissions_AreNeverEmitted()
     {
         Guid userId = Guid.NewGuid();
         SetOwnerAuthorization(userId, permissions:
@@ -525,7 +525,7 @@ public class ApiKeyExchangeServiceTests
             PrintFarmerPermissions.Slicing.Promote,
         ]);
 
-        (JsonWebToken jwt, _) = ExchangeAndRead(
+        (JsonWebToken jwt, _) = await ExchangeAndReadAsync(
             CreateDesktopKey(ApiKeyScope.CalibrationRead, userId),
             CreateActiveOwner(userId));
 
@@ -558,12 +558,12 @@ public class ApiKeyExchangeServiceTests
     /// sync, and the revoked scope must disappear from both claim families.
     /// </summary>
     [Fact]
-    public void ExchangeApiKeyAsync_AfterRevocation_DowngradesInsteadOfBreakingModelScopes()
+    public async Task ExchangeApiKeyAsync_AfterRevocation_DowngradesInsteadOfBreakingModelScopes()
     {
         Guid userId = Guid.NewGuid();
         SetOwnerAuthorization(userId);
 
-        (JsonWebToken jwt, ApiKeyExchangeResult result) = ExchangeAndRead(
+        (JsonWebToken jwt, ApiKeyExchangeResult result) = await ExchangeAndReadAsync(
             CreateDesktopKey(ApiKeyScope.ModelRead | ApiKeyScope.LibrarySync | ApiKeyScope.CalibrationRead, userId),
             CreateActiveOwner(userId));
 
@@ -603,12 +603,12 @@ public class ApiKeyExchangeServiceTests
     /// admin role - otherwise every permission check would be bypassed wholesale.
     /// </summary>
     [Fact]
-    public void ExchangeApiKeyAsync_FarmAdminOwner_GetsOnlySelectedPermissionAndNoAdminRole()
+    public async Task ExchangeApiKeyAsync_FarmAdminOwner_GetsOnlySelectedPermissionAndNoAdminRole()
     {
         Guid userId = Guid.NewGuid();
         SetOwnerAuthorization(userId, roles: [PrintFarmerPermissions.FarmAdminRole]);
 
-        (JsonWebToken jwt, _) = ExchangeAndRead(
+        (JsonWebToken jwt, _) = await ExchangeAndReadAsync(
             CreateDesktopKey(ApiKeyScope.CalibrationRead, userId),
             CreateActiveOwner(userId));
 
@@ -627,11 +627,11 @@ public class ApiKeyExchangeServiceTests
     [InlineData(2)]
     [InlineData(4)]
     [InlineData(7)]
-    public void ExchangeApiKeyAsync_LegacyNumericKeys_YieldNoPermissionClaims(int storedScopes)
+    public async Task ExchangeApiKeyAsync_LegacyNumericKeys_YieldNoPermissionClaims(int storedScopes)
     {
         Guid userId = Guid.NewGuid();
 
-        (JsonWebToken jwt, ApiKeyExchangeResult result) = ExchangeAndRead(
+        (JsonWebToken jwt, ApiKeyExchangeResult result) = await ExchangeAndReadAsync(
             CreateDesktopKey((ApiKeyScope)storedScopes, userId),
             CreateActiveOwner(userId));
 
@@ -699,12 +699,12 @@ public class ApiKeyExchangeServiceTests
     [InlineData("60")]
     [InlineData("1440")]
     [InlineData("2147483647")]
-    public void ExchangeApiKeyAsync_ConfiguredLifetimeAboveCeiling_IsClamped(string configured)
+    public async Task ExchangeApiKeyAsync_ConfiguredLifetimeAboveCeiling_IsClamped(string configured)
     {
         _mockConfiguration.Setup(c => c["Jwt:DesktopExchangeLifetimeMinutes"]).Returns(configured);
         Guid userId = Guid.NewGuid();
 
-        (_, ApiKeyExchangeResult result) = ExchangeAndRead(
+        (_, ApiKeyExchangeResult result) = await ExchangeAndReadAsync(
             CreateDesktopKey(ApiKeyScope.ModelRead, userId),
             CreateActiveOwner(userId));
 
@@ -718,12 +718,12 @@ public class ApiKeyExchangeServiceTests
     [InlineData("0")]
     [InlineData("-5")]
     [InlineData("not-a-number")]
-    public void ExchangeApiKeyAsync_InvalidConfiguredLifetime_FallsBackToDefault(string configured)
+    public async Task ExchangeApiKeyAsync_InvalidConfiguredLifetime_FallsBackToDefault(string configured)
     {
         _mockConfiguration.Setup(c => c["Jwt:DesktopExchangeLifetimeMinutes"]).Returns(configured);
         Guid userId = Guid.NewGuid();
 
-        (_, ApiKeyExchangeResult result) = ExchangeAndRead(
+        (_, ApiKeyExchangeResult result) = await ExchangeAndReadAsync(
             CreateDesktopKey(ApiKeyScope.ModelRead, userId),
             CreateActiveOwner(userId));
 
@@ -737,7 +737,7 @@ public class ApiKeyExchangeServiceTests
     /// disagree regardless of which scopes were revoked.
     /// </summary>
     [Fact]
-    public void ExchangeApiKeyAsync_ScopeAndPermissionClaims_AlwaysAgree()
+    public async Task ExchangeApiKeyAsync_ScopeAndPermissionClaims_AlwaysAgree()
     {
         Guid userId = Guid.NewGuid();
         SetOwnerAuthorization(userId, permissions:
@@ -746,7 +746,7 @@ public class ApiKeyExchangeServiceTests
             PrintFarmerPermissions.Queue.Read,
         ]);
 
-        (JsonWebToken jwt, _) = ExchangeAndRead(
+        (JsonWebToken jwt, _) = await ExchangeAndReadAsync(
             CreateDesktopKey(
                 ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationDelete | ApiKeyScope.QueueRead | ApiKeyScope.QueueStart,
                 userId),

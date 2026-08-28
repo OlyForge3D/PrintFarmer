@@ -441,9 +441,24 @@ public class ObicoFailureDetectionServiceTests
     {
         public static CapturedRequest From(HttpRequestMessage request)
         {
-            string body = request.Content == null
-                ? string.Empty
-                : request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            // The upstream JSON-style requests (GetAsync) carry no content at all -- request.Content
+            // is null and the empty-body branch below is taken. The only content-bearing request is
+            // the legacy image-upload contract, which sends a MultipartFormDataContent wrapping a
+            // ByteArrayContent built synchronously from data already fully buffered in memory --
+            // never a network/file stream. So ReadAsStream() performs no I/O and is safe to read
+            // synchronously here — unlike ReadAsStringAsync().GetAwaiter().GetResult(), which
+            // VSTHRD002 (rightly) flags as a problematic synchronous wait on a task that could, in
+            // general, block on real I/O.
+            string body;
+            if (request.Content == null)
+            {
+                body = string.Empty;
+            }
+            else
+            {
+                using StreamReader reader = new(request.Content.ReadAsStream(), Encoding.UTF8);
+                body = reader.ReadToEnd();
+            }
 
             return new CapturedRequest(
                 request.Method,

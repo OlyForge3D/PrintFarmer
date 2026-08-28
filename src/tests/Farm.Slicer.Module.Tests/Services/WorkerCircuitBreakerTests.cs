@@ -74,7 +74,7 @@ public class WorkerCircuitBreakerTests
     }
 
     [Fact]
-    public void CheckCircuits_TransitionsToHalfOpen_AfterCooldown()
+    public async Task CheckCircuits_TransitionsToHalfOpen_AfterCooldown()
     {
         // Arrange
         CircuitBreakerSettings shortCooldown = new CircuitBreakerSettings
@@ -90,9 +90,7 @@ public class WorkerCircuitBreakerTests
         // Act - open circuit
         for (int i = 0; i < shortCooldown.FailureThreshold; i++)
         {
-#pragma warning disable xUnit1031 // Do not use blocking task operations in test method
-            service.RecordJobFailureAsync(workerId, _workerRepoMock.Object).Wait();
-#pragma warning restore xUnit1031 // Do not use blocking task operations in test method
+            await service.RecordJobFailureAsync(workerId, _workerRepoMock.Object);
         }
         Assert.Equal(WorkerCircuitState.Open, service.GetCircuitState(workerId));
 
@@ -143,7 +141,7 @@ public class WorkerCircuitBreakerTests
     }
 
     [Fact]
-    public void ResetCircuit_ClearsState()
+    public async Task ResetCircuit_ClearsState()
     {
         // Arrange
         WorkerCircuitBreakerService service = new WorkerCircuitBreakerService(_loggerMock.Object, Options.Create(_settings));
@@ -152,9 +150,7 @@ public class WorkerCircuitBreakerTests
         // Open circuit
         for (int i = 0; i < _settings.FailureThreshold; i++)
         {
-#pragma warning disable xUnit1031 // Do not use blocking task operations in test method
-            service.RecordJobFailureAsync(workerId, _workerRepoMock.Object).Wait();
-#pragma warning restore xUnit1031 // Do not use blocking task operations in test method
+            await service.RecordJobFailureAsync(workerId, _workerRepoMock.Object);
         }
         Assert.Equal(WorkerCircuitState.Open, service.GetCircuitState(workerId));
 
