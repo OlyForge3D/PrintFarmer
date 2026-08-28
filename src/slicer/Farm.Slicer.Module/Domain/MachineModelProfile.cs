@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Slicer.Module.Domain;
 
@@ -15,11 +16,14 @@ namespace Farm.Slicer.Module.Domain;
 ///
 /// The machine profiles in machine_list inherit from these base models via the "inherits" field.
 /// </remarks>
-public class MachineModelProfile
+public class MachineModelProfile : IRevisionedEntity
 {
     private string _name = string.Empty;
 
     public Guid Id { get; set; }
+
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 
     /// <summary>
     /// The model name from OrcaSlicer (e.g., "Sovol SV08", "Prusa MK4").

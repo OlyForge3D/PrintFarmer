@@ -285,6 +285,11 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
+
                     b.Property<string>("SlicerDistribution")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");

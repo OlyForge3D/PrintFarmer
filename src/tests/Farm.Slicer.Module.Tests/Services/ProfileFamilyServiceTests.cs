@@ -1755,11 +1755,162 @@ public sealed class ProfileFamilyServiceTests
     }
 
     [Fact]
-    public async Task RenderFamilyAsync_FamilyDeletedConcurrentlyDuringPersist_RemovesBundleAndThrows404()
+    public async Task EditFamilyAsync_TwoContextsRace_FirstEditWinsAndSecondReturnsConcurrencyConflict()
+    {
+        string databaseName = $"ProfileFamilyEditRace{Guid.NewGuid():N}";
+        string connectionString = $"Data Source={databaseName};Mode=Memory;Cache=Shared";
+        await using SqliteConnection keeper = new(connectionString);
+        await keeper.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connectionString).Options;
+        await using SlicerDbContext seedContext = new(options);
+        await seedContext.Database.EnsureCreatedAsync();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(seedContext, modelId);
+        seedContext.ChangeTracker.Clear();
+
+        await using SlicerDbContext firstContext = new(options);
+        await using SlicerDbContext secondContext = new(options);
+        var secondLoaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstCommitted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ProfileFamilyWorkerTarget target = new("http://worker", "2.5.0");
+        AllProfilesResponseDto workerCatalog = WorkerCatalog("Prusa Test");
+
+        Mock<IProfileFamilyWorkerClient> firstWorker = new(MockBehavior.Strict);
+        _ = firstWorker
+            .Setup(client => client.GetCatalogAsync(string.Empty, null, It.IsAny<CancellationToken>()))
+            .Returns(async (string _, string? _, CancellationToken ct) =>
+            {
+                await secondLoaded.Task.WaitAsync(ct);
+                return (target, workerCatalog);
+            });
+        _ = firstWorker
+            .Setup(client => client.WriteBundleAsync(
+                target,
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        Mock<IProfileFamilyWorkerClient> secondWorker = new(MockBehavior.Strict);
+        _ = secondWorker
+            .Setup(client => client.GetCatalogAsync(string.Empty, null, It.IsAny<CancellationToken>()))
+            .Returns(async (string _, string? _, CancellationToken ct) =>
+            {
+                _ = secondLoaded.TrySetResult();
+                await firstCommitted.Task.WaitAsync(ct);
+                return (target, workerCatalog);
+            });
+        _ = secondWorker
+            .Setup(client => client.WriteBundleAsync(
+                target,
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        Mock<IPrinterModelAliasService> firstAliases = EditAliases(modelId, "Farm Test");
+        Mock<IPrinterModelAliasService> secondAliases = EditAliases(modelId, "Farm Test");
+        ProfileFamilyService firstService = CreateService(
+            firstContext, Catalog(modelId), firstAliases, EchoRenderer(), firstWorker);
+        ProfileFamilyService secondService = CreateService(
+            secondContext, Catalog(modelId), secondAliases, EchoRenderer(), secondWorker);
+
+        Task<ProfileFamilySummaryDto> firstEdit = firstService.EditFamilyAsync(
+            familyId,
+            new EditProfileFamilyRequestDto { FamilyOverrides = Overrides("""{"speed":111}""") },
+            CancellationToken.None);
+        Task<ProfileFamilySummaryDto> secondEdit = secondService.EditFamilyAsync(
+            familyId,
+            new EditProfileFamilyRequestDto { FamilyOverrides = Overrides("""{"speed":222}""") },
+            CancellationToken.None);
+
+        _ = await firstEdit;
+        _ = firstCommitted.TrySetResult();
+        Func<Task> secondAct = async () => await secondEdit;
+        _ = await secondAct.Should().ThrowAsync<ProfileFamilyConcurrencyException>();
+
+        await using SlicerDbContext assertionContext = new(options);
+        MachineModelProfile persisted = await assertionContext.MachineModelProfiles
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == familyId);
+        persisted.FamilyOverridesJson.Should().Contain("111");
+        persisted.FamilyOverridesJson.Should().NotContain("222");
+        persisted.Revision.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task DeleteFamilyAsync_RacesRender_RenderRemovesPostDeleteBundleAndReturnsConflict()
+    {
+        string databaseName = $"ProfileFamilyDeleteRenderRace{Guid.NewGuid():N}";
+        string connectionString = $"Data Source={databaseName};Mode=Memory;Cache=Shared";
+        await using SqliteConnection keeper = new(connectionString);
+        await keeper.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connectionString).Options;
+        await using SlicerDbContext seedContext = new(options);
+        await seedContext.Database.EnsureCreatedAsync();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(seedContext, modelId);
+        seedContext.ChangeTracker.Clear();
+
+        await using SlicerDbContext renderContext = new(options);
+        await using SlicerDbContext deleteContext = new(options);
+        var renderLoaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var deleteCommitted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ProfileFamilyWorkerTarget target = new("http://worker", "2.5.0");
+        Mock<IProfileFamilyWorkerClient> renderWorker = new(MockBehavior.Strict);
+        _ = renderWorker
+            .Setup(client => client.GetCatalogAsync(string.Empty, null, It.IsAny<CancellationToken>()))
+            .Returns(async (string _, string? _, CancellationToken ct) =>
+            {
+                _ = renderLoaded.TrySetResult();
+                await deleteCommitted.Task.WaitAsync(ct);
+                return (target, WorkerCatalog("Prusa Test"));
+            });
+        _ = renderWorker
+            .Setup(client => client.WriteBundleAsync(
+                target,
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = renderWorker
+            .Setup(client => client.DeleteBundleAsync(null, familyId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        ProfileFamilyService renderService = CreateService(
+            renderContext,
+            Catalog(modelId),
+            EditAliases(modelId, "Farm Test"),
+            EchoRenderer(),
+            renderWorker);
+        ProfileFamilyService deleteService = CreateService(
+            deleteContext,
+            Catalog(modelId),
+            DeleteAliases(modelId),
+            Renderer(),
+            DeleteWorker());
+
+        Task<ProfileFamilySummaryDto> render =
+            renderService.RenderFamilyAsync(familyId, CancellationToken.None);
+        await renderLoaded.Task;
+        await deleteService.DeleteFamilyAsync(familyId, force: false, CancellationToken.None);
+        _ = deleteCommitted.TrySetResult();
+
+        Func<Task> renderAct = async () => await render;
+        _ = await renderAct.Should().ThrowAsync<ProfileFamilyConcurrentlyDeletedException>();
+        renderWorker.Verify(
+            client => client.DeleteBundleAsync(null, familyId, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the render installed after delete and must remove that orphaned bundle");
+        await using SlicerDbContext assertionContext = new(options);
+        (await assertionContext.MachineModelProfiles.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RenderFamilyAsync_FamilyDeletedConcurrentlyDuringPersist_RemovesBundleAndThrowsConflict()
     {
         // #2087: a render racing a delete installs its bundle on the worker, then its persist matches zero
         // rows (the row was deleted) and EF throws DbUpdateConcurrencyException. The handler must remove the
-        // orphaned bundle it just installed and surface a clean 404, never a raw 500 that strands the bundle.
+        // orphaned bundle it just installed and surface a clean conflict, never a raw 500 that strands it.
         await using SqliteConnection connection = new("Data Source=:memory:");
         await connection.OpenAsync();
         DbContextOptions<SlicerDbContext> options =
@@ -1809,6 +1960,38 @@ public sealed class ProfileFamilyServiceTests
             service => service.DeleteBundleAsync(null, familyId, It.IsAny<CancellationToken>()),
             Times.Once,
             "the orphaned bundle installed before the concurrent delete must be compensated");
+    }
+
+    [Fact]
+    public async Task RenderFamilyAsync_ConcurrentDeleteBundleCleanupFails_SurfacesCleanupFailure()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ConcurrentDeleteOnSaveDbContext(options);
+        _ = dbContext.Database.EnsureCreated();
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        Mock<IProfileFamilyWorkerClient> worker = EditWorker();
+        _ = worker
+            .Setup(client => client.DeleteBundleAsync(null, familyId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("worker cleanup unavailable"));
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            Catalog(modelId),
+            EditAliases(modelId, "Farm Test"),
+            EchoRenderer(),
+            worker);
+
+        dbContext.DeleteFamilyOnNextSave = true;
+        Func<Task> act = async () => await service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ProfileFamilyCleanupException>())
+            .Which.Message.Should().Contain(familyId.ToString());
+        worker.Verify(
+            client => client.DeleteBundleAsync(null, familyId, It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -1908,7 +2091,7 @@ public sealed class ProfileFamilyServiceTests
         dbContext.CancelRequestOnConflict = cts;
         Func<Task> act = async () => await service.RenderFamilyAsync(familyId, cts.Token);
 
-        // Post-fix: the deleted-concurrently branch runs despite cancellation -> clean 404-mapping exception.
+        // Post-fix: the deleted-concurrently branch runs despite cancellation -> clean conflict exception.
         // Pre-fix (ct threaded): the re-check throws OperationCanceledException, so this assertion fails.
         (await act.Should().ThrowAsync<ProfileFamilyConcurrentlyDeletedException>())
             .Which.Message.Should().Contain(familyId.ToString());
@@ -1995,17 +2178,17 @@ public sealed class ProfileFamilyServiceTests
             .AsNoTracking().SingleAsync(f => f.Id == familyId);
         after.Name.Should().Be("Farm Test", "the row still holds the OLD state — the rename never persisted");
         after.RenderStatus.Should().Be(
-            ProfileFamilyRenderStatus.Failed,
-            "the surviving row must be marked Failed so the divergence is visible and re-renderable (H1)");
+            ProfileFamilyRenderStatus.Healthy,
+            "the current persisted winner is restored to the worker and remains authoritative");
     }
 
     [Fact]
-    public async Task EditFamilyAsync_RenameDeletedConcurrently_RemovesOrphanedTargetAlias_Throws404()
+    public async Task EditFamilyAsync_RenameDeletedConcurrently_RemovesOrphanedTargetAlias_ThrowsConflict()
     {
         // H3: an edit RENAME whose family row is DELETED concurrently during persist already created the
         // TARGET-name alias ("Renamed") before the save. The concurrent delete only knew the PREVIOUS name,
         // so without compensation the target alias survives pointing at a model with no family/bundle. The
-        // handler must best-effort remove that orphaned target alias. Uses a RENAME, not a plain render,
+        // handler must remove that orphaned target alias or surface cleanup failure. Uses a RENAME,
         // because only a rename creates a distinct target alias to orphan.
         await using SqliteConnection connection = new("Data Source=:memory:");
         await connection.OpenAsync();
@@ -2097,7 +2280,7 @@ public sealed class ProfileFamilyServiceTests
             .Returns(Task.CompletedTask);
 
         // Forward rename: ensure the target alias, drop the previous one. Compensation removes the orphaned
-        // target alias and is armed to throw so the guarded catch logs the sanitized target name.
+        // target alias and is armed to throw so cleanup is surfaced and the log uses the sanitized name.
         Mock<IPrinterModelAliasService> aliases = new(MockBehavior.Strict);
         _ = aliases.Setup(s => s.ResolveModelAliasAsync(maliciousName, "OrcaSlicer")).ReturnsAsync((Guid?)null);
         _ = aliases.Setup(s => s.EnsureModelAliasAsync(modelId, maliciousName, "OrcaSlicer", It.IsAny<CancellationToken>()))
@@ -2122,7 +2305,7 @@ public sealed class ProfileFamilyServiceTests
         Func<Task> act = async () => await service.EditFamilyAsync(
             familyId, new EditProfileFamilyRequestDto { Name = maliciousName }, CancellationToken.None);
 
-        _ = await act.Should().ThrowAsync<ProfileFamilyConcurrentlyDeletedException>();
+        _ = await act.Should().ThrowAsync<ProfileFamilyCleanupException>();
 
         string logged = capturingLogger.Messages.Should()
             .ContainSingle(message => message.Contains("orphaned target alias", StringComparison.Ordinal))

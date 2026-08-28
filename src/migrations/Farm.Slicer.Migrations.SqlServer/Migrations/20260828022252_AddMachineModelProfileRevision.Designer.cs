@@ -3,98 +3,107 @@ using System;
 using Farm.Slicer.Module.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace Farm.Slicer.Migrations.Sqlite.Migrations
+namespace Farm.Slicer.Migrations.SqlServer.Migrations
 {
     [DbContext(typeof(SlicerDbContext))]
-    partial class SlicerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260828022252_AddMachineModelProfileRevision")]
+    partial class AddMachineModelProfileRevision
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.11");
+            modelBuilder
+                .HasDefaultSchema("slicer")
+                .HasAnnotation("ProductVersion", "10.0.11")
+                .HasAnnotation("Relational:MaxIdentifierLength", 128);
+
+            SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.Artifact", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("ClaimToken")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("CleanupDeletionStartedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid?>("CleanupReservationToken")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("CleanupReservedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("ContentType")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("DeclaredSha256")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(256)");
 
                     b.Property<Guid>("JobId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<DateTime?>("PromotedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid?>("PromotedGcodeFileId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("PromotionCheckpointId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("PromotionOperationId")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<string>("PromotionOperationKey")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<DateTime?>("PromotionStartedAtUtc")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("RelativePath")
                         .IsRequired()
                         .HasMaxLength(1024)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(1024)");
 
                     b.Property<string>("Sha256")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<long>("SizeBytes")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bigint");
 
                     b.Property<Guid?>("WorkerId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 
@@ -107,74 +116,75 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.HasIndex("PromotionOperationId");
 
                     b.HasIndex("PromotionOperationKey")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[PromotionOperationKey] IS NOT NULL");
 
                     b.HasIndex("WorkerId");
 
                     b.HasIndex("JobId", "Kind");
 
-                    b.ToTable("Artifacts");
+                    b.ToTable("Artifacts", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.FilamentProfile", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("BedTemperature")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("CompatiblePrinters")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid?>("CreatedByUserId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(1000)");
 
                     b.Property<string>("Hash")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<bool>("IsDefault")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<bool>("IsPublic")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<bool>("IsSystem")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("bit")
                         .HasDefaultValue(false);
 
                     b.Property<string>("Manufacturer")
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(255)");
 
                     b.Property<string>("Material")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(255)");
 
                     b.Property<int>("NozzleTemperature")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<int>("PrintSpeed")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("ProfileFormat")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
@@ -183,23 +193,24 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SlicerDistribution")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("SlicerType")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("SlicerVersion")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("Hash")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[Hash] IS NOT NULL");
 
                     b.HasIndex("IsSystem");
 
@@ -210,60 +221,60 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.HasIndex("Name", "Material", "SlicerType")
                         .IsUnique();
 
-                    b.ToTable("FilamentProfiles");
+                    b.ToTable("FilamentProfiles", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.MachineModelProfile", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid?>("CreatedByUserId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Description")
                         .HasMaxLength(1024)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(1024)");
 
                     b.Property<string>("FamilyOverridesJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Hash")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<bool>("IsPublic")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<bool>("IsSystem")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("bit")
                         .HasDefaultValue(false);
 
                     b.Property<DateTime?>("LastRenderedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Manufacturer")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(256)");
 
                     b.Property<string>("NameNormalized")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(256)");
 
                     b.Property<Guid?>("PrinterModelId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
@@ -272,42 +283,43 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("nvarchar(32)")
                         .HasDefaultValueSql("'NotApplicable'");
 
                     b.Property<string>("RenderedForOrcaVersion")
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(32)");
 
                     b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("bigint")
                         .HasDefaultValue(1L);
 
                     b.Property<string>("SlicerDistribution")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<int>("SlicerType")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("SlicerVersion")
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(32)");
 
                     b.Property<string>("SourceMachineModelName")
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(256)");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("Hash")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[Hash] IS NOT NULL");
 
                     b.HasIndex("IsSystem");
 
@@ -319,61 +331,61 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .IsUnique()
                         .HasDatabaseName("IX_MachineModelProfiles_Name_SlicerType");
 
-                    b.ToTable("MachineModelProfiles");
+                    b.ToTable("MachineModelProfiles", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.MachineProfile", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid?>("CreatedByUserId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(1000)");
 
                     b.Property<string>("Hash")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<bool>("IsDefault")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<bool>("IsPublic")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<bool>("IsSystem")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("bit")
                         .HasDefaultValue(false);
 
                     b.Property<Guid?>("MachineModelProfileId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Manufacturer")
                         .IsRequired()
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(255)");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(255)");
 
                     b.Property<string>("OverridesJson")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("PrinterModelId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ProfileFormat")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
@@ -382,27 +394,28 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SlicerDistribution")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("SlicerType")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("SlicerVersion")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("SourceSystemPresetName")
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(255)");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("Hash")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[Hash] IS NOT NULL");
 
                     b.HasIndex("IsSystem");
 
@@ -417,117 +430,117 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.HasIndex("Name", "SlicerType")
                         .IsUnique();
 
-                    b.ToTable("MachineProfiles");
+                    b.ToTable("MachineProfiles", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.Model3D", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ClientUploadHash")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<Guid?>("ClientUploadId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Description")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<double?>("DimensionX")
-                        .HasColumnType("REAL");
+                        .HasColumnType("float");
 
                     b.Property<double?>("DimensionY")
-                        .HasColumnType("REAL");
+                        .HasColumnType("float");
 
                     b.Property<double?>("DimensionZ")
-                        .HasColumnType("REAL");
+                        .HasColumnType("float");
 
                     b.Property<string>("ExtractedMetadataJson")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("FileFormat")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("FileHash")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(255)");
 
                     b.Property<string>("FilePath")
                         .IsRequired()
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(512)");
 
                     b.Property<long>("FileSizeBytes")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bigint");
 
                     b.Property<Guid>("FolderId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("HealthStatus")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("int")
                         .HasDefaultValue(0);
 
                     b.Property<DateTime?>("ImportedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<bool>("IsValid")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<DateTime?>("LastHealthCheckDate")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("LastVerificationResult")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("bigint")
                         .HasDefaultValue(1L);
 
                     b.Property<string>("SourceCreator")
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(256)");
 
                     b.Property<string>("SourceLicense")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<string>("SourceUrl")
                         .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(2048)");
 
                     b.Property<string>("ThumbnailFileName")
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(255)");
 
                     b.Property<int?>("TriangleCount")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime>("UploadedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid?>("UploadedByUserId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ValidationErrors")
                         .HasColumnType("TEXT");
@@ -552,73 +565,74 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.HasIndex("UploadedByUserId");
 
                     b.HasIndex("UploadedByUserId", "ClientUploadId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[UploadedByUserId] IS NOT NULL AND [ClientUploadId] IS NOT NULL");
 
-                    b.ToTable("Models3D");
+                    b.ToTable("Models3D", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.ProcessProfile", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("AdvancedSettings")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("CompatiblePrinters")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid?>("CreatedByUserId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(1000)");
 
                     b.Property<bool>("EnableSupports")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<string>("Hash")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<int>("InfillPercentage")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<bool>("IsDefault")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<bool>("IsPublic")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<bool>("IsSystem")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("bit")
                         .HasDefaultValue(false);
 
                     b.Property<double>("LayerHeight")
-                        .HasColumnType("REAL");
+                        .HasColumnType("float");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(255)");
 
                     b.Property<double>("PrintSpeed")
-                        .HasColumnType("REAL");
+                        .HasColumnType("float");
 
                     b.Property<Guid?>("PrinterModelId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ProfileFormat")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("Quality")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
@@ -627,26 +641,27 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SlicerDistribution")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("SlicerType")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("SlicerVersion")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid?>("SpecificPrinterId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("Hash")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[Hash] IS NOT NULL");
 
                     b.HasIndex("IsDefault");
 
@@ -659,239 +674,240 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.HasIndex("SlicerType");
 
                     b.HasIndex("Name", "SlicerType", "PrinterModelId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[PrinterModelId] IS NOT NULL");
 
-                    b.ToTable("ProcessProfiles");
+                    b.ToTable("ProcessProfiles", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.SliceJob", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ArtifactIdsCsv")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int?>("ArtifactsCount")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<long?>("ArtifactsTotalBytes")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bigint");
 
                     b.Property<Guid?>("CalibrationAttemptId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("CalibrationMethod")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<Guid?>("CalibrationOrchestrationId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("CalibrationParamsJson")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("CalibrationProjectId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Checksum")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<Guid?>("ClaimToken")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("ClaimedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid?>("CorrelationId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("ErrorMessage")
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("EstimatedPrintTimeSeconds")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("ExtruderFilamentProfileNamesJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("FailureReason")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<Guid?>("FilamentProfileId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("FilamentProfileJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("FilamentProfileSha256")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<decimal?>("FilamentUsedGrams")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<Guid>("IdempotencyScopeId")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uniqueidentifier")
                         .HasDefaultValue(new Guid("00000000-0000-0000-0000-000000000000"));
 
                     b.Property<string>("LayoutDegradationReason")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<DateTime?>("LeaseExpiresAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<long>("LeaseFence")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("bigint")
                         .HasDefaultValue(0L);
 
                     b.Property<Guid?>("LeaseToken")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("MachineProfileId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("MachineProfileJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("MachineProfileSha256")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<Guid?>("Model3DId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ModelFileName")
                         .IsRequired()
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(512)");
 
                     b.Property<string>("ModelFileTransformsJson")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ModelFileUrl")
                         .IsRequired()
                         .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(2048)");
 
                     b.Property<string>("ModelFileUrlsJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ModelSha256")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("ModelTransformJson")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("NormalizedEngine")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("int")
                         .HasDefaultValue(0);
 
                     b.Property<Guid?>("OperationId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("PinnedWorkerId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("PrinterId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("Priority")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<Guid?>("ProcessProfileId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ProcessProfileJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ProcessProfileSha256")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("ProgressMessage")
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(512)");
 
                     b.Property<int>("ProgressPercent")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("QueuedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("RequiredCapabilitiesJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ResultFileUrl")
                         .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(2048)");
 
                     b.Property<int>("RetryCount")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("SlicerBinarySha256")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("SlicerContainerDigest")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<string>("SlicerDistribution")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<int>("SlicerEngine")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("SlicerEngineName")
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(32)");
 
                     b.Property<string>("SlicerEngineVersion")
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(32)");
 
                     b.Property<Guid?>("SlicerProfileId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("SlicerProfileJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SlicerVersion")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<DateTime?>("StartedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid>("UserId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("WorkerId")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 
@@ -919,79 +935,80 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.HasIndex("UserId", "IdempotencyScopeId", "Checksum")
                         .IsUnique()
                         .HasDatabaseName("IX_SliceJobs_Owner_Project_Checksum")
-                        .HasFilter("\"Checksum\" IS NOT NULL AND \"IdempotencyScopeId\" <> '00000000-0000-0000-0000-000000000000'");
+                        .HasFilter("[Checksum] IS NOT NULL AND [IdempotencyScopeId] <> '00000000-0000-0000-0000-000000000000'");
 
                     b.HasIndex("UserId", "IdempotencyScopeId", "CorrelationId")
                         .IsUnique()
                         .HasDatabaseName("IX_SliceJobs_Owner_Project_Correlation")
-                        .HasFilter("\"CorrelationId\" IS NOT NULL AND \"IdempotencyScopeId\" <> '00000000-0000-0000-0000-000000000000'");
+                        .HasFilter("[CorrelationId] IS NOT NULL AND [IdempotencyScopeId] <> '00000000-0000-0000-0000-000000000000'");
 
-                    b.ToTable("SliceJobs");
+                    b.ToTable("SliceJobs", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.SlicerService", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ApiKey")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<DateTime?>("ApiKeyRotatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("CapabilitiesJson")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Host")
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(512)");
 
                     b.Property<string>("InstanceId")
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<DateTime>("LastSeen")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<int>("MaxConcurrentJobs")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<int>("SlicerType")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("Status")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("Tags")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("UiManifestUrl")
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(512)");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Version")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(64)");
 
                     b.HasKey("Id");
 
                     b.HasIndex("InstanceId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[InstanceId] IS NOT NULL");
 
                     b.HasIndex("Name");
 
@@ -999,88 +1016,90 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("SlicerServices");
+                    b.ToTable("SlicerServices", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.SlicerSettings", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<bool>("Enabled")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<double>("JitterPercent")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("REAL")
+                        .HasColumnType("float")
                         .HasDefaultValue(15.0);
 
                     b.Property<string>("PerEngineJson")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.HasKey("Id");
 
-                    b.ToTable("SlicerSettings");
+                    b.ToTable("SlicerSettings", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.Worker", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("ActiveJobs")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<string>("ApiKey")
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(512)");
 
                     b.Property<long>("ArtifactBytesProduced")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bigint");
 
                     b.Property<int>("ArtifactsProduced")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<double?>("AverageProcessingTimeSeconds")
-                        .HasColumnType("REAL");
+                        .HasColumnType("float");
 
                     b.Property<string>("CapabilitiesJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<int>("CompletedJobs")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<int>("DisableSource")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("int")
                         .HasDefaultValue(0);
 
                     b.Property<string>("DisabledReason")
                         .HasMaxLength(1024)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(1024)");
 
                     b.Property<string>("EndpointUrl")
                         .IsRequired()
                         .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(2048)");
 
                     b.Property<int>("FailedJobs")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<bool>("IsDisabled")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("bit");
 
                     b.Property<DateTime?>("LastHeartbeat")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("MetadataJson")
                         .HasColumnType("TEXT");
@@ -1088,36 +1107,36 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(256)");
 
                     b.Property<DateTime?>("OfflineAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime?>("OnlineAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime>("RegisteredAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("ServiceId")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(256)");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<int>("TotalSlots")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Version")
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("nvarchar(50)");
 
                     b.HasKey("Id");
 
@@ -1128,7 +1147,7 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("Workers");
+                    b.ToTable("Workers", "slicer");
                 });
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.MachineProfile", b =>
