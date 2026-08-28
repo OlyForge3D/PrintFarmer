@@ -354,11 +354,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// (or a missing/unparsable machine profile) is refused with an explicit
     /// <see cref="InvalidOperationException"/> here, before the OrcaSlicer binary ever runs — this
     /// calibration method must never silently slice a tower that changes nothing. Bambu Lab (BBL)
-    /// machines are refused separately, by <c>printer_model</c>, before <c>gcode_flavor</c> is even
-    /// consulted: upstream OrcaSlicer inherits <c>gcode_flavor: "marlin"</c> for BBL machines but
-    /// its own gcode writer branches on a distinct <c>is_bbl_printers</c> flag ahead of flavour,
-    /// emitting a different command (<c>M900 K{v} L1000 M10</c>) than generic Marlin — see
-    /// <see cref="PressureAdvanceTowerGcodeBuilder.IsBambuLabPrinterModel"/>.
+    /// machines that resolve to the Marlin flavour are refused separately, by <c>printer_model</c>:
+    /// upstream OrcaSlicer inherits <c>gcode_flavor: "marlin"</c> for BBL machines but its own
+    /// gcode writer branches on a distinct <c>is_bbl_printers</c> flag ahead of flavour, emitting a
+    /// different command (<c>M900 K{v} L1000 M10</c>) than generic Marlin — see
+    /// <see cref="PressureAdvanceTowerGcodeBuilder.IsBambuLabPrinterModel"/>. The BBL check is
+    /// intentionally scoped to the Marlin flavour only: a Klipper-flashed BBL machine is a real,
+    /// supported configuration whose <c>gcode_flavor</c> already resolves to Klipper, so
+    /// <c>SET_PRESSURE_ADVANCE</c> is the correct command for it and must not be refused.
     /// </remarks>
     internal static async Task ApplyPressureAdvanceTowerGcodeAsync(
         DistributedSlicingJob job,
@@ -367,22 +370,6 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         CancellationToken cancellationToken)
     {
         string machineJsonContent = await File.ReadAllTextAsync(machineJsonPath, cancellationToken);
-
-        string? printerModel = PressureAdvanceTowerGcodeBuilder.ReadPrinterModel(machineJsonContent);
-        if (PressureAdvanceTowerGcodeBuilder.IsBambuLabPrinterModel(printerModel))
-        {
-            // Bambu Lab (BBL) machine profiles inherit gcode_flavor: "marlin" from upstream
-            // OrcaSlicer's fdm_machine_common, so they would otherwise resolve to the generic
-            // Marlin branch below and emit a bare "M900 K{v}" -- but upstream OrcaSlicer's own
-            // gcode writer branches on a distinct is_bbl_printers flag before gcode_flavor and
-            // emits "M900 K{v} L1000 M10" for BBL specifically. Since this builder does not (yet)
-            // emit that dialect, refuse explicitly rather than silently slicing a tower with the
-            // wrong command for this hardware. See PressureAdvanceTowerGcodeBuilder.IsBambuLabPrinterModel.
-            throw new InvalidOperationException(
-                $"Pressure advance tower calibration does not yet support Bambu Lab (BBL) machine " +
-                $"profiles (printer_model '{TruncateForMessage(printerModel!)}'); BBL requires a distinct " +
-                $"M900 K{{v}} L1000 M10 dialect that this calibration method does not emit.");
-        }
 
         string? gcodeFlavor = PressureAdvanceTowerGcodeBuilder.ReadGcodeFlavor(machineJsonContent);
         CalibrationFirmwareFlavor? flavor = PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor(gcodeFlavor);
@@ -395,6 +382,24 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             throw new InvalidOperationException(
                 $"Pressure advance tower calibration requires a Klipper or Marlin/Marlin2 machine profile " +
                 $"(gcode_flavor); the resolved firmware flavour '{flavorForMessage}' is not supported.");
+        }
+
+        string? printerModel = PressureAdvanceTowerGcodeBuilder.ReadPrinterModel(machineJsonContent);
+        if (flavor.Value == CalibrationFirmwareFlavor.Marlin && PressureAdvanceTowerGcodeBuilder.IsBambuLabPrinterModel(printerModel))
+        {
+            // Bambu Lab (BBL) machine profiles inherit gcode_flavor: "marlin" from upstream
+            // OrcaSlicer's fdm_machine_common, so they resolve to the generic Marlin branch below
+            // and would emit a bare "M900 K{v}" -- but upstream OrcaSlicer's own gcode writer
+            // branches on a distinct is_bbl_printers flag before gcode_flavor and emits
+            // "M900 K{v} L1000 M10" for BBL specifically. Since this builder does not (yet) emit
+            // that dialect, refuse explicitly rather than silently slicing a tower with the wrong
+            // command for this hardware. A Klipper-flashed BBL machine resolves to the Klipper
+            // branch above instead, and is not affected by this check.
+            // See PressureAdvanceTowerGcodeBuilder.IsBambuLabPrinterModel.
+            throw new InvalidOperationException(
+                $"Pressure advance tower calibration does not yet support Bambu Lab (BBL) machine " +
+                $"profiles (printer_model '{TruncateForMessage(printerModel!)}'); BBL requires a distinct " +
+                $"M900 K{{v}} L1000 M10 dialect that this calibration method does not emit.");
         }
 
         CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, CalibrationMethod.PressureAdvanceTower);

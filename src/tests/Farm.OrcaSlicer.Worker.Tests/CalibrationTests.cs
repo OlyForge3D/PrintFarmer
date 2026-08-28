@@ -1043,6 +1043,38 @@ public class CalibrationTests : IDisposable
         PressureAdvanceTowerGcodeBuilder.IsBambuLabPrinterModel(printerModel).Should().Be(expected);
     }
 
+    [Fact]
+    public async Task ApplyPressureAdvanceTowerGcodeAsync_KlipperFlashedBambuLabPrinterModel_IsAcceptedNotFalselyRefused()
+    {
+        // Regression (Bishop round-3 non-blocking note): a Klipper-flashed Bambu Lab machine is a
+        // real, supported configuration -- its gcode_flavor already resolves to Klipper, so
+        // SET_PRESSURE_ADVANCE is the correct command for it. The BBL refusal above exists only to
+        // stop a *Marlin-flavoured* BBL profile (upstream's own dialect mismatch) from silently
+        // mis-slicing; it must never over-refuse a machine whose flavour already resolved to
+        // Klipper just because its printer_model string happens to say "Bambu Lab".
+        string processJsonPath = Path.Combine(_tempDir, $"process-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(processJsonPath, """{"name": "Test Process"}""");
+        string machineJsonPath = Path.Combine(_tempDir, $"machine-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(
+            machineJsonPath,
+            JsonSerializer.Serialize(new { name = "Test Machine", gcode_flavor = "klipper", printer_model = "Bambu Lab X1 Carbon 0.4 nozzle (Klipper)" }));
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.PressureAdvanceTower),
+            CalibrationParamsJson = """{"start_advance": 0.02, "advance_step": 0.01, "band_height_mm": 5, "band_count": 2}""",
+        };
+
+        await OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync(job, processJsonPath, machineJsonPath, CancellationToken.None);
+
+        string updatedProcessContent = await File.ReadAllTextAsync(processJsonPath);
+        using JsonDocument doc = JsonDocument.Parse(updatedProcessContent);
+        string layerChangeGcode = doc.RootElement.GetProperty("layer_change_gcode").GetString()!;
+        layerChangeGcode.Should().Contain(
+            "SET_PRESSURE_ADVANCE",
+            "a Klipper-flashed Bambu Lab machine must resolve to the Klipper command, not be refused as BBL");
+        job.ProcessProfileSha256.Should().NotBeNull("a successfully processed job must record its updated process profile digest");
+    }
+
     private static OrcaSlicingPipelineService CreatePipeline(string calibResourcesRoot)
     {
         IConfiguration configuration =
