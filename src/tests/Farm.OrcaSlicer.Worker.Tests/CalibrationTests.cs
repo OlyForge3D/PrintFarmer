@@ -52,6 +52,8 @@ public class CalibrationTests : IDisposable
     [InlineData("FLOW_RATE_YOLO_RECOMMENDED", CalibrationMethod.FlowRateYoloRecommended)]
     [InlineData("pressure_advance_tower", CalibrationMethod.PressureAdvanceTower)]
     [InlineData("PRESSURE_ADVANCE_TOWER", CalibrationMethod.PressureAdvanceTower)]
+    [InlineData("max_volumetric_speed", CalibrationMethod.MaximumVolumetricSpeed)]
+    [InlineData("MAX_VOLUMETRIC_SPEED", CalibrationMethod.MaximumVolumetricSpeed)]
     public void TryParse_SupportedWireName_ReturnsExpectedMethod(string wireName, CalibrationMethod expected)
     {
         bool parsed = CalibrationMethods.TryParse(wireName, out CalibrationMethod method);
@@ -64,16 +66,14 @@ public class CalibrationTests : IDisposable
     [InlineData("pa_pattern")]
     [InlineData("pa_line")]
     [InlineData("not_a_real_method")]
-    [InlineData("max_volumetric_speed")]
     [InlineData("retraction")]
     [InlineData("")]
     [InlineData(null)]
     public void TryParse_UnsupportedOrMissingWireName_ReturnsFalse(string? wireName)
     {
         // PA Pattern (GPL-3.0 provenance) and PA Line (Bambu-specific) are deliberately not
-        // supported yet, and max_volumetric_speed/retraction are simply not yet built (issue
-        // #2051 investigation) — all must fail clearly rather than silently degrading into a
-        // generic slice failure.
+        // supported yet, and retraction is simply not yet built (issue #2051 investigation) —
+        // all must fail clearly rather than silently degrading into a generic slice failure.
         bool parsed = CalibrationMethods.TryParse(wireName, out _);
 
         parsed.Should().BeFalse();
@@ -99,6 +99,10 @@ public class CalibrationTests : IDisposable
         CalibrationMethods.ClientAcceptedWireNames.Should()
             .NotContain("flow_rate_yolo_recommended")
             .And.NotContain("flow_rate_yolo_perfectionist");
+
+        // Issue #2135: max volumetric speed is now fully slicer-supported, so it must be
+        // advertised to clients like every other built method.
+        CalibrationMethods.ClientAcceptedWireNames.Should().Contain("max_volumetric_speed");
 
         foreach (string wireName in CalibrationMethods.ClientAcceptedWireNames)
         {
@@ -147,6 +151,26 @@ public class CalibrationTests : IDisposable
         // Issue #2136: unlike the YOLO methods, pressure advance tower is fully slicer-supported —
         // OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync implements it.
         CalibrationMethods.IsSlicerSupported(CalibrationMethod.PressureAdvanceTower).Should().BeTrue();
+    }
+
+    [Fact]
+    public void DefaultModelFileName_MaxVolumetricSpeed_ReturnsSpeedTestStructureDrc()
+    {
+        // Verified against a local OrcaSlicer install: resources/calib/volumetric_speed/SpeedTestStructure.drc.
+        CalibrationMethods.DefaultModelFileName(CalibrationMethod.MaximumVolumetricSpeed).Should().Be("SpeedTestStructure.drc");
+    }
+
+    [Fact]
+    public void RelativeResourcePath_MaxVolumetricSpeed_ResolvesUnderVolumetricSpeedDirectory()
+    {
+        CalibrationMethods.RelativeResourcePath(CalibrationMethod.MaximumVolumetricSpeed).Should()
+            .Be(Path.Combine("volumetric_speed", "SpeedTestStructure.drc"));
+    }
+
+    [Fact]
+    public void IsSlicerSupported_MaxVolumetricSpeed_ReturnsTrue()
+    {
+        CalibrationMethods.IsSlicerSupported(CalibrationMethod.MaximumVolumetricSpeed).Should().BeTrue();
     }
 
     #endregion
@@ -1073,6 +1097,113 @@ public class CalibrationTests : IDisposable
             "SET_PRESSURE_ADVANCE",
             "a Klipper-flashed Bambu Lab machine must resolve to the Klipper command, not be refused as BBL");
         job.ProcessProfileSha256.Should().NotBeNull("a successfully processed job must record its updated process profile digest");
+    }
+
+    [Fact]
+    public void PrepareCalibrationModel_MaxVolumetricSpeedMethod_CopiesResourceUnmodified()
+    {
+        // Issue #2135: SpeedTestStructure.drc is an opaque OrcaSlicer binary format (confirmed by
+        // magic bytes against a local install, not a ZIP/3MF archive), so — like the temperature
+        // tower's .drc resource — the worker must copy it unmodified rather than attempt to parse
+        // and rewrite it.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-mvs");
+        string mvsPath = Path.Combine(calibResourcesRoot, "volumetric_speed", "SpeedTestStructure.drc");
+        Directory.CreateDirectory(Path.GetDirectoryName(mvsPath)!);
+        File.WriteAllText(mvsPath, "fake-mvs-resource");
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.MaximumVolumetricSpeed),
+        };
+
+        string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
+
+        File.Exists(preparedPath).Should().BeTrue();
+        File.ReadAllText(preparedPath).Should().Be("fake-mvs-resource");
+    }
+
+    [Fact]
+    public async Task ApplyMaxVolumetricSpeedCeilingAsync_SetsCeilingAndRecomputesDigest()
+    {
+        // Regression coverage for the pipeline's filament-profile injection wiring: a unit test on
+        // the JSON helper alone does not prove the ceiling actually reaches the filament profile
+        // on disk, or that the recorded digest is recomputed to match.
+        string filamentJsonPath = Path.Combine(_tempDir, $"filament-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(filamentJsonPath, """{"name": "Test Filament"}""");
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.MaximumVolumetricSpeed),
+            CalibrationParamsJson = """{"max_volumetric_speed_ceiling_mm3s": 35}""",
+        };
+
+        await OrcaSlicingPipelineService.ApplyMaxVolumetricSpeedCeilingAsync(job, filamentJsonPath, CancellationToken.None);
+
+        string updatedContent = await File.ReadAllTextAsync(filamentJsonPath);
+        using JsonDocument doc = JsonDocument.Parse(updatedContent);
+        JsonElement ceilingElement = doc.RootElement.GetProperty("filament_max_volumetric_speed");
+        ceilingElement.ValueKind.Should().Be(JsonValueKind.Array, "OrcaSlicer stores filament settings as single-element arrays");
+        ceilingElement[0].GetString().Should().Be(
+            "35",
+            "the pipeline must inject the exact ceiling computed from the job's CalibrationParamsJson, " +
+            "not the 50mm³/s default — a bug that ignores the client-supplied override would otherwise " +
+            "go undetected because the default also happens to be a plausible ceiling");
+        job.FilamentProfileSha256.Should().NotBeNullOrEmpty();
+        job.FilamentProfileSha256.Should().Be(
+            NativeSlicerProfiles.ComputeSha256(updatedContent),
+            "the recorded digest must match the mutated filament profile content, not the original");
+    }
+
+    [Fact]
+    public async Task ApplyMaxVolumetricSpeedCeilingAsync_MultiExtruder_SetsCeilingOnEveryFilamentAndRecomputesSetDigest()
+    {
+        // Regression coverage for a multi-extruder job: GenerateProfileJsonFilesAsync joins
+        // per-extruder filament paths with ';' (matching the --load-filaments CLI argument shape)
+        // when profile.ExtruderFilamentProfiles has more than one entry, and RunOrcaSlicerAsync
+        // passes that joined string straight through as profilePaths["filament"]. Before this fix,
+        // ApplyMaxVolumetricSpeedCeilingAsync treated the joined string as a single path and threw
+        // FileNotFoundException for any multi-extruder MVS calibration job.
+        string filamentPathA = Path.Combine(_tempDir, $"filament-a-{Guid.NewGuid():N}.json");
+        string filamentPathB = Path.Combine(_tempDir, $"filament-b-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(filamentPathA, """{"name": "Filament A"}""");
+        await File.WriteAllTextAsync(filamentPathB, """{"name": "Filament B", "filament_flow_ratio": ["0.97"]}""");
+        string joinedFilamentPath = string.Join(';', filamentPathA, filamentPathB);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.MaximumVolumetricSpeed),
+            CalibrationParamsJson = """{"max_volumetric_speed_ceiling_mm3s": 42}""",
+        };
+
+        await OrcaSlicingPipelineService.ApplyMaxVolumetricSpeedCeilingAsync(job, joinedFilamentPath, CancellationToken.None);
+
+        string updatedA = await File.ReadAllTextAsync(filamentPathA);
+        string updatedB = await File.ReadAllTextAsync(filamentPathB);
+        using JsonDocument docA = JsonDocument.Parse(updatedA);
+        using JsonDocument docB = JsonDocument.Parse(updatedB);
+        docA.RootElement.GetProperty("filament_max_volumetric_speed")[0].GetString().Should().Be("42");
+        docB.RootElement.GetProperty("filament_max_volumetric_speed")[0].GetString().Should().Be("42");
+        docB.RootElement.GetProperty("filament_flow_ratio")[0].GetString().Should().Be(
+            "0.97", "injecting the ceiling must not clobber a filament's other existing keys");
+
+        job.FilamentProfileSha256.Should().Be(
+            NativeSlicerProfiles.ComputeSha256(string.Join('\0', updatedA, updatedB)),
+            "the multi-filament digest must follow the same \\0-joined-set convention " +
+            "GenerateProfileJsonFilesAsync uses (ComputeProfileSetSha256), not a hash of a single document");
+    }
+
+    [Fact]
+    public void InjectMaxVolumetricSpeedCeiling_PreservesExistingKeys()
+    {
+        const string filamentJson = """{"name": "Test Filament", "filament_flow_ratio": ["0.98"]}""";
+
+        string updated = OrcaSlicingPipelineService.InjectMaxVolumetricSpeedCeiling(filamentJson, 42.5);
+
+        using JsonDocument doc = JsonDocument.Parse(updated);
+        doc.RootElement.GetProperty("name").GetString().Should().Be("Test Filament");
+        doc.RootElement.GetProperty("filament_flow_ratio")[0].GetString().Should().Be("0.98");
+        doc.RootElement.GetProperty("filament_max_volumetric_speed")[0].GetString().Should().Be("42.5");
     }
 
     private static OrcaSlicingPipelineService CreatePipeline(string calibResourcesRoot)

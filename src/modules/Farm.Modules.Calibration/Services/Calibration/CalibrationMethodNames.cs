@@ -275,6 +275,19 @@ public static class CalibrationMeasurementRanges
     /// <summary>Plausible pressure advance (linear advance) coefficient range.</summary>
     public static readonly CalibrationMeasurementRange PressureAdvance = new("pressure_advance", 0.0m, 2.0m);
 
+    /// <summary>
+    /// Plausible maximum volumetric speed range in mm³/s for a user-reported calibration
+    /// <em>observation</em> — the value the user settles on after inspecting the printed tower,
+    /// not the ceiling written into the filament profile before slicing (issue #2135). Upstream's
+    /// <c>CalibUtils::calib_max_vol_speed</c> uses a 50mm³/s slicing-time ceiling (see the
+    /// orcaslicer-worker's <c>CalibrationParameters.MaxVolumetricSpeedCeilingMm3s</c>) purely so the print
+    /// isn't clamped below the sweep the tower geometry produces; a well-tuned filament can then
+    /// legitimately report an observed ceiling anywhere up to that value, so the upper bound here
+    /// is intentionally set at 60 — a little above the slicing ceiling — to admit filaments/
+    /// nozzles that tolerate slightly more without accepting physically implausible submissions.
+    /// </summary>
+    public static readonly CalibrationMeasurementRange MaximumVolumetricSpeed = new("max_volumetric_speed_mm3_s", 1m, 60m);
+
     /// <summary>Gets the canonical measurement range for a calibration kind, if one is defined.</summary>
     /// <param name="kind">The stable calibration kind, e.g. from <see cref="CalibrationMethodNames.ToKind(CalibrationMethod)"/>.</param>
     /// <returns>The range, or <see langword="null"/> when the kind has no defined semantic range.</returns>
@@ -283,6 +296,7 @@ public static class CalibrationMeasurementRanges
         "temperature" => Temperature,
         "flow" => FlowRatio,
         "pressure_advance" => PressureAdvance,
+        "max_volumetric_speed" => MaximumVolumetricSpeed,
         _ => null,
     };
 }
