@@ -6,12 +6,12 @@ using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Hubs;
+using Farm.Modules.Maintenance.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Services.Maintenance;
+namespace Farm.Modules.Maintenance.Services.Maintenance;
 
 /// <summary>
 /// Service that evaluates V3 maintenance deployments (PrinterMaintenanceSchedule → Plan → PlanTask → Task)

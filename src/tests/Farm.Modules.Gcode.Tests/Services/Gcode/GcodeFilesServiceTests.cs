@@ -18,16 +18,16 @@ using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Tags;
 using Farm.Infrastructure.Telemetry;
+using Farm.Modules.Gcode.DTOs;
+using Farm.Modules.Gcode.Services.Gcode;
 using Farm.Slicer.Module.Services;
-using Farm.Web.Api.DTOs;
-using Farm.Web.Api.Services.Gcode;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.Gcode;
+namespace Farm.Modules.Gcode.Tests.Services.Gcode;
 
 public class GcodeFilesServiceTests
 {

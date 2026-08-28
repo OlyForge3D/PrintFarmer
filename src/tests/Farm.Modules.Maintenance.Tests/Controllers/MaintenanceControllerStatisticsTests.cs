@@ -7,14 +7,14 @@ using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Webhooks;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Hubs;
+using Farm.Modules.Maintenance.Controllers;
+using Farm.Modules.Maintenance.Hubs;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Moq;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Maintenance.Tests.Controllers;
 
 public class MaintenanceControllerStatisticsTests
 {

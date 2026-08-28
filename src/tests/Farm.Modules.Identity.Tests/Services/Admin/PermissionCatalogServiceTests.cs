@@ -2,7 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
-using Farm.Web.Api.Services.Admin;
+using Farm.Modules.Identity.Services.Admin;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Primitives;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.Admin;
+namespace Farm.Modules.Identity.Tests.Services.Admin;
 
 /// <summary>
 /// Unit tests for <see cref="PermissionCatalogService"/>. These verify that the catalog is

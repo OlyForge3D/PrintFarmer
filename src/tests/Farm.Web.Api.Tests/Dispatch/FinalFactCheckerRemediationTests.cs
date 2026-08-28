@@ -21,8 +21,8 @@ using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Tests.Dispatch;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Controllers.Requests;
+using Farm.Modules.Printers.Controllers;
+using Farm.Modules.Printers.Controllers.Requests;
 using FluentAssertions;
 using FluentValidation;
 using Microsoft.AspNetCore.Http;
@@ -471,7 +471,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             NullLogger<JobSchedulingService>.Instance,
             resourceAuthorization: authorization.Object);
 
-        Func<Task> denied = () => service.ScheduleJobAsync(
+        Func<Task> denied = async () => await service.ScheduleJobAsync(
             jobId,
             DateTime.SpecifyKind(DateTime.UtcNow.AddMinutes(5), DateTimeKind.Unspecified),
             "UTC",
@@ -677,7 +677,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             NullLogger<JobSchedulingService>.Instance,
             resourceAuthorization: AllowAllSchedulingAuthorization());
 
-        Func<Task> schedule = () => service.ScheduleJobAsync(
+        Func<Task> schedule = async () => await service.ScheduleJobAsync(
             job.Id,
             new DateTime(year, month, day, hour, minute, 0, DateTimeKind.Unspecified),
             "America/New_York",
@@ -1208,7 +1208,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         var controller = new PrintersController(
             logger: Mock.Of<Microsoft.Extensions.Logging.ILogger<PrintersController>>(),
             printersService: printers,
-            catalogService: Mock.Of<Farm.Web.Api.Services.Catalog.ICatalogService>(),
+            catalogService: Mock.Of<Farm.Modules.Printers.Services.Catalog.ICatalogService>(),
             validator: Mock.Of<IValidator<CreatePrinterFromDiscoveryDto>>(),
             discoveryProxyService: Mock.Of<
                 Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService>(),

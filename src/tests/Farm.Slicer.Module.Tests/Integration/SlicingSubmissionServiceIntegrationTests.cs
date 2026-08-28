@@ -19,7 +19,7 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// Fast executing (~5-6 seconds for 18 tests) - suitable for CI/CD pipelines
 /// </summary>
 [Trait("Category", "Integration")]
-public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
+public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;
     private readonly List<MemoryStream> _streamsToDispose = [];
@@ -34,7 +34,13 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         await _factory.ResetDatabaseAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
     {
         _factory?.Dispose();
 
@@ -42,8 +48,6 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         {
             stream.Dispose();
         }
-
-        await Task.CompletedTask;
     }
 
     /// <summary>

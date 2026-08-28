@@ -2,12 +2,12 @@
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Tasks;
-using Farm.Web.Api.Services.Tasks;
+using Farm.Modules.Observability.Services.Tasks;
 using Microsoft.AspNetCore.SignalR;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.Tasks;
+namespace Farm.Modules.Observability.Tests.Services.Tasks;
 
 /// <summary>
 /// Maintenance-sourced task DTOs are restricted to the authenticated administrator

@@ -14,8 +14,9 @@
 alert engine, resolution notifier, print-stats sync hosted service, the MaintenanceHub
 SignalR hub (the first hub to move out of the host), and the maintenance
 controllers/DTOs/request models. Registers via IApiModule (see Farm.Modules.Abstractions,
-issue #2035). Phase 9 of the module-decomposition epic #2019 -- namespaces are
-intentionally unchanged from their prior Farm.Web.Api location (move-first-rename-last).</Description>
+issue #2035). Phase 9 of the module-decomposition epic #2019. Namespaces were
+renamed from Farm.Web.Api.* to Farm.Modules.Maintenance.* by Phase 19 (issue #2047),
+completing the move-first-rename-last strategy.</Description>
   </PropertyGroup>
 
   <ItemGroup>

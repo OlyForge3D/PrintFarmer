@@ -7,7 +7,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Controllers;
+using Farm.Modules.Administration.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -16,7 +16,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Administration.Tests.Controllers;
 
 /// <summary>
 /// Tests optimistic concurrency enforcement on settings PUT endpoints.

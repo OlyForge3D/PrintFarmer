@@ -5,9 +5,9 @@ using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Webhooks;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Controllers.Responses;
-using Farm.Web.Api.Hubs;
+using Farm.Modules.Maintenance.Controllers;
+using Farm.Modules.Maintenance.Controllers.Responses;
+using Farm.Modules.Maintenance.Hubs;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Maintenance.Tests.Controllers;
 
 /// <summary>
 /// Issue #711 round-5 FIX 3: fleet statistics must project toolhead-scoped schedules against each

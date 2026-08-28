@@ -103,7 +103,7 @@ public class IdempotencyRecordCleanupServiceTests : IDisposable
             NullLogger<IdempotencyRecordCleanupService>.Instance,
             TimeSpan.FromMinutes(1));
 
-        Func<Task> act = () => svc.RunOnceAsync(CancellationToken.None);
+        Func<Task> act = async () => await svc.RunOnceAsync(CancellationToken.None);
         _ = await act.Should().NotThrowAsync("the cleanup loop must tolerate transient database failures");
     }
 
@@ -126,7 +126,7 @@ public class IdempotencyRecordCleanupServiceTests : IDisposable
             NullLogger<IdempotencyRecordCleanupService>.Instance,
             TimeSpan.FromMinutes(1));
 
-        Func<Task> act = () => svc.RunOnceAsync(CancellationToken.None);
+        Func<Task> act = async () => await svc.RunOnceAsync(CancellationToken.None);
         _ = await act.Should().ThrowAsync<InvalidOperationException>(
             "non-database failures must not be swallowed by the cleanup catch");
     }

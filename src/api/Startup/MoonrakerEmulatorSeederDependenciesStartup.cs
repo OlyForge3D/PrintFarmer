@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module;
+﻿using Farm.Modules.Calibration.Startup;
+using Farm.Slicer.Module;
 
 namespace Farm.Web.Api.Startup;
 

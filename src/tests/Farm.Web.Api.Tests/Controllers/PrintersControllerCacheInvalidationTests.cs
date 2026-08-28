@@ -16,14 +16,14 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Controllers;
 
 /// <summary>
-/// Verifies that <see cref="Farm.Web.Api.Controllers.PrintersController.UpdateAsync"/> notifies
+/// Verifies that <see cref="Farm.Modules.Printers.Controllers.PrintersController.UpdateAsync"/> notifies
 /// <see cref="IPrinterCacheInvalidator"/> exactly when a printer edit is durably committed
 /// (issue #1763). This is the invalidation half of the polling-cache perf fix: the polling
 /// services only stop re-querying the printer row per tick because an edit is guaranteed to
 /// clear their cached copy immediately, not merely within the 30s reconciliation window.
 /// </summary>
 [Trait("Category", "Integration")]
-public sealed class PrintersControllerCacheInvalidationTests : IAsyncLifetime
+public sealed class PrintersControllerCacheInvalidationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
     private HttpClient? _client;
@@ -37,6 +37,12 @@ public sealed class PrintersControllerCacheInvalidationTests : IAsyncLifetime
     {
         _client?.Dispose();
         await _factory.DisposeAsync();
+    }
+
+    public void Dispose()
+    {
+        _client?.Dispose();
+        _factory.Dispose();
     }
 
     [Fact]

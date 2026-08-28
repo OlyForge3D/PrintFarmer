@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Modules.Calibration.Services.Calibration;
 using Farm.Slicer.Module.Domain;
-using Farm.Web.Api.Services.Calibration;
 
-namespace Farm.Web.Api.Services.Gcode;
+namespace Farm.Modules.Calibration.Services.Gcode;
 
 /// <summary>
 /// Immutable promotion request. The same values always produce the same canonical payload hash, which

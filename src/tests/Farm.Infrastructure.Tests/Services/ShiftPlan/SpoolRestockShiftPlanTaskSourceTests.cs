@@ -19,7 +19,7 @@ using TestDbHelpers = Farm.Testing.Shared.AppDbTestHelpers;
 
 namespace Farm.Infrastructure.Tests.Services.ShiftPlan;
 
-public sealed class SpoolRestockShiftPlanTaskSourceTests : IAsyncLifetime
+public sealed class SpoolRestockShiftPlanTaskSourceTests : IAsyncLifetime, IDisposable
 {
     private static readonly DateTimeOffset Now =
         new(2026, 7, 22, 12, 0, 0, TimeSpan.Zero);
@@ -77,6 +77,8 @@ public sealed class SpoolRestockShiftPlanTaskSourceTests : IAsyncLifetime
     }
 
     public async Task DisposeAsync() => await _connection.DisposeAsync();
+
+    public void Dispose() => _connection.Dispose();
 
     [Fact]
     public async Task ProduceAsync_ReadyProjection_MapsStableTaskAndTypedMetadata()

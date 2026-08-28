@@ -1,14 +1,14 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Projects;
 using Farm.Infrastructure.Services.Projects;
-using Farm.Web.Api.Controllers;
+using Farm.Modules.Inventory.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Inventory.Tests.Controllers;
 
 public class PrintProjectsControllerTests
 {

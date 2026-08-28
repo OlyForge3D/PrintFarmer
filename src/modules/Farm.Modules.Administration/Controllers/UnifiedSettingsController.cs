@@ -3,16 +3,16 @@ using System.Text.Json;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Settings;
+using Farm.Modules.Administration.Services.Workers;
 using Farm.Settings;
 using Farm.Web.Api.Services;
-using Farm.Web.Api.Services.Workers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Administration.Controllers;
 
 [ApiController]
 [Route("api/settings")]

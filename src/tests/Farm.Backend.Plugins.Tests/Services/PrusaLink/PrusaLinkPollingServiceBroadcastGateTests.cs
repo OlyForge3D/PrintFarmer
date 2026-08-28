@@ -31,7 +31,7 @@ namespace Farm.Backend.Plugins.Tests.Services.PrusaLink;
 /// <c>private static readonly</c> field that cannot be shrunk via reflection once the type has
 /// initialized elsewhere in the test run.
 /// </summary>
-public class PrusaLinkPollingServiceBroadcastGateTests
+public class PrusaLinkPollingServiceBroadcastGateTests : IDisposable
 {
     private readonly Mock<IPrusaLinkClient> _prusaLinkClient = new(MockBehavior.Loose);
     private readonly Mock<IPrintersRepository> _printersRepository = new(MockBehavior.Loose);
@@ -74,6 +74,8 @@ public class PrusaLinkPollingServiceBroadcastGateTests
         _pollPrinterAsync = typeof(PrusaLinkPollingService)
             .GetMethod("PollPrinterAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
     }
+
+    public void Dispose() => _service.Dispose();
 
     private int SendCount() => _clientProxy.Invocations.Count(i => i.Method.Name == "SendCoreAsync");
 

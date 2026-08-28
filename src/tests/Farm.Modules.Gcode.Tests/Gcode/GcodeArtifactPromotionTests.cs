@@ -11,14 +11,15 @@ using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
+using Farm.Modules.Calibration.Services.Calibration;
+using Farm.Modules.Calibration.Services.Gcode;
+using Farm.Modules.Gcode.Services.Gcode;
 using Farm.Slicer.Module.Api.Services;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Metrics;
-using Farm.Web.Api.Services.Calibration;
-using Farm.Web.Api.Services.Gcode;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -28,7 +29,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 
-namespace Farm.Web.Api.Tests.Gcode;
+namespace Farm.Modules.Gcode.Tests.Gcode;
 
 /// <summary>
 /// Covers the <c>Artifact -&gt; GcodeFile</c> promotion boundary: lineage validation, byte equivalence,
@@ -363,7 +364,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
     {
         PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
         await _harness.AgeArtifactAsync(fixture.ArtifactId, TimeSpan.FromDays(30));
-        IArtifactsRepository inner = _harness.CreateArtifactsRepository();
+        EfArtifactsRepository inner = _harness.CreateArtifactsRepository();
         TaskCompletionSource selected =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         TaskCompletionSource releaseSelection =
@@ -429,7 +430,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
     {
         PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
         await _harness.AgeArtifactAsync(fixture.ArtifactId, TimeSpan.FromDays(30));
-        IArtifactsRepository inner = _harness.CreateArtifactsRepository();
+        EfArtifactsRepository inner = _harness.CreateArtifactsRepository();
         TaskCompletionSource deleteReached =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         TaskCompletionSource releaseDelete =
@@ -517,7 +518,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
     {
         PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
         await _harness.AgeArtifactAsync(fixture.ArtifactId, TimeSpan.FromDays(30));
-        IArtifactsRepository inner = _harness.CreateArtifactsRepository();
+        EfArtifactsRepository inner = _harness.CreateArtifactsRepository();
         TaskCompletionSource firstReserved =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         TaskCompletionSource releaseFirst =
@@ -675,7 +676,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             fixture.ArtifactId,
             expiredToken,
             expiredAtUtc);
-        IArtifactsRepository firstRepository = _harness.CreateArtifactsRepository();
+        EfArtifactsRepository firstRepository = _harness.CreateArtifactsRepository();
         IArtifactsRepository secondRepository = _harness.CreateArtifactsRepository();
         TaskCompletionSource releaseAttempts =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -736,7 +737,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
     {
         PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
         await _harness.AgeArtifactAsync(fixture.ArtifactId, TimeSpan.FromDays(30));
-        IArtifactsRepository inner = _harness.CreateArtifactsRepository();
+        EfArtifactsRepository inner = _harness.CreateArtifactsRepository();
         DateTime expiredAtUtc = new(2020, 1, 1, 12, 0, 0, DateTimeKind.Utc);
         TaskCompletionSource firstReserved =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1332,7 +1333,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         public SlicerDbContext CreateSlicerContext() =>
             new(new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(_slicerConnectionString).Options);
 
-        public IGcodeArtifactPromoter CreatePromoter(bool withArtifactRouting = true)
+        public GcodeArtifactPromoter CreatePromoter(bool withArtifactRouting = true)
         {
             AppDbContext core = CreateCoreContext();
             SlicerContextFactory slicerFactory = new(_slicerConnectionString);
@@ -1349,7 +1350,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 withArtifactRouting ? sliceJobs : null);
         }
 
-        public IArtifactsRepository CreateArtifactsRepository() =>
+        public EfArtifactsRepository CreateArtifactsRepository() =>
             new EfArtifactsRepository(new SlicerContextFactory(_slicerConnectionString));
 
         public async Task<PromotionFixture> SeedCompletedGcodeArtifactAsync(
@@ -1744,7 +1745,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             _ = await core.SaveChangesAsync();
         }
 
-        private IGcodeFilesService CreateGcodeFilesService(AppDbContext core)
+        private GcodeFilesService CreateGcodeFilesService(AppDbContext core)
         {
             Mock<IStoragePathService> storagePaths = new(MockBehavior.Loose);
             _ = storagePaths.Setup(service => service.GetGcodeStorageDirectory()).Returns(GcodeRoot);
@@ -1786,7 +1787,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             return storagePaths.Object;
         }
 
-        private IArtifactsService CreateArtifactsService(IArtifactsRepository repository) =>
+        private ArtifactsService CreateArtifactsService(IArtifactsRepository repository) =>
             new ArtifactsService(
                 CreateHostEnvironment(),
                 repository,

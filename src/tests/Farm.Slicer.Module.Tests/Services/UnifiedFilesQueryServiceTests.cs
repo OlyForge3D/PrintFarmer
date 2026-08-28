@@ -303,7 +303,7 @@ public sealed class UnifiedFilesQueryServiceTests : IAsyncDisposable
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
 
-        Func<Task> act = () => _service.QueryAsync(
+        Func<Task> act = async () => await _service.QueryAsync(
             new UnifiedFilesQueryRequestDto(),
             cancellation.Token);
 

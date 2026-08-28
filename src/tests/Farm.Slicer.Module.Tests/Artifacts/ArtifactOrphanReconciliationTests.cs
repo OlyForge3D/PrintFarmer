@@ -496,7 +496,7 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
 
         try
         {
-            Func<Task> upload = () => artifactsService.UploadAsync(
+            Func<Task> upload = async () => await artifactsService.UploadAsync(
                 formFile,
                 Guid.NewGuid(),
                 workerId: null,
@@ -759,7 +759,7 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
         CreatedAt = DateTime.UtcNow.AddDays(-2),
     };
 
-    private static IFormFile CreateFormFile(string fileName, string content)
+    private static FormFile CreateFormFile(string fileName, string content)
     {
         byte[] bytes = System.Text.Encoding.UTF8.GetBytes(content);
         return new FormFile(

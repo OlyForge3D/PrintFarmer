@@ -813,12 +813,16 @@ public class AutoDispatchConcurrencyTests : IDisposable
             NullLogger<AutoDispatchBackgroundService>.Instance);
         using CancellationTokenSource timeout =
             new(TimeSpan.FromSeconds(15));
+        // IDISP013 false positive: every task in this array is awaited via Task.WhenAll
+        // in the finally block below, before `timeout` leaves its using scope.
+#pragma warning disable IDISP013 // Await in using
         Task[] dispatches = printers
             .Select(printerId => service.ProcessPrinterIdleAsync(
                 printerId,
                 skipIdleThreshold: true,
                 timeout.Token))
             .ToArray();
+#pragma warning restore IDISP013
 
         try
         {

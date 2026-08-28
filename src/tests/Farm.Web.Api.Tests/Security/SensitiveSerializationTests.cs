@@ -3,8 +3,8 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
+using Farm.Modules.PrintQueue.Controllers.Responses;
 using Farm.Slicer.Module.Domain;
-using Farm.Web.Api.Controllers.Responses;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Security;

@@ -4,7 +4,7 @@ using Farm.Infrastructure.Services.Queue.Dispatch;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.PrintQueue.Controllers;
 
 /// <summary>
 /// Dispatch dashboard endpoints: queue status and dispatch history.

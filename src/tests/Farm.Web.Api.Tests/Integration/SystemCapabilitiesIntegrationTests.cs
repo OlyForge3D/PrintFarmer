@@ -106,7 +106,7 @@ public class SystemCapabilitiesIntegrationTests : IClassFixture<CustomWebApplica
 /// updated dynamically by worker registration.
 /// </summary>
 [Collection("SlicerDisabled")]
-public class SystemCapabilitiesMicroservicesTests : IAsyncLifetime
+public class SystemCapabilitiesMicroservicesTests : IAsyncLifetime, IDisposable
 {
     private SlicerDisabledWebApplicationFactory? _factory;
     private HttpClient? _client;
@@ -124,6 +124,12 @@ public class SystemCapabilitiesMicroservicesTests : IAsyncLifetime
         {
             await _factory.DisposeAsync();
         }
+    }
+
+    public void Dispose()
+    {
+        _client?.Dispose();
+        _factory?.Dispose();
     }
 
     [Fact]

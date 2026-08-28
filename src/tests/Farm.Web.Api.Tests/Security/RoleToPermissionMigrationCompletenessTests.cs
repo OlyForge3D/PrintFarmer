@@ -18,32 +18,32 @@ public sealed class RoleToPermissionMigrationCompletenessTests
 {
     private static readonly Assembly[] ScannedAssemblies =
     [
-        typeof(Farm.Web.Api.Controllers.PrintersController).Assembly,
+        typeof(Farm.Modules.Printers.Controllers.PrintersController).Assembly,
         typeof(Farm.Infrastructure.Services.SignalR.HarvestHub).Assembly,
         typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly,
         // Issue #2040: Farm.Modules.PrintQueue controllers moved out of Farm.Web.Api and must be
         // scanned here explicitly, or a reintroduced farm_admin role-name gate on one of them
         // would silently escape this guard.
-        typeof(Farm.Web.Api.Controllers.JobQueueController).Assembly,
-        typeof(Farm.Web.Api.Controllers.CalibrationProjectsController).Assembly,
-        typeof(Farm.Web.Api.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
+        typeof(Farm.Modules.PrintQueue.Controllers.JobQueueController).Assembly,
+        typeof(Farm.Modules.Calibration.Controllers.CalibrationProjectsController).Assembly,
+        typeof(Farm.Modules.Identity.Controllers.Admin.RolesController).Assembly, // Farm.Modules.Identity
         // Issue #2043: Farm.Modules.Devices controllers moved out of Farm.Web.Api and must be
         // scanned here explicitly, or a reintroduced farm_admin role-name gate on one of them
         // would silently escape this guard. AdminHomeAssistantController (also named in the
         // issue) ended up owned by Farm.Modules.Administration instead (Phase 14, #2042, landed
         // first), so NfcController anchors the Devices assembly here instead.
-        typeof(Farm.Web.Api.Controllers.NfcController).Assembly,
+        typeof(Farm.Modules.Devices.Controllers.NfcController).Assembly,
         // Phase 14 (#2042) never added its own anchor to this guard; the gap was masked
         // pre-merge because AdminHomeAssistantController.Assembly happened to resolve to
         // Farm.Web.Api like every other anchor here. Now that it resolves to
         // Farm.Modules.Administration, added explicitly so that assembly stays scanned.
-        typeof(Farm.Web.Api.Controllers.Admin.AdminHomeAssistantController).Assembly,
+        typeof(Farm.Modules.Administration.Controllers.Admin.AdminHomeAssistantController).Assembly,
         // Issue #2088: Farm.Modules.Gcode and Farm.Modules.Inventory were extracted by the
         // module-decomposition epic (#2019, Phases 11/16) but never got an anchor here, so a
         // reintroduced farm_admin role-name gate on either module's controllers would silently
         // escape this guard.
-        typeof(Farm.Web.Api.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
-        typeof(Farm.Web.Api.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
+        typeof(Farm.Modules.Gcode.Controllers.GcodeFilesController).Assembly, // Farm.Modules.Gcode
+        typeof(Farm.Modules.Inventory.Controllers.PartsInventoryController).Assembly, // Farm.Modules.Inventory
     ];
 
     [Fact]

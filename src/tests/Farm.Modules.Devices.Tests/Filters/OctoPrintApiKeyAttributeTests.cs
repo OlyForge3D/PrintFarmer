@@ -1,6 +1,6 @@
 ﻿using System.Security.Claims;
-using Farm.Web.Api.Filters;
-using Farm.Web.Api.Services.OctoPrint;
+using Farm.Modules.Devices.Filters;
+using Farm.Modules.Devices.Services.OctoPrint;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Abstractions;
@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Routing;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Filters;
+namespace Farm.Modules.Devices.Tests.Filters;
 
 public class OctoPrintApiKeyAttributeTests
 {

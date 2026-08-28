@@ -1109,12 +1109,16 @@ public class OctoPrintClientTests
     public async Task GetHistoryTotalsAsync_TransportFailure_PropagatesAfterOneRequest()
     {
         int requestCount = 0;
+        // IDISP013 false positive: this handler delegate is not invoked here — it runs later
+        // when HttpClient dispatches the request, synchronously within this method's scope.
+#pragma warning disable IDISP013 // Await in using
         using var handler = new AsyncMessageHandler((_, _) =>
         {
             requestCount++;
             return Task.FromException<HttpResponseMessage>(
                 new HttpRequestException("backend offline"));
         });
+#pragma warning restore IDISP013
         using var http = new HttpClient(handler);
         var client = new OctoPrintClient(
             http,
@@ -1155,12 +1159,16 @@ public class OctoPrintClientTests
     public async Task GetHistoryTotalsAsync_CallerCancellation_StaysCancellation()
     {
         using var cts = new CancellationTokenSource();
+        // IDISP013 false positive: this handler delegate is not invoked here — it runs later
+        // when HttpClient dispatches the request, synchronously within this method's scope.
+#pragma warning disable IDISP013 // Await in using
         using var handler = new AsyncMessageHandler((_, _) =>
         {
             cts.Cancel();
             return Task.FromException<HttpResponseMessage>(
                 new OperationCanceledException(cts.Token));
         });
+#pragma warning restore IDISP013
         using var http = new HttpClient(handler);
         var client = new OctoPrintClient(
             http,

@@ -11,7 +11,6 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Slicer.Module.Domain;
 using Farm.Testing.Shared;
-using Farm.Web.Api.Services.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -597,7 +596,7 @@ public class CustomWebApplicationFactory : HostFixture<Program>
     /// this write. Safe to call unconditionally for the two revisioned singleton tables: each has
     /// exactly one row at this point in <see cref="ResetSingletonModelDataAsync"/>.
     /// </summary>
-    private static Task ResetRevisionAsync<TEntity>(AppDbContext context, long revision)
+    private static Task<int> ResetRevisionAsync<TEntity>(AppDbContext context, long revision)
         where TEntity : class, IRevisionedEntity
         => context.Set<TEntity>().ExecuteUpdateAsync(setters => setters.SetProperty(e => e.Revision, revision));
 

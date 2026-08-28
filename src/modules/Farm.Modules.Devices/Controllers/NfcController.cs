@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Devices.Controllers;
 
 /// <summary>
 /// NFC tag binding endpoints — maps tag UIDs to spools and printer/tray contexts.

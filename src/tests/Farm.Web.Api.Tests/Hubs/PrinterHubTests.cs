@@ -19,7 +19,7 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Hubs;
 
-public class PrinterHubTests
+public class PrinterHubTests : IDisposable
 {
     private readonly Mock<IDiscoveryProgressCache> _progressCacheMock;
     private readonly Mock<IDiscoverySessionRegistry> _sessionRegistryMock;
@@ -102,6 +102,8 @@ public class PrinterHubTests
             Context = _contextMock.Object
         };
     }
+
+    public void Dispose() => _hub.Dispose();
 
     [Fact]
     public async Task OnConnectedAsync_QueueReader_JoinsResourceDiscoveryGroup()

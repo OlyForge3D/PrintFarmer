@@ -17,7 +17,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// <summary>
 /// Tests worker authentication enforcement on protected slicing endpoints.
 /// </summary>
-public class SliceJobWorkerAuthTests : IAsyncLifetime
+public class SliceJobWorkerAuthTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient _client = null!;
@@ -33,7 +33,13 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
     {
         _client?.Dispose();
         _factory?.Dispose();

@@ -2,7 +2,7 @@
 using Farm.Infrastructure.Logging;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.SmartPlug;
+namespace Farm.Modules.SmartPlug.Services.SmartPlug;
 
 /// <summary>
 /// Smart plug provider for TP-Link Kasa devices using the local LAN API (no cloud required).

@@ -1,7 +1,7 @@
 ﻿using System.Net;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using Farm.Web.Api.Controllers.Responses;
+using Farm.Modules.PrintQueue.Controllers.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

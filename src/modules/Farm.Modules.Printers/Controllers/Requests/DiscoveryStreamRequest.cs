@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 
-namespace Farm.Web.Api.Controllers.Requests;
+namespace Farm.Modules.Printers.Controllers.Requests;
 
 public class DiscoveryStreamRequest
 {

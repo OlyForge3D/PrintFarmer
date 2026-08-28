@@ -10,7 +10,6 @@ using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Users;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Services.Authentication;
 using Moq;
 using Xunit;
 
@@ -23,7 +22,7 @@ public class UsersServiceTests
     private readonly Mock<IPasswordHashingService> _passwordHashingServiceMock;
     private readonly Mock<IEffectivePermissionsRevocationService> _revocationServiceMock;
     private readonly Mock<IAuthAuditService> _authAuditServiceMock;
-    private readonly IUsersService _usersService;
+    private readonly UsersService _usersService;
     private readonly CancellationToken _cancellationToken = CancellationToken.None;
     private readonly Guid _actorUserId = Guid.NewGuid();
 

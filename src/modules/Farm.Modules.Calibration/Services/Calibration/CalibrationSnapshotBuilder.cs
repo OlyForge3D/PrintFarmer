@@ -2,7 +2,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Farm.Web.Api.Services.Calibration;
+namespace Farm.Modules.Calibration.Services.Calibration;
 
 internal static class CalibrationSnapshotBuilder
 {

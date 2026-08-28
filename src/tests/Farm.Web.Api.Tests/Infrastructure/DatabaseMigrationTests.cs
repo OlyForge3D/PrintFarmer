@@ -221,7 +221,7 @@ public sealed class DatabaseMigrationTests
                   {"orcaslicer"}, {"ORCASLICER"}, {DateTime.UtcNow});
              """);
 
-        Func<Task> migrateFurther = () => migrator.MigrateAsync(
+        Func<Task> migrateFurther = async () => await migrator.MigrateAsync(
             "20260827005237_EnforceNormalizedPrinterModelAliasUniqueness");
 
         _ = await migrateFurther.Should().NotThrowAsync(
@@ -454,7 +454,7 @@ public sealed class DatabaseMigrationTests
         await using AppDbContext context = CreateCoreContextWithoutMigrations(connection);
         _ = await context.Database.EnsureCreatedAsync();
 
-        Func<Task> migrate = () => ProviderAwareMigrationRunner.MigrateAsync(
+        Func<Task> migrate = async () => await ProviderAwareMigrationRunner.MigrateAsync(
             context,
             DatabaseMigrationTarget.Core,
             NullLogger.Instance);
@@ -484,7 +484,7 @@ public sealed class DatabaseMigrationTests
             _ = await context.Database.EnsureCreatedAsync();
         }
 
-        Func<Task> initialize = () => ProgramHelpers.InitializeDatabaseAsync(app);
+        Func<Task> initialize = async () => await ProgramHelpers.InitializeDatabaseAsync(app);
 
         DatabaseMigrationContractException exception =
             (await initialize.Should().ThrowAsync<DatabaseMigrationContractException>()).Which;
@@ -510,7 +510,7 @@ public sealed class DatabaseMigrationTests
             CREATE VIEW "DeviceTokens" AS SELECT 'blocked' AS "Id";
             """);
 
-        Func<Task> initialize = () => ProgramHelpers.InitializeDatabaseAsync(app);
+        Func<Task> initialize = async () => await ProgramHelpers.InitializeDatabaseAsync(app);
 
         SqliteException exception = (await initialize.Should().ThrowAsync<SqliteException>()).Which;
         exception.Message.Should().Contain("Cannot add a column to a view");
@@ -541,7 +541,7 @@ public sealed class DatabaseMigrationTests
             CREATE VIEW "MutationCounters" AS SELECT 1 AS "Id", 0 AS "Value";
             """);
 
-        Func<Task> initialize = () => ProgramHelpers.InitializeDatabaseAsync(app);
+        Func<Task> initialize = async () => await ProgramHelpers.InitializeDatabaseAsync(app);
 
         SqliteException exception = (await initialize.Should().ThrowAsync<SqliteException>()).Which;
         exception.Message.Should().Contain("MutationCounters");
@@ -624,7 +624,7 @@ public sealed class DatabaseMigrationTests
         _ = builder.Services.AddSingleton<IStartupStatus>(startupStatus);
         await using WebApplication app = builder.Build();
 
-        Func<Task> initialize = () => ProgramHelpers.InitializeDatabaseAsync(app);
+        Func<Task> initialize = async () => await ProgramHelpers.InitializeDatabaseAsync(app);
 
         _ = await initialize.Should().NotThrowAsync();
         initializer.Verify(
@@ -683,7 +683,7 @@ public sealed class DatabaseMigrationTests
 
         await using AppDbContext context = CreateCoreContext(connection);
 
-        Func<Task> migrate = () => ProviderAwareMigrationRunner.MigrateAsync(
+        Func<Task> migrate = async () => await ProviderAwareMigrationRunner.MigrateAsync(
             context,
             DatabaseMigrationTarget.Core,
             NullLogger.Instance);
@@ -867,7 +867,8 @@ public sealed class DatabaseMigrationTests
             "20260822141641_AddWorkerDisableSource",
             "20260824024658_AddSliceJobCalibrationFields",
             "20260826021050_AddCustomProfileFamilyRenderingState",
-            "20260826063137_EnforceNormalizedMachineModelProfileNames");
+            "20260826063137_EnforceNormalizedMachineModelProfileNames",
+            "20260828022254_AddMachineModelProfileRevision");
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 
@@ -1172,6 +1173,7 @@ public sealed class DatabaseMigrationTests
                 "20260824023212_AddSliceJobCalibrationFields",
                 "20260826021028_AddCustomProfileFamilyRenderingState",
                 "20260826063137_EnforceNormalizedMachineModelProfileNames",
+                "20260828022249_AddMachineModelProfileRevision",
             ]
             :
             [
@@ -1185,6 +1187,7 @@ public sealed class DatabaseMigrationTests
                 "20260824023226_AddSliceJobCalibrationFields",
                 "20260826021040_AddCustomProfileFamilyRenderingState",
                 "20260826063137_EnforceNormalizedMachineModelProfileNames",
+                "20260828022252_AddMachineModelProfileRevision",
             ];
         _ = slicerMigrations.Should().Equal(expectedSlicerMigrations,
             $"the {provider} slicer migration set must apply in the exact recorded order");
@@ -1334,7 +1337,7 @@ public sealed class DatabaseMigrationTests
             _ = await corruptCommand.ExecuteNonQueryAsync();
         }
 
-        Func<Task> migrate = () => ProviderAwareMigrationRunner.MigrateAsync(
+        Func<Task> migrate = async () => await ProviderAwareMigrationRunner.MigrateAsync(
             context,
             DatabaseMigrationTarget.Core,
             NullLogger.Instance);

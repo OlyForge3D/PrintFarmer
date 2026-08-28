@@ -27,6 +27,13 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   related job by stable identity with complete VoiceOver and Dynamic Type
   support on iPhone and iPad.
 
+### Fixed
+
+- **Backend-disabled operator features** — The app now reads canonical nested
+  operator capability flags and removes disabled Attention, Tasks, filament
+  coverage, and printed-parts inventory surfaces while keeping spool inventory
+  available. Legacy top-level capability payloads remain supported.
+
 ## [v1.0-beta.78] — 2026-07-05
 
 ### Fixed

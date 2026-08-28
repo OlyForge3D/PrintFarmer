@@ -18,7 +18,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Camera = Farm.Infrastructure.Domain.Camera;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Devices.Controllers;
 
 /// <summary>
 /// Provides endpoints for managing standalone cameras and retrieving all camera feeds.

@@ -13,6 +13,14 @@ struct PrinterDetailView: View {
 
     private let printerId: UUID
 
+    private var filamentCoverageEnabled: Bool {
+        services.capabilitiesService.resolved.filamentCoverageEnabled
+    }
+
+    private var guidedSwapEnabled: Bool {
+        services.capabilitiesService.resolved.guidedSwapEnabled
+    }
+
     init(printerId: UUID) {
         self.printerId = printerId
         _viewModel = State(initialValue: PrinterDetailViewModel(printerId: printerId))
@@ -22,7 +30,7 @@ struct PrinterDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             // #789: shared stale banner — honest, read-only cached coverage.
-            if coverageViewModel.isShowingStaleCache {
+            if filamentCoverageEnabled && coverageViewModel.isShowingStaleCache {
                 ConnectionStatusBar(
                     status: .offline,
                     lastConfirmedAt: coverageViewModel.cacheLastUpdatedAt,
@@ -99,14 +107,7 @@ struct PrinterDetailView: View {
                 jobService: services.jobService,
                 maintenanceService: services.maintenanceService
             )
-            coverageViewModel.configure(coverageService: services.filamentCoverageService)
-            coverageViewModel.configureSignalR(services.signalRService)
-            // #789: wire + hydrate this printer's coverage read-cache BEFORE the
-            // canonical load so an offline detail launch shows honest stale data.
-            coverageViewModel.configureCache(services.filamentCoverageReadCache)
-            await coverageViewModel.hydrateFromCache()
             await viewModel.loadPrinter()
-            await coverageViewModel.load()
             viewModel.setSnapshotPollingAllowed(scenePhase == .active)
 
             // Handle NFC "mark ready" deep link
@@ -115,10 +116,25 @@ struct PrinterDetailView: View {
                 router.pendingNFCReadyPrinterId = nil
             }
             if let target = router.pendingFilamentSwap, target.printerId == viewModel.printerId {
-                guidedSwapTarget = target
                 router.pendingFilamentSwap = nil
-                viewModel.showSpoolPicker = true
+                if guidedSwapEnabled {
+                    guidedSwapTarget = target
+                    viewModel.showSpoolPicker = true
+                }
             }
+        }
+        .task(id: filamentCoverageEnabled) {
+            guard filamentCoverageEnabled else {
+                coverageViewModel.disableForCapabilityGate()
+                return
+            }
+            coverageViewModel.configure(coverageService: services.filamentCoverageService)
+            coverageViewModel.configureSignalR(services.signalRService)
+            // #789: wire + hydrate this printer's coverage read-cache BEFORE the
+            // canonical load so an offline detail launch shows honest stale data.
+            coverageViewModel.configureCache(services.filamentCoverageReadCache)
+            await coverageViewModel.hydrateFromCache()
+            await coverageViewModel.load()
         }
         .onDisappear {
             activeTasks.forEach { $0.cancel() }
@@ -138,6 +154,11 @@ struct PrinterDetailView: View {
             @unknown default:
                 viewModel.setSnapshotPollingAllowed(false)
             }
+        }
+        .onChange(of: guidedSwapEnabled) { _, isEnabled in
+            guard !isEnabled, guidedSwapTarget != nil else { return }
+            guidedSwapTarget = nil
+            viewModel.showSpoolPicker = false
         }
         .sheet(isPresented: $viewModel.showSpoolPicker) {
             SpoolPickerView { spool in
@@ -453,7 +474,9 @@ struct PrinterDetailView: View {
                             Text(jobName ?? "Printing")
                                 .font(.subheadline.weight(.semibold))
                                 .fixedSize(horizontal: false, vertical: true)
-                            if let coverage = coverageViewModel.coverage, coverage.status != .unknown {
+                            if filamentCoverageEnabled,
+                               let coverage = coverageViewModel.coverage,
+                               coverage.status != .unknown {
                                 FilamentCoverageBadge(
                                     status: coverage.status,
                                     earliestPredictedRunoutAt: coverage.earliestPredictedRunoutAt
@@ -522,7 +545,7 @@ struct PrinterDetailView: View {
                 }
             }
 
-            if let coverage = coverageViewModel.coverage {
+            if filamentCoverageEnabled, let coverage = coverageViewModel.coverage {
                 FilamentCoverageDetailSection(coverage: coverage)
             }
 

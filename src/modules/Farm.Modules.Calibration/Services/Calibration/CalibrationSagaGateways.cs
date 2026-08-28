@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Calibration;
+namespace Farm.Modules.Calibration.Services.Calibration;
 
 /// <summary>A slice job submission carried out on the caller's behalf.</summary>
 /// <param name="RequestBody">

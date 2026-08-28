@@ -1,11 +1,11 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
-using Farm.Web.Api.Controllers.Requests;
+using Farm.Modules.Printers.Controllers.Requests;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Moq;
 
-namespace Farm.Web.Api.Tests.Controllers.Requests;
+namespace Farm.Modules.Printers.Tests.Controllers.Requests;
 
 public class CreateManufacturerRequestTests
 {
@@ -281,7 +281,7 @@ public class FileOperationRequestTests
     {
         var request = new FileOperationRequest { FileName = "test.gcode" };
 
-        request.ToString().Should().Be("Farm.Web.Api.Controllers.Requests.FileOperationRequest");
+        request.ToString().Should().Be("Farm.Modules.Printers.Controllers.Requests.FileOperationRequest");
     }
 }
 

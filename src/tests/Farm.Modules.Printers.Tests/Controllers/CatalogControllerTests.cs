@@ -2,9 +2,9 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Exceptions;
 using Farm.Infrastructure.Services.Tags;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.Services.Catalog;
+using Farm.Modules.Printers.Controllers;
+using Farm.Modules.Printers.Controllers.Requests;
+using Farm.Modules.Printers.Services.Catalog;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Printers.Tests.Controllers;
 
 public class CatalogControllerTests
 {

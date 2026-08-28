@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Controllers.Responses;
+﻿namespace Farm.Modules.PrintQueue.Controllers.Responses;
 
 /// <summary>
 /// Authenticated same-origin camera proxy routes for a printer.

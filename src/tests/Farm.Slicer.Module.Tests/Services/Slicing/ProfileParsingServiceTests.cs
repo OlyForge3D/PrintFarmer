@@ -5,7 +5,7 @@ namespace Farm.Slicer.Module.Tests.Services.Slicing;
 
 public class ProfileParsingServiceTests
 {
-    private readonly IProfileParsingService _service = new ProfileParsingService();
+    private readonly ProfileParsingService _service = new ProfileParsingService();
 
     #region Null/Empty Input Tests
 

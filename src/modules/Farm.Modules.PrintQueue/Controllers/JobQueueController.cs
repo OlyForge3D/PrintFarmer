@@ -17,7 +17,7 @@ using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Controllers.Requests;
+using Farm.Modules.PrintQueue.Controllers.Requests;
 using Farm.Web.Api.Infrastructure.Idempotency;
 using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Farm.Web.Api.Infrastructure.PartsInventory;
@@ -26,7 +26,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.PrintQueue.Controllers;
 
 /// <summary>
 /// Manages the print job queue and printer assignment

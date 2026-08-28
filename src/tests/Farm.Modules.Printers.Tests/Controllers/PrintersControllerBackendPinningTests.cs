@@ -10,9 +10,9 @@ using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.Controllers.Responses;
+using Farm.Modules.Printers.Controllers;
+using Farm.Modules.Printers.Controllers.Requests;
+using Farm.Modules.PrintQueue.Controllers.Responses;
 using FluentAssertions;
 using FluentValidation;
 using Microsoft.AspNetCore.Http;
@@ -21,7 +21,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Printers.Tests.Controllers;
 
 /// <summary>
 /// Extends the pinning proof in <see cref="PrintersControllerTestConnectionTests"/> (which only
@@ -165,7 +165,7 @@ public class PrintersControllerBackendPinningTests
         var controller = new PrintersController(
             logger: Mock.Of<ILogger<PrintersController>>(),
             printersService: Mock.Of<IPrintersService>(),
-            catalogService: Mock.Of<Farm.Web.Api.Services.Catalog.ICatalogService>(),
+            catalogService: Mock.Of<Farm.Modules.Printers.Services.Catalog.ICatalogService>(),
             validator: Mock.Of<IValidator<CreatePrinterFromDiscoveryDto>>(),
             discoveryProxyService: Mock.Of<Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService>(),
             discoverySessions: Mock.Of<Farm.Infrastructure.Services.Discovery.IDiscoverySessionRegistry>(),

@@ -125,7 +125,7 @@ public sealed class RevisionConcurrencyProviderTests
             .Options;
         using var context = new SlicerDbContext(options);
 
-        AssertRevisionModel(context.Model, [typeof(Model3D)]);
+        AssertRevisionModel(context.Model, [typeof(MachineModelProfile), typeof(Model3D)]);
     }
 
     [Fact]

@@ -137,7 +137,7 @@ public sealed class PriorityQueueOrderingTests
         };
     }
 
-    private static async Task SeedAsync(AppDbContext db, IReadOnlyCollection<PrintJob> jobs)
+    private static async Task SeedAsync(AppDbContext db, List<PrintJob> jobs)
     {
         DispatchSettings? settings = await db.DispatchSettings.SingleOrDefaultAsync();
         if (settings is null)

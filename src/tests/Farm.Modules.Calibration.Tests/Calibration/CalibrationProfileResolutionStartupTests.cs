@@ -1,12 +1,12 @@
 ﻿using Farm.Infrastructure.PrinterCalibration;
-using Farm.Web.Api.Services.Calibration;
-using Farm.Web.Api.Startup;
+using Farm.Modules.Calibration.Services.Calibration;
+using Farm.Modules.Calibration.Startup;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Farm.Web.Api.Tests.Calibration;
+namespace Farm.Modules.Calibration.Tests.Calibration;
 
 /// <summary>
 /// Deployment-topology selection for the calibration profile resolver. A monolith must keep its

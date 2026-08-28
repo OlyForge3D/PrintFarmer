@@ -1,9 +1,9 @@
 ﻿using System.Net;
 using System.Net.Sockets;
-using Farm.Web.Api.Services.SmartPlug;
+using Farm.Modules.SmartPlug.Services.SmartPlug;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Farm.Web.Api.Tests.Services.SmartPlug;
+namespace Farm.Modules.SmartPlug.Tests.Services.SmartPlug;
 
 /// <summary>
 /// Unit tests for <see cref="KasaSmartPlugProvider"/> covering DoS protections.

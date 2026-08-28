@@ -4,7 +4,7 @@ using Farm.Infrastructure.Services.CustomFields;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Inventory.Controllers;
 
 /// <summary>
 /// Manages custom field definitions and per-entity values for Printers and Users.

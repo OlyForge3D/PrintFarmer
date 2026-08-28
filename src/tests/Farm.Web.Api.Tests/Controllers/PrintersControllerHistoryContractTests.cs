@@ -29,7 +29,7 @@ using Moq;
 
 namespace Farm.Web.Api.Tests.Controllers;
 
-public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime
+public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime, IDisposable
 {
     private readonly Mock<IPrintersService> _printers = new(MockBehavior.Strict);
     private readonly HistoryContractFactory _factory;
@@ -48,6 +48,12 @@ public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime
     {
         _client.Dispose();
         await _factory.DisposeAsync();
+    }
+
+    public void Dispose()
+    {
+        _client?.Dispose();
+        _factory.Dispose();
     }
 
     [Fact]

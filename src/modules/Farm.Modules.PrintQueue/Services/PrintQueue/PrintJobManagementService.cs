@@ -21,12 +21,12 @@ using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.DTOs.SignalR;
+using Farm.Modules.PrintQueue.DTOs.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Farm.Api.Services.PrintQueue;
+namespace Farm.Modules.PrintQueue.Services.PrintQueue;
 
 /// <summary>
 /// Service for managing print jobs including CRUD operations, queue management,

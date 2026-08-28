@@ -809,8 +809,12 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
                 return result;
             }
 
+            // IDISP013 false positive: both tasks are awaited via Task.WhenAll on the next
+            // line, before this scope's disposables leave scope.
+#pragma warning disable IDISP013 // Await in using
             Task<CommandResult> first = Task.Run(() => BindAsync("user-a"));
             Task<CommandResult> second = Task.Run(() => BindAsync("user-b"));
+#pragma warning restore IDISP013
             CommandResult[] results = await Task.WhenAll(first, second);
 
             results.Count(r => r.Success).Should().Be(1);

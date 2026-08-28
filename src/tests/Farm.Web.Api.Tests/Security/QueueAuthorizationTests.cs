@@ -6,7 +6,7 @@ using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Security;
 
-public sealed class QueueAuthorizationTests : IAsyncLifetime
+public sealed class QueueAuthorizationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new(
         new Dictionary<string, string?>
@@ -37,6 +37,8 @@ public sealed class QueueAuthorizationTests : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Theory]
     [MemberData(nameof(AnonymousRouteCases))]

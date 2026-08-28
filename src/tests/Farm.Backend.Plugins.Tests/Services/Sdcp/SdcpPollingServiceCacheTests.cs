@@ -27,7 +27,7 @@ namespace Farm.Backend.Plugins.Tests.Services.Sdcp;
 /// cache-miss fallback could publish a stale row if an invalidation arrived while the fetch was
 /// still in flight.
 /// </summary>
-public class SdcpPollingServiceCacheTests
+public class SdcpPollingServiceCacheTests : IDisposable
 {
     private readonly Mock<ISdcpClient> _sdcpClient = new(MockBehavior.Loose);
     private readonly Mock<IPrintersRepository> _printersRepository = new(MockBehavior.Loose);
@@ -79,6 +79,8 @@ public class SdcpPollingServiceCacheTests
         _invalidationGenerationsField = serviceType.GetField("_invalidationGenerations", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _pollingStateType = serviceType.GetNestedType("PrinterPollingState", BindingFlags.NonPublic)!;
     }
+
+    public void Dispose() => _service.Dispose();
 
     private static PrinterCompositeStatus IdleStatus() => new(
         IsOnline: true,

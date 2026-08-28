@@ -13,7 +13,7 @@ using Moq;
 
 namespace Farm.Web.Api.Tests.Security;
 
-public sealed class PrinterFileAuthorizationTests : IAsyncLifetime
+public sealed class PrinterFileAuthorizationTests : IAsyncLifetime, IDisposable
 {
     private readonly Mock<IPrintersService> _printers = new();
     private readonly PrinterFileFactory _factory;
@@ -26,6 +26,8 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Fact]
     public async Task PrinterFiles_CrossUserDenied_ProduceZeroBackendEffects()

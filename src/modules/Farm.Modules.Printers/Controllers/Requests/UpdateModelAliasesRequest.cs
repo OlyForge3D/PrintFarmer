@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Controllers.Requests;
+﻿namespace Farm.Modules.Printers.Controllers.Requests;
 
 /// <summary>
 /// Request to update slicer model name aliases for a printer model.

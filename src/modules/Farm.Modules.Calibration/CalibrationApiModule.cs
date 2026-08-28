@@ -1,5 +1,5 @@
 ﻿using Farm.Modules.Abstractions;
-using Farm.Web.Api.Startup;
+using Farm.Modules.Calibration.Startup;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,12 +8,13 @@ namespace Farm.Modules.Calibration;
 
 /// <summary>
 /// Vertical-slice module for filament calibration (issue #2038, epic #2019). Owns the
-/// <see cref="Farm.Web.Api.Controllers.CalibrationProjectsController"/> and
-/// <see cref="Farm.Web.Api.Controllers.CalibrationOrchestrationsController"/> controllers, the
+/// <see cref="Farm.Modules.Calibration.Controllers.CalibrationProjectsController"/> and
+/// <see cref="Farm.Modules.Calibration.Controllers.CalibrationOrchestrationsController"/> controllers, the
 /// calibration project/attempt/photo/orchestration services, blob storage, capability
 /// negotiation, and the split-deployment profile-resolution startup wiring. Phase 10 of the
-/// Farm.Web.Api decomposition epic (see docs/MODULE_MIGRATION_PATTERN.md). Namespaces are
-/// intentionally unchanged from their prior Farm.Web.Api location (move-first-rename-last).
+/// Farm.Web.Api decomposition epic (see docs/MODULE_MIGRATION_PATTERN.md). Namespaces were
+/// renamed from Farm.Web.Api.* to Farm.Modules.Calibration.* by Phase 19 (issue #2047),
+/// completing the move-first-rename-last strategy.
 /// </summary>
 public sealed class CalibrationApiModule : IApiModule
 {
@@ -38,12 +39,12 @@ public sealed class CalibrationApiModule : IApiModule
                     .Get<string[]>()));
 
         _ = services.AddScoped<
-            Farm.Web.Api.Services.Capabilities.ICalibrationCapabilityService,
-            Farm.Web.Api.Services.Capabilities.CalibrationCapabilityService>();
+            Farm.Modules.Calibration.Services.Capabilities.ICalibrationCapabilityService,
+            Farm.Modules.Calibration.Services.Capabilities.CalibrationCapabilityService>();
 
-        _ = services.AddOptions<Farm.Web.Api.Services.Calibration.CalibrationBlobStorageOptions>()
+        _ = services.AddOptions<Farm.Modules.Calibration.Services.Calibration.CalibrationBlobStorageOptions>()
             .Bind(configuration.GetSection(
-                Farm.Web.Api.Services.Calibration.CalibrationBlobStorageOptions.SectionName))
+                Farm.Modules.Calibration.Services.Calibration.CalibrationBlobStorageOptions.SectionName))
             .Validate(
                 options =>
                     !string.IsNullOrWhiteSpace(options.RootPath) &&
@@ -54,13 +55,13 @@ public sealed class CalibrationApiModule : IApiModule
                 "Calibration blob storage requires a private root and positive limits.")
             .ValidateOnStart();
         _ = services.AddSingleton<
-            Farm.Web.Api.Services.Calibration.ICalibrationBlobStore,
-            Farm.Web.Api.Services.Calibration.CalibrationBlobStore>();
+            Farm.Modules.Calibration.Services.Calibration.ICalibrationBlobStore,
+            Farm.Modules.Calibration.Services.Calibration.CalibrationBlobStore>();
         _ = services.AddScoped<
-            Farm.Web.Api.Services.Calibration.ICalibrationProjectService,
-            Farm.Web.Api.Services.Calibration.CalibrationProjectService>();
+            Farm.Modules.Calibration.Services.Calibration.ICalibrationProjectService,
+            Farm.Modules.Calibration.Services.Calibration.CalibrationProjectService>();
         _ = services.AddHostedService<
-            Farm.Web.Api.Services.Calibration.CalibrationPhotoDeleteReconciliationService>();
+            Farm.Modules.Calibration.Services.Calibration.CalibrationPhotoDeleteReconciliationService>();
 
         // Filament-calibration saga: drives the existing CalibrationOrchestration checkpoint
         // through created -> ... -> completed by calling the real
@@ -76,17 +77,17 @@ public sealed class CalibrationApiModule : IApiModule
             ?? configuration["MainApi:BaseUrl"]
             ?? "http://localhost:5245";
         _ = services.AddHttpClient(
-            Farm.Web.Api.Services.Calibration.InternalApiSliceSubmissionGateway.HttpClientName,
+            Farm.Modules.Calibration.Services.Calibration.InternalApiSliceSubmissionGateway.HttpClientName,
             client => client.BaseAddress = new Uri(calibrationSagaInternalApiBaseUrl.TrimEnd('/') + "/"));
         _ = services.AddScoped<
-            Farm.Web.Api.Services.Calibration.ISliceSubmissionGateway,
-            Farm.Web.Api.Services.Calibration.InternalApiSliceSubmissionGateway>();
+            Farm.Modules.Calibration.Services.Calibration.ISliceSubmissionGateway,
+            Farm.Modules.Calibration.Services.Calibration.InternalApiSliceSubmissionGateway>();
         _ = services.AddScoped<
-            Farm.Web.Api.Services.Calibration.IPrintDispatchGateway,
-            Farm.Web.Api.Services.Calibration.InternalApiPrintDispatchGateway>();
+            Farm.Modules.Calibration.Services.Calibration.IPrintDispatchGateway,
+            Farm.Modules.Calibration.Services.Calibration.InternalApiPrintDispatchGateway>();
         _ = services.AddScoped<
-            Farm.Web.Api.Services.Calibration.ICalibrationOrchestrationSagaService,
-            Farm.Web.Api.Services.Calibration.CalibrationOrchestrationSagaService>();
+            Farm.Modules.Calibration.Services.Calibration.ICalibrationOrchestrationSagaService,
+            Farm.Modules.Calibration.Services.Calibration.CalibrationOrchestrationSagaService>();
     }
 
     /// <inheritdoc />

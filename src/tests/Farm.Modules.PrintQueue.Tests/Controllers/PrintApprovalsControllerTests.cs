@@ -6,20 +6,20 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.PrintJobs;
 using Farm.Infrastructure.Services.PrintJobs;
-using Farm.Web.Api.Controllers;
+using Farm.Modules.PrintQueue.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.PrintQueue.Tests.Controllers;
 
 public class PrintApprovalsControllerTests : IDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly AppDbContext _context;
-    private readonly IPrintApprovalRepository _repository;
+    private readonly EfPrintApprovalRepository _repository;
     private readonly TestPrintApprovalService _service;
     private readonly PrintApprovalsController _controller;
 

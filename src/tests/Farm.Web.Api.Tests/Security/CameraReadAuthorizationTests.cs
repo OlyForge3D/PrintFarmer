@@ -27,7 +27,7 @@ namespace Farm.Web.Api.Tests.Security;
 /// against and remain visible to any authenticated caller by deliberate, documented design
 /// (see <c>CamerasController.CanAccessCameraPrinterAsync</c>).
 /// </summary>
-public sealed class CameraReadAuthorizationTests : IAsyncLifetime
+public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
 {
     private readonly Mock<ICameraService> _cameras = new();
     private readonly Mock<IPrinterCameraEndpointDetectionService> _detection = new();
@@ -41,6 +41,8 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     // --- Restricted printer / camera fixtures -----------------------------------------------
 

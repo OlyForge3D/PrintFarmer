@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Controllers.Responses;
+﻿namespace Farm.Modules.PrintQueue.Controllers.Responses;
 
 /// <summary>
 /// Identifies the license and corresponding source for the running PrintFarmer version.

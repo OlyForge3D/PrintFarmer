@@ -47,7 +47,7 @@ public sealed class PrinterTelemetryFreshnessPolicyTests
     }
 
     private static void AssertSla(
-        IPrinterTelemetryFreshnessPolicy policy,
+        PrinterTelemetryFreshnessPolicy policy,
         int backendId,
         TimeSpan expected)
     {

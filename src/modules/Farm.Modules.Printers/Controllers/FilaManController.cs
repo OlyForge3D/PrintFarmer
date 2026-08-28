@@ -3,7 +3,7 @@ using Farm.Infrastructure.Services.Printers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Printers.Controllers;
 
 /// <summary>
 /// Lightweight unauthenticated API for FilamentManager (ESP32 NFC firmware).

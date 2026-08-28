@@ -16,7 +16,7 @@ namespace Farm.Web.Api.Tests.Services;
 /// Tests for GcodeHarvestOperation entity change tracking and persistence
 /// Specifically tests that the cancel operation properly persists to the database
 /// </summary>
-public class HarvestOperationChangeTrackingTests : IAsyncLifetime
+public class HarvestOperationChangeTrackingTests : IAsyncLifetime, IDisposable
 {
     private readonly DbContextOptions<AppDbContext> _dbOptions;
     private AppDbContext _dbContext = null!;
@@ -43,6 +43,8 @@ public class HarvestOperationChangeTrackingTests : IAsyncLifetime
         _ = await _dbContext.Database.EnsureDeletedAsync();
         _dbContext.Dispose();
     }
+
+    public void Dispose() => _dbContext?.Dispose();
 
     [Fact]
     public async Task GetOperationByIdAsync_WithAsNoTracking_ReturnsDetachedEntity()

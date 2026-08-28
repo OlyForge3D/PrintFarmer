@@ -2,7 +2,7 @@
 using System.Text;
 using Microsoft.Extensions.Primitives;
 
-namespace Farm.Web.Api.Services.Discovery;
+namespace Farm.Modules.Printers.Services.Discovery;
 
 /// <summary>
 /// Validates the shared key used by the printer-discovery service.

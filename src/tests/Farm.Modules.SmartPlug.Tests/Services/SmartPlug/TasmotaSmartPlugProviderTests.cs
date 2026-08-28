@@ -1,13 +1,13 @@
 ﻿using System.Net;
 using System.Text;
 using System.Text.Json;
-using Farm.Web.Api.Services.SmartPlug;
+using Farm.Modules.SmartPlug.Services.SmartPlug;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
 
-namespace Farm.Web.Api.Tests.Services.SmartPlug;
+namespace Farm.Modules.SmartPlug.Tests.Services.SmartPlug;
 
 /// <summary>
 /// Unit tests for <see cref="TasmotaSmartPlugProvider"/> using mocked HTTP handlers.

@@ -14,7 +14,7 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// Fast executing (~2 seconds for 20 tests) - suitable for CI/CD pipelines
 /// </summary>
 [Trait("Category", "Integration")]
-public class SlicersServiceIntegrationTests : IAsyncLifetime
+public class SlicersServiceIntegrationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;
 
@@ -28,7 +28,13 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         await _factory.ResetDatabaseAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
     {
         _factory?.Dispose();
     }

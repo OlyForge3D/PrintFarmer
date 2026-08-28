@@ -1,5 +1,7 @@
 ﻿using Farm.Modules.Abstractions;
-using Farm.Web.Api.Services.Gcode;
+using Farm.Modules.Calibration.Services.Gcode;
+using Farm.Modules.Gcode.Services.Gcode;
+using Farm.Modules.Gcode.Services.Gcode.Safety;
 using Farm.Web.Api.Services.Gcode.Safety;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
@@ -11,15 +13,16 @@ namespace Farm.Modules.Gcode;
 
 /// <summary>
 /// Vertical-slice module for gcode file management (issue #2039, epic #2019). Owns the
-/// <see cref="Farm.Web.Api.Controllers.GcodeFilesController"/>,
-/// <see cref="Farm.Web.Api.Controllers.GcodeLibraryController"/>,
-/// <see cref="Farm.Web.Api.Controllers.GcodePromotionsController"/>,
-/// <see cref="Farm.Web.Api.Controllers.GcodeHarvestController"/>, and
-/// <see cref="Farm.Web.Api.Controllers.GcodeHarvestDiagnosticsController"/> controllers, the
+/// <see cref="Farm.Modules.Gcode.Controllers.GcodeFilesController"/>,
+/// <see cref="Farm.Modules.Gcode.Controllers.GcodeLibraryController"/>,
+/// <see cref="Farm.Modules.Gcode.Controllers.GcodePromotionsController"/>,
+/// <see cref="Farm.Modules.Gcode.Controllers.GcodeHarvestController"/>, and
+/// <see cref="Farm.Modules.Gcode.Controllers.GcodeHarvestDiagnosticsController"/> controllers, the
 /// gcode library/upload/safety-validation services, artifact-to-gcode promotion and its
 /// reconciler, and the file-consistency audit background service. Phase 11 of the Farm.Web.Api
-/// decomposition epic (see docs/MODULE_MIGRATION_PATTERN.md). Namespaces are intentionally
-/// unchanged from their prior Farm.Web.Api location (move-first-rename-last). Requires the
+/// decomposition epic (see docs/MODULE_MIGRATION_PATTERN.md). Namespaces were renamed
+/// from Farm.Web.Api.* to Farm.Modules.Gcode.* by Phase 19 (issue #2047), completing the
+/// move-first-rename-last strategy. Requires the
 /// slicer module (<c>AddSlicerModule</c>) for artifact routing and calibration promotion --
 /// consistent with the slicer-on <c>HostFixture</c> sub-fixture used by Phase 4.
 /// </summary>
@@ -75,9 +78,9 @@ public sealed class GcodeApiModule : IApiModule
             IConfiguration config = sp.GetRequiredService<IConfiguration>();
             string modelStoragePath = config["ModelStorage:Path"] ?? Path.Join(Directory.GetCurrentDirectory(), "models");
             string gcodeStoragePath = config["GcodeStorage:Path"] ?? Path.Join(Directory.GetCurrentDirectory(), "gcode-library");
-            return new Farm.Infrastructure.Services.FileManagement.FileConsistencyAuditService(
+            return new Farm.Modules.Gcode.Services.FileManagement.FileConsistencyAuditService(
                 scopeFactory,
-                loggerFactory.CreateLogger<Farm.Infrastructure.Services.FileManagement.FileConsistencyAuditService>(),
+                loggerFactory.CreateLogger<Farm.Modules.Gcode.Services.FileManagement.FileConsistencyAuditService>(),
                 modelStoragePath,
                 gcodeStoragePath);
         });

@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure.Dtos;
 
-namespace Farm.Web.Api.Services.Admin;
+namespace Farm.Modules.Administration.Services.Admin;
 
 /// <summary>
 /// Aggregates existing health-check results into a single snapshot for the Admin Control Center.

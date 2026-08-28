@@ -279,6 +279,11 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
+
                     b.Property<string>("SlicerDistribution")
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");

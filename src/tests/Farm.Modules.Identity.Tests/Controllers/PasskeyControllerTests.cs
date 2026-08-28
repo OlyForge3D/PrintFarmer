@@ -10,19 +10,19 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Identity.Tests.Controllers;
 
 public class PasskeyControllerTests
 {
     private readonly Mock<IAuthenticationService> _authService = new();
     private readonly Mock<ILoginAuditService> _loginAudit = new();
     private readonly Mock<IPasskeyService> _passkeySvc = new();
-    private readonly Mock<ILogger<Farm.Web.Api.Controllers.AuthController>> _logger = new();
+    private readonly Mock<ILogger<Farm.Modules.Identity.Controllers.AuthController>> _logger = new();
     private readonly Mock<IApiKeyExchangeService> _apiKeyExchangeService = new();
 
-    private Farm.Web.Api.Controllers.AuthController CreateController(Guid? userId = null, string? username = null)
+    private Farm.Modules.Identity.Controllers.AuthController CreateController(Guid? userId = null, string? username = null)
     {
-        Farm.Web.Api.Controllers.AuthController controller = new(
+        Farm.Modules.Identity.Controllers.AuthController controller = new(
             _authService.Object,
             _loginAudit.Object,
             _passkeySvc.Object,
@@ -51,7 +51,7 @@ public class PasskeyControllerTests
             .Setup(s => s.BeginRegistrationAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(fakeOptions);
 
-        Farm.Web.Api.Controllers.AuthController controller = CreateController();
+        Farm.Modules.Identity.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyRegisterBeginAsync(CancellationToken.None);
 
         OkObjectResult ok = result.Should().BeOfType<OkObjectResult>().Subject;
@@ -65,7 +65,7 @@ public class PasskeyControllerTests
             .Setup(s => s.BeginRegistrationAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("fido2 error"));
 
-        Farm.Web.Api.Controllers.AuthController controller = CreateController();
+        Farm.Modules.Identity.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyRegisterBeginAsync(CancellationToken.None);
 
         result.Should().BeOfType<BadRequestObjectResult>();
@@ -81,7 +81,7 @@ public class PasskeyControllerTests
             .Setup(s => s.CompleteRegistrationAsync(It.IsAny<string>(), It.IsAny<AuthenticatorAttestationRawResponse>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((fakeCredential, 42));
 
-        Farm.Web.Api.Controllers.AuthController controller = CreateController();
+        Farm.Modules.Identity.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyRegisterCompleteAsync(
             new AuthenticatorAttestationRawResponse(),
             CancellationToken.None);
@@ -96,7 +96,7 @@ public class PasskeyControllerTests
             .Setup(s => s.CompleteRegistrationAsync(It.IsAny<string>(), It.IsAny<AuthenticatorAttestationRawResponse>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new PasskeyChallengeNotFoundException("No pending challenge"));
 
-        Farm.Web.Api.Controllers.AuthController controller = CreateController();
+        Farm.Modules.Identity.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyRegisterCompleteAsync(
             new AuthenticatorAttestationRawResponse(),
             CancellationToken.None);
@@ -111,7 +111,7 @@ public class PasskeyControllerTests
             .Setup(s => s.CompleteRegistrationAsync(It.IsAny<string>(), It.IsAny<AuthenticatorAttestationRawResponse>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Invalid attestation signature"));
 
-        Farm.Web.Api.Controllers.AuthController controller = CreateController();
+        Farm.Modules.Identity.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyRegisterCompleteAsync(
             new AuthenticatorAttestationRawResponse(),
             CancellationToken.None);
@@ -129,9 +129,9 @@ public class PasskeyControllerTests
             .Setup(s => s.BeginLoginAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(fakeOptions);
 
-        Farm.Web.Api.Controllers.AuthController controller = CreateController();
+        Farm.Modules.Identity.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyLoginBeginAsync(
-            new Farm.Web.Api.Controllers.PasskeyLoginBeginRequest("testuser"),
+            new Farm.Modules.Identity.Controllers.PasskeyLoginBeginRequest("testuser"),
             CancellationToken.None);
 
         OkObjectResult ok = result.Should().BeOfType<OkObjectResult>().Subject;
@@ -141,9 +141,9 @@ public class PasskeyControllerTests
     [Fact]
     public async Task LoginBegin_MissingUsername_Returns400()
     {
-        Farm.Web.Api.Controllers.AuthController controller = CreateController();
+        Farm.Modules.Identity.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyLoginBeginAsync(
-            new Farm.Web.Api.Controllers.PasskeyLoginBeginRequest(string.Empty),
+            new Farm.Modules.Identity.Controllers.PasskeyLoginBeginRequest(string.Empty),
             CancellationToken.None);
 
         result.Should().BeOfType<BadRequestObjectResult>();
@@ -160,9 +160,9 @@ public class PasskeyControllerTests
             .Setup(s => s.CompleteLoginAsync(It.IsAny<string>(), It.IsAny<AuthenticatorAssertionRawResponse>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(successResult);
 
-        Farm.Web.Api.Controllers.AuthController controller = CreateController();
+        Farm.Modules.Identity.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyLoginCompleteAsync(
-            new Farm.Web.Api.Controllers.PasskeyLoginCompleteRequest("testuser", new AuthenticatorAssertionRawResponse()),
+            new Farm.Modules.Identity.Controllers.PasskeyLoginCompleteRequest("testuser", new AuthenticatorAssertionRawResponse()),
             CancellationToken.None);
 
         OkObjectResult ok = result.Should().BeOfType<OkObjectResult>().Subject;
@@ -176,9 +176,9 @@ public class PasskeyControllerTests
             .Setup(s => s.CompleteLoginAsync(It.IsAny<string>(), It.IsAny<AuthenticatorAssertionRawResponse>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new PasskeyChallengeNotFoundException("Challenge already used"));
 
-        Farm.Web.Api.Controllers.AuthController controller = CreateController();
+        Farm.Modules.Identity.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyLoginCompleteAsync(
-            new Farm.Web.Api.Controllers.PasskeyLoginCompleteRequest("testuser", new AuthenticatorAssertionRawResponse()),
+            new Farm.Modules.Identity.Controllers.PasskeyLoginCompleteRequest("testuser", new AuthenticatorAssertionRawResponse()),
             CancellationToken.None);
 
         result.Should().BeOfType<BadRequestObjectResult>();
@@ -191,9 +191,9 @@ public class PasskeyControllerTests
             .Setup(s => s.CompleteLoginAsync(It.IsAny<string>(), It.IsAny<AuthenticatorAssertionRawResponse>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Signature verification failed"));
 
-        Farm.Web.Api.Controllers.AuthController controller = CreateController();
+        Farm.Modules.Identity.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyLoginCompleteAsync(
-            new Farm.Web.Api.Controllers.PasskeyLoginCompleteRequest("testuser", new AuthenticatorAssertionRawResponse()),
+            new Farm.Modules.Identity.Controllers.PasskeyLoginCompleteRequest("testuser", new AuthenticatorAssertionRawResponse()),
             CancellationToken.None);
 
         result.Should().BeOfType<UnprocessableEntityObjectResult>();
@@ -202,9 +202,9 @@ public class PasskeyControllerTests
     [Fact]
     public async Task LoginComplete_MissingBody_Returns400()
     {
-        Farm.Web.Api.Controllers.AuthController controller = CreateController();
+        Farm.Modules.Identity.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyLoginCompleteAsync(
-            new Farm.Web.Api.Controllers.PasskeyLoginCompleteRequest("testuser", null),
+            new Farm.Modules.Identity.Controllers.PasskeyLoginCompleteRequest("testuser", null),
             CancellationToken.None);
 
         result.Should().BeOfType<BadRequestObjectResult>();

@@ -13,13 +13,15 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.Security;
 
-public sealed class HubAuthorizationIntegrationTests : IAsyncLifetime
+public sealed class HubAuthorizationIntegrationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Theory]
     [InlineData("/hubs/printers/negotiate?negotiateVersion=1")]
@@ -94,10 +96,10 @@ public sealed class HubAuthorizationIntegrationTests : IAsyncLifetime
             .Build();
         await connection.StartAsync();
 
-        Func<Task> queueJoin = () => connection.InvokeAsync(
+        Func<Task> queueJoin = async () => await connection.InvokeAsync(
             "SubscribeToQueueJobAsync",
             Guid.NewGuid().ToString());
-        Func<Task> projectJoin = () => connection.InvokeAsync(
+        Func<Task> projectJoin = async () => await connection.InvokeAsync(
             "SubscribeToProjectAsync",
             Guid.NewGuid().ToString());
 

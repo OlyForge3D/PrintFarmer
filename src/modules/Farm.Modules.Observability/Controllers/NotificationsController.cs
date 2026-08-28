@@ -17,7 +17,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Observability.Controllers;
 
 /// <summary>
 /// Controller for user notifications management (Phase 4.3)

@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Controllers.Admin;
+namespace Farm.Modules.Printers.Controllers.Admin;
 
 /// <summary>
 /// Admin controller for checking and applying catalog data updates from the remote repository.

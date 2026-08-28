@@ -14,8 +14,8 @@ using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Controllers.Requests;
+using Farm.Modules.Printers.Controllers;
+using Farm.Modules.Printers.Controllers.Requests;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -25,7 +25,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Printers.Tests.Controllers;
 
 /// <summary>
 /// Unit tests covering the API surface added for the guided filament swap flow
@@ -66,7 +66,7 @@ public class PrintersControllerSwapFlowTests
         return new PrintersController(
             logger: Mock.Of<ILogger<PrintersController>>(),
             printersService: printersService.Object,
-            catalogService: Mock.Of<Farm.Web.Api.Services.Catalog.ICatalogService>(),
+            catalogService: Mock.Of<Farm.Modules.Printers.Services.Catalog.ICatalogService>(),
             validator: Mock.Of<IValidator<CreatePrinterFromDiscoveryDto>>(),
             discoveryProxyService: Mock.Of<Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService>(),
             discoverySessions: Mock.Of<Farm.Infrastructure.Services.Discovery.IDiscoverySessionRegistry>(),

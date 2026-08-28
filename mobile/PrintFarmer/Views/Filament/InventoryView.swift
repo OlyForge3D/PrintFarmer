@@ -11,28 +11,70 @@ struct InventoryView: View {
         case parts = "Printed Parts"
 
         var id: String { rawValue }
+
+        static func available(printedPartsInventoryEnabled: Bool) -> [Segment] {
+            printedPartsInventoryEnabled ? allCases : [.spools]
+        }
+
+        static func resolved(
+            _ segment: Segment,
+            printedPartsInventoryEnabled: Bool
+        ) -> Segment {
+            available(printedPartsInventoryEnabled: printedPartsInventoryEnabled)
+                .contains(segment) ? segment : .spools
+        }
     }
 
+    @Environment(ServiceContainer.self) private var services
     @State private var segment: Segment = .spools
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("Inventory", selection: $segment) {
-                ForEach(Segment.allCases) { segment in
-                    Text(segment.rawValue).tag(segment)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.top, 8)
-            .accessibilityIdentifier("inventory.segmentPicker")
+        let printedPartsInventoryEnabled =
+            services.capabilitiesService.resolved.printedPartsInventoryEnabled
 
-            switch segment {
-            case .spools:
+        Group {
+            if printedPartsInventoryEnabled {
+                VStack(spacing: 0) {
+                    Picker("Inventory", selection: $segment) {
+                        ForEach(
+                            Segment.available(
+                                printedPartsInventoryEnabled: printedPartsInventoryEnabled
+                            )
+                        ) { segment in
+                            Text(segment.rawValue).tag(segment)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .accessibilityIdentifier("inventory.segmentPicker")
+
+                    inventoryContent(
+                        for: Segment.resolved(
+                            segment,
+                            printedPartsInventoryEnabled: printedPartsInventoryEnabled
+                        )
+                    )
+                }
+            } else {
                 SpoolInventoryView()
-            case .parts:
-                PartsInventoryListNavView()
             }
+        }
+        .onChange(of: printedPartsInventoryEnabled) { _, isEnabled in
+            segment = Segment.resolved(
+                segment,
+                printedPartsInventoryEnabled: isEnabled
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func inventoryContent(for segment: Segment) -> some View {
+        switch segment {
+        case .spools:
+            SpoolInventoryView()
+        case .parts:
+            PartsInventoryListNavView()
         }
     }
 }

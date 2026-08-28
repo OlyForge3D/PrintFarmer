@@ -1,6 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace Farm.Web.Api.Controllers.Requests;
+namespace Farm.Modules.Maintenance.Controllers.Requests;
 
 /// <summary>
 /// Request payload for deploying a maintenance plan to a printer.

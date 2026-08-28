@@ -1,14 +1,14 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Services.Cost;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Controllers.Responses;
+using Farm.Modules.PrintQueue.Controllers;
+using Farm.Modules.PrintQueue.Controllers.Responses;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.PrintQueue.Tests.Controllers;
 
 /// <summary>
 /// Unit tests for <see cref="SliceCostController"/>.

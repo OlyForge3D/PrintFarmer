@@ -4,14 +4,14 @@ using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.OperatorFeatures;
-using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.DTOs;
+using Farm.Modules.Maintenance.Controllers.Requests;
+using Farm.Modules.Maintenance.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Maintenance.Controllers;
 
 /// <summary>
 /// API controller for deploying maintenance plans to printers.

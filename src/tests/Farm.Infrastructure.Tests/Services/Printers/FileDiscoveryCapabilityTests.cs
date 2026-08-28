@@ -301,7 +301,7 @@ public class FileDiscoveryCapabilityTests
     }
 
     private void VerifyCapabilityConsistency(
-        IBackendCapabilityFactory factory,
+        BackendCapabilityFactory factory,
         IBackendClientFactory clientFactory,
         PrinterBackend backend,
         Type requiredCapability)

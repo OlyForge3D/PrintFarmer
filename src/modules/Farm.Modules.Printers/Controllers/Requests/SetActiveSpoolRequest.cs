@@ -1,7 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
-namespace Farm.Web.Api.Controllers.Requests;
+namespace Farm.Modules.Printers.Controllers.Requests;
 
 /// <summary>
 /// Request to set or clear the active Spoolman spool on a printer.

@@ -5,14 +5,14 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Web.Api.Services.Admin;
+using Farm.Modules.Administration.Services.Admin;
 using FluentAssertions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.Admin;
+namespace Farm.Modules.Administration.Tests.Services.Admin;
 
 /// <summary>
 /// Unit tests for <see cref="AdminOverviewService"/>. These verify that the aggregation:
@@ -289,7 +289,7 @@ public class AdminOverviewServiceTests
         _healthCheckService.Setup(s => s.CheckHealthAsync(It.IsAny<System.Func<HealthCheckRegistration, bool>?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException(cts.Token));
 
-        Func<Task> act = () => CreateService().GetOverviewAsync(cts.Token);
+        Func<Task> act = async () => await CreateService().GetOverviewAsync(cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -344,7 +344,7 @@ public class AdminOverviewServiceTests
         // The database Error must sort ahead of the printer Warning.
         overview.Attention.Should().HaveCountGreaterThanOrEqualTo(2);
         overview.Attention[0].Severity.Should().Be(AttentionSeverity.Error);
-        overview.Attention.Last().Severity.Should().Be(AttentionSeverity.Warning);
+        overview.Attention[^1].Severity.Should().Be(AttentionSeverity.Warning);
     }
 
     // ─── Serialization contract ───────────────────────────────────────────────
@@ -434,7 +434,7 @@ public class AdminOverviewServiceTests
         return new HealthReport(entries, TimeSpan.FromMilliseconds(50));
     }
 
-    private static IReadOnlyDictionary<string, object> BuildComprehensiveData(
+    private static Dictionary<string, object> BuildComprehensiveData(
         string databaseStatus = "Healthy")
     {
         return new Dictionary<string, object>

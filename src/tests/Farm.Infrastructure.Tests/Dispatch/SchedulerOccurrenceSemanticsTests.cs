@@ -199,6 +199,10 @@ public sealed class SchedulerOccurrenceSemanticsTests
             DateTime.UtcNow.AddMinutes(-1),
             recurring: false);
         var management = new Mock<IPrintJobManagementService>();
+        // IDISP013 false positive: Moq's Setup/SetupSequence lambda is an expression tree
+        // describing which member to intercept — it is never invoked directly, so this is
+        // not an unawaited call tied to `db`'s using scope.
+#pragma warning disable IDISP013 // Await in using
         management.SetupSequence(service => service.DispatchJobAsync(
                 job.Id.ToString(),
                 actorId.ToString(),
@@ -212,6 +216,7 @@ public sealed class SchedulerOccurrenceSemanticsTests
                 job.Id,
                 Guid.NewGuid(),
                 DispatchAttemptOutcome.Accepted));
+#pragma warning restore IDISP013
         JobSchedulingService service = CreateService(db, management.Object);
 
         await service.TriggerScheduledJobsAsync();

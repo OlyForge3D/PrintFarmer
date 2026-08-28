@@ -266,7 +266,7 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
         await using SlicerDbContext context = CreateContext("Data Source=:memory:");
         var repository = new EfSliceJobRepository(context);
 
-        Func<Task> claim = () => repository.ClaimNextJobAsync(
+        Func<Task> claim = async () => await repository.ClaimNextJobAsync(
             WorkerClaimIdentity.CreateUnattested(Guid.NewGuid(), ["orcaslicer"]),
             leaseDurationSeconds,
             3);

@@ -1,7 +1,7 @@
 ﻿using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Settings;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Services.Workers;
+using Farm.Modules.Administration.Controllers;
+using Farm.Modules.Administration.Services.Workers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Administration.Tests.Controllers;
 
 /// <summary>
 /// Guards the fail-fast behavior of the settings metadata endpoints. The service methods are

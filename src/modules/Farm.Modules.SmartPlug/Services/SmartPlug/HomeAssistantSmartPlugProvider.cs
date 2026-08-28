@@ -6,7 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.SmartPlug;
+namespace Farm.Modules.SmartPlug.Services.SmartPlug;
 
 /// <summary>
 /// Smart plug provider that reads power state from Home Assistant entities.

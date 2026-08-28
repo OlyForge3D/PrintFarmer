@@ -189,7 +189,7 @@ public class ToolheadUsageCompletionRegressionTests : IClassFixture<CustomWebApp
         }
 
         // This must NOT throw DbUpdateException from duplicate index violation
-        var saveAction = () => context.SaveChangesAsync();
+        var saveAction = async () => await context.SaveChangesAsync();
         await saveAction.Should().NotThrowAsync<DbUpdateException>(
             "completion must update existing snapshot rows, not insert duplicates");
 
@@ -253,7 +253,7 @@ public class ToolheadUsageCompletionRegressionTests : IClassFixture<CustomWebApp
             SpoolmanSpoolId = 100
         });
 
-        var insertDuplicate = () => context.SaveChangesAsync();
+        var insertDuplicate = async () => await context.SaveChangesAsync();
         await insertDuplicate.Should().ThrowAsync<DbUpdateException>(
             "the unique composite index on (PrintJobId, ToolheadIndex) must reject duplicates");
     }

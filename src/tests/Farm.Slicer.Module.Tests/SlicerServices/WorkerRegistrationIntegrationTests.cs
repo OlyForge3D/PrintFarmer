@@ -15,7 +15,7 @@ namespace Farm.Slicer.Module.Tests.SlicerServices;
 /// Integration tests for slicer worker registration with the central registry
 /// </summary>
 [Trait("Category", "Integration")]
-public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsyncLifetime
+public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new CustomWebApplicationFactory();
     private readonly ITestOutputHelper _output = output ?? throw new ArgumentNullException(nameof(output));
@@ -25,7 +25,13 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
         await _factory.ResetDatabaseAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
     {
         _factory?.Dispose();
     }

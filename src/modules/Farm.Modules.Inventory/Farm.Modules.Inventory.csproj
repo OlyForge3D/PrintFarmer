@@ -16,7 +16,8 @@ bins, parts inventory, material clusters, tags, custom fields, model
 collections, print projects, filament coverage, and filament fallback groups.
 Moves 11 inventory controllers out of Farm.Web.Api as part of issue #2044
 (Phase 16 of epic #2019), following the move-first-rename-last module migration
-pattern. Namespaces remain unchanged (`Farm.Web.Api.Controllers`). Underlying
+pattern. Namespaces were renamed from `Farm.Web.Api.Controllers` to
+`Farm.Modules.Inventory.Controllers` by Phase 19 (issue #2047). Underlying
 services remain registered by Farm.Infrastructure / Farm.Web.Api host-wide DI
 and are not moved in this phase.</Description>
   </PropertyGroup>

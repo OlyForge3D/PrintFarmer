@@ -1,6 +1,5 @@
 ﻿using System.Data.Common;
 using System.Security.Claims;
-using Farm.Api.Controllers;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -9,6 +8,7 @@ using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Modules.PrintQueue.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -20,7 +20,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.PrintQueue.Tests.Controllers;
 
 /// <summary>
 /// Tests for issue #1704: <see cref="JobQueueAnalyticsController.GetPrinterQueueSummariesAsync"/>

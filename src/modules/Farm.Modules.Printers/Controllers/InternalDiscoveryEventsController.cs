@@ -3,12 +3,12 @@ using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Webhooks;
-using Farm.Web.Api.Services.Discovery;
+using Farm.Modules.Printers.Services.Discovery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Printers.Controllers;
 
 /// <summary>
 /// Receives authenticated discovery-service events and publishes redacted client events.

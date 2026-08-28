@@ -8,7 +8,6 @@ using Farm.Infrastructure.Contracts.FileManagement;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
-using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Tags;
 using Farm.Infrastructure.Telemetry;
@@ -19,7 +18,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 
-namespace Farm.Web.Api.DTOs;
+namespace Farm.Modules.Gcode.DTOs;
 
 /// <summary>DTO describing a single file or directory entry in the virtual G-code library listing.</summary>
 public record GcodeFileEntryDto(

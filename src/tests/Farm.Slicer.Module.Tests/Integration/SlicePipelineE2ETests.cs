@@ -13,7 +13,7 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// End-to-end integration test exercising the full slice pipeline via HTTP:
 /// Register worker → Submit job → Verify queued → Claim → Report progress → Upload artifact → Complete → Verify completed → Verify artifact accessible.
 /// </summary>
-public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
+public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
     private readonly ITestOutputHelper _output = output;
@@ -27,7 +27,13 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
         _adminClient = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
     {
         _workerClient?.Dispose();
         _adminClient?.Dispose();

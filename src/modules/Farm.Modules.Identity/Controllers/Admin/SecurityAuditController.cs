@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Web.Api.Controllers.Admin;
+namespace Farm.Modules.Identity.Controllers.Admin;
 
 /// <summary>
 /// Admin-only endpoint for querying the login audit log.

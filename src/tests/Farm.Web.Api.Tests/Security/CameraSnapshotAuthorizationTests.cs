@@ -14,19 +14,21 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Farm.Web.Api.Tests.Security;
 
 /// <summary>
-/// Regression coverage for issue #1424: <see cref="Farm.Web.Api.Controllers.CameraSnapshotsController"/>
+/// Regression coverage for issue #1424: <see cref="Farm.Modules.Devices.Controllers.CameraSnapshotsController"/>
 /// must enforce the same <see cref="PrinterGroupAccess"/> scope check that <c>PrintersController</c>
 /// enforces on printer-scoped reads, and the destructive delete must additionally require a
 /// write-level permission and a write-level (Submit) PrinterGroup scope check distinct from the
 /// View-level check used by the read endpoints.
 /// </summary>
-public sealed class CameraSnapshotAuthorizationTests : IAsyncLifetime
+public sealed class CameraSnapshotAuthorizationTests : IAsyncLifetime, IDisposable
 {
     private readonly CameraSnapshotAuthorizationFactory _factory = new();
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     #region GET /api/snapshots/by-printer/{printerId} — foreign caller denied
 

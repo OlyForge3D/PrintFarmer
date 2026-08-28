@@ -12,8 +12,11 @@ struct JobDetailView: View {
     @Environment(ServiceContainer.self) private var services
     @State private var viewModel: JobDetailViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
-    @State private var partsInventoryEnabled = true
     @State private var showingHarvestSheet = false
+
+    private var partsInventoryEnabled: Bool {
+        services.capabilitiesService.resolved.printedPartsInventoryEnabled
+    }
 
     init(jobId: UUID) {
         _viewModel = State(initialValue: JobDetailViewModel(jobId: jobId))
@@ -78,7 +81,6 @@ struct JobDetailView: View {
             viewModel.configure(jobService: services.jobService)
             await viewModel.loadJob()
             await services.capabilitiesService.refresh()
-            partsInventoryEnabled = services.capabilitiesService.resolved.printedPartsInventoryEnabled
         }
         .sheet(isPresented: $showingHarvestSheet) {
             if let job = viewModel.job {
@@ -92,6 +94,11 @@ struct JobDetailView: View {
             activeTasks.forEach { $0.cancel() }
             activeTasks.removeAll()
             viewModel.isViewActive = false
+        }
+        .onChange(of: partsInventoryEnabled) { _, isEnabled in
+            if !isEnabled {
+                showingHarvestSheet = false
+            }
         }
     }
 

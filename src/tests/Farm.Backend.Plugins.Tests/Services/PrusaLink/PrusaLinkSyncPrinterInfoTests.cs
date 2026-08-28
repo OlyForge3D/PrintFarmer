@@ -22,7 +22,7 @@ namespace Farm.Backend.Plugins.Tests.Services.PrusaLink;
 /// The method is private and invoked via reflection. A mocked <see cref="IServiceScopeFactory"/>
 /// injects fake <see cref="IPrusaLinkClient"/> and <see cref="IUnitOfWork"/> instances.
 /// </summary>
-public class PrusaLinkSyncPrinterInfoTests
+public class PrusaLinkSyncPrinterInfoTests : IDisposable
 {
     private readonly Mock<IServiceScopeFactory> _scopeFactory;
     private readonly Mock<IServiceScope> _scope;
@@ -63,6 +63,8 @@ public class PrusaLinkSyncPrinterInfoTests
         _syncPrinterInfoAsync = typeof(PrusaLinkPollingService)
             .GetMethod("SyncPrinterInfoAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
     }
+
+    public void Dispose() => _service.Dispose();
 
     private Task InvokeAsync(Printer printer) =>
         (Task)_syncPrinterInfoAsync.Invoke(_service, [printer, CancellationToken.None])!;

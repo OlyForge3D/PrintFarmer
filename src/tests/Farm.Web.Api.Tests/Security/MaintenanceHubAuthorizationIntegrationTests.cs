@@ -24,13 +24,15 @@ namespace Farm.Web.Api.Tests.Security;
 /// <see cref="IMaintenanceAlertService.ResolveAlertAsync"/> and asserts who actually receives the
 /// resulting SignalR event.
 /// </summary>
-public sealed class MaintenanceHubAuthorizationIntegrationTests : IAsyncLifetime
+public sealed class MaintenanceHubAuthorizationIntegrationTests : IAsyncLifetime, IDisposable
 {
     private readonly MaintenanceHubFactory _factory = new();
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Fact]
     public async Task ResolvedAlert_ExcludedUser_NeverReceivesEvent_ButAdminAndGroupMemberDo()
@@ -54,7 +56,7 @@ public sealed class MaintenanceHubAuthorizationIntegrationTests : IAsyncLifetime
 
         // The excluded user has no PrinterGroupAccess rule granting this printer's group, so
         // subscribing must be rejected with resource_forbidden and must NOT join the group.
-        Func<Task> excludedSubscribe = () => excludedConnection.InvokeAsync(
+        Func<Task> excludedSubscribe = async () => await excludedConnection.InvokeAsync(
             "SubscribeToPrinterAsync",
             printerId.ToString());
         (await excludedSubscribe.Should().ThrowAsync<Microsoft.AspNetCore.SignalR.HubException>())

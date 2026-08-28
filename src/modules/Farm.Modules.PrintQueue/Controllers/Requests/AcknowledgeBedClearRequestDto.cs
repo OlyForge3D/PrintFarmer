@@ -1,4 +1,4 @@
-﻿namespace Farm.Web.Api.Controllers.Requests;
+﻿namespace Farm.Modules.PrintQueue.Controllers.Requests;
 
 /// <summary>
 /// Request body for <c>POST /api/job-queue/{jobId}/acknowledge-bed-clear-and-start</c>.

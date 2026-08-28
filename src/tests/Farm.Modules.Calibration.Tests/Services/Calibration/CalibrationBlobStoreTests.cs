@@ -1,10 +1,10 @@
 ﻿using System.Text;
-using Farm.Web.Api.Services.Calibration;
-using Farm.Web.Api.Tests.Services;
+using Farm.Modules.Calibration.Services.Calibration;
+using Farm.Modules.Calibration.Tests.Services;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 
-namespace Farm.Web.Api.Tests.Services.Calibration;
+namespace Farm.Modules.Calibration.Tests.Services.Calibration;
 
 public sealed class CalibrationBlobStoreTests
 {
@@ -21,7 +21,7 @@ public sealed class CalibrationBlobStoreTests
             "image/png");
         await using MemoryStream content = new(Encoding.UTF8.GetBytes("not an image"));
 
-        Func<Task> operation = () => store.PutAsync(request, content, CancellationToken.None);
+        Func<Task> operation = async () => await store.PutAsync(request, content, CancellationToken.None);
 
         CalibrationBlobValidationException exception =
             (await operation.Should().ThrowAsync<CalibrationBlobValidationException>()).Which;

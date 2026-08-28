@@ -31,7 +31,7 @@ namespace Farm.Web.Api.Tests.Services.OctoPrint;
 /// until the next reconciliation pass noticed the credential change. Invalidation must therefore
 /// dispose the adapter immediately so the very next poll tick recreates it with fresh credentials.
 /// </summary>
-public class OctoPrintPollingServiceCacheTests
+public class OctoPrintPollingServiceCacheTests : IDisposable
 {
     private readonly Mock<IPrintersRepository> _printersRepository = new(MockBehavior.Loose);
     private readonly Mock<IOctoPrintClient> _octoPrintClient = new(MockBehavior.Loose);
@@ -81,6 +81,8 @@ public class OctoPrintPollingServiceCacheTests
         _invalidationGenerationsField = serviceType.GetField("_invalidationGenerations", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _pollingStateType = serviceType.GetNestedType("PrinterPollingState", BindingFlags.NonPublic)!;
     }
+
+    public void Dispose() => _service.Dispose();
 
     private IDictionary PrinterStates => (IDictionary)_printerStatesField.GetValue(_service)!;
 

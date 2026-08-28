@@ -27,7 +27,7 @@ public sealed class ArtifactsServiceFailureCleanupTests : IDisposable
             "cancelled.gcode",
             length: 14);
 
-        Func<Task> upload = () => service.UploadAsync(
+        Func<Task> upload = async () => await service.UploadAsync(
             file,
             Guid.NewGuid(),
             workerId: null,
@@ -58,7 +58,7 @@ public sealed class ArtifactsServiceFailureCleanupTests : IDisposable
             "failed.gcode",
             length: 15);
 
-        Func<Task> upload = () => service.UploadAsync(
+        Func<Task> upload = async () => await service.UploadAsync(
             file,
             Guid.NewGuid(),
             workerId: null,
@@ -92,7 +92,7 @@ public sealed class ArtifactsServiceFailureCleanupTests : IDisposable
             "failed.gcode",
             length: 15);
 
-        Func<Task> upload = () => service.UploadForActiveLeaseAsync(
+        Func<Task> upload = async () => await service.UploadForActiveLeaseAsync(
             file,
             Guid.NewGuid(),
             Guid.NewGuid(),
@@ -119,7 +119,7 @@ public sealed class ArtifactsServiceFailureCleanupTests : IDisposable
         using ArtifactsMetrics metrics = new();
         ArtifactsService service = CreateService(repository.Object, metrics);
 
-        Func<Task> upload = () => service.UploadTextAsync(
+        Func<Task> upload = async () => await service.UploadTextAsync(
             "complete upload",
             "failed.log",
             Guid.NewGuid(),
@@ -152,7 +152,7 @@ public sealed class ArtifactsServiceFailureCleanupTests : IDisposable
             "ambiguous.gcode",
             length: 15);
 
-        Func<Task> upload = () => service.UploadAsync(
+        Func<Task> upload = async () => await service.UploadAsync(
             file,
             Guid.NewGuid(),
             workerId: null,

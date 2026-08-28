@@ -300,7 +300,7 @@ public class BackendCapabilityFactoryTests
         return plugin.Object;
     }
 
-    private IEnumerable<Type> GetCapabilitiesForBackend(PrinterBackend backend)
+    private Type[] GetCapabilitiesForBackend(PrinterBackend backend)
     {
         return backend switch
         {

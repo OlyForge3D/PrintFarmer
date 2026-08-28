@@ -16,7 +16,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// Integration tests for OrcaSlicer bundle import/export round-trip functionality.
 /// Tests the complete workflow: preview → import → export → verify.
 /// </summary>
-public class OrcaBundleIntegrationTests : IAsyncLifetime
+public class OrcaBundleIntegrationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient _client = null!;
@@ -32,7 +32,13 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime
         _client = await _factory.CreateAdminClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
     {
         _client?.Dispose();
         _factory?.Dispose();

@@ -93,8 +93,7 @@ public sealed class ModelDownloadRequestTests : IDisposable
         OrcaSlicingPipelineService service = CreateService(httpClient);
         DistributedSlicingJob job = CreateJob();
 
-        Func<Task> fetch = () =>
-            service.FetchStlFileAsync(job, _workingDirectory, CancellationToken.None);
+        Func<Task> fetch = async () => await service.FetchStlFileAsync(job, _workingDirectory, CancellationToken.None);
 
         await fetch.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*redirects are not allowed*");
@@ -116,8 +115,7 @@ public sealed class ModelDownloadRequestTests : IDisposable
         OrcaSlicingPipelineService service = CreateService(httpClient);
         DistributedSlicingJob job = CreateJob(fileName);
 
-        Func<Task> fetch = () =>
-            service.FetchStlFileAsync(job, _workingDirectory, CancellationToken.None);
+        Func<Task> fetch = async () => await service.FetchStlFileAsync(job, _workingDirectory, CancellationToken.None);
 
         await fetch.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*bare file name*");
@@ -151,8 +149,7 @@ public sealed class ModelDownloadRequestTests : IDisposable
             maxDownloadBytes: "4");
         DistributedSlicingJob job = CreateJob();
 
-        Func<Task> fetch = () =>
-            service.FetchStlFileAsync(job, _workingDirectory, CancellationToken.None);
+        Func<Task> fetch = async () => await service.FetchStlFileAsync(job, _workingDirectory, CancellationToken.None);
 
         await fetch.Should().ThrowAsync<InvalidDataException>()
             .WithMessage("*4-byte limit*");
@@ -173,8 +170,7 @@ public sealed class ModelDownloadRequestTests : IDisposable
             downloadTimeoutSeconds: "1");
         DistributedSlicingJob job = CreateJob();
 
-        Func<Task> fetch = () =>
-            service.FetchStlFileAsync(job, _workingDirectory, CancellationToken.None);
+        Func<Task> fetch = async () => await service.FetchStlFileAsync(job, _workingDirectory, CancellationToken.None);
 
         await fetch.Should().ThrowAsync<TimeoutException>()
             .WithMessage("*1-second timeout*");
@@ -277,8 +273,7 @@ public sealed class ModelDownloadRequestTests : IDisposable
             maxDownloadBytes: "4");
         DistributedSlicingJob job = CreateJob("known-oversized.stl");
 
-        Func<Task> fetch = () =>
-            service.FetchStlFileAsync(job, _workingDirectory, CancellationToken.None);
+        Func<Task> fetch = async () => await service.FetchStlFileAsync(job, _workingDirectory, CancellationToken.None);
 
         await fetch.Should().ThrowAsync<InvalidDataException>()
             .WithMessage("*4-byte limit*");
@@ -295,8 +290,7 @@ public sealed class ModelDownloadRequestTests : IDisposable
         DistributedSlicingJob job = CreateJob("digest.stl");
         job.ModelSha256 = new string('0', 64);
 
-        Func<Task> fetch = () =>
-            service.FetchStlFileAsync(job, _workingDirectory, CancellationToken.None);
+        Func<Task> fetch = async () => await service.FetchStlFileAsync(job, _workingDirectory, CancellationToken.None);
 
         await fetch.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*does not match the digest*");

@@ -291,7 +291,7 @@ public class CameraSnapshotServiceTests : IDisposable
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        Func<Task> act = () => service.CaptureSnapshotAsync(printerId, "PrintStarted", ct: cts.Token);
+        Func<Task> act = async () => await service.CaptureSnapshotAsync(printerId, "PrintStarted", ct: cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }

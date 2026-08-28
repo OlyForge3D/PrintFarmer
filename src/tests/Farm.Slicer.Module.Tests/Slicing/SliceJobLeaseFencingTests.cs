@@ -17,7 +17,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// Verifies that a claim is atomic and that every worker mutation is bound to the claiming worker,
 /// the claimed job, an unexpired lease and the current fencing token.
 /// </summary>
-public sealed class SliceJobLeaseFencingTests : IAsyncLifetime
+public sealed class SliceJobLeaseFencingTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
     private HttpClient _firstWorker = null!;
@@ -36,11 +36,17 @@ public sealed class SliceJobLeaseFencingTests : IAsyncLifetime
             email: "fencing-b@example.com");
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
     {
         _firstWorker.Dispose();
         _secondWorker.Dispose();
-        await _factory.DisposeAsync();
+        _factory.Dispose();
     }
 
     [Fact(DisplayName = "Concurrent claims of one queued job produce exactly one winner")]

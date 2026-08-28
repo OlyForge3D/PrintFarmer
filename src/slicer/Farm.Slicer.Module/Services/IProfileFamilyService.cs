@@ -104,6 +104,9 @@ public interface IProfileFamilyService
     /// Thrown when a concurrent delete removed the family between the worker install and the persist; the
     /// partially installed bundle is rolled back before this is thrown.
     /// </exception>
+    /// <exception cref="ProfileFamilyCleanupException">
+    /// Thrown when concurrency compensation cannot remove or restore every installed artifact.
+    /// </exception>
     /// <exception cref="ProfileFamilyConcurrencyException">
     /// Thrown when a concurrent request modified the family mid-edit.
     /// </exception>
@@ -137,6 +140,9 @@ public interface IProfileFamilyService
     /// <exception cref="ProfileFamilyConcurrentlyDeletedException">
     /// Thrown when a concurrent delete removed the family between the worker install and the persist; the
     /// partially installed bundle is rolled back before this is thrown.
+    /// </exception>
+    /// <exception cref="ProfileFamilyCleanupException">
+    /// Thrown when concurrency compensation cannot remove or restore every installed artifact.
     /// </exception>
     /// <exception cref="ProfileFamilyConcurrencyException">
     /// Thrown when a concurrent request modified the family mid-render.

@@ -7,7 +7,7 @@ using Farm.Infrastructure.Services.PrintJobs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.PrintQueue.Controllers;
 
 [ApiController]
 [Route("api/print-approvals")]

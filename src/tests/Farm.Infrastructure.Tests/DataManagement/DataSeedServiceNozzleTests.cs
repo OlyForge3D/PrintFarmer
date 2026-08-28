@@ -22,7 +22,7 @@ namespace Farm.Infrastructure.Tests.DataManagement;
 /// <em>both</em> upsert branches so that regression cannot recur unnoticed.
 /// </para>
 /// </summary>
-public sealed class DataSeedServiceNozzleTests
+public sealed class DataSeedServiceNozzleTests : IDisposable
 {
     private readonly AppDbContext _context;
     private readonly Mock<IYamlSeedDataReader> _reader = new();
@@ -51,6 +51,8 @@ public sealed class DataSeedServiceNozzleTests
 
         _service = new DataSeedService(_context, _reader.Object, _logger.Object);
     }
+
+    public void Dispose() => _context.Dispose();
 
     private async Task SeedAsync(params NozzleModelSeedDto[] nozzles)
     {

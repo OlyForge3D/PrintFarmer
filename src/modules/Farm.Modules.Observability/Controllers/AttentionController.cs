@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Observability.Controllers;
 
 /// <summary>
 /// Unified attention feed for the operator home screen. See epic #705 / issue #707.

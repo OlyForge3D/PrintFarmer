@@ -17,7 +17,7 @@ public class SpoolmanFilamentCostProviderTests
 {
     // ── helpers ────────────────────────────────────────────────────────────────
 
-    private static IMemoryCache BuildCache() =>
+    private static MemoryCache BuildCache() =>
         new MemoryCache(new MemoryCacheOptions());
 
     private static SpoolmanFilamentCostProvider BuildProvider(

@@ -11,7 +11,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Observability.Controllers;
 
 /// <summary>
 /// Controller for managing Obico ML API servers used for AI-powered print failure detection.

@@ -11,7 +11,7 @@ using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
-using Farm.Web.Api.Controllers;
+using Farm.Modules.PrintQueue.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -22,7 +22,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.PrintQueue.Tests.Controllers;
 
 /// <summary>
 /// Tests for issue #1726: <see cref="JobQueueController.GetChangesAsync"/> used to authorize
@@ -31,7 +31,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// partitions candidates by aggregate type up front and performs a single batched
 /// <c>FilterAccessiblePrinterIdsAsync</c> call and a single batched
 /// <c>FilterActorAccessibleJobIdsAsync</c> call, mirroring the pattern already used by
-/// <see cref="Farm.Api.Controllers.JobQueueAnalyticsController"/>. These tests prove:
+/// <see cref="Farm.Modules.PrintQueue.Controllers.JobQueueAnalyticsController"/>. These tests prove:
 /// (1) the total SQL statement count for a group-restricted (non-admin) user with 400 seeded
 ///     outbox events spanning both aggregate types is single digits, not hundreds,
 /// (2) the farm-admin short-circuit still returns every event, and
@@ -577,7 +577,7 @@ public class JobQueueControllerChangesBatchedAuthorizationTests
             authorization,
             CreatePrincipalWithNoResolvableSubject());
 
-        Func<Task<IActionResult>> act = () => controller.GetChangesAsync(
+        Func<Task<IActionResult>> act = async () => await controller.GetChangesAsync(
             afterSequence: 0,
             limit: 500,
             CancellationToken.None);

@@ -19,7 +19,7 @@ namespace Farm.Backend.Plugins.Tests.Services.TestEmulator;
 /// invoked once per call (no polling loop to work around), so it's exercised directly via
 /// reflection, following the pattern in <c>PrusaLinkSyncPrinterInfoTests</c>.
 /// </summary>
-public class TestEmulatorPollingServiceBroadcastGateTests
+public class TestEmulatorPollingServiceBroadcastGateTests : IDisposable
 {
     private readonly Mock<IClientProxy> _clientProxy = new(MockBehavior.Loose);
     private readonly TestEmulatorStateManager _stateManager = new();
@@ -45,6 +45,8 @@ public class TestEmulatorPollingServiceBroadcastGateTests
         _tickPrinterAsync = typeof(TestEmulatorPollingService)
             .GetMethod("TickPrinterAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
     }
+
+    public void Dispose() => _service.Dispose();
 
     private Task TickAsync(Guid printerId) =>
         (Task)_tickPrinterAsync.Invoke(_service, [printerId, CancellationToken.None])!;

@@ -12,8 +12,9 @@
     <Description>Vertical-slice module for gcode file management: gcode library, chunked/multi
     uploads, moves and deletes, harvest completion and diagnostics, and gcode safety validation.
     Registers via IApiModule (see Farm.Modules.Abstractions, issue #2035). Phase 11 of the
-    module-decomposition epic #2019 -- namespaces are intentionally unchanged from their prior
-    Farm.Web.Api location (move-first-rename-last).</Description>
+    module-decomposition epic #2019. Namespaces were renamed from Farm.Web.Api.* to
+    Farm.Modules.Gcode.* by Phase 19 (issue #2047), completing the move-first-rename-last
+    strategy.</Description>
   </PropertyGroup>
 
   <ItemGroup>

@@ -24,7 +24,7 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// </remarks>
 [Trait("Category", "Integration")]
 [Trait("Category", "Regression")]
-public class Model3DFileDownloadRegressionTests : IAsyncLifetime
+public class Model3DFileDownloadRegressionTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
@@ -42,9 +42,14 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
 
     public Task DisposeAsync()
     {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
         _client?.Dispose();
         _factory?.Dispose();
-        return Task.CompletedTask;
     }
 
     [Fact]

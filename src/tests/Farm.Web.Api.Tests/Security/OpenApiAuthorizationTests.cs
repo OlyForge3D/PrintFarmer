@@ -6,13 +6,15 @@ using FluentAssertions;
 namespace Farm.Web.Api.Tests.Security;
 
 [Collection(IntegrationTestCollection.Name)]
-public sealed class OpenApiAuthorizationTests : IAsyncLifetime
+public sealed class OpenApiAuthorizationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Fact]
     public async Task OpenApiDocument_DescribesBearerRequirementsAndAuthorizationResponses()

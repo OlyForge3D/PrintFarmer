@@ -8,7 +8,6 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Farm.Api.Services.PrintQueue;
 using Farm.Backend.Plugin.Moonraker;
 using Farm.Backend.Plugin.OctoPrint;
 using Farm.Backend.Plugin.PrusaLink;
@@ -33,8 +32,9 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Infrastructure.Tests.Dispatch;
-using Farm.Web.Api.Controllers;
-using Farm.Web.Api.Controllers.Requests;
+using Farm.Modules.PrintQueue.Controllers;
+using Farm.Modules.PrintQueue.Controllers.Requests;
+using Farm.Modules.PrintQueue.Services.PrintQueue;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -2223,7 +2223,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         {
             PrintJob activeJob = await duplicateContext.PrintJobs.SingleAsync(
                 candidate => candidate.Id == fixture.JobId);
-            Func<Task> duplicate = () => CreateManagementService(
+            Func<Task> duplicate = async () => await CreateManagementService(
                     duplicateContext,
                     printers.Object)
                 .CancelJobAsync(
@@ -2978,9 +2978,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         // #1990). The "loser rereads winner" unique-index race this test used to exercise
         // is therefore unreachable for calibration jobs: both concurrent producers must
         // fail deterministically at the same pre-insert gate, and no row must ever land.
-        Func<Task> actA = () => CreateQueueService(ctxA)
+        Func<Task> actA = async () => await CreateQueueService(ctxA)
             .AddJobToQueueAsync(request, CalibrationOwnerId, CancellationToken.None);
-        Func<Task> actB = () => CreateQueueService(ctxB)
+        Func<Task> actB = async () => await CreateQueueService(ctxB)
             .AddJobToQueueAsync(request, CalibrationOwnerId, CancellationToken.None);
 
         (await actA.Should().ThrowAsync<CalibrationQueueIncompatibleException>())

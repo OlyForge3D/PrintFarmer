@@ -106,10 +106,10 @@ public class JobQueueServiceTests
 
         // Assert
         result.Should().HaveCount(1);
-        result.First().PrinterId.Should().Be(printer.Id);
-        result.First().PrinterName.Should().Be("Test Printer");
-        result.First().IsAvailable.Should().BeTrue();
-        result.First().QueuedJobsCount.Should().Be(0);
+        result[0].PrinterId.Should().Be(printer.Id);
+        result[0].PrinterName.Should().Be("Test Printer");
+        result[0].IsAvailable.Should().BeTrue();
+        result[0].QueuedJobsCount.Should().Be(0);
     }
 
     [Fact]
@@ -133,9 +133,9 @@ public class JobQueueServiceTests
 
         // Assert
         result.Should().HaveCount(1);
-        result.First().QueuedJobsCount.Should().Be(1);
-        result.First().EstimatedCompletionTime.Should().NotBeNull();
-        result.First().EstimatedCompletionTime.Should().BeCloseTo(DateTime.UtcNow.AddHours(2), TimeSpan.FromMinutes(1));
+        result[0].QueuedJobsCount.Should().Be(1);
+        result[0].EstimatedCompletionTime.Should().NotBeNull();
+        result[0].EstimatedCompletionTime.Should().BeCloseTo(DateTime.UtcNow.AddHours(2), TimeSpan.FromMinutes(1));
     }
 
     [Fact]
@@ -169,7 +169,7 @@ public class JobQueueServiceTests
 
         // Assert
         result.Should().HaveCount(1);
-        DateTime? estimate = result.First().EstimatedCompletionTime;
+        DateTime? estimate = result[0].EstimatedCompletionTime;
         estimate.Should().NotBeNull();
         estimate.Should().BeCloseTo(DateTime.UtcNow.AddMinutes(90), TimeSpan.FromMinutes(2));
     }
@@ -225,8 +225,8 @@ public class JobQueueServiceTests
 
         // Assert - Only 0.4mm printer returned
         result.Should().HaveCount(1);
-        result.First().PrinterName.Should().Be("Printer 0.4mm");
-        result.First().NozzleDiameter.Should().BeApproximately(0.4, 0.01);
+        result[0].PrinterName.Should().Be("Printer 0.4mm");
+        result[0].NozzleDiameter.Should().BeApproximately(0.4, 0.01);
     }
 
     [Fact]
@@ -288,7 +288,7 @@ public class JobQueueServiceTests
 
         // Assert - Printer matches due to tolerance
         result.Should().HaveCount(1);
-        result.First().PrinterName.Should().Be("Printer Within Tolerance");
+        result[0].PrinterName.Should().Be("Printer Within Tolerance");
     }
 
     [Fact]
@@ -332,8 +332,8 @@ public class JobQueueServiceTests
 
         // Assert - Only PCTG-capable printer returned
         result.Should().HaveCount(1);
-        result.First().PrinterName.Should().Be("PCTG Printer");
-        result.First().SupportedMaterials.Should().Contain("PCTG");
+        result[0].PrinterName.Should().Be("PCTG Printer");
+        result[0].SupportedMaterials.Should().Contain("PCTG");
     }
 
     [Fact]
@@ -363,7 +363,7 @@ public class JobQueueServiceTests
 
         // Assert - Matches despite case difference
         result.Should().HaveCount(1);
-        result.First().PrinterName.Should().Be("Test Printer");
+        result[0].PrinterName.Should().Be("Test Printer");
     }
 
     [Fact]
@@ -389,7 +389,7 @@ public class JobQueueServiceTests
         _mockDataService.Verify(x => x.GetCompatiblePrintersAsync("Qidi X-Plus 4", It.IsAny<CancellationToken>()), Times.Once);
         _mockDataService.Verify(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()), Times.Never);
         result.Should().HaveCount(1);
-        result.First().PrinterModel.Should().Be("Qidi X-Plus 4");
+        result[0].PrinterModel.Should().Be("Qidi X-Plus 4");
     }
 
     [Fact]
@@ -457,9 +457,9 @@ public class JobQueueServiceTests
 
         // Assert - Only the printer matching ALL criteria is returned
         result.Should().HaveCount(1);
-        result.First().PrinterName.Should().Be("qp4-1");
-        result.First().NozzleDiameter.Should().BeApproximately(0.4, 0.01);
-        result.First().SupportedMaterials.Should().Contain("PCTG");
+        result[0].PrinterName.Should().Be("qp4-1");
+        result[0].NozzleDiameter.Should().BeApproximately(0.4, 0.01);
+        result[0].SupportedMaterials.Should().Contain("PCTG");
     }
 
     [Fact]
@@ -528,8 +528,8 @@ public class JobQueueServiceTests
 
         // Assert
         result.Should().HaveCount(2);
-        result.First().QueuePosition.Should().Be(1);
-        result.Last().QueuePosition.Should().Be(2);
+        result[0].QueuePosition.Should().Be(1);
+        result[^1].QueuePosition.Should().Be(2);
     }
 
     [Fact]

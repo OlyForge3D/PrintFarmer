@@ -3,7 +3,7 @@ using Farm.Infrastructure.Services.Background;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Observability.Controllers;
 
 /// <summary>
 /// API controller for monitoring background service status

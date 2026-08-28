@@ -13,7 +13,7 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Controllers;
 
-public sealed class PrinterMutationEtagTests : IAsyncLifetime
+public sealed class PrinterMutationEtagTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
     private HttpClient _client = null!;
@@ -53,6 +53,12 @@ public sealed class PrinterMutationEtagTests : IAsyncLifetime
     {
         _client.Dispose();
         await _factory.DisposeAsync();
+    }
+
+    public void Dispose()
+    {
+        _client?.Dispose();
+        _factory.Dispose();
     }
 
     [Fact]

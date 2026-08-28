@@ -3,7 +3,7 @@ using Farm.Infrastructure.Services.Diagnostics;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Observability.Controllers;
 
 /// <summary>
 /// Runtime diagnostic channel management.

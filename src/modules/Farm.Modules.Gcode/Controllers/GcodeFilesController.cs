@@ -14,8 +14,8 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Quota;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Tags;
+using Farm.Modules.Gcode.DTOs;
 using Farm.Slicer.Module.Dtos;
-using Farm.Web.Api.DTOs;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -24,7 +24,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Controllers;
+namespace Farm.Modules.Gcode.Controllers;
 
 /// <summary>
 /// Provides a lightweight virtual file browser over the server-side G-code library directory (wwwroot/gcode-library).
@@ -42,7 +42,7 @@ public class GcodeFilesController(
     ILogger<GcodeFilesController> logger,
     IGcodeUploadSettings uploadSettings,
     IGcodeUploadQuotaService quotaService,
-    Farm.Web.Api.Services.Gcode.IGcodeFilesService gcodeFilesService,
+    Farm.Modules.Gcode.Services.Gcode.IGcodeFilesService gcodeFilesService,
     Farm.Infrastructure.Services.FileManagement.IChunkedUploadService chunkedUploadService,
     Farm.Infrastructure.Services.FileManagement.IFileManagementService fileManagementService,
     IStoragePathService storagePathService,

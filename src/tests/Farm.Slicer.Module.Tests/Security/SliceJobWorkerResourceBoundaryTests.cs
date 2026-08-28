@@ -13,7 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Slicer.Module.Tests.Security;
 
-public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
+public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
     private readonly Guid _claimToken = Guid.NewGuid();
@@ -39,11 +39,17 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
             _claimToken.ToString());
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
     {
         _firstWorkerClient.Dispose();
         _secondWorkerClient.Dispose();
-        await _factory.DisposeAsync();
+        _factory.Dispose();
     }
 
     [Fact]

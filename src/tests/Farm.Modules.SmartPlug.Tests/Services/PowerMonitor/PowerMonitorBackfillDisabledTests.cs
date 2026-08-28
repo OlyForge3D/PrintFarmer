@@ -6,8 +6,8 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Cost;
-using Farm.Web.Api.Services.PowerMonitor;
-using Farm.Web.Api.Services.SmartPlug;
+using Farm.Modules.SmartPlug.Services.PowerMonitor;
+using Farm.Modules.SmartPlug.Services.SmartPlug;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -17,7 +17,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Services.PowerMonitor;
+namespace Farm.Modules.SmartPlug.Tests.Services.PowerMonitor;
 
 /// <summary>
 /// Verifies that kWh backfill for completed jobs works even when the
@@ -161,8 +161,8 @@ public class PowerMonitorBackfillDisabledTests : IDisposable
     {
         public string ProviderType => "Kasa";
 
-        public Task<Farm.Web.Api.Services.SmartPlug.PowerReading?> GetCurrentReadingAsync(string deviceAddress, CancellationToken ct)
-            => Task.FromResult<Farm.Web.Api.Services.SmartPlug.PowerReading?>(null);
+        public Task<Farm.Modules.SmartPlug.Services.SmartPlug.PowerReading?> GetCurrentReadingAsync(string deviceAddress, CancellationToken ct)
+            => Task.FromResult<Farm.Modules.SmartPlug.Services.SmartPlug.PowerReading?>(null);
 
         public Task<bool> TestConnectionAsync(string deviceAddress, CancellationToken ct)
             => Task.FromResult(true);

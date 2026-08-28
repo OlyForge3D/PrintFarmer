@@ -17,7 +17,7 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Controllers;
 
 /// <summary>
-/// Integration tests for <see cref="Farm.Web.Api.Controllers.Admin.AdminPowerMonitorsController"/>.
+/// Integration tests for <see cref="Farm.Modules.SmartPlug.Controllers.Admin.AdminPowerMonitorsController"/>.
 /// </summary>
 [Trait("Category", "Integration")]
 public class AdminPowerMonitorsControllerTests : IClassFixture<AdminPowerMonitorsControllerTests.Factory>, IAsyncLifetime

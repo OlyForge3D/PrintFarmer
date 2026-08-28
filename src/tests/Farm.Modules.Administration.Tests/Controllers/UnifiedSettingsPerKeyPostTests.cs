@@ -5,11 +5,12 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Tests;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Xunit;
 
-namespace Farm.Web.Api.Tests.Controllers;
+namespace Farm.Modules.Administration.Tests.Controllers;
 
 /// <summary>
 /// Integration tests for the per-key settings save endpoint

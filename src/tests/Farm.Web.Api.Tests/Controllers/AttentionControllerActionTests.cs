@@ -4,6 +4,7 @@ using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Modules.Observability.Controllers;
 using Farm.Web.Api.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;

@@ -10,7 +10,7 @@ using Moq;
 
 namespace Farm.Infrastructure.Tests.DataManagement;
 
-public class YamlSeedDataTests
+public class YamlSeedDataTests : IDisposable
 {
     private readonly AppDbContext _context;
     private readonly Mock<ILogger<YamlSeedDataReader>> _loggerMock;
@@ -30,6 +30,8 @@ public class YamlSeedDataTests
 
         _yamlReader = new YamlSeedDataReader(_loggerMock.Object, _configMock.Object);
     }
+
+    public void Dispose() => _context.Dispose();
 
     [Fact]
     public async Task ReadManufacturersAsync_ValidYamlFile_ReturnsManufacturers()

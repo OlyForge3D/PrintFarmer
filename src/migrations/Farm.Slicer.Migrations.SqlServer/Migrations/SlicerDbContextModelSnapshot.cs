@@ -287,6 +287,11 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
+
                     b.Property<string>("SlicerDistribution")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");

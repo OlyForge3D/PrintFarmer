@@ -1,8 +1,9 @@
 ﻿using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using Farm.Web.Api.Services.Gcode.Safety;
 
-namespace Farm.Web.Api.Services.Gcode.Safety;
+namespace Farm.Modules.Gcode.Services.Gcode.Safety;
 
 /// <summary>Default <see cref="IGcodeSafetyValidator"/>.</summary>
 /// <remarks>

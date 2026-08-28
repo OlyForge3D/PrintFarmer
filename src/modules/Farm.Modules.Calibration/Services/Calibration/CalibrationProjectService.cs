@@ -6,13 +6,13 @@ using System.Text.Json.Nodes;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.PrinterCalibration;
-using Farm.Web.Api.Contracts;
+using Farm.Modules.Calibration.Contracts;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.Calibration;
+namespace Farm.Modules.Calibration.Services.Calibration;
 
 /// <summary>Authenticated caller context used for calibration resource authorization.</summary>
 public sealed record CalibrationActor(Guid UserId, string Subject, bool IsFarmAdmin);

@@ -9,7 +9,7 @@ using RoleHasMembersResponse = Farm.Infrastructure.Contracts.Roles.RoleHasMember
 using RoleSummaryDto = Farm.Infrastructure.Contracts.Roles.RoleSummaryDto;
 using UpdateCustomRoleRequest = Farm.Infrastructure.Contracts.Roles.UpdateCustomRoleRequest;
 
-namespace Farm.Web.Api.Controllers.Admin;
+namespace Farm.Modules.Identity.Controllers.Admin;
 
 /// <summary>
 /// Administrative CRUD for custom roles. System roles (<c>farm_admin</c>, <c>farm_user</c>)
