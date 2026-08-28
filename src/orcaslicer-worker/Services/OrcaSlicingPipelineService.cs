@@ -265,8 +265,13 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// <summary>
     /// Resolves and prepares the local calibration model for <paramref name="job"/> (issue #1938),
     /// applying per-object flow-ratio overrides for the flow-rate methods. The temperature tower
-    /// method needs no per-model changes here; its per-band configuration is injected into the
-    /// process profile in <see cref="RunOrcaSlicerAsync"/>.
+    /// and max volumetric speed methods need no per-model changes here; their per-band/permissive
+    /// configuration is injected into the process/filament profile in
+    /// <see cref="RunOrcaSlicerAsync"/>. Max volumetric speed's bundled resource
+    /// (<c>SpeedTestStructure.drc</c>) is an opaque OrcaSlicer binary format (confirmed by magic
+    /// bytes, not a ZIP/3MF archive), so — like the temperature tower's <c>.drc</c> resource — it
+    /// cannot be parsed and rewritten the way <see cref="FlowRateCalibrationConfigurator"/>
+    /// rewrites 3MF metadata; it falls through to the generic copy below.
     /// </summary>
     internal string PrepareCalibrationModel(DistributedSlicingJob job, string workDir)
     {
@@ -336,6 +341,52 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string updatedProcessJsonContent = InjectLayerChangeGcode(processJsonContent, layerChangeGcode);
         await File.WriteAllTextAsync(processJsonPath, updatedProcessJsonContent, cancellationToken);
         job.ProcessProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedProcessJsonContent);
+    }
+
+    /// <summary>
+    /// Sets the max volumetric speed calibration's permissive <c>filament_max_volumetric_speed</c>
+    /// ceiling (issue #2135) on the filament profile on disk and recomputes
+    /// <see cref="DistributedSlicingJob.FilamentProfileSha256"/> so the recorded digest matches the
+    /// mutated content. The calibration tower's bundled resource
+    /// (<c>volumetric_speed/SpeedTestStructure.drc</c>) sweeps volumetric flow through its own
+    /// built-in, width-increasing geometry rather than via per-band gcode, so — unlike the
+    /// temperature tower — no <c>layer_change_gcode</c> injection is needed here; the ceiling
+    /// override simply keeps OrcaSlicer's own auto speed-limiting from clamping the print below the
+    /// range that geometry is designed to sweep through (mirroring upstream's
+    /// <c>CalibUtils::calib_max_vol_speed</c>).
+    /// </summary>
+    internal static async Task ApplyMaxVolumetricSpeedCeilingAsync(
+        DistributedSlicingJob job,
+        string filamentJsonPath,
+        CancellationToken cancellationToken)
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, CalibrationMethod.MaximumVolumetricSpeed);
+
+        string filamentJsonContent = await File.ReadAllTextAsync(filamentJsonPath, cancellationToken);
+        string updatedFilamentJsonContent = InjectMaxVolumetricSpeedCeiling(filamentJsonContent, parameters.MaxVolumetricSpeedCeilingMm3s);
+        await File.WriteAllTextAsync(filamentJsonPath, updatedFilamentJsonContent, cancellationToken);
+        job.FilamentProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedFilamentJsonContent);
+    }
+
+    /// <summary>
+    /// Sets the <c>filament_max_volumetric_speed</c> key on a filament profile JSON document to
+    /// <paramref name="ceilingMm3s"/>. OrcaSlicer stores this (like most filament settings) as a
+    /// single-element array, e.g. <c>["50"]</c>, so the value is written the same way regardless
+    /// of whether the key was previously present.
+    /// </summary>
+    internal static string InjectMaxVolumetricSpeedCeiling(string filamentJson, double ceilingMm3s)
+    {
+        JsonNode rootNode = JsonNode.Parse(filamentJson)
+            ?? throw new InvalidOperationException("Filament profile JSON is empty.");
+        if (rootNode is not JsonObject rootObject)
+        {
+            throw new InvalidOperationException("Filament profile JSON root must be an object.");
+        }
+
+        rootObject["filament_max_volumetric_speed"] = new JsonArray(
+            JsonValue.Create(ceilingMm3s.ToString(CultureInfo.InvariantCulture)));
+
+        return rootObject.ToJsonString();
     }
 
     /// <summary>
@@ -1326,6 +1377,15 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             && calibrationMethod == CalibrationMethod.TemperatureTower)
         {
             await ApplyTemperatureTowerGcodeAsync(job, processJson, cancellationToken);
+        }
+
+        // Max volumetric speed calibration (issue #2135): apply the permissive
+        // filament_max_volumetric_speed ceiling here, before the profile is handed to
+        // OrcaSlicer, so the gate check below and the slice itself both see the final,
+        // calibration-aware filament profile.
+        if (calibrationMethod == CalibrationMethod.MaximumVolumetricSpeed)
+        {
+            await ApplyMaxVolumetricSpeedCeilingAsync(job, filamentJson, cancellationToken);
         }
 
         await WarnIfProcessCannotSatisfyGateAsync(job, machineJson, processJson, cancellationToken);

@@ -20,8 +20,23 @@
 /// not blocked by anything (upstream OrcaSlicer already implements both —
 /// <c>Plater::calib_max_vol_speed</c>/<c>Plater::calib_retraction</c> and their
 /// <c>CalibMode::Calib_Vol_speed_Tower</c>/<c>CalibMode::Calib_Retraction_tower</c> modes exist
-/// in <c>calib_dlg.cpp</c>); they simply have no resource resolver, configurator, or pipeline
-/// wiring in this repo yet, unlike temperature-tower and flow-rate.
+/// in <c>calib_dlg.cpp</c>). "Retraction" still has no resource resolver, configurator, or
+/// pipeline wiring in this repo. "Max volumetric speed" gained all three in issue #2135; see
+/// <see cref="MaximumVolumetricSpeed"/>.
+/// </para>
+/// <para>
+/// <see cref="MaximumVolumetricSpeed"/> (issue #2135): upstream's <c>CalibUtils::calib_max_vol_speed</c>
+/// loads <c>resources/calib/volumetric_speed/SpeedTestStructure.drc</c> — an opaque, proprietary
+/// binary (magic bytes <c>44 52 41 43</c>/"DRAC", not a ZIP/3MF archive), confirmed against a local
+/// OrcaSlicer install. Unlike the flow-rate resources, this cannot be parsed and rewritten the way
+/// <c>FlowRateCalibrationConfigurator</c> rewrites 3MF metadata, so the worker copies it unmodified
+/// — the same treatment as <see cref="TemperatureTower"/>'s <c>.drc</c> resource. Upstream's C++
+/// also sets a permissive <c>filament_max_volumetric_speed</c> ceiling (a constant 50mm³/s) before
+/// slicing, purely so the slicer's own auto speed-limiting does not clamp the print below the
+/// range the calibration tower's built-in, width-increasing geometry is designed to sweep through.
+/// The worker reproduces that: <c>OrcaSlicingPipelineService.ApplyMaxVolumetricSpeedCeilingAsync</c>
+/// sets the filament profile's <c>filament_max_volumetric_speed</c> to the ceiling resolved from
+/// <c>CalibrationParameters.MaxVolumetricSpeedCeilingMm3s</c> before the slice.
 /// </para>
 /// <para>
 /// <see cref="FlowRateYoloRecommended"/>/<see cref="FlowRateYoloPerfectionist"/>'s bundled 3MF
@@ -58,6 +73,12 @@ public enum CalibrationMethod
     /// method's per-object overrides.
     /// </summary>
     FlowRateYoloPerfectionist,
+
+    /// <summary>
+    /// Maximum volumetric speed calibration (issue #2135). See the type-level remarks for the
+    /// resource format and the permissive-ceiling configurator this method needs.
+    /// </summary>
+    MaximumVolumetricSpeed,
 }
 
 /// <summary>
@@ -75,6 +96,7 @@ public static class CalibrationMethods
             ["temperature_tower"] = CalibrationMethod.TemperatureTower,
             ["flow_rate_yolo_recommended"] = CalibrationMethod.FlowRateYoloRecommended,
             ["flow_rate_yolo_perfectionist"] = CalibrationMethod.FlowRateYoloPerfectionist,
+            ["max_volumetric_speed"] = CalibrationMethod.MaximumVolumetricSpeed,
         };
 
     private static readonly Dictionary<CalibrationMethod, string> MethodToWireName =
@@ -85,6 +107,7 @@ public static class CalibrationMethods
             [CalibrationMethod.TemperatureTower] = "temperature_tower",
             [CalibrationMethod.FlowRateYoloRecommended] = "flow_rate_yolo_recommended",
             [CalibrationMethod.FlowRateYoloPerfectionist] = "flow_rate_yolo_perfectionist",
+            [CalibrationMethod.MaximumVolumetricSpeed] = "max_volumetric_speed",
         };
 
     /// <summary>
@@ -164,6 +187,7 @@ public static class CalibrationMethods
         CalibrationMethod.TemperatureTower => "temperature_tower.drc",
         CalibrationMethod.FlowRateYoloRecommended => "Orca-LinearFlow.3mf",
         CalibrationMethod.FlowRateYoloPerfectionist => "Orca-LinearFlow_fine.3mf",
+        CalibrationMethod.MaximumVolumetricSpeed => "SpeedTestStructure.drc",
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 
@@ -178,6 +202,7 @@ public static class CalibrationMethods
         CalibrationMethod.TemperatureTower => Path.Combine("temperature_tower", "temperature_tower.drc"),
         CalibrationMethod.FlowRateYoloRecommended => Path.Combine("filament_flow", "Orca-LinearFlow.3mf"),
         CalibrationMethod.FlowRateYoloPerfectionist => Path.Combine("filament_flow", "Orca-LinearFlow_fine.3mf"),
+        CalibrationMethod.MaximumVolumetricSpeed => Path.Combine("volumetric_speed", "SpeedTestStructure.drc"),
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 }
