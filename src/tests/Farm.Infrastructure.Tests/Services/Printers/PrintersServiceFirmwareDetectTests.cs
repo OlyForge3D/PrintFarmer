@@ -418,13 +418,13 @@ public sealed class PrintersServiceFirmwareDetectTests
         return unitOfWork;
     }
 
-    private static HttpMessageHandler RespondWith(string payload) =>
+    private static StubHandler RespondWith(string payload) =>
         new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(payload, Encoding.UTF8, "application/json"),
         });
 
-    private static HttpMessageHandler Throwing() =>
+    private static StubHandler Throwing() =>
         new StubHandler(_ => throw new HttpRequestException("connection refused"));
 
     private static PrintersService CreateService(

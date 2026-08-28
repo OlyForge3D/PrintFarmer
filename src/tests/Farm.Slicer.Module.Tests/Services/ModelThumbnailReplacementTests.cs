@@ -310,7 +310,7 @@ public class ModelThumbnailReplacementTests : IDisposable
             originalThumbnailBytes);
     }
 
-    private IFormFile CreateFormFile(byte[] bytes)
+    private FormFile CreateFormFile(byte[] bytes)
     {
         MemoryStream stream = new(bytes);
         _streamsToDispose.Add(stream);

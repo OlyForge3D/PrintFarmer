@@ -19,7 +19,7 @@ public class PrintApprovalsControllerTests : IDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly AppDbContext _context;
-    private readonly IPrintApprovalRepository _repository;
+    private readonly EfPrintApprovalRepository _repository;
     private readonly TestPrintApprovalService _service;
     private readonly PrintApprovalsController _controller;
 

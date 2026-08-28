@@ -450,10 +450,10 @@ public class ModelUploadStreamingTests : IDisposable
             () => addedModel);
     }
 
-    private IFormFile CreateFormFile(string content, string fileName)
+    private FormFile CreateFormFile(string content, string fileName)
         => CreateFormFile(Encoding.UTF8.GetBytes(content), fileName);
 
-    private IFormFile CreateFormFile(byte[] content, string fileName)
+    private FormFile CreateFormFile(byte[] content, string fileName)
     {
         MemoryStream stream = new(content);
         _streamsToDispose.Add(stream);

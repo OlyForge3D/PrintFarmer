@@ -57,10 +57,10 @@ public class OperatorFeatureGateTests
         return repo;
     }
 
-    private static IOperatorFeatureGate CreateGate(
+    private static OperatorFeatureGate CreateGate(
         OperatorFeatureSettings? persisted = null,
         IConfiguration? configuration = null)
-        => new OperatorFeatureGate(
+        => new(
             RepoWith(persisted).Object,
             configuration ?? EmptyConfig(),
             NullLogger<OperatorFeatureGate>.Instance);
@@ -68,7 +68,7 @@ public class OperatorFeatureGateTests
     [Fact]
     public void Defaults_MatchIssueSpecification()
     {
-        IOperatorFeatureGate gate = CreateGate();
+        OperatorFeatureGate gate = CreateGate();
 
         OperatorFeatureFlagsDto flags = gate.GetEffectiveFlags();
 
@@ -85,7 +85,7 @@ public class OperatorFeatureGateTests
     [Fact]
     public void GetFlagName_ReturnsCamelCaseFlagNames()
     {
-        IOperatorFeatureGate gate = CreateGate();
+        OperatorFeatureGate gate = CreateGate();
 
         gate.GetFlagName(OperatorFeature.Attention).Should().Be("attentionEnabled");
         gate.GetFlagName(OperatorFeature.NativePush).Should().Be("nativePushEnabled");
@@ -100,7 +100,7 @@ public class OperatorFeatureGateTests
     [Fact]
     public void AllFeatures_CoversEveryEnumValue()
     {
-        IOperatorFeatureGate gate = CreateGate();
+        OperatorFeatureGate gate = CreateGate();
 
         gate.AllFeatures.Select(f => f.Feature)
             .Should().BeEquivalentTo(Enum.GetValues<OperatorFeature>());
@@ -115,7 +115,7 @@ public class OperatorFeatureGateTests
             NativePushEnabled = true,
             PrintedPartsInventoryEnabled = false,
         };
-        IOperatorFeatureGate gate = CreateGate(persisted);
+        OperatorFeatureGate gate = CreateGate(persisted);
 
         gate.IsEnabled(OperatorFeature.Attention).Should().BeFalse();
         gate.IsEnabled(OperatorFeature.NativePush).Should().BeTrue();
@@ -135,7 +135,7 @@ public class OperatorFeatureGateTests
             ("OperatorFeatures:attentionEnabled", "false"),
             ("OperatorFeatures:printedPartsInventoryEnabled", "False"));
 
-        IOperatorFeatureGate gate = CreateGate(persisted, config);
+        OperatorFeatureGate gate = CreateGate(persisted, config);
 
         gate.IsEnabled(OperatorFeature.Attention).Should().BeFalse();
         gate.IsEnabled(OperatorFeature.PrintedPartsInventory).Should().BeFalse();
@@ -150,7 +150,7 @@ public class OperatorFeatureGateTests
         OperatorFeatureSettings persisted = new() { NativePushEnabled = false };
         IConfiguration config = ConfigWith(("OperatorFeatures:nativePushEnabled", "true"));
 
-        IOperatorFeatureGate gate = CreateGate(persisted, config);
+        OperatorFeatureGate gate = CreateGate(persisted, config);
 
         gate.IsEnabled(OperatorFeature.NativePush).Should().BeFalse("only explicit false overrides");
         gate.IsHardDisabledByEnvironment(OperatorFeature.NativePush).Should().BeFalse();
@@ -162,7 +162,7 @@ public class OperatorFeatureGateTests
         OperatorFeatureSettings persisted = new() { AttentionEnabled = true };
         IConfiguration config = ConfigWith(("OperatorFeatures:attentionEnabled", "not-a-bool"));
 
-        IOperatorFeatureGate gate = CreateGate(persisted, config);
+        OperatorFeatureGate gate = CreateGate(persisted, config);
 
         gate.IsEnabled(OperatorFeature.Attention).Should().BeTrue();
         gate.IsHardDisabledByEnvironment(OperatorFeature.Attention).Should().BeFalse();
@@ -178,7 +178,7 @@ public class OperatorFeatureGateTests
         };
         IConfiguration config = ConfigWith(("OperatorFeatures:offlineWriteReplayEnabled", "false"));
 
-        IOperatorFeatureGate gate = CreateGate(persisted, config);
+        OperatorFeatureGate gate = CreateGate(persisted, config);
         OperatorFeatureFlagsDto flags = gate.GetEffectiveFlags();
 
         flags.AttentionEnabled.Should().BeTrue();
@@ -386,7 +386,7 @@ public class OperatorFeatureGateTests
     public async Task IsEnabledAsync_WhenRepositorySucceeds_ReturnsPersistedValue()
     {
         OperatorFeatureSettings persisted = new() { NativePushEnabled = true, AttentionEnabled = false };
-        IOperatorFeatureGate gate = CreateGate(persisted);
+        OperatorFeatureGate gate = CreateGate(persisted);
 
         (await gate.IsEnabledAsync(OperatorFeature.NativePush)).Should().BeTrue();
         (await gate.IsEnabledAsync(OperatorFeature.Attention)).Should().BeFalse();
@@ -432,7 +432,7 @@ public class OperatorFeatureGateTests
     public async Task IsEnabledStrictAsync_WhenRepositorySucceeds_ReturnsPersistedValue()
     {
         OperatorFeatureSettings persisted = new() { NativePushEnabled = true };
-        IOperatorFeatureGate gate = CreateGate(persisted);
+        OperatorFeatureGate gate = CreateGate(persisted);
 
         (await gate.IsEnabledStrictAsync(OperatorFeature.NativePush)).Should().BeTrue();
     }

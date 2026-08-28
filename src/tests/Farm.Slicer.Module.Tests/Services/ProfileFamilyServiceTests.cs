@@ -2667,7 +2667,7 @@ public sealed class ProfileFamilyServiceTests
     /// A single OrcaSlicer alias mapping named for the seeded family ("Farm Test"), i.e. the family's own
     /// alias is the model's ONLY coverage, so removing it strips the model's last OrcaSlicer coverage.
     /// </summary>
-    private static IReadOnlyList<SlicerModelAliasDto> OnlyFamilyAlias(Guid modelId) =>
+    private static List<SlicerModelAliasDto> OnlyFamilyAlias(Guid modelId) =>
         new List<SlicerModelAliasDto> { new(Guid.NewGuid(), modelId, "Farm Test", "OrcaSlicer") };
 
     private static (Guid FamilyId, Guid VariantId) SeedHealthyFamily(

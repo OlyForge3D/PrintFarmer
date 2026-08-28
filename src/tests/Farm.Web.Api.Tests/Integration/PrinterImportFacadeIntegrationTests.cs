@@ -38,7 +38,7 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
         }
     }
 
-    private IFormFile CreateCsvFormFile(string filename, string csvContent)
+    private FormFile CreateCsvFormFile(string filename, string csvContent)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(csvContent);
         var stream = new MemoryStream(bytes);
@@ -50,7 +50,7 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
         };
     }
 
-    private IFormFile CreateJsonFormFile(string filename, string jsonContent)
+    private FormFile CreateJsonFormFile(string filename, string jsonContent)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(jsonContent);
         var stream = new MemoryStream(bytes);
@@ -72,7 +72,7 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
             .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         string csvContent = "";
-        IFormFile file = CreateCsvFormFile("empty.csv", csvContent);
+        FormFile file = CreateCsvFormFile("empty.csv", csvContent);
 
         // Act & Assert
         ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
@@ -93,7 +93,7 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
             .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         string csvContent = "Name,IpAddress,Backend\n";
-        IFormFile file = CreateCsvFormFile("header-only.csv", csvContent);
+        FormFile file = CreateCsvFormFile("header-only.csv", csvContent);
 
         // Act & Assert
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -112,7 +112,7 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
             .GetRequiredService<Farm.Infrastructure.Services.Printers.IPrintersService>();
 
         string jsonContent = "{ invalid json }";
-        IFormFile file = CreateJsonFormFile("invalid.json", jsonContent);
+        FormFile file = CreateJsonFormFile("invalid.json", jsonContent);
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -130,7 +130,7 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
         string printerName = $"CredentialImport-{Guid.NewGuid():N}";
         string jsonContent =
             $$"""[{"name":"{{printerName}}","serverUrl":"http://user:password@printer.local","backend":"Moonraker"}]""";
-        IFormFile file = CreateJsonFormFile("credential-printer.json", jsonContent);
+        FormFile file = CreateJsonFormFile("credential-printer.json", jsonContent);
 
         using (Stream stream = file.OpenReadStream())
         {
@@ -176,7 +176,7 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
 
         // Missing 'Backend' required column
         string csvContent = "Name,IpAddress\nPrinter1,192.168.1.100\n";
-        IFormFile file = CreateCsvFormFile("missing-cols.csv", csvContent);
+        FormFile file = CreateCsvFormFile("missing-cols.csv", csvContent);
 
         // Act & Assert
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -211,7 +211,7 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
                 Backend = PrinterBackend.PrusaLink
             }
         });
-        IFormFile file = CreateJsonFormFile("printers.json", jsonContent);
+        FormFile file = CreateJsonFormFile("printers.json", jsonContent);
 
         // Act
         object result;
@@ -236,7 +236,7 @@ Prusa1,192.168.1.100,Moonraker,First printer
 Prusa2,192.168.1.101,PrusaLink,Second printer
 Prusa3,192.168.1.102,SDCP,Third printer
 ";
-        IFormFile file = CreateCsvFormFile("printers-detailed.csv", csvContent);
+        FormFile file = CreateCsvFormFile("printers-detailed.csv", csvContent);
 
         // Act
         object result;
@@ -261,7 +261,7 @@ Prusa3,192.168.1.102,SDCP,Third printer
 ""Printer, Special Model"",192.168.1.100,Moonraker,""Note with, comma inside""
 SimpleNamePrinter,192.168.1.101,Moonraker,SimpleNote
 ";
-        IFormFile file = CreateCsvFormFile("quoted.csv", csvContent);
+        FormFile file = CreateCsvFormFile("quoted.csv", csvContent);
 
         // Act
         object result;
@@ -287,7 +287,7 @@ PrusaLinkPrinter,192.168.1.101,PrusaLink
 SDCPPrinter,192.168.1.102,SDCP
 OctoPrintPrinter,192.168.1.103,OctoPrint
 ";
-        IFormFile file = CreateCsvFormFile("mixed-backends.csv", csvContent);
+        FormFile file = CreateCsvFormFile("mixed-backends.csv", csvContent);
 
         // Act
         object result;
@@ -311,7 +311,7 @@ OctoPrintPrinter,192.168.1.103,OctoPrint
 Printer1,192.168.1.100,Moonraker,Test,Prusa,CORE One,key123,true,7125,http://cam.local
 Printer2,192.168.1.101,PrusaLink,Test2,Prusa,Mk3S+,key456,false,8008,http://cam2.local
 ";
-        IFormFile file = CreateCsvFormFile("with-optional.csv", csvContent);
+        FormFile file = CreateCsvFormFile("with-optional.csv", csvContent);
 
         // Act
         object result;

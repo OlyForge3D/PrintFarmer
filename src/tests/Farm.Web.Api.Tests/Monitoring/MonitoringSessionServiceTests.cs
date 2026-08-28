@@ -9,7 +9,7 @@ namespace Farm.Web.Api.Tests.Monitoring;
 
 public class MonitoringSessionServiceTests
 {
-    private readonly IMonitoringSessionService _service;
+    private readonly MonitoringSessionService _service;
 
     public MonitoringSessionServiceTests()
     {

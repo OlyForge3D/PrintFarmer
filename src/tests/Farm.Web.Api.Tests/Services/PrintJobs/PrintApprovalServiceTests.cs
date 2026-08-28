@@ -21,9 +21,9 @@ public class PrintApprovalServiceTests : IDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly AppDbContext _context;
-    private readonly IPrintApprovalRepository _repository;
+    private readonly EfPrintApprovalRepository _repository;
     private readonly StubJobQueueService _queueService;
-    private readonly IPrintApprovalService _service;
+    private readonly PrintApprovalService _service;
 
     public PrintApprovalServiceTests()
     {
