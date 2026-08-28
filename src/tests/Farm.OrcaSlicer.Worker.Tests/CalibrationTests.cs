@@ -50,6 +50,8 @@ public class CalibrationTests : IDisposable
     [InlineData("flow_rate_yolo_recommended", CalibrationMethod.FlowRateYoloRecommended)]
     [InlineData("flow_rate_yolo_perfectionist", CalibrationMethod.FlowRateYoloPerfectionist)]
     [InlineData("FLOW_RATE_YOLO_RECOMMENDED", CalibrationMethod.FlowRateYoloRecommended)]
+    [InlineData("pressure_advance_tower", CalibrationMethod.PressureAdvanceTower)]
+    [InlineData("PRESSURE_ADVANCE_TOWER", CalibrationMethod.PressureAdvanceTower)]
     public void TryParse_SupportedWireName_ReturnsExpectedMethod(string wireName, CalibrationMethod expected)
     {
         bool parsed = CalibrationMethods.TryParse(wireName, out CalibrationMethod method);
@@ -122,6 +124,138 @@ public class CalibrationTests : IDisposable
     public void RelativeResourcePath_YoloMethods_ResolvesUnderFilamentFlowDirectory(CalibrationMethod method, string expectedFileName)
     {
         CalibrationMethods.RelativeResourcePath(method).Should().Be(Path.Combine("filament_flow", expectedFileName));
+    }
+
+    [Fact]
+    public void DefaultModelFileName_PressureAdvanceTower_ReturnsUpstreamResourceFileName()
+    {
+        // "tower_with_seam.drc" matches OrcaSlicer upstream's resources/calib/pressure_advance/
+        // directory (issue #2136), mirroring temperature_tower.drc for the temperature tower.
+        CalibrationMethods.DefaultModelFileName(CalibrationMethod.PressureAdvanceTower).Should().Be("tower_with_seam.drc");
+    }
+
+    [Fact]
+    public void RelativeResourcePath_PressureAdvanceTower_ResolvesUnderPressureAdvanceDirectory()
+    {
+        CalibrationMethods.RelativeResourcePath(CalibrationMethod.PressureAdvanceTower).Should()
+            .Be(Path.Combine("pressure_advance", "tower_with_seam.drc"));
+    }
+
+    [Fact]
+    public void IsSlicerSupported_PressureAdvanceTower_ReturnsTrue()
+    {
+        // Issue #2136: unlike the YOLO methods, pressure advance tower is fully slicer-supported —
+        // OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync implements it.
+        CalibrationMethods.IsSlicerSupported(CalibrationMethod.PressureAdvanceTower).Should().BeTrue();
+    }
+
+    #endregion
+
+    #region PressureAdvanceTowerGcodeBuilder
+
+    [Theory]
+    [InlineData("klipper", CalibrationFirmwareFlavor.Klipper)]
+    [InlineData("KLIPPER", CalibrationFirmwareFlavor.Klipper)]
+    [InlineData("marlin", CalibrationFirmwareFlavor.Marlin)]
+    [InlineData("marlin2", CalibrationFirmwareFlavor.Marlin)]
+    [InlineData("Marlin2", CalibrationFirmwareFlavor.Marlin)]
+    public void TryResolveFirmwareFlavor_SupportedFlavor_ReturnsExpected(string gcodeFlavor, CalibrationFirmwareFlavor expected)
+    {
+        PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor(gcodeFlavor).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("reprap")]
+    [InlineData("reprapfirmware")]
+    [InlineData("repetier")]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData(null)]
+    public void TryResolveFirmwareFlavor_UnsupportedOrMissingFlavor_ReturnsNull(string? gcodeFlavor)
+    {
+        // The pressure advance tower method must refuse any firmware it cannot emit a correct
+        // command for, rather than guessing — see PressureAdvanceTowerGcodeBuilder's remarks.
+        PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor(gcodeFlavor).Should().BeNull();
+    }
+
+    [Fact]
+    public void ReadGcodeFlavor_ValidMachineProfile_ReturnsFlavor()
+    {
+        string machineProfileJson = """{"name": "Test Machine", "gcode_flavor": "klipper"}""";
+
+        PressureAdvanceTowerGcodeBuilder.ReadGcodeFlavor(machineProfileJson).Should().Be("klipper");
+    }
+
+    [Theory]
+    [InlineData("""{"name": "Test Machine"}""")] // missing gcode_flavor
+    [InlineData("not json")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void ReadGcodeFlavor_MissingOrMalformedProfile_ReturnsNull(string? machineProfileJson)
+    {
+        PressureAdvanceTowerGcodeBuilder.ReadGcodeFlavor(machineProfileJson).Should().BeNull();
+    }
+
+    [Fact]
+    public void BuildLayerChangeGcode_Klipper_EmitsSetPressureAdvancePerBand()
+    {
+        string gcode = PressureAdvanceTowerGcodeBuilder.BuildLayerChangeGcode(
+            CalibrationFirmwareFlavor.Klipper,
+            startAdvance: 0.0,
+            advanceStep: 0.01,
+            bandHeightMm: 5,
+            bandCount: 4);
+
+        gcode.Should().Contain("{if layer_z >= 15}SET_PRESSURE_ADVANCE ADVANCE=0.03");
+        gcode.Should().Contain("{elsif layer_z >= 10}SET_PRESSURE_ADVANCE ADVANCE=0.02");
+        gcode.Should().Contain("{elsif layer_z >= 5}SET_PRESSURE_ADVANCE ADVANCE=0.01");
+        gcode.Should().Contain("{else}SET_PRESSURE_ADVANCE ADVANCE=0");
+        gcode.Should().NotContain("M900", "Klipper must never receive Marlin's linear-advance command");
+    }
+
+    [Fact]
+    public void BuildLayerChangeGcode_Marlin_EmitsM900KPerBand()
+    {
+        string gcode = PressureAdvanceTowerGcodeBuilder.BuildLayerChangeGcode(
+            CalibrationFirmwareFlavor.Marlin,
+            startAdvance: 0.0,
+            advanceStep: 0.01,
+            bandHeightMm: 5,
+            bandCount: 4);
+
+        gcode.Should().Contain("{if layer_z >= 15}M900 K0.03");
+        gcode.Should().Contain("{elsif layer_z >= 10}M900 K0.02");
+        gcode.Should().Contain("{elsif layer_z >= 5}M900 K0.01");
+        gcode.Should().Contain("{else}M900 K0");
+        gcode.Should().NotContain("SET_PRESSURE_ADVANCE", "Marlin must never receive Klipper's SET_PRESSURE_ADVANCE macro");
+    }
+
+    [Fact]
+    public void BuildLayerChangeGcode_TallestBandCheckedFirst()
+    {
+        string gcode = PressureAdvanceTowerGcodeBuilder.BuildLayerChangeGcode(
+            CalibrationFirmwareFlavor.Klipper, 0.0, 0.01, bandHeightMm: 5, bandCount: 4);
+
+        gcode.IndexOf("layer_z >= 15", StringComparison.Ordinal)
+            .Should().BeLessThan(gcode.IndexOf("layer_z >= 5", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BuildLayerChangeGcode_InvalidBandCount_ThrowsForPressureAdvanceTower()
+    {
+        Action act = () => PressureAdvanceTowerGcodeBuilder.BuildLayerChangeGcode(
+            CalibrationFirmwareFlavor.Klipper, 0.0, 0.01, bandHeightMm: 5, bandCount: 0);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void BuildLayerChangeGcode_InvalidBandHeight_Throws()
+    {
+        Action act = () => PressureAdvanceTowerGcodeBuilder.BuildLayerChangeGcode(
+            CalibrationFirmwareFlavor.Klipper, 0.0, 0.01, bandHeightMm: 0, bandCount: 4);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     #endregion
@@ -271,6 +405,43 @@ public class CalibrationTests : IDisposable
         CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.TemperatureTower);
 
         parameters.StartTemperatureC.Should().Be(230);
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_PressureAdvanceTower_NullJson_ReturnsDefaults()
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(null, CalibrationMethod.PressureAdvanceTower);
+
+        parameters.StartAdvance.Should().Be(0.0);
+        parameters.AdvanceStep.Should().Be(0.002);
+        parameters.BandHeightMm.Should().Be(5);
+        parameters.BandCount.Should().Be(20);
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_PressureAdvanceTower_OverridesProvidedKeysOnly()
+    {
+        string json = """{"start_advance": 0.01, "advance_step": 0.005, "band_count": 10}""";
+
+        CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.PressureAdvanceTower);
+
+        parameters.StartAdvance.Should().Be(0.01);
+        parameters.AdvanceStep.Should().Be(0.005);
+        parameters.BandCount.Should().Be(10);
+        parameters.BandHeightMm.Should().Be(5); // default preserved
+    }
+
+    [Theory]
+    [InlineData("""{"start_advance": -1}""")] // below the CalibrationMeasurementRanges.PressureAdvance minimum (0.0)
+    [InlineData("""{"start_advance": 2.5}""")] // above the CalibrationMeasurementRanges.PressureAdvance maximum (2.0)
+    [InlineData("""{"start_advance": "NaN"}""")]
+    public void CalibrationParameters_Parse_PressureAdvanceTower_OutOfRangeStartAdvance_FallsBackToDefault(string json)
+    {
+        // Mirrors Farm.Modules.Calibration.Services.Calibration.CalibrationMeasurementRanges.PressureAdvance
+        // (0.0-2.0), so the worker's own bounds-checking never diverges from the saga layer's.
+        CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.PressureAdvanceTower);
+
+        parameters.StartAdvance.Should().Be(0.0);
     }
 
     #endregion
@@ -468,6 +639,32 @@ public class CalibrationTests : IDisposable
         File.ReadAllText(preparedPath).Should().Be("fake-tower-resource");
     }
 
+    [Fact]
+    public void PrepareCalibrationModel_PressureAdvanceTowerMethod_CopiesResourceUnmodified()
+    {
+        // Mirrors PrepareCalibrationModel_TemperatureTowerMethod_CopiesResourceUnmodified: the
+        // pressure advance tower method's per-band configuration is injected later, into the
+        // process profile in RunOrcaSlicerAsync (see ApplyPressureAdvanceTowerGcodeAsync below),
+        // so PrepareCalibrationModel just needs to copy the bundled resource unmodified.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-pa");
+        string towerPath = Path.Combine(calibResourcesRoot, "pressure_advance", "tower_with_seam.drc");
+        Directory.CreateDirectory(Path.GetDirectoryName(towerPath)!);
+        File.WriteAllText(towerPath, "fake-pa-tower-resource");
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.PressureAdvanceTower),
+        };
+
+        string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
+
+        File.Exists(preparedPath).Should().BeTrue();
+        File.ReadAllText(preparedPath).Should().Be("fake-pa-tower-resource");
+    }
+
     [Theory]
     [InlineData(CalibrationMethod.FlowRateYoloRecommended, "Orca-LinearFlow.3mf")]
     [InlineData(CalibrationMethod.FlowRateYoloPerfectionist, "Orca-LinearFlow_fine.3mf")]
@@ -559,6 +756,84 @@ public class CalibrationTests : IDisposable
         job.ProcessProfileSha256.Should().Be(
             NativeSlicerProfiles.ComputeSha256(updatedContent),
             "the recorded digest must match the mutated process profile content, not the original");
+    }
+
+    [Theory]
+    [InlineData("klipper")]
+    [InlineData("marlin")]
+    [InlineData("marlin2")]
+    public async Task ApplyPressureAdvanceTowerGcodeAsync_InjectsLayerChangeGcodeAndRecomputesDigest(string gcodeFlavor)
+    {
+        // Regression coverage for the pipeline's process-profile injection wiring, mirroring
+        // ApplyTemperatureTowerGcodeAsync_InjectsLayerChangeGcodeAndRecomputesDigest — plus proof
+        // that the correct firmware-specific command is chosen from the machine profile's
+        // gcode_flavor (issue #2136's firmware-flavour decision).
+        string processJsonPath = Path.Combine(_tempDir, $"process-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(processJsonPath, """{"name": "Test Process"}""");
+        string machineJsonPath = Path.Combine(_tempDir, $"machine-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(machineJsonPath, $$"""{"name": "Test Machine", "gcode_flavor": "{{gcodeFlavor}}"}""");
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.PressureAdvanceTower),
+            CalibrationParamsJson = """{"start_advance": 0.0, "advance_step": 0.01, "band_height_mm": 5, "band_count": 4}""",
+        };
+
+        await OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync(job, processJsonPath, machineJsonPath, CancellationToken.None);
+
+        string updatedContent = await File.ReadAllTextAsync(processJsonPath);
+        using JsonDocument doc = JsonDocument.Parse(updatedContent);
+        string layerChangeGcode = doc.RootElement.GetProperty("layer_change_gcode").GetString()!;
+        CalibrationFirmwareFlavor expectedFlavor = PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor(gcodeFlavor)!.Value;
+        string expectedGcode = PressureAdvanceTowerGcodeBuilder.BuildLayerChangeGcode(
+            expectedFlavor,
+            startAdvance: 0.0,
+            advanceStep: 0.01,
+            bandHeightMm: 5,
+            bandCount: 4);
+        layerChangeGcode.Should().Be(
+            expectedGcode,
+            "the pipeline must inject the exact gcode computed from the job's CalibrationParamsJson and the " +
+            "machine profile's gcode_flavor, not a default/fallback template or the wrong firmware's command");
+        job.ProcessProfileSha256.Should().NotBeNullOrEmpty();
+        job.ProcessProfileSha256.Should().Be(
+            NativeSlicerProfiles.ComputeSha256(updatedContent),
+            "the recorded digest must match the mutated process profile content, not the original");
+    }
+
+    [Theory]
+    [InlineData("reprap")]
+    [InlineData("reprapfirmware")]
+    [InlineData("repetier")]
+    [InlineData("")]
+    [InlineData(null)]
+    public async Task ApplyPressureAdvanceTowerGcodeAsync_UnsupportedFirmwareFlavor_ThrowsRatherThanSilentlyNoOp(string? gcodeFlavor)
+    {
+        // Acceptance criterion (issue #2136): an unsupported firmware flavour must be refused
+        // explicitly, not silently produce a tower gcode that changes nothing. This is checked
+        // before the process profile is ever mutated, and before OrcaSlicer runs.
+        string processJsonPath = Path.Combine(_tempDir, $"process-{Guid.NewGuid():N}.json");
+        const string originalProcessJson = """{"name": "Test Process"}""";
+        await File.WriteAllTextAsync(processJsonPath, originalProcessJson);
+        string machineJsonPath = Path.Combine(_tempDir, $"machine-{Guid.NewGuid():N}.json");
+        string machineJsonContent = gcodeFlavor is null
+            ? """{"name": "Test Machine"}"""
+            : $$"""{"name": "Test Machine", "gcode_flavor": "{{gcodeFlavor}}"}""";
+        await File.WriteAllTextAsync(machineJsonPath, machineJsonContent);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.PressureAdvanceTower),
+        };
+
+        Func<Task> act = () => OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync(
+            job, processJsonPath, machineJsonPath, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "an unsupported or missing firmware flavour must be refused explicitly instead of " +
+            "silently slicing a pressure advance tower that never changes the advance value");
+        (await File.ReadAllTextAsync(processJsonPath)).Should().Be(
+            originalProcessJson,
+            "the process profile must not be mutated when the firmware flavour is refused");
+        job.ProcessProfileSha256.Should().BeNull("no digest should be recorded for a job that was refused");
     }
 
     private static OrcaSlicingPipelineService CreatePipeline(string calibResourcesRoot)

@@ -265,8 +265,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// <summary>
     /// Resolves and prepares the local calibration model for <paramref name="job"/> (issue #1938),
     /// applying per-object flow-ratio overrides for the flow-rate methods. The temperature tower
-    /// method needs no per-model changes here; its per-band configuration is injected into the
-    /// process profile in <see cref="RunOrcaSlicerAsync"/>.
+    /// and pressure advance tower (issue #2136) methods need no per-model changes here; their
+    /// per-band configuration is injected into the process profile in
+    /// <see cref="RunOrcaSlicerAsync"/> (see <see cref="ApplyTemperatureTowerGcodeAsync"/> and
+    /// <see cref="ApplyPressureAdvanceTowerGcodeAsync"/>).
     /// </summary>
     internal string PrepareCalibrationModel(DistributedSlicingJob job, string workDir)
     {
@@ -329,6 +331,51 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string layerChangeGcode = TemperatureTowerGcodeBuilder.BuildLayerChangeGcode(
             parameters.StartTemperatureC,
             parameters.TemperatureStepC,
+            parameters.BandHeightMm,
+            parameters.BandCount);
+
+        string processJsonContent = await File.ReadAllTextAsync(processJsonPath, cancellationToken);
+        string updatedProcessJsonContent = InjectLayerChangeGcode(processJsonContent, layerChangeGcode);
+        await File.WriteAllTextAsync(processJsonPath, updatedProcessJsonContent, cancellationToken);
+        job.ProcessProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedProcessJsonContent);
+    }
+
+    /// <summary>
+    /// Injects the pressure advance tower's per-band <c>layer_change_gcode</c> hook (issue #2136)
+    /// into the process profile on disk and recomputes <see cref="DistributedSlicingJob.ProcessProfileSha256"/>
+    /// so the recorded digest matches the mutated content.
+    /// </summary>
+    /// <remarks>
+    /// Firmware-flavour decision: pressure advance's command syntax differs by firmware
+    /// (<c>SET_PRESSURE_ADVANCE ADVANCE=...</c> on Klipper, <c>M900 K...</c> on Marlin/Marlin2), so
+    /// this reads the machine profile's <c>gcode_flavor</c> field — the pipeline's existing
+    /// firmware-flavour notion (see <c>OrcaProfilesService.GcodeDialect</c>) — and resolves it via
+    /// <see cref="PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor"/>. Any other flavour
+    /// (or a missing/unparsable machine profile) is refused with an explicit
+    /// <see cref="InvalidOperationException"/> here, before the OrcaSlicer binary ever runs — this
+    /// calibration method must never silently slice a tower that changes nothing.
+    /// </remarks>
+    internal static async Task ApplyPressureAdvanceTowerGcodeAsync(
+        DistributedSlicingJob job,
+        string processJsonPath,
+        string machineJsonPath,
+        CancellationToken cancellationToken)
+    {
+        string machineJsonContent = await File.ReadAllTextAsync(machineJsonPath, cancellationToken);
+        string? gcodeFlavor = PressureAdvanceTowerGcodeBuilder.ReadGcodeFlavor(machineJsonContent);
+        CalibrationFirmwareFlavor? flavor = PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor(gcodeFlavor);
+        if (flavor is null)
+        {
+            throw new InvalidOperationException(
+                $"Pressure advance tower calibration requires a Klipper or Marlin/Marlin2 machine profile " +
+                $"(gcode_flavor); the resolved firmware flavour '{gcodeFlavor ?? "(unset)"}' is not supported.");
+        }
+
+        CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, CalibrationMethod.PressureAdvanceTower);
+        string layerChangeGcode = PressureAdvanceTowerGcodeBuilder.BuildLayerChangeGcode(
+            flavor.Value,
+            parameters.StartAdvance,
+            parameters.AdvanceStep,
             parameters.BandHeightMm,
             parameters.BandCount);
 
@@ -1319,13 +1366,20 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string processJson = profilePaths["process"];
         string filamentJson = profilePaths["filament"];
 
-        // Temperature tower calibration (issue #1938): inject the per-band layer_change_gcode
-        // hook here, before the profile is handed to OrcaSlicer, so the gate check below and the
-        // slice itself both see the final, calibration-aware process profile.
-        if (CalibrationMethods.TryParse(job.CalibrationMethod, out CalibrationMethod calibrationMethod)
-            && calibrationMethod == CalibrationMethod.TemperatureTower)
+        // Temperature tower calibration (issue #1938) and pressure advance tower calibration
+        // (issue #2136): inject the per-band layer_change_gcode hook here, before the profile is
+        // handed to OrcaSlicer, so the gate check below and the slice itself both see the final,
+        // calibration-aware process profile.
+        if (CalibrationMethods.TryParse(job.CalibrationMethod, out CalibrationMethod calibrationMethod))
         {
-            await ApplyTemperatureTowerGcodeAsync(job, processJson, cancellationToken);
+            if (calibrationMethod == CalibrationMethod.TemperatureTower)
+            {
+                await ApplyTemperatureTowerGcodeAsync(job, processJson, cancellationToken);
+            }
+            else if (calibrationMethod == CalibrationMethod.PressureAdvanceTower)
+            {
+                await ApplyPressureAdvanceTowerGcodeAsync(job, processJson, machineJson, cancellationToken);
+            }
         }
 
         await WarnIfProcessCannotSatisfyGateAsync(job, machineJson, processJson, cancellationToken);

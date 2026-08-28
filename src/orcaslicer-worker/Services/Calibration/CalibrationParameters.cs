@@ -23,6 +23,15 @@ public sealed record CalibrationParameters
     public int BandCount { get; init; } = 9;
 
     /// <summary>
+    /// Pressure advance (Klipper) / linear advance (Marlin) value of the bottom-most pressure
+    /// advance tower band. See <see cref="Farm.OrcaSlicer.Worker.Services.Calibration.PressureAdvanceTowerGcodeBuilder"/>.
+    /// </summary>
+    public double StartAdvance { get; init; } = 0.0;
+
+    /// <summary>Pressure/linear advance increase applied per band.</summary>
+    public double AdvanceStep { get; init; } = 0.002;
+
+    /// <summary>
     /// Parses a job's <c>CalibrationParamsJson</c> (a flat <c>string, double</c> JSON object) into
     /// strongly typed parameters for <paramref name="method"/>, applying that method's defaults for
     /// any key that is absent or the JSON itself is null/blank.
@@ -30,25 +39,22 @@ public sealed record CalibrationParameters
     public static CalibrationParameters Parse(string? calibrationParamsJson, CalibrationMethod method)
     {
         var defaults = new CalibrationParameters();
-        if (string.IsNullOrWhiteSpace(calibrationParamsJson))
+        Dictionary<string, double> values = [];
+        if (!string.IsNullOrWhiteSpace(calibrationParamsJson))
         {
-            return defaults;
-        }
-
-        Dictionary<string, double>? values;
-        try
-        {
-            values = JsonSerializer.Deserialize<Dictionary<string, double>>(calibrationParamsJson);
-        }
-        catch (JsonException)
-        {
-            // Malformed params never crash the slice; fall back to the method's defaults.
-            return defaults;
-        }
-
-        if (values is null)
-        {
-            return defaults;
+            try
+            {
+                // An empty map falls through to the method's own defaults below, same as absent
+                // JSON: every method-specific default (e.g. the pressure advance tower's
+                // 5mm/20-band shape, vs. the temperature tower's 10mm/9-band shape) must be
+                // applied via the switch below, not by returning the record's own field defaults
+                // directly — those are shaped for the temperature tower only.
+                values = JsonSerializer.Deserialize<Dictionary<string, double>>(calibrationParamsJson) ?? [];
+            }
+            catch (JsonException)
+            {
+                // Malformed params never crash the slice; fall back to the method's defaults.
+            }
         }
 
         return method switch
@@ -60,8 +66,26 @@ public sealed record CalibrationParameters
                 BandHeightMm = ReadOrDefault(values, "band_height_mm", defaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm),
                 BandCount = (int)ReadOrDefault(values, "band_count", defaults.BandCount, MinBandCount, MaxBandCount),
             },
+            CalibrationMethod.PressureAdvanceTower => defaults with
+            {
+                StartAdvance = ReadOrDefault(values, "start_advance", PressureAdvanceTowerDefaults.StartAdvance, MinAdvance, MaxAdvance),
+                AdvanceStep = ReadOrDefault(values, "advance_step", PressureAdvanceTowerDefaults.AdvanceStep, MinAdvanceStep, MaxAdvanceStep),
+                BandHeightMm = ReadOrDefault(values, "band_height_mm", PressureAdvanceTowerDefaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm),
+                BandCount = (int)ReadOrDefault(values, "band_count", PressureAdvanceTowerDefaults.BandCount, MinBandCount, MaxBandCount),
+            },
             _ => defaults,
         };
+    }
+
+    // The pressure advance tower's own defaults for the shared BandHeightMm/BandCount properties
+    // (5mm/20 bands, i.e. a 100mm tower) differ from the temperature tower's (10mm/9 bands), so
+    // they are applied explicitly above rather than inherited from `defaults`.
+    private static class PressureAdvanceTowerDefaults
+    {
+        public const double StartAdvance = 0.0;
+        public const double AdvanceStep = 0.002;
+        public const double BandHeightMm = 5;
+        public const double BandCount = 20;
     }
 
     // Bounds below are deliberately generous but finite: they exist only to reject adversarial or
@@ -75,6 +99,13 @@ public sealed record CalibrationParameters
     private const double MaxBandHeightMm = 200;
     private const double MinBandCount = 1;
     private const double MaxBandCount = 50;
+
+    // Matches Farm.Modules.Calibration.Services.Calibration.CalibrationMeasurementRanges.PressureAdvance
+    // (0.0-2.0) so the worker's own bounds-checking never diverges from the saga layer's.
+    private const double MinAdvance = 0.0;
+    private const double MaxAdvance = 2.0;
+    private const double MinAdvanceStep = 0.0001;
+    private const double MaxAdvanceStep = 0.5;
 
     /// <summary>
     /// Reads <paramref name="key"/> from <paramref name="values"/>, falling back to
