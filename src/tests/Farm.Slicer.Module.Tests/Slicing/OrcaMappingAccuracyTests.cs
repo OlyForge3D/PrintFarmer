@@ -383,7 +383,9 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime, IDisposable
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         string lowered = name.ToLowerInvariant();
+#pragma warning disable CA1862 // string.Equals(string, StringComparison.OrdinalIgnoreCase) is not translatable by the EF Core SQLite provider; ToLower() is the provider-translatable idiom for a case-insensitive predicate here.
         Manufacturer? existing = await db.Manufacturers.FirstOrDefaultAsync(m => m.Name.ToLower() == lowered);
+#pragma warning restore CA1862
         if (existing != null)
         {
             return existing;
@@ -436,7 +438,9 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime, IDisposable
         // Attach models to the resolved manufacturer id and save
         foreach (PrinterModel? pm in printerModels)
         {
+#pragma warning disable CA1862 // string.Equals(string, StringComparison.OrdinalIgnoreCase) is not translatable by the EF Core SQLite provider; ToLower() is the provider-translatable idiom for a case-insensitive predicate here.
             bool exists = await db.PrinterModels.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
+#pragma warning restore CA1862
             if (!exists)
             {
                 _ = db.PrinterModels.Add(pm);
@@ -478,7 +482,9 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime, IDisposable
 
         foreach (PrinterModel? pm in printerModels)
         {
+#pragma warning disable CA1862 // string.Equals(string, StringComparison.OrdinalIgnoreCase) is not translatable by the EF Core SQLite provider; ToLower() is the provider-translatable idiom for a case-insensitive predicate here.
             bool exists = await db.PrinterModels.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
+#pragma warning restore CA1862
             if (!exists)
             {
                 _ = db.PrinterModels.Add(pm);
@@ -520,7 +526,9 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime, IDisposable
 
         foreach (PrinterModel? pm in printerModels)
         {
+#pragma warning disable CA1862 // string.Equals(string, StringComparison.OrdinalIgnoreCase) is not translatable by the EF Core SQLite provider; ToLower() is the provider-translatable idiom for a case-insensitive predicate here.
             bool exists = await db.PrinterModels.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
+#pragma warning restore CA1862
             if (!exists)
             {
                 _ = db.PrinterModels.Add(pm);
@@ -572,7 +580,9 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime, IDisposable
 
         foreach (PrinterModel? pm in printerModels)
         {
+#pragma warning disable CA1862 // string.Equals(string, StringComparison.OrdinalIgnoreCase) is not translatable by the EF Core SQLite provider; ToLower() is the provider-translatable idiom for a case-insensitive predicate here.
             bool exists = await db.PrinterModels.AnyAsync(m => m.ManufacturerId == pm.ManufacturerId && m.Name.ToLower() == pm.Name.ToLower());
+#pragma warning restore CA1862
             if (!exists)
             {
                 _ = db.PrinterModels.Add(pm);
