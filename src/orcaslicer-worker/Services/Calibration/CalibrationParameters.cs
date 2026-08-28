@@ -47,6 +47,15 @@ public sealed record CalibrationParameters
     public double MaxVolumetricSpeedCeilingMm3s { get; init; } = 50;
 
     /// <summary>
+    /// Pressure advance (Klipper) / linear advance (Marlin) value of the bottom-most pressure
+    /// advance tower band. See <see cref="Farm.OrcaSlicer.Worker.Services.Calibration.PressureAdvanceTowerGcodeBuilder"/>.
+    /// </summary>
+    public double StartAdvance { get; init; } = 0.0;
+
+    /// <summary>Pressure/linear advance increase applied per band.</summary>
+    public double AdvanceStep { get; init; } = 0.002;
+
+    /// <summary>
     /// Parses a job's <c>CalibrationParamsJson</c> (a flat <c>string, double</c> JSON object) into
     /// strongly typed parameters for <paramref name="method"/>, applying that method's defaults for
     /// any key that is absent or the JSON itself is null/blank.
@@ -54,25 +63,22 @@ public sealed record CalibrationParameters
     public static CalibrationParameters Parse(string? calibrationParamsJson, CalibrationMethod method)
     {
         var defaults = new CalibrationParameters();
-        if (string.IsNullOrWhiteSpace(calibrationParamsJson))
+        Dictionary<string, double> values = [];
+        if (!string.IsNullOrWhiteSpace(calibrationParamsJson))
         {
-            return defaults;
-        }
-
-        Dictionary<string, double>? values;
-        try
-        {
-            values = JsonSerializer.Deserialize<Dictionary<string, double>>(calibrationParamsJson);
-        }
-        catch (JsonException)
-        {
-            // Malformed params never crash the slice; fall back to the method's defaults.
-            return defaults;
-        }
-
-        if (values is null)
-        {
-            return defaults;
+            try
+            {
+                // An empty map falls through to the method's own defaults below, same as absent
+                // JSON: every method-specific default (e.g. the pressure advance tower's
+                // 5mm/20-band shape, vs. the temperature tower's 10mm/9-band shape) must be
+                // applied via the switch below, not by returning the record's own field defaults
+                // directly — those are shaped for the temperature tower only.
+                values = JsonSerializer.Deserialize<Dictionary<string, double>>(calibrationParamsJson) ?? [];
+            }
+            catch (JsonException)
+            {
+                // Malformed params never crash the slice; fall back to the method's defaults.
+            }
         }
 
         return method switch
@@ -93,8 +99,70 @@ public sealed record CalibrationParameters
                     MinVolumetricSpeedCeilingBoundMm3s,
                     MaxVolumetricSpeedCeilingBoundMm3s),
             },
+            CalibrationMethod.PressureAdvanceTower => BuildPressureAdvanceTowerParameters(defaults, values),
             _ => defaults,
         };
+    }
+
+    // Resolves the pressure advance tower's parameters, then either clamps AdvanceStep so the
+    // tallest band's compounded advance value (StartAdvance + (BandCount - 1) * AdvanceStep)
+    // never exceeds MaxAdvance, or refuses the combination outright when no clamp can produce a
+    // meaningful sweep. Each individual field is already bounds-checked in isolation by
+    // ReadOrDefault, but that alone does not stop e.g. StartAdvance=2.0, AdvanceStep=0.5,
+    // BandCount=50 from compounding to an out-of-range 26.5 on the topmost band -- a real
+    // hardware-safety gap, since this value is embedded directly into a SET_PRESSURE_ADVANCE/M900
+    // K gcode command sent to the printer.
+    private static CalibrationParameters BuildPressureAdvanceTowerParameters(CalibrationParameters defaults, Dictionary<string, double> values)
+    {
+        double startAdvance = ReadOrDefault(values, "start_advance", PressureAdvanceTowerDefaults.StartAdvance, MinAdvance, MaxAdvance);
+        double advanceStep = ReadOrDefault(values, "advance_step", PressureAdvanceTowerDefaults.AdvanceStep, MinAdvanceStep, MaxAdvanceStep);
+        double bandHeightMm = ReadOrDefault(values, "band_height_mm", PressureAdvanceTowerDefaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm);
+        int bandCount = (int)ReadOrDefault(values, "band_count", PressureAdvanceTowerDefaults.BandCount, MinBandCount, MaxBandCount);
+
+        if (bandCount > 1)
+        {
+            // The headroom between StartAdvance and MaxAdvance, spread across BandCount - 1
+            // steps, is the largest step that keeps the topmost band in bounds.
+            double maxStepForBounds = (MaxAdvance - startAdvance) / (bandCount - 1);
+            if (maxStepForBounds < MinAdvanceStep)
+            {
+                // There is no room for even the smallest meaningful step: silently clamping here
+                // would produce a "tower" whose bands all emit (near-)identical advance values --
+                // a calibration print that runs to completion and reports success while measuring
+                // nothing, exactly the silent-no-op failure mode this method must refuse instead
+                // of hiding. Reject explicitly so the caller sees a clear reason instead of a
+                // seemingly successful but useless print.
+                throw new InvalidOperationException(
+                    $"Pressure advance tower parameters cannot produce a meaningful sweep: start_advance " +
+                    $"({startAdvance}) leaves no room for a distinguishable advance_step across " +
+                    $"band_count ({bandCount}) bands within the supported [{MinAdvance}, {MaxAdvance}] range. " +
+                    $"Lower start_advance or band_count.");
+            }
+
+            // Only ever shrink the step, never grow it back up to a value the client didn't ask
+            // for: the invariant that the topmost band never exceeds MaxAdvance takes priority
+            // over honouring a client-requested step that would overflow it.
+            advanceStep = Math.Min(advanceStep, maxStepForBounds);
+        }
+
+        return defaults with
+        {
+            StartAdvance = startAdvance,
+            AdvanceStep = advanceStep,
+            BandHeightMm = bandHeightMm,
+            BandCount = bandCount,
+        };
+    }
+
+    // The pressure advance tower's own defaults for the shared BandHeightMm/BandCount properties
+    // (5mm/20 bands, i.e. a 100mm tower) differ from the temperature tower's (10mm/9 bands), so
+    // they are applied explicitly above rather than inherited from `defaults`.
+    private static class PressureAdvanceTowerDefaults
+    {
+        public const double StartAdvance = 0.0;
+        public const double AdvanceStep = 0.002;
+        public const double BandHeightMm = 5;
+        public const double BandCount = 20;
     }
 
     // Bounds below are deliberately generous but finite: they exist only to reject adversarial or
@@ -108,6 +176,13 @@ public sealed record CalibrationParameters
     private const double MaxBandHeightMm = 200;
     private const double MinBandCount = 1;
     private const double MaxBandCount = 50;
+
+    // Matches Farm.Modules.Calibration.Services.Calibration.CalibrationMeasurementRanges.PressureAdvance
+    // (0.0-2.0) so the worker's own bounds-checking never diverges from the saga layer's.
+    private const double MinAdvance = 0.0;
+    private const double MaxAdvance = 2.0;
+    private const double MinAdvanceStep = 0.0001;
+    private const double MaxAdvanceStep = 0.5;
 
     // Upstream's constant ceiling is 50mm³/s; the bounds below give a little headroom for
     // unusual filaments/nozzles while still rejecting adversarial or malformed input.
