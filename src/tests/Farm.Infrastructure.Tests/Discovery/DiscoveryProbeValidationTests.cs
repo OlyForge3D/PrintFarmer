@@ -640,17 +640,17 @@ public class DiscoveryProbeValidationTests
 
     private sealed class TestablePrusaLinkProbe : PrusaLinkDiscoveryProbe
     {
-        public Task<(bool, int, string)> CallValidateAsync(HttpResponseMessage response, string content) => ValidateResponseAsync(response, content);
+        public Task<(bool IsValid, int ConfidenceScore, string Reason)> CallValidateAsync(HttpResponseMessage response, string content) => ValidateResponseAsync(response, content);
     }
 
     private sealed class TestableOctoPrintProbe : OctoPrintDiscoveryProbe
     {
-        public Task<(bool, int, string)> CallValidateAsync(HttpResponseMessage response, string content) => ValidateResponseAsync(response, content);
+        public Task<(bool IsValid, int ConfidenceScore, string Reason)> CallValidateAsync(HttpResponseMessage response, string content) => ValidateResponseAsync(response, content);
     }
 
     private sealed class TestableMoonrakerProbe : MoonrakerDiscoveryProbe
     {
-        public Task<(bool, int, string)> CallValidateAsync(HttpResponseMessage response, string content) => ValidateResponseAsync(response, content);
+        public Task<(bool IsValid, int ConfidenceScore, string Reason)> CallValidateAsync(HttpResponseMessage response, string content) => ValidateResponseAsync(response, content);
     }
 
     private sealed class HttpClientMoonrakerProbe(HttpMessageHandler handler) : MoonrakerDiscoveryProbe
