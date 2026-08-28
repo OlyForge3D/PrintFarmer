@@ -41,20 +41,32 @@
 /// <c>CalibrationParameters.MaxVolumetricSpeedCeilingMm3s</c> before the slice.
 /// </para>
 /// <para>
-/// This ceiling is upstream's <em>entire</em> speed-sweep mechanism for this mode, not merely a
-/// safety margin: no occurrence of <c>CalibMode::Calib_Vol_speed_Tower</c> anywhere in upstream's
-/// gcode-generation path (<c>GCode.cpp</c>, <c>PrintObject.cpp</c>) varies per-layer speed — the
-/// same function that sets the ceiling also fixes line width/layer height to single values and
-/// only trims the model to the requested height range. The visible speed variation instead comes
-/// entirely from OrcaSlicer's ordinary flow-based auto speed-limiting reacting to the tower's
-/// per-band widening geometry: as required volumetric flow rises with Z at a fixed print speed,
-/// the slicer throttles once flow would exceed this ceiling. Writing the ceiling and reusing the
-/// client-selected process/machine profile — as this worker does — reproduces that mechanism
-/// faithfully; it is a known MVP limitation, not yet exposing this method's start/end/step
-/// parameters, that the bundled model's own height defines the swept range rather than a
-/// per-request client-controllable one (upstream additionally supports trimming the tower to a
-/// user-chosen height range and remaps the requested start/end/step to a volumetric-flow domain
-/// via <c>process_and_store_3mf</c> — this PR does not yet expose that knob).
+/// <strong>Known, more significant limitation (corrected after adversarial review — an earlier
+/// revision of this comment claimed the ceiling alone was upstream's entire sweep mechanism; that
+/// claim was checked against upstream source and was wrong, see below):</strong> upstream's actual
+/// per-layer speed variation is produced by <c>GCode.cpp</c>'s <c>calib_mode()</c> switch
+/// (<c>case CalibMode::Calib_Vol_speed_Tower: auto _speed = print.calib_params().start + print_z *
+/// print.calib_params().step; m_calib_config.set_key_value("outer_wall_speed", ...)</c>) — a live,
+/// in-process override of the wall speed applied while <em>that same run's</em> gcode is being
+/// generated, driven by <c>Print::calib_params()</c>/<c>calib_mode()</c>. Those are set only by
+/// <c>Print::set_calib_params</c>, which is called only from <c>CalibUtils::process_and_store_3mf</c>
+/// (GUI code, <c>src/slic3r/Utils/CalibUtils.cpp</c>) immediately before slicing in the same GUI
+/// process. <c>calib_mode</c>/<c>calib_params</c> are never persisted into the 3MF/project file and
+/// have no OrcaSlicer CLI flag — confirmed by exhaustive search of the upstream tree — so, unlike
+/// <see cref="TemperatureTower"/>'s per-layer temperature step (a real, standalone <c>M104</c>
+/// command any inserted <c>layer_change_gcode</c> can emit with full physical effect), this
+/// specific mechanism is not reachable at all from a separate-process, CLI-driven pipeline: an
+/// injected custom-gcode "set speed" command would be silently overwritten the moment the slicer's
+/// own wall-generation code emits its own <c>F</c> parameter on the next extrusion move, which it
+/// always does. This worker's implementation therefore only applies the permissive
+/// <c>filament_max_volumetric_speed</c> ceiling and slices the bundled tower geometry with the
+/// client-selected process profile's own (constant) wall speed; it does not reproduce upstream's
+/// deliberate per-layer speed ramp, and — given the architecture above — cannot do so today without
+/// a new worker capability such as authoring OrcaSlicer/PrusaSlicer's 3MF-native "height range
+/// modifier" per-object speed overrides (a legitimate, project-format-persisted mechanism that,
+/// unlike <c>calib_mode</c>, the CLI slicer does read normally), tracked as follow-up work rather
+/// than attempted here. The wire name still submits, slices, and returns gcode end to end per the
+/// issue's acceptance criteria; what is not yet delivered is upstream's full calibration fidelity.
 /// </para>
 /// <para>
 /// <see cref="FlowRateYoloRecommended"/>/<see cref="FlowRateYoloPerfectionist"/>'s bundled 3MF

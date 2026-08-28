@@ -347,13 +347,19 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// Sets the max volumetric speed calibration's permissive <c>filament_max_volumetric_speed</c>
     /// ceiling (issue #2135) on the filament profile(s) on disk and recomputes
     /// <see cref="DistributedSlicingJob.FilamentProfileSha256"/> so the recorded digest matches the
-    /// mutated content. The calibration tower's bundled resource
-    /// (<c>volumetric_speed/SpeedTestStructure.drc</c>) sweeps volumetric flow through its own
-    /// built-in, width-increasing geometry rather than via per-band gcode, so — unlike the
-    /// temperature tower — no <c>layer_change_gcode</c> injection is needed here; the ceiling
-    /// override simply keeps OrcaSlicer's own auto speed-limiting from clamping the print below the
-    /// range that geometry is designed to sweep through (mirroring upstream's
-    /// <c>CalibUtils::calib_max_vol_speed</c>).
+    /// mutated content. The ceiling keeps OrcaSlicer's own flow-based auto speed-limiting from
+    /// clamping the print below the range the calibration tower's own width-increasing geometry
+    /// needs, mirroring upstream's <c>CalibUtils::calib_max_vol_speed</c> permissive-ceiling
+    /// write. Unlike the temperature tower, no <c>layer_change_gcode</c> injection is attempted
+    /// here: it would have no effect, since a slicer-emitted <c>F</c> parameter on the next
+    /// extrusion move always overrides one from injected custom gcode. Upstream also applies a
+    /// separate, additional per-layer <c>outer_wall_speed</c> override
+    /// (<c>GCode.cpp</c>'s <c>Calib_Vol_speed_Tower</c> case) that is set in-process by the GUI
+    /// wizard and is not reachable at all from this worker's CLI-driven pipeline — see the
+    /// <c>CalibrationMethod</c> type remarks for the full citation trail. This worker therefore
+    /// applies only the ceiling and relies on the bundled geometry plus the client-selected
+    /// process profile's own constant wall speed; it does not reproduce upstream's deliberate
+    /// per-layer ramp.
     /// </summary>
     /// <param name="job">The claimed job whose <see cref="DistributedSlicingJob.FilamentProfileSha256"/> is updated.</param>
     /// <param name="filamentJsonPath">

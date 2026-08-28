@@ -26,19 +26,22 @@ public sealed record CalibrationParameters
     /// Permissive <c>filament_max_volumetric_speed</c> ceiling applied before slicing a max
     /// volumetric speed calibration (issue #2135), in mm³/s. Verified against upstream source
     /// (<c>CalibUtils::calib_max_vol_speed</c>, <c>src/slicer/Utils/CalibUtils.cpp</c> in
-    /// SoftFever/OrcaSlicer): <c>filament_config.set_key_value("filament_max_volumetric_speed",
+    /// OrcaSlicer/OrcaSlicer): <c>filament_config.set_key_value("filament_max_volumetric_speed",
     /// new ConfigOptionFloats{50})</c> — the constant really is 50, not a larger value.
     /// <para>
-    /// This ceiling is the entire mechanism upstream relies on to produce the sweep: the same
-    /// function reassigns line width/layer height to fixed values and cuts the model to the
-    /// requested height range, but never varies the filament's speed limit per band, and no
-    /// searched occurrence of <c>Calib_Vol_speed_Tower</c> touches gcode generation in
-    /// <c>GCode.cpp</c>/<c>PrintObject.cpp</c>. The visible speed drop instead comes from
-    /// OrcaSlicer's ordinary flow-based auto speed-limiting: the bundled
-    /// <c>SpeedTestStructure.drc</c> geometry widens per band, so required volumetric flow rises
-    /// with Z at a fixed print speed, and the slicer throttles once that flow would exceed this
-    /// ceiling — exactly the mechanism this worker reproduces by writing the ceiling alone and
-    /// reusing the client-selected process profile for the rest.
+    /// <strong>This ceiling is not upstream's sweep mechanism</strong> (an earlier revision of
+    /// this comment claimed it was; that was checked against upstream source during a later
+    /// review round and found wrong). Upstream's actual per-layer speed variation comes from a
+    /// live, in-process <c>Print::set_calib_params</c>/<c>calib_mode()</c> override consumed by a
+    /// <c>GCode.cpp</c> switch (<c>case CalibMode::Calib_Vol_speed_Tower: ... start + print_z *
+    /// step ...</c>) — set only by the GUI wizard immediately before slicing in the same process,
+    /// never persisted to the 3MF project file, and with no CLI flag. It is therefore not
+    /// reachable from this worker's separate-process, CLI-driven pipeline at all (see the fuller
+    /// explanation and citations on <see cref="Farm.Slicer.Module.Models.CalibrationMethod"/>).
+    /// This ceiling remains a safety margin only, exactly as it is upstream: it keeps OrcaSlicer's
+    /// ordinary flow-based auto speed-limiting from clamping the client-selected process profile's
+    /// print speed below what the bundled tower geometry needs while slicing proceeds at that
+    /// profile's own constant speed.
     /// </para>
     /// </summary>
     public double MaxVolumetricSpeedCeilingMm3s { get; init; } = 50;
