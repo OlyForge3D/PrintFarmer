@@ -164,7 +164,7 @@ public sealed class ProfileFamilyConcurrencyException : Exception
 /// <summary>
 /// Indicates that a render lost the race with a concurrent delete: the family row was removed between the
 /// worker install and the authoritative persist. The partially installed bundle is rolled back before this
-/// is thrown, so nothing is stranded on the worker. Mapped to <c>404</c>.
+/// is thrown, so nothing is stranded on the worker. Mapped to <c>409</c>.
 /// </summary>
 public sealed class ProfileFamilyConcurrentlyDeletedException : Exception
 {
@@ -181,6 +181,30 @@ public sealed class ProfileFamilyConcurrentlyDeletedException : Exception
 
     /// <summary>Creates a concurrently-deleted exception with an underlying error.</summary>
     public ProfileFamilyConcurrentlyDeletedException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
+/// <summary>
+/// Indicates that compensation after a profile-family concurrency conflict could not restore or remove
+/// every derived worker artifact. Mapped to a stable service-unavailable response rather than hidden.
+/// </summary>
+public sealed class ProfileFamilyCleanupException : Exception
+{
+    /// <summary>Creates an empty cleanup exception.</summary>
+    public ProfileFamilyCleanupException()
+    {
+    }
+
+    /// <summary>Creates a cleanup exception with a descriptive message.</summary>
+    public ProfileFamilyCleanupException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Creates a cleanup exception with an underlying error.</summary>
+    public ProfileFamilyCleanupException(string message, Exception innerException)
         : base(message, innerException)
     {
     }

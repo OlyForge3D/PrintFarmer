@@ -187,13 +187,53 @@ public sealed class ProfileFamilyService(
             family.LastRenderedAt = DateTime.UtcNow;
             family.RenderedForOrcaVersion = worker.OrcaVersion;
             family.UpdatedAt = family.LastRenderedAt.Value;
-            _ = await _dbContext.SaveChangesAsync(ct);
+            try
+            {
+                _ = await _dbContext.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                DetachTrackedGraph();
+                bool familyStillExists = await _dbContext.MachineModelProfiles
+                    .AsNoTracking()
+                    .AnyAsync(candidate => candidate.Id == family.Id, CancellationToken.None);
+                if (!familyStillExists)
+                {
+                    await CleanupOrphanedInstalledArtifactsAsync(
+                        family.Id,
+                        family.PrinterModelId,
+                        family.Name);
+                    throw new ProfileFamilyConcurrentlyDeletedException(
+                        $"Profile family '{family.Id}' was deleted by a concurrent request while its bundle " +
+                        "was being installed; the partially installed artifacts have been removed.",
+                        ex);
+                }
+
+                await RestorePersistedWinnerStateAsync(
+                    family.Id,
+                    worker,
+                    catalog,
+                    family.Name);
+                throw new ProfileFamilyConcurrencyException(
+                    $"Profile family '{family.Id}' was modified by a concurrent request; retry the operation.",
+                    ex);
+            }
+        }
+        catch (ProfileFamilyConcurrentlyDeletedException)
+        {
+            throw;
+        }
+        catch (ProfileFamilyCleanupException)
+        {
+            throw;
+        }
+        catch (ProfileFamilyConcurrencyException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            family.RenderStatus = ProfileFamilyRenderStatus.Failed;
-            family.UpdatedAt = DateTime.UtcNow;
-            _ = await _dbContext.SaveChangesAsync(CancellationToken.None);
+            await TryMarkRenderFailedAsync(family.Id);
             _logger.LogError(
                 ex,
                 "Failed to install generated profile family {FamilyId} for OrcaSlicer {Version}",
@@ -432,9 +472,24 @@ public sealed class ProfileFamilyService(
     }
 
     /// <inheritdoc />
-    public async Task<ProfileFamilySummaryDto> RenderFamilyAsync(Guid familyId, CancellationToken ct)
+    public Task<ProfileFamilySummaryDto> RenderFamilyAsync(Guid familyId, CancellationToken ct) =>
+        RenderSelectedFamilyAsync(familyId, expectedRevision: null, ct);
+
+    private async Task<ProfileFamilySummaryDto> RenderSelectedFamilyAsync(
+        Guid familyId,
+        long? expectedRevision,
+        CancellationToken ct)
     {
         MachineModelProfile family = await LoadTrackedFamilyAsync(familyId, ct);
+        if (expectedRevision is long revision
+            && (family.Revision != revision
+                || family.RenderStatus is not (ProfileFamilyRenderStatus.Stale or ProfileFamilyRenderStatus.Failed)))
+        {
+            _dbContext.Entry(family).State = EntityState.Detached;
+            throw new ProfileFamilyConcurrencyException(
+                $"Profile family '{familyId}' changed after it was selected for stale rendering; retry the operation.");
+        }
+
         List<MachineProfile> existingVariants = family.MachineProfiles.ToList();
 
         // A pure re-render reconstructs an equivalent request from the persisted family state, so no
@@ -465,7 +520,7 @@ public sealed class ProfileFamilyService(
 
         // Re-render both Stale (post-upgrade drift) and Failed (recover a family whose last render or
         // install failed) families. Ordered oldest-first for a stable, bounded pass.
-        List<Guid> allTargetIds = await _dbContext.MachineModelProfiles
+        var allTargets = await _dbContext.MachineModelProfiles
             .AsNoTracking()
             .Where(family =>
                 !family.IsSystem
@@ -473,23 +528,24 @@ public sealed class ProfileFamilyService(
                 && (family.RenderStatus == ProfileFamilyRenderStatus.Stale
                     || family.RenderStatus == ProfileFamilyRenderStatus.Failed))
             .OrderBy(family => family.CreatedAt)
-            .Select(family => family.Id)
+            .Select(family => new { family.Id, family.Revision })
             .ToListAsync(ct);
 
         // Bound the batch: each family is a synchronous worker HTTP round-trip, so an unbounded loop
         // over dozens of families would blow past Kestrel/nginx request timeouts and abort mid-batch
         // (S4). Process at most MaxStaleRenderBatch per call and report how many remain so a client can
         // drain the queue across successive calls. No DB transaction is held across the worker calls.
-        List<Guid> targetIds = allTargetIds.Take(MaxStaleRenderBatch).ToList();
-        int remainingCount = allTargetIds.Count - targetIds.Count;
+        var targets = allTargets.Take(MaxStaleRenderBatch).ToList();
+        int remainingCount = allTargets.Count - targets.Count;
 
-        List<ProfileFamilyRenderResultDto> results = new(targetIds.Count);
-        foreach (Guid targetId in targetIds)
+        List<ProfileFamilyRenderResultDto> results = new(targets.Count);
+        foreach (var target in targets)
         {
             // One bad family must never abort the batch: capture each outcome and continue.
             try
             {
-                ProfileFamilySummaryDto rendered = await RenderFamilyAsync(targetId, ct);
+                ProfileFamilySummaryDto rendered =
+                    await RenderSelectedFamilyAsync(target.Id, target.Revision, ct);
                 results.Add(new ProfileFamilyRenderResultDto(
                     rendered.FamilyId,
                     rendered.FamilyName,
@@ -502,11 +558,11 @@ public sealed class ProfileFamilyService(
                 (string code, string detail) = ClassifyRenderFailure(ex);
                 string familyName = await _dbContext.MachineModelProfiles
                     .AsNoTracking()
-                    .Where(family => family.Id == targetId)
+                    .Where(family => family.Id == target.Id)
                     .Select(family => family.Name)
-                    .FirstOrDefaultAsync(ct) ?? targetId.ToString();
+                    .FirstOrDefaultAsync(ct) ?? target.Id.ToString();
                 results.Add(new ProfileFamilyRenderResultDto(
-                    targetId,
+                    target.Id,
                     familyName,
                     ProfileFamilyRenderStatus.Failed,
                     code,
@@ -633,6 +689,7 @@ public sealed class ProfileFamilyService(
         string previousName = family.Name;
 
         ProfileFamilyWorkerTarget worker;
+        AllProfilesResponseDto catalog;
         ProfileFamilyBundleDto? previousBundle;
         string sourceManufacturer;
         ProfileFamilyRenderResult rendered;
@@ -641,7 +698,6 @@ public sealed class ProfileFamilyService(
             // Select a fresh worker and download its full catalog (empty manufacturer = every
             // manufacturer) for the CURRENT live OrcaSlicer version. A missing worker throws
             // HttpRequestException (503) before any mutation.
-            AllProfilesResponseDto catalog;
             (worker, catalog) = await _workerClient.GetCatalogAsync(string.Empty, null, ct);
 
             // Capture the previous good bundle by rendering the CURRENT persisted state against the same
@@ -751,14 +807,9 @@ public sealed class ProfileFamilyService(
             }
             catch (DbUpdateConcurrencyException ex)
             {
-                // Optimistic-concurrency race. MachineModelProfile carries no concurrency token, so EF only
-                // throws here when the UPDATE matched ZERO rows — i.e. the family row was DELETED by a
-                // concurrent request between our load and this persist (a concurrent UPDATE is
-                // last-writer-wins and never throws). That is the render-vs-delete race Bishop flagged: the
-                // bundle we installed on the worker above now has no DB row left to ever drive its removal.
-                // Detach our abandoned mutations, confirm the row is really gone, roll back the bundle we
-                // just installed so nothing is stranded, and surface a clean 404 rather than a raw 500. If
-                // the row somehow still exists, restore the previous good state and report a 409.
+                // The portable Revision token detects both delete and update races. Detach the losing graph,
+                // then distinguish a deleted aggregate (remove every installed artifact) from a surviving
+                // winner (restore that winner's current persisted state). Both surface as conflicts.
                 DetachTrackedGraph();
 
                 // CancellationToken.None, NOT ct: this is a compensation read inside a catch block whose
@@ -773,29 +824,19 @@ public sealed class ProfileFamilyService(
                     .AnyAsync(candidate => candidate.Id == family.Id, CancellationToken.None);
                 if (!familyStillExists)
                 {
-                    await TryDeleteInstalledBundleAsync(family.Id);
-
-                    // H3: on a rename we already created the TARGET-name alias above; the concurrent delete
-                    // only knew the PREVIOUS name, so the target alias would otherwise survive pointing at a
-                    // catalog model with no family or bundle behind it. Best-effort remove it (guarded) so
-                    // no orphaned alias is left. No-op for a non-rename (target == previous name, which the
-                    // concurrent delete already removed).
-                    await TryRemoveOrphanedTargetAliasAsync(family, targetName, isRename);
+                    await CleanupOrphanedInstalledArtifactsAsync(
+                        family.Id,
+                        family.PrinterModelId,
+                        targetName);
                     throw new ProfileFamilyConcurrentlyDeletedException(
                         $"Profile family '{family.Id}' was deleted by a concurrent request while its bundle " +
-                        "was being rendered; the partially installed bundle has been removed.",
+                        "was being rendered; the partially installed artifacts have been removed.",
                         ex);
                 }
 
-                // H1: the row survives (a concurrent MODIFICATION, not a delete) but our persist lost the
-                // race, so the DB still holds the OLD state while the new bundle is already installed and the
-                // alias already moved — a silent DB/worker divergence. Restore the previous good bundle and
-                // alias and mark the row Failed (both guarded) BEFORE surfacing the 409, so the caller's
-                // write genuinely lost but the farm is left coherent rather than split-brained. Symmetric
-                // with the generic failure handler below, which does the same restore + mark-Failed.
-                await RestorePreviousGoodStateAsync(
-                    family, worker, previousBundle, previousName, targetName, isRename);
-                await TryMarkRenderFailedAsync(family.Id);
+                // A concurrent modification won. Restore the CURRENT persisted winner, never this losing
+                // request's stale pre-edit snapshot, so compensation cannot clobber the successful edit.
+                await RestorePersistedWinnerStateAsync(family.Id, worker, catalog, targetName);
                 throw new ProfileFamilyConcurrencyException(
                     $"Profile family '{family.Id}' was modified by a concurrent request; retry the operation.",
                     ex);
@@ -858,9 +899,12 @@ public sealed class ProfileFamilyService(
         }
         catch (ProfileFamilyConcurrencyException)
         {
-            // A concurrent MODIFICATION (not a delete) won the race and the row survives. The concurrency
-            // handler above already restored the previous good bundle and alias and marked the row Failed
-            // (H1), so rethrow as a clean 409 WITHOUT repeating the restore/mark-Failed compensation below.
+            // A concurrent modification won and its current persisted state was restored to the worker.
+            throw;
+        }
+        catch (ProfileFamilyCleanupException)
+        {
+            // Compensation already attempted every cleanup step. Never restore the losing bundle here.
             throw;
         }
         catch (Exception ex)
@@ -993,65 +1037,145 @@ public sealed class ProfileFamilyService(
     }
 
     /// <summary>
-    /// Best-effort removal of a bundle installed on the worker that was orphaned by a concurrent delete:
-    /// the family row is already gone, so nothing else will ever drive this bundle's removal. Guarded the
-    /// same way as <see cref="TryMarkRenderFailedAsync"/> (H3) — a cleanup failure is logged and swallowed
-    /// so it can never mask the <see cref="ProfileFamilyConcurrentlyDeletedException"/> the caller is being
-    /// given, and never throws out of the catch block that calls it. Uses <see cref="CancellationToken.None"/>
-    /// so the orphaned bundle is still removed even if the original request was cancelled.
+    /// Removes every derived artifact installed after a concurrent delete. All cleanup steps are attempted;
+    /// any failure is surfaced so an orphan can never be reported as successfully removed.
     /// </summary>
-    private async Task TryDeleteInstalledBundleAsync(Guid familyId)
+    private async Task CleanupOrphanedInstalledArtifactsAsync(
+        Guid familyId,
+        Guid? printerModelId,
+        string targetName)
     {
-        try
+        List<Exception> failures = [];
+
+        IReadOnlyList<Exception> workerFailures = await ObserveCleanupOperationAsync(
+            () => _workerClient.DeleteBundleAsync(null, familyId, CancellationToken.None));
+        foreach (Exception failure in workerFailures)
         {
-            // Pass null (any fresh online worker), NEVER a pinned version: the bundle name is
-            // version-independent (PrintFarmer-{familyId:N}) and the worker selector filters on EXACT
-            // version equality, so pinning could select no worker and leave the bundle stranded — the same
-            // reasoning as the delete path (C1). Idempotent: a worker 404 is treated as success.
-            await _workerClient.DeleteBundleAsync(null, familyId, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
+            failures.Add(failure);
             _logger.LogError(
-                ex,
-                "Failed to roll back the worker bundle for profile family {FamilyId} after it was deleted concurrently during a render; the bundle may be orphaned on the worker.",
+                failure,
+                "Failed to remove orphaned worker bundle for profile family {FamilyId}",
                 familyId);
+        }
+
+        if (printerModelId is Guid modelId)
+        {
+            IReadOnlyList<Exception> aliasFailures = await ObserveCleanupOperationAsync(
+                () => _aliasService.RemoveModelAliasAsync(
+                    modelId,
+                    targetName,
+                    "OrcaSlicer",
+                    CancellationToken.None));
+            foreach (Exception failure in aliasFailures)
+            {
+                failures.Add(failure);
+                _logger.LogError(
+                    failure,
+                    "Failed to remove orphaned target alias '{TargetName}' for profile family {FamilyId}",
+                    LogSanitizer.Sanitize(targetName),
+                    familyId);
+            }
+
+            IReadOnlyList<Exception> cacheFailures = await ObserveCleanupOperationAsync(
+                () => _catalogService.InvalidateModelAliasesAsync(modelId, CancellationToken.None));
+            foreach (Exception failure in cacheFailures)
+            {
+                failures.Add(failure);
+                _logger.LogError(
+                    failure,
+                    "Failed to invalidate model alias cache for profile family {FamilyId}",
+                    familyId);
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new ProfileFamilyCleanupException(
+                $"Profile family '{familyId}' was deleted concurrently, but cleanup of its installed artifacts failed.",
+                new AggregateException(failures));
         }
     }
 
     /// <summary>
-    /// Best-effort removal of the TARGET-name OrcaSlicer alias created during a rename whose family row was
-    /// then deleted by a concurrent request (H3). The install added the new-name alias before the persist,
-    /// but the concurrent delete only knew the PREVIOUS name, so the target alias would otherwise survive
-    /// pointing at a catalog model with no family or bundle behind it. Guarded exactly like
-    /// <see cref="TryDeleteInstalledBundleAsync"/>: a failure is logged and swallowed so it can never mask
-    /// the <see cref="ProfileFamilyConcurrentlyDeletedException"/> the caller is being given, and never
-    /// throws out of the catch block. No-op when the operation was not a rename (the target name equals the
-    /// previous name, which the concurrent delete already removed) or the family has no bound catalog model.
-    /// Uses <see cref="CancellationToken.None"/> so cleanup still runs if the original request was cancelled.
+    /// Converts synchronous and asynchronous cleanup failures into inspectable faulted tasks without a
+    /// catch-all clause, allowing the caller to continue with the remaining compensation steps.
     /// </summary>
-    private async Task TryRemoveOrphanedTargetAliasAsync(
-        MachineModelProfile family,
-        string targetName,
-        bool isRename)
+    private static async Task<IReadOnlyList<Exception>> ObserveCleanupOperationAsync(Func<Task> operation)
     {
-        if (!isRename || family.PrinterModelId is not Guid printerModelId)
+        Task operationTask = InvokeCleanupOperationAsync(operation);
+        await operationTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+        if (operationTask.Exception is AggregateException aggregateException)
         {
-            return;
+            return aggregateException.Flatten().InnerExceptions;
+        }
+
+        return operationTask.IsCanceled ? [new TaskCanceledException(operationTask)] : [];
+    }
+
+    /// <summary>
+    /// Ensures an exception thrown while the dependency creates its task is represented by the returned task.
+    /// </summary>
+    private static async Task InvokeCleanupOperationAsync(Func<Task> operation)
+    {
+        await operation();
+    }
+
+    /// <summary>
+    /// Reinstalls the state that won an optimistic-concurrency race. The winner is reloaded after detaching
+    /// the losing graph, preventing compensation from replacing it with a stale pre-edit bundle.
+    /// </summary>
+    private async Task RestorePersistedWinnerStateAsync(
+        Guid familyId,
+        ProfileFamilyWorkerTarget worker,
+        AllProfilesResponseDto catalog,
+        string losingTargetName)
+    {
+        MachineModelProfile? winner = await _dbContext.MachineModelProfiles
+            .AsNoTracking()
+            .Include(candidate => candidate.MachineProfiles)
+            .FirstOrDefaultAsync(candidate => candidate.Id == familyId, CancellationToken.None);
+        if (winner is null)
+        {
+            throw new ProfileFamilyCleanupException(
+                $"Profile family '{familyId}' disappeared while restoring the winning concurrent update.");
+        }
+
+        ProfileFamilyBundleDto? winnerBundle =
+            TryRenderPreviousBundle(winner, winner.MachineProfiles.ToList(), catalog);
+        if (winnerBundle is null)
+        {
+            throw new ProfileFamilyCleanupException(
+                $"The winning state for profile family '{familyId}' could not be rendered during concurrency recovery.");
         }
 
         try
         {
-            await _aliasService.RemoveModelAliasAsync(printerModelId, targetName, "OrcaSlicer", CancellationToken.None);
-            await _catalogService.InvalidateModelAliasesAsync(printerModelId, CancellationToken.None);
+            await _workerClient.WriteBundleAsync(worker, winnerBundle, CancellationToken.None);
+            if (winner.PrinterModelId is Guid printerModelId)
+            {
+                await _aliasService.EnsureModelAliasAsync(
+                    printerModelId,
+                    winner.Name,
+                    "OrcaSlicer",
+                    CancellationToken.None);
+                if (!string.Equals(winner.Name, losingTargetName, StringComparison.Ordinal))
+                {
+                    await _aliasService.RemoveModelAliasAsync(
+                        printerModelId,
+                        losingTargetName,
+                        "OrcaSlicer",
+                        CancellationToken.None);
+                }
+
+                await _catalogService.InvalidateModelAliasesAsync(printerModelId, CancellationToken.None);
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(
-                ex,
-                "Failed to remove the orphaned target alias '{TargetName}' for profile family {FamilyId} after it was deleted concurrently during a rename; the alias may be orphaned.",
-                LogSanitizer.Sanitize(targetName),
-                family.Id);
+            throw new ProfileFamilyCleanupException(
+                $"The winning state for profile family '{familyId}' could not be restored after a concurrency conflict.",
+                ex);
         }
     }
 
@@ -1335,6 +1459,9 @@ public sealed class ProfileFamilyService(
         ProfileFamilyConflictException => ("profile_family_name_conflict", exception.Message),
         ProfileFamilyHashConflictException => ("profile_family_hash_conflict", exception.Message),
         ProfileFamilyInUseException => ("profile_family_in_use", exception.Message),
+        ProfileFamilyConcurrentlyDeletedException => ("profile_family_deleted_concurrently", exception.Message),
+        ProfileFamilyConcurrencyException => ("profile_family_concurrent_modification", exception.Message),
+        ProfileFamilyCleanupException => ("profile_family_cleanup_failed", exception.Message),
         ArgumentException => ("invalid_profile_family", exception.Message),
         HttpRequestException => ("profile_family_worker_unavailable", exception.Message),
 
@@ -1623,6 +1750,14 @@ public sealed class ProfileFamilyService(
             _dbContext.MachineProfiles.AddRange(machineProfiles);
             _ = await _dbContext.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            DetachTrackedGraph();
+            throw new ProfileFamilyConcurrencyException(
+                $"Profile family '{family.Id}' was modified by a concurrent request; retry the operation.",
+                ex);
         }
         catch (DbUpdateException ex) when (IsFamilyNameUniqueConstraintViolation(ex))
         {

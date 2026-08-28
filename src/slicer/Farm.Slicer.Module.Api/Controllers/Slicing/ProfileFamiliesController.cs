@@ -72,6 +72,21 @@ public sealed class ProfileFamiliesController(
         {
             return Conflict(new { code = "profile_family_hash_conflict", detail = ex.Message });
         }
+        catch (ProfileFamilyConcurrentlyDeletedException ex)
+        {
+            return Conflict(new { code = "profile_family_deleted_concurrently", detail = ex.Message });
+        }
+        catch (ProfileFamilyConcurrencyException ex)
+        {
+            return Conflict(new { code = "profile_family_concurrent_modification", detail = ex.Message });
+        }
+        catch (ProfileFamilyCleanupException ex)
+        {
+            _logger.LogError(ex, "Profile-family cleanup failed during creation");
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { code = "profile_family_cleanup_failed", detail = ex.Message });
+        }
         catch (ProfileFamilySourceException ex)
         {
             return UnprocessableEntity(new { code = "source_preset_unavailable", detail = ex.Message });
@@ -331,11 +346,18 @@ public sealed class ProfileFamiliesController(
         catch (ProfileFamilyConcurrentlyDeletedException ex)
         {
             // The family was deleted mid-edit; the service rolled back the partially installed bundle.
-            return NotFound(new { code = "profile_family_deleted_concurrently", detail = ex.Message });
+            return Conflict(new { code = "profile_family_deleted_concurrently", detail = ex.Message });
         }
         catch (ProfileFamilyConcurrencyException ex)
         {
             return Conflict(new { code = "profile_family_concurrent_modification", detail = ex.Message });
+        }
+        catch (ProfileFamilyCleanupException ex)
+        {
+            _logger.LogError(ex, "Profile-family {FamilyId} cleanup failed during edit", familyId);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { code = "profile_family_cleanup_failed", detail = ex.Message });
         }
         catch (ProfileFamilySourceException ex)
         {
@@ -420,11 +442,18 @@ public sealed class ProfileFamiliesController(
         {
             // The family was deleted mid-render; the service rolled back the partially installed bundle
             // so nothing is stranded on the worker.
-            return NotFound(new { code = "profile_family_deleted_concurrently", detail = ex.Message });
+            return Conflict(new { code = "profile_family_deleted_concurrently", detail = ex.Message });
         }
         catch (ProfileFamilyConcurrencyException ex)
         {
             return Conflict(new { code = "profile_family_concurrent_modification", detail = ex.Message });
+        }
+        catch (ProfileFamilyCleanupException ex)
+        {
+            _logger.LogError(ex, "Profile-family {FamilyId} cleanup failed during re-render", familyId);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { code = "profile_family_cleanup_failed", detail = ex.Message });
         }
         catch (ProfileFamilySourceException ex)
         {
