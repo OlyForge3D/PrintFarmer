@@ -550,6 +550,21 @@ public class IdempotencyStoreTests : IDisposable
         _ = IdempotencyStore.IsUniqueViolation(fkViolation).Should().BeFalse();
     }
 
+    [Fact]
+    public void FakeSqlStateException_MessageAndInnerExceptionConstructor_SetsPropertiesAndLeavesSqlStateEmpty()
+    {
+        // Exercises the message+innerException overload directly (distinct from the
+        // SqlState-only overload used above), confirming it behaves like a
+        // conventional exception constructor: it sets Message/InnerException and
+        // leaves SqlState at its default, unlike the single-string overload.
+        InvalidOperationException inner = new("boom");
+        FakeSqlStateException exception = new("custom message", inner);
+
+        _ = exception.Message.Should().Be("custom message");
+        _ = exception.InnerException.Should().BeSameAs(inner);
+        _ = exception.SqlState.Should().BeEmpty();
+    }
+
     /// <summary>
     /// Minimal <see cref="DbException"/> stand-in that surfaces a chosen SQLSTATE on
     /// the base <see cref="DbException.SqlState"/> property, mirroring how Npgsql
