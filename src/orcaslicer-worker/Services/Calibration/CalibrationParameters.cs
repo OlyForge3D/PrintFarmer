@@ -79,16 +79,18 @@ public sealed record CalibrationParameters
     /// whole-payload <c>Dictionary&lt;string, double&gt;</c> deserialization throws and falls back
     /// to <em>all</em> defaults the instant any key holds a string, which would make a firmware
     /// flavor unparseable. Per-key extraction keeps every existing numeric method's net *outcome*
-    /// the same for a non-numeric value at a numeric key (that key alone falls back to its own
-    /// default — every default is already within its own valid range, so the observable result
-    /// matches the old whole-payload fallback) and for duplicate JSON keys (both the old
-    /// <c>Dictionary&lt;string, double&gt;</c> deserialization and <c>JsonElement.TryGetProperty</c>
-    /// here resolve duplicates to the *last* occurrence). The one edge case that does differ
-    /// mechanically: the old code fell back to defaults for *every* key on the first bad value,
-    /// whereas this reverts only the offending key, so a payload mixing one bad numeric key with
-    /// other good numeric keys now keeps the good ones instead of losing them too. This difference
-    /// is not observable through this class's public surface today, since every numeric value is
-    /// subsequently clamped to the method's valid range regardless of which path produced it.
+    /// the same for duplicate JSON keys (both the old <c>Dictionary&lt;string, double&gt;</c>
+    /// deserialization and <c>JsonElement.TryGetProperty</c> here resolve duplicates to the *last*
+    /// occurrence). Two edge cases do differ mechanically from the old whole-payload behavior: (1)
+    /// a non-numeric value at a numeric key falls back only for that key here, whereas the old
+    /// dictionary deserialization would throw for the whole payload - but since that key's fallback
+    /// is always its own valid default, this is not observable through this class's public surface;
+    /// (2) the old code fell back to defaults for *every* key the instant any one key held a bad
+    /// value, whereas this reverts only the offending key, so a payload mixing one bad numeric key
+    /// with other good numeric keys now keeps the good keys' actual submitted values instead of
+    /// silently discarding them for defaults too - this second case IS an observable behavior
+    /// change (an intentional improvement, not a regression), since a good key's submitted value is
+    /// not itself clamped or otherwise forced back to the default.
     /// </remarks>
     public static CalibrationParameters Parse(string? calibrationParamsJson, CalibrationMethod method)
     {
