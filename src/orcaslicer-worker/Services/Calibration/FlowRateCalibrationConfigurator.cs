@@ -225,14 +225,18 @@ public static partial class FlowRateCalibrationConfigurator
         return destinationPath;
     }
 
-    private static string ReadEntryText(ZipArchiveEntry entry)
+    /// <summary>Reads a 3MF zip entry's full text content as UTF-8.</summary>
+    /// <remarks>Internal so <see cref="FlowRateDeltaCalibrationConfigurator"/> can reuse it.</remarks>
+    internal static string ReadEntryText(ZipArchiveEntry entry)
     {
         using Stream stream = entry.Open();
         using var reader = new StreamReader(stream, Encoding.UTF8);
         return reader.ReadToEnd();
     }
 
-    private static void WriteEntryText(ZipArchiveEntry entry, string content)
+    /// <summary>Writes UTF-8 text content into a newly created 3MF zip entry.</summary>
+    /// <remarks>Internal so <see cref="FlowRateDeltaCalibrationConfigurator"/> can reuse it.</remarks>
+    internal static void WriteEntryText(ZipArchiveEntry entry, string content)
     {
         using Stream stream = entry.Open();
         using var writer = new StreamWriter(stream, Encoding.UTF8);

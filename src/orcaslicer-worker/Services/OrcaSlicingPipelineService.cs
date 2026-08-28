@@ -304,24 +304,145 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             return FlowRateCalibrationConfigurator.ApplyPerObjectFlowRatios(sourcePath, workDir, _logger);
         }
 
-        if (method is CalibrationMethod.FlowRateYoloRecommended or CalibrationMethod.FlowRateYoloPerfectionist)
+        if (method is CalibrationMethod.FlowRateYoloRecommended)
         {
             // The YOLO flow-ratio resources encode per-object flow ratios as baseline-relative
             // deltas (e.g. "flowrate_0.01", "flowrate_m0.01"), not the absolute percentages (e.g.
-            // "flowrate_95") FlowRateCalibrationConfigurator parses for pass1/pass2. Reusing that
-            // parser here would silently mis-scale or skip every object, producing a job that
-            // "succeeds" while emitting near-identical, uncalibrated G-code for every block —
-            // see CalibrationMethod.cs for the full investigation (issue #2051). Fail loudly
-            // instead of slicing an uncalibrated result until a delta-aware configurator exists.
+            // "flowrate_95") FlowRateCalibrationConfigurator parses for pass1/pass2 — see
+            // CalibrationMethod.cs for the full investigation (issue #2051). Issue #2141 added
+            // FlowRateDeltaCalibrationConfigurator, which applies baseline + delta per object
+            // instead of reusing that absolute-percentage parser.
+            double baselineFlowRatio = ResolveBaselineFlowRatio(job);
+            return FlowRateDeltaCalibrationConfigurator.ApplyPerObjectFlowRatioDeltas(
+                sourcePath, workDir, baselineFlowRatio, _logger);
+        }
+
+        if (method is CalibrationMethod.FlowRateYoloPerfectionist)
+        {
+            // Tracked separately (issue #2142): same delta-based naming scheme as Recommended, but
+            // not yet wired to FlowRateDeltaCalibrationConfigurator. Fail loudly instead of slicing
+            // an uncalibrated result until that follow-up ships.
             throw new InvalidOperationException(
                 $"Calibration method '{job.CalibrationMethod}' is catalogued but not yet slicer-supported: " +
                 "its bundled resource uses a delta-based per-object naming scheme the worker cannot apply " +
-                "overrides for. A dedicated configurator is required before this method can be used.");
+                "overrides for. A dedicated configurator wiring is required before this method can be used.");
         }
 
         string destinationPath = Path.Combine(workDir, Path.GetFileName(sourcePath));
         File.Copy(sourcePath, destinationPath, overwrite: true);
         return destinationPath;
+    }
+
+    /// <summary>
+    /// Resolves the source filament profile's current <c>filament_flow_ratio</c> — the baseline
+    /// that <see cref="FlowRateDeltaCalibrationConfigurator"/> adds each object's delta to (issue
+    /// #2141).
+    /// <para>
+    /// This must mirror the branch <see cref="RunOrcaSlicerAsync"/> takes when materializing
+    /// profiles for the actual slice: when <see cref="DistributedSlicingJob.NativeProfiles"/> is
+    /// non-null, it is written to disk verbatim and <c>job.Profile</c> is never consulted — so the
+    /// baseline must come from <c>NativeProfiles.FilamentJson</c> in that case too, or the
+    /// calibration would silently measure against a filament profile OrcaSlicer never actually
+    /// slices with. Only when <c>NativeProfiles</c> is null does <c>job.Profile</c> get
+    /// materialized (see <see cref="GenerateProfileJsonFilesAsync"/>), which itself prefers
+    /// <c>ExtruderFilamentProfiles[0]</c> over <c>FilamentProfile</c> whenever an extruder profile
+    /// is present.
+    /// </para>
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when no filament profile was resolved for the job, or the resolved profile carries
+    /// no <c>filament_flow_ratio</c>. A delta-based calibration slice with a guessed baseline
+    /// (e.g. defaulting to 1.0) could silently apply the wrong flow ratio to every object, so this
+    /// refuses rather than guessing — the same fail-loud property the object-name parser upholds.
+    /// </exception>
+    internal static double ResolveBaselineFlowRatio(DistributedSlicingJob job)
+    {
+        double? resolved = job.NativeProfiles is not null
+            ? TryParseNativeFilamentFlowRatio(job.NativeProfiles.FilamentJson)
+            : ResolveProfileFlowRatio(job.Profile);
+
+        if (resolved is not { } baselineFlowRatio)
+        {
+            throw new InvalidOperationException(
+                "Delta-based flow-rate calibration requires a resolved filament profile with a " +
+                "'filament_flow_ratio' baseline; none was available for this job. Select a filament " +
+                "profile that carries a flow ratio, or refuse rather than guessing one.");
+        }
+
+        return baselineFlowRatio;
+    }
+
+    /// <summary>
+    /// Resolves <c>filament_flow_ratio</c> from a worker-cache-resolved <see cref="SlicerProfileDto"/>,
+    /// preferring <see cref="SlicerProfileDto.ExtruderFilamentProfiles"/> (index 0) over
+    /// <see cref="SlicerProfileDto.FilamentProfile"/> — matching the precedence
+    /// <see cref="GenerateProfileJsonFilesAsync"/> applies when materializing the filament JSON
+    /// actually handed to OrcaSlicer for this job.
+    /// </summary>
+    private static double? ResolveProfileFlowRatio(SlicerProfileDto? profile)
+    {
+        if (profile is null)
+        {
+            return null;
+        }
+
+        return profile.ExtruderFilamentProfiles is { Count: > 0 } extruders
+            ? extruders[0].FlowRatio
+            : profile.FilamentProfile?.FlowRatio;
+    }
+
+    /// <summary>
+    /// Parses the native (upstream-Orca) filament profile JSON for its <c>filament_flow_ratio</c>
+    /// value, which OrcaSlicer stores as a string (or an array of one string per extruder).
+    /// </summary>
+    private static double? TryParseNativeFilamentFlowRatio(string? filamentJson)
+    {
+        if (string.IsNullOrWhiteSpace(filamentJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(filamentJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("filament_flow_ratio", out JsonElement flowRatioElement))
+            {
+                return null;
+            }
+
+            string? raw = flowRatioElement.ValueKind switch
+            {
+                JsonValueKind.Array => flowRatioElement.GetArrayLength() > 0
+                    ? ExtractScalarText(flowRatioElement[0])
+                    : null,
+                JsonValueKind.String => flowRatioElement.GetString(),
+                JsonValueKind.Number => flowRatioElement.GetRawText(),
+                _ => null,
+            };
+
+            return raw is not null &&
+                double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed)
+                ? parsed
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        // Extracts a parseable scalar from an array element without assuming its JSON kind: a
+        // hand-edited native profile could plausibly store `["1.05"]` (string, the normal case) or
+        // `[1.05]` (number). Calling GetString() unconditionally throws InvalidOperationException
+        // for the latter — this returns null instead, so an unexpected shape falls through to the
+        // "no baseline resolved" refusal rather than crashing the job with a raw framework
+        // exception.
+        static string? ExtractScalarText(JsonElement element) => element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Number => element.GetRawText(),
+            _ => null,
+        };
     }
 
     /// <summary>
