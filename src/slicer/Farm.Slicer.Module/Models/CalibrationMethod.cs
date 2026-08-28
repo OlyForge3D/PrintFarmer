@@ -140,6 +140,14 @@ public enum CalibrationMethod
     /// resource format and the permissive-ceiling configurator this method needs.
     /// </summary>
     MaximumVolumetricSpeed,
+
+    /// <summary>
+    /// Pressure advance tower calibration (issue #2136). Scope is deliberately Tower-only; PA
+    /// Pattern and PA Line remain unsupported per the type-level remarks above. Emits per-band
+    /// <c>layer_change_gcode</c> for Klipper (<c>SET_PRESSURE_ADVANCE</c>) or Marlin/Marlin2
+    /// (<c>M900 K</c>) — see <c>PressureAdvanceTowerGcodeBuilder</c> in the OrcaSlicer worker.
+    /// </summary>
+    PressureAdvanceTower,
 }
 
 /// <summary>
@@ -159,6 +167,10 @@ public static class CalibrationMethods
             ["flow_rate_yolo_perfectionist"] = CalibrationMethod.FlowRateYoloPerfectionist,
             ["retraction"] = CalibrationMethod.Retraction,
             ["max_volumetric_speed"] = CalibrationMethod.MaximumVolumetricSpeed,
+
+            // Matches Farm.Modules.Calibration.Services.Calibration.CalibrationMethodNames.PressureAdvanceTower
+            // so the two catalogues do not diverge further (issue #2136).
+            ["pressure_advance_tower"] = CalibrationMethod.PressureAdvanceTower,
         };
 
     private static readonly Dictionary<CalibrationMethod, string> MethodToWireName =
@@ -171,6 +183,7 @@ public static class CalibrationMethods
             [CalibrationMethod.FlowRateYoloPerfectionist] = "flow_rate_yolo_perfectionist",
             [CalibrationMethod.Retraction] = "retraction",
             [CalibrationMethod.MaximumVolumetricSpeed] = "max_volumetric_speed",
+            [CalibrationMethod.PressureAdvanceTower] = "pressure_advance_tower",
         };
 
     /// <summary>
@@ -235,6 +248,12 @@ public static class CalibrationMethods
     /// </summary>
     /// <param name="method">A method that already parsed successfully via <see cref="TryParse"/>.</param>
     /// <returns><see langword="true"/> when the worker can slice this method today.</returns>
+    /// <remarks>
+    /// This check is opt-out: any method not explicitly excluded above is considered supported.
+    /// <see cref="CalibrationMethod.PressureAdvanceTower"/> (issue #2136) is therefore already
+    /// slicer-supported without an entry here — the worker's
+    /// <c>OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync</c> implements it.
+    /// </remarks>
     public static bool IsSlicerSupported(CalibrationMethod method) => method is not (
         CalibrationMethod.FlowRateYoloRecommended or CalibrationMethod.FlowRateYoloPerfectionist);
 
@@ -252,6 +271,7 @@ public static class CalibrationMethods
         CalibrationMethod.FlowRateYoloPerfectionist => "Orca-LinearFlow_fine.3mf",
         CalibrationMethod.Retraction => "retraction_tower.drc",
         CalibrationMethod.MaximumVolumetricSpeed => "SpeedTestStructure.drc",
+        CalibrationMethod.PressureAdvanceTower => "tower_with_seam.drc",
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 
@@ -268,6 +288,7 @@ public static class CalibrationMethods
         CalibrationMethod.FlowRateYoloPerfectionist => Path.Combine("filament_flow", "Orca-LinearFlow_fine.3mf"),
         CalibrationMethod.Retraction => Path.Join("retraction", "retraction_tower.drc"),
         CalibrationMethod.MaximumVolumetricSpeed => Path.Combine("volumetric_speed", "SpeedTestStructure.drc"),
+        CalibrationMethod.PressureAdvanceTower => Path.Combine("pressure_advance", "tower_with_seam.drc"),
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 }

@@ -168,6 +168,49 @@ public sealed class SliceJobControllerCalibrationTests
             Times.Once);
     }
 
+    [Fact]
+    public async Task SubmitAsync_PressureAdvanceTowerMethod_CreatesOrdinarySliceJobWithNoCalibrationSagaFields()
+    {
+        // Issue #2136: mirrors SubmitAsync_KnownCalibrationMethod_CreatesOrdinarySliceJobWithNoCalibrationSagaFields
+        // for the pressure advance tower method — proving the wire name is accepted end to end at
+        // the submission boundary, and that it too remains an ordinary slice job.
+        SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out Mock<ISliceJobEventService> events);
+        SliceJob? added = null;
+        _ = repository
+            .Setup(instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()))
+            .Callback<SliceJob, CancellationToken>((job, _) => added = job)
+            .Returns(Task.CompletedTask);
+
+        var request = new SubmitSliceJobRequest
+        {
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            Priority = 1,
+            Calibration = new CalibrationRequest
+            {
+                Method = "pressure_advance_tower",
+                Params = new Dictionary<string, double> { ["start_advance"] = 0.0, ["advance_step"] = 0.01 },
+            },
+        };
+
+        IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
+
+        _ = result.Should().BeOfType<CreatedResult>();
+        _ = added.Should().NotBeNull();
+        _ = added!.CalibrationMethod.Should().Be("pressure_advance_tower");
+        _ = added.CalibrationParamsJson.Should().NotBeNullOrEmpty();
+
+        _ = added.CalibrationProjectId.Should().BeNull();
+        _ = added.CalibrationAttemptId.Should().BeNull();
+        _ = added.CalibrationOrchestrationId.Should().BeNull();
+
+        _ = added.ModelFileUrl.Should().Be("calibration:pressure_advance_tower");
+        _ = added.ModelFileName.Should().Be(CalibrationMethods.DefaultModelFileName(CalibrationMethod.PressureAdvanceTower));
+
+        events.Verify(
+            instance => instance.NotifyJobQueuedAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     [Theory]
     [InlineData(true, false, false)]
     [InlineData(false, true, false)]
