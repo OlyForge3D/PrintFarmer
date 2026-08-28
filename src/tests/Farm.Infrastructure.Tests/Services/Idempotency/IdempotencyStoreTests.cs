@@ -557,7 +557,7 @@ public class IdempotencyStoreTests : IDisposable
     /// test assembly.
     /// </summary>
     /// <remarks>
-    /// This type implements CA1032's four standard exception constructors, but the
+    /// This type implements CA1032's three standard exception constructors, but the
     /// single-<see cref="string"/> overload intentionally deviates from the usual
     /// "message" convention: for this test double, that argument is the SQLSTATE
     /// (used by every call site in this file), not the exception message, which stays
