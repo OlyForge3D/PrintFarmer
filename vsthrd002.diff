@@ -1,0 +1,590 @@
+diff --git a/src/tests/Directory.Build.props b/src/tests/Directory.Build.props
+index 543260a21..b854b8509 100644
+--- a/src/tests/Directory.Build.props
++++ b/src/tests/Directory.Build.props
+@@ -81,7 +81,35 @@
+            in "Async" and every call site was updated accordingly; this is a purely
+            mechanical naming-convention fix with zero behavioral impact, so no suppressions
+            were required. -->
+-      VSTHRD002;<!-- Avoid problematic synchronous waits (16) -->
++      <!-- VSTHRD002 (Avoid problematic synchronous waits) fully cleared across src/tests/ —
++           see #2106 burn-down. All 14 distinct instances (the issue's original "16" estimate
++           was close but not exact; 12 were in projects that ship in farm-web.sln, plus 2 more
++           in Farm.Web.IntegrationTests, which is excluded from that solution's default
++           `dotnet test` run via IsTestProject=false unless RunIntegrationTests=true but still
++           inherits this file's NoWarn and was rebuilt/tested separately to confirm) were
++           `.GetAwaiter().GetResult()`/`.Wait()` calls on tasks from otherwise-synchronous test
++           code and were fixed directly: xUnit constructor-based async seeding was moved to
++           `IAsyncLifetime.InitializeAsync`, `void`-returning test methods and helper methods
++           that only existed to bridge to a synchronous caller were converted to `async Task`
++           with a real `await`, and one mocked-HTTP-content read used `HttpContent.ReadAsStream()`
++           instead of an async read, since the content there is always built synchronously by the
++           code under test from data already fully buffered in memory (never a network/file
++           stream), regardless of whether it's a `StringContent` or a
++           `MultipartFormDataContent`/`ByteArrayContent` pair. Two instances are a deliberately
++           blocking wait inside a method overriding a fixed synchronous base signature that
++           cannot be made async — `IServiceScopeFactory.CreateScope()` and
++           `WebApplicationFactory<T>.CreateHost()` respectively — each always driven from a
++           background thread rather than the test's own thread, suppressed with a scoped #pragma
++           warning disable/restore VSTHRD002 plus an explanatory comment at the site. Dozens of
++           other `.GetAwaiter().GetResult()` calls remain in `Func<HttpRequestMessage,
++           HttpResponseMessage>`-typed fake-HTTP-handler callbacks (e.g. SpoolmanServiceTests,
++           MoonrakerClientBusyTests, DirectApnsNativePushSenderTests) — these are not VSTHRD002
++           violations at all: the analyzer does not flag a synchronous wait inside a lambda whose
++           delegate type cannot itself be made async, which was confirmed empirically by
++           reverting one already-fixed call site to its original synchronous form and rebuilding,
++           which reproduced the VSTHRD002 error, while these callback sites never do, even from a
++           fully clean rebuild. -->
++
+       IDISP024; <!-- Don't call GC.SuppressFinalize when no finalizer exists (16) -->
+       CA2025;   <!-- Do not pass 'IDisposable' instances into unawaited tasks (14) -->
+       IDISP007; <!-- Don't dispose an injected dependency (12) -->
+diff --git a/src/tests/Farm.Infrastructure.Tests/Dispatch/DispatchScorerNozzleMaterialCatalogParityTests.cs b/src/tests/Farm.Infrastructure.Tests/Dispatch/DispatchScorerNozzleMaterialCatalogParityTests.cs
+index a010c5cb8..4716f0de8 100644
+--- a/src/tests/Farm.Infrastructure.Tests/Dispatch/DispatchScorerNozzleMaterialCatalogParityTests.cs
++++ b/src/tests/Farm.Infrastructure.Tests/Dispatch/DispatchScorerNozzleMaterialCatalogParityTests.cs
+@@ -31,7 +31,7 @@ namespace Farm.Infrastructure.Tests.Dispatch;
+ /// <see cref="NozzleType"/> member so no material's hardness classification regresses silently.
+ /// </para>
+ /// </summary>
+-public sealed class DispatchScorerNozzleMaterialCatalogParityTests : IDisposable
++public sealed class DispatchScorerNozzleMaterialCatalogParityTests : IAsyncLifetime, IDisposable
+ {
+     private readonly SqliteConnection _connection;
+     private readonly AppDbContext _context;
+@@ -58,15 +58,20 @@ public sealed class DispatchScorerNozzleMaterialCatalogParityTests : IDisposable
+             CreatedAt = DateTime.UtcNow,
+         });
+         _context.SaveChanges();
++    }
+ 
++    public async Task InitializeAsync()
++    {
+         // Seed via the real production seeding path (not hand-built fixtures) so this test
+         // actually exercises the same catalog rows a fresh local/dev database would have.
+         Mock<IYamlSeedDataReader> reader = new();
+         Mock<ILogger<DataSeedService>> logger = new();
+         DataSeedService seedService = new(_context, reader.Object, logger.Object);
+-        seedService.SeedNozzleMaterialsAsync().GetAwaiter().GetResult();
++        await seedService.SeedNozzleMaterialsAsync();
+     }
+ 
++    public Task DisposeAsync() => Task.CompletedTask;
++
+     public void Dispose()
+     {
+         _context.Dispose();
+diff --git a/src/tests/Farm.Infrastructure.Tests/Services/FailureDetection/ObicoFailureDetectionServiceTests.cs b/src/tests/Farm.Infrastructure.Tests/Services/FailureDetection/ObicoFailureDetectionServiceTests.cs
+index 98b834475..5bfdaa6f5 100644
+--- a/src/tests/Farm.Infrastructure.Tests/Services/FailureDetection/ObicoFailureDetectionServiceTests.cs
++++ b/src/tests/Farm.Infrastructure.Tests/Services/FailureDetection/ObicoFailureDetectionServiceTests.cs
+@@ -441,9 +441,23 @@ public class ObicoFailureDetectionServiceTests
+     {
+         public static CapturedRequest From(HttpRequestMessage request)
+         {
+-            string body = request.Content == null
+-                ? string.Empty
+-                : request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
++            // The request content here is always built synchronously by the code under test from
++            // data already fully buffered in memory — a StringContent for the upstream JSON-style
++            // requests, or a MultipartFormDataContent wrapping a ByteArrayContent for the legacy
++            // image-upload contract — never a network/file stream. So ReadAsStream() performs no
++            // I/O and is safe to read synchronously — unlike ReadAsStringAsync().GetAwaiter()
++            // .GetResult(), which VSTHRD002 (rightly) flags as a problematic synchronous wait on a
++            // task that could, in general, block on real I/O.
++            string body;
++            if (request.Content == null)
++            {
++                body = string.Empty;
++            }
++            else
++            {
++                using StreamReader reader = new(request.Content.ReadAsStream(), Encoding.UTF8);
++                body = reader.ReadToEnd();
++            }
+ 
+             return new CapturedRequest(
+                 request.Method,
+diff --git a/src/tests/Farm.Infrastructure.Tests/Services/Notifications/NativePush/NativePushDispatcherTests.cs b/src/tests/Farm.Infrastructure.Tests/Services/Notifications/NativePush/NativePushDispatcherTests.cs
+index 712312d45..f7e7ff4a2 100644
+--- a/src/tests/Farm.Infrastructure.Tests/Services/Notifications/NativePush/NativePushDispatcherTests.cs
++++ b/src/tests/Farm.Infrastructure.Tests/Services/Notifications/NativePush/NativePushDispatcherTests.cs
+@@ -8379,7 +8379,15 @@ public sealed class NativePushDispatcherTests
+             if (Interlocked.Increment(ref _callCount) == 1)
+             {
+                 entered.TrySetResult();
++
++                // IServiceScopeFactory.CreateScope() is a synchronous interface member, so this
++                // cannot be an await; per the class doc comment above, the gated first call is
++                // always driven from a background Task.Run, never from the test method's own
++                // thread, so this deliberately blocks that background thread rather than the
++                // caller under test.
++#pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
+                 release.Task.GetAwaiter().GetResult();
++#pragma warning restore VSTHRD002
+             }
+ 
+             return inner.CreateScope();
+diff --git a/src/tests/Farm.Infrastructure.Tests/Services/Queue/BedClearAcknowledgementExpiryServiceTelemetryTests.cs b/src/tests/Farm.Infrastructure.Tests/Services/Queue/BedClearAcknowledgementExpiryServiceTelemetryTests.cs
+index 739f1f99f..f43ecb6a5 100644
+--- a/src/tests/Farm.Infrastructure.Tests/Services/Queue/BedClearAcknowledgementExpiryServiceTelemetryTests.cs
++++ b/src/tests/Farm.Infrastructure.Tests/Services/Queue/BedClearAcknowledgementExpiryServiceTelemetryTests.cs
+@@ -125,7 +125,7 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
+         return printer.Id;
+     }
+ 
+-    private (List<int> counts, List<double> durations) ListenForScanMetrics(Action recordEvents)
++    private async Task<(List<int> counts, List<double> durations)> ListenForScanMetricsAsync(Func<Task> recordEvents)
+     {
+         List<int> counts = new();
+         List<double> durations = new();
+@@ -160,13 +160,13 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
+         });
+         listener.Start();
+ 
+-        recordEvents();
++        await recordEvents();
+ 
+         return (counts, durations);
+     }
+ 
+     [Fact(DisplayName = "ScanAsync records scanned count and duration once per pass")]
+-    public void ScanAsync_RecordsScannedCountAndDuration_OncePerPass()
++    public async Task ScanAsync_RecordsScannedCountAndDuration_OncePerPass()
+     {
+         Guid printerA = SeedAcknowledgedPrinter(1);
+         Guid printerB = SeedAcknowledgedPrinter(2);
+@@ -174,8 +174,8 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
+ 
+         BedClearAcknowledgementExpiryService sut = CreateSut();
+ 
+-        (List<int> counts, List<double> durations) = ListenForScanMetrics(() =>
+-            sut.ScanAsync(CancellationToken.None).GetAwaiter().GetResult());
++        (List<int> counts, List<double> durations) = await ListenForScanMetricsAsync(() =>
++            sut.ScanAsync(CancellationToken.None));
+ 
+         _ = counts.Should().ContainSingle().Which.Should().Be(3, "exactly 3 acknowledged printers were scanned");
+         _ = durations.Should().ContainSingle();
+@@ -185,12 +185,12 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
+     }
+ 
+     [Fact(DisplayName = "ScanAsync records a zero scanned count when nothing is acknowledged")]
+-    public void ScanAsync_RecordsZeroScannedCount_WhenNoAcknowledgedPrinters()
++    public async Task ScanAsync_RecordsZeroScannedCount_WhenNoAcknowledgedPrinters()
+     {
+         BedClearAcknowledgementExpiryService sut = CreateSut();
+ 
+-        (List<int> counts, List<double> durations) = ListenForScanMetrics(() =>
+-            sut.ScanAsync(CancellationToken.None).GetAwaiter().GetResult());
++        (List<int> counts, List<double> durations) = await ListenForScanMetricsAsync(() =>
++            sut.ScanAsync(CancellationToken.None));
+ 
+         _ = counts.Should().ContainSingle().Which.Should().Be(0, "no printers had an outstanding acknowledgement");
+         _ = durations.Should().ContainSingle();
+@@ -198,7 +198,7 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
+     }
+ 
+     [Fact(DisplayName = "ScanAsync only scans printers with an outstanding acknowledgement")]
+-    public void ScanAsync_OnlyScansPrintersWithOutstandingAcknowledgement()
++    public async Task ScanAsync_OnlyScansPrintersWithOutstandingAcknowledgement()
+     {
+         Guid acknowledged = SeedAcknowledgedPrinter(1);
+ 
+@@ -222,8 +222,8 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
+ 
+         BedClearAcknowledgementExpiryService sut = CreateSut();
+ 
+-        (List<int> counts, _) = ListenForScanMetrics(() =>
+-            sut.ScanAsync(CancellationToken.None).GetAwaiter().GetResult());
++        (List<int> counts, _) = await ListenForScanMetricsAsync(() =>
++            sut.ScanAsync(CancellationToken.None));
+ 
+         _ = counts.Should().ContainSingle().Which.Should().Be(1);
+         _ = _fakeAckService.InvalidatedPrinterIds.Should().BeEquivalentTo(new[] { acknowledged });
+diff --git a/src/tests/Farm.Slicer.Module.Tests/Services/WorkerCircuitBreakerTests.cs b/src/tests/Farm.Slicer.Module.Tests/Services/WorkerCircuitBreakerTests.cs
+index 15a5d4894..feb898fdc 100644
+--- a/src/tests/Farm.Slicer.Module.Tests/Services/WorkerCircuitBreakerTests.cs
++++ b/src/tests/Farm.Slicer.Module.Tests/Services/WorkerCircuitBreakerTests.cs
+@@ -74,7 +74,7 @@ public class WorkerCircuitBreakerTests
+     }
+ 
+     [Fact]
+-    public void CheckCircuits_TransitionsToHalfOpen_AfterCooldown()
++    public async Task CheckCircuits_TransitionsToHalfOpen_AfterCooldown()
+     {
+         // Arrange
+         CircuitBreakerSettings shortCooldown = new CircuitBreakerSettings
+@@ -90,9 +90,7 @@ public class WorkerCircuitBreakerTests
+         // Act - open circuit
+         for (int i = 0; i < shortCooldown.FailureThreshold; i++)
+         {
+-#pragma warning disable xUnit1031 // Do not use blocking task operations in test method
+-            service.RecordJobFailureAsync(workerId, _workerRepoMock.Object).Wait();
+-#pragma warning restore xUnit1031 // Do not use blocking task operations in test method
++            await service.RecordJobFailureAsync(workerId, _workerRepoMock.Object);
+         }
+         Assert.Equal(WorkerCircuitState.Open, service.GetCircuitState(workerId));
+ 
+@@ -143,7 +141,7 @@ public class WorkerCircuitBreakerTests
+     }
+ 
+     [Fact]
+-    public void ResetCircuit_ClearsState()
++    public async Task ResetCircuit_ClearsState()
+     {
+         // Arrange
+         WorkerCircuitBreakerService service = new WorkerCircuitBreakerService(_loggerMock.Object, Options.Create(_settings));
+@@ -152,9 +150,7 @@ public class WorkerCircuitBreakerTests
+         // Open circuit
+         for (int i = 0; i < _settings.FailureThreshold; i++)
+         {
+-#pragma warning disable xUnit1031 // Do not use blocking task operations in test method
+-            service.RecordJobFailureAsync(workerId, _workerRepoMock.Object).Wait();
+-#pragma warning restore xUnit1031 // Do not use blocking task operations in test method
++            await service.RecordJobFailureAsync(workerId, _workerRepoMock.Object);
+         }
+         Assert.Equal(WorkerCircuitState.Open, service.GetCircuitState(workerId));
+ 
+diff --git a/src/tests/Farm.Web.Api.Tests/MoonrakerSnapmakerU1CameraTests.cs b/src/tests/Farm.Web.Api.Tests/MoonrakerSnapmakerU1CameraTests.cs
+index 1d7b66756..645d1690c 100644
+--- a/src/tests/Farm.Web.Api.Tests/MoonrakerSnapmakerU1CameraTests.cs
++++ b/src/tests/Farm.Web.Api.Tests/MoonrakerSnapmakerU1CameraTests.cs
+@@ -132,9 +132,9 @@ public class MoonrakerSnapmakerU1CameraTests
+ 
+         bool started = await manager.EnsureMonitorStartedAsync("http://u1.local", null, CancellationToken.None);
+         await clock.FirstTimerCreated.WaitAsync(TimeSpan.FromSeconds(1));
+-        clock.ReleaseLatestTimer();
++        _ = await clock.ReleaseLatestTimerAndAwaitAsync();
+         await clock.SecondTimerCreated.WaitAsync(TimeSpan.FromSeconds(1));
+-        clock.ReleaseLatestTimer();
++        _ = await clock.ReleaseLatestTimerAndAwaitAsync();
+         await rpc.StopObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
+ 
+         started.Should().BeTrue();
+@@ -257,7 +257,7 @@ public class MoonrakerSnapmakerU1CameraTests
+         started.Should().BeTrue();
+ 
+         // Fire timer[0]; stop fails → RescheduleStopRetry creates timer[1] (retry backoff).
+-        clock.ReleaseTimerAt(0);
++        _ = await clock.ReleaseTimerAtAndAwaitAsync(0);
+         await clock.TimerCreatedAtAsync(1).WaitAsync(TimeSpan.FromSeconds(1));
+ 
+         // Access camera before retry fires; ScheduleIdleStop cancels timer[1] and creates timer[2].
+@@ -506,17 +506,6 @@ public class MoonrakerSnapmakerU1CameraTests
+             return timer;
+         }
+ 
+-        public void ReleaseLatestTimer()
+-        {
+-            ControlledTimer? timer;
+-            lock (_sync)
+-            {
+-                timer = _timers.LastOrDefault();
+-            }
+-
+-            timer?.Fire();
+-        }
+-
+         public async Task<TimerFireResult> ReleaseLatestTimerAndAwaitAsync()
+         {
+             ControlledTimer? timer;
+@@ -533,18 +522,6 @@ public class MoonrakerSnapmakerU1CameraTests
+             return await timer.FireAndAwaitAsync().ConfigureAwait(false);
+         }
+ 
+-        /// <summary>Fires the timer at <paramref name="index"/> (0-based). No-op if the timer has already been disposed.</summary>
+-        public void ReleaseTimerAt(int index)
+-        {
+-            ControlledTimer? timer;
+-            lock (_sync)
+-            {
+-                timer = index < _timers.Count ? _timers[index] : null;
+-            }
+-
+-            timer?.Fire();
+-        }
+-
+         public async Task<TimerFireResult> ReleaseTimerAtAndAwaitAsync(int index)
+         {
+             ControlledTimer? timer;
+@@ -579,11 +556,6 @@ public class MoonrakerSnapmakerU1CameraTests
+                 return ValueTask.CompletedTask;
+             }
+ 
+-            public void Fire()
+-            {
+-                _ = FireAndAwaitAsync().GetAwaiter().GetResult();
+-            }
+-
+             public async Task<TimerFireResult> FireAndAwaitAsync()
+             {
+                 int previous = Interlocked.Exchange(ref _completed, 1);
+diff --git a/src/tests/Farm.Web.Api.Tests/Security/CameraReadAuthorizationTests.cs b/src/tests/Farm.Web.Api.Tests/Security/CameraReadAuthorizationTests.cs
+index 23deb32e0..e4d07371e 100644
+--- a/src/tests/Farm.Web.Api.Tests/Security/CameraReadAuthorizationTests.cs
++++ b/src/tests/Farm.Web.Api.Tests/Security/CameraReadAuthorizationTests.cs
+@@ -194,7 +194,7 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
+     public async Task PerCameraEndpoint_MatchingRoleCaller_IsNotDeniedByGroupCheck(string suffix)
+     {
+         (Guid printerId, Guid cameraId, Guid allowedRoleId) = await SeedRestrictedFixtureWithRoleAsync();
+-        using HttpClient client = CreateClientWithRole(allowedRoleId);
++        using HttpClient client = await CreateClientWithRoleAsync(allowedRoleId);
+ 
+         HttpResponseMessage response = await client.GetAsync(BuildCameraUrl(cameraId, suffix));
+ 
+@@ -214,7 +214,7 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
+     public async Task GetCamerasByPrinter_MatchingRoleCaller_IsNotDeniedByGroupCheck()
+     {
+         (Guid printerId, _, Guid allowedRoleId) = await SeedRestrictedFixtureWithRoleAsync();
+-        using HttpClient client = CreateClientWithRole(allowedRoleId);
++        using HttpClient client = await CreateClientWithRoleAsync(allowedRoleId);
+ 
+         HttpResponseMessage response = await client.GetAsync($"/api/cameras/by-printer/{printerId}");
+ 
+@@ -225,7 +225,7 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
+     public async Task DetectEndpoints_MatchingRoleCaller_IsNotDeniedByGroupCheck()
+     {
+         (Guid printerId, _, Guid allowedRoleId) = await SeedRestrictedFixtureWithRoleAsync();
+-        using HttpClient client = CreateClientWithRole(allowedRoleId);
++        using HttpClient client = await CreateClientWithRoleAsync(allowedRoleId);
+ 
+         HttpResponseMessage response = await client.PostAsJsonAsync(
+             "/api/cameras/detect-endpoints",
+@@ -241,7 +241,7 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
+     public async Task ListEndpoint_MatchingRoleCaller_SeesRestrictedCamera(string suffix)
+     {
+         (_, Guid cameraId, Guid allowedRoleId) = await SeedRestrictedFixtureWithRoleAsync();
+-        using HttpClient client = CreateClientWithRole(allowedRoleId);
++        using HttpClient client = await CreateClientWithRoleAsync(allowedRoleId);
+ 
+         HttpResponseMessage response = await client.GetAsync($"/api/cameras{suffix}");
+ 
+@@ -589,13 +589,13 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
+         return client;
+     }
+ 
+-    private HttpClient CreateClientWithRole(Guid roleId)
++    private async Task<HttpClient> CreateClientWithRoleAsync(Guid roleId)
+     {
+         Guid actorId = Guid.NewGuid();
+         HttpClient client = _factory.CreateClient();
+         client.DefaultRequestHeaders.Add("X-Test-User-Id", actorId.ToString());
+         client.DefaultRequestHeaders.Add("X-Test-Roles", "matching-role");
+-        EnsureUserRoleAsync(actorId, roleId).GetAwaiter().GetResult();
++        await EnsureUserRoleAsync(actorId, roleId);
+         return client;
+     }
+ 
+diff --git a/src/tests/Farm.Web.Api.Tests/Security/PrinterReadAuthorizationTests.cs b/src/tests/Farm.Web.Api.Tests/Security/PrinterReadAuthorizationTests.cs
+index 820b978b4..8a8a3ba9c 100644
+--- a/src/tests/Farm.Web.Api.Tests/Security/PrinterReadAuthorizationTests.cs
++++ b/src/tests/Farm.Web.Api.Tests/Security/PrinterReadAuthorizationTests.cs
+@@ -257,7 +257,7 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime, IDisposable
+     public async Task ReadEndpoint_MatchingRoleCaller_IsNotDeniedByGroupCheck(string suffix)
+     {
+         (Guid printerId, Guid allowedRoleId) = await SeedRestrictedPrinterWithRoleAsync();
+-        using HttpClient client = CreateClientWithRole(Guid.NewGuid(), allowedRoleId, "matching-role");
++        using HttpClient client = await CreateClientWithRoleAsync(Guid.NewGuid(), allowedRoleId, "matching-role");
+ 
+         HttpResponseMessage response = await client.GetAsync(BuildUrl(printerId, suffix));
+ 
+@@ -320,12 +320,12 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime, IDisposable
+         return client;
+     }
+ 
+-    private HttpClient CreateClientWithRole(Guid actorId, Guid roleId, string roleName)
++    private async Task<HttpClient> CreateClientWithRoleAsync(Guid actorId, Guid roleId, string roleName)
+     {
+         HttpClient client = _factory.CreateClient();
+         client.DefaultRequestHeaders.Add("X-Test-User-Id", actorId.ToString());
+         client.DefaultRequestHeaders.Add("X-Test-Roles", roleName);
+-        EnsureUserRoleAsync(actorId, roleId).GetAwaiter().GetResult();
++        await EnsureUserRoleAsync(actorId, roleId);
+         return client;
+     }
+ 
+diff --git a/src/tests/Farm.Web.Api.Tests/Services/Authentication/ApiKeyExchangeServiceTests.cs b/src/tests/Farm.Web.Api.Tests/Services/Authentication/ApiKeyExchangeServiceTests.cs
+index 08b24ee49..aadf75119 100644
+--- a/src/tests/Farm.Web.Api.Tests/Services/Authentication/ApiKeyExchangeServiceTests.cs
++++ b/src/tests/Farm.Web.Api.Tests/Services/Authentication/ApiKeyExchangeServiceTests.cs
+@@ -430,12 +430,12 @@ public class ApiKeyExchangeServiceTests
+             })]);
+     }
+ 
+-    private (JsonWebToken Jwt, ApiKeyExchangeResult Result) ExchangeAndRead(ApiKey key, User owner)
++    private async Task<(JsonWebToken Jwt, ApiKeyExchangeResult Result)> ExchangeAndReadAsync(ApiKey key, User owner)
+     {
+         _mockApiKeyRepository.Setup(r => r.GetByKeyHashAsync(It.IsAny<string>())).ReturnsAsync(key);
+         _mockUsersRepository.Setup(r => r.GetUserEntityAsync(owner.Id, It.IsAny<CancellationToken>())).ReturnsAsync(owner);
+ 
+-        ApiKeyExchangeResult result = _service.ExchangeApiKeyAsync("raw-desktop-key", null, null).GetAwaiter().GetResult();
++        ApiKeyExchangeResult result = await _service.ExchangeApiKeyAsync("raw-desktop-key", null, null);
+         result.Success.Should().BeTrue();
+ 
+         JsonWebTokenHandler handler = new();
+@@ -465,7 +465,7 @@ public class ApiKeyExchangeServiceTests
+     [InlineData(ApiKeyScope.QueueStart, "QueueStart", "queue:start")]
+     [InlineData(ApiKeyScope.QueueCancel, "QueueCancel", "queue:cancel")]
+     [InlineData(ApiKeyScope.QueueAcknowledgeBedClear, "QueueAcknowledgeBedClear", "queue:acknowledge-bed-clear")]
+-    public void ExchangeApiKeyAsync_EachAuthorizedScope_EmitsItsScopeAndExactlyItsPermission(
++    public async Task ExchangeApiKeyAsync_EachAuthorizedScope_EmitsItsScopeAndExactlyItsPermission(
+         ApiKeyScope scope,
+         string expectedScopeName,
+         string expectedPermission)
+@@ -474,7 +474,7 @@ public class ApiKeyExchangeServiceTests
+         SetOwnerAuthorization(userId, permissions: [expectedPermission]);
+ 
+         (JsonWebToken jwt, ApiKeyExchangeResult result) =
+-            ExchangeAndRead(CreateDesktopKey(scope, userId), CreateActiveOwner(userId));
++            await ExchangeAndReadAsync(CreateDesktopKey(scope, userId), CreateActiveOwner(userId));
+ 
+         ScopeClaims(jwt).Should().Equal(expectedScopeName);
+         PermissionClaims(jwt).Should().Equal(expectedPermission);
+@@ -490,7 +490,7 @@ public class ApiKeyExchangeServiceTests
+     /// mint <c>calibration:publish</c> against an operator's explicit deny.
+     /// </summary>
+     [Fact]
+-    public void ExchangeApiKeyAsync_ResourceAdminOwnerWithExplicitDeny_DropsOnlyTheDeniedScope()
++    public async Task ExchangeApiKeyAsync_ResourceAdminOwnerWithExplicitDeny_DropsOnlyTheDeniedScope()
+     {
+         Guid userId = Guid.NewGuid();
+         SetOwnerAuthorization(
+@@ -498,7 +498,7 @@ public class ApiKeyExchangeServiceTests
+             permissions: ["calibration:admin"],
+             denied: [PrintFarmerPermissions.Calibration.Publish]);
+ 
+-        (JsonWebToken jwt, ApiKeyExchangeResult result) = ExchangeAndRead(
++        (JsonWebToken jwt, ApiKeyExchangeResult result) = await ExchangeAndReadAsync(
+             CreateDesktopKey(ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationPublish, userId),
+             CreateActiveOwner(userId));
+ 
+@@ -514,7 +514,7 @@ public class ApiKeyExchangeServiceTests
+     /// A permission the owner holds but did not select on the key must never be minted.
+     /// </summary>
+     [Fact]
+-    public void ExchangeApiKeyAsync_UnselectedOwnerPermissions_AreNeverEmitted()
++    public async Task ExchangeApiKeyAsync_UnselectedOwnerPermissions_AreNeverEmitted()
+     {
+         Guid userId = Guid.NewGuid();
+         SetOwnerAuthorization(userId, permissions:
+@@ -525,7 +525,7 @@ public class ApiKeyExchangeServiceTests
+             PrintFarmerPermissions.Slicing.Promote,
+         ]);
+ 
+-        (JsonWebToken jwt, _) = ExchangeAndRead(
++        (JsonWebToken jwt, _) = await ExchangeAndReadAsync(
+             CreateDesktopKey(ApiKeyScope.CalibrationRead, userId),
+             CreateActiveOwner(userId));
+ 
+@@ -558,12 +558,12 @@ public class ApiKeyExchangeServiceTests
+     /// sync, and the revoked scope must disappear from both claim families.
+     /// </summary>
+     [Fact]
+-    public void ExchangeApiKeyAsync_AfterRevocation_DowngradesInsteadOfBreakingModelScopes()
++    public async Task ExchangeApiKeyAsync_AfterRevocation_DowngradesInsteadOfBreakingModelScopes()
+     {
+         Guid userId = Guid.NewGuid();
+         SetOwnerAuthorization(userId);
+ 
+-        (JsonWebToken jwt, ApiKeyExchangeResult result) = ExchangeAndRead(
++        (JsonWebToken jwt, ApiKeyExchangeResult result) = await ExchangeAndReadAsync(
+             CreateDesktopKey(ApiKeyScope.ModelRead | ApiKeyScope.LibrarySync | ApiKeyScope.CalibrationRead, userId),
+             CreateActiveOwner(userId));
+ 
+@@ -603,12 +603,12 @@ public class ApiKeyExchangeServiceTests
+     /// admin role - otherwise every permission check would be bypassed wholesale.
+     /// </summary>
+     [Fact]
+-    public void ExchangeApiKeyAsync_FarmAdminOwner_GetsOnlySelectedPermissionAndNoAdminRole()
++    public async Task ExchangeApiKeyAsync_FarmAdminOwner_GetsOnlySelectedPermissionAndNoAdminRole()
+     {
+         Guid userId = Guid.NewGuid();
+         SetOwnerAuthorization(userId, roles: [PrintFarmerPermissions.FarmAdminRole]);
+ 
+-        (JsonWebToken jwt, _) = ExchangeAndRead(
++        (JsonWebToken jwt, _) = await ExchangeAndReadAsync(
+             CreateDesktopKey(ApiKeyScope.CalibrationRead, userId),
+             CreateActiveOwner(userId));
+ 
+@@ -627,11 +627,11 @@ public class ApiKeyExchangeServiceTests
+     [InlineData(2)]
+     [InlineData(4)]
+     [InlineData(7)]
+-    public void ExchangeApiKeyAsync_LegacyNumericKeys_YieldNoPermissionClaims(int storedScopes)
++    public async Task ExchangeApiKeyAsync_LegacyNumericKeys_YieldNoPermissionClaims(int storedScopes)
+     {
+         Guid userId = Guid.NewGuid();
+ 
+-        (JsonWebToken jwt, ApiKeyExchangeResult result) = ExchangeAndRead(
++        (JsonWebToken jwt, ApiKeyExchangeResult result) = await ExchangeAndReadAsync(
+             CreateDesktopKey((ApiKeyScope)storedScopes, userId),
+             CreateActiveOwner(userId));
+ 
+@@ -699,12 +699,12 @@ public class ApiKeyExchangeServiceTests
+     [InlineData("60")]
+     [InlineData("1440")]
+     [InlineData("2147483647")]
+-    public void ExchangeApiKeyAsync_ConfiguredLifetimeAboveCeiling_IsClamped(string configured)
++    public async Task ExchangeApiKeyAsync_ConfiguredLifetimeAboveCeiling_IsClamped(string configured)
+     {
+         _mockConfiguration.Setup(c => c["Jwt:DesktopExchangeLifetimeMinutes"]).Returns(configured);
+         Guid userId = Guid.NewGuid();
+ 
+-        (_, ApiKeyExchangeResult result) = ExchangeAndRead(
++        (_, ApiKeyExchangeResult result) = await ExchangeAndReadAsync(
+             CreateDesktopKey(ApiKeyScope.ModelRead, userId),
+             CreateActiveOwner(userId));
+ 
+@@ -718,12 +718,12 @@ public class ApiKeyExchangeServiceTests
+     [InlineData("0")]
+     [InlineData("-5")]
+     [InlineData("not-a-number")]
+-    public void ExchangeApiKeyAsync_InvalidConfiguredLifetime_FallsBackToDefault(string configured)
++    public async Task ExchangeApiKeyAsync_InvalidConfiguredLifetime_FallsBackToDefault(string configured)
+     {
+         _mockConfiguration.Setup(c => c["Jwt:DesktopExchangeLifetimeMinutes"]).Returns(configured);
+         Guid userId = Guid.NewGuid();
+ 
+-        (_, ApiKeyExchangeResult result) = ExchangeAndRead(
++        (_, ApiKeyExchangeResult result) = await ExchangeAndReadAsync(
+             CreateDesktopKey(ApiKeyScope.ModelRead, userId),
+             CreateActiveOwner(userId));
+ 
+@@ -737,7 +737,7 @@ public class ApiKeyExchangeServiceTests
+     /// disagree regardless of which scopes were revoked.
+     /// </summary>
+     [Fact]
+-    public void ExchangeApiKeyAsync_ScopeAndPermissionClaims_AlwaysAgree()
++    public async Task ExchangeApiKeyAsync_ScopeAndPermissionClaims_AlwaysAgree()
+     {
+         Guid userId = Guid.NewGuid();
+         SetOwnerAuthorization(userId, permissions:
+@@ -746,7 +746,7 @@ public class ApiKeyExchangeServiceTests
+             PrintFarmerPermissions.Queue.Read,
+         ]);
+ 
+-        (JsonWebToken jwt, _) = ExchangeAndRead(
++        (JsonWebToken jwt, _) = await ExchangeAndReadAsync(
+             CreateDesktopKey(
+                 ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationDelete | ApiKeyScope.QueueRead | ApiKeyScope.QueueStart,
+                 userId),
+diff --git a/src/tests/Farm.Web.IntegrationTests/CustomWebApplicationFactory.cs b/src/tests/Farm.Web.IntegrationTests/CustomWebApplicationFactory.cs
+index f6e0ff5e7..a4d495052 100644
+--- a/src/tests/Farm.Web.IntegrationTests/CustomWebApplicationFactory.cs
++++ b/src/tests/Farm.Web.IntegrationTests/CustomWebApplicationFactory.cs
+@@ -163,8 +163,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
+             {
+                 try
+                 {
++                    // CreateHost overrides WebApplicationFactory<T>.CreateHost, a synchronous
++                    // virtual base method whose signature this factory cannot change, so the
++                    // seed work it triggers can't be awaited here. It runs once per factory
++                    // instance against a fresh/in-memory database, never the ASP.NET Core
++                    // request pipeline, so there is no real deadlock risk.
++#pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
+                     initializer.InitializeAsync("sqlite", 3, 2).GetAwaiter().GetResult();
+                     initializer.SeedAllAsync().GetAwaiter().GetResult();
++#pragma warning restore VSTHRD002
+                 }
+                 catch { /* best-effort */ }
+             }
