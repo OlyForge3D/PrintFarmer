@@ -31,12 +31,30 @@
 /// OrcaSlicer install. Unlike the flow-rate resources, this cannot be parsed and rewritten the way
 /// <c>FlowRateCalibrationConfigurator</c> rewrites 3MF metadata, so the worker copies it unmodified
 /// — the same treatment as <see cref="TemperatureTower"/>'s <c>.drc</c> resource. Upstream's C++
-/// also sets a permissive <c>filament_max_volumetric_speed</c> ceiling (a constant 50mm³/s) before
-/// slicing, purely so the slicer's own auto speed-limiting does not clamp the print below the
-/// range the calibration tower's built-in, width-increasing geometry is designed to sweep through.
-/// The worker reproduces that: <c>OrcaSlicingPipelineService.ApplyMaxVolumetricSpeedCeilingAsync</c>
-/// sets the filament profile's <c>filament_max_volumetric_speed</c> to the ceiling resolved from
+/// also sets a permissive <c>filament_max_volumetric_speed</c> ceiling (a constant 50mm³/s,
+/// <c>src/slicer/Utils/CalibUtils.cpp</c>: <c>filament_config.set_key_value(
+/// "filament_max_volumetric_speed", new ConfigOptionFloats{50})</c>) before slicing, purely so the
+/// slicer's own auto speed-limiting does not clamp the print below the range the calibration
+/// tower's built-in, width-increasing geometry is designed to sweep through. The worker reproduces
+/// that: <c>OrcaSlicingPipelineService.ApplyMaxVolumetricSpeedCeilingAsync</c> sets the filament
+/// profile's <c>filament_max_volumetric_speed</c> to the ceiling resolved from
 /// <c>CalibrationParameters.MaxVolumetricSpeedCeilingMm3s</c> before the slice.
+/// </para>
+/// <para>
+/// This ceiling is upstream's <em>entire</em> speed-sweep mechanism for this mode, not merely a
+/// safety margin: no occurrence of <c>CalibMode::Calib_Vol_speed_Tower</c> anywhere in upstream's
+/// gcode-generation path (<c>GCode.cpp</c>, <c>PrintObject.cpp</c>) varies per-layer speed — the
+/// same function that sets the ceiling also fixes line width/layer height to single values and
+/// only trims the model to the requested height range. The visible speed variation instead comes
+/// entirely from OrcaSlicer's ordinary flow-based auto speed-limiting reacting to the tower's
+/// per-band widening geometry: as required volumetric flow rises with Z at a fixed print speed,
+/// the slicer throttles once flow would exceed this ceiling. Writing the ceiling and reusing the
+/// client-selected process/machine profile — as this worker does — reproduces that mechanism
+/// faithfully; it is a known MVP limitation, not yet exposing this method's start/end/step
+/// parameters, that the bundled model's own height defines the swept range rather than a
+/// per-request client-controllable one (upstream additionally supports trimming the tower to a
+/// user-chosen height range and remaps the requested start/end/step to a volumetric-flow domain
+/// via <c>process_and_store_3mf</c> — this PR does not yet expose that knob).
 /// </para>
 /// <para>
 /// <see cref="FlowRateYoloRecommended"/>/<see cref="FlowRateYoloPerfectionist"/>'s bundled 3MF

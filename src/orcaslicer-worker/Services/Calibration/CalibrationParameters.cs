@@ -24,10 +24,22 @@ public sealed record CalibrationParameters
 
     /// <summary>
     /// Permissive <c>filament_max_volumetric_speed</c> ceiling applied before slicing a max
-    /// volumetric speed calibration (issue #2135), in mm³/s. Upstream's
-    /// <c>CalibUtils::calib_max_vol_speed</c> hard-codes this to 50 so the slicer's own
-    /// auto speed-limiting never clamps the print below the range the calibration tower's
-    /// built-in, width-increasing geometry is designed to sweep through.
+    /// volumetric speed calibration (issue #2135), in mm³/s. Verified against upstream source
+    /// (<c>CalibUtils::calib_max_vol_speed</c>, <c>src/slicer/Utils/CalibUtils.cpp</c> in
+    /// SoftFever/OrcaSlicer): <c>filament_config.set_key_value("filament_max_volumetric_speed",
+    /// new ConfigOptionFloats{50})</c> — the constant really is 50, not a larger value.
+    /// <para>
+    /// This ceiling is the entire mechanism upstream relies on to produce the sweep: the same
+    /// function reassigns line width/layer height to fixed values and cuts the model to the
+    /// requested height range, but never varies the filament's speed limit per band, and no
+    /// searched occurrence of <c>Calib_Vol_speed_Tower</c> touches gcode generation in
+    /// <c>GCode.cpp</c>/<c>PrintObject.cpp</c>. The visible speed drop instead comes from
+    /// OrcaSlicer's ordinary flow-based auto speed-limiting: the bundled
+    /// <c>SpeedTestStructure.drc</c> geometry widens per band, so required volumetric flow rises
+    /// with Z at a fixed print speed, and the slicer throttles once that flow would exceed this
+    /// ceiling — exactly the mechanism this worker reproduces by writing the ceiling alone and
+    /// reusing the client-selected process profile for the rest.
+    /// </para>
     /// </summary>
     public double MaxVolumetricSpeedCeilingMm3s { get; init; } = 50;
 

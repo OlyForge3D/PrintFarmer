@@ -643,6 +643,43 @@ public class CalibrationTests : IDisposable
     }
 
     [Fact]
+    public async Task ApplyMaxVolumetricSpeedCeilingAsync_MultiExtruder_SetsCeilingOnEveryFilamentAndRecomputesSetDigest()
+    {
+        // Regression coverage for a multi-extruder job: GenerateProfileJsonFilesAsync joins
+        // per-extruder filament paths with ';' (matching the --load-filaments CLI argument shape)
+        // when profile.ExtruderFilamentProfiles has more than one entry, and RunOrcaSlicerAsync
+        // passes that joined string straight through as profilePaths["filament"]. Before this fix,
+        // ApplyMaxVolumetricSpeedCeilingAsync treated the joined string as a single path and threw
+        // FileNotFoundException for any multi-extruder MVS calibration job.
+        string filamentPathA = Path.Combine(_tempDir, $"filament-a-{Guid.NewGuid():N}.json");
+        string filamentPathB = Path.Combine(_tempDir, $"filament-b-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(filamentPathA, """{"name": "Filament A"}""");
+        await File.WriteAllTextAsync(filamentPathB, """{"name": "Filament B", "filament_flow_ratio": ["0.97"]}""");
+        string joinedFilamentPath = string.Join(';', filamentPathA, filamentPathB);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.MaximumVolumetricSpeed),
+            CalibrationParamsJson = """{"max_volumetric_speed_ceiling_mm3s": 42}""",
+        };
+
+        await OrcaSlicingPipelineService.ApplyMaxVolumetricSpeedCeilingAsync(job, joinedFilamentPath, CancellationToken.None);
+
+        string updatedA = await File.ReadAllTextAsync(filamentPathA);
+        string updatedB = await File.ReadAllTextAsync(filamentPathB);
+        using JsonDocument docA = JsonDocument.Parse(updatedA);
+        using JsonDocument docB = JsonDocument.Parse(updatedB);
+        docA.RootElement.GetProperty("filament_max_volumetric_speed")[0].GetString().Should().Be("42");
+        docB.RootElement.GetProperty("filament_max_volumetric_speed")[0].GetString().Should().Be("42");
+        docB.RootElement.GetProperty("filament_flow_ratio")[0].GetString().Should().Be(
+            "0.97", "injecting the ceiling must not clobber a filament's other existing keys");
+
+        job.FilamentProfileSha256.Should().Be(
+            NativeSlicerProfiles.ComputeSha256(string.Join('\0', updatedA, updatedB)),
+            "the multi-filament digest must follow the same \\0-joined-set convention " +
+            "GenerateProfileJsonFilesAsync uses (ComputeProfileSetSha256), not a hash of a single document");
+    }
+
+    [Fact]
     public void InjectMaxVolumetricSpeedCeiling_PreservesExistingKeys()
     {
         const string filamentJson = """{"name": "Test Filament", "filament_flow_ratio": ["0.98"]}""";
