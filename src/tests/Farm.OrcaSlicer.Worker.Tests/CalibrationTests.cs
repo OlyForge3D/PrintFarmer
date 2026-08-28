@@ -2274,14 +2274,17 @@ public class CalibrationTests : IDisposable
     [Fact]
     public void PrepareCalibrationModel_VfaMethod_CopiesResourceUnmodified()
     {
-        // Issue #2140: vfa.drc is an opaque OrcaSlicer binary format (confirmed by magic bytes
-        // against the upstream resource tree, not a ZIP/3MF archive), so — like
-        // MaximumVolumetricSpeed's and Cornering's .drc resources — the worker must copy it
-        // unmodified rather than attempt to parse and rewrite it.
+        // Mirrors PrepareCalibrationModel_RetractionMethod_CopiesResourceUnmodified: vfa.drc is an
+        // opaque OrcaSlicer Draco binary (confirmed by magic bytes against the upstream resource
+        // tree, not a ZIP/3MF archive), so — like MaximumVolumetricSpeed's and Cornering's .drc
+        // resources — the worker must copy it unmodified. Compare raw bytes rather than text: a
+        // text-based round trip could mask corruption from an encoding conversion that a
+        // byte-for-byte comparison would catch immediately.
         string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-vfa");
         string vfaPath = Path.Combine(calibResourcesRoot, "vfa", "vfa.drc");
         Directory.CreateDirectory(Path.GetDirectoryName(vfaPath)!);
-        File.WriteAllText(vfaPath, "fake-vfa-resource");
+        byte[] fakeDracoBytes = [0x44, 0x52, 0x41, 0x43, 0x4F, 0x00, 0xFF, 0xFE, 0x80, 0x01, 0x02, 0x03];
+        File.WriteAllBytes(vfaPath, fakeDracoBytes);
 
         OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
         string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
@@ -2294,7 +2297,7 @@ public class CalibrationTests : IDisposable
         string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
 
         File.Exists(preparedPath).Should().BeTrue();
-        File.ReadAllText(preparedPath).Should().Be("fake-vfa-resource");
+        File.ReadAllBytes(preparedPath).Should().Equal(fakeDracoBytes, "a binary Draco mesh must survive the copy byte-for-byte, not just as valid text");
     }
 
     [Fact]
@@ -2392,6 +2395,35 @@ public class CalibrationTests : IDisposable
     {
         string calibrationParamsJson = JsonSerializer.Serialize(
             new Dictionary<string, double> { ["vfa_max_volumetric_speed_ceiling_mm3s"] = outOfBoundsCeiling });
+
+        CalibrationParameters parameters = CalibrationParameters.Parse(calibrationParamsJson, CalibrationMethod.Vfa);
+
+        parameters.VfaMaxVolumetricSpeedCeilingMm3s.Should().Be(200);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(250)]
+    public void CalibrationParametersParse_VfaCeilingAtDeclaredBounds_IsAccepted(double inBoundsCeiling)
+    {
+        // Pins the declared [1, 250] range exactly at its edges: without this, an off-by-one
+        // implementation (e.g. an exclusive upper bound rejecting 250, or a min of 0 instead of 1)
+        // would still pass the out-of-bounds theory above, since that only probes -5/0/500.
+        string calibrationParamsJson = JsonSerializer.Serialize(
+            new Dictionary<string, double> { ["vfa_max_volumetric_speed_ceiling_mm3s"] = inBoundsCeiling });
+
+        CalibrationParameters parameters = CalibrationParameters.Parse(calibrationParamsJson, CalibrationMethod.Vfa);
+
+        parameters.VfaMaxVolumetricSpeedCeilingMm3s.Should().Be(inBoundsCeiling);
+    }
+
+    [Fact]
+    public void CalibrationParametersParse_VfaCeilingJustAboveDeclaredUpperBound_FallsBackToUpstream200Mm3sDefault()
+    {
+        // 251 is the first value outside the declared [1, 250] range — the 500 case in the
+        // out-of-bounds theory above would still pass with a far looser (or entirely wrong) upper
+        // bound, so this pins the boundary exactly rather than deep in "obviously invalid" territory.
+        const string calibrationParamsJson = """{"vfa_max_volumetric_speed_ceiling_mm3s": 251}""";
 
         CalibrationParameters parameters = CalibrationParameters.Parse(calibrationParamsJson, CalibrationMethod.Vfa);
 
