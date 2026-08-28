@@ -76,7 +76,6 @@
            test), suppressed with a scoped #pragma warning disable/restore IDISP017 plus an
            explanatory comment at each site, since a using-declaration cannot express repeated or
            directly-observed Dispose() calls. -->
-      SA1414;   <!-- Tuple types in signatures should have element names (18) -->
       CA1862;   <!-- Use case-insensitive string comparison methods (18) -->
       VSTHRD200;<!-- Use Async suffix for async methods (18) -->
       VSTHRD002;<!-- Avoid problematic synchronous waits (16) -->
