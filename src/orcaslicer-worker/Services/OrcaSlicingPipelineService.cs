@@ -1920,7 +1920,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
                 int totalPercent = root.TryGetProperty("total_percent", out JsonElement tp)
                     && tp.ValueKind == JsonValueKind.Number
-                    ? tp.GetInt32()
+                    && tp.TryGetInt32(out int parsedPercent)
+                    ? parsedPercent
                     : -1;
                 string message = root.TryGetProperty("message", out JsonElement msg)
                     && msg.ValueKind == JsonValueKind.String
@@ -2616,6 +2617,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         {
             using JsonDocument doc = JsonDocument.Parse(modelTransformJson);
             JsonElement root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                // Valid but non-object JSON (e.g. a bare array or scalar) carries no
+                // rotation/scale/position to extract; treat it like the malformed input handled
+                // by the catch below instead of letting TryGetProperty throw.
+                return new TransformResult(string.Empty, false, false);
+            }
+
             StringBuilder flags = new();
             bool hasCustomPosition = false;
             bool hasNonUniformScale = false;

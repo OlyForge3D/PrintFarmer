@@ -84,6 +84,22 @@ public sealed class ReportCompletePipeLinesShapeGuardTests : IDisposable
         reporter.ProgressReports.Should().BeEmpty();
     }
 
+    [Theory(DisplayName = "A total_percent that is a JSON number but not Int32-representable falls back rather than throwing")]
+    [InlineData("""{"total_percent": 50.5, "message": "hi"}""")]
+    [InlineData("""{"total_percent": 1e999, "message": "hi"}""")]
+    [InlineData("""{"total_percent": 99999999999, "message": "hi"}""")]
+    public async Task ReportCompletePipeLinesAsync_NonInt32NumberTotalPercent_DoesNotThrow(string jsonLine)
+    {
+        var reporter = new RecordingProgressReporter();
+        OrcaSlicingPipelineService service = CreateService(reporter);
+        var pending = new StringBuilder(jsonLine + "\n");
+
+        Func<Task> act = () => InvokeReportCompletePipeLinesAsync(service, pending);
+
+        await act.Should().NotThrowAsync();
+        reporter.ProgressReports.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "A well-formed progress line still reports progress with the guard in place")]
     public async Task ReportCompletePipeLinesAsync_WellFormedLine_StillReportsProgress()
     {
