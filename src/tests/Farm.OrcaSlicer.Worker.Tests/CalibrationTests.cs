@@ -407,6 +407,7 @@ public class CalibrationTests : IDisposable
     public void BuildLayerChangeGcode_Retraction_ProducesAscendingRetractionPerBand()
     {
         string gcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            CalibrationFirmwareFlavor.Marlin,
             startRetractionMm: 0.2,
             retractionStepMm: 0.2,
             bandHeightMm: 5,
@@ -433,6 +434,7 @@ public class CalibrationTests : IDisposable
         // that each band's threshold maps to *that band's* retraction length, not merely that
         // all eight lengths appear somewhere in the emitted gcode.
         string gcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            CalibrationFirmwareFlavor.Marlin,
             startRetractionMm: 0.2,
             retractionStepMm: 0.2,
             bandHeightMm: 5,
@@ -463,6 +465,7 @@ public class CalibrationTests : IDisposable
     public void BuildLayerChangeGcode_Retraction_EightBands_HasEightDistinctRetractionLengths()
     {
         string gcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            CalibrationFirmwareFlavor.Marlin,
             startRetractionMm: 0.2,
             retractionStepMm: 0.2,
             bandHeightMm: 5,
@@ -488,6 +491,7 @@ public class CalibrationTests : IDisposable
         // "M207 S{else}0.2{endif}" with no matching {if} — a placeholder-syntax error that
         // OrcaSlicer's gcode processor rejects. The builder must special-case this instead.
         string gcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            CalibrationFirmwareFlavor.Marlin,
             startRetractionMm: 0.3,
             retractionStepMm: 0.2,
             bandHeightMm: 5,
@@ -498,9 +502,57 @@ public class CalibrationTests : IDisposable
     }
 
     [Fact]
+    public void BuildLayerChangeGcode_Retraction_Klipper_EmitsSetRetractionInsteadOfM207()
+    {
+        // Issue #2137 review finding: Klipper does not recognize Marlin's M207/M208 at all, so
+        // emitting M207 unconditionally would silently no-op the entire tower on a Klipper
+        // machine (the printer ignores the unknown gcode and keeps whatever static retraction
+        // length its [firmware_retraction] config already had). Klipper's equivalent runtime
+        // command is SET_RETRACTION RETRACT_LENGTH=....
+        string gcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            CalibrationFirmwareFlavor.Klipper,
+            startRetractionMm: 0.2,
+            retractionStepMm: 0.2,
+            bandHeightMm: 5,
+            bandCount: 8);
+
+        gcode.Should().StartWith("SET_RETRACTION RETRACT_LENGTH=");
+        gcode.Should().NotContain("M207");
+        gcode.Should().Contain("{if layer_z >= 35}1.6");
+        gcode.Should().Contain("{else}0.2{endif}");
+    }
+
+    [Fact]
+    public void BuildLayerChangeGcode_Retraction_Klipper_SingleBand_EmitsUnconditionalSetRetraction()
+    {
+        string gcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            CalibrationFirmwareFlavor.Klipper,
+            startRetractionMm: 0.3,
+            retractionStepMm: 0.2,
+            bandHeightMm: 5,
+            bandCount: 1);
+
+        gcode.Should().Be("SET_RETRACTION RETRACT_LENGTH=0.3\n");
+        gcode.Should().NotContain("{if").And.NotContain("{elsif").And.NotContain("{else").And.NotContain("{endif");
+    }
+
+    [Fact]
+    public void BuildLayerChangeGcode_Retraction_UnsupportedFlavor_Throws()
+    {
+        Action act = () => RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            (CalibrationFirmwareFlavor)(-1),
+            startRetractionMm: 0.2,
+            retractionStepMm: 0.2,
+            bandHeightMm: 5,
+            bandCount: 8);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
     public void BuildLayerChangeGcode_Retraction_InvalidBandCount_Throws()
     {
-        Action act = () => RetractionTowerGcodeBuilder.BuildLayerChangeGcode(0.2, 0.2, 5, bandCount: 0);
+        Action act = () => RetractionTowerGcodeBuilder.BuildLayerChangeGcode(CalibrationFirmwareFlavor.Marlin, 0.2, 0.2, 5, bandCount: 0);
 
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
@@ -508,7 +560,7 @@ public class CalibrationTests : IDisposable
     [Fact]
     public void BuildLayerChangeGcode_Retraction_InvalidBandHeight_Throws()
     {
-        Action act = () => RetractionTowerGcodeBuilder.BuildLayerChangeGcode(0.2, 0.2, bandHeightMm: 0, bandCount: 8);
+        Action act = () => RetractionTowerGcodeBuilder.BuildLayerChangeGcode(CalibrationFirmwareFlavor.Marlin, 0.2, 0.2, bandHeightMm: 0, bandCount: 8);
 
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
@@ -1366,7 +1418,7 @@ public class CalibrationTests : IDisposable
         // Mirrors a real vendor machine profile (BambuLab/Prusa/Creality/Voron all ship wipe
         // enabled): use_firmware_retraction=1 combined with any extruder's wipe=1 is a hard
         // config-validation error in OrcaSlicer, so the pipeline must also force wipe off.
-        await File.WriteAllTextAsync(machineJsonPath, """{"name": "Test Machine", "use_firmware_retraction": "0", "wipe": ["1"]}""");
+        await File.WriteAllTextAsync(machineJsonPath, """{"name": "Test Machine", "gcode_flavor": "marlin", "use_firmware_retraction": "0", "wipe": ["1"]}""");
         var job = new DistributedSlicingJob
         {
             CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.Retraction),
@@ -1379,6 +1431,7 @@ public class CalibrationTests : IDisposable
         using JsonDocument processDoc = JsonDocument.Parse(updatedProcessContent);
         string layerChangeGcode = processDoc.RootElement.GetProperty("layer_change_gcode").GetString()!;
         string expectedGcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            CalibrationFirmwareFlavor.Marlin,
             startRetractionMm: 0.3,
             retractionStepMm: 0.3,
             bandHeightMm: 8,
@@ -1404,6 +1457,69 @@ public class CalibrationTests : IDisposable
         job.MachineProfileSha256.Should().Be(
             NativeSlicerProfiles.ComputeSha256(updatedMachineContent),
             "the recorded digest must match the mutated machine profile content, not the original");
+    }
+
+    [Fact]
+    public async Task ApplyRetractionTowerGcodeAsync_KlipperMachine_EmitsSetRetractionInsteadOfM207()
+    {
+        // Issue #2137 review finding: a Klipper machine profile must never receive Marlin's M207
+        // -- Klipper does not recognize it at all, so the tower would silently print with no
+        // retraction sweep whatsoever while still reporting success.
+        string processJsonPath = Path.Combine(_tempDir, $"process-{Guid.NewGuid():N}.json");
+        string machineJsonPath = Path.Combine(_tempDir, $"machine-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(processJsonPath, """{"name": "Test Process"}""");
+        await File.WriteAllTextAsync(machineJsonPath, """{"name": "Test Machine", "gcode_flavor": "klipper", "use_firmware_retraction": "0"}""");
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.Retraction),
+            CalibrationParamsJson = """{"start_retraction_mm": 0.3, "retraction_step_mm": 0.3, "retraction_band_height_mm": 8, "retraction_band_count": 4}""",
+        };
+
+        await OrcaSlicingPipelineService.ApplyRetractionTowerGcodeAsync(job, processJsonPath, machineJsonPath, CancellationToken.None);
+
+        string updatedProcessContent = await File.ReadAllTextAsync(processJsonPath);
+        using JsonDocument processDoc = JsonDocument.Parse(updatedProcessContent);
+        string layerChangeGcode = processDoc.RootElement.GetProperty("layer_change_gcode").GetString()!;
+        layerChangeGcode.Should().Contain("SET_RETRACTION", "Klipper machines must receive Klipper's own retraction-length command");
+        layerChangeGcode.Should().NotContain("M207", "M207 is Marlin-only and is silently ignored by Klipper");
+        job.ProcessProfileSha256.Should().NotBeNull("a successfully processed job must record its updated process profile digest");
+    }
+
+    [Fact]
+    public async Task ApplyRetractionTowerGcodeAsync_UnsupportedFirmwareFlavor_ThrowsRatherThanSilentlyEmittingM207()
+    {
+        string processJsonPath = Path.Combine(_tempDir, $"process-{Guid.NewGuid():N}.json");
+        string machineJsonPath = Path.Combine(_tempDir, $"machine-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(processJsonPath, """{"name": "Test Process"}""");
+        await File.WriteAllTextAsync(machineJsonPath, """{"name": "Test Machine", "gcode_flavor": "reprap"}""");
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.Retraction),
+            CalibrationParamsJson = """{"start_retraction_mm": 0.3, "retraction_step_mm": 0.3, "retraction_band_height_mm": 8, "retraction_band_count": 4}""",
+        };
+
+        Func<Task> act = () => OrcaSlicingPipelineService.ApplyRetractionTowerGcodeAsync(job, processJsonPath, machineJsonPath, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        job.ProcessProfileSha256.Should().BeNull("a refused job must never record a digest for content it never wrote");
+    }
+
+    [Fact]
+    public async Task ApplyRetractionTowerGcodeAsync_MissingGcodeFlavor_ThrowsRatherThanSilentlyEmittingM207()
+    {
+        string processJsonPath = Path.Combine(_tempDir, $"process-{Guid.NewGuid():N}.json");
+        string machineJsonPath = Path.Combine(_tempDir, $"machine-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(processJsonPath, """{"name": "Test Process"}""");
+        await File.WriteAllTextAsync(machineJsonPath, """{"name": "Test Machine"}""");
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.Retraction),
+            CalibrationParamsJson = """{"start_retraction_mm": 0.3, "retraction_step_mm": 0.3, "retraction_band_height_mm": 8, "retraction_band_count": 4}""",
+        };
+
+        Func<Task> act = () => OrcaSlicingPipelineService.ApplyRetractionTowerGcodeAsync(job, processJsonPath, machineJsonPath, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [Fact]

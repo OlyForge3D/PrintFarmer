@@ -351,19 +351,47 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// Injects the retraction tower's per-band <c>layer_change_gcode</c> hook (issue #2137) into
     /// the process profile on disk, and forces the machine profile's
     /// <c>use_firmware_retraction</c> setting on — see <see cref="RetractionTowerGcodeBuilder"/>
-    /// for why the injected <c>M207</c> gcode has no effect without it. Recomputes both
-    /// <see cref="DistributedSlicingJob.ProcessProfileSha256"/> and
+    /// for why the injected firmware-retraction-length command has no effect without it.
+    /// Recomputes both <see cref="DistributedSlicingJob.ProcessProfileSha256"/> and
     /// <see cref="DistributedSlicingJob.MachineProfileSha256"/> so the recorded digests match the
     /// mutated content.
     /// </summary>
+    /// <remarks>
+    /// Firmware-flavour decision (mirrors <see cref="ApplyPressureAdvanceTowerGcodeAsync"/> for the
+    /// exact same reason): the runtime command that sets the firmware's retraction length differs
+    /// by firmware (<c>M207 S...</c> on Marlin/Marlin2, <c>SET_RETRACTION RETRACT_LENGTH=...</c> on
+    /// Klipper — Klipper does not recognize <c>M207</c>/<c>M208</c> at all), so this reads the
+    /// machine profile's <c>gcode_flavor</c> field and resolves it via
+    /// <see cref="PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor"/> (reused rather than
+    /// duplicated: it is a general firmware-flavour resolver, not specific to pressure advance).
+    /// Any other flavour (or a missing/unparsable machine profile) is refused with an explicit
+    /// <see cref="InvalidOperationException"/> here, before the OrcaSlicer binary ever runs — this
+    /// calibration method must never silently slice a tower that never varies retraction at all.
+    /// </remarks>
     internal static async Task ApplyRetractionTowerGcodeAsync(
         DistributedSlicingJob job,
         string processJsonPath,
         string machineJsonPath,
         CancellationToken cancellationToken)
     {
+        string machineJsonContent = await File.ReadAllTextAsync(machineJsonPath, cancellationToken);
+
+        string? gcodeFlavor = PressureAdvanceTowerGcodeBuilder.ReadGcodeFlavor(machineJsonContent);
+        CalibrationFirmwareFlavor? flavor = PressureAdvanceTowerGcodeBuilder.TryResolveFirmwareFlavor(gcodeFlavor);
+        if (flavor is null)
+        {
+            // Truncate the untrusted, client-influenced gcode_flavor value before echoing it into
+            // the exception message: an adversarial machine profile could otherwise smuggle an
+            // arbitrarily large string into job failure telemetry/logs.
+            string flavorForMessage = gcodeFlavor is null ? "(unset)" : TruncateForMessage(gcodeFlavor);
+            throw new InvalidOperationException(
+                $"Retraction tower calibration requires a Klipper or Marlin/Marlin2 machine profile " +
+                $"(gcode_flavor); the resolved firmware flavour '{flavorForMessage}' is not supported.");
+        }
+
         CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, CalibrationMethod.Retraction);
         string layerChangeGcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            flavor.Value,
             parameters.StartRetractionMm,
             parameters.RetractionStepMm,
             parameters.RetractionBandHeightMm,
@@ -374,7 +402,6 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         await File.WriteAllTextAsync(processJsonPath, updatedProcessJsonContent, cancellationToken);
         job.ProcessProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedProcessJsonContent);
 
-        string machineJsonContent = await File.ReadAllTextAsync(machineJsonPath, cancellationToken);
         string updatedMachineJsonContent = EnableFirmwareRetraction(machineJsonContent);
         await File.WriteAllTextAsync(machineJsonPath, updatedMachineJsonContent, cancellationToken);
         job.MachineProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedMachineJsonContent);
