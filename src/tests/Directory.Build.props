@@ -90,13 +90,14 @@
            methods and helper methods that only existed to bridge to a synchronous caller were
            converted to `async Task` with a real `await`, and one mocked-HTTP-content read used
            `HttpContent.ReadAsStream()` instead of an async read, since the content there is
-           always a fully-buffered in-memory `StringContent` the test itself constructed (never
-           real I/O). The sole exception is a deliberately blocking wait inside a synchronous
-           `IServiceScopeFactory.CreateScope()` override, which cannot be async because it
-           implements a synchronous interface member; that call is always driven from a
-           background `Task.Run` (never the test thread itself, per its own doc comment) and is
-           suppressed with a scoped #pragma warning disable/restore VSTHRD002 plus an
-           explanatory comment at the site. -->
+           always built synchronously by the code under test from data already fully buffered in
+           memory (never a network/file stream), regardless of whether it's a `StringContent` or
+           a `MultipartFormDataContent`/`ByteArrayContent` pair. The sole exception is a
+           deliberately blocking wait inside a synchronous `IServiceScopeFactory.CreateScope()`
+           override, which cannot be async because it implements a synchronous interface member;
+           that call is always driven from a background `Task.Run` (never the test thread itself),
+           suppressed with a scoped #pragma warning disable/restore VSTHRD002 plus an explanatory
+           comment at the site. -->
 
       IDISP024; <!-- Don't call GC.SuppressFinalize when no finalizer exists (16) -->
       CA2025;   <!-- Do not pass 'IDisposable' instances into unawaited tasks (14) -->
