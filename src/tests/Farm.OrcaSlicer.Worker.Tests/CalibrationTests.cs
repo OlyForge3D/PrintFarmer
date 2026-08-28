@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.OrcaSlicer.Worker.Services.Calibration;
+using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Worker.Core;
 using FluentAssertions;
@@ -90,14 +91,14 @@ public class CalibrationTests : IDisposable
     }
 
     [Fact]
-    public void ClientAcceptedWireNames_ExcludesYoloMethodsButIncludesEverythingElse()
+    public void ClientAcceptedWireNames_ExcludesOnlyPerfectionistYoloMethod()
     {
-        // Issue #2051: the two YOLO methods parse (they are catalogued) but are not yet
-        // slicer-supported, so they must not appear in the list a controller advertises to
-        // clients as "supported methods" — otherwise the API would recommend a method it
+        // Issue #2141: FlowRateYoloRecommended is now slicer-supported and must appear in the
+        // list a controller advertises to clients as "supported methods". FlowRateYoloPerfectionist
+        // remains gated (issue #2142) and must not appear, or the API would recommend a method it
         // immediately rejects.
         CalibrationMethods.ClientAcceptedWireNames.Should()
-            .NotContain("flow_rate_yolo_recommended")
+            .Contain("flow_rate_yolo_recommended")
             .And.NotContain("flow_rate_yolo_perfectionist");
 
         // Issue #2135: max volumetric speed is now fully slicer-supported, so it must be
@@ -111,7 +112,7 @@ public class CalibrationTests : IDisposable
         }
 
         CalibrationMethods.ClientAcceptedWireNames.Should()
-            .HaveCount(CalibrationMethods.SupportedWireNames.Count - 2);
+            .HaveCount(CalibrationMethods.SupportedWireNames.Count - 1);
     }
 
     [Theory]
@@ -682,6 +683,143 @@ public class CalibrationTests : IDisposable
 
     #endregion
 
+    #region FlowRateDeltaCalibrationConfigurator — pure parsing
+
+    [Theory]
+    [InlineData("flowrate_0.01", 0.01)]
+    [InlineData("flowrate_m0.01", -0.01)]
+    [InlineData("flowrate_0.05", 0.05)]
+    [InlineData("flowrate_m0.05", -0.05)]
+    [InlineData("flow_rate_m1.5", -1.5)]
+    [InlineData("flow-rate_2", 2.0)]
+    [InlineData("FLOWRATE_M0.02", -0.02)]
+    [InlineData("Body_1", null)]
+    [InlineData(null, null)]
+    public void TryParseFlowDelta_ParsesSignedBaselineRelativeDelta(string? objectName, double? expectedDelta)
+    {
+        // Issue #2141: unlike FlowRateCalibrationConfigurator.TryParseFlowRatio (which divides an
+        // embedded percentage by 100), this must return the raw additive delta unscaled — the
+        // "m" prefix stands in for a minus sign that cannot appear in a 3MF object name.
+        double? delta = FlowRateDeltaCalibrationConfigurator.TryParseFlowDelta(objectName);
+
+        delta.Should().Be(expectedDelta);
+    }
+
+    [Fact]
+    public void ResolveObjectFlowRatios_ValidDeltas_AppliesBaselinePlusDeltaPerObject()
+    {
+        IReadOnlyDictionary<int, double> ratios = FlowRateDeltaCalibrationConfigurator.ResolveObjectFlowRatios(
+            [(1, "flowrate_0.01"), (2, "flowrate_m0.01")],
+            baselineFlowRatio: 0.98);
+
+        ratios.Should().BeEquivalentTo(new Dictionary<int, double>
+        {
+            [1] = 0.99,
+            [2] = 0.97,
+        });
+    }
+
+    [Fact]
+    public void ResolveObjectFlowRatios_UnparseableObjectName_ThrowsRatherThanGuessing()
+    {
+        // Control case (issue #2141 acceptance criterion): an object name that carries no
+        // recognizable delta must refuse loudly rather than silently defaulting to the baseline
+        // (which would produce an uncalibrated, misleading flow ratio for that object).
+        Action act = () => FlowRateDeltaCalibrationConfigurator.ResolveObjectFlowRatios(
+            [(1, "flowrate_0.01"), (2, "Body_2")],
+            baselineFlowRatio: 0.98);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Body_2*")
+            .Which.Message.Should().Contain(
+                "flowrate_",
+                "the message should explain the expected naming scheme, not just that parsing failed");
+    }
+
+    #endregion
+
+    #region FlowRateDeltaCalibrationConfigurator — end-to-end 3MF
+
+    [Fact]
+    public void ApplyPerObjectFlowRatioDeltas_PositiveAndNegativeDeltas_AppliesBaselinePlusDelta()
+    {
+        (string Id, string Name)[] objects =
+        [
+            ("1", "flowrate_0.01"),
+            ("2", "flowrate_m0.01"),
+            ("3", "flowrate_0.05"),
+        ];
+        string source3mf = CreateSynthetic3mf(objects);
+
+        string resultPath = FlowRateDeltaCalibrationConfigurator.ApplyPerObjectFlowRatioDeltas(
+            source3mf,
+            _tempDir,
+            baselineFlowRatio: 0.98,
+            NullLogger.Instance);
+
+        using ZipArchive archive = ZipFile.OpenRead(resultPath);
+        ZipArchiveEntry configEntry = archive.GetEntry("Metadata/Slic3r_PE_model.config")!;
+        string configXml = ReadEntryText(configEntry);
+
+        System.Xml.Linq.XDocument doc = System.Xml.Linq.XDocument.Parse(configXml);
+        Dictionary<int, double> flowRatiosById = doc.Root!.Elements("object")
+            .ToDictionary(
+                o => int.Parse(o.Attribute("id")!.Value, System.Globalization.CultureInfo.InvariantCulture),
+                o => double.Parse(
+                    o.Elements("metadata").First(m => m.Attribute("key")!.Value == "flow_ratio").Attribute("value")!.Value,
+                    System.Globalization.CultureInfo.InvariantCulture));
+
+        flowRatiosById.Should().BeEquivalentTo(new Dictionary<int, double>
+        {
+            [1] = 0.99,
+            [2] = 0.97,
+            [3] = 1.03,
+        });
+    }
+
+    [Fact]
+    public void ApplyPerObjectFlowRatioDeltas_UnparseableObjectName_ThrowsWithoutLeakingPath()
+    {
+        // Control case mirroring FlowRateCalibrationConfigurator's equivalent test: an
+        // unparseable name must fail the whole job rather than silently applying the baseline
+        // (which would defeat the point of a per-object delta calibration).
+        string source3mf = CreateSynthetic3mf([("1", "Body")]);
+
+        Action act = () => FlowRateDeltaCalibrationConfigurator.ApplyPerObjectFlowRatioDeltas(
+            source3mf,
+            _tempDir,
+            baselineFlowRatio: 0.98,
+            NullLogger.Instance);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Body*")
+            .Which.Message.Should().NotContain(_tempDir, "the exception message must not disclose internal worker filesystem paths");
+    }
+
+    [Fact]
+    public void ApplyPerObjectFlowRatioDeltas_MissingModelEntry_Throws()
+    {
+        string sourceDir = Path.Combine(_tempDir, "source-no-model-delta");
+        Directory.CreateDirectory(sourceDir);
+        string path = Path.Join(sourceDir, $"empty-{Guid.NewGuid():N}.3mf");
+        using (FileStream fs = File.Create(path))
+        using (_ = new ZipArchive(fs, ZipArchiveMode.Create))
+        {
+            // Intentionally no entries: this 3MF has no 3D/3dmodel.model.
+        }
+
+        Action act = () => FlowRateDeltaCalibrationConfigurator.ApplyPerObjectFlowRatioDeltas(
+            path,
+            _tempDir,
+            baselineFlowRatio: 0.98,
+            NullLogger.Instance);
+
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().NotContain(_tempDir, "the exception message must not disclose internal worker filesystem paths");
+    }
+
+    #endregion
+
     #region OrcaSlicingPipelineService — calibration pipeline wiring
 
     [Theory]
@@ -821,20 +959,16 @@ public class CalibrationTests : IDisposable
             "ready for the OrcaSlicer CLI invocation that would follow with the stage-1 model path");
     }
 
-    [Theory]
-    [InlineData(CalibrationMethod.FlowRateYoloRecommended, "Orca-LinearFlow.3mf")]
-    [InlineData(CalibrationMethod.FlowRateYoloPerfectionist, "Orca-LinearFlow_fine.3mf")]
-    public void PrepareCalibrationModel_YoloMethod_ThrowsBecauseDeltaOverridesAreNotYetSupported(
-        CalibrationMethod method,
-        string resourceFileName)
+    [Fact]
+    public void PrepareCalibrationModel_YoloPerfectionistMethod_ThrowsBecauseDeltaOverridesAreNotYetSupported()
     {
-        // The YOLO resources' per-object names encode baseline-relative deltas
-        // (e.g. "flowrate_0.01"), not the absolute percentages FlowRateCalibrationConfigurator
-        // parses for pass1/pass2. The worker must fail loudly here instead of silently copying
-        // the resource unmodified (which would slice an uncalibrated result) or misapplying the
-        // pass1/2 parser (see CalibrationMethod.cs remarks, issue #2051).
+        // FlowRateYoloPerfectionist remains gated (issue #2142) even though the same delta-based
+        // naming scheme is now supported for FlowRateYoloRecommended (issue #2141) — the worker
+        // must still fail loudly here instead of silently copying the resource unmodified (which
+        // would slice an uncalibrated result) or misapplying the pass1/2 absolute-percentage
+        // parser (see CalibrationMethod.cs remarks, issue #2051).
         string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-yolo-" + Guid.NewGuid().ToString("N"));
-        string resourcePath = Path.Combine(calibResourcesRoot, "filament_flow", resourceFileName);
+        string resourcePath = Path.Combine(calibResourcesRoot, "filament_flow", "Orca-LinearFlow_fine.3mf");
         Directory.CreateDirectory(Path.GetDirectoryName(resourcePath)!);
         CreateSynthetic3mfAt(resourcePath, [("1", "flowrate_0.01"), ("2", "flowrate_m0.01")]);
 
@@ -843,7 +977,7 @@ public class CalibrationTests : IDisposable
         Directory.CreateDirectory(workDir);
         var job = new DistributedSlicingJob
         {
-            CalibrationMethod = CalibrationMethods.ToWireName(method),
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.FlowRateYoloPerfectionist),
         };
 
         Action act = () => pipeline.PrepareCalibrationModel(job, workDir);
@@ -857,6 +991,311 @@ public class CalibrationTests : IDisposable
             .And.NotContain(
                 calibResourcesRoot,
                 "the exception message must not disclose internal worker filesystem paths");
+    }
+
+    [Fact]
+    public void PrepareCalibrationModel_YoloRecommendedMethod_AppliesBaselinePlusDeltaFlowRatios()
+    {
+        // Issue #2141 acceptance criterion: FlowRateYoloRecommended must now actually apply the
+        // bundled resource's per-object flow-ratio deltas (baseline + delta), not throw.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-yolo-recommended-" + Guid.NewGuid().ToString("N"));
+        string resourcePath = Path.Combine(calibResourcesRoot, "filament_flow", "Orca-LinearFlow.3mf");
+        Directory.CreateDirectory(Path.GetDirectoryName(resourcePath)!);
+        CreateSynthetic3mfAt(resourcePath, [("1", "flowrate_0.01"), ("2", "flowrate_m0.01")]);
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.FlowRateYoloRecommended),
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.98 },
+            },
+        };
+
+        string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
+
+        File.Exists(preparedPath).Should().BeTrue();
+        using ZipArchive archive = ZipFile.OpenRead(preparedPath);
+        ZipArchiveEntry configEntry = archive.GetEntry("Metadata/Slic3r_PE_model.config")!;
+        string configXml = ReadEntryText(configEntry);
+        System.Xml.Linq.XDocument doc = System.Xml.Linq.XDocument.Parse(configXml);
+        Dictionary<int, double> flowRatiosById = doc.Root!.Elements("object")
+            .ToDictionary(
+                o => int.Parse(o.Attribute("id")!.Value, System.Globalization.CultureInfo.InvariantCulture),
+                o => double.Parse(
+                    o.Elements("metadata").First(m => m.Attribute("key")!.Value == "flow_ratio").Attribute("value")!.Value,
+                    System.Globalization.CultureInfo.InvariantCulture));
+
+        flowRatiosById.Should().BeEquivalentTo(new Dictionary<int, double>
+        {
+            [1] = 0.99,
+            [2] = 0.97,
+        });
+    }
+
+    [Fact]
+    public void PrepareCalibrationModel_YoloRecommendedMethod_NoResolvableBaseline_ThrowsRatherThanGuessing()
+    {
+        // A delta-based calibration slice with a guessed baseline (e.g. defaulting to 1.0) could
+        // silently apply the wrong flow ratio to every object; the worker must refuse instead.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-yolo-nobaseline-" + Guid.NewGuid().ToString("N"));
+        string resourcePath = Path.Combine(calibResourcesRoot, "filament_flow", "Orca-LinearFlow.3mf");
+        Directory.CreateDirectory(Path.GetDirectoryName(resourcePath)!);
+        CreateSynthetic3mfAt(resourcePath, [("1", "flowrate_0.01")]);
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.FlowRateYoloRecommended),
+        };
+
+        Action act = () => pipeline.PrepareCalibrationModel(job, workDir);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*filament_flow_ratio*")
+            .Which.Message.Should().Contain(
+                "Select a filament profile that carries a flow ratio, or refuse rather than guessing one",
+                "the refusal message must explain the fix (pick a profile with a flow ratio), not just " +
+                "name the missing field");
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_ExtruderFilamentProfilesPresent_PrefersExtruderZeroOverFilamentProfile()
+    {
+        // GenerateProfileJsonFilesAsync (issue #2141 review finding) prefers
+        // ExtruderFilamentProfiles[0] over FilamentProfile whenever an extruder profile is present
+        // — the baseline resolution must mirror that precedence or it would report a flow ratio
+        // that is not the one OrcaSlicer actually slices with.
+        var job = new DistributedSlicingJob
+        {
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.5 },
+                ExtruderFilamentProfiles = [new FilamentProfileDto { FlowRatio = 0.98 }],
+            },
+        };
+
+        OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job).Should().Be(0.98);
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NoExtruderProfiles_FallsBackToFilamentProfile()
+    {
+        var job = new DistributedSlicingJob
+        {
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.93 },
+            },
+        };
+
+        OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job).Should().Be(0.93);
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NativeProfilesPresent_PrefersNativeOverJobProfile()
+    {
+        // RunOrcaSlicerAsync writes NativeProfiles verbatim and never consults job.Profile when
+        // NativeProfiles is non-null — so the baseline must come from NativeProfiles.FilamentJson
+        // in that case, even when job.Profile also carries a (different, worker-cache-resolved)
+        // flow ratio. Preferring job.Profile here would silently measure against a filament
+        // profile OrcaSlicer never actually slices with (issue #2141 review finding).
+        var job = new DistributedSlicingJob
+        {
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.5 },
+            },
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: """{"filament_flow_ratio": "0.98"}""",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job).Should().Be(0.98);
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NativeProfilesPresentAsArray_ParsesFirstElement()
+    {
+        var job = new DistributedSlicingJob
+        {
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: """{"filament_flow_ratio": ["0.965", "1.0"]}""",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job).Should().Be(0.965);
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NativeProfilesArrayElementIsNumberNotString_ParsesWithoutCrashing()
+    {
+        // A hand-edited native profile could plausibly store filament_flow_ratio as an array of
+        // *numbers* (`[1.05]`) rather than OrcaSlicer's normal array-of-strings shape
+        // (`["1.05"]`). Blindly calling JsonElement.GetString() on a Number element throws
+        // InvalidOperationException, which the surrounding catch (JsonException) does not catch —
+        // that would crash the job with a raw framework exception instead of either parsing the
+        // number or cleanly falling through to the "no baseline resolved" refusal.
+        var job = new DistributedSlicingJob
+        {
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: """{"filament_flow_ratio": [1.05]}""",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job).Should().Be(1.05);
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NativeProfilesArrayElementUnrecognizedKind_ThrowsRatherThanGuessing()
+    {
+        // An array element that is neither a string nor a number (e.g. a nested object or bool) is
+        // genuinely unparseable; the worker must refuse rather than silently falling back to
+        // job.Profile, since RunOrcaSlicerAsync would still slice with NativeProfiles verbatim.
+        var job = new DistributedSlicingJob
+        {
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.5 },
+            },
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: """{"filament_flow_ratio": [true]}""",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        Action act = () => OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*filament_flow_ratio*");
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NativeProfilesMissingFlowRatioProperty_ThrowsRatherThanGuessing()
+    {
+        var job = new DistributedSlicingJob
+        {
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: "{}",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        Action act = () => OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*filament_flow_ratio*");
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NativeProfilesMalformedJson_ThrowsRatherThanGuessing()
+    {
+        var job = new DistributedSlicingJob
+        {
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: "{ not valid json",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        Action act = () => OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*filament_flow_ratio*");
+    }
+
+    [Fact]
+    public void ResolveBaselineFlowRatio_NativeProfilesJsonRootIsNotAnObject_ThrowsRatherThanGuessing()
+    {
+        // A valid-JSON-but-non-object root (e.g. a bare array or string) must not crash with a raw
+        // InvalidOperationException from TryGetProperty — it should refuse cleanly like any other
+        // unparseable native profile.
+        var job = new DistributedSlicingJob
+        {
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: "[\"1.05\"]",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        Action act = () => OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*filament_flow_ratio*");
+    }
+
+    [Fact]
+    public void PrepareCalibrationModel_YoloRecommendedMethod_NativeProfilesPresent_UsesNativeBaselineOverJobProfile()
+    {
+        // End-to-end variant of ResolveBaselineFlowRatio_NativeProfilesPresent_PrefersNativeOverJobProfile
+        // through the full PrepareCalibrationModel path, proving the pipeline wiring (not just the
+        // helper in isolation) resolves the baseline OrcaSlicer will actually slice with.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-yolo-native-" + Guid.NewGuid().ToString("N"));
+        string resourcePath = Path.Combine(calibResourcesRoot, "filament_flow", "Orca-LinearFlow.3mf");
+        Directory.CreateDirectory(Path.GetDirectoryName(resourcePath)!);
+        CreateSynthetic3mfAt(resourcePath, [("1", "flowrate_0.01")]);
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.FlowRateYoloRecommended),
+            Profile = new SlicerProfileDto
+            {
+                FilamentProfile = new FilamentProfileDto { FlowRatio = 0.5 },
+            },
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: """{"filament_flow_ratio": "0.98"}""",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
+
+        using ZipArchive archive = ZipFile.OpenRead(preparedPath);
+        ZipArchiveEntry configEntry = archive.GetEntry("Metadata/Slic3r_PE_model.config")!;
+        string configXml = ReadEntryText(configEntry);
+        System.Xml.Linq.XDocument doc = System.Xml.Linq.XDocument.Parse(configXml);
+        double appliedFlowRatio = double.Parse(
+            doc.Root!.Elements("object").Single()
+                .Elements("metadata").First(m => m.Attribute("key")!.Value == "flow_ratio").Attribute("value")!.Value,
+            System.Globalization.CultureInfo.InvariantCulture);
+
+        // baseline 0.98 (native) + delta 0.01, NOT baseline 0.5 (job.Profile) + delta 0.01.
+        appliedFlowRatio.Should().Be(0.99);
     }
 
     [Fact]

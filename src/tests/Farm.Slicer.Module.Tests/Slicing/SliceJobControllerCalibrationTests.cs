@@ -42,22 +42,21 @@ public sealed class SliceJobControllerCalibrationTests
         _ = problem.Extensions["code"].Should().Be("unsupported_calibration_method");
         _ = problem.Detail.Should().Contain("flow_rate_pass_1").And.Contain("temperature_tower");
 
-        // Issue #2051 regression: the YOLO methods parse successfully (they are catalogued) but
-        // are rejected separately as "not yet slicer-supported" — they must never appear in the
-        // "Supported methods" list of an *unrelated* unsupported-method error, or a client would
-        // be told to retry with a method that request would also reject.
-        _ = problem.Detail.Should().NotContain("flow_rate_yolo_recommended").And.NotContain("flow_rate_yolo_perfectionist");
+        // Issue #2141: FlowRateYoloRecommended is now slicer-supported and appears in
+        // ClientAcceptedWireNames, so it may legitimately show up in the "Supported methods" list
+        // surfaced for an unrelated unsupported-method error. FlowRateYoloPerfectionist remains
+        // gated (issue #2142) and must never appear in that list, or a client would be told to
+        // retry with a method that request would also reject.
+        _ = problem.Detail.Should().NotContain("flow_rate_yolo_perfectionist");
     }
 
-    [Theory]
-    [InlineData("flow_rate_yolo_recommended")]
-    [InlineData("flow_rate_yolo_perfectionist")]
-    public async Task SubmitAsync_CataloguedButNotYetSlicerSupportedMethod_ReturnsInvalidRequestBeforeQueueing(string wireName)
+    [Fact]
+    public async Task SubmitAsync_CataloguedButNotYetSlicerSupportedMethod_ReturnsInvalidRequestBeforeQueueing()
     {
-        // Issue #2051: FlowRateYoloRecommended/FlowRateYoloPerfectionist parse successfully (their
-        // wire names/resource metadata are catalogued), but the worker cannot yet apply their
-        // delta-based per-object overrides. Rejecting here, at the API boundary, matters: without
-        // it the job would be queued, claimed by a worker, and only fail late in
+        // Issue #2142: FlowRateYoloPerfectionist parses successfully (its wire name/resource
+        // metadata is catalogued), but the worker cannot yet apply its delta-based per-object
+        // overrides. Rejecting here, at the API boundary, matters: without it the job would be
+        // queued, claimed by a worker, and only fail late in
         // OrcaSlicingPipelineService.PrepareCalibrationModel — wasting a worker slot and a job
         // record for a request that could never have succeeded.
         SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out Mock<ISliceJobEventService> events);
@@ -65,7 +64,7 @@ public sealed class SliceJobControllerCalibrationTests
         {
             SlicerEngine = SlicerEngineType.OrcaSlicer,
             Priority = 1,
-            Calibration = new CalibrationRequest { Method = wireName },
+            Calibration = new CalibrationRequest { Method = "flow_rate_yolo_perfectionist" },
         };
 
         IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
@@ -80,6 +79,45 @@ public sealed class SliceJobControllerCalibrationTests
         events.Verify(
             instance => instance.NotifyJobQueuedAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_FlowRateYoloRecommendedMethod_CreatesOrdinarySliceJob()
+    {
+        // Issue #2141 acceptance criterion: flow_rate_yolo_recommended must now be accepted and
+        // create an ordinary slice job, exactly like the already-supported flow_rate_pass_1/2 and
+        // temperature_tower methods — it must never be rejected as "not yet slicer-supported"
+        // again now that the worker has a delta-aware configurator for it.
+        SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out Mock<ISliceJobEventService> events);
+        SliceJob? added = null;
+        _ = repository
+            .Setup(instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()))
+            .Callback<SliceJob, CancellationToken>((job, _) => added = job)
+            .Returns(Task.CompletedTask);
+
+        var request = new SubmitSliceJobRequest
+        {
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            Priority = 1,
+            Calibration = new CalibrationRequest { Method = "flow_rate_yolo_recommended" },
+        };
+
+        IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
+
+        _ = result.Should().BeOfType<CreatedResult>();
+        _ = added.Should().NotBeNull();
+        _ = added!.CalibrationMethod.Should().Be("flow_rate_yolo_recommended");
+
+        // The defining constraint from issue #1938: this must remain an ordinary slice job so
+        // SlicePrintBridgeController's IsCalibrationSlice(job) gate never trips and
+        // send-to-printer keeps accepting it.
+        _ = added.CalibrationProjectId.Should().BeNull();
+        _ = added.CalibrationAttemptId.Should().BeNull();
+        _ = added.CalibrationOrchestrationId.Should().BeNull();
+
+        events.Verify(
+            instance => instance.NotifyJobQueuedAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
