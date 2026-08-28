@@ -538,9 +538,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             && CorneringSupportedGcodeFlavors.Contains(gcodeFlavor, StringComparer.OrdinalIgnoreCase);
         if (!supported)
         {
+            // Truncate the untrusted, client-influenced gcode_flavor value before echoing it into
+            // the exception message: an adversarial machine profile could otherwise smuggle an
+            // arbitrarily large string into job failure telemetry/logs (same rationale as the
+            // pressure advance tower gate above).
+            string flavorForMessage = gcodeFlavor is null ? "(unset)" : TruncateForMessage(gcodeFlavor);
             throw new InvalidOperationException(
                 $"Cornering calibration (job {job.Id}) is not supported for gcode flavor " +
-                $"'{gcodeFlavor ?? "(unset)"}'. Only Marlin/Marlin2 (jerk / junction deviation via " +
+                $"'{flavorForMessage}'. Only Marlin/Marlin2 (jerk / junction deviation via " +
                 "M205) and Klipper (SQUARE_CORNER_VELOCITY) are supported; refusing rather than " +
                 "silently slicing a result the printer's firmware cannot apply.");
         }

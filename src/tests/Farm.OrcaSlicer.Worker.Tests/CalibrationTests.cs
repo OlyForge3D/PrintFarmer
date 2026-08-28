@@ -257,6 +257,24 @@ public class CalibrationTests : IDisposable
     }
 
     [Fact]
+    public async Task ValidateCorneringFirmwareFlavorAsync_OversizedUnsupportedFlavor_TruncatesValueInMessage()
+    {
+        // Mirrors the pressure advance tower gate's truncation safeguard: an adversarial or
+        // malformed machine profile must not be able to smuggle an arbitrarily large gcode_flavor
+        // value into job failure telemetry/logs via this exception message.
+        string oversizedFlavor = new('x', 500);
+        string machineJsonPath = WriteMachineJsonWithGcodeFlavor(oversizedFlavor);
+        DistributedSlicingJob job = new();
+
+        Func<Task> act = () => OrcaSlicingPipelineService.ValidateCorneringFirmwareFlavorAsync(
+            job, machineJsonPath, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message
+            .Should().NotContain(oversizedFlavor)
+            .And.Contain(new string('x', 64));
+    }
+
+    [Fact]
     public async Task ValidateCorneringFirmwareFlavorAsync_SingleElementArrayEncoding_IsTolerated()
     {
         // OrcaSlicer sometimes encodes scalar config values as single-element JSON arrays;

@@ -134,6 +134,38 @@ public class PrintersControllerCorneringFieldsUpdateTests : IClassFixture<Custom
         persisted.Notes.Should().Be("unrelated update");
     }
 
+    [Theory]
+    [InlineData(-1, null, null, "maxJerk")]
+    [InlineData(null, -0.01, null, "junctionDeviation")]
+    [InlineData(null, null, -1.0, "squareCornerVelocity")]
+    public async Task UpdatePrinter_WhenCorneringFieldIsNegative_ReturnsBadRequestAndDoesNotPersist(
+        int? maxJerk, double? junctionDeviation, double? squareCornerVelocity, string expectedField)
+    {
+        // Vasquez review (issue #2138): a negative motion-planner tunable is physically
+        // nonsensical and must be rejected with 400 rather than silently persisted -- it could
+        // later flow into slicer/firmware configuration downstream.
+        Guid printerId = await SeedPrinterAsync();
+
+        var dto = new UpdatePrinterDto(
+            MaxJerk: maxJerk,
+            JunctionDeviation: junctionDeviation,
+            SquareCornerVelocity: squareCornerVelocity);
+
+        HttpResponseMessage response = await PutPrinterAsync(printerId, dto);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain(expectedField);
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Printer persisted = await db.Printers.SingleAsync(p => p.Id == printerId);
+
+        persisted.MaxJerk.Should().BeNull();
+        persisted.JunctionDeviation.Should().BeNull();
+        persisted.SquareCornerVelocity.Should().BeNull();
+    }
+
     private async Task<HttpResponseMessage> PutPrinterAsync(
         Guid printerId,
         UpdatePrinterDto dto)
