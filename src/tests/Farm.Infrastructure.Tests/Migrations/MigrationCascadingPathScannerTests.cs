@@ -252,7 +252,7 @@ public sealed class MigrationCascadingPathScannerTests
         }
     }
 
-    private static IEnumerable<(string Ancestor, string Descendant, List<string> Paths)> EnumerateMultiCascadingPaths(
+    private static List<(string Ancestor, string Descendant, List<string> Paths)> EnumerateMultiCascadingPaths(
         Dictionary<string, Dictionary<string, (string Referenced, ReferentialAction OnDelete)>> graph)
     {
         // Build ancestor → list of (descendant, edgeOnDelete, fkName) tuples for cascading

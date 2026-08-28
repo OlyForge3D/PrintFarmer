@@ -126,7 +126,7 @@ public class OperatorFeatureProblemDetailsTests
         repo.Setup(r => r.GetReadOnlyAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()))
             .ReturnsAsync((AppSettingsEntity?)null);
         IConfiguration config = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
-        IOperatorFeatureGate gate = new OperatorFeatureGate(
+        OperatorFeatureGate gate = new(
             repo.Object,
             config,
             NullLogger<OperatorFeatureGate>.Instance);

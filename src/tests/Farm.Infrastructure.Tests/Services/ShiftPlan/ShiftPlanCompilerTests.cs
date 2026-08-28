@@ -1775,7 +1775,7 @@ public class ShiftPlanCompilerTests
             LastMutationSequence = sequence,
         };
 
-    private static IShiftPlanTaskSource AuthoritySource(
+    private static ControlledSource AuthoritySource(
         string name,
         UserTaskSourceKind kind,
         long? originWatermark,

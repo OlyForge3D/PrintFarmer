@@ -63,7 +63,7 @@ public sealed class PrintedPartReorderShiftPlanTaskSourceTests
         };
         var source = new PrintedPartReorderShiftPlanTaskSource(reorder, ControlledFeatureGate.Enabled());
 
-        IReadOnlyList<ShiftPlanTaskSpec> specs = await source.ProduceAsync(CancellationToken.None);
+        ShiftPlanSourceResult specs = await source.ProduceAsync(CancellationToken.None);
 
         Assert.Equal(4, specs.Count);
         Assert.Equal(4, specs.Select(spec => spec.SourceId).Distinct(StringComparer.Ordinal).Count());

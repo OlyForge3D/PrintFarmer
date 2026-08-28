@@ -49,7 +49,6 @@
            positives (Moq Setup/Returns callbacks, Task.Run/Task.Factory.StartNew awaited later
            via Task.WhenAll) suppressed with a scoped #pragma warning disable/restore IDISP013
            plus an explanatory comment at each site. -->
-      CA1859;   <!-- Use a more specific return type for performance (54) -->
       CA1826;   <!-- Use property instead of Linq method, e.g. Count() vs Count (40) -->
       S1144;    <!-- Unused private types or members (36) -->
       VSTHRD003;<!-- Avoid awaiting foreign Tasks (30) -->

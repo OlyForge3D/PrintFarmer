@@ -23,7 +23,7 @@ namespace Farm.Slicer.Module.Tests.Services;
 
 public class ModelServiceTests
 {
-    private static IFormFile CreateFormFile(string name, string content, string fileName)
+    private static FormFile CreateFormFile(string name, string content, string fileName)
     {
         MemoryStream ms = new MemoryStream(Encoding.UTF8.GetBytes(content));
         return new FormFile(ms, 0, ms.Length, name, fileName);

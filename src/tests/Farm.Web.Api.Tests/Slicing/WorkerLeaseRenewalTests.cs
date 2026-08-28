@@ -338,7 +338,7 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
             string jobDirectory,
             Guid leaseToken,
             long leaseFence,
-            IWorkerStateService workerStateService,
+            WorkerStateService workerStateService,
             Action<System.Net.Http.Headers.HttpRequestHeaders>? configureDefaults = null)
         {
             _jobDirectory = jobDirectory;

@@ -78,7 +78,7 @@ public class SlicersServiceWorkerSyncTests
         return mock;
     }
 
-    private static ILogger<SlicersService> CreateMockLogger()
+    private static NullLogger<SlicersService> CreateMockLogger()
     {
         return NullLogger<SlicersService>.Instance;
     }

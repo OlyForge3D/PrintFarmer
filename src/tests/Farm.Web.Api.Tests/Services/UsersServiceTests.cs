@@ -22,7 +22,7 @@ public class UsersServiceTests
     private readonly Mock<IPasswordHashingService> _passwordHashingServiceMock;
     private readonly Mock<IEffectivePermissionsRevocationService> _revocationServiceMock;
     private readonly Mock<IAuthAuditService> _authAuditServiceMock;
-    private readonly IUsersService _usersService;
+    private readonly UsersService _usersService;
     private readonly CancellationToken _cancellationToken = CancellationToken.None;
     private readonly Guid _actorUserId = Guid.NewGuid();
 
