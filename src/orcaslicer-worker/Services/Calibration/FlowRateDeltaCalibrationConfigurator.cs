@@ -106,7 +106,18 @@ public static partial class FlowRateDeltaCalibrationConfigurator
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
         ArgumentNullException.ThrowIfNull(logger);
 
-        string destinationPath = Path.Combine(destinationDirectory, Path.GetFileName(source3mfPath));
+        // Path.GetFileName never returns a rooted path in practice, but CodeQL's cs/path-combine
+        // check cannot prove that from the call alone (Path.Combine silently drops earlier
+        // arguments when a later one is rooted). Guard explicitly so the intent is verifiable
+        // by inspection rather than relying on GetFileName's undocumented behavior.
+        string sourceFileName = Path.GetFileName(source3mfPath);
+        if (string.IsNullOrEmpty(sourceFileName) || Path.IsPathRooted(sourceFileName))
+        {
+            throw new InvalidOperationException(
+                $"Calibration resource path '{source3mfPath}' does not resolve to a valid file name.");
+        }
+
+        string destinationPath = Path.Combine(destinationDirectory, sourceFileName);
         File.Copy(source3mfPath, destinationPath, overwrite: true);
 
         try
