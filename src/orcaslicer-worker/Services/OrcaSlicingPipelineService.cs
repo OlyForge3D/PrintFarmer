@@ -396,7 +396,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         try
         {
             using JsonDocument document = JsonDocument.Parse(filamentJson);
-            if (!document.RootElement.TryGetProperty("filament_flow_ratio", out JsonElement flowRatioElement))
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("filament_flow_ratio", out JsonElement flowRatioElement))
             {
                 return null;
             }

@@ -878,6 +878,29 @@ public class CalibrationTests : IDisposable
     }
 
     [Fact]
+    public void ResolveBaselineFlowRatio_NativeProfilesJsonRootIsNotAnObject_ThrowsRatherThanGuessing()
+    {
+        // A valid-JSON-but-non-object root (e.g. a bare array or string) must not crash with a raw
+        // InvalidOperationException from TryGetProperty — it should refuse cleanly like any other
+        // unparseable native profile.
+        var job = new DistributedSlicingJob
+        {
+            NativeProfiles = new NativeSlicerProfiles(
+                MachineJson: "{}",
+                ProcessJson: "{}",
+                FilamentJson: "[\"1.05\"]",
+                MachineSha256: "m",
+                ProcessSha256: "p",
+                FilamentSha256: "f"),
+        };
+
+        Action act = () => OrcaSlicingPipelineService.ResolveBaselineFlowRatio(job);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*filament_flow_ratio*");
+    }
+
+    [Fact]
     public void PrepareCalibrationModel_YoloRecommendedMethod_NativeProfilesPresent_UsesNativeBaselineOverJobProfile()
     {
         // End-to-end variant of ResolveBaselineFlowRatio_NativeProfilesPresent_PrefersNativeOverJobProfile
