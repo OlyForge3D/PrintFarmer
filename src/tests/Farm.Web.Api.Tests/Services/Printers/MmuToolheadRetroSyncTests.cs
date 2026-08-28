@@ -42,7 +42,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         _factory?.Dispose();
     }
 
-    private async Task<Printer> SeedLegacyMmuPrinter(string name = "Legacy MMU Printer")
+    private async Task<Printer> SeedLegacyMmuPrinterAsync(string name = "Legacy MMU Printer")
     {
         await using AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope();
         AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -83,7 +83,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         return printer;
     }
 
-    private async Task<Printer> SeedSingleToolheadPrinter(bool hasMmu = false)
+    private async Task<Printer> SeedSingleToolheadPrinterAsync(bool hasMmu = false)
     {
         await using AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope();
         AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -125,7 +125,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         return printer;
     }
 
-    private async Task<Printer> SeedMmuPrinterWithGates(int gateCount = 4, string name = "MMU Printer With Gates")
+    private async Task<Printer> SeedMmuPrinterWithGatesAsync(int gateCount = 4, string name = "MMU Printer With Gates")
     {
         await using AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope();
         AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -179,7 +179,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         return printer;
     }
 
-    private async Task<Printer> SeedSnapmakerU1StylePrinter()
+    private async Task<Printer> SeedSnapmakerU1StylePrinterAsync()
     {
         await using AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope();
         AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -229,7 +229,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     /// (physicalToolheadCount &gt; 1) declines gate creation even though HasConfirmedMmuSignal
     /// authorized a tentative promotion — used to prove the same-call rollback path.
     /// </summary>
-    private async Task<Printer> SeedToolchangerWithConfirmedMmuSignalPrinter()
+    private async Task<Printer> SeedToolchangerWithConfirmedMmuSignalPrinterAsync()
     {
         await using AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope();
         AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -278,7 +278,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     [Fact]
     public async Task EnsureMmuToolheadsAsync_CreatesGates_ForLegacyMmuPrinter()
     {
-        Printer printer = await SeedLegacyMmuPrinter();
+        Printer printer = await SeedLegacyMmuPrinterAsync();
 
         CommandResult result = await _printersService.EnsureMmuToolheadsAsync(printer.Id, CancellationToken.None);
 
@@ -301,7 +301,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     [Fact]
     public async Task EnsureMmuToolheadsAsync_IsIdempotent_WhenGatesAlreadyExist()
     {
-        Printer printer = await SeedMmuPrinterWithGates(gateCount: 4);
+        Printer printer = await SeedMmuPrinterWithGatesAsync(gateCount: 4);
 
         CommandResult result = await _printersService.EnsureMmuToolheadsAsync(printer.Id, CancellationToken.None);
 
@@ -318,7 +318,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         // 3 persisted gates (Index 1-3) while live hardware reports 4 — the exact
         // Qidi Plus 4 scenario from issue #1588: the gate set must grow to cover
         // the missing gate rather than reporting success without acting.
-        Printer printer = await SeedMmuPrinterWithGates(gateCount: 3);
+        Printer printer = await SeedMmuPrinterWithGatesAsync(gateCount: 3);
 
         CommandResult result = await _printersService.EnsureMmuToolheadsAsync(printer.Id, CancellationToken.None);
 
@@ -345,7 +345,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     [Fact]
     public async Task EnsureMmuToolheadsAsync_DoesNotCreateMmuGates_ForU1PhysicalToolheads()
     {
-        Printer printer = await SeedSnapmakerU1StylePrinter();
+        Printer printer = await SeedSnapmakerU1StylePrinterAsync();
 
         CommandResult result = await _printersService.EnsureMmuToolheadsAsync(printer.Id, CancellationToken.None);
 
@@ -363,7 +363,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     [Fact]
     public async Task EnsureMmuToolheadsAsync_NoOp_ForNonMmuPrinter()
     {
-        Printer printer = await SeedSingleToolheadPrinter();
+        Printer printer = await SeedSingleToolheadPrinterAsync();
 
         CommandResult result = await _printersService.EnsureMmuToolheadsAsync(printer.Id, CancellationToken.None);
 
@@ -388,7 +388,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     [Fact]
     public async Task SetToolheadSpoolAsync_AutoCreatesGates_ForLegacyMmuPrinter()
     {
-        Printer printer = await SeedLegacyMmuPrinter();
+        Printer printer = await SeedLegacyMmuPrinterAsync();
 
         int beforeCount = await _dbContext.Toolheads.CountAsync(t => t.PrinterId == printer.Id);
         beforeCount.Should().Be(1);
@@ -409,7 +409,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     [Fact]
     public async Task ClearToolheadSpoolAsync_AutoCreatesGates_ForLegacyMmuPrinter()
     {
-        Printer printer = await SeedLegacyMmuPrinter();
+        Printer printer = await SeedLegacyMmuPrinterAsync();
 
         int beforeCount = await _dbContext.Toolheads.CountAsync(t => t.PrinterId == printer.Id);
         beforeCount.Should().Be(1);
@@ -433,7 +433,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         // HasMmu=true is the positive hardware-reported signal (e.g. PrusaLink polling)
         // that this printer really has an AMS/MMU — auto-promotion is only legitimate
         // when that signal is present. See issue #1600.
-        Printer printer = await SeedSingleToolheadPrinter(hasMmu: true);
+        Printer printer = await SeedSingleToolheadPrinterAsync(hasMmu: true);
 
         CommandResult result = await _printersService.SetToolheadSpoolAsync(printer.Id, 1, spoolId: 999, CancellationToken.None);
 
@@ -460,7 +460,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     [Fact]
     public async Task SetToolheadSpoolAsync_DoesNotPromoteMultiMaterial_ForToolchangerMissingToolhead()
     {
-        Printer printer = await SeedSingleToolheadPrinter(hasMmu: false);
+        Printer printer = await SeedSingleToolheadPrinterAsync(hasMmu: false);
 
         CommandResult result = await _printersService.SetToolheadSpoolAsync(printer.Id, 1, spoolId: 999, CancellationToken.None);
 
@@ -483,7 +483,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     [Fact]
     public async Task ClearToolheadSpoolAsync_DoesNotPromoteMultiMaterial_ForToolchangerMissingToolhead()
     {
-        Printer printer = await SeedSingleToolheadPrinter(hasMmu: false);
+        Printer printer = await SeedSingleToolheadPrinterAsync(hasMmu: false);
 
         CommandResult result = await _printersService.ClearToolheadSpoolAsync(printer.Id, 1, CancellationToken.None);
 
@@ -510,7 +510,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     [Fact]
     public async Task ClearToolheadSpoolAsync_RollsBackMultiMaterial_WhenGateCreationDeclinedAfterPromotion()
     {
-        Printer printer = await SeedToolchangerWithConfirmedMmuSignalPrinter();
+        Printer printer = await SeedToolchangerWithConfirmedMmuSignalPrinterAsync();
 
         CommandResult result = await _printersService.ClearToolheadSpoolAsync(printer.Id, 5, CancellationToken.None);
 
@@ -543,7 +543,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     [Fact]
     public async Task SetToolheadSpoolAsync_ExtendsPartialGateSet_AssigningToLiveOnlyFourthGate()
     {
-        Printer printer = await SeedMmuPrinterWithGates(gateCount: 3, name: "Qidi Plus 4");
+        Printer printer = await SeedMmuPrinterWithGatesAsync(gateCount: 3, name: "Qidi Plus 4");
 
         // Bind existing gates 1-3 to spools so we can assert they are preserved untouched.
         List<Toolhead> seededGates = await _dbContext.Toolheads

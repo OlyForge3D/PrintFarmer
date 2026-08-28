@@ -933,7 +933,7 @@ public class FilamentCoverageServiceTests
         Printer? seedPrinter = null;
         DateTime start = DateTime.UtcNow.AddMinutes(-30);
 
-        async Task<PrinterFilamentCoverageDto?> Snapshot(double progress)
+        async Task<PrinterFilamentCoverageDto?> SnapshotAsync(double progress)
         {
             (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, _) =
                 BuildService(liveProgress: progress);
@@ -955,7 +955,7 @@ public class FilamentCoverageServiceTests
         int? layerAt0 = null;
         foreach (double progress in new[] { 0.0, 15.0, 30.0, 55.0, 80.0 })
         {
-            PrinterFilamentCoverageDto? cov = await Snapshot(progress);
+            PrinterFilamentCoverageDto? cov = await SnapshotAsync(progress);
             cov.Should().NotBeNull($"progress={progress}");
             ToolheadCoverageDto slot = cov!.Toolheads.Single();
 

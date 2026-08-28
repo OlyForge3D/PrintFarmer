@@ -41,7 +41,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         return Task.CompletedTask;
     }
 
-    private static async Task DumpResponse(HttpResponseMessage resp, string tag)
+    private static async Task DumpResponseAsync(HttpResponseMessage resp, string tag)
     {
         try
         {
@@ -116,7 +116,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
             LastName = registerRequest.LastName
         });
         // Dump HTTP response for diagnostics
-        await DumpResponse(registerResponse, "registerResponse");
+        await DumpResponseAsync(registerResponse, "registerResponse");
 
         using IServiceScope scope = _factory.Services.CreateScope();
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -130,7 +130,7 @@ public class AuthAuditIntegrationTests : IClassFixture<CustomWebApplicationFacto
         LoginRequest loginRequest = new LoginRequest { UsernameOrEmail = "auditloginuser", Password = "SecurePassword123!" };
         HttpResponseMessage loginResponse = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.UsernameOrEmail, Password = loginRequest.Password });
         // Dump HTTP response for diagnostics
-        await DumpResponse(loginResponse, "loginResponse");
+        await DumpResponseAsync(loginResponse, "loginResponse");
 
         // Assert - Check audit log
         using IServiceScope verifyScope = _factory.Services.CreateScope();

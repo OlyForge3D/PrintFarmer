@@ -422,7 +422,7 @@ public sealed class SlicePrintBridgeAddToQueueTests
             .Setup(g => g.DeleteFileAsync(gcodeFileId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
-        var (result, fakePath) = await SetupAndRunQueueReturnsNull(jobId, gcodeFileId, isNewFile: true);
+        var (result, fakePath) = await SetupAndRunQueueReturnsNullAsync(jobId, gcodeFileId, isNewFile: true);
 
         try
         {
@@ -446,7 +446,7 @@ public sealed class SlicePrintBridgeAddToQueueTests
         Guid jobId = Guid.NewGuid();
         Guid gcodeFileId = Guid.NewGuid();
 
-        var (result, fakePath) = await SetupAndRunQueueReturnsNull(jobId, gcodeFileId, isNewFile: false);
+        var (result, fakePath) = await SetupAndRunQueueReturnsNullAsync(jobId, gcodeFileId, isNewFile: false);
 
         try
         {
@@ -569,7 +569,7 @@ public sealed class SlicePrintBridgeAddToQueueTests
             .ReturnsAsync(new List<Artifact> { gcodeArtifact });
     }
 
-    private async Task<(IActionResult result, string fakePath)> SetupAndRunQueueReturnsNull(
+    private async Task<(IActionResult result, string fakePath)> SetupAndRunQueueReturnsNullAsync(
         Guid jobId, Guid gcodeFileId, bool isNewFile)
     {
         Artifact artifact = CreateArtifact(jobId, "gcode", "model.gcode");
