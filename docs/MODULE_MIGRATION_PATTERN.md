@@ -275,7 +275,12 @@ never candidates for module extraction — see the epic's own non-goal
 chase the file count further.
 
 **Manifest schema recap:** no new module or test project is introduced by
-this phase, so `scripts/ci/dotnet-test-manifest.json` needs no new entry;
-the existing `Farm.Web.Api.Tests` entry already covers the guardrail test.
-CI continues to assert every `*.Tests.csproj` is registered in the manifest
-exactly once (`scripts/ci/tests/test-dotnet-test-manifest.sh`).
+this phase, so `scripts/ci/dotnet-test-manifest.json` needs no new
+top-level entry — but the guardrail test's new `Architecture/` namespace
+*does* need to be added to an existing `Farm.Web.Api.Tests` shard's
+`namespacePrefixes`/`filter` (it was added to the `core` shard), because
+`scripts/ci/tests/test-dotnet-test-manifest.sh` asserts every namespace
+subdirectory under a sharded test project's directory is claimed by
+exactly one shard — an unclaimed namespace is silently excluded from every
+CI leg. CI continues to assert every `*.Tests.csproj` is registered in the
+manifest exactly once (`scripts/ci/tests/test-dotnet-test-manifest.sh`).
