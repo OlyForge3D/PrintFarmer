@@ -303,28 +303,20 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             return FlowRateCalibrationConfigurator.ApplyPerObjectFlowRatios(sourcePath, workDir, _logger);
         }
 
-        if (method is CalibrationMethod.FlowRateYoloRecommended)
+        if (method is CalibrationMethod.FlowRateYoloRecommended or CalibrationMethod.FlowRateYoloPerfectionist)
         {
-            // The YOLO flow-ratio resources encode per-object flow ratios as baseline-relative
-            // deltas (e.g. "flowrate_0.01", "flowrate_m0.01"), not the absolute percentages (e.g.
-            // "flowrate_95") FlowRateCalibrationConfigurator parses for pass1/pass2 — see
-            // CalibrationMethod.cs for the full investigation (issue #2051). Issue #2141 added
-            // FlowRateDeltaCalibrationConfigurator, which applies baseline + delta per object
-            // instead of reusing that absolute-percentage parser.
+            // Both YOLO flow-ratio resources encode per-object flow ratios as baseline-relative
+            // deltas (e.g. "flowrate_0.01"/"flowrate_m0.01" for Recommended's 0.01 steps,
+            // "flowrate_0.005"/"flowrate_m0.035" for Perfectionist's finer 0.005 steps), not the
+            // absolute percentages (e.g. "flowrate_95") FlowRateCalibrationConfigurator parses for
+            // pass1/pass2 — see CalibrationMethod.cs for the full investigation (issue #2051).
+            // Issue #2141 added FlowRateDeltaCalibrationConfigurator, which applies baseline +
+            // delta per object instead of reusing that absolute-percentage parser; issue #2142
+            // confirmed its regex already tolerates Perfectionist's extra decimal place unmodified
+            // and wired Perfectionist into the same call.
             double baselineFlowRatio = ResolveBaselineFlowRatio(job);
             return FlowRateDeltaCalibrationConfigurator.ApplyPerObjectFlowRatioDeltas(
                 sourcePath, workDir, baselineFlowRatio, _logger);
-        }
-
-        if (method is CalibrationMethod.FlowRateYoloPerfectionist)
-        {
-            // Tracked separately (issue #2142): same delta-based naming scheme as Recommended, but
-            // not yet wired to FlowRateDeltaCalibrationConfigurator. Fail loudly instead of slicing
-            // an uncalibrated result until that follow-up ships.
-            throw new InvalidOperationException(
-                $"Calibration method '{job.CalibrationMethod}' is catalogued but not yet slicer-supported: " +
-                "its bundled resource uses a delta-based per-object naming scheme the worker cannot apply " +
-                "overrides for. A dedicated configurator wiring is required before this method can be used.");
         }
 
         string destinationPath = Path.Combine(workDir, Path.GetFileName(sourcePath));
