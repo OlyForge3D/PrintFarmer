@@ -295,11 +295,10 @@ public class DesktopApiKeyExchangePolicyIntegrationTests : IClassFixture<Desktop
         });
         await factory.ResetDataAsync();
 
-        HttpClient loginClient = await factory.CreateAuthenticatedClientAsync(
+        using HttpClient loginClient = await factory.CreateAuthenticatedClientAsync(
             "rate-limit-owner",
             "rate-limit-owner@example.com",
             "TestPassword123!");
-        loginClient.Dispose();
 
         Guid ownerId;
         using (AsyncServiceScope scope = factory.Services.CreateAsyncScope())

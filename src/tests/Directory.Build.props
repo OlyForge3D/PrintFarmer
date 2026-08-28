@@ -66,7 +66,16 @@
            completion, and hand-written test-double/fake helpers returning a TaskCompletionSource's
            Task to control fake-dependency timing — each suppressed with a scoped #pragma warning
            disable/restore VSTHRD003 plus an explanatory comment at each site. -->
-      IDISP017; <!-- Prefer using-declaration (24) -->
+      <!-- IDISP017 (Prefer using-declaration) fully cleared across src/tests/ — see #2106
+           burn-down. All 16 distinct instances (the issue's original "24" estimate overcounted,
+           consistent with the duplicate-build-log-line effect noted for other tiers above) were
+           either converted directly to a `using`/`using var` declaration (dropping a manual
+           trailing `.Dispose()` call that was otherwise redundant with scope-end disposal), or,
+           for a small number of tests whose entire point is to exercise explicit/idempotent
+           `Dispose()` call semantics directly (double-Dispose tests, a Dispose-behavior unit
+           test), suppressed with a scoped #pragma warning disable/restore IDISP017 plus an
+           explanatory comment at each site, since a using-declaration cannot express repeated or
+           directly-observed Dispose() calls. -->
       SA1414;   <!-- Tuple types in signatures should have element names (18) -->
       CA1862;   <!-- Use case-insensitive string comparison methods (18) -->
       VSTHRD200;<!-- Use Async suffix for async methods (18) -->

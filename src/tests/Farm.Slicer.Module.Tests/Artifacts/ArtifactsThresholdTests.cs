@@ -94,7 +94,7 @@ public class ArtifactsThresholdTests
         using ArtifactsMetrics metrics = new ArtifactsMetrics();
         metrics.SetThresholds(warningBytes: 1000, criticalBytes: 5000);
 
-        MeterListener meterListener = new MeterListener();
+        using MeterListener meterListener = new MeterListener();
         List<int> stateValues = new List<int>();
 
         meterListener.InstrumentPublished = (instrument, listener) =>
@@ -129,8 +129,6 @@ public class ArtifactsThresholdTests
         metrics.RecordUpload(4000);
         meterListener.RecordObservableInstruments();
         int criticalState = stateValues.LastOrDefault();
-
-        meterListener.Dispose();
 
         // Assert
         _ = initialState.Should().Be(0); // Normal

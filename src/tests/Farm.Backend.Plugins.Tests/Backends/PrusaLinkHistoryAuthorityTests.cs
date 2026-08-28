@@ -1590,8 +1590,13 @@ public sealed class PrusaLinkHistoryAuthorityTests
             http,
             NullLogger<PrusaLinkApiClient>.Instance);
 
+        // IDISP017: intentionally not a using-declaration - this test exercises idempotent
+        // double-Dispose() behavior directly, which a using-declaration (single implicit
+        // Dispose() call) cannot express.
+#pragma warning disable IDISP017
         client.Dispose();
         client.Dispose();
+#pragma warning restore IDISP017
 
         handler.DisposeCount.Should().Be(0);
     }

@@ -236,7 +236,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime, IDisposa
     public async Task Complete_Job_Fails_401_Without_Auth()
     {
         // Arrange - use a client without worker key header
-        HttpClient clientWithoutWorkerKey = await _factory.CreateAdminClientAsync();
+        using HttpClient clientWithoutWorkerKey = await _factory.CreateAdminClientAsync();
 
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
@@ -284,8 +284,6 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime, IDisposa
         SliceJob? unchangedJob = await jobRepo.GetByIdAsync(job.Id);
         _ = unchangedJob!.Status.Should().Be(SliceJobStatus.Processing);
         _ = unchangedJob.CompletedAt.Should().BeNull();
-
-        clientWithoutWorkerKey.Dispose();
     }
 
     [Fact(DisplayName = "Complete job with large log text and multiple thumbnails")]

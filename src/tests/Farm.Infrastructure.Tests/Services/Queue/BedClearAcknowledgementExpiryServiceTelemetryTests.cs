@@ -162,7 +162,6 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
 
         recordEvents();
 
-        listener.Dispose();
         return (counts, durations);
     }
 
