@@ -21,7 +21,27 @@
 /// <c>Plater::calib_max_vol_speed</c>/<c>Plater::calib_retraction</c> and their
 /// <c>CalibMode::Calib_Vol_speed_Tower</c>/<c>CalibMode::Calib_Retraction_tower</c> modes exist
 /// in <c>calib_dlg.cpp</c>); they simply have no resource resolver, configurator, or pipeline
-/// wiring in this repo yet, unlike temperature-tower and flow-rate.
+/// wiring in this repo yet, unlike temperature-tower and flow-rate. Retraction is now built (see
+/// <see cref="Retraction"/>); max volumetric speed remains unbuilt.
+/// </para>
+/// <para>
+/// <see cref="Retraction"/> (issue #2137): the bundled <c>retraction_tower.drc</c> resource is a
+/// single raw Draco mesh with no per-object names or metadata — unlike the flow-rate towers'
+/// 3MF resources, there is nothing here for a <c>FlowRateCalibrationConfigurator</c>-style
+/// per-object rewrite to target. Upstream's native sweep
+/// (<c>CalibMode::Calib_Retraction_tower</c> in <c>GCode.cpp</c>) mutates the slicing engine's
+/// internal <c>retraction_length</c> config directly per layer, a hook the CLI-driven worker
+/// cannot reach. The worker instead reimplements the sweep via a <c>layer_change_gcode</c>
+/// injection (mirroring <see cref="TemperatureTower"/>'s <c>M104</c> approach) that issues
+/// <c>M207 S...</c> once per Z-band, and forces the machine profile's
+/// <c>use_firmware_retraction</c> setting on for these jobs — <c>M207</c> only takes effect when
+/// firmware retraction is enabled, since software retraction bakes the retraction length into
+/// <c>G1 E...</c> moves at slice time instead of reading it live. This produces a per-band
+/// <em>retraction length</em> result; write-back into a filament profile (as opposed to a
+/// machine profile) is the calibration-consumer's job and is intentionally out of scope for the
+/// worker — see the issue for the recommendation that a future desktop-side workflow store the
+/// selected band's length as a filament override, analogous to how flow-rate results are
+/// consumed today.
 /// </para>
 /// <para>
 /// <see cref="FlowRateYoloRecommended"/>/<see cref="FlowRateYoloPerfectionist"/>'s bundled 3MF
@@ -58,6 +78,14 @@ public enum CalibrationMethod
     /// method's per-object overrides.
     /// </summary>
     FlowRateYoloPerfectionist,
+
+    /// <summary>
+    /// Retraction tower calibration (issue #2137). See the type-level remarks for how the worker
+    /// reimplements upstream's native per-band sweep via injected <c>layer_change_gcode</c> plus
+    /// a forced <c>use_firmware_retraction</c> machine-profile setting, and for the deliberate
+    /// out-of-scope note on filament-profile write-back.
+    /// </summary>
+    Retraction,
 }
 
 /// <summary>
@@ -75,6 +103,7 @@ public static class CalibrationMethods
             ["temperature_tower"] = CalibrationMethod.TemperatureTower,
             ["flow_rate_yolo_recommended"] = CalibrationMethod.FlowRateYoloRecommended,
             ["flow_rate_yolo_perfectionist"] = CalibrationMethod.FlowRateYoloPerfectionist,
+            ["retraction"] = CalibrationMethod.Retraction,
         };
 
     private static readonly Dictionary<CalibrationMethod, string> MethodToWireName =
@@ -85,6 +114,7 @@ public static class CalibrationMethods
             [CalibrationMethod.TemperatureTower] = "temperature_tower",
             [CalibrationMethod.FlowRateYoloRecommended] = "flow_rate_yolo_recommended",
             [CalibrationMethod.FlowRateYoloPerfectionist] = "flow_rate_yolo_perfectionist",
+            [CalibrationMethod.Retraction] = "retraction",
         };
 
     /// <summary>
@@ -164,6 +194,7 @@ public static class CalibrationMethods
         CalibrationMethod.TemperatureTower => "temperature_tower.drc",
         CalibrationMethod.FlowRateYoloRecommended => "Orca-LinearFlow.3mf",
         CalibrationMethod.FlowRateYoloPerfectionist => "Orca-LinearFlow_fine.3mf",
+        CalibrationMethod.Retraction => "retraction_tower.drc",
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 
@@ -178,6 +209,7 @@ public static class CalibrationMethods
         CalibrationMethod.TemperatureTower => Path.Combine("temperature_tower", "temperature_tower.drc"),
         CalibrationMethod.FlowRateYoloRecommended => Path.Combine("filament_flow", "Orca-LinearFlow.3mf"),
         CalibrationMethod.FlowRateYoloPerfectionist => Path.Combine("filament_flow", "Orca-LinearFlow_fine.3mf"),
+        CalibrationMethod.Retraction => Path.Combine("retraction", "retraction_tower.drc"),
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 }

@@ -50,6 +50,8 @@ public class CalibrationTests : IDisposable
     [InlineData("flow_rate_yolo_recommended", CalibrationMethod.FlowRateYoloRecommended)]
     [InlineData("flow_rate_yolo_perfectionist", CalibrationMethod.FlowRateYoloPerfectionist)]
     [InlineData("FLOW_RATE_YOLO_RECOMMENDED", CalibrationMethod.FlowRateYoloRecommended)]
+    [InlineData("retraction", CalibrationMethod.Retraction)]
+    [InlineData("RETRACTION", CalibrationMethod.Retraction)]
     public void TryParse_SupportedWireName_ReturnsExpectedMethod(string wireName, CalibrationMethod expected)
     {
         bool parsed = CalibrationMethods.TryParse(wireName, out CalibrationMethod method);
@@ -63,15 +65,15 @@ public class CalibrationTests : IDisposable
     [InlineData("pa_line")]
     [InlineData("not_a_real_method")]
     [InlineData("max_volumetric_speed")]
-    [InlineData("retraction")]
     [InlineData("")]
     [InlineData(null)]
     public void TryParse_UnsupportedOrMissingWireName_ReturnsFalse(string? wireName)
     {
         // PA Pattern (GPL-3.0 provenance) and PA Line (Bambu-specific) are deliberately not
-        // supported yet, and max_volumetric_speed/retraction are simply not yet built (issue
-        // #2051 investigation) — all must fail clearly rather than silently degrading into a
-        // generic slice failure.
+        // supported yet, and max_volumetric_speed is simply not yet built (issue #2051
+        // investigation; retraction was built by issue #2137, see the Retraction-specific tests
+        // below) — all must fail clearly rather than silently degrading into a generic slice
+        // failure.
         bool parsed = CalibrationMethods.TryParse(wireName, out _);
 
         parsed.Should().BeFalse();
@@ -96,7 +98,8 @@ public class CalibrationTests : IDisposable
         // immediately rejects.
         CalibrationMethods.ClientAcceptedWireNames.Should()
             .NotContain("flow_rate_yolo_recommended")
-            .And.NotContain("flow_rate_yolo_perfectionist");
+            .And.NotContain("flow_rate_yolo_perfectionist")
+            .And.Contain("retraction", "issue #2137 makes retraction a fully slicer-supported method");
 
         foreach (string wireName in CalibrationMethods.ClientAcceptedWireNames)
         {
@@ -111,6 +114,7 @@ public class CalibrationTests : IDisposable
     [Theory]
     [InlineData(CalibrationMethod.FlowRateYoloRecommended, "Orca-LinearFlow.3mf")]
     [InlineData(CalibrationMethod.FlowRateYoloPerfectionist, "Orca-LinearFlow_fine.3mf")]
+    [InlineData(CalibrationMethod.Retraction, "retraction_tower.drc")]
     public void DefaultModelFileName_YoloMethods_ReturnsExpectedFileName(CalibrationMethod method, string expected)
     {
         CalibrationMethods.DefaultModelFileName(method).Should().Be(expected);
@@ -122,6 +126,13 @@ public class CalibrationTests : IDisposable
     public void RelativeResourcePath_YoloMethods_ResolvesUnderFilamentFlowDirectory(CalibrationMethod method, string expectedFileName)
     {
         CalibrationMethods.RelativeResourcePath(method).Should().Be(Path.Combine("filament_flow", expectedFileName));
+    }
+
+    [Fact]
+    public void RelativeResourcePath_Retraction_ResolvesUnderRetractionDirectory()
+    {
+        CalibrationMethods.RelativeResourcePath(CalibrationMethod.Retraction)
+            .Should().Be(Path.Combine("retraction", "retraction_tower.drc"));
     }
 
     #endregion
@@ -214,6 +225,95 @@ public class CalibrationTests : IDisposable
 
     #endregion
 
+    #region RetractionTowerGcodeBuilder
+
+    [Fact]
+    public void BuildLayerChangeGcode_Retraction_ProducesAscendingRetractionPerBand()
+    {
+        string gcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            startRetractionMm: 0.2,
+            retractionStepMm: 0.2,
+            bandHeightMm: 5,
+            bandCount: 8);
+
+        // 8 bands starting at 0.2mm, stepping up 0.2mm every 5mm: the bottom band (band 0, no
+        // threshold) stays at 0.2mm, and the top band (band 7, z >= 35) reaches 1.6mm.
+        gcode.Should().StartWith("M207 S");
+        gcode.Should().Contain("{if layer_z >= 35}1.6");
+        gcode.Should().Contain("{elsif layer_z >= 30}1.4");
+        gcode.Should().Contain("{elsif layer_z >= 5}0.4");
+        gcode.Should().Contain("{else}0.2{endif}");
+
+        // The tallest band's condition must be evaluated first, since {if}/{elsif} stops at the
+        // first true branch.
+        gcode.IndexOf("layer_z >= 35", StringComparison.Ordinal)
+            .Should().BeLessThan(gcode.IndexOf("layer_z >= 5", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BuildLayerChangeGcode_Retraction_EightBands_EachThresholdMapsToTheCorrectRetraction()
+    {
+        // Mirrors TemperatureTowerGcodeBuilder's equivalent test: the acceptance criterion is
+        // that each band's threshold maps to *that band's* retraction length, not merely that
+        // all eight lengths appear somewhere in the emitted gcode.
+        string gcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            startRetractionMm: 0.2,
+            retractionStepMm: 0.2,
+            bandHeightMm: 5,
+            bandCount: 8);
+
+        var conditionalPairs = System.Text.RegularExpressions.Regex
+            .Matches(gcode, @"\{(?:if|elsif) layer_z >= (?<threshold>[\d.]+)\}(?<retraction>[\d.]+)")
+            .Select(m => (
+                Threshold: double.Parse(m.Groups["threshold"].Value, System.Globalization.CultureInfo.InvariantCulture),
+                Retraction: double.Parse(m.Groups["retraction"].Value, System.Globalization.CultureInfo.InvariantCulture)))
+            .ToList();
+
+        // Bands 7 down to 1, tallest (highest threshold) first: band N sits at z >= N*5 and
+        // retracts 0.2 + N*0.2 mm.
+        List<(double Threshold, double Retraction)> expectedPairs =
+            Enumerable.Range(1, 7).Reverse()
+                .Select(band => ((double)(band * 5), Math.Round(0.2 + (band * 0.2), 4)))
+                .ToList();
+        conditionalPairs.Should().BeEquivalentTo(expectedPairs, options => options.WithStrictOrdering());
+
+        var elseMatch = System.Text.RegularExpressions.Regex.Match(gcode, @"\{else\}(?<retraction>[\d.]+)\{endif\}");
+        elseMatch.Success.Should().BeTrue();
+        double.Parse(elseMatch.Groups["retraction"].Value, System.Globalization.CultureInfo.InvariantCulture)
+            .Should().Be(0.2); // band 0, no threshold
+    }
+
+    [Fact]
+    public void BuildLayerChangeGcode_Retraction_EightBands_HasEightDistinctRetractionLengths()
+    {
+        string gcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            startRetractionMm: 0.2,
+            retractionStepMm: 0.2,
+            bandHeightMm: 5,
+            bandCount: 8);
+
+        IEnumerable<double> lengths = Enumerable.Range(0, 8).Select(band => 0.2 + (band * 0.2));
+        lengths.Distinct().Should().HaveCount(8);
+    }
+
+    [Fact]
+    public void BuildLayerChangeGcode_Retraction_InvalidBandCount_Throws()
+    {
+        Action act = () => RetractionTowerGcodeBuilder.BuildLayerChangeGcode(0.2, 0.2, 5, bandCount: 0);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void BuildLayerChangeGcode_Retraction_InvalidBandHeight_Throws()
+    {
+        Action act = () => RetractionTowerGcodeBuilder.BuildLayerChangeGcode(0.2, 0.2, bandHeightMm: 0, bandCount: 8);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    #endregion
+
     #region CalibrationParameters
 
     [Fact]
@@ -271,6 +371,43 @@ public class CalibrationTests : IDisposable
         CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.TemperatureTower);
 
         parameters.StartTemperatureC.Should().Be(230);
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_Retraction_NullJson_ReturnsDefaults()
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(null, CalibrationMethod.Retraction);
+
+        parameters.StartRetractionMm.Should().Be(0.2);
+        parameters.RetractionStepMm.Should().Be(0.2);
+        parameters.RetractionBandHeightMm.Should().Be(5);
+        parameters.RetractionBandCount.Should().Be(8);
+    }
+
+    [Fact]
+    public void CalibrationParameters_Parse_Retraction_OverridesProvidedKeysOnly()
+    {
+        string json = """{"start_retraction_mm": 0.5, "retraction_band_count": 4}""";
+
+        CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.Retraction);
+
+        parameters.StartRetractionMm.Should().Be(0.5);
+        parameters.RetractionBandCount.Should().Be(4);
+        parameters.RetractionStepMm.Should().Be(0.2); // default preserved
+        parameters.RetractionBandHeightMm.Should().Be(5); // default preserved
+    }
+
+    [Theory]
+    [InlineData("""{"start_retraction_mm": 99999}""")]
+    [InlineData("""{"start_retraction_mm": -1}""")]
+    [InlineData("""{"retraction_band_count": 0}""")]
+    [InlineData("""{"retraction_band_count": -5}""")]
+    public void CalibrationParameters_Parse_Retraction_OutOfRangeValue_FallsBackToDefault(string json)
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(json, CalibrationMethod.Retraction);
+
+        parameters.StartRetractionMm.Should().BeInRange(0, 10);
+        parameters.RetractionBandCount.Should().BeInRange(1, 50);
     }
 
     #endregion
@@ -468,6 +605,32 @@ public class CalibrationTests : IDisposable
         File.ReadAllText(preparedPath).Should().Be("fake-tower-resource");
     }
 
+    [Fact]
+    public void PrepareCalibrationModel_RetractionMethod_CopiesResourceUnmodified()
+    {
+        // Mirrors PrepareCalibrationModel_TemperatureTowerMethod_CopiesResourceUnmodified: the
+        // bundled retraction_tower.drc resource is a single raw Draco mesh with no per-object
+        // names to configure (issue #2137), so — like TemperatureTower — the worker must copy it
+        // unmodified here and inject its per-band gcode later, in RunOrcaSlicerAsync.
+        string calibResourcesRoot = Path.Combine(_tempDir, "calib-resources-retraction");
+        string towerPath = Path.Combine(calibResourcesRoot, "retraction", "retraction_tower.drc");
+        Directory.CreateDirectory(Path.GetDirectoryName(towerPath)!);
+        File.WriteAllText(towerPath, "fake-retraction-tower-resource");
+
+        OrcaSlicingPipelineService pipeline = CreatePipeline(calibResourcesRoot);
+        string workDir = Path.Combine(_tempDir, "work-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workDir);
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.Retraction),
+        };
+
+        string preparedPath = pipeline.PrepareCalibrationModel(job, workDir);
+
+        File.Exists(preparedPath).Should().BeTrue();
+        File.ReadAllText(preparedPath).Should().Be("fake-retraction-tower-resource");
+    }
+
     [Theory]
     [InlineData(CalibrationMethod.FlowRateYoloRecommended, "Orca-LinearFlow.3mf")]
     [InlineData(CalibrationMethod.FlowRateYoloPerfectionist, "Orca-LinearFlow_fine.3mf")]
@@ -559,6 +722,67 @@ public class CalibrationTests : IDisposable
         job.ProcessProfileSha256.Should().Be(
             NativeSlicerProfiles.ComputeSha256(updatedContent),
             "the recorded digest must match the mutated process profile content, not the original");
+    }
+
+    [Fact]
+    public async Task ApplyRetractionTowerGcodeAsync_InjectsLayerChangeGcodeAndForcesFirmwareRetractionAndRecomputesDigests()
+    {
+        // Mirrors ApplyTemperatureTowerGcodeAsync_InjectsLayerChangeGcodeAndRecomputesDigest: a
+        // unit test on RetractionTowerGcodeBuilder alone does not prove the gcode reaches the
+        // process profile on disk, that use_firmware_retraction is forced on the machine profile
+        // (without which the injected M207 has no physical effect — see
+        // RetractionTowerGcodeBuilder's remarks), or that both recorded digests are recomputed to
+        // match.
+        string processJsonPath = Path.Combine(_tempDir, $"process-{Guid.NewGuid():N}.json");
+        string machineJsonPath = Path.Combine(_tempDir, $"machine-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(processJsonPath, """{"name": "Test Process"}""");
+        await File.WriteAllTextAsync(machineJsonPath, """{"name": "Test Machine", "use_firmware_retraction": "0"}""");
+        var job = new DistributedSlicingJob
+        {
+            CalibrationMethod = CalibrationMethods.ToWireName(CalibrationMethod.Retraction),
+            CalibrationParamsJson = """{"start_retraction_mm": 0.3, "retraction_step_mm": 0.3, "retraction_band_height_mm": 8, "retraction_band_count": 4}""",
+        };
+
+        await OrcaSlicingPipelineService.ApplyRetractionTowerGcodeAsync(job, processJsonPath, machineJsonPath, CancellationToken.None);
+
+        string updatedProcessContent = await File.ReadAllTextAsync(processJsonPath);
+        using JsonDocument processDoc = JsonDocument.Parse(updatedProcessContent);
+        string layerChangeGcode = processDoc.RootElement.GetProperty("layer_change_gcode").GetString()!;
+        string expectedGcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            startRetractionMm: 0.3,
+            retractionStepMm: 0.3,
+            bandHeightMm: 8,
+            bandCount: 4);
+        layerChangeGcode.Should().Be(
+            expectedGcode,
+            "the pipeline must inject the exact gcode computed from the job's CalibrationParamsJson, " +
+            "not a default/fallback template");
+        job.ProcessProfileSha256.Should().NotBeNullOrEmpty();
+        job.ProcessProfileSha256.Should().Be(
+            NativeSlicerProfiles.ComputeSha256(updatedProcessContent),
+            "the recorded digest must match the mutated process profile content, not the original");
+
+        string updatedMachineContent = await File.ReadAllTextAsync(machineJsonPath);
+        using JsonDocument machineDoc = JsonDocument.Parse(updatedMachineContent);
+        machineDoc.RootElement.GetProperty("use_firmware_retraction").GetString().Should().Be(
+            "1",
+            "M207-driven retraction only takes effect when firmware retraction is enabled on the printer profile");
+        job.MachineProfileSha256.Should().NotBeNullOrEmpty();
+        job.MachineProfileSha256.Should().Be(
+            NativeSlicerProfiles.ComputeSha256(updatedMachineContent),
+            "the recorded digest must match the mutated machine profile content, not the original");
+    }
+
+    [Fact]
+    public void EnableFirmwareRetraction_TurnsOnFirmwareRetractionWithoutDisturbingOtherKeys()
+    {
+        string machineJson = """{"name": "Test Machine", "bed_shape": ["0x0", "250x0", "250x250", "0x250"], "use_firmware_retraction": "0"}""";
+
+        string updated = OrcaSlicingPipelineService.EnableFirmwareRetraction(machineJson);
+
+        using JsonDocument doc = JsonDocument.Parse(updated);
+        doc.RootElement.GetProperty("use_firmware_retraction").GetString().Should().Be("1");
+        doc.RootElement.GetProperty("name").GetString().Should().Be("Test Machine");
     }
 
     private static OrcaSlicingPipelineService CreatePipeline(string calibResourcesRoot)

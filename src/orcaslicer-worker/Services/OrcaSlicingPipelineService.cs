@@ -265,8 +265,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// <summary>
     /// Resolves and prepares the local calibration model for <paramref name="job"/> (issue #1938),
     /// applying per-object flow-ratio overrides for the flow-rate methods. The temperature tower
-    /// method needs no per-model changes here; its per-band configuration is injected into the
-    /// process profile in <see cref="RunOrcaSlicerAsync"/>.
+    /// and retraction tower methods need no per-model changes here; their per-band configuration
+    /// is injected into the process (and, for retraction, machine) profile in
+    /// <see cref="RunOrcaSlicerAsync"/>.
     /// </summary>
     internal string PrepareCalibrationModel(DistributedSlicingJob job, string workDir)
     {
@@ -336,6 +337,59 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string updatedProcessJsonContent = InjectLayerChangeGcode(processJsonContent, layerChangeGcode);
         await File.WriteAllTextAsync(processJsonPath, updatedProcessJsonContent, cancellationToken);
         job.ProcessProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedProcessJsonContent);
+    }
+
+    /// <summary>
+    /// Injects the retraction tower's per-band <c>layer_change_gcode</c> hook (issue #2137) into
+    /// the process profile on disk, and forces the machine profile's
+    /// <c>use_firmware_retraction</c> setting on — see <see cref="RetractionTowerGcodeBuilder"/>
+    /// for why the injected <c>M207</c> gcode has no effect without it. Recomputes both
+    /// <see cref="DistributedSlicingJob.ProcessProfileSha256"/> and
+    /// <see cref="DistributedSlicingJob.MachineProfileSha256"/> so the recorded digests match the
+    /// mutated content.
+    /// </summary>
+    internal static async Task ApplyRetractionTowerGcodeAsync(
+        DistributedSlicingJob job,
+        string processJsonPath,
+        string machineJsonPath,
+        CancellationToken cancellationToken)
+    {
+        CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, CalibrationMethod.Retraction);
+        string layerChangeGcode = RetractionTowerGcodeBuilder.BuildLayerChangeGcode(
+            parameters.StartRetractionMm,
+            parameters.RetractionStepMm,
+            parameters.RetractionBandHeightMm,
+            parameters.RetractionBandCount);
+
+        string processJsonContent = await File.ReadAllTextAsync(processJsonPath, cancellationToken);
+        string updatedProcessJsonContent = InjectLayerChangeGcode(processJsonContent, layerChangeGcode);
+        await File.WriteAllTextAsync(processJsonPath, updatedProcessJsonContent, cancellationToken);
+        job.ProcessProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedProcessJsonContent);
+
+        string machineJsonContent = await File.ReadAllTextAsync(machineJsonPath, cancellationToken);
+        string updatedMachineJsonContent = EnableFirmwareRetraction(machineJsonContent);
+        await File.WriteAllTextAsync(machineJsonPath, updatedMachineJsonContent, cancellationToken);
+        job.MachineProfileSha256 = NativeSlicerProfiles.ComputeSha256(updatedMachineJsonContent);
+    }
+
+    /// <summary>
+    /// Sets <c>use_firmware_retraction</c> on a machine profile JSON document, so the retraction
+    /// tower's injected <c>M207</c> gcode (see <see cref="RetractionTowerGcodeBuilder"/>) has any
+    /// physical effect. Stored as the string <c>"1"</c> to match the settings-dictionary string
+    /// convention <see cref="SettingsDictToNativeJson"/> emits for other keys in this profile
+    /// format.
+    /// </summary>
+    internal static string EnableFirmwareRetraction(string machineJson)
+    {
+        JsonNode rootNode = JsonNode.Parse(machineJson)
+            ?? throw new InvalidOperationException("Machine profile JSON is empty.");
+        if (rootNode is not JsonObject rootObject)
+        {
+            throw new InvalidOperationException("Machine profile JSON root must be an object.");
+        }
+
+        rootObject["use_firmware_retraction"] = "1";
+        return rootObject.ToJsonString();
     }
 
     /// <summary>
@@ -1319,13 +1373,20 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string processJson = profilePaths["process"];
         string filamentJson = profilePaths["filament"];
 
-        // Temperature tower calibration (issue #1938): inject the per-band layer_change_gcode
-        // hook here, before the profile is handed to OrcaSlicer, so the gate check below and the
-        // slice itself both see the final, calibration-aware process profile.
-        if (CalibrationMethods.TryParse(job.CalibrationMethod, out CalibrationMethod calibrationMethod)
-            && calibrationMethod == CalibrationMethod.TemperatureTower)
+        // Temperature tower / retraction tower calibration (issues #1938, #2137): inject the
+        // per-band layer_change_gcode hook here, before the profile is handed to OrcaSlicer, so
+        // the gate check below and the slice itself both see the final, calibration-aware
+        // process (and, for retraction, machine) profile.
+        if (CalibrationMethods.TryParse(job.CalibrationMethod, out CalibrationMethod calibrationMethod))
         {
-            await ApplyTemperatureTowerGcodeAsync(job, processJson, cancellationToken);
+            if (calibrationMethod == CalibrationMethod.TemperatureTower)
+            {
+                await ApplyTemperatureTowerGcodeAsync(job, processJson, cancellationToken);
+            }
+            else if (calibrationMethod == CalibrationMethod.Retraction)
+            {
+                await ApplyRetractionTowerGcodeAsync(job, processJson, machineJson, cancellationToken);
+            }
         }
 
         await WarnIfProcessCannotSatisfyGateAsync(job, machineJson, processJson, cancellationToken);

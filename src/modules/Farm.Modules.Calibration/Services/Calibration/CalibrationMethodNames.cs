@@ -275,6 +275,9 @@ public static class CalibrationMeasurementRanges
     /// <summary>Plausible pressure advance (linear advance) coefficient range.</summary>
     public static readonly CalibrationMeasurementRange PressureAdvance = new("pressure_advance", 0.0m, 2.0m);
 
+    /// <summary>Plausible retraction length range in millimetres.</summary>
+    public static readonly CalibrationMeasurementRange RetractionLength = new("retraction_length_mm", 0.0m, 10.0m);
+
     /// <summary>Gets the canonical measurement range for a calibration kind, if one is defined.</summary>
     /// <param name="kind">The stable calibration kind, e.g. from <see cref="CalibrationMethodNames.ToKind(CalibrationMethod)"/>.</param>
     /// <returns>The range, or <see langword="null"/> when the kind has no defined semantic range.</returns>
@@ -283,6 +286,7 @@ public static class CalibrationMeasurementRanges
         "temperature" => Temperature,
         "flow" => FlowRatio,
         "pressure_advance" => PressureAdvance,
+        "retraction" => RetractionLength,
         _ => null,
     };
 }

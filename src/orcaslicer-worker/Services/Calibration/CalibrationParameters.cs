@@ -22,6 +22,18 @@ public sealed record CalibrationParameters
     /// <summary>Total number of temperature tower bands.</summary>
     public int BandCount { get; init; } = 9;
 
+    /// <summary>Retraction length of the bottom-most retraction tower band, in millimetres.</summary>
+    public double StartRetractionMm { get; init; } = 0.2;
+
+    /// <summary>Retraction length increase applied per band above band 0, in millimetres.</summary>
+    public double RetractionStepMm { get; init; } = 0.2;
+
+    /// <summary>Print height of each retraction tower band, in millimetres.</summary>
+    public double RetractionBandHeightMm { get; init; } = 5;
+
+    /// <summary>Total number of retraction tower bands.</summary>
+    public int RetractionBandCount { get; init; } = 8;
+
     /// <summary>
     /// Parses a job's <c>CalibrationParamsJson</c> (a flat <c>string, double</c> JSON object) into
     /// strongly typed parameters for <paramref name="method"/>, applying that method's defaults for
@@ -60,6 +72,13 @@ public sealed record CalibrationParameters
                 BandHeightMm = ReadOrDefault(values, "band_height_mm", defaults.BandHeightMm, MinBandHeightMm, MaxBandHeightMm),
                 BandCount = (int)ReadOrDefault(values, "band_count", defaults.BandCount, MinBandCount, MaxBandCount),
             },
+            CalibrationMethod.Retraction => defaults with
+            {
+                StartRetractionMm = ReadOrDefault(values, "start_retraction_mm", defaults.StartRetractionMm, MinRetractionMm, MaxRetractionMm),
+                RetractionStepMm = ReadOrDefault(values, "retraction_step_mm", defaults.RetractionStepMm, MinRetractionStepMm, MaxRetractionStepMm),
+                RetractionBandHeightMm = ReadOrDefault(values, "retraction_band_height_mm", defaults.RetractionBandHeightMm, MinRetractionBandHeightMm, MaxRetractionBandHeightMm),
+                RetractionBandCount = (int)ReadOrDefault(values, "retraction_band_count", defaults.RetractionBandCount, MinRetractionBandCount, MaxRetractionBandCount),
+            },
             _ => defaults,
         };
     }
@@ -75,6 +94,17 @@ public sealed record CalibrationParameters
     private const double MaxBandHeightMm = 200;
     private const double MinBandCount = 1;
     private const double MaxBandCount = 50;
+
+    // Same rationale as the temperature-tower bounds above, sized for a retraction-length sweep
+    // (millimetres, not Celsius) rather than temperature.
+    private const double MinRetractionMm = 0;
+    private const double MaxRetractionMm = 10;
+    private const double MinRetractionStepMm = 0.01;
+    private const double MaxRetractionStepMm = 5;
+    private const double MinRetractionBandHeightMm = 0.1;
+    private const double MaxRetractionBandHeightMm = 200;
+    private const double MinRetractionBandCount = 1;
+    private const double MaxRetractionBandCount = 50;
 
     /// <summary>
     /// Reads <paramref name="key"/> from <paramref name="values"/>, falling back to

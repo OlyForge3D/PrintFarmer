@@ -125,6 +125,49 @@ public sealed class SliceJobControllerCalibrationTests
             Times.Once);
     }
 
+    [Fact]
+    public async Task SubmitAsync_RetractionCalibrationMethod_CreatesOrdinarySliceJobWithNoCalibrationSagaFields()
+    {
+        // Issue #2137: retraction must be end-to-end submittable through the same calibration
+        // request path as flow_rate_pass_1/temperature_tower, and must remain an ordinary slice
+        // job — see the class-level remarks on why the three saga fields must stay null.
+        SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out Mock<ISliceJobEventService> events);
+        SliceJob? added = null;
+        _ = repository
+            .Setup(instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()))
+            .Callback<SliceJob, CancellationToken>((job, _) => added = job)
+            .Returns(Task.CompletedTask);
+
+        var request = new SubmitSliceJobRequest
+        {
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            Priority = 1,
+            Calibration = new CalibrationRequest
+            {
+                Method = "retraction",
+                Params = new Dictionary<string, double> { ["start_retraction_mm"] = 0.3 },
+            },
+        };
+
+        IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
+
+        _ = result.Should().BeOfType<CreatedResult>();
+        _ = added.Should().NotBeNull();
+        _ = added!.CalibrationMethod.Should().Be("retraction");
+        _ = added.CalibrationParamsJson.Should().NotBeNullOrEmpty();
+
+        _ = added.CalibrationProjectId.Should().BeNull();
+        _ = added.CalibrationAttemptId.Should().BeNull();
+        _ = added.CalibrationOrchestrationId.Should().BeNull();
+
+        _ = added.ModelFileUrl.Should().Be("calibration:retraction");
+        _ = added.ModelFileName.Should().Be(CalibrationMethods.DefaultModelFileName(CalibrationMethod.Retraction));
+
+        events.Verify(
+            instance => instance.NotifyJobQueuedAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     [Theory]
     [InlineData(true, false, false)]
     [InlineData(false, true, false)]
