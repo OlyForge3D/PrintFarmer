@@ -1910,14 +1910,25 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 using JsonDocument doc = JsonDocument.Parse(line);
                 JsonElement root = doc.RootElement;
 
+                if (root.ValueKind != JsonValueKind.Object)
+                {
+                    // OrcaSlicer can emit valid but non-object JSON (e.g. a bare scalar) on the
+                    // progress channel; there is nothing to extract, so treat it like the
+                    // non-JSON diagnostics handled by the catch below.
+                    continue;
+                }
+
                 int totalPercent = root.TryGetProperty("total_percent", out JsonElement tp)
+                    && tp.ValueKind == JsonValueKind.Number
                     ? tp.GetInt32()
                     : -1;
                 string message = root.TryGetProperty("message", out JsonElement msg)
+                    && msg.ValueKind == JsonValueKind.String
                     ? msg.GetString() ?? "Slicing..."
                     : "Slicing...";
 
-                if (root.TryGetProperty("warning", out JsonElement warn))
+                if (root.TryGetProperty("warning", out JsonElement warn)
+                    && warn.ValueKind == JsonValueKind.String)
                 {
                     _logger.LogWarning(
                         "OrcaSlicer warning for job {JobId}: {Warning}",
