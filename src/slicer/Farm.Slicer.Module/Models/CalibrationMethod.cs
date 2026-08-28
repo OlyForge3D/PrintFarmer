@@ -214,7 +214,7 @@ public static class CalibrationMethods
         CalibrationMethod.TemperatureTower => Path.Combine("temperature_tower", "temperature_tower.drc"),
         CalibrationMethod.FlowRateYoloRecommended => Path.Combine("filament_flow", "Orca-LinearFlow.3mf"),
         CalibrationMethod.FlowRateYoloPerfectionist => Path.Combine("filament_flow", "Orca-LinearFlow_fine.3mf"),
-        CalibrationMethod.Retraction => Path.Combine("retraction", "retraction_tower.drc"),
+        CalibrationMethod.Retraction => Path.Join("retraction", "retraction_tower.drc"),
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 }
