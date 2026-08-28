@@ -26,7 +26,7 @@ namespace Farm.Backend.Plugins.Tests.Services.FlashForge;
 /// cache-miss fallback could publish a stale row if an invalidation arrived while the fetch was
 /// still in flight.
 /// </summary>
-public class FlashForgePollingServiceCacheTests
+public class FlashForgePollingServiceCacheTests : IDisposable
 {
     private readonly Mock<IFlashForgeClient> _flashForgeClient = new(MockBehavior.Loose);
     private readonly Mock<IPrintersRepository> _printersRepository = new(MockBehavior.Loose);
@@ -78,6 +78,8 @@ public class FlashForgePollingServiceCacheTests
         _invalidationGenerationsField = serviceType.GetField("_invalidationGenerations", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _pollingStateType = serviceType.GetNestedType("PrinterPollingState", BindingFlags.NonPublic)!;
     }
+
+    public void Dispose() => _service.Dispose();
 
     private static PrinterCompositeStatus IdleStatus() => new(
         IsOnline: true,

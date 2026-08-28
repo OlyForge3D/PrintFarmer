@@ -23,7 +23,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// clear their cached copy immediately, not merely within the 30s reconciliation window.
 /// </summary>
 [Trait("Category", "Integration")]
-public sealed class PrintersControllerCacheInvalidationTests : IAsyncLifetime
+public sealed class PrintersControllerCacheInvalidationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
     private HttpClient? _client;
@@ -37,6 +37,12 @@ public sealed class PrintersControllerCacheInvalidationTests : IAsyncLifetime
     {
         _client?.Dispose();
         await _factory.DisposeAsync();
+    }
+
+    public void Dispose()
+    {
+        _client?.Dispose();
+        _factory.Dispose();
     }
 
     [Fact]

@@ -21,7 +21,7 @@ namespace Farm.Web.Api.Tests.Security;
 ///   a destination in a configured allowed range, and the vetted client does not follow redirects
 ///   to internal addresses.
 /// </summary>
-public sealed class ObicoServerAuthorizationTests : IAsyncLifetime
+public sealed class ObicoServerAuthorizationTests : IAsyncLifetime, IDisposable
 {
     private readonly SpyHttpMessageHandler _spyHandler = new(_ => new HttpResponseMessage(HttpStatusCode.OK)
     {
@@ -37,6 +37,12 @@ public sealed class ObicoServerAuthorizationTests : IAsyncLifetime
     }
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose()
+    {
+        _factory?.Dispose();
+        _spyHandler.Dispose();
+    }
 
     [Theory]
     [InlineData("GET", "/api/obico-servers")]

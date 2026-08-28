@@ -27,7 +27,7 @@ namespace Farm.Backend.Plugins.Tests.Services.PrusaLink;
 /// the 30s reconciliation loop and cleared explicitly on printer edit - so steady-state polling
 /// does zero per-tick DB reads for the printer row.
 /// </summary>
-public class PrusaLinkPollingServiceCacheTests
+public class PrusaLinkPollingServiceCacheTests : IDisposable
 {
     private readonly Mock<IPrusaLinkClient> _prusaLinkClient = new(MockBehavior.Loose);
     private readonly Mock<IPrintersRepository> _printersRepository = new(MockBehavior.Loose);
@@ -79,6 +79,8 @@ public class PrusaLinkPollingServiceCacheTests
         _invalidationGenerationsField = serviceType.GetField("_invalidationGenerations", BindingFlags.NonPublic | BindingFlags.Instance)!;
         _pollingStateType = serviceType.GetNestedType("PrinterPollingState", BindingFlags.NonPublic)!;
     }
+
+    public void Dispose() => _service.Dispose();
 
     private static PrusaCompositeStatus IdleStatus() => new(
         IsOnline: true,

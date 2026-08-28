@@ -21,7 +21,7 @@ namespace Farm.Web.Api.Tests.Security;
 /// <see cref="PrinterGroup"/> must never observe another group's printer, whether by id or via
 /// the collection endpoints.
 /// </summary>
-public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
+public sealed class PrinterReadAuthorizationTests : IAsyncLifetime, IDisposable
 {
     private readonly Mock<IPrintersService> _printers = new();
     private readonly Mock<IPrinterVersionCache> _versionCache = new();
@@ -147,6 +147,8 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     public static IEnumerable<object[]> RestrictedReadEndpoints()
     {

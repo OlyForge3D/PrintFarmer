@@ -23,7 +23,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// submitting user's own) and snapshots native profile JSON onto the job, routing it onto the
 /// same robust <c>NativeProfiles</c> worker path already used by ID-based submissions.
 /// </summary>
-public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime
+public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDisposable
 {
     private const string MachineProfileJson = """{"type":"machine","printer_model":"Test","nozzle_diameter":["0.4"]}""";
     private const string ProcessProfileJson = """{"type":"process","layer_height":"0.2"}""";
@@ -42,10 +42,16 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime
             email: "named-profile@example.com");
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
     {
         _client.Dispose();
-        await _factory.DisposeAsync();
+        _factory.Dispose();
     }
 
     [Fact(DisplayName = "A job submitted with a custom filament profile name resolves via the database and reaches a claimable native profile set")]

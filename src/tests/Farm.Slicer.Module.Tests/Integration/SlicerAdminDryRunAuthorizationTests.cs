@@ -16,13 +16,15 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// </summary>
 [Trait("Category", "Integration")]
 [Trait("Category", "Regression")]
-public class SlicerAdminDryRunAuthorizationTests : IAsyncLifetime
+public class SlicerAdminDryRunAuthorizationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
 
     public async Task InitializeAsync() => await _factory.ResetDatabaseAsync();
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     private static HttpRequestMessage CreateDryRunRequest() =>
         new(HttpMethod.Post, "/api/admin/slicer/dry-run")

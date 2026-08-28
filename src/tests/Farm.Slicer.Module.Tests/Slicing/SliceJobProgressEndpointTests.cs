@@ -11,7 +11,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// <summary>
 /// Tests /api/slice/{id}/progress endpoint updates job state and emits event prerequisites.
 /// </summary>
-public class SliceJobProgressEndpointTests : IAsyncLifetime
+public class SliceJobProgressEndpointTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient _client = null!;
@@ -27,7 +27,13 @@ public class SliceJobProgressEndpointTests : IAsyncLifetime
         _client = await _factory.CreateWorkerClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
     {
         _client?.Dispose();
         _factory?.Dispose();

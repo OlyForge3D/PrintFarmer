@@ -20,7 +20,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// Verifies canonical submission behaviour: validated string engines, stored-model identity
 /// resolution, exact native profile delivery and owner-scoped correlation uniqueness.
 /// </summary>
-public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
+public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime, IDisposable
 {
     private const string MachineProfileJson = """{"type":"machine","printer_model":"Test","nozzle_diameter":["0.4"]}""";
     private const string ProcessProfileJson = """{"type":"process","layer_height":"0.2"}""";
@@ -38,10 +38,16 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
             email: "canonical@example.com");
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
     {
         _client.Dispose();
-        await _factory.DisposeAsync();
+        _factory.Dispose();
     }
 
     [Fact(DisplayName = "Submission serializes the engine as a canonical string name")]

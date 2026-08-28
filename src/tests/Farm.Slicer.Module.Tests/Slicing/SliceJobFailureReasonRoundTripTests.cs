@@ -32,7 +32,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// change cannot satisfy "tell the user why" by widening <c>ErrorDetail</c>.
 /// </para>
 /// </remarks>
-public sealed class SliceJobFailureReasonRoundTripTests : IAsyncLifetime
+public sealed class SliceJobFailureReasonRoundTripTests : IAsyncLifetime, IDisposable
 {
     /// <summary>
     /// The detail the worker composes for a real exit-156 run, built from the byte-exact console
@@ -56,6 +56,8 @@ public sealed class SliceJobFailureReasonRoundTripTests : IAsyncLifetime
     public async Task InitializeAsync() => await _factory.ResetDatabaseAsync();
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Fact(DisplayName =
         "A rejected model's diagnostic survives worker → API intact, and is never reduced to \"Errors\"")]

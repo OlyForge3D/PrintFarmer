@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Hubs;
 
-public class SlicerHubTests
+public class SlicerHubTests : IDisposable
 {
     private readonly Mock<ILogger<SlicerHub>> _loggerMock;
     private readonly Mock<IHubCallerClients> _clientsMock;
@@ -38,6 +38,8 @@ public class SlicerHubTests
             Groups = _groupsMock.Object
         };
     }
+
+    public void Dispose() => _hub.Dispose();
 
     [Fact]
     public void Constructor_WithValidLogger_InitializesSuccessfully()

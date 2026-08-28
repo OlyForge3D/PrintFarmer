@@ -13,7 +13,7 @@ using Moq;
 
 namespace Farm.Slicer.Module.Tests.Hubs;
 
-public sealed class SlicerProgressHubTests
+public sealed class SlicerProgressHubTests : IDisposable
 {
     private readonly Mock<ILogger<SlicerProgressHub>> _logger = new();
     private readonly Mock<ISlicerProgressNotifier> _progressNotifier = new();
@@ -39,6 +39,8 @@ public sealed class SlicerProgressHubTests
             Groups = _groups.Object,
         };
     }
+
+    public void Dispose() => _hub.Dispose();
 
     [Fact]
     public void Hub_RequiresAuthentication()

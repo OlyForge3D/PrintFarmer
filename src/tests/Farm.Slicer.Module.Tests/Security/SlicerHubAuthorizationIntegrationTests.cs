@@ -3,13 +3,15 @@ using FluentAssertions;
 
 namespace Farm.Slicer.Module.Tests.Security;
 
-public sealed class SlicerHubAuthorizationIntegrationTests : IAsyncLifetime
+public sealed class SlicerHubAuthorizationIntegrationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Theory]
     [InlineData("/hubs/slicer-registry/negotiate?negotiateVersion=1")]

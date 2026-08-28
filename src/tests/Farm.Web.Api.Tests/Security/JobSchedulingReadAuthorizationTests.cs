@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.Security;
 
-public sealed class JobSchedulingReadAuthorizationTests : IAsyncLifetime
+public sealed class JobSchedulingReadAuthorizationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new(
         new Dictionary<string, string?>
@@ -22,6 +22,8 @@ public sealed class JobSchedulingReadAuthorizationTests : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Fact]
     public async Task SchedulingReads_FilterAndReturnNotFoundAcrossEveryResourceBoundary()

@@ -11,7 +11,7 @@ using Moq;
 
 namespace Farm.Infrastructure.Tests.DataManagement;
 
-public class DataImportServiceTests
+public class DataImportServiceTests : IDisposable
 {
     private readonly AppDbContext _context;
     private readonly Mock<ILogger<DataImportService>> _loggerMock;
@@ -38,6 +38,8 @@ public class DataImportServiceTests
 
         _importService = new DataImportService(_context, _loggerMock.Object, _sensitiveDataProtectorMock.Object, printersRepository);
     }
+
+    public void Dispose() => _context.Dispose();
 
     [Fact]
     public async Task ImportCatalogAsync_MergeMode_AddsNewManufacturers()

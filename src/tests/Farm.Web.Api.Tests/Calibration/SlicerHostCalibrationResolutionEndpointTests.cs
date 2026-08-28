@@ -17,7 +17,7 @@ namespace Farm.Web.Api.Tests.Calibration;
 /// Contract of the slicer-host calibration resolution endpoint: who may call it, what it accepts,
 /// and that ownership scope always comes from the validated token rather than the request.
 /// </summary>
-public sealed class SlicerHostCalibrationResolutionEndpointTests : IAsyncLifetime
+public sealed class SlicerHostCalibrationResolutionEndpointTests : IAsyncLifetime, IDisposable
 {
     private static readonly Guid PublicMachineId = Guid.NewGuid();
     private static readonly Guid PublicProcessId = Guid.NewGuid();
@@ -52,6 +52,8 @@ public sealed class SlicerHostCalibrationResolutionEndpointTests : IAsyncLifetim
         await _keepAlive.CloseAsync();
         await _keepAlive.DisposeAsync();
     }
+
+    public void Dispose() => _keepAlive.Dispose();
 
     [Fact]
     public async Task ResolveEndpoint_WithoutAuthentication_Returns401()

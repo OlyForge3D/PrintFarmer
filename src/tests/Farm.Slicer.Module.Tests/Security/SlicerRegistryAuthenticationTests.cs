@@ -8,13 +8,15 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Slicer.Module.Tests.Security;
 
-public sealed class SlicerRegistryAuthenticationTests : IAsyncLifetime
+public sealed class SlicerRegistryAuthenticationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
 
     public async Task InitializeAsync() => await _factory.ResetDatabaseAsync();
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Theory]
     [InlineData(null)]

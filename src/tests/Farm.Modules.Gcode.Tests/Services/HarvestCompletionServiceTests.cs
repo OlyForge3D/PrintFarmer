@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Services;
 
-public class HarvestCompletionServiceTests
+public class HarvestCompletionServiceTests : IDisposable
 {
     private readonly Mock<ILogger<HarvestCompletionService>> _loggerMock;
     private readonly Mock<IUnitOfWork> _unitOfWorkMock;
@@ -39,6 +39,8 @@ public class HarvestCompletionServiceTests
 
         _service = new HarvestCompletionService(_mockServiceProvider, _loggerMock.Object);
     }
+
+    public void Dispose() => _service.Dispose();
 
     private class MockServiceProvider(IUnitOfWork unitOfWork, IServiceScope? scope = null) : IServiceProvider
     {

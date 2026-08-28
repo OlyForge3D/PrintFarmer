@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Web.Api.Tests.Capabilities;
 
-public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
+public sealed class CalibrationCapabilitiesTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _anonymousFactory = new();
     private readonly CustomWebApplicationFactory _authenticatedFactory = new(
@@ -28,6 +28,12 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
     {
         await _anonymousFactory.DisposeAsync();
         await _authenticatedFactory.DisposeAsync();
+    }
+
+    public void Dispose()
+    {
+        _anonymousFactory.Dispose();
+        _authenticatedFactory.Dispose();
     }
 
     [Fact]

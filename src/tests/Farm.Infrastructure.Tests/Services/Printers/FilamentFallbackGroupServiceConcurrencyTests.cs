@@ -23,7 +23,7 @@ namespace Farm.Infrastructure.Tests.Services.Printers;
 /// in-memory SQLite database, after the service's duplicate check has already read
 /// (and found nothing) but before the service's own INSERT commits.
 /// </summary>
-public sealed class FilamentFallbackGroupServiceConcurrencyTests : IAsyncLifetime
+public sealed class FilamentFallbackGroupServiceConcurrencyTests : IAsyncLifetime, IDisposable
 {
     private readonly string _dataSource = $"Data Source=fbgroup_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
     private readonly List<SqliteConnection> _connectionsToDispose = [];
@@ -47,6 +47,16 @@ public sealed class FilamentFallbackGroupServiceConcurrencyTests : IAsyncLifetim
         foreach (SqliteConnection connection in _connectionsToDispose)
         {
             await connection.DisposeAsync();
+        }
+    }
+
+    public void Dispose()
+    {
+        _keepAlive.Dispose();
+
+        foreach (SqliteConnection connection in _connectionsToDispose)
+        {
+            connection.Dispose();
         }
     }
 

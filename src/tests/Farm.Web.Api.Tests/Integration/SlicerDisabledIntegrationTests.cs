@@ -25,7 +25,7 @@ public class SlicerDisabledCollection { }
 /// <c>DEPLOYMENT_MODE=microservices</c> before the host boots.
 /// </summary>
 [Collection("SlicerDisabled")]
-public class SlicerDisabledIntegrationTests : IAsyncLifetime
+public class SlicerDisabledIntegrationTests : IAsyncLifetime, IDisposable
 {
     private SlicerDisabledWebApplicationFactory? _factory;
     private HttpClient? _client;
@@ -44,6 +44,13 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
         {
             await _factory.DisposeAsync();
         }
+    }
+
+    public void Dispose()
+    {
+        _client?.Dispose();
+        _adminClient?.Dispose();
+        _factory?.Dispose();
     }
 
     [Fact]

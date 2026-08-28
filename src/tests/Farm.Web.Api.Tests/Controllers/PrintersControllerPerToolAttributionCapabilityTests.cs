@@ -11,7 +11,7 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Controllers;
 
 [Trait("Category", "Integration")]
-public sealed class PrintersControllerPerToolAttributionCapabilityTests : IAsyncLifetime
+public sealed class PrintersControllerPerToolAttributionCapabilityTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
     private HttpClient? _client;
@@ -25,6 +25,12 @@ public sealed class PrintersControllerPerToolAttributionCapabilityTests : IAsync
     {
         _client?.Dispose();
         await _factory.DisposeAsync();
+    }
+
+    public void Dispose()
+    {
+        _client?.Dispose();
+        _factory.Dispose();
     }
 
     [Fact]

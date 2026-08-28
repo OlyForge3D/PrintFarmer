@@ -31,7 +31,7 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// </summary>
 [Trait("Category", "Integration")]
 [Trait("Category", "Regression")]
-public class Model3DUploadQueryRoundTripTests : IAsyncLifetime
+public class Model3DUploadQueryRoundTripTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
@@ -49,9 +49,14 @@ public class Model3DUploadQueryRoundTripTests : IAsyncLifetime
 
     public Task DisposeAsync()
     {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
         _client?.Dispose();
         _factory?.Dispose();
-        return Task.CompletedTask;
     }
 
     private static MultipartFormDataContent CreateStlUpload(string fileName, string content = "solid test\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid test\n")

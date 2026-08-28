@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Hubs;
 
-public class HarvestHubTests
+public class HarvestHubTests : IDisposable
 {
     private readonly Mock<IHubCallerClients> _clientsMock;
     private readonly Mock<IClientProxy> _groupMock;
@@ -37,6 +37,8 @@ public class HarvestHubTests
             Context = _contextMock.Object
         };
     }
+
+    public void Dispose() => _hub.Dispose();
 
     [Fact]
     public async Task JoinHarvestGroupAsync_AddsClientToGroup()

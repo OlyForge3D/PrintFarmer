@@ -24,13 +24,15 @@ namespace Farm.Web.Api.Tests.Security;
 /// <see cref="IMaintenanceAlertService.ResolveAlertAsync"/> and asserts who actually receives the
 /// resulting SignalR event.
 /// </summary>
-public sealed class MaintenanceHubAuthorizationIntegrationTests : IAsyncLifetime
+public sealed class MaintenanceHubAuthorizationIntegrationTests : IAsyncLifetime, IDisposable
 {
     private readonly MaintenanceHubFactory _factory = new();
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
+
+    public void Dispose() => _factory.Dispose();
 
     [Fact]
     public async Task ResolvedAlert_ExcludedUser_NeverReceivesEvent_ButAdminAndGroupMemberDo()

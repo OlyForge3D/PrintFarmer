@@ -27,7 +27,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// login/session tokens (proven by every other test in
 /// <see cref="SliceJobCanonicalSubmissionTests"/>, which authenticate as a worker) are unaffected.
 /// </summary>
-public sealed class SliceJobDesktopScopeAuthorizationTests : IAsyncLifetime
+public sealed class SliceJobDesktopScopeAuthorizationTests : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
     private HttpClient _anonymousClient = null!;
@@ -60,9 +60,14 @@ public sealed class SliceJobDesktopScopeAuthorizationTests : IAsyncLifetime
 
     public Task DisposeAsync()
     {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
         _anonymousClient?.Dispose();
         _factory?.Dispose();
-        return Task.CompletedTask;
     }
 
     private static string ComputeSha256Hash(string rawData) =>

@@ -28,7 +28,7 @@ namespace Farm.Backend.Plugins.Tests.Services.Sdcp;
 /// the mocked <see cref="ISdcpClient.GetCompositeStatusAsync(string, CancellationToken)"/>
 /// callback once the desired number of poll iterations has executed.
 /// </summary>
-public class SdcpPollingServiceBroadcastGateTests
+public class SdcpPollingServiceBroadcastGateTests : IDisposable
 {
     private readonly Mock<ISdcpClient> _sdcpClient = new(MockBehavior.Loose);
     private readonly Mock<IPrintersRepository> _printersRepository = new(MockBehavior.Loose);
@@ -66,6 +66,8 @@ public class SdcpPollingServiceBroadcastGateTests
         _pollPrinterAsync = typeof(SdcpPollingService)
             .GetMethod("PollPrinterAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
     }
+
+    public void Dispose() => _service.Dispose();
 
     private int SendCount() => _clientProxy.Invocations.Count(i => i.Method.Name == "SendCoreAsync");
 

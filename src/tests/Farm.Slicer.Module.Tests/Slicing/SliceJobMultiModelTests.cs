@@ -14,7 +14,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 /// Validates that ModelFileUrls are stored, resolved, and returned correctly,
 /// while preserving backward compatibility for single-model jobs.
 /// </summary>
-public class SliceJobMultiModelTests(Xunit.Abstractions.ITestOutputHelper output) : IAsyncLifetime
+public class SliceJobMultiModelTests(Xunit.Abstractions.ITestOutputHelper output) : IAsyncLifetime, IDisposable
 {
     private readonly CustomWebApplicationFactory _factory = new();
     private readonly Xunit.Abstractions.ITestOutputHelper _output = output;
@@ -26,7 +26,13 @@ public class SliceJobMultiModelTests(Xunit.Abstractions.ITestOutputHelper output
         _client = await _factory.CreateWorkerClientAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
+    {
+        Dispose();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
     {
         _client?.Dispose();
         _factory?.Dispose();
