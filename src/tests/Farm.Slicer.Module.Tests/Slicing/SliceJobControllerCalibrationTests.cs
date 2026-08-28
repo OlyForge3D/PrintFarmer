@@ -331,6 +331,80 @@ public sealed class SliceJobControllerCalibrationTests
             Times.Once);
     }
 
+    [Fact]
+    public async Task SubmitAsync_InputShapingMethodWithSupportedFirmwareFlavor_CreatesOrdinarySliceJobWithNoCalibrationSagaFields()
+    {
+        // Issue #2139 acceptance: report-only method — no CalibrationParameters.Params measurement
+        // range, no printer-settable field, no clone/patch saga step — but it still submits end to
+        // end like every other built calibration method, carrying firmware_flavor through
+        // CalibrationParamsJson for the worker to validate again in PrepareCalibrationModel.
+        SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out Mock<ISliceJobEventService> events);
+        SliceJob? added = null;
+        _ = repository
+            .Setup(instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()))
+            .Callback<SliceJob, CancellationToken>((job, _) => added = job)
+            .Returns(Task.CompletedTask);
+
+        var request = new SubmitSliceJobRequest
+        {
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            Priority = 1,
+            Calibration = new CalibrationRequest { Method = "input_shaping", FirmwareFlavor = "klipper" },
+        };
+
+        IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
+
+        _ = result.Should().BeOfType<CreatedResult>();
+        _ = added.Should().NotBeNull();
+        _ = added!.CalibrationMethod.Should().Be("input_shaping");
+        _ = added.CalibrationParamsJson.Should().Contain("firmware_flavor").And.Contain("klipper");
+
+        _ = added.CalibrationProjectId.Should().BeNull();
+        _ = added.CalibrationAttemptId.Should().BeNull();
+        _ = added.CalibrationOrchestrationId.Should().BeNull();
+
+        _ = added.ModelFileUrl.Should().Be("calibration:input_shaping");
+        _ = added.ModelFileName.Should().Be(CalibrationMethods.DefaultModelFileName(CalibrationMethod.InputShaping));
+
+        events.Verify(
+            instance => instance.NotifyJobQueuedAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("reprap")]
+    [InlineData("smoothieware")]
+    public async Task SubmitAsync_InputShapingMethodWithMissingOrUnsupportedFirmwareFlavor_ReturnsInvalidRequestBeforeQueueing(
+        string? firmwareFlavor)
+    {
+        // Issue #2139: input shaping is firmware-specific (Klipper's [input_shaper] block vs.
+        // Marlin's M593 flow are entirely different operator actions), so the API must reject a
+        // missing/unrecognized firmware flavor before queueing — never silently default to one
+        // flavor and never queue a job the worker would only refuse later.
+        SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out Mock<ISliceJobEventService> events);
+        var request = new SubmitSliceJobRequest
+        {
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            Priority = 1,
+            Calibration = new CalibrationRequest { Method = "input_shaping", FirmwareFlavor = firmwareFlavor },
+        };
+
+        IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
+
+        var objectResult = result.Should().BeOfType<ObjectResult>().Subject;
+        _ = objectResult.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        var problem = objectResult.Value.Should().BeOfType<ProblemDetails>().Subject;
+        _ = problem.Extensions["code"].Should().Be("unsupported_input_shaping_firmware_flavor");
+        repository.Verify(
+            instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        events.Verify(
+            instance => instance.NotifyJobQueuedAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     private static SliceJobController CreateController(
         out Mock<ISliceJobRepository> repository,
         out Mock<ISliceJobEventService> events)

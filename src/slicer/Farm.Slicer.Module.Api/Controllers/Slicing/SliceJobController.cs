@@ -157,6 +157,21 @@ public partial class SliceJobController(
                     "those belong to the separate printer/toolhead calibration-projects saga.";
                 return SlicerApiProblems.InvalidRequest(this, "calibration_mode_conflicts_with_saga_ids", conflictMessage);
             }
+
+            // Input shaping (issue #2139) is report-only and firmware-specific: the resonance
+            // frequency/damping-factor result only means something once the operator applies it
+            // to their own firmware (Klipper's [input_shaper] vs. Marlin's M593), so the request
+            // must name which one it targets. Validated here, at the API boundary, so a missing
+            // or unsupported flavor fails the same way as an unknown method rather than only
+            // failing late, after a worker has already claimed the job.
+            if (parsedMethod == CalibrationMethod.InputShaping &&
+                !InputShapingFirmwareFlavors.IsSupported(request.Calibration.FirmwareFlavor))
+            {
+                string message = "Calibration method 'input_shaping' requires calibration.firmwareFlavor to be one " +
+                    $"of: {string.Join(", ", InputShapingFirmwareFlavors.Supported)}. Got " +
+                    $"'{request.Calibration.FirmwareFlavor}'.";
+                return SlicerApiProblems.InvalidRequest(this, "unsupported_input_shaping_firmware_flavor", message);
+            }
         }
 
         if (_printerAccess is not null &&
@@ -266,9 +281,7 @@ public partial class SliceJobController(
             // Calibration mode (issue #1938): deliberately independent of the three fields above —
             // this is an ordinary slice job, not a printer/toolhead calibration saga entry.
             CalibrationMethod = calibrationMethod is { } cm3 ? CalibrationMethods.ToWireName(cm3) : null,
-            CalibrationParamsJson = request.Calibration?.Params is { Count: > 0 }
-                ? JsonSerializer.Serialize(request.Calibration.Params)
-                : null,
+            CalibrationParamsJson = BuildCalibrationParamsJson(request.Calibration),
             OperationId = request.OperationId,
             CorrelationId = request.CorrelationId,
             Checksum = request.Checksum,
@@ -1195,6 +1208,38 @@ public partial class SliceJobController(
         {
             return slicerProfileJson;
         }
+    }
+
+    /// <summary>
+    /// Builds the single <c>CalibrationParamsJson</c> blob a calibration-mode slice job persists,
+    /// merging <see cref="CalibrationRequest.Params"/> (numeric, per method) with
+    /// <see cref="CalibrationRequest.FirmwareFlavor"/> (string, input shaping only — issue #2139)
+    /// into one JSON object under the <c>firmware_flavor</c> key. This keeps both concerns on the
+    /// single existing <c>CalibrationParamsJson</c> column — no schema change — while the worker's
+    /// <c>CalibrationParameters.Parse</c> reads each key per its own expected JSON kind.
+    /// </summary>
+    private static string? BuildCalibrationParamsJson(CalibrationRequest? calibration)
+    {
+        if (calibration is null)
+        {
+            return null;
+        }
+
+        Dictionary<string, object> merged = [];
+        if (calibration.Params is { Count: > 0 } numericParams)
+        {
+            foreach (KeyValuePair<string, double> pair in numericParams)
+            {
+                merged[pair.Key] = pair.Value;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(calibration.FirmwareFlavor))
+        {
+            merged["firmware_flavor"] = calibration.FirmwareFlavor.Trim();
+        }
+
+        return merged.Count > 0 ? JsonSerializer.Serialize(merged) : null;
     }
 
     private bool CanAccess(SliceJob job)
