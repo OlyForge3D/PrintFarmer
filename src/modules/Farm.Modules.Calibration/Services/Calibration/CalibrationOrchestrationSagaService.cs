@@ -414,6 +414,17 @@ public sealed class CalibrationOrchestrationSagaService(
                 retryCount: orchestration.RetryCount);
         }
 
+        if (result.IsTerminal)
+        {
+            // A deterministic rejection (issue #2139: e.g. a missing/unsupported input-shaping
+            // firmware flavor gets HTTP 400 from SliceJobController) will fail identically on
+            // every retry, since the request body is rebuilt from the same recorded attempt
+            // input each time. Entering the exponential-backoff retry loop here would delay the
+            // operator-visible refusal by minutes for no chance of a different outcome - fail the
+            // step immediately instead.
+            return StepOutcome.TerminalFailure(result.ErrorCode ?? "slice_submission_failed", result.ErrorDetail);
+        }
+
         return StepOutcome.Retryable(
             orchestration.RetryCount,
             CalibrationSagaSteps.Slicing,
@@ -541,6 +552,16 @@ public sealed class CalibrationOrchestrationSagaService(
     /// request that sets <c>calibration.method</c> alongside any of them, so this saga must never
     /// forward them even if a stored input happened to contain one.
     /// </summary>
+    /// <remarks>
+    /// Issue #2139: <see cref="CalibrationMethod.InputShaping"/> is the one method whose
+    /// specification carries a string <c>firmware_flavor</c> value rather than purely numeric
+    /// parameters. <c>calibration.params</c> binds to
+    /// <c>Farm.Slicer.Module.Contracts.CalibrationRequest.Params</c>
+    /// (<c>Dictionary&lt;string, double&gt;?</c>), so a string value left there would fail to bind
+    /// and the API would never see it. It must instead be lifted to the request's dedicated
+    /// <c>calibration.firmwareFlavor</c> sibling field, the same field <c>SliceJobController</c>
+    /// validates directly against <c>InputShapingFirmwareFlavors.IsSupported</c>.
+    /// </remarks>
     private static JsonObject BuildSliceSubmissionBody(CalibrationAttempt attempt, CalibrationMethod method)
     {
         JsonNode? parsedBody = JsonNode.Parse(attempt.InputJson);
@@ -549,11 +570,36 @@ public sealed class CalibrationOrchestrationSagaService(
         bodyObject.Remove("calibrationAttemptId");
         bodyObject.Remove("calibrationOrchestrationId");
         JsonNode? specification = JsonNode.Parse(attempt.SpecificationJson);
-        bodyObject["calibration"] = new JsonObject
+
+        var calibration = new JsonObject
         {
             ["method"] = CalibrationMethodNames.ToName(method),
             ["params"] = specification?.DeepClone(),
         };
+
+        if (method == CalibrationMethod.InputShaping &&
+            calibration["params"] is JsonObject inputShapingParams &&
+            inputShapingParams.TryGetPropertyValue("firmware_flavor", out JsonNode? firmwareFlavorNode))
+        {
+            calibration["firmwareFlavor"] = firmwareFlavorNode?.DeepClone();
+            inputShapingParams.Remove("firmware_flavor");
+
+            // Deliberately reassign calibration["params"] only when it must become null (every key
+            // was firmware_flavor). Re-assigning a JsonObject to the same key it is already the
+            // value of (the Count > 0 branch a prior revision of this fix took) is unverifiable by
+            // inspection alone - review finding on issue #2139: whether System.Text.Json.Nodes'
+            // JsonObject indexer setter tolerates re-parenting a node under the key it already
+            // occupies depends on internal ordering of its detach-old/assign-new-parent steps, which
+            // is not part of the public contract. Leaving inputShapingParams as the untouched,
+            // already-assigned value for calibration["params"] sidesteps the question entirely: no
+            // reassignment happens unless the object is being replaced with null.
+            if (inputShapingParams.Count == 0)
+            {
+                calibration["params"] = null;
+            }
+        }
+
+        bodyObject["calibration"] = calibration;
         return bodyObject;
     }
 
