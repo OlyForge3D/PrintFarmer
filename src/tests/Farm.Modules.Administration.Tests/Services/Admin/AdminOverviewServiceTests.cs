@@ -344,7 +344,7 @@ public class AdminOverviewServiceTests
         // The database Error must sort ahead of the printer Warning.
         overview.Attention.Should().HaveCountGreaterThanOrEqualTo(2);
         overview.Attention[0].Severity.Should().Be(AttentionSeverity.Error);
-        overview.Attention.Last().Severity.Should().Be(AttentionSeverity.Warning);
+        overview.Attention[^1].Severity.Should().Be(AttentionSeverity.Warning);
     }
 
     // ─── Serialization contract ───────────────────────────────────────────────
