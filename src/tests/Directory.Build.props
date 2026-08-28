@@ -56,7 +56,6 @@
            to simulate provider-specific exception shapes; each was fixed directly by adding the
            missing parameterless/message/message+innerException constructors delegating to the
            base Exception/DbException constructors. -->
-      S1144;    <!-- Unused private types or members (36) -->
       VSTHRD003;<!-- Avoid awaiting foreign Tasks (30) -->
       IDISP017; <!-- Prefer using-declaration (24) -->
       SA1414;   <!-- Tuple types in signatures should have element names (18) -->
