@@ -25,7 +25,7 @@ public sealed record CalibrationSliceSubmission(JsonNode RequestBody);
 /// currently, an HTTP 400 from <c>POST /api/slice</c> - so retrying (which resubmits the exact
 /// same body) can never succeed. <see cref="CalibrationOrchestrationSagaService"/> fails the step
 /// immediately instead of entering the exponential-backoff retry loop when this is set, so a
-/// deterministic rejection (e.g. issue #2139's <c>unsupported_input_shaping_firmware_flavor</c>)
+/// deterministic rejection (e.g. an unknown or unsupported calibration method)
 /// surfaces to the operator right away rather than after minutes of guaranteed-to-repeat retries.
 /// </param>
 public sealed record SliceSubmissionResult(bool Success, Guid? SliceJobId, string? ErrorCode, string? ErrorDetail, bool IsTerminal = false)
@@ -129,8 +129,8 @@ public sealed class InternalApiSliceSubmissionGateway(
             if (!response.IsSuccessStatusCode)
             {
                 // A 400 means SliceJobController rejected this exact request body as invalid
-                // (e.g. issue #2139's missing/unsupported input-shaping firmware flavor) -
-                // resubmitting the same body will always fail the same way, so this is terminal,
+                // (e.g. an unsupported or unknown calibration method) - resubmitting the same
+                // body will always fail the same way, so this is terminal,
                 // not retryable. Any other non-success status (5xx, etc.) is left retryable, since
                 // those can plausibly succeed on a later attempt.
                 bool isTerminal = response.StatusCode == System.Net.HttpStatusCode.BadRequest;

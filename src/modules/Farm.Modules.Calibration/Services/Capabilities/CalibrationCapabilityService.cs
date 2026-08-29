@@ -165,7 +165,8 @@ public sealed class CalibrationCapabilityService(
                 slicingOperational,
                 workerHealth,
                 calibrationContextOperational,
-                promotionCapability);
+                promotionCapability,
+                modelStorageResolvable);
 
         IReadOnlyList<string>? effectivePermissions = null;
         EffectiveCalibrationCapabilitiesDto? effectiveCapabilities = null;
@@ -447,7 +448,8 @@ public sealed class CalibrationCapabilityService(
         bool slicingOperational,
         WorkerHealthSnapshot workerHealth,
         bool calibrationContextOperational,
-        GcodePromotionCapabilityDto? promotionCapability)
+        GcodePromotionCapabilityDto? promotionCapability,
+        bool modelStorageResolvable)
     {
         List<CapabilityUnavailableReasonDto> reasons = [];
         if (!calibrationContextOperational)
@@ -511,6 +513,31 @@ public sealed class CalibrationCapabilityService(
                     : workerHealth.HealthyCount == 0
                         ? $"No healthy upstream OrcaSlicer worker matches the configured allow-list ({string.Join(", ", _compatibilityPolicy.SupportedVersions)})."
                     : "The complete slicer-to-artifact path is not currently usable.",
+            });
+        }
+
+        // The slicing path itself can be fully operational while calibration slicing still
+        // isn't: it additionally requires a worker that attests a pinned upstream OrcaSlicer
+        // build identity and a resolvable model storage backend. Both conjuncts are
+        // independent of each other and of the chain above, so each is reported on its own
+        // rather than as an "else if" — either, neither, or both can be the true cause.
+        if (slicingOperational && workerHealth.PinnedIdentityCount == 0)
+        {
+            reasons.Add(new()
+            {
+                Feature = "slicing",
+                Code = "no_pinned_worker_identity",
+                Message = "Calibration slicing requires a worker that attests a pinned upstream OrcaSlicer build.",
+            });
+        }
+
+        if (slicingOperational && !modelStorageResolvable)
+        {
+            reasons.Add(new()
+            {
+                Feature = "slicing",
+                Code = "model_storage_unresolvable",
+                Message = "Calibration slicing requires a resolvable model storage backend to read the print model.",
             });
         }
 

@@ -41,9 +41,6 @@ public static class CalibrationMethodKinds
         CalibrationMethod.MaximumVolumetricSpeed => "max_volumetric_speed",
         CalibrationMethod.Shrinkage => "shrinkage",
         CalibrationMethod.FinalVerification => "verification",
-        CalibrationMethod.Cornering => "cornering",
-        CalibrationMethod.InputShaping => "input_shaping",
-        CalibrationMethod.Vfa => "resonance_speed",
         _ => throw new ArgumentOutOfRangeException(
             nameof(method),
             method,
@@ -91,10 +88,7 @@ public static class CalibrationMethodSteps
         CalibrationMethod.Retraction or
         CalibrationMethod.MaximumVolumetricSpeed or
         CalibrationMethod.Shrinkage or
-        CalibrationMethod.FinalVerification or
-        CalibrationMethod.Cornering or
-        CalibrationMethod.InputShaping or
-        CalibrationMethod.Vfa => DefaultSequence,
+        CalibrationMethod.FinalVerification => DefaultSequence,
         _ => throw new ArgumentOutOfRangeException(
             nameof(method),
             method,

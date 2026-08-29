@@ -69,9 +69,7 @@ public sealed class CalibrationSagaSliceSubmissionIntegrationTests
         {
             Method = CalibrationMethods.ToWireName(method),
             InputJson = /*lang=json,strict*/ """{"slicerEngine":"OrcaSlicer","priority":1}""",
-            SpecificationJson = method == CalibrationMethod.InputShaping
-                ? /*lang=json,strict*/ """{"firmware_flavor":"klipper"}"""
-                : /*lang=json,strict*/ "{}",
+            SpecificationJson = /*lang=json,strict*/ "{}",
         };
 
         JsonObject requestBody = CalibrationOrchestrationSagaService.BuildSliceSubmissionBody(attempt, method);
