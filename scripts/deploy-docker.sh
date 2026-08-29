@@ -30,6 +30,14 @@
 
 set -euo pipefail
 
+# Internal state for resolve_orcaslicer_container_digest() (see its definition
+# below). This is deliberately reset here, unconditionally, rather than left
+# to default via "${_ORCASLICER_DIGEST_SOURCE:-}" -- an inherited/exported
+# value of "override" from the calling shell would make the function's first
+# call skip digest validation entirely (defense-in-depth: closes a residual
+# path back to the injection risk B3 fixed, per round-3 review).
+_ORCASLICER_DIGEST_SOURCE=""
+
 # Pre-process args to support verify-only mode with optional env/config file overrides.
 # Accept both '--flag value' and '--flag=value' forms.
 # Source shared utilities
@@ -277,6 +285,127 @@ resolve_image_tag() {
         echo "$upgraded_tag"
     else
         echo "$base_tag"
+    fi
+}
+
+# Resolve ORCASLICER_CONTAINER_DIGEST from the local OrcaSlicer worker image's
+# repository digest, so the worker can attest a pinned build (issue #2164).
+# A registry-sourced image -- pulled via pull-from-registry.sh, or pushed via
+# build-and-push-registry.sh -- has a resolvable RepoDigests entry that survives
+# a local `docker tag` (RepoDigests is a property of the image object itself,
+# keyed by image ID, not of the tag name used to reference it). A pure local
+# build (build-orcaslicer-optimized.sh, or a plain `docker compose build` with
+# no prior pull/push) is never pulled or pushed, so it genuinely has no
+# repository digest to resolve, and calibration generation must stay unavailable.
+#
+# The value written to ORCASLICER_CONTAINER_DIGEST/.env MUST be the bare
+# "sha256:<64-hex>" form, not the full "repo@sha256:<hex>" reference that
+# `docker image inspect`/docker_image_digest_reference() returns: the API's
+# WorkerClaimIdentity.IsContainerDigest() (src/slicer/Farm.Slicer.Module/Domain/
+# WorkerClaimIdentity.cs) requires an exact "sha256:" prefix followed by 64 hex
+# characters and nothing else, so a repo-qualified reference would silently
+# fail attestation while this script still reported calibration as available.
+#
+# Any accepted value (operator override or resolved) is re-validated against
+# that exact bare-digest shape before being trusted, because it is later
+# written into the unquoted .env heredoc / via update_kv_file, which
+# load_env_file() `source`s with `set -a`: an unvalidated value containing
+# shell metacharacters or embedded newlines could inject arbitrary
+# configuration or code into that source.
+#
+# Sets (as globals): ORCASLICER_CONTAINER_DIGEST, ORCASLICER_CALIBRATION_AVAILABLE ("yes"/"no")
+#
+# This function is called TWICE per deploy: once from generate_env_file()
+# (before the worker image is built/pulled) and again from deploy_containers()
+# right after the build/pull/dry-run step converges, so the digest reflects
+# the image actually being deployed rather than whatever existed beforehand
+# (issue #2164). Because both calls share the same ORCASLICER_CONTAINER_DIGEST
+# global, the second call cannot simply treat "already non-empty" as "operator
+# override" -- that value could just as easily be this function's OWN first-call
+# resolution, and treating it as an override would freeze the (possibly stale)
+# first-call digest in place forever, defeating the whole point of the second
+# call. _ORCASLICER_DIGEST_SOURCE (an internal, non-.env global) records which
+# case applied on the first call, so every later call can tell the two apart:
+# an operator override is honored on every call, while a self-resolved value is
+# always re-resolved from the current image.
+resolve_orcaslicer_container_digest() {
+    local worker_image="printfarmer-orcaslicer-worker:latest"
+    local bare_digest_regex='^sha256:[0-9a-f]{64}$'
+
+    if [ "${_ORCASLICER_DIGEST_SOURCE:-}" = "override" ]; then
+        # An operator override was already accepted on an earlier call in this
+        # run; keep honoring it rather than re-resolving from the (possibly
+        # different) image on a later call.
+        return 0
+    fi
+
+    if [ -z "${_ORCASLICER_DIGEST_SOURCE:-}" ] && [ -n "${ORCASLICER_CONTAINER_DIGEST:-}" ]; then
+        # Operator explicitly supplied a digest override on the FIRST call only.
+        # Validate its shape before trusting it -- see the function comment
+        # above for why.
+        _ORCASLICER_DIGEST_SOURCE="override"
+        if [[ "$ORCASLICER_CONTAINER_DIGEST" =~ $bare_digest_regex ]]; then
+            ORCASLICER_CALIBRATION_AVAILABLE="yes"
+        else
+            print_error "ORCASLICER_CONTAINER_DIGEST override is malformed (expected the bare form sha256:<64 lowercase hex characters>); ignoring it."
+            ORCASLICER_CONTAINER_DIGEST=""
+            ORCASLICER_CALIBRATION_AVAILABLE="no"
+        fi
+        return 0
+    fi
+
+    # No operator override (on this call or an earlier one) -- always
+    # re-resolve from the current local image so a later call picks up any
+    # image that was built/pulled since the previous call.
+    _ORCASLICER_DIGEST_SOURCE="resolved"
+
+    if [ "${ENABLE_ORCA_WORKER:-no}" != "yes" ]; then
+        # Worker disabled entirely; nothing to resolve and no need to warn.
+        ORCASLICER_CONTAINER_DIGEST=""
+        ORCASLICER_CALIBRATION_AVAILABLE="no"
+        return 0
+    fi
+
+    local repo_digest_reference
+    # NOTE: on failure, docker_image_digest_reference() calls print_error, which
+    # writes its diagnostic to stdout (not stderr) -- so that text is captured by
+    # this command substitution, not silenced by the `2>/dev/null` below (which
+    # only suppresses the function's actual stderr, expected to be empty). We
+    # rely solely on the function's exit status and never print
+    # $repo_digest_reference in the failure branch, so the captured diagnostic
+    # text is simply discarded rather than leaking into ORCASLICER_CONTAINER_DIGEST.
+    if repo_digest_reference=$(docker_image_digest_reference "$worker_image" 2>/dev/null); then
+        # Strip the "repo@" prefix to get the bare "sha256:<hex>" form the API expects.
+        local bare_digest="${repo_digest_reference#*@}"
+        if [[ "$bare_digest" =~ $bare_digest_regex ]]; then
+            ORCASLICER_CONTAINER_DIGEST="$bare_digest"
+            ORCASLICER_CALIBRATION_AVAILABLE="yes"
+            print_success "Resolved OrcaSlicer worker container digest: $ORCASLICER_CONTAINER_DIGEST"
+        else
+            # Defensive: docker_image_digest_reference() already validates the
+            # repo@sha256:<hex> shape, so this should be unreachable, but never
+            # trust a value bound for .env without re-checking it here too.
+            ORCASLICER_CONTAINER_DIGEST=""
+            ORCASLICER_CALIBRATION_AVAILABLE="no"
+            print_warning "Calibration generation will be unavailable: the worker image has no registry digest, so it cannot attest a pinned build. Use pull-from-registry.sh or build-and-push-registry.sh to enable calibration."
+        fi
+    else
+        ORCASLICER_CONTAINER_DIGEST=""
+        ORCASLICER_CALIBRATION_AVAILABLE="no"
+        print_warning "Calibration generation will be unavailable: the worker image has no registry digest, so it cannot attest a pinned build. Use pull-from-registry.sh or build-and-push-registry.sh to enable calibration."
+    fi
+}
+
+# Print a single "Calibration generation" status line for the deploy summary,
+# based on the outcome of resolve_orcaslicer_container_digest() (issue #2164).
+print_calibration_status_line() {
+    if [ "${ENABLE_ORCA_WORKER:-no}" != "yes" ]; then
+        return 0
+    fi
+    if [ "${ORCASLICER_CALIBRATION_AVAILABLE:-no}" = "yes" ]; then
+        print_success "Calibration generation: available (worker image digest attested)"
+    else
+        print_warning "Calibration generation: unavailable (worker image has no registry digest)"
     fi
 }
 
@@ -4549,6 +4678,11 @@ generate_env_file() {
         CORS_ORIGINS="${CORS_ORIGINS},https://localhost:${HTTPS_PORT}"
     fi
     
+    # Resolve ORCASLICER_CONTAINER_DIGEST before the heredoc below, since the
+    # resolution emits print_success/print_warning output that must not be
+    # captured into the .env file's variable text (issue #2164).
+    resolve_orcaslicer_container_digest
+    
     cat > "$ENV_FILE" << EOF
 # PrintFarmer Docker Configuration
 # Generated by deploy-docker.sh on $(date)
@@ -4706,9 +4840,14 @@ DEVMODE_BYPASS_AUTH=${DEVMODE_BYPASS_AUTH:-false}
 # Slicer Versions
 ORCASLICER_VERSION=$SUPPORTED_ORCASLICER_VERSION
 ORCASLICER_SHA256=$SUPPORTED_ORCASLICER_SHA256
-# Set only after resolving or pushing an immutable worker image. Leaving this empty keeps
-# calibration generation unavailable while ordinary slicing can continue.
-ORCASLICER_CONTAINER_DIGEST=${ORCASLICER_CONTAINER_DIGEST:-}
+# Resolved above by resolve_orcaslicer_container_digest() from the worker image's
+# repository digest when available (registry pull/push). deploy_containers()
+# re-resolves and rewrites this value after the worker image build/pull
+# completes, so it reflects the image actually being deployed rather than
+# whatever existed at .env-generation time. Empty means calibration
+# generation is unavailable for this deployment while ordinary slicing can
+# continue (issue #2164).
+ORCASLICER_CONTAINER_DIGEST=$ORCASLICER_CONTAINER_DIGEST
 
 # Docker Base Image Tags - Use values from container-versions.conf (single source of truth)
 # If not set by config file, these defaults are used
@@ -5550,6 +5689,20 @@ EOF
         
         # Clean up the temporary override file if it was created
         cleanup_orca_override
+    fi
+    
+    # Re-resolve ORCASLICER_CONTAINER_DIGEST now that the worker image build
+    # (or registry pull) above has completed, and persist the fresh value into
+    # $ENV_FILE so the imminent `docker compose --env-file "$ENV_FILE" up`
+    # picks it up. The resolution in generate_env_file() ran BEFORE this
+    # build/pull step, so on a clean host it would have found no image yet
+    # (leaving calibration unavailable even though this deploy just built one),
+    # and on a redeploy it could have attested the *previous* image's digest --
+    # a stale attestation that no longer matches what is actually running
+    # (issue #2164).
+    resolve_orcaslicer_container_digest
+    if [ -f "$ENV_FILE" ]; then
+        update_kv_file "$ENV_FILE" "ORCASLICER_CONTAINER_DIGEST" "$ORCASLICER_CONTAINER_DIGEST"
     fi
     
     print_info "Step 2/3: Starting containers..."
@@ -7154,6 +7307,7 @@ display_final_info() {
     echo -e "${BLUE}  • Enabled: $ENABLE_DISTRIBUTED_SLICING${NC}"
     if [ "$ENABLE_DISTRIBUTED_SLICING" = "true" ]; then
         echo -e "${BLUE}  • Orca Workers: $ORCA_WORKER_COUNT (enabled: $ENABLE_ORCA_WORKER)${NC}"
+        print_calibration_status_line
     fi
 
     
@@ -7315,6 +7469,7 @@ redeploy_existing() {
     
     print_success "✅ Redeployment complete!"
     print_info "All containers have been rebuilt and restarted with the same configuration."
+    print_calibration_status_line
     
     exit 0
 }
