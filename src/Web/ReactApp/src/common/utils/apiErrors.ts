@@ -32,6 +32,42 @@ export function extractValidationErrorMessage(data: unknown): string | undefined
   return messages.length > 0 ? messages.join(' ') : undefined;
 }
 
+/**
+ * Extracts a human-readable message from a raw XHR error response body. XHR-based upload
+ * flows (progress-tracked via `XMLHttpRequest` rather than the `apiClient` axios instance)
+ * previously discarded the server's response body entirely and surfaced only
+ * `xhr.statusText` (e.g. "Bad Request"), hiding actionable validation detail such as
+ * "File is too small to be a valid STL (must be at least 84 bytes)" (issue #2175). Mirrors
+ * the axios interceptor's message-extraction priority above: a top-level `message`/`detail`
+ * string, then a `ValidationProblemDetails`-style `errors` map, then a bare JSON string body
+ * (ASP.NET Core's `BadRequest(string)` serializes the string as-is), then raw response text,
+ * finally `fallback`.
+ */
+export function parseXhrErrorMessage(responseText: string, fallback: string): string {
+  if (!responseText) return fallback;
+
+  let data: unknown;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    return responseText.trim() || fallback;
+  }
+
+  if (typeof data === 'string') return data || fallback;
+
+  if (data && typeof data === 'object') {
+    const record = data as { message?: unknown; detail?: unknown; error?: unknown };
+    if (typeof record.message === 'string' && record.message) return record.message;
+    if (typeof record.detail === 'string' && record.detail) return record.detail;
+    if (typeof record.error === 'string' && record.error) return record.error;
+
+    const validationMessage = extractValidationErrorMessage(data);
+    if (validationMessage) return validationMessage;
+  }
+
+  return fallback;
+}
+
 /** Narrows an unknown thrown value to the shared `ApiError` shape. */
 export function isApiError(error: unknown): error is ApiError {
   return (

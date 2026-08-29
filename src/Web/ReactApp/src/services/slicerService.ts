@@ -1,6 +1,7 @@
 // Slicer service interfaces and types
 import { apiClient } from './api';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
+import { parseXhrErrorMessage } from '@/common/utils/apiErrors';
 
 export interface SliceRequest {
   modelFile: File;
@@ -142,7 +143,13 @@ class SlicerService {
             reject(new Error('Failed to parse upload response'));
           }
         } else {
-          reject(new Error(`Model upload failed: ${xhr.statusText}`));
+          // Surface the server's actual validation reason instead of the generic
+          // statusText (e.g. "Bad Request") so users know why a file was rejected (#2175).
+          const message = parseXhrErrorMessage(
+            xhr.responseText,
+            `Model upload failed: ${xhr.statusText}`
+          );
+          reject(new Error(message));
         }
       });
 
