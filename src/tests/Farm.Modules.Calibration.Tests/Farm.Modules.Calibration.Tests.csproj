@@ -29,6 +29,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
     <ProjectReference Include="..\..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
+    <ProjectReference Include="..\..\slicer\Farm.Slicer.Module.Api\Farm.Slicer.Module.Api.csproj" />
     <ProjectReference Include="..\..\modules\Farm.Modules.Calibration\Farm.Modules.Calibration.csproj" />
   </ItemGroup>
 </Project>

@@ -5,6 +5,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.PrinterCalibration;
 using Farm.Modules.Calibration.Contracts;
 using Farm.Modules.Calibration.Services.Calibration;
+using Farm.Slicer.Module.Models;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -638,14 +639,14 @@ public sealed class CalibrationProjectServiceTests
         CalibrationApiResult<CalibrationDraftDto> setup = await service.UpsertDraftAsync(
             project.Value!.Id,
             CalibrationMethodSteps.Setup,
-            CreateStepDraftRequest(CalibrationMethodNames.Temperature),
+            CreateStepDraftRequest(CalibrationMethods.ToWireName(CalibrationMethod.TemperatureTower)),
             null,
             actor,
             CancellationToken.None);
         CalibrationApiResult<CalibrationDraftDto> print = await service.UpsertDraftAsync(
             project.Value.Id,
             CalibrationMethodSteps.Print,
-            CreateStepDraftRequest(CalibrationMethodNames.Temperature),
+            CreateStepDraftRequest(CalibrationMethods.ToWireName(CalibrationMethod.TemperatureTower)),
             null,
             actor,
             CancellationToken.None);
@@ -669,7 +670,7 @@ public sealed class CalibrationProjectServiceTests
         CalibrationApiResult<CalibrationDraftDto> result = await service.UpsertDraftAsync(
             project.Value!.Id,
             CalibrationMethodSteps.Measure,
-            CreateStepDraftRequest(CalibrationMethodNames.Temperature),
+            CreateStepDraftRequest(CalibrationMethods.ToWireName(CalibrationMethod.TemperatureTower)),
             null,
             actor,
             CancellationToken.None);
@@ -698,7 +699,7 @@ public sealed class CalibrationProjectServiceTests
             project.Value!.Id,
             actor.Subject,
             sequence: 1,
-            CalibrationMethodNames.Temperature);
+            CalibrationMethods.ToWireName(CalibrationMethod.TemperatureTower));
 
         CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
             attemptId,
@@ -727,7 +728,7 @@ public sealed class CalibrationProjectServiceTests
             project.Value!.Id,
             actor.Subject,
             sequence: 1,
-            CalibrationMethodNames.Temperature);
+            CalibrationMethods.ToWireName(CalibrationMethod.TemperatureTower));
 
         CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
             attemptId,
@@ -759,7 +760,7 @@ public sealed class CalibrationProjectServiceTests
             project.Value!.Id,
             actor.Subject,
             sequence: 1,
-            CalibrationMethodNames.FlowRatioCoarse);
+            CalibrationMethods.ToWireName(CalibrationMethod.FlowRatePass1));
 
         CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
             attemptId,
@@ -788,7 +789,7 @@ public sealed class CalibrationProjectServiceTests
             project.Value!.Id,
             actor.Subject,
             sequence: 1,
-            CalibrationMethodNames.FlowRatioCoarse);
+            CalibrationMethods.ToWireName(CalibrationMethod.FlowRatePass1));
 
         CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
             attemptId,
@@ -820,7 +821,7 @@ public sealed class CalibrationProjectServiceTests
             project.Value!.Id,
             actor.Subject,
             sequence: 1,
-            CalibrationMethodNames.PressureAdvanceTower);
+            CalibrationMethods.ToWireName(CalibrationMethod.PressureAdvanceTower));
 
         CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
             attemptId,
@@ -849,7 +850,7 @@ public sealed class CalibrationProjectServiceTests
             project.Value!.Id,
             actor.Subject,
             sequence: 1,
-            CalibrationMethodNames.PressureAdvanceTower);
+            CalibrationMethods.ToWireName(CalibrationMethod.PressureAdvanceTower));
 
         CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
             attemptId,
@@ -884,7 +885,7 @@ public sealed class CalibrationProjectServiceTests
             project.Value!.Id,
             actor.Subject,
             sequence: 1,
-            CalibrationMethodNames.Retraction);
+            CalibrationMethods.ToWireName(CalibrationMethod.Retraction));
 
         CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
             attemptId,
@@ -916,7 +917,7 @@ public sealed class CalibrationProjectServiceTests
             project.Value!.Id,
             actor.Subject,
             sequence: 1,
-            CalibrationMethodNames.MaximumVolumetricSpeed);
+            CalibrationMethods.ToWireName(CalibrationMethod.MaximumVolumetricSpeed));
 
         CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
             attemptId,
@@ -945,7 +946,7 @@ public sealed class CalibrationProjectServiceTests
             project.Value!.Id,
             actor.Subject,
             sequence: 1,
-            CalibrationMethodNames.Retraction);
+            CalibrationMethods.ToWireName(CalibrationMethod.Retraction));
 
         CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
             attemptId,
@@ -975,7 +976,7 @@ public sealed class CalibrationProjectServiceTests
             project.Value!.Id,
             actor.Subject,
             sequence: 1,
-            CalibrationMethodNames.MaximumVolumetricSpeed);
+            CalibrationMethods.ToWireName(CalibrationMethod.MaximumVolumetricSpeed));
 
         CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
             attemptId,
@@ -1013,7 +1014,7 @@ public sealed class CalibrationProjectServiceTests
             project.Value!.Id,
             actor.Subject,
             sequence: 1,
-            CalibrationMethodNames.InputShaping);
+            CalibrationMethods.ToWireName(CalibrationMethod.InputShaping));
 
         CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
             attemptId,
@@ -1040,7 +1041,7 @@ public sealed class CalibrationProjectServiceTests
             project.Value!.Id,
             actor.Subject,
             sequence: 1,
-            CalibrationMethodNames.Temperature);
+            CalibrationMethods.ToWireName(CalibrationMethod.TemperatureTower));
         CalibrationObservationCreateRequest request = new()
         {
             ClientId = "desktop",
@@ -1074,14 +1075,14 @@ public sealed class CalibrationProjectServiceTests
         _ = await service.UpsertDraftAsync(
             project.Value!.Id,
             CalibrationMethodSteps.Setup,
-            CreateStepDraftRequest(CalibrationMethodNames.Temperature, "lineage-a"),
+            CreateStepDraftRequest(CalibrationMethods.ToWireName(CalibrationMethod.TemperatureTower), "lineage-a"),
             null,
             actor,
             CancellationToken.None);
         _ = await service.UpsertDraftAsync(
             project.Value.Id,
             CalibrationMethodSteps.Print,
-            CreateStepDraftRequest(CalibrationMethodNames.Temperature, "lineage-a"),
+            CreateStepDraftRequest(CalibrationMethods.ToWireName(CalibrationMethod.TemperatureTower), "lineage-a"),
             null,
             actor,
             CancellationToken.None);
@@ -1089,7 +1090,7 @@ public sealed class CalibrationProjectServiceTests
         CalibrationApiResult<CalibrationDraftDto> lineageBSetup = await service.UpsertDraftAsync(
             project.Value.Id,
             CalibrationMethodSteps.Setup,
-            CreateStepDraftRequest(CalibrationMethodNames.Temperature, "lineage-b"),
+            CreateStepDraftRequest(CalibrationMethods.ToWireName(CalibrationMethod.TemperatureTower), "lineage-b"),
             null,
             actor,
             CancellationToken.None);
@@ -1127,7 +1128,7 @@ public sealed class CalibrationProjectServiceTests
         CalibrationDraftUpsertRequest editRequest = new()
         {
             DeviceLineageId = "device-a",
-            Method = CalibrationMethodNames.Temperature,
+            Method = CalibrationMethods.ToWireName(CalibrationMethod.TemperatureTower),
             Values = JsonSerializer.SerializeToElement(new { }),
             Prerequisites = JsonSerializer.SerializeToElement(new { }),
             BaseRevision = unenforcedCreate.Value!.Revision,

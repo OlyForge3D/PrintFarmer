@@ -1,25 +1,28 @@
 ﻿using Farm.Modules.Calibration.Services.Calibration;
+using Farm.Slicer.Module.Models;
 using FluentAssertions;
 using Xunit;
 
 namespace Farm.Modules.Calibration.Tests.Services.Calibration;
 
 /// <summary>
-/// Direct coverage for the domain calibration-method catalogue (<see cref="CalibrationMethodNames"/>,
-/// <see cref="CalibrationMethodSteps"/>, <see cref="CalibrationMeasurementRanges"/>). Prior to this
-/// file, this catalogue was only exercised indirectly through
-/// <see cref="CalibrationProjectServiceTests"/>'s <c>AppendObservationAsync</c>-style tests.
+/// Direct coverage for the domain calibration catalogue as unified onto the slicer's own
+/// <see cref="CalibrationMethods"/> (issue #2161), plus the saga-specific behavior that remains
+/// in <see cref="Farm.Modules.Calibration.Services.Calibration.CalibrationMethodSteps"/> and
+/// <see cref="CalibrationMeasurementRanges"/>. Prior to this file, this catalogue was only
+/// exercised indirectly through <see cref="CalibrationProjectServiceTests"/>'s
+/// <c>AppendObservationAsync</c>-style tests.
 /// </summary>
 public sealed class CalibrationMethodNamesTests
 {
     [Fact]
-    public void InputShaping_ToName_RoundTripsThroughTryParse()
+    public void InputShaping_ToWireName_RoundTripsThroughTryParse()
     {
         // Issue #2139 acceptance: wire name must be exactly "input_shaping" and must round-trip.
-        string name = CalibrationMethodNames.ToName(CalibrationMethod.InputShaping);
+        string name = CalibrationMethods.ToWireName(CalibrationMethod.InputShaping);
 
         name.Should().Be("input_shaping");
-        CalibrationMethodNames.TryParse(name, out CalibrationMethod parsed).Should().BeTrue();
+        CalibrationMethods.TryParse(name, out CalibrationMethod parsed).Should().BeTrue();
         parsed.Should().Be(CalibrationMethod.InputShaping);
     }
 
@@ -28,8 +31,8 @@ public sealed class CalibrationMethodNamesTests
     {
         // ToKind feeds CalibrationMeasurementRanges.ForKind and CalibrationObservation.Kind - must
         // match the wire name exactly so AppendObservationAsync looks up the (absent) range under
-        // the same key ToName/TryParse use.
-        CalibrationMethodNames.ToKind(CalibrationMethod.InputShaping).Should().Be("input_shaping");
+        // the same key ToWireName/TryParse use.
+        CalibrationMethodKinds.ToKind(CalibrationMethod.InputShaping).Should().Be("input_shaping");
     }
 
     [Fact]
@@ -47,9 +50,9 @@ public sealed class CalibrationMethodNamesTests
     }
 
     [Fact]
-    public void InputShaping_IsIncludedInAll()
+    public void InputShaping_IsIncludedInSupportedWireNames()
     {
-        CalibrationMethodNames.All.Should().Contain(CalibrationMethodNames.InputShaping);
+        CalibrationMethods.SupportedWireNames.Should().Contain("input_shaping");
     }
 
     [Fact]
@@ -58,6 +61,6 @@ public sealed class CalibrationMethodNamesTests
         // Report-only (issue #2139): the worker-parsed resonance-frequency/damping-factor value is
         // recorded unvalidated, unlike temperature/flow_ratio/pressure_advance/max_volumetric_speed
         // which all have a defined physical range.
-        CalibrationMeasurementRanges.ForKind(CalibrationMethodNames.InputShaping).Should().BeNull();
+        CalibrationMeasurementRanges.ForKind("input_shaping").Should().BeNull();
     }
 }

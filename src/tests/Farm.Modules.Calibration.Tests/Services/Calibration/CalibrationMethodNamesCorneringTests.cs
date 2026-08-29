@@ -1,4 +1,5 @@
 ﻿using Farm.Modules.Calibration.Services.Calibration;
+using Farm.Slicer.Module.Models;
 using FluentAssertions;
 using Xunit;
 
@@ -16,29 +17,29 @@ public sealed class CalibrationMethodNamesCorneringTests
     [Fact]
     public void Cornering_WireName_Is_cornering()
     {
-        CalibrationMethodNames.Cornering.Should().Be("cornering");
+        CalibrationMethods.ToWireName(CalibrationMethod.Cornering).Should().Be("cornering");
     }
 
     [Fact]
     public void TryParse_Cornering_RoundTripsToCorneringMethod()
     {
-        bool parsed = CalibrationMethodNames.TryParse("cornering", out CalibrationMethod method);
+        bool parsed = CalibrationMethods.TryParse("cornering", out CalibrationMethod method);
 
         parsed.Should().BeTrue();
         method.Should().Be(CalibrationMethod.Cornering);
-        CalibrationMethodNames.ToName(CalibrationMethod.Cornering).Should().Be("cornering");
+        CalibrationMethods.ToWireName(CalibrationMethod.Cornering).Should().Be("cornering");
     }
 
     [Fact]
-    public void All_ContainsCornering()
+    public void SupportedWireNames_ContainsCornering()
     {
-        CalibrationMethodNames.All.Should().Contain("cornering");
+        CalibrationMethods.SupportedWireNames.Should().Contain("cornering");
     }
 
     [Fact]
     public void ToKind_Cornering_ReturnsCorneringKind()
     {
-        CalibrationMethodNames.ToKind(CalibrationMethod.Cornering).Should().Be("cornering");
+        CalibrationMethodKinds.ToKind(CalibrationMethod.Cornering).Should().Be("cornering");
     }
 
     [Fact]
@@ -60,7 +61,7 @@ public sealed class CalibrationMethodNamesCorneringTests
         // incompatible units depending on firmware flavor (mm/s jerk, mm junction deviation, or
         // mm/s square corner velocity), so no single plausible-value range applies. The API must
         // treat a null range here as "no server-side plausibility check", not as a bug.
-        CalibrationMeasurementRanges.ForKind(CalibrationMethodNames.ToKind(CalibrationMethod.Cornering))
+        CalibrationMeasurementRanges.ForKind(CalibrationMethodKinds.ToKind(CalibrationMethod.Cornering))
             .Should().BeNull();
     }
 }

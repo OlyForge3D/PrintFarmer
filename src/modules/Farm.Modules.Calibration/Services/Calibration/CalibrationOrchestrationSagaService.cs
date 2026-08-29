@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Modules.Calibration.Contracts;
+using Farm.Slicer.Module.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -379,7 +380,7 @@ public sealed class CalibrationOrchestrationSagaService(
     /// transient one - retrying the same parse can never succeed.
     /// </remarks>
     private static StepOutcome RunCloningProfileStep(CalibrationAttempt attempt) =>
-        CalibrationMethodNames.TryParse(attempt.Method, out _)
+        CalibrationMethods.TryParse(attempt.Method, out _)
             ? StepOutcome.Advance(CalibrationSagaSteps.Slicing, "step:cloning-profile")
             : StepOutcome.TerminalFailure("unknown_calibration_method", $"Method '{attempt.Method}' is not a recognized calibration method.");
 
@@ -388,7 +389,7 @@ public sealed class CalibrationOrchestrationSagaService(
         CalibrationAttempt attempt,
         CancellationToken cancellationToken)
     {
-        if (!CalibrationMethodNames.TryParse(attempt.Method, out CalibrationMethod method))
+        if (!CalibrationMethods.TryParse(attempt.Method, out CalibrationMethod method))
         {
             return StepOutcome.TerminalFailure(
                 "unknown_calibration_method",
@@ -562,7 +563,19 @@ public sealed class CalibrationOrchestrationSagaService(
     /// <c>calibration.firmwareFlavor</c> sibling field, the same field <c>SliceJobController</c>
     /// validates directly against <c>InputShapingFirmwareFlavors.IsSupported</c>.
     /// </remarks>
-    private static JsonObject BuildSliceSubmissionBody(CalibrationAttempt attempt, CalibrationMethod method)
+    /// <remarks>
+    /// Internal (rather than private) so <c>Farm.Modules.Calibration.Tests</c> can exercise it
+    /// directly against the real <c>SliceJobController</c> - see
+    /// <c>CalibrationSagaSliceSubmissionIntegrationTests</c> (issue #2161 AC #6). This is the
+    /// method that regressed: it used to call the saga's own, now-deleted
+    /// <c>CalibrationMethodNames.ToName</c>, which posted a wire name
+    /// <c>SliceJobController</c> validates against a completely different dictionary
+    /// (<see cref="CalibrationMethods"/>) - 9 of 15 saga methods 400'd with
+    /// <c>unsupported_calibration_method</c> as a result. It now calls
+    /// <see cref="CalibrationMethods.ToWireName"/>, the same canonical formatter the controller's
+    /// own responses use, so the two can never diverge again.
+    /// </remarks>
+    internal static JsonObject BuildSliceSubmissionBody(CalibrationAttempt attempt, CalibrationMethod method)
     {
         JsonNode? parsedBody = JsonNode.Parse(attempt.InputJson);
         JsonObject bodyObject = parsedBody as JsonObject ?? [];
@@ -573,7 +586,7 @@ public sealed class CalibrationOrchestrationSagaService(
 
         var calibration = new JsonObject
         {
-            ["method"] = CalibrationMethodNames.ToName(method),
+            ["method"] = CalibrationMethods.ToWireName(method),
             ["params"] = specification?.DeepClone(),
         };
 

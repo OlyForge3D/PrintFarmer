@@ -4,6 +4,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Modules.Calibration.Contracts;
 using Farm.Modules.Calibration.Services.Calibration;
+using Farm.Slicer.Module.Models;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -141,7 +142,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         // BuildSliceSubmissionBody unconditionally rebuilt the "calibration" node as
         // {method, params}, so an input_shaping attempt's firmware_flavor never reached the API's
         // dedicated CalibrationRequest.FirmwareFlavor field. Because InputShaping is now a
-        // recognized CalibrationMethodNames entry, RunCloningProfileStep's TryParse succeeds where
+        // recognized CalibrationMethods entry, RunCloningProfileStep's TryParse succeeds where
         // it previously failed fast - so without this fix the saga would proceed to slicing and
         // have every submission rejected by the API's firmware-flavor validation, retrying with
         // exponential backoff until the retry budget was exhausted instead of failing fast.
@@ -157,7 +158,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(
             actor,
             projectService,
-            methodName: CalibrationMethodNames.InputShaping,
+            methodName: CalibrationMethods.ToWireName(CalibrationMethod.InputShaping),
             specification: JsonSerializer.SerializeToElement(new { firmware_flavor = "klipper" }));
 
         JsonNode? capturedRequestBody = null;
@@ -185,7 +186,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
 
         _ = capturedRequestBody.Should().NotBeNull();
         JsonObject calibration = (JsonObject)capturedRequestBody!["calibration"]!;
-        _ = calibration["method"]!.GetValue<string>().Should().Be(CalibrationMethodNames.InputShaping);
+        _ = calibration["method"]!.GetValue<string>().Should().Be(CalibrationMethods.ToWireName(CalibrationMethod.InputShaping));
         _ = calibration["firmwareFlavor"]!.GetValue<string>().Should().Be(
             "klipper",
             "firmware_flavor must be lifted out of params and promoted to the dedicated " +
@@ -219,7 +220,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(
             actor,
             projectService,
-            methodName: CalibrationMethodNames.InputShaping,
+            methodName: CalibrationMethods.ToWireName(CalibrationMethod.InputShaping),
             specification: JsonSerializer.SerializeToElement(new { firmware_flavor = "marlin", notes_ref = 42 }));
 
         JsonNode? capturedRequestBody = null;
@@ -277,7 +278,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(
             actor,
             projectService,
-            methodName: CalibrationMethodNames.InputShaping,
+            methodName: CalibrationMethods.ToWireName(CalibrationMethod.InputShaping),
             specification: JsonSerializer.SerializeToElement(new { firmware_flavor = "unsupported" }));
 
         _ = await AdvanceAsync(saga, orchestrationId, actor); // created -> cloning-profile
@@ -312,7 +313,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         CalibrationOrchestrationSagaService saga = CreateSaga(db, projectService, sliceGateway, printGateway);
         CalibrationActor actor = CreateActor();
         (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(
-            actor, projectService, methodName: CalibrationMethodNames.Cornering);
+            actor, projectService, methodName: CalibrationMethods.ToWireName(CalibrationMethod.Cornering));
 
         Guid sliceJobId = Guid.NewGuid();
         sliceGateway.SubmitBehavior = _ => SliceSubmissionResult.Ok(sliceJobId);
@@ -761,7 +762,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
     private static async Task<(Guid OrchestrationId, Guid AttemptId)> CreateProjectAndAttemptAsync(
         ICalibrationProjectService projectService,
         CalibrationActor actor,
-        string methodName = CalibrationMethodNames.Temperature) =>
+        string methodName = "temperature_tower") =>
         await CreateProjectAndAttemptAsync(actor, projectService, methodName);
 
     private static async Task<(Guid OrchestrationId, Guid AttemptId)> CreateProjectAndAttemptAsync(
