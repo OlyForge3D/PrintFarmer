@@ -1488,9 +1488,19 @@ public class ProfilesController(
     /// hardcoded server-side, so it is structurally impossible for this route to mint a machine or
     /// process profile no matter what a caller sends.
     /// </para>
+    /// <para>
+    /// Round-4 review fix (issue #2180 - Hicks Blocking #2): the calibration-side promotion claim
+    /// is TTL-reclaimable, so this endpoint may legitimately be called more than once for the same
+    /// draft profile (e.g. a crash or lost response between this call succeeding and the caller
+    /// recording the outcome locally). <see cref="PromoteCalibrationDraftProfileRequestDto.SourceDraftProfileId"/>
+    /// is therefore required and used as an idempotency key: a replayed call with the same value
+    /// returns the SAME profile (200 OK) rather than minting a second, user-visible duplicate in
+    /// the owner's custom filament profile list (201 Created only on first promotion).
+    /// </para>
     /// </remarks>
     [HttpPost("promote-from-calibration")]
     [RequirePermission(PrintFarmerPermissions.Calibration.Update)]
+    [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> PromoteCalibrationDraftProfileAsync(
@@ -1500,6 +1510,11 @@ public class ProfilesController(
         if (request is null)
         {
             return BadRequest("Request body is required");
+        }
+
+        if (request.SourceDraftProfileId == Guid.Empty)
+        {
+            return BadRequest("SourceDraftProfileId is required");
         }
 
         try
@@ -1512,8 +1527,12 @@ public class ProfilesController(
                 RawJson = request.RawJson,
                 ProfileType = "filament",
             };
-            CustomProfileDto result = await _profilesService.UploadCustomProfileAsync(uploadRequest, userId, ct);
-            return Created($"/api/slicer/profiles/{result.Id}", result);
+            (CustomProfileDto result, bool wasCreated) = await _profilesService.PromoteCalibrationDraftProfileAsync(
+                uploadRequest, userId, request.SourceDraftProfileId, ct);
+
+            return wasCreated
+                ? Created($"/api/slicer/profiles/{result.Id}", result)
+                : Ok(result);
         }
         catch (ArgumentException ex)
         {

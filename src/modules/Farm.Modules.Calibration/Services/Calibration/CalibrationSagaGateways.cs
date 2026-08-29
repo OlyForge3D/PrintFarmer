@@ -220,7 +220,14 @@ public sealed class InternalApiSliceSubmissionGateway(
 /// The filament-profile-shaped JSON document built from the project's accumulated draft values,
 /// posted verbatim as <c>UploadProfileRequestDto.RawJson</c>.
 /// </param>
-public sealed record FilamentProfilePromotionRequest(string Name, string RawJson);
+/// <param name="DraftProfileId">
+/// The calibration draft profile's own stable identifier (<c>CalibrationDraftProfile.Id</c>).
+/// Round-4 review fix (issue #2180 - Hicks Blocking #2): sent as an idempotency key so a
+/// retried/replayed promotion call (e.g. after a TTL-reclaimed stranded claim, see
+/// <c>CalibrationProjectService.PromotionClaimStaleAfter</c>) returns the SAME promoted profile
+/// instead of minting a visible duplicate in the owner's custom filament profile list.
+/// </param>
+public sealed record FilamentProfilePromotionRequest(string Name, string RawJson, Guid DraftProfileId);
 
 /// <summary>Outcome of promoting a project's draft profile to a real custom filament profile.</summary>
 /// <param name="Success">Whether the promotion was accepted.</param>
@@ -292,12 +299,14 @@ public sealed class InternalApiFilamentProfilePromotionGateway(
             {
                 ["rawJson"] = request.RawJson,
                 ["name"] = request.Name,
+                ["sourceDraftProfileId"] = request.DraftProfileId.ToString(),
             };
 
             // Note: profileType is intentionally NOT sent here. The endpoint's request DTO
-            // (PromoteCalibrationDraftProfileRequestDto) only accepts rawJson/name and hardcodes
-            // filament server-side (round-2 review fix, Bishop B6/Vasquez Task 5) - sending it
-            // would be silently ignored, so omitting it avoids implying it still has any effect.
+            // (PromoteCalibrationDraftProfileRequestDto) only accepts rawJson/name/
+            // sourceDraftProfileId and hardcodes filament server-side (round-2 review fix, Bishop
+            // B6/Vasquez Task 5) - sending it would be silently ignored, so omitting it avoids
+            // implying it still has any effect.
 
             // The client's BaseAddress is pinned via Program.cs's AddHttpClient registration from
             // trusted configuration - reusing the same named client as the slice-submission

@@ -3747,6 +3747,110 @@ public class ProfilesService(
 
     private async Task<CustomProfileDto> UploadFilamentProfileAsync(UploadProfileRequestDto request, Guid userId, CancellationToken ct)
     {
+        (string name, string? compatiblePrinters) = ParseFilamentProfileMetadata(request);
+
+        FilamentProfile profile = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            SlicerType = SlicerType.OrcaSlicer,
+            IsSystem = false,
+            IsPublic = false,
+            CreatedByUserId = userId,
+            RawJson = request.RawJson,
+            Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
+            CompatiblePrinters = compatiblePrinters,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        await _filamentProfileRepo.AddAsync(profile, ct);
+        _logger.LogInformation("Uploaded filament profile '{Name}' for user {UserId} (CompatiblePrinters={CompatiblePrinters})", LogSanitizer.Sanitize(name), userId, LogSanitizer.Sanitize(profile.CompatiblePrinters ?? "<none>"));
+
+        return ToCustomProfileDto(profile);
+    }
+
+    /// <summary>
+    /// Promotes a calibration project's draft profile to a real, owner-visible custom filament
+    /// profile (#2180, gap 1), idempotently keyed on <paramref name="sourceDraftProfileId"/>.
+    /// </summary>
+    /// <remarks>
+    /// Round-4 review fix (issue #2180 - Hicks Blocking #2): the calibration-side promotion claim
+    /// is TTL-reclaimable (see <c>CalibrationProjectService.PromotionClaimStaleAfter</c>), so this
+    /// endpoint may legitimately be called more than once for the same draft profile - most
+    /// plausibly after a process crash or lost response between the original call succeeding here
+    /// and the caller recording the result locally. Replaying the call must return the SAME
+    /// filament profile rather than minting a visible duplicate in the owner's custom profile
+    /// list. The unique index on <see cref="FilamentProfile.PromotedFromCalibrationDraftProfileId"/>
+    /// is the actual source of truth for this guarantee; the check-then-insert below is a fast
+    /// path that avoids the round trip to the database's constraint violation on the common,
+    /// non-racing case, and the catch handles the narrow window where two concurrent replays both
+    /// miss the initial check.
+    /// </remarks>
+    public async Task<(CustomProfileDto Profile, bool WasCreated)> PromoteCalibrationDraftProfileAsync(
+        UploadProfileRequestDto request, Guid userId, Guid sourceDraftProfileId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.IsNullOrWhiteSpace(request.RawJson))
+        {
+            throw new ArgumentException("RawJson is required.");
+        }
+
+        FilamentProfile? existing = await _filamentProfileRepo
+            .GetByPromotedFromCalibrationDraftProfileIdAsync(sourceDraftProfileId, ct);
+        if (existing is not null)
+        {
+            return (ToCustomProfileDto(existing), false);
+        }
+
+        (string name, string? compatiblePrinters) = ParseFilamentProfileMetadata(request);
+
+        FilamentProfile profile = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            SlicerType = SlicerType.OrcaSlicer,
+            IsSystem = false,
+            IsPublic = false,
+            CreatedByUserId = userId,
+            RawJson = request.RawJson,
+            Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
+            CompatiblePrinters = compatiblePrinters,
+            PromotedFromCalibrationDraftProfileId = sourceDraftProfileId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            await _filamentProfileRepo.AddAsync(profile, ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Lost the race: another concurrent/replayed request already promoted this exact
+            // draft and won the unique-index race. Reload and return the winner instead of
+            // surfacing a spurious failure to a caller that is itself only retrying the same
+            // idempotent completion.
+            FilamentProfile? winner = await _filamentProfileRepo
+                .GetByPromotedFromCalibrationDraftProfileIdAsync(sourceDraftProfileId, ct);
+            if (winner is not null)
+            {
+                return (ToCustomProfileDto(winner), false);
+            }
+
+            throw;
+        }
+
+        _logger.LogInformation(
+            "Promoted calibration draft profile {DraftProfileId} to filament profile '{Name}' for user {UserId}",
+            sourceDraftProfileId, LogSanitizer.Sanitize(name), userId);
+
+        return (ToCustomProfileDto(profile), true);
+    }
+
+    private static (string Name, string? CompatiblePrinters) ParseFilamentProfileMetadata(UploadProfileRequestDto request)
+    {
         string name = request.Name ?? "Uploaded Filament";
         try
         {
@@ -3767,39 +3871,23 @@ public class ProfilesService(
         string? compatiblePrinters = NormalizeCompatiblePrintersList(request.CompatiblePrinters)
             ?? ExtractCompatiblePrintersFromRawJson(request.RawJson);
 
-        FilamentProfile profile = new()
-        {
-            Id = Guid.NewGuid(),
-            Name = name,
-            SlicerType = SlicerType.OrcaSlicer,
-            IsSystem = false,
-            IsPublic = false,
-            CreatedByUserId = userId,
-            RawJson = request.RawJson,
-            Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
-            CompatiblePrinters = compatiblePrinters,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        await _filamentProfileRepo.AddAsync(profile, ct);
-        _logger.LogInformation("Uploaded filament profile '{Name}' for user {UserId} (CompatiblePrinters={CompatiblePrinters})", LogSanitizer.Sanitize(name), userId, LogSanitizer.Sanitize(profile.CompatiblePrinters ?? "<none>"));
-
-        // Filament profiles do not carry a PrinterModelId column; they are matched to
-        // printers via CompatiblePrinters strings instead. Always emit null PrinterModelId.
-        return new CustomProfileDto
-        {
-            Id = profile.Id,
-            Name = profile.Name,
-            ProfileType = "filament",
-            IsSystem = false,
-            CreatedAt = profile.CreatedAt,
-            UpdatedAt = profile.UpdatedAt,
-            RawJson = profile.RawJson,
-            PrinterModelId = null,
-            CompatiblePrinters = SplitCompatiblePrinters(profile.CompatiblePrinters)
-        };
+        return (name, compatiblePrinters);
     }
+
+    // Filament profiles do not carry a PrinterModelId column; they are matched to
+    // printers via CompatiblePrinters strings instead. Always emit null PrinterModelId.
+    private static CustomProfileDto ToCustomProfileDto(FilamentProfile profile) => new()
+    {
+        Id = profile.Id,
+        Name = profile.Name,
+        ProfileType = "filament",
+        IsSystem = false,
+        CreatedAt = profile.CreatedAt,
+        UpdatedAt = profile.UpdatedAt,
+        RawJson = profile.RawJson,
+        PrinterModelId = null,
+        CompatiblePrinters = SplitCompatiblePrinters(profile.CompatiblePrinters)
+    };
 
     private async Task<CustomProfileDto> UploadMachineProfileAsync(UploadProfileRequestDto request, Guid userId, CancellationToken ct)
     {

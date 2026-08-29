@@ -69,7 +69,7 @@ const SCOPE_GROUPS: ScopeGroup[] = [
         value: 'CalibrationUpdate',
         label: 'Calibration update',
         description: 'Edit calibration projects, drafts, observations, and photos.',
-        impact: 'Also requires Calibration read.',
+        impact: 'Also requires Calibration read and Slicing submit.',
       },
       {
         value: 'CalibrationDelete',

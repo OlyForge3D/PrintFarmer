@@ -156,6 +156,15 @@ public sealed class PromoteCalibrationDraftProfileRequestDto
     /// values.
     /// </summary>
     public string RawJson { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The calibration draft profile's own stable identifier (#2180, gap 1). Required, and used
+    /// server-side as an idempotency key: replaying this call with the same value (e.g. after a
+    /// TTL-reclaimed stranded promotion claim, see
+    /// <c>CalibrationProjectService.PromotionClaimStaleAfter</c>) returns the SAME promoted
+    /// profile instead of minting a visible duplicate in the owner's custom profile list.
+    /// </summary>
+    public Guid SourceDraftProfileId { get; set; }
 }
 
 /// <summary>

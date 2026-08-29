@@ -37,6 +37,11 @@ public class EfFilamentProfileRepository(SlicerDbContext db) : IFilamentProfileR
         await _db.FilamentProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Hash == hash, ct);
 
     /// <inheritdoc/>
+    public async Task<FilamentProfile?> GetByPromotedFromCalibrationDraftProfileIdAsync(Guid sourceDraftProfileId, CancellationToken ct = default) =>
+        await _db.FilamentProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.PromotedFromCalibrationDraftProfileId == sourceDraftProfileId, ct);
+
+    /// <inheritdoc/>
     public async Task AddAsync(FilamentProfile profile, CancellationToken ct = default)
     {
         _ = _db.FilamentProfiles.Add(profile);

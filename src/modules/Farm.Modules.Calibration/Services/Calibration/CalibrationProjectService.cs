@@ -504,13 +504,15 @@ public sealed class CalibrationProjectService(
                 // it as abandoned and allow reclaiming it - the Revision concurrency token still
                 // protects against two callers reclaiming the same stale row simultaneously.
                 //
-                // Residual, documented risk: if the ORIGINAL claimant crashed AFTER the external
-                // gateway call already created the real filament profile but BEFORE recording
-                // PromotedProfileId locally, a reclaim after the TTL calls the gateway again and
-                // creates a second, harmless orphaned external profile (never referenced by any
-                // project) rather than losing the first one. Fully preventing that duplicate would
-                // require an idempotency key threaded through the external profile-creation
-                // contract, which is out of scope for this PR; tracked as a follow-up.
+                // Round-4 review fix (Hicks Blocking #2, issue #2180): a reclaim after the TTL
+                // that calls the gateway again is now genuinely safe, not merely "harmless" -
+                // PromoteCalibrationDraftProfileAsync dedups on the draft profile's own stable ID
+                // (a unique-indexed column on FilamentProfile), so a replayed gateway call returns
+                // the SAME already-promoted profile instead of minting a second, user-visible
+                // duplicate in the owner's custom filament profile list. (An earlier version of
+                // this comment described the duplicate as a "harmless orphaned" profile; that
+                // framing was incorrect - a duplicate is a real, visible entry in the user's
+                // profile list, not an orphan - and is what motivated this fix.)
                 if (draftProfile.PromotionClaimedAtUtc is not null &&
                     !IsPromotionClaimStale(draftProfile.PromotionClaimedAtUtc.Value))
                 {
@@ -552,7 +554,7 @@ public sealed class CalibrationProjectService(
                 draftProfile = claimedProfile;
 
                 FilamentProfilePromotionResult promotion = await _filamentProfilePromotionGateway.PromoteAsync(
-                    new FilamentProfilePromotionRequest(project.Name, BuildDraftProfileRawJson(project, draftProfile)),
+                    new FilamentProfilePromotionRequest(project.Name, BuildDraftProfileRawJson(project, draftProfile), draftProfile.Id),
                     cancellationToken);
                 if (!promotion.Success || promotion.ProfileId is null)
                 {
@@ -3498,6 +3500,17 @@ public sealed class CalibrationProjectService(
                 _dbContext.Entry(draftProfile).State = EntityState.Detached;
                 draftProfile = await _dbContext.CalibrationDraftProfiles.SingleAsync(
                     profile => profile.Id == draftProfileId, cancellationToken);
+                if (draftProfile.PromotedProfileId is not null)
+                {
+                    // Bishop round-4 hardening (issue #2180): a concurrent caller already
+                    // completed promotion for this draft while we were retrying the claim.
+                    // Promotion is now idempotent end-to-end (see PromoteCalibrationDraftProfileAsync's
+                    // draft-profile-id dedup key), so reclaiming here would not be unsafe, but it
+                    // would be a wasted gateway round trip for a promotion that has already
+                    // succeeded - fail fast instead.
+                    return null;
+                }
+
                 if (draftProfile.PromotionClaimedAtUtc is not null &&
                     !IsPromotionClaimStale(draftProfile.PromotionClaimedAtUtc.Value))
                 {
