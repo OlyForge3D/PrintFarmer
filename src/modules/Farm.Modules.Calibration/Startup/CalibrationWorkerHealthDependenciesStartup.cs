@@ -33,8 +33,10 @@ namespace Farm.Modules.Calibration.Startup;
 /// <c>CalibrationCapabilityService.GetWorkerHealthAsync</c>'s
 /// <c>_serviceProvider.GetService&lt;IDbContextFactory&lt;SlicerDbContext&gt;&gt;()</c> resolution
 /// depended entirely on wiring it has nothing to do with, and would have silently broken (worker
-/// health always reported <c>Unavailable</c>) had either of those unrelated startup paths ever
-/// been removed or reshaped without anyone noticing the incidental coupling. This class makes the
+/// health always reported <c>Unavailable</c>) had both of those unrelated startup paths ever been
+/// removed or reshaped at the same time without anyone noticing the incidental coupling — either
+/// one alone was enough to keep the registration reachable, which is exactly what made the
+/// coupling easy to miss. This class makes the
 /// dependency explicit, named, and independently testable, following the same pattern
 /// <see cref="ModelStorageResolutionStartup"/> itself established for
 /// <see cref="Farm.Slicer.Module.Services.IModelStorageResolver"/> (#2179).

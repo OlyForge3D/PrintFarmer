@@ -140,10 +140,14 @@ public static class SlicerModuleExtensions
     /// (#2178) explicitly names and independently tests: calibration worker-health capability
     /// detection (<c>CalibrationCapabilityService.GetWorkerHealthAsync</c>) resolves
     /// <see cref="IDbContextFactory{TContext}"/> of <see cref="SlicerDbContext"/> from its own DI
-    /// scope, and previously depended entirely on this method being reachable through
-    /// <c>Farm.Web.Api.Startup.MoonrakerEmulatorSeederDependenciesStartup</c>'s call chain even
-    /// though it has nothing to do with seeding Moonraker emulator fixtures. See that class for
-    /// the explicit, Moonraker-seeder-independent registration path.
+    /// scope, and previously depended entirely on this shared registration being reachable as an
+    /// incidental side effect of unrelated startup wiring — either
+    /// <c>Farm.Web.Api.Startup.MoonrakerEmulatorSeederDependenciesStartup</c>'s call chain, or
+    /// <c>Farm.Slicer.Module.Services.ModelStorageResolutionStartup.AddModelStorageResolution</c>
+    /// (#2179), neither of which has anything to do with calibration worker-health detection. See
+    /// <c>CalibrationWorkerHealthDependenciesStartup</c> for the explicit, independently-named
+    /// registration path (#2178) that makes this dependency its own source of truth instead of
+    /// riding along on either of those unrelated callers.
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection.</param>
