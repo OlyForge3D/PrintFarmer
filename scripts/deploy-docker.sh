@@ -1465,23 +1465,55 @@ prompt_yes_no() {
 
 # Remove Docker artifacts that are no longer referenced after a redeployment.
 # Volumes, active images, tagged offline assets, and most-recent build cache are preserved.
+prune_redeploy_build_cache() {
+    local prune_mode="$1"
+
+    case "$prune_mode" in
+        max-used-space)
+            if docker builder prune --all --force --max-used-space 20GB; then
+                return 0
+            fi
+
+            print_warning "Maximum cache-size pruning failed; retrying the legacy Docker cache limit"
+            docker builder prune --all --force --keep-storage 20GB
+            ;;
+        keep-storage)
+            docker builder prune --all --force --keep-storage 20GB
+            ;;
+        age)
+            docker builder prune --all --force --filter "until=24h"
+            ;;
+        *)
+            print_warning "Unknown Docker build-cache prune mode: $prune_mode"
+            return 1
+            ;;
+    esac
+}
+
 cleanup_redeploy_docker_artifacts() {
     if [ "${DRY_RUN:-false}" = "true" ]; then
         return 0
     fi
 
     local cleanup_failed=false
-    local -a builder_prune_args=(--all --force)
+    local builder_prune_help
+    local builder_prune_mode
 
     print_info "Pruning unused Docker build cache and dangling images..."
-    if docker builder prune --help 2>&1 | grep -q -- "--max-used-space"; then
-        builder_prune_args+=(--max-used-space 20GB)
+    if ! builder_prune_help=$(docker builder prune --help 2>&1); then
+        print_warning "Unable to detect Docker build-cache pruning capabilities"
+        cleanup_failed=true
+        builder_prune_mode="age"
+    elif grep -q -- "--max-used-space" <<< "$builder_prune_help"; then
+        builder_prune_mode="max-used-space"
+    elif grep -q -- "--keep-storage" <<< "$builder_prune_help"; then
+        builder_prune_mode="keep-storage"
     else
-        print_warning "Docker does not support bounded cache pruning; removing unused cache older than 24 hours"
-        builder_prune_args+=(--filter "until=24h")
+        print_warning "Docker does not support size-bounded cache pruning; removing unused cache older than 24 hours"
+        builder_prune_mode="age"
     fi
 
-    if ! docker builder prune "${builder_prune_args[@]}"; then
+    if ! prune_redeploy_build_cache "$builder_prune_mode"; then
         print_warning "Unable to prune unused Docker build cache"
         cleanup_failed=true
     fi
@@ -1495,7 +1527,7 @@ cleanup_redeploy_docker_artifacts() {
 
     # Removing dangling images can make their shared BuildKit layers reclaimable.
     # Repeat the bounded prune so the configured cache ceiling is actually reached.
-    if ! docker builder prune "${builder_prune_args[@]}"; then
+    if ! prune_redeploy_build_cache "$builder_prune_mode"; then
         print_warning "Unable to finish pruning unused Docker build cache"
         cleanup_failed=true
     fi

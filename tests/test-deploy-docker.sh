@@ -172,27 +172,58 @@ EOF
     assert_exit_code 0 "$helper_script" \
         "Cleanup should bound cache, prune images afterward, preserve volumes, and skip dry-runs"
 
-    local fallback_script="$TEST_TEMP_DIR/redeploy-cleanup-fallback-helper.sh"
-    local fallback_calls="$TEST_TEMP_DIR/redeploy-cleanup-fallback-calls"
-    cat > "$fallback_script" << EOF
+    local legacy_script="$TEST_TEMP_DIR/redeploy-cleanup-legacy-helper.sh"
+    local legacy_calls="$TEST_TEMP_DIR/redeploy-cleanup-legacy-calls"
+    cat > "$legacy_script" << EOF
 #!/bin/bash
 set -euo pipefail
 source "$DEPLOY_SCRIPT"
-DOCKER_CALLS="$fallback_calls"
+DOCKER_CALLS="$legacy_calls"
 docker() {
     printf '%s\n' "\$*" >> "\$DOCKER_CALLS"
+    if [[ "\$*" == "builder prune --help" ]]; then
+        printf '%s\n' "      --keep-storage bytes"
+    fi
 }
 
 DRY_RUN=false
 cleanup_redeploy_docker_artifacts
-[[ "\$(grep -Fxc "builder prune --all --force --filter until=24h" "\$DOCKER_CALLS")" -eq 2 ]]
+[[ "\$(grep -Fxc "builder prune --all --force --keep-storage 20GB" "\$DOCKER_CALLS")" -eq 2 ]]
 [[ "\$(sed -n '3p' "\$DOCKER_CALLS")" == "image prune --force" ]]
 ! grep -q "volume" "\$DOCKER_CALLS"
 EOF
-    chmod +x "$fallback_script"
+    chmod +x "$legacy_script"
 
-    assert_exit_code 0 "$fallback_script" \
-        "Older Docker versions should prune unused cache by age without touching volumes"
+    assert_exit_code 0 "$legacy_script" \
+        "Older supported Docker versions should retain the same size-bounded cache"
+
+    local retry_script="$TEST_TEMP_DIR/redeploy-cleanup-retry-helper.sh"
+    local retry_calls="$TEST_TEMP_DIR/redeploy-cleanup-retry-calls"
+    cat > "$retry_script" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$DEPLOY_SCRIPT"
+DOCKER_CALLS="$retry_calls"
+docker() {
+    printf '%s\n' "\$*" >> "\$DOCKER_CALLS"
+    if [[ "\$*" == "builder prune --help" ]]; then
+        printf '%s\n' "      --max-used-space bytes"
+    elif [[ "\$*" == *"--max-used-space 20GB" ]]; then
+        return 1
+    fi
+}
+
+DRY_RUN=false
+cleanup_redeploy_docker_artifacts
+[[ "\$(grep -Fxc "builder prune --all --force --max-used-space 20GB" "\$DOCKER_CALLS")" -eq 2 ]]
+[[ "\$(grep -Fxc "builder prune --all --force --keep-storage 20GB" "\$DOCKER_CALLS")" -eq 2 ]]
+[[ "\$(grep -Fxc "image prune --force" "\$DOCKER_CALLS")" -eq 1 ]]
+! grep -q "volume" "\$DOCKER_CALLS"
+EOF
+    chmod +x "$retry_script"
+
+    assert_exit_code 0 "$retry_script" \
+        "A rejected modern cache limit should retry the legacy size-bound option"
 
     local redeploy_helper="$TEST_TEMP_DIR/redeploy-cleanup-failure-helper.sh"
     local redeploy_calls="$TEST_TEMP_DIR/redeploy-cleanup-failure-calls"
