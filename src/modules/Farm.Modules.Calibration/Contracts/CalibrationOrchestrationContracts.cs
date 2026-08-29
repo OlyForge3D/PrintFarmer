@@ -32,8 +32,7 @@ public sealed record CalibrationOrchestrationDto(
 /// operator-submitted <c>CalibrationObservation</c>) so calling this endpoint never becomes a new
 /// precondition an operator must satisfy - it only reports and drives forward work that was going
 /// to happen anyway.
-/// </remarks>
-/// <remarks>
+///
 /// <b>Take-over semantics.</b> Advancing is full read-write adoption, not per-device ownership:
 /// any caller with visibility into the orchestration's project (the owning user, or a farm admin)
 /// may call this endpoint and drive an in-flight orchestration forward, whether or not it was the
@@ -41,11 +40,24 @@ public sealed record CalibrationOrchestrationDto(
 /// is deliberate: the durable checkpoint (<see cref="CalibrationOrchestrationDto.CurrentStep"/>
 /// and friends), not which device is calling, is what makes the saga correct, so a second device
 /// picking up an unfinished orchestration is a supported scenario rather than an edge case to
-/// block. Two devices racing to advance the <em>same</em> orchestration at the same time are kept
-/// safe by <see cref="CalibrationOrchestrationDto.Revision"/>, an optimistic concurrency token:
-/// the loser of the race receives a <c>calibration_orchestration_advance_conflict</c> 409 and
-/// should refetch current state (e.g. via the project's in-flight query) rather than blindly
-/// retrying its own now-stale view.
+/// block.
+///
+/// Two devices racing to advance the <em>same</em> orchestration are kept safe by
+/// <see cref="ExpectedRevision"/>, which a caller should populate from the last
+/// <see cref="CalibrationOrchestrationDto.Revision"/> it observed (e.g. via the project's
+/// in-flight query, or a prior advance response). When supplied and it no longer matches the
+/// orchestration's current <c>Revision</c>, the call is rejected immediately with a
+/// <c>calibration_orchestration_advance_conflict</c> 409 - before any step logic or side effects
+/// run - and the caller should refetch current state rather than blindly retrying its now-stale
+/// view. <see cref="ExpectedRevision"/> is optional for backward compatibility: omitting it falls
+/// back to unconditional best-effort advancement against whatever the current checkpoint is (the
+/// in-process serialization lock still prevents two overlapping calls from both acting on the
+/// same stale snapshot and duplicating an external side effect, but does not by itself detect
+/// that a caller's specific intent - e.g. "I'm reporting on awaiting-print" - has been superseded
+/// by the time its turn comes). New take-over-aware clients should always supply
+/// <see cref="ExpectedRevision"/>. A residual <see cref="Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException"/>-driven
+/// 409 also exists as defense in depth for the multi-instance case, where two API processes each
+/// hold their own independent in-process lock.
 /// </remarks>
 public sealed class CalibrationOrchestrationAdvanceRequest
 {
@@ -56,6 +68,15 @@ public sealed class CalibrationOrchestrationAdvanceRequest
     public bool? PrintCompleted { get; init; }
 
     public bool? PrintFailed { get; init; }
+
+    /// <summary>
+    /// The <see cref="CalibrationOrchestrationDto.Revision"/> this caller last observed. When
+    /// supplied and stale, the advance is rejected with a
+    /// <c>calibration_orchestration_advance_conflict</c> 409 instead of proceeding against
+    /// whatever the orchestration's current state now is. See the take-over semantics remarks
+    /// above.
+    /// </summary>
+    public long? ExpectedRevision { get; init; }
 }
 
 /// <summary>

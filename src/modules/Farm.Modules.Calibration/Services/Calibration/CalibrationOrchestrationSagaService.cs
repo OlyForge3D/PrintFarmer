@@ -224,6 +224,22 @@ public sealed class CalibrationOrchestrationSagaService(
                 "calibration_orchestration_not_found");
         }
 
+        // Take-over race check: a caller that supplied the Revision it last observed is asserting
+        // "act only if nothing else has changed this since I looked." This closes the race for
+        // BOTH the common same-process case (the semaphore above only serializes access - it
+        // reloads fresh state and dispatches on CurrentStep, so without this check a second
+        // caller's now-stale intent, e.g. reporting on a step the orchestration has already moved
+        // past, would silently become a no-op instead of surfacing a conflict) and the residual
+        // cross-process case (alongside the DbUpdateConcurrencyException handling below). Checked
+        // before any terminal-status short-circuit or step dispatch so a stale caller always gets
+        // an explicit signal rather than an answer computed from state it never agreed to act on.
+        if (request.ExpectedRevision.HasValue && request.ExpectedRevision.Value != orchestration.Revision)
+        {
+            return CalibrationApiResult<CalibrationOrchestrationDto>.Failure(
+                StatusCodes.Status409Conflict,
+                "calibration_orchestration_advance_conflict");
+        }
+
         if (orchestration.Status == CalibrationOrchestrationStatus.Failed)
         {
             // A terminal failure never blocks starting a new calibration attempt - it only means

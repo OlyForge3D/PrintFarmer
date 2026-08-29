@@ -1212,6 +1212,109 @@ public sealed class CalibrationProjectServiceTests
             "a terminal orchestration is not in flight and must not be reported as such");
     }
 
+    [Theory]
+    [InlineData(CalibrationOrchestrationStatus.Pending)]
+    [InlineData(CalibrationOrchestrationStatus.Running)]
+    [InlineData(CalibrationOrchestrationStatus.WaitingToRetry)]
+    public async Task GetInFlightAsync_NonTerminalOrchestration_IsIncluded(CalibrationOrchestrationStatus status)
+    {
+        // Fail-safe coverage for the inclusion list: every currently-defined non-terminal status
+        // must be reported as in flight, not just the ones exercised by other tests.
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, $"in-flight-nonterminal-{status}"),
+            actor,
+            CancellationToken.None);
+        Guid attemptId = await AddAttemptAsync(db, project.Value!.Id, "owner");
+        DateTime nowUtc = DateTime.UtcNow;
+        _ = db.CalibrationOrchestrations.Add(new CalibrationOrchestration
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = project.Value.Id,
+            AttemptId = attemptId,
+            CurrentStep = CalibrationSagaSteps.CloningProfile,
+            Status = status,
+            OperationId = $"operation-{attemptId:N}",
+            CreatedAtUtc = nowUtc,
+            UpdatedAtUtc = nowUtc,
+        });
+        _ = await db.SaveChangesAsync();
+
+        CalibrationApiResult<CalibrationInFlightStateDto> result = await service.GetInFlightAsync(
+            project.Value.Id,
+            actor,
+            CancellationToken.None);
+
+        _ = result.Value!.Orchestration.Should().NotBeNull(
+            $"{status} is a non-terminal status and must be reported as in flight");
+        _ = result.Value.Orchestration!.Status.Should().Be(status.ToString());
+    }
+
+    [Fact]
+    public async Task GetInFlightAsync_NewerPendingRetryDoesNotMaskOlderRunningPrint()
+    {
+        // The exact wasted-filament scenario #2181 exists to prevent: an older orchestration is
+        // Running with a physical print underway (PrintJobId set), and a newer orchestration for a
+        // retry attempt on the SAME project is merely Pending (no PrintJobId). Picking "most
+        // recently touched" alone would surface the newer Pending row and hide the print in
+        // progress - GetInFlightAsync must rank the print-in-progress row first regardless of
+        // which was touched more recently.
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "in-flight-priority-race"),
+            actor,
+            CancellationToken.None);
+
+        Guid olderAttemptId = await AddAttemptAsync(db, project.Value!.Id, "owner");
+        Guid printJobId = Guid.NewGuid();
+        DateTime olderTouchedUtc = DateTime.UtcNow.AddMinutes(-10);
+        Guid runningOrchestrationId = Guid.NewGuid();
+        _ = db.CalibrationOrchestrations.Add(new CalibrationOrchestration
+        {
+            Id = runningOrchestrationId,
+            ProjectId = project.Value.Id,
+            AttemptId = olderAttemptId,
+            CurrentStep = CalibrationSagaSteps.AwaitingPrint,
+            Status = CalibrationOrchestrationStatus.Running,
+            PrintJobId = printJobId,
+            OperationId = $"operation-{olderAttemptId:N}",
+            CreatedAtUtc = olderTouchedUtc,
+            UpdatedAtUtc = olderTouchedUtc,
+        });
+
+        Guid newerAttemptId = await AddAttemptAsync(db, project.Value.Id, "owner");
+        DateTime newerTouchedUtc = DateTime.UtcNow;
+        _ = db.CalibrationOrchestrations.Add(new CalibrationOrchestration
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = project.Value.Id,
+            AttemptId = newerAttemptId,
+            CurrentStep = CalibrationSagaSteps.Created,
+            Status = CalibrationOrchestrationStatus.Pending,
+            OperationId = $"operation-{newerAttemptId:N}",
+            CreatedAtUtc = newerTouchedUtc,
+            UpdatedAtUtc = newerTouchedUtc,
+        });
+        _ = await db.SaveChangesAsync();
+
+        CalibrationApiResult<CalibrationInFlightStateDto> result = await service.GetInFlightAsync(
+            project.Value.Id,
+            actor,
+            CancellationToken.None);
+
+        _ = result.Value!.Orchestration.Should().NotBeNull();
+        _ = result.Value.Orchestration!.Id.Should().Be(runningOrchestrationId,
+            "the Running orchestration with a physical print underway must never be masked by a " +
+            "more-recently-touched but less-advanced orchestration");
+        _ = result.Value.Orchestration.PrintJobId.Should().Be(printJobId);
+    }
+
     [Fact]
     public async Task GetInFlightAsync_DraftContent_NeverAppearsInResponse()
     {
@@ -1232,7 +1335,10 @@ public sealed class CalibrationProjectServiceTests
         CalibrationDraftUpsertRequest draftRequest = new()
         {
             DeviceLineageId = "device-a",
-            Method = "manual",
+            // The secret marker is also embedded in Method (not just Values/Prerequisites) so this
+            // test fails if a future change starts projecting Method - or any other draft field -
+            // into the in-flight response, not just the two fields the DTO happens to declare today.
+            Method = $"manual-{secretValue}",
             Values = JsonSerializer.SerializeToElement(new { measurement = secretValue }),
             Prerequisites = JsonSerializer.SerializeToElement(new { note = secretValue }),
         };

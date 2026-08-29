@@ -44,7 +44,7 @@ public sealed class CalibrationOrchestrationTakeOverConcurrencyTests
         Guid orchestrationId;
         await using (AppDbContext seedContext = store.CreateContext())
         {
-            CalibrationApiResult<CalibrationAttemptDto> attempt = await CreateService(seedContext, store.PrinterId)
+            CalibrationApiResult<CalibrationAttemptDto> attempt = await CreateService(seedContext)
                 .CreateAttemptAsync(projectId, CreateAttemptRequest("attempt-1"), actor, CancellationToken.None);
             _ = attempt.StatusCode.Should().Be(StatusCodes.Status201Created);
             orchestrationId = await seedContext.CalibrationOrchestrations
@@ -96,7 +96,143 @@ public sealed class CalibrationOrchestrationTakeOverConcurrencyTests
         _ = persisted.LastErrorCode.Should().BeNull();
     }
 
-    private static CalibrationProjectService CreateService(AppDbContext context, Guid printerId) =>
+    [Fact]
+    public async Task AdvanceAsync_TwoDevicesRaceToAdvanceSameOrchestration_LoserGetsExplicit409()
+    {
+        // Exercises the REAL CalibrationOrchestrationSagaService.AdvanceAsync entry point (not raw
+        // EF, per Hicks/Vasquez's review feedback): two devices both observe the orchestration at
+        // Revision 1, then both call AdvanceAsync supplying ExpectedRevision=1. Because the
+        // in-process semaphore serializes them, the second call is never a genuine
+        // DbUpdateConcurrencyException at the database layer - without the explicit
+        // ExpectedRevision check this would previously have silently succeeded a second time
+        // (or silently no-op'd) instead of surfacing the race to the caller. This proves the take-
+        // over contract's documented 409 for the common same-process case, not just the residual
+        // cross-instance DbUpdateConcurrencyException path covered by the sibling test above.
+        await using AppDbContext db = new(
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase($"calibration-advance-race-{Guid.NewGuid()}")
+                .Options);
+        CalibrationProjectService projectService = new(
+            db,
+            new TestCalibrationBlobStore(),
+            TimeProvider.System,
+            NullLogger<CalibrationProjectService>.Instance);
+        CalibrationOrchestrationSagaService saga = new(
+            db,
+            projectService,
+            new StubSliceSubmissionGateway(),
+            new StubPrintDispatchGateway(),
+            TimeProvider.System,
+            NullLogger<CalibrationOrchestrationSagaService>.Instance);
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+
+        CalibrationApiResult<CalibrationProjectDto> project = await projectService.CreateProjectAsync(
+            new CalibrationProjectCreateRequest
+            {
+                ClientId = "test-client",
+                RequestId = $"project-{Guid.NewGuid():N}",
+                Name = "Take-over race",
+                PrinterId = Guid.NewGuid(),
+                PrinterConfigurationRevision = 1,
+                FilamentProvider = "catalog",
+                FilamentProductId = "sku-pla-blue",
+                FilamentProductName = "PLA Blue",
+                FilamentMaterial = "PLA",
+                FilamentSnapshot = JsonSerializer.SerializeToElement(new { vendor = "OlyForge" }),
+                OrderedSteps = JsonSerializer.SerializeToElement(new[] { "temperature" }),
+                CurrentSelections = JsonSerializer.SerializeToElement(new { }),
+                ExperienceMode = "Coach",
+            },
+            actor,
+            CancellationToken.None);
+        _ = project.StatusCode.Should().Be(StatusCodes.Status201Created);
+
+        CalibrationApiResult<CalibrationAttemptDto> attempt = await projectService.CreateAttemptAsync(
+            project.Value!.Id,
+            new CalibrationAttemptCreateRequest
+            {
+                ClientId = "test-client",
+                RequestId = $"attempt-{Guid.NewGuid():N}",
+                CalibrationKind = "temperature",
+                Method = "temperature_tower",
+                DefinitionVersion = "1",
+                Input = JsonSerializer.SerializeToElement(new { modelUrl = "https://example.test/model.3mf" }),
+                Specification = JsonSerializer.SerializeToElement(new { targetTemperatureC = 210 }),
+                ProfileSnapshotIds = JsonSerializer.SerializeToElement(Array.Empty<Guid>()),
+                PrinterConfigurationRevision = 1,
+            },
+            actor,
+            CancellationToken.None);
+        _ = attempt.StatusCode.Should().Be(StatusCodes.Status201Created);
+
+        Guid orchestrationId = await db.CalibrationOrchestrations
+            .Where(o => o.AttemptId == attempt.Value!.Id)
+            .Select(o => o.Id)
+            .SingleAsync();
+
+        // Both devices observe the freshly-created orchestration at Revision 1 (e.g. via the
+        // project's in-flight query) before either one acts on it.
+        long observedRevision = await db.CalibrationOrchestrations
+            .Where(o => o.Id == orchestrationId)
+            .Select(o => o.Revision)
+            .SingleAsync();
+        _ = observedRevision.Should().Be(1);
+
+        // Device A advances first: created -> cloning-profile, bumping Revision to 2.
+        CalibrationApiResult<CalibrationOrchestrationDto> deviceAResult = await saga.AdvanceAsync(
+            orchestrationId,
+            new CalibrationOrchestrationAdvanceRequest
+            {
+                ClientId = "device-a",
+                OperationId = $"advance-{Guid.NewGuid():N}",
+                ExpectedRevision = observedRevision,
+            },
+            actor,
+            CancellationToken.None);
+        _ = deviceAResult.IsSuccess.Should().BeTrue(deviceAResult.Code);
+        _ = deviceAResult.Value!.CurrentStep.Should().Be(CalibrationSagaSteps.CloningProfile);
+        _ = deviceAResult.Value.Revision.Should().Be(2);
+
+        // Device B still believes Revision is 1 (its own earlier observation) and tries to act on
+        // that now-stale view. It must receive an explicit conflict, not a silent no-op and not a
+        // second successful advance from a state it never actually observed.
+        CalibrationApiResult<CalibrationOrchestrationDto> deviceBResult = await saga.AdvanceAsync(
+            orchestrationId,
+            new CalibrationOrchestrationAdvanceRequest
+            {
+                ClientId = "device-b",
+                OperationId = $"advance-{Guid.NewGuid():N}",
+                ExpectedRevision = observedRevision,
+            },
+            actor,
+            CancellationToken.None);
+        _ = deviceBResult.IsSuccess.Should().BeFalse();
+        _ = deviceBResult.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = deviceBResult.Code.Should().Be("calibration_orchestration_advance_conflict");
+
+        // The orchestration reflects only device A's committed advance - the loser's stale intent
+        // never touched persisted state.
+        CalibrationOrchestration persisted = await db.CalibrationOrchestrations.SingleAsync(o => o.Id == orchestrationId);
+        _ = persisted.CurrentStep.Should().Be(CalibrationSagaSteps.CloningProfile);
+        _ = persisted.Revision.Should().Be(2);
+    }
+
+    private sealed class StubSliceSubmissionGateway : ISliceSubmissionGateway
+    {
+        public Task<SliceSubmissionResult> SubmitAsync(CalibrationSliceSubmission submission, CancellationToken ct) =>
+            Task.FromResult(SliceSubmissionResult.Ok(Guid.NewGuid()));
+
+        public Task<SliceStatusResult> GetStatusAsync(Guid sliceJobId, CancellationToken ct) =>
+            Task.FromResult(SliceStatusResult.Ok("Completed"));
+    }
+
+    private sealed class StubPrintDispatchGateway : IPrintDispatchGateway
+    {
+        public Task<PrintDispatchResult> SendToPrinterAsync(Guid sliceJobId, Guid printerId, CancellationToken ct) =>
+            Task.FromResult(PrintDispatchResult.Ok());
+    }
+
+    private static CalibrationProjectService CreateService(AppDbContext context) =>
         new(
             context,
             new TestCalibrationBlobStore(),
@@ -212,7 +348,21 @@ public sealed class CalibrationOrchestrationTakeOverConcurrencyTests
 
         public ValueTask DisposeAsync()
         {
-            File.Delete(DatabasePath);
+            // SQLite's default journal mode leaves -wal/-shm sidecar files alongside the main
+            // database file, and a lingering file handle on Windows can make deletion fail
+            // outright - none of that should fail the test, since it is cleanup, not assertion.
+            foreach (string path in new[] { DatabasePath, DatabasePath + "-wal", DatabasePath + "-shm" })
+            {
+                try
+                {
+                    File.Delete(path);
+                }
+                catch (IOException)
+                {
+                    // Best-effort cleanup only.
+                }
+            }
+
             return ValueTask.CompletedTask;
         }
     }

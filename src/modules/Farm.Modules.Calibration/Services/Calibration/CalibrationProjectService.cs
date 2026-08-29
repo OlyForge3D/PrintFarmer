@@ -284,17 +284,30 @@ public sealed class CalibrationProjectService(
             return NotFound<CalibrationInFlightStateDto>();
         }
 
-        // A single non-terminal orchestration answers "is a print underway", picking the most
-        // recently touched one defensively even though AttemptId is unique-indexed and the saga
-        // does not currently allow more than one live orchestration per project.
-        CalibrationOrchestration? orchestration = await _dbContext.CalibrationOrchestrations
+        // Attempts are append-only and retryable (ParentAttemptId), and each CreateAttemptAsync
+        // call inserts its own orchestration row (CalibrationOrchestration.AttemptId is
+        // unique-indexed per ATTEMPT, not per project) - so more than one non-terminal
+        // orchestration CAN and does coexist for one project (e.g. a retry attempt started while
+        // an earlier one is still mid-print). Picking "most recently touched" alone would let a
+        // brand-new Pending retry mask an older Running orchestration that already has a
+        // PrintJobId - exactly the wasted-filament case this endpoint exists to prevent. Load the
+        // (small, per-project) candidate set and rank in memory: a physical print in progress
+        // (PrintJobId set) always outranks everything else, then Running outranks
+        // WaitingToRetry outranks Pending, then most recently touched, with a fully deterministic
+        // tiebreak so results are stable across providers and ticks that share a timestamp.
+        List<CalibrationOrchestration> nonTerminalOrchestrations = await _dbContext.CalibrationOrchestrations
             .AsNoTracking()
             .Where(candidate => candidate.ProjectId == projectId &&
-                candidate.Status != CalibrationOrchestrationStatus.Completed &&
-                candidate.Status != CalibrationOrchestrationStatus.Failed &&
-                candidate.Status != CalibrationOrchestrationStatus.Cancelled)
-            .OrderByDescending(candidate => candidate.UpdatedAtUtc)
-            .FirstOrDefaultAsync(cancellationToken);
+                (candidate.Status == CalibrationOrchestrationStatus.Pending ||
+                    candidate.Status == CalibrationOrchestrationStatus.Running ||
+                    candidate.Status == CalibrationOrchestrationStatus.WaitingToRetry))
+            .ToListAsync(cancellationToken);
+        CalibrationOrchestration? orchestration = nonTerminalOrchestrations
+            .OrderByDescending(InFlightPriority)
+            .ThenByDescending(candidate => candidate.UpdatedAtUtc)
+            .ThenByDescending(candidate => candidate.CreatedAtUtc)
+            .ThenBy(candidate => candidate.Id)
+            .FirstOrDefault();
 
         CalibrationDraftExistenceDto[] drafts = await _dbContext.CalibrationDrafts
             .AsNoTracking()
@@ -304,6 +317,7 @@ public sealed class CalibrationProjectService(
                 candidate.StepId,
                 candidate.DeviceLineageId,
                 candidate.UpdatedAtUtc))
+            .Take(MaxInFlightDrafts)
             .ToArrayAsync(cancellationToken);
 
         CalibrationInFlightStateDto dto = new(
@@ -312,6 +326,27 @@ public sealed class CalibrationProjectService(
             drafts);
         return CalibrationApiResult<CalibrationInFlightStateDto>.Success(dto);
     }
+
+    /// <summary>
+    /// Ranking key for <see cref="GetInFlightAsync"/>: higher always wins. A physical print
+    /// already underway must never be masked by a newer but less-advanced orchestration.
+    /// </summary>
+    private static int InFlightPriority(CalibrationOrchestration orchestration) =>
+        (orchestration.PrintJobId.HasValue ? 100 : 0) +
+        orchestration.Status switch
+        {
+            CalibrationOrchestrationStatus.Running => 3,
+            CalibrationOrchestrationStatus.WaitingToRetry => 2,
+            CalibrationOrchestrationStatus.Pending => 1,
+            _ => 0,
+        };
+
+    /// <summary>
+    /// Defensive cap on drafts returned by <see cref="GetInFlightAsync"/>: existence metadata is
+    /// cheap, but an unbounded number of devices leaving stale drafts on one project should not
+    /// let a single request load an unbounded result set into memory.
+    /// </summary>
+    private const int MaxInFlightDrafts = 200;
 
     /// <inheritdoc />
     public async Task<CalibrationApiResult<CalibrationProjectDto>> CreateProjectAsync(
