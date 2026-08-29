@@ -331,64 +331,24 @@ public sealed class SliceJobControllerCalibrationTests
             Times.Once);
     }
 
-    [Fact]
-    public async Task SubmitAsync_InputShapingMethodWithSupportedFirmwareFlavor_CreatesOrdinarySliceJobWithNoCalibrationSagaFields()
-    {
-        // Issue #2139 acceptance: report-only method — no CalibrationParameters.Params measurement
-        // range, no printer-settable field, no clone/patch saga step — but it still submits end to
-        // end like every other built calibration method, carrying firmware_flavor through
-        // CalibrationParamsJson for the worker to validate again in PrepareCalibrationModel.
-        SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out Mock<ISliceJobEventService> events);
-        SliceJob? added = null;
-        _ = repository
-            .Setup(instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()))
-            .Callback<SliceJob, CancellationToken>((job, _) => added = job)
-            .Returns(Task.CompletedTask);
-
-        var request = new SubmitSliceJobRequest
-        {
-            SlicerEngine = SlicerEngineType.OrcaSlicer,
-            Priority = 1,
-            Calibration = new CalibrationRequest { Method = "input_shaping", FirmwareFlavor = "klipper" },
-        };
-
-        IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
-
-        _ = result.Should().BeOfType<CreatedResult>();
-        _ = added.Should().NotBeNull();
-        _ = added!.CalibrationMethod.Should().Be("input_shaping");
-        _ = added.CalibrationParamsJson.Should().Contain("firmware_flavor").And.Contain("klipper");
-
-        _ = added.CalibrationProjectId.Should().BeNull();
-        _ = added.CalibrationAttemptId.Should().BeNull();
-        _ = added.CalibrationOrchestrationId.Should().BeNull();
-
-        _ = added.ModelFileUrl.Should().Be("calibration:input_shaping");
-        _ = added.ModelFileName.Should().Be(CalibrationMethods.DefaultModelFileName(CalibrationMethod.InputShaping));
-
-        events.Verify(
-            instance => instance.NotifyJobQueuedAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
-
     [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("reprap")]
-    [InlineData("smoothieware")]
-    public async Task SubmitAsync_InputShapingMethodWithMissingOrUnsupportedFirmwareFlavor_ReturnsInvalidRequestBeforeQueueing(
-        string? firmwareFlavor)
+    [InlineData("cornering")]
+    [InlineData("input_shaping")]
+    [InlineData("vfa")]
+    public async Task SubmitAsync_RemovedMachineLevelCalibrationMethod_ReturnsInvalidRequestBeforeQueueing(string method)
     {
-        // Issue #2139: input shaping is firmware-specific (Klipper's [input_shaper] block vs.
-        // Marlin's M593 flow are entirely different operator actions), so the API must reject a
-        // missing/unrecognized firmware flavor before queueing — never silently default to one
-        // flavor and never queue a job the worker would only refuse later.
+        // Issue #2162: cornering, input_shaping, and vfa were removed as machine/firmware-level
+        // calibrations, not filament-profile calibrations. Submitting any of their former wire
+        // names must be rejected the same way as any other unknown method — paired with
+        // SubmitAsync_RetractionCalibrationMethod_CreatesOrdinarySliceJobWithNoCalibrationSagaFields
+        // above as the control proving a surviving method is still accepted, so this test cannot
+        // pass by rejecting everything.
         SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out Mock<ISliceJobEventService> events);
         var request = new SubmitSliceJobRequest
         {
             SlicerEngine = SlicerEngineType.OrcaSlicer,
             Priority = 1,
-            Calibration = new CalibrationRequest { Method = "input_shaping", FirmwareFlavor = firmwareFlavor },
+            Calibration = new CalibrationRequest { Method = method },
         };
 
         IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
@@ -396,56 +356,13 @@ public sealed class SliceJobControllerCalibrationTests
         var objectResult = result.Should().BeOfType<ObjectResult>().Subject;
         _ = objectResult.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
         var problem = objectResult.Value.Should().BeOfType<ProblemDetails>().Subject;
-        _ = problem.Extensions["code"].Should().Be("unsupported_input_shaping_firmware_flavor");
+        _ = problem.Extensions["code"].Should().Be("unsupported_calibration_method");
         repository.Verify(
             instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
             Times.Never);
         events.Verify(
             instance => instance.NotifyJobQueuedAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
             Times.Never);
-    }
-
-    [Fact]
-    public async Task SubmitAsync_VfaMethod_CreatesOrdinarySliceJobWithNoCalibrationSagaFields()
-    {
-        // Issue #2140 acceptance: the vfa wire name must submit end to end like every other built
-        // calibration method, not just parse, and — like Cornering (#2138) — must never carry
-        // saga fields, since VFA is report-only.
-        SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out Mock<ISliceJobEventService> events);
-        SliceJob? added = null;
-        _ = repository
-            .Setup(instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()))
-            .Callback<SliceJob, CancellationToken>((job, _) => added = job)
-            .Returns(Task.CompletedTask);
-
-        var request = new SubmitSliceJobRequest
-        {
-            SlicerEngine = SlicerEngineType.OrcaSlicer,
-            Priority = 1,
-            Calibration = new CalibrationRequest
-            {
-                Method = "vfa",
-                Params = new Dictionary<string, double> { ["vfa_max_volumetric_speed_ceiling_mm3s"] = 180 },
-            },
-        };
-
-        IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
-
-        _ = result.Should().BeOfType<CreatedResult>();
-        _ = added.Should().NotBeNull();
-        _ = added!.CalibrationMethod.Should().Be("vfa");
-        _ = added.CalibrationParamsJson.Should().NotBeNullOrEmpty();
-
-        _ = added.CalibrationProjectId.Should().BeNull();
-        _ = added.CalibrationAttemptId.Should().BeNull();
-        _ = added.CalibrationOrchestrationId.Should().BeNull();
-
-        _ = added.ModelFileUrl.Should().Be("calibration:vfa");
-        _ = added.ModelFileName.Should().Be(CalibrationMethods.DefaultModelFileName(CalibrationMethod.Vfa));
-
-        events.Verify(
-            instance => instance.NotifyJobQueuedAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()),
-            Times.Once);
     }
 
     private static SliceJobController CreateController(

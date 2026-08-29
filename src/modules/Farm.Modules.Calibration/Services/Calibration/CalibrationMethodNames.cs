@@ -52,33 +52,6 @@ public enum CalibrationMethod
 
     /// <summary>Final verification against a linked imported asset or normal model.</summary>
     FinalVerification = 12,
-
-    /// <summary>
-    /// Cornering (jerk / junction deviation / Klipper square corner velocity) sweep. Unlike
-    /// every other catalogued method, this measures the printer's motion system rather than a
-    /// filament property, so it is report-only: see <see cref="CalibrationMethodNames"/> remarks
-    /// and issue #2138 for the write-back model.
-    /// </summary>
-    Cornering = 13,
-
-    /// <summary>
-    /// Input shaping / resonance-compensation calibration (issue #2139). Report-only per the
-    /// architecture decision recorded on that issue: the worker slices the bundled ringing-tower
-    /// resource, the operator measures and records the result as a
-    /// <c>CalibrationObservation</c>, and applies it to their own firmware
-    /// (Klipper's <c>[input_shaper]</c> or Marlin's <c>M593</c>) themselves. There is no
-    /// filament-profile-clone patch step and no settable <c>Printer</c> field for this method.
-    /// </summary>
-    InputShaping = 14,
-
-    /// <summary>
-    /// VFA (Vertical Fine Artifacts / resonance speed) sweep. Like <see cref="Cornering"/>, this
-    /// measures the printer's motion system (frame/belt resonance) rather than a filament
-    /// property, and its output is a diagnosis — the speed range that produced visible
-    /// banding — rather than a settable value, so it is report-only: see the architecture
-    /// decision on issue #2140.
-    /// </summary>
-    Vfa = 15,
 }
 
 /// <summary>Canonical wire names for <see cref="CalibrationMethod"/>.</summary>
@@ -120,21 +93,6 @@ public static class CalibrationMethodNames
     /// <summary>Final verification from a linked asset.</summary>
     public const string FinalVerification = "final_verification";
 
-    /// <summary>
-    /// Cornering (jerk / junction deviation / Klipper square corner velocity) sweep. Report-only:
-    /// see the type-level <see cref="CalibrationMethod"/> remarks and issue #2138.
-    /// </summary>
-    public const string Cornering = "cornering";
-
-    /// <summary>Input shaping / resonance-compensation calibration (issue #2139).</summary>
-    public const string InputShaping = "input_shaping";
-
-    /// <summary>
-    /// VFA (Vertical Fine Artifacts / resonance speed) sweep. Report-only: see the type-level
-    /// <see cref="CalibrationMethod"/> remarks and issue #2140's architecture decision.
-    /// </summary>
-    public const string Vfa = "vfa";
-
     private static readonly Dictionary<string, CalibrationMethod> ByName =
         new(StringComparer.Ordinal)
         {
@@ -150,9 +108,6 @@ public static class CalibrationMethodNames
             [MaximumVolumetricSpeed] = CalibrationMethod.MaximumVolumetricSpeed,
             [Shrinkage] = CalibrationMethod.Shrinkage,
             [FinalVerification] = CalibrationMethod.FinalVerification,
-            [Cornering] = CalibrationMethod.Cornering,
-            [InputShaping] = CalibrationMethod.InputShaping,
-            [Vfa] = CalibrationMethod.Vfa,
         };
 
     /// <summary>Gets every supported canonical method name, in stable order.</summary>
@@ -170,9 +125,6 @@ public static class CalibrationMethodNames
         MaximumVolumetricSpeed,
         Shrinkage,
         FinalVerification,
-        Cornering,
-        InputShaping,
-        Vfa,
     ];
 
     /// <summary>Maps a method to its canonical wire name.</summary>
@@ -193,9 +145,6 @@ public static class CalibrationMethodNames
         CalibrationMethod.MaximumVolumetricSpeed => MaximumVolumetricSpeed,
         CalibrationMethod.Shrinkage => Shrinkage,
         CalibrationMethod.FinalVerification => FinalVerification,
-        CalibrationMethod.Cornering => Cornering,
-        CalibrationMethod.InputShaping => InputShaping,
-        CalibrationMethod.Vfa => Vfa,
         _ => throw new ArgumentOutOfRangeException(
             nameof(method),
             method,
@@ -231,9 +180,6 @@ public static class CalibrationMethodNames
         CalibrationMethod.MaximumVolumetricSpeed => "max_volumetric_speed",
         CalibrationMethod.Shrinkage => "shrinkage",
         CalibrationMethod.FinalVerification => "verification",
-        CalibrationMethod.Cornering => "cornering",
-        CalibrationMethod.InputShaping => "input_shaping",
-        CalibrationMethod.Vfa => "resonance_speed",
         _ => throw new ArgumentOutOfRangeException(
             nameof(method),
             method,
@@ -280,10 +226,7 @@ public static class CalibrationMethodSteps
         CalibrationMethod.Retraction or
         CalibrationMethod.MaximumVolumetricSpeed or
         CalibrationMethod.Shrinkage or
-        CalibrationMethod.FinalVerification or
-        CalibrationMethod.Cornering or
-        CalibrationMethod.InputShaping or
-        CalibrationMethod.Vfa => DefaultSequence,
+        CalibrationMethod.FinalVerification => DefaultSequence,
         _ => throw new ArgumentOutOfRangeException(
             nameof(method),
             method,

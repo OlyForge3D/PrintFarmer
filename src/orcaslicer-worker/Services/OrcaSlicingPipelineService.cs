@@ -275,15 +275,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// (<c>SpeedTestStructure.drc</c>) is an opaque OrcaSlicer binary format (confirmed by magic
     /// bytes, not a ZIP/3MF archive), so — like the temperature tower's <c>.drc</c> resource — it
     /// cannot be parsed and rewritten the way <see cref="FlowRateCalibrationConfigurator"/>
-    /// rewrites 3MF metadata; it falls through to the generic copy below. VFA (resonance speed,
-    /// issue #2140) needs no per-model changes for the same reason: its bundled resource
-    /// (<c>vfa.drc</c>) is likewise an opaque, unrewritable binary — confirmed against upstream
-    /// OrcaSlicer's resource tree and its <c>calib_VFA</c>/<c>Calib_VFA_Tower</c> mechanism (see
-    /// the <c>CalibrationMethod</c> type remarks for the full citation trail) — so it too falls
-    /// through to the generic copy below, and its own permissive ceiling is injected into the
-    /// filament profile in <see cref="RunOrcaSlicerAsync"/> via
-    /// <see cref="ApplyVfaMaxVolumetricSpeedCeilingAsync"/>, mirroring max volumetric speed rather
-    /// than <see cref="FlowRateCalibrationConfigurator"/>'s per-object 3MF rewriting.
+    /// rewrites 3MF metadata; it falls through to the generic copy below.
     /// </summary>
     internal string PrepareCalibrationModel(DistributedSlicingJob job, string workDir)
     {
@@ -326,41 +318,6 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             double baselineFlowRatio = ResolveBaselineFlowRatio(job);
             return FlowRateDeltaCalibrationConfigurator.ApplyPerObjectFlowRatioDeltas(
                 sourcePath, workDir, baselineFlowRatio, _logger);
-        }
-
-        if (method is CalibrationMethod.InputShaping)
-        {
-            // Input shaping (issue #2139) is report-only and firmware-specific: the resonance
-            // frequency/damping-factor result the operator measures off the printed ringing
-            // tower only means something once it is applied to their own firmware
-            // (Klipper's [input_shaper] vs Marlin's M593), and this worker never writes firmware
-            // configuration. Defense-in-depth: refuse explicitly here even though the API
-            // boundary (SliceJobController) already validates this, rather than silently slicing
-            // a tower the operator has no firmware-specific guidance to act on.
-            //
-            // Deliberately client-declared, not derived from the machine profile's gcode_flavor
-            // (review finding on issue #2139, unlike ValidateCorneringFirmwareFlavorAsync /
-            // ApplyPressureAdvanceTowerGcodeAsync / ApplyRetractionTowerGcodeAsync above): those
-            // three methods derive flavor from gcode_flavor because they inject flavor-specific
-            // gcode (M205/SQUARE_CORNER_VELOCITY, SET_PRESSURE_ADVANCE/M900, SET_RETRACTION/M207)
-            // that must match the machine actually being sliced for, so an unresolved or wrong
-            // flavor there means a syntactically wrong command lands in the gcode. Input shaping
-            // emits no flavor-specific gcode at all - the bundled ringing-tower resource is copied
-            // byte-for-byte regardless of flavor - so there is nothing here for gcode_flavor to
-            // make correct or incorrect. FirmwareFlavor exists solely so the operator's own
-            // measurement/report reflects which firmware's convention (Klipper's frequency/damping
-            // pair vs. Marlin's M593 parameters) they intend to apply the result to; it is
-            // persisted verbatim on the job's CalibrationParamsJson (see
-            // SliceJobController.BuildCalibrationParamsJson) and readable back from the job record,
-            // so it is not silently dropped even though no downstream step branches on it.
-            CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, method);
-            if (!InputShapingFirmwareFlavors.IsSupported(parameters.FirmwareFlavor))
-            {
-                throw new InvalidOperationException(
-                    $"Calibration method '{job.CalibrationMethod}' requires a supported firmware flavor " +
-                    $"(one of: {string.Join(", ", InputShapingFirmwareFlavors.Supported)}); " +
-                    $"got '{parameters.FirmwareFlavor}'.");
-            }
         }
 
         string destinationPath = Path.Combine(workDir, Path.GetFileName(sourcePath));
@@ -742,46 +699,6 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     }
 
     /// <summary>
-    /// Sets the VFA (resonance speed) calibration's permissive <c>filament_max_volumetric_speed</c>
-    /// ceiling (issue #2140) on the filament profile(s) on disk and recomputes
-    /// <see cref="DistributedSlicingJob.FilamentProfileSha256"/> so the recorded digest matches the
-    /// mutated content. This mirrors <see cref="ApplyMaxVolumetricSpeedCeilingAsync"/> exactly —
-    /// same JSON key, same <see cref="InjectMaxVolumetricSpeedCeiling"/> helper, same reasoning for
-    /// why no <c>layer_change_gcode</c> injection is attempted — but with the higher ceiling
-    /// upstream's own <c>CalibUtils::calib_VFA</c> uses (200mm³/s, versus max-volumetric-speed's
-    /// 50mm³/s), since VFA's outer-wall sweep runs faster. See
-    /// <see cref="CalibrationParameters.VfaMaxVolumetricSpeedCeilingMm3s"/> and the
-    /// <c>CalibrationMethod</c> type remarks for the full citation trail, including why upstream's
-    /// actual per-layer speed ramp itself is not reachable from this worker's CLI-driven pipeline.
-    /// </summary>
-    /// <param name="job">The claimed job whose <see cref="DistributedSlicingJob.FilamentProfileSha256"/> is updated.</param>
-    /// <param name="filamentJsonPath">
-    /// The value of <c>profilePaths["filament"]</c>: either a single filament JSON path, or — for a
-    /// multi-extruder job — a <c>;</c>-joined list of per-extruder paths, matching the
-    /// <c>--load-filaments</c> argument format produced by <see cref="GenerateProfileJsonFilesAsync"/>.
-    /// </param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    internal static async Task ApplyVfaMaxVolumetricSpeedCeilingAsync(
-        DistributedSlicingJob job,
-        string filamentJsonPath,
-        CancellationToken cancellationToken)
-    {
-        CalibrationParameters parameters = CalibrationParameters.Parse(job.CalibrationParamsJson, CalibrationMethod.Vfa);
-
-        string[] paths = filamentJsonPath.Split(';', StringSplitOptions.RemoveEmptyEntries);
-        var updatedDocuments = new List<string>(paths.Length);
-        foreach (string path in paths)
-        {
-            string filamentJsonContent = await File.ReadAllTextAsync(path, cancellationToken);
-            string updatedFilamentJsonContent = InjectMaxVolumetricSpeedCeiling(filamentJsonContent, parameters.VfaMaxVolumetricSpeedCeilingMm3s);
-            await File.WriteAllTextAsync(path, updatedFilamentJsonContent, cancellationToken);
-            updatedDocuments.Add(updatedFilamentJsonContent);
-        }
-
-        job.FilamentProfileSha256 = ComputeProfileSetSha256(updatedDocuments);
-    }
-
-    /// <summary>
     /// Sets the <c>filament_max_volumetric_speed</c> key on a filament profile JSON document to
     /// <paramref name="ceilingMm3s"/>. OrcaSlicer stores this (like most filament settings) as a
     /// single-element array, e.g. <c>["50"]</c>, so the value is written the same way regardless
@@ -800,85 +717,6 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             JsonValue.Create(ceilingMm3s.ToString(CultureInfo.InvariantCulture)));
 
         return rootObject.ToJsonString();
-    }
-
-    /// <summary>
-    /// Firmware flavors this worker recognizes as supporting cornering calibration (issue
-    /// #2138), matching OrcaSlicer's <c>gcode_flavor</c> config key values case-insensitively.
-    /// Marlin (classic jerk, <c>M205 X/Y</c>) and Marlin 2 (junction deviation, <c>M205 J</c>)
-    /// are both accepted under the same flavor name OrcaSlicer uses for the modern Marlin
-    /// fork family; Klipper (<c>SQUARE_CORNER_VELOCITY</c>) is its own distinct motion-planner
-    /// concept. Every other flavor (RepRapFirmware, Smoothieware, Sprinter, Mach3/4, etc.) has
-    /// no equivalent tunable this worker can attribute a cornering measurement to, so it is
-    /// refused explicitly by <see cref="ValidateCorneringFirmwareFlavorAsync"/> rather than
-    /// silently treated as a no-op.
-    /// </summary>
-    private static readonly string[] CorneringSupportedGcodeFlavors = ["marlin", "marlin2", "klipper"];
-
-    /// <summary>
-    /// Refuses to proceed with a cornering calibration slice (issue #2138) unless the target
-    /// printer's <c>gcode_flavor</c> is one this worker knows how to attribute jerk, junction
-    /// deviation, or square corner velocity to. Cornering is the only catalogued calibration
-    /// method that measures the printer's own motion planner rather than a filament property, so
-    /// — unlike every other method here — its applicability depends on firmware flavor. A
-    /// mismatch here would otherwise silently produce a "successful" slice/print whose recorded
-    /// observation the operator's firmware cannot actually apply; per the architecture decision
-    /// on issue #2138 this must fail loudly instead.
-    /// </summary>
-    /// <param name="job">The claimed job, used only for the failure message's correlation.</param>
-    /// <param name="machineJsonPath">Path of the emitted machine document to read <c>gcode_flavor</c> from.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <exception cref="InvalidOperationException">
-    /// The machine document's <c>gcode_flavor</c> is missing, blank, or not one of
-    /// <see cref="CorneringSupportedGcodeFlavors"/>.
-    /// </exception>
-    internal static async Task ValidateCorneringFirmwareFlavorAsync(
-        DistributedSlicingJob job,
-        string machineJsonPath,
-        CancellationToken cancellationToken)
-    {
-        string machineJsonContent = await File.ReadAllTextAsync(machineJsonPath, cancellationToken);
-        string? gcodeFlavor = ReadGcodeFlavor(machineJsonContent);
-
-        bool supported = gcodeFlavor is not null
-            && CorneringSupportedGcodeFlavors.Contains(gcodeFlavor, StringComparer.OrdinalIgnoreCase);
-        if (!supported)
-        {
-            // Truncate the untrusted, client-influenced gcode_flavor value before echoing it into
-            // the exception message: an adversarial machine profile could otherwise smuggle an
-            // arbitrarily large string into job failure telemetry/logs (same rationale as the
-            // pressure advance tower gate above).
-            string flavorForMessage = gcodeFlavor is null ? "(unset)" : TruncateForMessage(gcodeFlavor);
-            throw new InvalidOperationException(
-                $"Cornering calibration (job {job.Id}) is not supported for gcode flavor " +
-                $"'{flavorForMessage}'. Only Marlin/Marlin2 (jerk / junction deviation via " +
-                "M205) and Klipper (SQUARE_CORNER_VELOCITY) are supported; refusing rather than " +
-                "silently slicing a result the printer's firmware cannot apply.");
-        }
-    }
-
-    /// <summary>
-    /// Reads the machine document's <c>gcode_flavor</c> value, tolerating OrcaSlicer's
-    /// single-element-array encoding the same way <see cref="OrcaRawValueParser.ParseStringValue"/>
-    /// does for every other raw profile value.
-    /// </summary>
-    private static string? ReadGcodeFlavor(string machineJson)
-    {
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(machineJson);
-            if (document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty("gcode_flavor", out JsonElement flavorElement))
-            {
-                return OrcaRawValueParser.ParseStringValue(flavorElement);
-            }
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-
-        return null;
     }
 
     /// <summary>
@@ -1895,27 +1733,6 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         if (isKnownCalibrationMethod && calibrationMethod == CalibrationMethod.MaximumVolumetricSpeed)
         {
             await ApplyMaxVolumetricSpeedCeilingAsync(job, filamentJson, cancellationToken);
-        }
-
-        // VFA (resonance speed) calibration (issue #2140): same permissive-ceiling rationale as
-        // MaximumVolumetricSpeed above, applied before the profile is handed to OrcaSlicer, but
-        // with the higher ceiling upstream's own CalibUtils::calib_VFA uses (200mm3/s vs 50mm3/s)
-        // since VFA's outer-wall sweep runs faster. See ApplyVfaMaxVolumetricSpeedCeilingAsync and
-        // the CalibrationMethod type remarks for the full citation trail.
-        if (isKnownCalibrationMethod && calibrationMethod == CalibrationMethod.Vfa)
-        {
-            await ApplyVfaMaxVolumetricSpeedCeilingAsync(job, filamentJson, cancellationToken);
-        }
-
-        // Cornering calibration (issue #2138): jerk, junction deviation, and Klipper's
-        // SQUARE_CORNER_VELOCITY are firmware-specific motion-planner concepts with no shared
-        // representation, unlike every other catalogued method here. Refuse explicitly, before
-        // slicing, for any gcode flavor other than the ones this worker knows how to interpret,
-        // rather than silently producing a "successful" slice/print whose result the operator's
-        // firmware cannot even apply.
-        if (isKnownCalibrationMethod && calibrationMethod == CalibrationMethod.Cornering)
-        {
-            await ValidateCorneringFirmwareFlavorAsync(job, machineJson, cancellationToken);
         }
 
         await WarnIfProcessCannotSatisfyGateAsync(job, machineJson, processJson, cancellationToken);
