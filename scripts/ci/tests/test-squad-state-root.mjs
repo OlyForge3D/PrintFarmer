@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import {
   access,
@@ -24,6 +25,9 @@ const repositoryRoot = path.resolve(
 
 const requestTimeoutMs = 120_000;
 const execFileAsync = promisify(execFile);
+const squadVersion = '0.13.1';
+const squadLinuxX64Sha256 = 'b7eecfe5c46676547b6e1bb1f10796fadd2b2f74a87f088646541c344f89b43d';
+const squadLinuxX64Url = `https://github.com/bradygaster/squad/releases/download/v${squadVersion}/squad-linux-x64.tar.gz`;
 
 async function exists(filePath) {
   try {
@@ -59,17 +63,11 @@ async function loadSquadStateServer() {
   const server = config.mcpServers?.squad_state;
 
   assert.ok(server, '.mcp.json must define mcpServers.squad_state');
-  assert.equal(server.command, 'npx');
+  assert.equal(server.command, 'squad');
   assert.deepEqual(
     server.args,
-    [
-      '-y',
-      '--package=@bradygaster/squad-cli@0.11.0',
-      '--package=@bradygaster/squad-sdk@0.11.0',
-      'squad',
-      'state-mcp',
-    ],
-    'the regression must exercise the repository-pinned Squad CLI and SDK integration',
+    ['state-mcp'],
+    'the regression must exercise the portable Squad state MCP integration',
   );
   assert.deepEqual(
     server.env,
@@ -78,6 +76,78 @@ async function loadSquadStateServer() {
   );
 
   return server;
+}
+
+async function commandExists(command) {
+  try {
+    await execFileAsync(command, ['--version'], {
+      timeout: 10_000,
+      windowsHide: true,
+    });
+    return true;
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return false;
+    }
+    return true;
+  }
+}
+
+async function resolveSquadStateServer(server) {
+  if (await commandExists(server.command)) {
+    return { server, cleanup: async () => {} };
+  }
+
+  if (process.platform !== 'linux' || process.arch !== 'x64') {
+    throw new Error(
+      `Squad CLI is not on PATH and no fallback bundle is available for ${process.platform}/${process.arch}`,
+    );
+  }
+
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'printfarmer-squad-cli-'));
+  const archivePath = path.join(temporaryRoot, 'squad-linux-x64.tar.gz');
+  const installDirectory = path.join(temporaryRoot, 'squad');
+
+  try {
+    const response = await fetch(squadLinuxX64Url);
+    if (!response.ok) {
+      throw new Error(
+        `Failed to download Squad CLI v${squadVersion}: HTTP ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const archive = Buffer.from(await response.arrayBuffer());
+    const actualSha256 = createHash('sha256').update(archive).digest('hex');
+    assert.equal(
+      actualSha256,
+      squadLinuxX64Sha256,
+      `Squad CLI v${squadVersion} Linux x64 bundle checksum mismatch`,
+    );
+
+    await mkdir(installDirectory);
+    await writeFile(archivePath, archive);
+    await execFileAsync('tar', [
+      '--extract',
+      '--gzip',
+      '--file',
+      archivePath,
+      '--directory',
+      installDirectory,
+      '--strip-components=1',
+    ], {
+      windowsHide: true,
+    });
+
+    const command = path.join(installDirectory, 'squad');
+    await access(command);
+    return {
+      server: { ...server, command },
+      cleanup: () => rm(temporaryRoot, { recursive: true, force: true }),
+    };
+  } catch (error) {
+    await rm(temporaryRoot, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function startMcpServer(server, cwd, ambientEnv = {}) {
@@ -287,6 +357,7 @@ test('Squad state MCP confines decision and state writes to .squad and rejects t
     `${path.basename(fixtureRoot)}-absolute-escape.md`,
   );
   let client;
+  let squadRuntime;
 
   try {
     await mkdir(squadDir, { recursive: true });
@@ -303,7 +374,8 @@ test('Squad state MCP confines decision and state writes to .squad and rejects t
     await writeFile(path.join(decoySquadDir, 'team.md'), '## Members\n', 'utf8');
 
     const server = await loadSquadStateServer();
-    client = startMcpServer(server, fixtureRoot, {
+    squadRuntime = await resolveSquadStateServer(server);
+    client = startMcpServer(squadRuntime.server, fixtureRoot, {
       SQUAD_TEAM_ROOT: decoyRoot,
     });
 
@@ -413,6 +485,7 @@ test('Squad state MCP confines decision and state writes to .squad and rejects t
       await client?.close();
     } finally {
       await Promise.all([
+        squadRuntime?.cleanup(),
         rm(fixtureRoot, { recursive: true, force: true }),
         rm(decoyRoot, { recursive: true, force: true }),
         rm(absoluteEscapePath, { force: true }),
