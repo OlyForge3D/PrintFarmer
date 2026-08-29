@@ -84,7 +84,7 @@ public static class SlicerModuleExtensions
     }
 
     /// <summary>
-    /// Registers only the machine/process/filament profile repositories (and the
+    /// Registers the machine/process/filament/model-3D-file repositories (and the
     /// <see cref="SlicerDbContext"/> they depend on) without loading the rest of the slicer
     /// module: no plugin discovery, no hosted services, no job orchestration.
     /// </summary>
@@ -96,6 +96,15 @@ public static class SlicerModuleExtensions
     /// <c>IMachineProfileRepository</c>/<c>IProcessProfileRepository</c>/
     /// <c>IFilamentProfileRepository</c> registered when resolving them from its DI scope,
     /// throwing and turning the daily-validation reset endpoint into an unconditional 500 (#1858).
+    /// </para>
+    /// <para>
+    /// <see cref="IModel3DFileRepository"/> was added alongside those three (#2179) so
+    /// <c>Farm.Modules.Calibration.Startup.ModelStorageResolutionStartup</c> can register
+    /// <see cref="Farm.Slicer.Module.Services.IModelStorageResolver"/> on split/microservices
+    /// hosts too: the API and slicer-host containers already share the same physical database
+    /// (<c>ConnectionStrings:Default</c>) and the same model-storage volume, so
+    /// <c>Model3DStorageResolver</c> needs only this repository plus the already-unconditionally
+    /// registered <c>IStoragePathService</c> — no new network hop.
     /// </para>
     /// <para>
     /// This does not reuse the HTTP-hop pattern used by
@@ -152,11 +161,45 @@ public static class SlicerModuleExtensions
 
         _ = services.AddSingleton<SlicerCalibrationProfileRepositoriesMarker>();
 
-        AddSlicerDatabase(services, configuration);
+        EnsureSlicerDatabaseRegistered(services, configuration);
         _ = services.AddScoped<IMachineProfileRepository, EfMachineProfileRepository>();
         _ = services.AddScoped<IProcessProfileRepository, EfProcessProfileRepository>();
         _ = services.AddScoped<IFilamentProfileRepository, EfFilamentProfileRepository>();
+        _ = services.AddScoped<IModel3DFileRepository, EfModel3DFileRepository>();
 
+        return services;
+    }
+
+    /// <summary>
+    /// Ensures <see cref="SlicerDbContext"/> and its <see cref="IDbContextFactory{TContext}"/> are
+    /// registered, without duplicating the registration if some other caller already added them.
+    /// </summary>
+    /// <remarks>
+    /// Exposed as public (rather than folded silently into <see cref="AddSlicerCalibrationProfileRepositories"/>)
+    /// so a caller adding a repository that depends on <see cref="SlicerDbContext"/> — e.g.
+    /// <c>ModelStorageResolutionStartup</c>'s <c>TryAddScoped&lt;IModel3DFileRepository,
+    /// EfModel3DFileRepository&gt;</c> insurance registration — can guarantee the full dependency
+    /// chain is present, rather than relying on <see cref="AddSlicerCalibrationProfileRepositories"/>'s
+    /// own early-return guard (which, if it were ever to fire for a reason other than "the
+    /// monolith already registered everything," would otherwise leave <see cref="SlicerDbContext"/>
+    /// unregistered too).
+    /// </remarks>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">Application configuration (reads DB_PROVIDER, ConnectionStrings:Default, etc.).</param>
+    /// <returns>The service collection for chaining.</returns>
+    public static IServiceCollection EnsureSlicerDatabaseRegistered(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        if (services.Any(sd => sd.ServiceType == typeof(SlicerDbContext)))
+        {
+            return services;
+        }
+
+        AddSlicerDatabase(services, configuration);
         return services;
     }
 
