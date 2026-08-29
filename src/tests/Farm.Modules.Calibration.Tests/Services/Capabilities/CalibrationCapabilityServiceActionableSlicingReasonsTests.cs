@@ -43,11 +43,17 @@ namespace Farm.Modules.Calibration.Tests.Services.Capabilities;
 /// split/microservices hosts additionally call, per
 /// <c>Farm.Web.Api.Startup.MoonrakerEmulatorSeederDependenciesStartup</c> — registers only the
 /// three calibration profile repositories, not a model storage resolver. This test intentionally
-/// exercises the real registration extension methods for each mode (both are called
-/// unconditionally on every real host too: <c>AddSlicerModule</c> via the assembly-scanned
-/// <c>SlicerModuleRegistrar</c>, <c>AddSlicerCalibrationProfileRepositories</c> gated by
-/// <c>IsSplitDeployment</c>) rather than hand-rolling a fixture, so it fails exactly when
-/// production wiring has this gap and passes exactly when it doesn't.
+/// exercises the real registration extension methods for each mode, mirroring the exact
+/// caller-side gating the API host applies (<c>Farm.Web.Api/Program.cs</c>): <c>AddSlicerModule</c>
+/// is called for monolith and split (it self-short-circuits internally for split before reaching
+/// <c>AddSlicerServices</c>), but is skipped entirely for microservices — on that host the slicer
+/// module runs in a separate slicer-host process, so the API never even loads the registration
+/// extension for it (<c>Program.cs</c>'s <c>slicerModuleEnabled = !isMicroservices</c> gate).
+/// <c>AddSlicerCalibrationProfileRepositories</c> is called only for split/microservices, gated by
+/// the same <c>IsSplitDeployment</c> check production uses. Hand-rolling a fixture that ignored
+/// this caller-side asymmetry could pass even if a future change taught <c>AddSlicerModule</c> to
+/// do something microservices-specific that the API host would never actually observe — mirroring
+/// the real gate keeps the test honest to what each topology actually runs.
 /// </para>
 /// <para>
 /// <b>Why this is not vacuous.</b> The assertion is factored into
@@ -232,17 +238,30 @@ public sealed class CalibrationCapabilityServiceActionableSlicingReasonsTests
             _ = services.AddSingleton<IApplicationPathProvider>(new TestApplicationPathProvider());
             _ = services.AddSingleton<IStoragePathService, StoragePathService>();
 
-            // Mirrors production exactly: AddSlicerModule is called unconditionally on every real
-            // host too (via the assembly-scanned SlicerModuleRegistrar and, standalone, by
-            // Farm.Slicer.Host/Program.cs) — it is the method's own deployment-mode check,
-            // treating "split" and "microservices" identically, that short-circuits before
-            // registering AddSlicerServices (where IModelStorageResolver lives). Split and
-            // microservices hosts additionally call AddSlicerCalibrationProfileRepositories, per
-            // Farm.Web.Api.Startup.MoonrakerEmulatorSeederDependenciesStartup (guarded there by
-            // IsSplitDeployment, since monolith already has these repositories via
-            // AddSlicerModule) — see SlicerModuleExtensions and #1858/#2171/#2179.
-            _ = services.AddSlicerModule(configuration);
-            _ = services.AddSlicerCalibrationProfileRepositories(configuration);
+            // Mirrors the API host's actual caller-side gate (Farm.Web.Api/Program.cs:119-120,
+            // `slicerModuleEnabled = !isMicroservices`): AddSlicerModule is called for monolith
+            // and split — it self-short-circuits internally before registering AddSlicerServices
+            // (where IModelStorageResolver lives) once its own deployment-mode check sees "split"
+            // (SlicerModuleExtensions.cs:62-69) — but is never called at all for microservices,
+            // where the slicer module runs in a separate slicer-host process and the API doesn't
+            // even load the registration extension. AddSlicerCalibrationProfileRepositories is
+            // called only for split/microservices, gated by the same IsSplitDeployment check
+            // production uses (Farm.Web.Api.Startup.MoonrakerEmulatorSeederDependenciesStartup,
+            // CalibrationProfileResolutionStartup.IsSplitDeployment) — monolith already has these
+            // repositories via AddSlicerModule's AddSlicerRepositories. See #1858/#2171/#2179.
+            bool isMicroservices = string.Equals(
+                deploymentMode, "microservices", StringComparison.OrdinalIgnoreCase);
+            if (!isMicroservices)
+            {
+                _ = services.AddSlicerModule(configuration);
+            }
+
+            bool isSplitDeployment = isMicroservices ||
+                string.Equals(deploymentMode, "split", StringComparison.OrdinalIgnoreCase);
+            if (isSplitDeployment)
+            {
+                _ = services.AddSlicerCalibrationProfileRepositories(configuration);
+            }
 
             if (removeModelStorageResolverRegistration)
             {
