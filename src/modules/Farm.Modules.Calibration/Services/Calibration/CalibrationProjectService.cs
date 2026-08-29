@@ -99,6 +99,16 @@ public interface ICalibrationProjectService
         CalibrationActor actor,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Answers "is anything already underway on this project, and where was it started?" without
+    /// requiring the caller to know any attempt or orchestration id up front. See
+    /// <see cref="CalibrationInFlightStateDto"/> for how to interpret the result.
+    /// </summary>
+    Task<CalibrationApiResult<CalibrationInFlightStateDto>> GetInFlightAsync(
+        Guid projectId,
+        CalibrationActor actor,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<CalibrationAttemptDto>> GetAttemptsAsync(
         Guid projectId,
         CalibrationActor actor,
@@ -260,6 +270,47 @@ public sealed class CalibrationProjectService(
         return project is null
             ? NotFound<CalibrationProjectDto>()
             : CalibrationApiResult<CalibrationProjectDto>.Success(MapProject(project));
+    }
+
+    /// <inheritdoc />
+    public async Task<CalibrationApiResult<CalibrationInFlightStateDto>> GetInFlightAsync(
+        Guid projectId,
+        CalibrationActor actor,
+        CancellationToken cancellationToken)
+    {
+        CalibrationProject? project = await FindVisibleProjectAsync(projectId, actor, false, cancellationToken);
+        if (project is null)
+        {
+            return NotFound<CalibrationInFlightStateDto>();
+        }
+
+        // A single non-terminal orchestration answers "is a print underway", picking the most
+        // recently touched one defensively even though AttemptId is unique-indexed and the saga
+        // does not currently allow more than one live orchestration per project.
+        CalibrationOrchestration? orchestration = await _dbContext.CalibrationOrchestrations
+            .AsNoTracking()
+            .Where(candidate => candidate.ProjectId == projectId &&
+                candidate.Status != CalibrationOrchestrationStatus.Completed &&
+                candidate.Status != CalibrationOrchestrationStatus.Failed &&
+                candidate.Status != CalibrationOrchestrationStatus.Cancelled)
+            .OrderByDescending(candidate => candidate.UpdatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        CalibrationDraftExistenceDto[] drafts = await _dbContext.CalibrationDrafts
+            .AsNoTracking()
+            .Where(candidate => candidate.ProjectId == projectId && candidate.DeletedAtUtc == null)
+            .OrderByDescending(candidate => candidate.UpdatedAtUtc)
+            .Select(candidate => new CalibrationDraftExistenceDto(
+                candidate.StepId,
+                candidate.DeviceLineageId,
+                candidate.UpdatedAtUtc))
+            .ToArrayAsync(cancellationToken);
+
+        CalibrationInFlightStateDto dto = new(
+            projectId,
+            orchestration is null ? null : MapOrchestration(orchestration),
+            drafts);
+        return CalibrationApiResult<CalibrationInFlightStateDto>.Success(dto);
     }
 
     /// <inheritdoc />
@@ -2910,6 +2961,23 @@ public sealed class CalibrationProjectService(
             draft.CreatedAtUtc,
             draft.UpdatedAtUtc,
             draft.DeletedAtUtc);
+
+    private static CalibrationOrchestrationDto MapOrchestration(CalibrationOrchestration orchestration) => new(
+        orchestration.Id,
+        orchestration.ProjectId,
+        orchestration.AttemptId,
+        orchestration.CurrentStep,
+        orchestration.Status.ToString(),
+        orchestration.RetryCount,
+        orchestration.NextRetryAtUtc,
+        orchestration.LastErrorCode,
+        orchestration.SliceJobId,
+        orchestration.GcodeFileId,
+        orchestration.PrintJobId,
+        orchestration.Revision,
+        orchestration.CreatedAtUtc,
+        orchestration.UpdatedAtUtc,
+        orchestration.CompletedAtUtc);
 
     private static CalibrationAttemptDto MapAttempt(CalibrationAttempt attempt, string status) =>
         new(

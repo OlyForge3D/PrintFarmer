@@ -1109,6 +1109,268 @@ public sealed class CalibrationProjectServiceTests
         _ = swapped.Code.Should().Be("step_out_of_sequence");
     }
 
+    [Fact]
+    public async Task GetInFlightAsync_NoOrchestrationOrDrafts_ReturnsEmptyState()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "in-flight-empty"),
+            actor,
+            CancellationToken.None);
+
+        CalibrationApiResult<CalibrationInFlightStateDto> result = await service.GetInFlightAsync(
+            project.Value!.Id,
+            actor,
+            CancellationToken.None);
+
+        _ = result.IsSuccess.Should().BeTrue();
+        _ = result.Value!.ProjectId.Should().Be(project.Value.Id);
+        _ = result.Value.Orchestration.Should().BeNull();
+        _ = result.Value.Drafts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetInFlightAsync_RunningOrchestrationWithPrintJob_DistinguishesPrintingFromDraft()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "in-flight-printing"),
+            actor,
+            CancellationToken.None);
+        Guid attemptId = await AddAttemptAsync(db, project.Value!.Id, "owner");
+        Guid printJobId = Guid.NewGuid();
+        DateTime nowUtc = DateTime.UtcNow;
+        _ = db.CalibrationOrchestrations.Add(new CalibrationOrchestration
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = project.Value.Id,
+            AttemptId = attemptId,
+            CurrentStep = CalibrationSagaSteps.AwaitingPrint,
+            Status = CalibrationOrchestrationStatus.Running,
+            PrintJobId = printJobId,
+            OperationId = $"operation-{attemptId:N}",
+            CreatedAtUtc = nowUtc,
+            UpdatedAtUtc = nowUtc,
+        });
+        _ = await db.SaveChangesAsync();
+
+        CalibrationApiResult<CalibrationInFlightStateDto> result = await service.GetInFlightAsync(
+            project.Value.Id,
+            actor,
+            CancellationToken.None);
+
+        // A running orchestration with a PrintJobId is a physical print underway - the client
+        // must be able to tell this apart from a merely-uncommitted draft (see the paired
+        // "printing vs started" test below), because starting a second print here wastes filament.
+        _ = result.Value!.Orchestration.Should().NotBeNull();
+        _ = result.Value.Orchestration!.Status.Should().Be(nameof(CalibrationOrchestrationStatus.Running));
+        _ = result.Value.Orchestration.PrintJobId.Should().Be(printJobId);
+        _ = result.Value.Orchestration.CurrentStep.Should().Be(CalibrationSagaSteps.AwaitingPrint);
+    }
+
+    [Theory]
+    [InlineData(CalibrationOrchestrationStatus.Completed)]
+    [InlineData(CalibrationOrchestrationStatus.Failed)]
+    [InlineData(CalibrationOrchestrationStatus.Cancelled)]
+    public async Task GetInFlightAsync_TerminalOrchestration_IsExcluded(CalibrationOrchestrationStatus status)
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, $"in-flight-terminal-{status}"),
+            actor,
+            CancellationToken.None);
+        Guid attemptId = await AddAttemptAsync(db, project.Value!.Id, "owner");
+        DateTime nowUtc = DateTime.UtcNow;
+        _ = db.CalibrationOrchestrations.Add(new CalibrationOrchestration
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = project.Value.Id,
+            AttemptId = attemptId,
+            CurrentStep = CalibrationSagaSteps.Completed,
+            Status = status,
+            OperationId = $"operation-{attemptId:N}",
+            CreatedAtUtc = nowUtc,
+            UpdatedAtUtc = nowUtc,
+        });
+        _ = await db.SaveChangesAsync();
+
+        CalibrationApiResult<CalibrationInFlightStateDto> result = await service.GetInFlightAsync(
+            project.Value.Id,
+            actor,
+            CancellationToken.None);
+
+        _ = result.Value!.Orchestration.Should().BeNull(
+            "a terminal orchestration is not in flight and must not be reported as such");
+    }
+
+    [Fact]
+    public async Task GetInFlightAsync_DraftContent_NeverAppearsInResponse()
+    {
+        // Highest-risk invariant for #2181: draft CONTENT is device-scoped and must never cross
+        // devices, even though draft EXISTENCE (step + device label + timestamp) intentionally
+        // does. This asserts the secret payload is absent from the entire serialized response,
+        // not just from the fields the DTO happens to declare, so a future field addition that
+        // accidentally re-exposes content would also be caught.
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "in-flight-content-isolation"),
+            actor,
+            CancellationToken.None);
+        const string secretValue = "nozzle-offset-marker-9f3a1c-0.42mm";
+        CalibrationDraftUpsertRequest draftRequest = new()
+        {
+            DeviceLineageId = "device-a",
+            Method = "manual",
+            Values = JsonSerializer.SerializeToElement(new { measurement = secretValue }),
+            Prerequisites = JsonSerializer.SerializeToElement(new { note = secretValue }),
+        };
+        CalibrationApiResult<CalibrationDraftDto> upserted = await service.UpsertDraftAsync(
+            project.Value!.Id,
+            CalibrationMethodSteps.Setup,
+            draftRequest,
+            null,
+            actor,
+            CancellationToken.None);
+        _ = upserted.IsSuccess.Should().BeTrue(upserted.Code);
+
+        CalibrationApiResult<CalibrationInFlightStateDto> result = await service.GetInFlightAsync(
+            project.Value.Id,
+            actor,
+            CancellationToken.None);
+
+        string serialized = JsonSerializer.Serialize(result.Value);
+        _ = serialized.Should().NotContain(secretValue);
+        _ = result.Value!.Drafts.Should().ContainSingle();
+        CalibrationDraftExistenceDto draft = result.Value.Drafts[0];
+        _ = draft.StepId.Should().Be(CalibrationMethodSteps.Setup);
+        _ = draft.DeviceLabel.Should().Be("device-a");
+    }
+
+    [Fact]
+    public async Task GetInFlightAsync_MultipleDeviceDrafts_AllAppearExistenceOnly()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "in-flight-multi-device"),
+            actor,
+            CancellationToken.None);
+        _ = await service.UpsertDraftAsync(
+            project.Value!.Id,
+            CalibrationMethodSteps.Setup,
+            CreateStepDraftRequest("manual", "device-a"),
+            null,
+            actor,
+            CancellationToken.None);
+        _ = await service.UpsertDraftAsync(
+            project.Value.Id,
+            CalibrationMethodSteps.Print,
+            CreateStepDraftRequest("manual", "device-b"),
+            null,
+            actor,
+            CancellationToken.None);
+
+        CalibrationApiResult<CalibrationInFlightStateDto> result = await service.GetInFlightAsync(
+            project.Value.Id,
+            actor,
+            CancellationToken.None);
+
+        _ = result.Value!.Drafts.Should().HaveCount(2);
+        _ = result.Value.Drafts.Select(draft => draft.DeviceLabel).Should()
+            .BeEquivalentTo(["device-a", "device-b"]);
+    }
+
+    [Fact]
+    public async Task GetInFlightAsync_SoftDeletedDraft_IsExcluded()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "in-flight-soft-deleted-draft"),
+            actor,
+            CancellationToken.None);
+        CalibrationApiResult<CalibrationDraftDto> created = await service.UpsertDraftAsync(
+            project.Value!.Id,
+            CalibrationMethodSteps.Setup,
+            CreateStepDraftRequest("manual", "device-a"),
+            null,
+            actor,
+            CancellationToken.None);
+        _ = await service.DeleteDraftAsync(
+            project.Value.Id,
+            CalibrationMethodSteps.Setup,
+            "device-a",
+            created.Value!.Revision,
+            $"\"calibration-draft-{created.Value.Id:N}-{created.Value.Revision}\"",
+            actor,
+            CancellationToken.None);
+
+        CalibrationApiResult<CalibrationInFlightStateDto> result = await service.GetInFlightAsync(
+            project.Value.Id,
+            actor,
+            CancellationToken.None);
+
+        _ = result.Value!.Drafts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetInFlightAsync_ProjectNotVisibleToActor_ReturnsNotFound()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor owner = new(Guid.NewGuid(), "owner", false);
+        CalibrationActor stranger = new(Guid.NewGuid(), "stranger", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "in-flight-not-visible"),
+            owner,
+            CancellationToken.None);
+
+        CalibrationApiResult<CalibrationInFlightStateDto> result = await service.GetInFlightAsync(
+            project.Value!.Id,
+            stranger,
+            CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+    }
+
+    [Fact]
+    public async Task GetInFlightAsync_FarmAdmin_CanSeeAnyProjectsInFlightState()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor owner = new(Guid.NewGuid(), "owner", false);
+        CalibrationActor admin = new(Guid.NewGuid(), "admin", true);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "in-flight-admin-visible"),
+            owner,
+            CancellationToken.None);
+
+        CalibrationApiResult<CalibrationInFlightStateDto> result = await service.GetInFlightAsync(
+            project.Value!.Id,
+            admin,
+            CancellationToken.None);
+
+        _ = result.IsSuccess.Should().BeTrue();
+    }
+
     private static CalibrationDraftUpsertRequest CreateStepDraftRequest(string method) =>
         CreateStepDraftRequest(method, "device-a");
 

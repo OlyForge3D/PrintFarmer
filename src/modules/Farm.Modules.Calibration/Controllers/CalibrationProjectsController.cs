@@ -178,6 +178,27 @@ public sealed class CalibrationProjectsController(ICalibrationProjectService cal
         return DraftResult(result);
     }
 
+    /// <summary>
+    /// Answers "is anything already underway on this project, and where was it started?" for a
+    /// fresh device that has no attempt or orchestration id to query by.
+    /// </summary>
+    [HttpGet("{projectId:guid}/in-flight")]
+    [RequirePermission(PrintFarmerPermissions.Calibration.Read)]
+    public async Task<IActionResult> GetInFlightAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        CalibrationActor? actor = GetActor();
+        if (actor is null)
+        {
+            return AuthenticationProblem();
+        }
+
+        CalibrationApiResult<CalibrationInFlightStateDto> result = await _calibrationService.GetInFlightAsync(
+            projectId,
+            actor,
+            cancellationToken);
+        return InFlightResult(result);
+    }
+
     /// <summary>Lists immutable plans belonging to a project.</summary>
     [HttpGet("{projectId:guid}/attempts")]
     [RequirePermission(PrintFarmerPermissions.Calibration.Read)]
@@ -643,6 +664,10 @@ public abstract class CalibrationControllerBase : ControllerBase
 
     /// <summary>Maps a filament-calibration saga orchestration operation result.</summary>
     protected IActionResult OrchestrationResult(CalibrationApiResult<CalibrationOrchestrationDto> result) =>
+        Result(result);
+
+    /// <summary>Maps a project-scoped in-flight-state query result.</summary>
+    protected IActionResult InFlightResult(CalibrationApiResult<CalibrationInFlightStateDto> result) =>
         Result(result);
 
     private IActionResult Result<T>(CalibrationApiResult<T> result)
