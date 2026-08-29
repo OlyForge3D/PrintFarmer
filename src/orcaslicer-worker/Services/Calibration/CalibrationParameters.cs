@@ -59,41 +59,6 @@ public sealed record CalibrationParameters
     public double MaxVolumetricSpeedCeilingMm3s { get; init; } = 50;
 
     /// <summary>
-    /// Target firmware flavor for an input shaping / resonance-compensation calibration (issue
-    /// #2139), from <c>calibration.firmwareFlavor</c>. Report-only: the worker never writes
-    /// firmware configuration itself, but it must know which firmware the operator targets so it
-    /// can refuse an unsupported or missing flavor explicitly (see
-    /// <see cref="InputShapingFirmwareFlavors.IsSupported"/>) rather than silently slicing a
-    /// ringing tower the operator has no firmware-specific guidance to act on.
-    /// <see langword="null"/> means the client did not supply one at all.
-    /// </summary>
-    public string? FirmwareFlavor { get; init; }
-
-    /// <summary>
-    /// Permissive <c>filament_max_volumetric_speed</c> ceiling applied before slicing a VFA
-    /// (resonance speed) calibration (issue #2140), in mm³/s. Verified against upstream source
-    /// (<c>CalibUtils::calib_VFA</c>, <c>src/slic3r/Utils/CalibUtils.cpp</c> in
-    /// OrcaSlicer/OrcaSlicer): <c>filament_config.set_key_value("filament_max_volumetric_speed",
-    /// new ConfigOptionFloats{200})</c> — VFA's own outer-wall speed sweep runs faster than
-    /// <see cref="MaxVolumetricSpeedCeilingMm3s"/>'s 50 would allow, so upstream raises this
-    /// method's ceiling separately rather than reusing the max-volumetric-speed method's value.
-    /// <para>
-    /// Exactly as documented for <see cref="MaxVolumetricSpeedCeilingMm3s"/>, this ceiling is not
-    /// upstream's sweep mechanism: VFA's actual per-layer outer wall speed ramp comes from the
-    /// same live, in-process <c>Print::set_calib_params</c>/<c>calib_mode()</c> override
-    /// (<c>GCode.cpp</c>'s <c>case CalibMode::Calib_VFA_Tower</c>), set only by the GUI wizard
-    /// immediately before slicing, never persisted to the 3MF project file, and with no CLI flag
-    /// — so it is not reachable from this worker's separate-process, CLI-driven pipeline (see the
-    /// fuller explanation on <see cref="Farm.Slicer.Module.Models.CalibrationMethod"/>). This
-    /// ceiling remains a safety margin only: it keeps OrcaSlicer's ordinary flow-based auto
-    /// speed-limiting from clamping the client-selected process profile's print speed below what
-    /// the bundled tower geometry needs while slicing proceeds at that profile's own constant
-    /// speed.
-    /// </para>
-    /// </summary>
-    public double VfaMaxVolumetricSpeedCeilingMm3s { get; init; } = 200;
-
-    /// <summary>
     /// Pressure advance (Klipper) / linear advance (Marlin) value of the bottom-most pressure
     /// advance tower band. See <see cref="Farm.OrcaSlicer.Worker.Services.Calibration.PressureAdvanceTowerGcodeBuilder"/>.
     /// </summary>
@@ -109,13 +74,9 @@ public sealed record CalibrationParameters
     /// </summary>
     /// <remarks>
     /// Parses per-key via <see cref="JsonDocument"/> rather than deserializing the whole payload
-    /// into a single <c>Dictionary&lt;string, double&gt;</c> (as earlier revisions did), because
-    /// <see cref="CalibrationMethod.InputShaping"/> (issue #2139) needs a string <see cref="FirmwareFlavor"/>
-    /// alongside every other method's numeric-only params in the same JSON object; a
-    /// whole-payload <c>Dictionary&lt;string, double&gt;</c> deserialization throws and falls back
-    /// to <em>all</em> defaults the instant any key holds a string, which would make a firmware
-    /// flavor unparseable. Per-key extraction keeps every existing numeric method's net *outcome*
-    /// the same for duplicate JSON keys (both the old <c>Dictionary&lt;string, double&gt;</c>
+    /// into a single <c>Dictionary&lt;string, double&gt;</c> (as earlier revisions did): per-key
+    /// extraction keeps every existing numeric method's net *outcome* the same for duplicate JSON
+    /// keys (both the old <c>Dictionary&lt;string, double&gt;</c>
     /// deserialization and <c>JsonElement.TryGetProperty</c> here resolve duplicates to the *last*
     /// occurrence). Two edge cases do differ mechanically from the old whole-payload behavior: (1)
     /// a non-numeric value at a numeric key falls back only for that key here, whereas the old
@@ -155,7 +116,7 @@ public sealed record CalibrationParameters
             // Null/blank/malformed params still need to run through the method-specific switch
             // below so each method's own defaults (e.g. PressureAdvanceTowerDefaults) are applied
             // rather than this record's base property initializers, which belong to TemperatureTower.
-            // An empty object makes every ReadOrDefault/ReadStringOrDefault key lookup miss and fall
+            // An empty object makes every ReadOrDefault key lookup miss and fall
             // back, which is exactly the same outcome as a present-but-empty "{}" payload.
             using JsonDocument emptyDocument = JsonDocument.Parse("{}");
             root = emptyDocument.RootElement.Clone();
@@ -188,20 +149,7 @@ public sealed record CalibrationParameters
                     MinVolumetricSpeedCeilingBoundMm3s,
                     MaxVolumetricSpeedCeilingBoundMm3s),
             },
-            CalibrationMethod.InputShaping => defaults with
-            {
-                FirmwareFlavor = ReadStringOrDefault(root, "firmware_flavor", defaults.FirmwareFlavor),
-            },
             CalibrationMethod.PressureAdvanceTower => BuildPressureAdvanceTowerParameters(defaults, root),
-            CalibrationMethod.Vfa => defaults with
-            {
-                VfaMaxVolumetricSpeedCeilingMm3s = ReadOrDefault(
-                    root,
-                    "vfa_max_volumetric_speed_ceiling_mm3s",
-                    defaults.VfaMaxVolumetricSpeedCeilingMm3s,
-                    MinVfaVolumetricSpeedCeilingBoundMm3s,
-                    MaxVfaVolumetricSpeedCeilingBoundMm3s),
-            },
             _ => defaults,
         };
     }
@@ -318,12 +266,6 @@ public sealed record CalibrationParameters
     private const double MinVolumetricSpeedCeilingBoundMm3s = 1;
     private const double MaxVolumetricSpeedCeilingBoundMm3s = 100;
 
-    // Upstream's constant ceiling for VFA specifically is 200mm³/s (CalibUtils::calib_VFA), a
-    // separate, higher value than MaximumVolumetricSpeed's own 50mm³/s ceiling above; the bounds
-    // below give a little headroom while still rejecting adversarial or malformed input.
-    private const double MinVfaVolumetricSpeedCeilingBoundMm3s = 1;
-    private const double MaxVfaVolumetricSpeedCeilingBoundMm3s = 250;
-
     /// <summary>
     /// Reads <paramref name="key"/> from <paramref name="root"/>, falling back to
     /// <paramref name="fallback"/> when the key is absent, not a JSON number, non-finite
@@ -346,20 +288,5 @@ public sealed record CalibrationParameters
         }
 
         return value;
-    }
-
-    /// <summary>
-    /// Reads <paramref name="key"/> from <paramref name="root"/> as a string, falling back to
-    /// <paramref name="fallback"/> when the key is absent, blank, or not a JSON string.
-    /// </summary>
-    private static string? ReadStringOrDefault(JsonElement root, string key, string? fallback)
-    {
-        if (!root.TryGetProperty(key, out JsonElement element) || element.ValueKind != JsonValueKind.String)
-        {
-            return fallback;
-        }
-
-        string? value = element.GetString();
-        return string.IsNullOrWhiteSpace(value) ? fallback : value;
     }
 }

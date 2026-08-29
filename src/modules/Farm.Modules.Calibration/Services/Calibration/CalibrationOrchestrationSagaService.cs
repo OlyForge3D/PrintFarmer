@@ -553,14 +553,8 @@ public sealed class CalibrationOrchestrationSagaService(
     /// forward them even if a stored input happened to contain one.
     /// </summary>
     /// <remarks>
-    /// Issue #2139: <see cref="CalibrationMethod.InputShaping"/> is the one method whose
-    /// specification carries a string <c>firmware_flavor</c> value rather than purely numeric
-    /// parameters. <c>calibration.params</c> binds to
-    /// <c>Farm.Slicer.Module.Contracts.CalibrationRequest.Params</c>
-    /// (<c>Dictionary&lt;string, double&gt;?</c>), so a string value left there would fail to bind
-    /// and the API would never see it. It must instead be lifted to the request's dedicated
-    /// <c>calibration.firmwareFlavor</c> sibling field, the same field <c>SliceJobController</c>
-    /// validates directly against <c>InputShapingFirmwareFlavors.IsSupported</c>.
+    /// Deliberately strips the saga-only identifiers above so the API sees a clean calibration
+    /// request rather than one that also happens to carry saga bookkeeping fields.
     /// </remarks>
     private static JsonObject BuildSliceSubmissionBody(CalibrationAttempt attempt, CalibrationMethod method)
     {
@@ -576,28 +570,6 @@ public sealed class CalibrationOrchestrationSagaService(
             ["method"] = CalibrationMethodNames.ToName(method),
             ["params"] = specification?.DeepClone(),
         };
-
-        if (method == CalibrationMethod.InputShaping &&
-            calibration["params"] is JsonObject inputShapingParams &&
-            inputShapingParams.TryGetPropertyValue("firmware_flavor", out JsonNode? firmwareFlavorNode))
-        {
-            calibration["firmwareFlavor"] = firmwareFlavorNode?.DeepClone();
-            inputShapingParams.Remove("firmware_flavor");
-
-            // Deliberately reassign calibration["params"] only when it must become null (every key
-            // was firmware_flavor). Re-assigning a JsonObject to the same key it is already the
-            // value of (the Count > 0 branch a prior revision of this fix took) is unverifiable by
-            // inspection alone - review finding on issue #2139: whether System.Text.Json.Nodes'
-            // JsonObject indexer setter tolerates re-parenting a node under the key it already
-            // occupies depends on internal ordering of its detach-old/assign-new-parent steps, which
-            // is not part of the public contract. Leaving inputShapingParams as the untouched,
-            // already-assigned value for calibration["params"] sidesteps the question entirely: no
-            // reassignment happens unless the object is being replaced with null.
-            if (inputShapingParams.Count == 0)
-            {
-                calibration["params"] = null;
-            }
-        }
 
         bodyObject["calibration"] = calibration;
         return bodyObject;

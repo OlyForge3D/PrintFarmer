@@ -988,42 +988,6 @@ public sealed class CalibrationProjectServiceTests
         _ = (await db.CalibrationObservations.CountAsync()).Should().Be(0);
     }
 
-    [Theory]
-    [InlineData(45.5)]
-    [InlineData(-3.2)]
-    [InlineData(0)]
-    [InlineData(999999)]
-    public async Task AppendObservationAsync_InputShapingAnyNumericMeasurement_SucceedsWithNoRangeValidation(decimal resonanceFrequency)
-    {
-        // Issue #2139: input_shaping is report-only and intentionally has no defined measurement
-        // range (Dallas's architecture decision: "optional, non-blocking") — the worker-parsed
-        // resonance-frequency/damping-factor value is recorded as-is for the operator to act on
-        // manually, never validated against a physical bound the way pressure_advance/temperature/
-        // max_volumetric_speed are.
-        await using AppDbContext db = CreateContext();
-        Guid printerId = Guid.NewGuid();
-        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
-        CalibrationProjectService service = CreateService(db);
-        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
-            CreateProjectRequest(printerId, $"input-shaping-{resonanceFrequency}"),
-            actor,
-            CancellationToken.None);
-        Guid attemptId = await AddAttemptAsync(
-            db,
-            project.Value!.Id,
-            actor.Subject,
-            sequence: 1,
-            CalibrationMethodNames.InputShaping);
-
-        CalibrationApiResult<CalibrationObservationDto> result = await service.AppendObservationAsync(
-            attemptId,
-            CreateMeasurementRequest($"input-shaping-{resonanceFrequency}", "resonance_frequency_hz", resonanceFrequency),
-            actor,
-            CancellationToken.None);
-
-        _ = result.StatusCode.Should().Be(StatusCodes.Status201Created);
-    }
-
     [Fact]
     public async Task AppendObservationAsync_TemperatureNonNumeric_ReturnsInvalidValidationError()
     {

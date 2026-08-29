@@ -106,80 +106,6 @@
 /// <c>\d+(?:\.\d+)?</c>, not a fixed decimal count) and wired the same configurator in for
 /// <see cref="FlowRateYoloPerfectionist"/> too — both methods are now slicer-supported.
 /// </para>
-/// <para>
-/// <see cref="Cornering"/> (issue #2138): cornering calibrates jerk (classic Marlin), junction
-/// deviation (Marlin 2's <c>M205 J</c>), or Klipper's <c>SQUARE_CORNER_VELOCITY</c> — three
-/// firmware-specific motion-planner concepts, unlike every other catalogued method here, which
-/// are filament properties. Per the architecture decision recorded on issue #2138 (and shared
-/// with #2139/#2140), this method is <strong>report-only</strong>: the calibration saga never
-/// carries it into a filament-profile-clone/patch step, and the operator may separately, and
-/// explicitly, record the resulting value onto the printer's own
-/// <c>MaxJerk</c>/<c>JunctionDeviation</c>/<c>SquareCornerVelocity</c> fields (mirroring
-/// <c>MaxAcceleration</c>) through the ordinary admin-gated printer update endpoint — never
-/// automatically from this calibration flow. The bundled resource
-/// (<c>resources/calib/cornering/SCV-V2.drc</c>) is, like <see cref="TemperatureTower"/>'s and
-/// <see cref="MaximumVolumetricSpeed"/>'s <c>.drc</c> resources, an opaque OrcaSlicer binary
-/// format that is copied unmodified rather than parsed and rewritten. Because jerk/junction
-/// deviation and square corner velocity are meaningless outside Marlin/Marlin-2/Klipper
-/// firmware, <c>OrcaSlicingPipelineService</c> validates the target printer's <c>gcode_flavor</c>
-/// before slicing and refuses explicitly — rather than silently slicing a test result the
-/// operator's firmware cannot even apply — for any other flavor (reprapfirmware, smoothie,
-/// sprinter, etc.).
-/// </para>
-/// <para>
-/// <see cref="InputShaping"/> (issue #2139): report-only per the architecture decision recorded
-/// on that issue (Dallas). Input shaping compensates for mechanical resonance in the printer
-/// frame, and the result is applied to <em>firmware</em> — Klipper's <c>[input_shaper]</c>
-/// (typically measured via <c>SHAPER_CALIBRATE</c>/<c>TEST_RESONANCES</c> with an accelerometer,
-/// or read off a printed ringing tower) or Marlin's <c>M593</c> ZV input shaping — never to a
-/// slicer or filament setting PrintFarmer can write. There is deliberately no settable field for
-/// this method anywhere (no <c>Printer</c> column, no filament-profile-clone patch step): the
-/// worker only slices the bundled ringing-tower resource so the operator can print and measure
-/// it, and the result is captured purely as a <c>CalibrationObservation</c> the operator
-/// acts on themselves in their firmware config. Upstream's bundled resource
-/// (<c>resources/calib/input_shaping/ringing_tower.drc</c>, confirmed against a local OrcaSlicer
-/// install: DRAC magic bytes, not a ZIP/3MF archive) is opaque like <see cref="TemperatureTower"/>
-/// and <see cref="MaximumVolumetricSpeed"/>'s <c>.drc</c> resources, so the worker copies it
-/// unmodified rather than attempting to parse and rewrite it. Because the measured result is
-/// firmware-specific (a Klipper shaper frequency/damping-ratio pair vs. Marlin's coarser
-/// <c>M593</c> parameters), a calibration job for this method must name the firmware flavor it
-/// targets (<c>"klipper"</c> or <c>"marlin"</c>, via <c>CalibrationParameters.FirmwareFlavor</c>);
-/// an unsupported or missing flavor is refused explicitly by
-/// <c>OrcaSlicingPipelineService.PrepareCalibrationModel</c> rather than silently slicing a tower
-/// the operator has no firmware-specific guidance to act on.
-/// </para>
-/// <para>
-/// <see cref="Vfa"/> (Vertical Fine Artifacts / resonance speed, issue #2140): VFA sweeps outer
-/// wall speed across a tall tower to find the printer's resonance band (the range that produces
-/// visible ringing/banding), so — like <see cref="Cornering"/> — it measures the printer's motion
-/// system rather than a filament property, and the architecture decision recorded on issue #2140
-/// makes it <strong>report-only</strong>: the calibration saga never carries it into a
-/// filament-profile-clone/patch step, and there is no settable field to write back at all (the
-/// operator's takeaway is a speed range to avoid, not a value to apply). The bundled resource
-/// (<c>resources/calib/vfa/vfa.drc</c>, verified against the upstream OrcaSlicer resource tree)
-/// is, like <see cref="MaximumVolumetricSpeed"/>'s and <see cref="Cornering"/>'s <c>.drc</c>
-/// resources, an opaque binary format copied unmodified rather than parsed and rewritten.
-/// Upstream's actual per-layer speed ramp for this tower uses the exact same in-process
-/// mechanism documented above for <see cref="MaximumVolumetricSpeed"/> —
-/// <c>GCode.cpp</c>'s <c>calib_mode()</c> switch (<c>case CalibMode::Calib_VFA_Tower</c>) drives
-/// <c>m_calib_config.set_key_value("outer_wall_speed", ...)</c> from <c>Print::calib_params()</c>,
-/// which is set only by the GUI's <c>CalibUtils::calib_VFA</c>/<c>process_and_store_3mf</c>
-/// immediately before slicing, is never persisted to the 3MF project file, and has no CLI flag —
-/// so, exactly as for <see cref="MaximumVolumetricSpeed"/>, it is not reachable from this
-/// separate-process, CLI-driven worker. (This is why this method's implementation is closer in
-/// shape to <see cref="MaximumVolumetricSpeed"/>'s permissive-ceiling configurator than to
-/// <c>FlowRateCalibrationConfigurator</c>'s per-object 3MF rewriting — the bundled resource here
-/// is an opaque tower, not a 3MF with per-object metadata to patch.) Upstream's
-/// <c>CalibUtils::calib_VFA</c> also raises <c>filament_max_volumetric_speed</c> to 200 (versus
-/// <see cref="MaximumVolumetricSpeed"/>'s 50) so the sweep's higher wall speeds are never
-/// throttled by the slicer's own volumetric-speed limiter; the worker reproduces that ceiling via
-/// <c>OrcaSlicingPipelineService.ApplyVfaMaxVolumetricSpeedCeilingAsync</c>, gated by
-/// <c>CalibrationParameters.VfaMaxVolumetricSpeedCeilingMm3s</c>, and otherwise slices the bundled
-/// tower geometry with the client-selected process profile's own constant wall speed — the wire
-/// name still submits, slices, and returns gcode end to end per the issue's acceptance criteria,
-/// while upstream's per-layer speed ramp itself remains unreproduced for the same structural
-/// reason as <see cref="MaximumVolumetricSpeed"/>.
-/// </para>
 /// </remarks>
 public enum CalibrationMethod
 {
@@ -221,34 +147,12 @@ public enum CalibrationMethod
     MaximumVolumetricSpeed,
 
     /// <summary>
-    /// Input shaping / resonance-compensation calibration (issue #2139). Report-only: see the
-    /// type-level remarks for why this method never writes a filament profile, a
-    /// <c>Printer</c> field, or firmware configuration, and requires a firmware flavor.
-    /// </summary>
-    InputShaping,
-
-    /// <summary>
     /// Pressure advance tower calibration (issue #2136). Scope is deliberately Tower-only; PA
     /// Pattern and PA Line remain unsupported per the type-level remarks above. Emits per-band
     /// <c>layer_change_gcode</c> for Klipper (<c>SET_PRESSURE_ADVANCE</c>) or Marlin/Marlin2
     /// (<c>M900 K</c>) — see <c>PressureAdvanceTowerGcodeBuilder</c> in the OrcaSlicer worker.
     /// </summary>
     PressureAdvanceTower,
-
-    /// <summary>
-    /// Cornering (jerk / junction deviation / Klipper square corner velocity) calibration
-    /// (issue #2138). See the type-level remarks for the report-only write-back model and the
-    /// firmware-flavor gate this method needs.
-    /// </summary>
-    Cornering,
-
-    /// <summary>
-    /// VFA (Vertical Fine Artifacts / resonance speed) calibration (issue #2140). See the
-    /// type-level remarks for the report-only write-back model and why this method's
-    /// permissive-ceiling implementation mirrors <see cref="MaximumVolumetricSpeed"/> rather than
-    /// <c>FlowRateCalibrationConfigurator</c>'s per-object 3MF rewriting.
-    /// </summary>
-    Vfa,
 }
 
 /// <summary>
@@ -268,13 +172,10 @@ public static class CalibrationMethods
             ["flow_rate_yolo_perfectionist"] = CalibrationMethod.FlowRateYoloPerfectionist,
             ["retraction"] = CalibrationMethod.Retraction,
             ["max_volumetric_speed"] = CalibrationMethod.MaximumVolumetricSpeed,
-            ["input_shaping"] = CalibrationMethod.InputShaping,
 
             // Matches Farm.Modules.Calibration.Services.Calibration.CalibrationMethodNames.PressureAdvanceTower
             // so the two catalogues do not diverge further (issue #2136).
             ["pressure_advance_tower"] = CalibrationMethod.PressureAdvanceTower,
-            ["cornering"] = CalibrationMethod.Cornering,
-            ["vfa"] = CalibrationMethod.Vfa,
         };
 
     private static readonly Dictionary<CalibrationMethod, string> MethodToWireName =
@@ -287,10 +188,7 @@ public static class CalibrationMethods
             [CalibrationMethod.FlowRateYoloPerfectionist] = "flow_rate_yolo_perfectionist",
             [CalibrationMethod.Retraction] = "retraction",
             [CalibrationMethod.MaximumVolumetricSpeed] = "max_volumetric_speed",
-            [CalibrationMethod.InputShaping] = "input_shaping",
             [CalibrationMethod.PressureAdvanceTower] = "pressure_advance_tower",
-            [CalibrationMethod.Cornering] = "cornering",
-            [CalibrationMethod.Vfa] = "vfa",
         };
 
     /// <summary>
@@ -371,10 +269,7 @@ public static class CalibrationMethods
         CalibrationMethod.FlowRateYoloPerfectionist => "Orca-LinearFlow_fine.3mf",
         CalibrationMethod.Retraction => "retraction_tower.drc",
         CalibrationMethod.MaximumVolumetricSpeed => "SpeedTestStructure.drc",
-        CalibrationMethod.InputShaping => "ringing_tower.drc",
         CalibrationMethod.PressureAdvanceTower => "tower_with_seam.drc",
-        CalibrationMethod.Cornering => "SCV-V2.drc",
-        CalibrationMethod.Vfa => "vfa.drc",
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
 
@@ -391,45 +286,7 @@ public static class CalibrationMethods
         CalibrationMethod.FlowRateYoloPerfectionist => Path.Combine("filament_flow", "Orca-LinearFlow_fine.3mf"),
         CalibrationMethod.Retraction => Path.Join("retraction", "retraction_tower.drc"),
         CalibrationMethod.MaximumVolumetricSpeed => Path.Combine("volumetric_speed", "SpeedTestStructure.drc"),
-        CalibrationMethod.InputShaping => Path.Combine("input_shaping", "ringing_tower.drc"),
         CalibrationMethod.PressureAdvanceTower => Path.Combine("pressure_advance", "tower_with_seam.drc"),
-        CalibrationMethod.Cornering => Path.Combine("cornering", "SCV-V2.drc"),
-        CalibrationMethod.Vfa => Path.Combine("vfa", "vfa.drc"),
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported calibration method."),
     };
-}
-
-/// <summary>
-/// Canonical firmware flavors <see cref="CalibrationMethod.InputShaping"/> calibration (issue
-/// #2139) supports. Defined here — in <c>Farm.Slicer.Module</c>, referenced by both the API
-/// project (<c>SliceJobController</c>, which validates a client's request) and the worker project
-/// (<c>CalibrationParameters</c>, which re-validates defense-in-depth before slicing) — so the two
-/// layers share one source of truth instead of maintaining duplicate lists that could drift.
-/// </summary>
-public static class InputShapingFirmwareFlavors
-{
-    /// <summary>
-    /// Klipper: input shaping is tuned via the <c>SHAPER_CALIBRATE</c>/<c>TEST_RESONANCES</c>
-    /// macros (typically with an accelerometer, or by measuring a printed ringing tower) and
-    /// applied through the <c>[input_shaper]</c> config section.
-    /// </summary>
-    public const string Klipper = "klipper";
-
-    /// <summary>
-    /// Marlin: input shaping is configured via the <c>M593</c> ZV input shaping G-code command.
-    /// </summary>
-    public const string Marlin = "marlin";
-
-    /// <summary>The full set of supported firmware flavor wire values, in stable order.</summary>
-    public static readonly IReadOnlyList<string> Supported = [Klipper, Marlin];
-
-    /// <summary>
-    /// Whether <paramref name="firmwareFlavor"/> names a firmware flavor input shaping
-    /// calibration supports. Comparison is case-insensitive and trims surrounding whitespace; a
-    /// null, blank, or unrecognized value returns <see langword="false"/> — callers must refuse
-    /// those explicitly rather than silently defaulting to either supported flavor.
-    /// </summary>
-    public static bool IsSupported(string? firmwareFlavor) =>
-        !string.IsNullOrWhiteSpace(firmwareFlavor)
-        && Supported.Contains(firmwareFlavor.Trim(), StringComparer.OrdinalIgnoreCase);
 }
