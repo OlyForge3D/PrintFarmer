@@ -188,6 +188,12 @@ public sealed class CalibrationProjectsController(ICalibrationProjectService cal
     [RequirePermission(PrintFarmerPermissions.Calibration.Read)]
     public IActionResult GetMethodGuidanceCatalog()
     {
+        CalibrationActor? actor = GetActor();
+        if (actor is null)
+        {
+            return AuthenticationProblem();
+        }
+
         return Ok(_calibrationService.GetMethodGuidanceCatalog());
     }
 
