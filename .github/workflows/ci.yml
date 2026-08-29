@@ -182,21 +182,6 @@ jobs:
       - name: Test daily development image-set policy
         run: node --test scripts/ci/tests/test-daily-development-images.mjs
 
-      - name: Install Squad CLI
-        env:
-          SQUAD_VERSION: 0.13.1
-          SQUAD_LINUX_X64_SHA256: b7eecfe5c46676547b6e1bb1f10796fadd2b2f74a87f088646541c344f89b43d
-        run: |
-          archive="$RUNNER_TEMP/squad-linux-x64.tar.gz"
-          install_dir="$RUNNER_TEMP/squad"
-          curl --fail --location --retry 3 \
-            --output "$archive" \
-            "https://github.com/bradygaster/squad/releases/download/v${SQUAD_VERSION}/squad-linux-x64.tar.gz"
-          echo "${SQUAD_LINUX_X64_SHA256}  ${archive}" | sha256sum --check
-          mkdir -p "$install_dir"
-          tar --extract --gzip --file "$archive" --directory "$install_dir" --strip-components=1
-          echo "$install_dir" >> "$GITHUB_PATH"
-
       - name: Test Squad state-root containment
         run: node --test scripts/ci/tests/test-squad-state-root.mjs
 
