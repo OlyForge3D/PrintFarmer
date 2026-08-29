@@ -143,7 +143,7 @@ public static class SlicerModuleExtensions
     /// scope, and previously depended entirely on this shared registration being reachable as an
     /// incidental side effect of unrelated startup wiring — either
     /// <c>Farm.Web.Api.Startup.MoonrakerEmulatorSeederDependenciesStartup</c>'s call chain, or
-    /// <c>Farm.Slicer.Module.Services.ModelStorageResolutionStartup.AddModelStorageResolution</c>
+    /// <c>Farm.Modules.Calibration.Startup.ModelStorageResolutionStartup.AddModelStorageResolution</c>
     /// (#2179), neither of which has anything to do with calibration worker-health detection. See
     /// <c>CalibrationWorkerHealthDependenciesStartup</c> for the explicit, independently-named
     /// registration path (#2178) that makes this dependency its own source of truth instead of
