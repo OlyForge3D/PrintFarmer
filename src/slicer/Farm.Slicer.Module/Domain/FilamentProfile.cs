@@ -52,6 +52,16 @@ public class FilamentProfile
     /// <summary>Soft reference to the user who created this profile (no FK constraint).</summary>
     public Guid? CreatedByUserId { get; set; }
 
+    /// <summary>
+    /// When this profile was promoted from a calibration project's draft profile (#2180, gap 1),
+    /// the draft profile's own stable identifier - used as an idempotency key so a retried/replayed
+    /// promotion call (e.g. after a TTL-reclaimed stranded claim) returns this SAME profile instead
+    /// of minting a visible duplicate in the owner's custom profile list. Null for every profile
+    /// created any other way. Enforced unique (nulls excluded) - see
+    /// <c>FilamentProfileConfiguration</c>.
+    /// </summary>
+    public Guid? PromotedFromCalibrationDraftProfileId { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public DateTime UpdatedAt { get; set; }

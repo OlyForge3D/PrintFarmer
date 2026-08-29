@@ -245,3 +245,44 @@ public sealed class CalibrationSyncCursorConfiguration : IEntityTypeConfiguratio
         _ = builder.HasIndex(cursor => new { cursor.Scope, cursor.Sequence });
     }
 }
+
+/// <summary>
+/// Configures the project-owned, non-device-scoped per-method disposition (issue #2180, gap 2).
+/// The unique (ProjectId, Method) index is the resume/skip authority - deliberately unlike
+/// <see cref="CalibrationDraftConfiguration"/>'s device-lineage-scoped uniqueness.
+/// </summary>
+public sealed class CalibrationMethodProgressConfiguration : IEntityTypeConfiguration<CalibrationMethodProgress>
+{
+    public void Configure(EntityTypeBuilder<CalibrationMethodProgress> builder)
+    {
+        _ = builder.HasKey(progress => progress.Id);
+        _ = builder.Property(progress => progress.Method).IsRequired().HasMaxLength(128);
+        _ = builder.Property(progress => progress.CurrentStepId).HasMaxLength(128);
+        _ = builder.Property(progress => progress.Revision).IsConcurrencyToken().ValueGeneratedNever();
+        _ = builder.Property(progress => progress.CreatedBySubject).IsRequired().HasMaxLength(256);
+        _ = builder.Property(progress => progress.UpdatedBySubject).IsRequired().HasMaxLength(256);
+        _ = builder.HasIndex(progress => new { progress.ProjectId, progress.Method }).IsUnique();
+        _ = builder.HasOne<CalibrationProject>().WithMany().HasForeignKey(progress => progress.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+/// <summary>
+/// Configures the project-owned draft filament profile document (issue #2180, gap 1). At most one
+/// per project; never promoted for an abandoned/archived project, so no row here ever implies a
+/// row in the separately deployed slicer module's custom filament profiles.
+/// </summary>
+public sealed class CalibrationDraftProfileConfiguration : IEntityTypeConfiguration<CalibrationDraftProfile>
+{
+    public void Configure(EntityTypeBuilder<CalibrationDraftProfile> builder)
+    {
+        _ = builder.HasKey(profile => profile.Id);
+        _ = builder.Property(profile => profile.ValuesJson).IsRequired();
+        _ = builder.Property(profile => profile.Revision).IsConcurrencyToken().ValueGeneratedNever();
+        _ = builder.Property(profile => profile.CreatedBySubject).IsRequired().HasMaxLength(256);
+        _ = builder.Property(profile => profile.UpdatedBySubject).IsRequired().HasMaxLength(256);
+        _ = builder.HasIndex(profile => profile.ProjectId).IsUnique();
+        _ = builder.HasOne<CalibrationProject>().WithMany().HasForeignKey(profile => profile.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}

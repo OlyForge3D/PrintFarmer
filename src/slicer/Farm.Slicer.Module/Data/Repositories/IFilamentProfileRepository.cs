@@ -24,6 +24,15 @@ public interface IFilamentProfileRepository
     /// <param name="ct">Cancellation token.</param>
     Task<FilamentProfile?> GetByHashAsync(string hash, CancellationToken ct = default);
 
+    /// <summary>
+    /// Gets the filament profile, if any, that was promoted from the given calibration draft
+    /// profile (#2180, gap 1). Used as the idempotency check backing
+    /// <c>IProfilesService.PromoteCalibrationDraftProfileAsync</c>.
+    /// </summary>
+    /// <param name="sourceDraftProfileId">The calibration draft profile's stable identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<FilamentProfile?> GetByPromotedFromCalibrationDraftProfileIdAsync(Guid sourceDraftProfileId, CancellationToken ct = default);
+
     /// <summary>Adds a new filament profile.</summary>
     /// <param name="profile">The profile to add.</param>
     /// <param name="ct">Cancellation token.</param>

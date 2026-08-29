@@ -136,9 +136,12 @@ GET /api/calibration-orchestrations/{orchestrationId:guid} -> Farm.Modules.Calib
 GET /api/calibration-photos/{photoId:guid} -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationPhotosController.GetPhotoAsync
 GET /api/calibration-photos/{photoId:guid}/content -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationPhotosController.GetPhotoContentAsync
 GET /api/calibration-projects -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetProjectsAsync
+GET /api/calibration-projects/method-guidance -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetMethodGuidanceCatalog
 GET /api/calibration-projects/{projectId:guid} -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetProjectAsync
 GET /api/calibration-projects/{projectId:guid}/attempts -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetAttemptsAsync
+GET /api/calibration-projects/{projectId:guid}/draft-profile -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetDraftProfileAsync
 GET /api/calibration-projects/{projectId:guid}/in-flight -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetInFlightAsync
+GET /api/calibration-projects/{projectId:guid}/method-progress -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetMethodProgressAsync
 GET /api/calibration-sync/changes -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationSyncController.GetChangesAsync
 GET /api/calibration/capabilities -> Farm.Web.Api::Farm.Web.Api.Controllers.CalibrationCapabilitiesController.GetCapabilitiesAsync
 GET /api/cameras -> Farm.Modules.Devices::Farm.Modules.Devices.Controllers.CamerasController.GetCamerasAsync
@@ -752,6 +755,7 @@ POST /api/slicer/profiles/import-selected-for-model/{modelId:guid} -> Farm.Slice
 POST /api/slicer/profiles/import/orca -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.ImportOrcaBundleAsync
 POST /api/slicer/profiles/import/orca/preview -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.PreviewOrcaBundle
 POST /api/slicer/profiles/process/for-machines -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.GetProcessProfilesForMachinesAsync
+POST /api/slicer/profiles/promote-from-calibration -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.PromoteCalibrationDraftProfileAsync
 POST /api/slicer/profiles/resolve-for-model/{modelId:guid} -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.ResolveProfileForModelAsync
 POST /api/slicer/profiles/system/orca/force-reseed-from-worker -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.ForceReseedSystemProfilesFromWorkerAsync
 POST /api/slicer/profiles/system/orca/seed-from-worker -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.SeedSystemProfilesFromWorkerAsync
@@ -802,6 +806,7 @@ PUT /api/auto-dispatch/{printerId:guid}/enabled -> Farm.Modules.PrintQueue::Farm
 PUT /api/bed-types/{id:guid} -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.BedTypeController.UpdateBedTypeAsync
 PUT /api/bins/{code} -> Farm.Modules.Inventory::Farm.Modules.Inventory.Controllers.BinsController.UpdateAsync
 PUT /api/calibration-projects/{projectId:guid}/drafts/{stepId} -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.UpsertDraftAsync
+PUT /api/calibration-projects/{projectId:guid}/method-progress/{method} -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.SetMethodDispositionAsync
 PUT /api/cameras/{id} -> Farm.Modules.Devices::Farm.Modules.Devices.Controllers.CamerasController.UpdateCameraAsync
 PUT /api/catalog/extruders/{id:guid} -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.CatalogController.UpdateExtruderAsync
 PUT /api/catalog/hotends/{id:guid} -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.CatalogController.UpdateHotendAsync

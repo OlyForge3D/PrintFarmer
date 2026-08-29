@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { isApiError, getRevisionConflict, getErrorMessage, extractValidationErrorMessage } from '../apiErrors';
+import {
+  isApiError,
+  getRevisionConflict,
+  getErrorMessage,
+  extractValidationErrorMessage,
+  parseXhrErrorMessage,
+} from '../apiErrors';
 import type { ApiError } from '@/types/api';
 
 function makeApiError(overrides: Partial<ApiError> = {}): ApiError {
@@ -135,5 +141,57 @@ describe('extractValidationErrorMessage', () => {
     expect(extractValidationErrorMessage(null)).toBeUndefined();
     expect(extractValidationErrorMessage(undefined)).toBeUndefined();
     expect(extractValidationErrorMessage('a string')).toBeUndefined();
+  });
+});
+
+describe('parseXhrErrorMessage', () => {
+  // Regression test for issue #2175: `POST /api/3d-models/upload` returns a 400 with
+  // `BadRequest(ex.Message)`, which ASP.NET Core serializes as a bare JSON string body
+  // (e.g. `"Model file '...' failed validation: File is too small..."`). XHR-based upload
+  // flows previously discarded this body entirely and surfaced only `xhr.statusText`
+  // ("Bad Request").
+  it('extracts a bare JSON string body (ASP.NET Core BadRequest(string))', () => {
+    const body = JSON.stringify(
+      "Model file '.playwright-malformed-repro.stl' failed validation: File is too small to be a valid STL (must be at least 84 bytes) (Parameter 'modelFile')"
+    );
+    expect(parseXhrErrorMessage(body, 'fallback')).toBe(
+      "Model file '.playwright-malformed-repro.stl' failed validation: File is too small to be a valid STL (must be at least 84 bytes) (Parameter 'modelFile')"
+    );
+  });
+
+  it('prefers a top-level "message" field', () => {
+    const body = JSON.stringify({ message: 'Model too large.' });
+    expect(parseXhrErrorMessage(body, 'fallback')).toBe('Model too large.');
+  });
+
+  it('falls back to a top-level "detail" field for application/problem+json bodies', () => {
+    const body = JSON.stringify({ detail: 'Unsupported model format.' });
+    expect(parseXhrErrorMessage(body, 'fallback')).toBe('Unsupported model format.');
+  });
+
+  it('falls back to a top-level "error" field', () => {
+    const body = JSON.stringify({ error: 'Model rejected.' });
+    expect(parseXhrErrorMessage(body, 'fallback')).toBe('Model rejected.');
+  });
+
+  it('falls back to a ValidationProblemDetails "errors" map', () => {
+    const body = JSON.stringify({ errors: { modelFile: ['The modelFile field is required.'] } });
+    expect(parseXhrErrorMessage(body, 'fallback')).toBe('The modelFile field is required.');
+  });
+
+  it('falls back to the raw response text when the body is not valid JSON', () => {
+    expect(parseXhrErrorMessage('Internal Server Error', 'fallback')).toBe('Internal Server Error');
+  });
+
+  it('returns the fallback for an empty response body', () => {
+    expect(parseXhrErrorMessage('', 'fallback')).toBe('fallback');
+  });
+
+  it('returns the fallback for an empty JSON string body', () => {
+    expect(parseXhrErrorMessage(JSON.stringify(''), 'fallback')).toBe('fallback');
+  });
+
+  it('returns the fallback for a JSON object with no recognizable message field', () => {
+    expect(parseXhrErrorMessage(JSON.stringify({ traceId: 'abc' }), 'fallback')).toBe('fallback');
   });
 });
