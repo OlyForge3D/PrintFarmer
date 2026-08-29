@@ -58,6 +58,22 @@ public sealed record CalibrationOrchestrationDto(
 /// <see cref="ExpectedRevision"/>. A residual <see cref="Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException"/>-driven
 /// 409 also exists as defense in depth for the multi-instance case, where two API processes each
 /// hold their own independent in-process lock.
+///
+/// <b>Known residual gap (accepted, not fixed by this feature).</b> The <see
+/// cref="ExpectedRevision"/> check only guarantees that a caller's *read* of the checkpoint was
+/// current at the moment it read it - within a single process, the in-process lock then serializes
+/// everything else, so no second caller can act on that same stale read. Across two separate API
+/// process instances, however, both can pass the staleness check and both can begin a step's
+/// external side effect (e.g. two overlapping calls to <c>IPrintDispatchGateway.SendToPrinterAsync</c>)
+/// before either one's write reaches the database and the loser's save fails with
+/// <see cref="Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException"/>. That failure still
+/// prevents the loser's outcome from being persisted, but it cannot un-send an HTTP call that
+/// already reached a printer. Closing this fully would mean holding a cross-process lock (e.g. a
+/// database-level row lock) for the whole step, including its side effect, not just the checkpoint
+/// read-then-write - a change to how every saga step executes, not specific to take-over, and out
+/// of scope for the take-over semantics this type documents. It is called out explicitly here
+/// rather than left implicit because it is the kind of gap that is easy to assume
+/// <see cref="ExpectedRevision"/> already closes.
 /// </remarks>
 public sealed class CalibrationOrchestrationAdvanceRequest
 {
@@ -100,11 +116,17 @@ public sealed record CalibrationDraftExistenceDto(
 /// started?" for a fresh device that has no attempt or orchestration id to query by.
 /// </summary>
 /// <remarks>
-/// <see cref="Orchestration"/> is the most recent non-terminal saga checkpoint for the project, if
-/// any. Its <see cref="CalibrationOrchestrationDto.Status"/> and
-/// <see cref="CalibrationOrchestrationDto.PrintJobId"/> distinguish a physical print already
-/// underway (<c>Running</c> with a non-null <c>PrintJobId</c> - starting another wastes filament)
-/// from a step merely in progress. <see cref="Drafts"/> lists every device with an uncommitted
+/// <see cref="Orchestration"/> is the highest-priority non-terminal saga checkpoint for the
+/// project, if any - see <c>CalibrationProjectService.InFlightPriority</c> for why "most recently
+/// touched" alone is not a safe pick. Its <see cref="CalibrationOrchestrationDto.Status"/> and
+/// <see cref="CalibrationOrchestrationDto.CurrentStep"/> distinguish a physical print already
+/// underway from a step merely in progress: <c>Running</c> at <c>awaiting-print</c> means gcode
+/// has actually been uploaded and a print started on a printer - starting another wastes filament
+/// - not merely that a step is mid-flight. <see cref="CalibrationOrchestrationDto.PrintJobId"/> is
+/// also checked when present, for forward compatibility, but the saga's ad-hoc print-dispatch path
+/// does not create a queued print job today, so it is normally null even while a print is
+/// genuinely running; <c>CurrentStep</c> is the signal that is actually populated. <see
+/// cref="Drafts"/> lists every device with an uncommitted
 /// step draft, by existence only: draft CONTENT never crosses devices, only the fact that one
 /// exists, which step it is for, and when it was last touched. A project can have both an
 /// in-flight orchestration and unrelated device drafts at once; a client should treat the

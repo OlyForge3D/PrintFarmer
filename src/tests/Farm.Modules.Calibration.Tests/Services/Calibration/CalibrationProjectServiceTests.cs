@@ -1316,6 +1316,69 @@ public sealed class CalibrationProjectServiceTests
     }
 
     [Fact]
+    public async Task GetInFlightAsync_AwaitingPrintWithoutPrintJobId_StillOutranksNewerPendingRetry()
+    {
+        // Reflects real production behavior: the saga's ad-hoc print-dispatch path
+        // (RunSendingToPrinterStepAsync -> IPrintDispatchGateway.SendToPrinterAsync) never creates
+        // a queued PrintJob, so CalibrationOrchestration.PrintJobId is always null even while a
+        // print is genuinely running - only CurrentStep == "awaiting-print" is a signal the saga
+        // actually populates. The priority ranking must treat that step alone as "a physical print
+        // is underway," not merely rely on PrintJobId, or this whole endpoint would never actually
+        // distinguish printing from drafting outside hand-seeded test data.
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "in-flight-no-printjobid"),
+            actor,
+            CancellationToken.None);
+
+        Guid olderAttemptId = await AddAttemptAsync(db, project.Value!.Id, "owner");
+        DateTime olderTouchedUtc = DateTime.UtcNow.AddMinutes(-10);
+        Guid runningOrchestrationId = Guid.NewGuid();
+        _ = db.CalibrationOrchestrations.Add(new CalibrationOrchestration
+        {
+            Id = runningOrchestrationId,
+            ProjectId = project.Value.Id,
+            AttemptId = olderAttemptId,
+            CurrentStep = CalibrationSagaSteps.AwaitingPrint,
+            Status = CalibrationOrchestrationStatus.Running,
+            PrintJobId = null,
+            OperationId = $"operation-{olderAttemptId:N}",
+            CreatedAtUtc = olderTouchedUtc,
+            UpdatedAtUtc = olderTouchedUtc,
+        });
+
+        Guid newerAttemptId = await AddAttemptAsync(db, project.Value.Id, "owner");
+        DateTime newerTouchedUtc = DateTime.UtcNow;
+        _ = db.CalibrationOrchestrations.Add(new CalibrationOrchestration
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = project.Value.Id,
+            AttemptId = newerAttemptId,
+            CurrentStep = CalibrationSagaSteps.Created,
+            Status = CalibrationOrchestrationStatus.Pending,
+            OperationId = $"operation-{newerAttemptId:N}",
+            CreatedAtUtc = newerTouchedUtc,
+            UpdatedAtUtc = newerTouchedUtc,
+        });
+        _ = await db.SaveChangesAsync();
+
+        CalibrationApiResult<CalibrationInFlightStateDto> result = await service.GetInFlightAsync(
+            project.Value.Id,
+            actor,
+            CancellationToken.None);
+
+        _ = result.Value!.Orchestration.Should().NotBeNull();
+        _ = result.Value.Orchestration!.Id.Should().Be(runningOrchestrationId,
+            "awaiting-print alone means a physical print is dispatched, even without a PrintJobId, " +
+            "and must never be masked by a more-recently-touched but less-advanced orchestration");
+        _ = result.Value.Orchestration.PrintJobId.Should().BeNull();
+        _ = result.Value.Orchestration.CurrentStep.Should().Be(CalibrationSagaSteps.AwaitingPrint);
+    }
+
+    [Fact]
     public async Task GetInFlightAsync_DraftContent_NeverAppearsInResponse()
     {
         // Highest-risk invariant for #2181: draft CONTENT is device-scoped and must never cross

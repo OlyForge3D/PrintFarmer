@@ -332,7 +332,7 @@ public sealed class CalibrationProjectService(
     /// already underway must never be masked by a newer but less-advanced orchestration.
     /// </summary>
     private static int InFlightPriority(CalibrationOrchestration orchestration) =>
-        (orchestration.PrintJobId.HasValue ? 100 : 0) +
+        (IsPhysicalPrintUnderway(orchestration) ? 100 : 0) +
         orchestration.Status switch
         {
             CalibrationOrchestrationStatus.Running => 3,
@@ -340,6 +340,29 @@ public sealed class CalibrationProjectService(
             CalibrationOrchestrationStatus.Pending => 1,
             _ => 0,
         };
+
+    /// <summary>
+    /// Whether an orchestration has an actual physical print dispatched to a printer right now -
+    /// the case where starting a second print on another device wastes filament.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="CalibrationOrchestration.PrintJobId"/> is checked first for forward
+    /// compatibility, but the saga's ad-hoc dispatch path
+    /// (<c>CalibrationOrchestrationSagaService.RunSendingToPrinterStepAsync</c> calling
+    /// <c>IPrintDispatchGateway.SendToPrinterAsync</c>) never creates a queued
+    /// <c>PrintJob</c> and so never populates <see cref="CalibrationOrchestration.PrintJobId"/>
+    /// today - wiring that up would mean teaching the ad-hoc dispatch bridge
+    /// (<c>SlicePrintBridgeController</c>/<c>DispatchClaimService</c>, a different module) to mint
+    /// and return an identifier, which is out of this endpoint's scope. The signal that IS real
+    /// today is <see cref="CalibrationOrchestration.CurrentStep"/> reaching
+    /// <c>CalibrationSagaSteps.AwaitingPrint</c>: <c>RunSendingToPrinterStepAsync</c> only advances
+    /// to that step after <c>SendToPrinterAsync</c> reports success, so a <c>Running</c>
+    /// orchestration sitting at <c>awaiting-print</c> means gcode has actually been uploaded and a
+    /// print started on a physical printer, not merely that a step is in progress.
+    /// </remarks>
+    private static bool IsPhysicalPrintUnderway(CalibrationOrchestration orchestration) =>
+        orchestration.PrintJobId.HasValue ||
+        string.Equals(orchestration.CurrentStep, CalibrationSagaSteps.AwaitingPrint, StringComparison.Ordinal);
 
     /// <summary>
     /// Defensive cap on drafts returned by <see cref="GetInFlightAsync"/>: existence metadata is
