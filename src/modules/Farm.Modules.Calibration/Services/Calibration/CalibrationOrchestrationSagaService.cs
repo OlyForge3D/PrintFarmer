@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Data.Common;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -780,15 +781,22 @@ public sealed class CalibrationOrchestrationSagaService(
     /// </para>
     /// <para>
     /// <b>Duplicate-dispatch-on-reclaim risk (accepted for v1, AC #4):</b>
-    /// <c>SliceJobController</c>'s <c>POST /api/slice</c> does accept and persist caller-supplied
-    /// <c>SubmitSliceJobRequest.OperationId</c>/<c>CorrelationId</c>/<c>Checksum</c> onto the
-    /// resulting <c>SliceJob</c> (there is even a unique index over
-    /// <c>(UserId, IdempotencyScopeId, CorrelationId)</c>) - but
-    /// <c>SliceJobController.SubmitAsync</c> never reads them back to detect or coalesce a
-    /// resubmission into an already-existing job; every call creates a brand-new <c>SliceJob</c>
-    /// row regardless of the correlation id supplied (that dedup-by-correlation-id behavior exists
-    /// only on a separate code path this endpoint never calls -
-    /// <c>SlicerOrchestrator.SubmitJobAsync</c>/<c>EfSliceJobRepository.FindExistingJobAsync</c>).
+    /// <c>SliceJobController</c>'s <c>POST /api/slice</c> does enforce a real, DB-level
+    /// idempotency guard for project-scoped submissions - a unique index over
+    /// <c>(UserId, IdempotencyScopeId, CorrelationId)</c> (and one over
+    /// <c>(UserId, IdempotencyScopeId, Checksum)</c>) rejects a genuine duplicate with
+    /// <c>409 slice_job_duplicate</c> - but that guard is filtered to exclude rows whose
+    /// <c>IdempotencyScopeId</c> is <see cref="Guid.Empty"/> (see
+    /// <c>SlicerDbContext.ApplyProviderSpecificIdempotencyFilters</c>: "standard jobs use
+    /// <see cref="Guid.Empty"/> and must remain repeatable"), and <see cref="BuildSliceSubmissionBody"/>
+    /// deliberately strips <c>calibrationProjectId</c> from this saga's own request body, so every
+    /// submission this gateway makes resolves <c>IdempotencyScopeId</c> to <see cref="Guid.Empty"/>
+    /// regardless of what <c>OperationId</c>/<c>CorrelationId</c>/<c>Checksum</c> it carries. The
+    /// unique-index guard therefore never applies to this saga's own calls: every call creates a
+    /// brand-new <c>SliceJob</c> row regardless of the correlation id supplied. (A separate,
+    /// unrelated code path this endpoint never calls -
+    /// <c>SlicerOrchestrator.SubmitJobAsync</c>/<c>EfSliceJobRepository.FindExistingJobAsync</c> -
+    /// does look up an existing job by correlation id, but only for its own callers.)
     /// <c>SlicePrintBridgeController</c>'s send-to-printer endpoint (<c>SendToPrinterRequest</c>)
     /// has no idempotency/correlation field at all. So, unlike
     /// <c>QueueDispatchAttempt.BackendCommandId</c>/<c>BackendCorrelationId</c> for print-queue
@@ -878,7 +886,11 @@ public sealed class CalibrationOrchestrationSagaService(
     /// own reason (the event-append failure), and if another process concurrently reclaimed this
     /// same lease (because it had already outlived <see cref="StepClaimLeaseDuration"/>) that
     /// process's own claim/outcome now owns the row - this best-effort release must never fight
-    /// that write or mask the original failure this method was called to report.
+    /// that write or mask the original failure this method was called to report. Also swallows any
+    /// other <see cref="DbUpdateException"/>/<see cref="DbException"/> (e.g. a transient
+    /// connection failure on this best-effort save) for the same reason: this method's entire
+    /// purpose is to never let its own cleanup attempt replace the original failure's status code
+    /// with an unrelated 500 (review follow-up, issue #2188).
     /// </remarks>
     private async Task TryReleaseLeaseBestEffortAsync(
         CalibrationOrchestration orchestration,
@@ -898,10 +910,13 @@ public sealed class CalibrationOrchestrationSagaService(
         {
             _ = await _dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateConcurrencyException)
+        catch (Exception exception) when (exception is DbUpdateException or DbException)
         {
-            // Another process already changed this row (most likely: reclaimed the same lease
-            // after it expired) - that write wins, and this best-effort release is simply dropped.
+            // Covers both a losing DbUpdateConcurrencyException (another process already changed
+            // this row, most likely by reclaiming the same lease after it expired - that write
+            // wins) and any other transient save failure - either way this best-effort release is
+            // simply dropped rather than masking the original failure this method was called to
+            // report.
         }
     }
 

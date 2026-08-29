@@ -79,9 +79,12 @@ public sealed record CalibrationOrchestrationDto(
 /// unaffected.
 ///
 /// <b>Residual risk accepted for v1 (documented, not closed).</b> <c>SliceJobController</c>'s
-/// <c>POST /api/slice</c> accepts and persists caller-supplied correlation fields but never uses
-/// them to deduplicate a resubmission, and <c>SlicePrintBridgeController</c>'s send-to-printer
-/// endpoint has no idempotency field at all (unlike
+/// <c>POST /api/slice</c> does enforce a real unique-index dedup guard on caller-supplied
+/// correlation/checksum fields, but only for project-scoped (non-empty <c>IdempotencyScopeId</c>)
+/// submissions - this saga's own gateway deliberately strips <c>calibrationProjectId</c> from its
+/// request body, so every submission it makes falls outside that guard regardless of correlation
+/// id, and <c>SlicePrintBridgeController</c>'s send-to-printer endpoint has no idempotency field at
+/// all (unlike
 /// <c>QueueDispatchAttempt.BackendCommandId</c>/<c>BackendCorrelationId</c> for print-queue
 /// dispatch), so a *reclaim* of a lease that has genuinely expired - but whose original holder is
 /// merely slow, not crashed - can still result in two real external dispatches for the same step;
