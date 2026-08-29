@@ -62,7 +62,7 @@
     "gcode-preview": "^2.18.0",
     "html5-qrcode": "^2.3.8",
     "jspdf": "^4.2.0",
-    "jspdf-autotable": "^5.0.7",
+    "jspdf-autotable": "^5.0.8",
     "jszip": "^3.10.1",
     "lucide-react": "1.34.0",
     "postcss": "^8.5.23",
