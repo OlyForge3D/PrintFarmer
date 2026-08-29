@@ -397,11 +397,11 @@ prepare_orcaslicer_worker_temp_directories() {
             print_info "Creating directory: [$desc] $path"
             if ! mkdir -p "$path" 2>/dev/null; then
                 print_error "Failed to create directory: $path"
-                ((paths_failed++))
+                paths_failed=$((paths_failed + 1))
                 continue
             fi
             print_success "Created: $path"
-            ((paths_created++))
+            paths_created=$((paths_created + 1))
         else
             print_info "Directory already exists: [$desc] $path"
         fi
@@ -431,7 +431,7 @@ prepare_orcaslicer_worker_temp_directories() {
             print_warning "Could not set permissions on $path (likely owned by another user from a prior broken deploy) - recreating it"
             if ! rm -rf "$path" 2>/dev/null || ! mkdir -p "$path" 2>/dev/null || ! chmod 777 "$path" 2>/dev/null; then
                 print_warning "Could not recreate $path with correct permissions - may have restricted access"
-                ((paths_failed++))
+                paths_failed=$((paths_failed + 1))
                 continue
             fi
             chown 1001:1001 "$path" 2>/dev/null || true

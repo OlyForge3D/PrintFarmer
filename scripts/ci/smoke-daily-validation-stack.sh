@@ -161,7 +161,10 @@ cp -R "$REPO_ROOT/deploy/nginx" "$STACK_DIR/deploy/nginx"
 # Without this, Docker auto-creates the host directory as root:root on first use, and
 # the immutable, non-root worker container fails every slice job with
 # UnauthorizedAccessException creating its per-job temp directory (issue #2174).
-prepare_orcaslicer_worker_temp_directories
+if ! prepare_orcaslicer_worker_temp_directories; then
+  log "FAIL: could not prepare OrcaSlicer worker temp directories (see output above)"
+  exit 1
+fi
 
 if [[ "$USE_REGISTRY" == "true" ]]; then
   log "Pulling the exact digest-pinned daily image set"
