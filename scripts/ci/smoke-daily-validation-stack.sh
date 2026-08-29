@@ -23,7 +23,12 @@
 #     this script);
 #   - exactly one OrcaSlicer worker container is running (the emulator
 #     instances are intentional replicas of one image and are not subject to
-#     this "exactly one" rule).
+#     this "exactly one" rule);
+#   - the OrcaSlicer worker can create and write to a per-job temp directory
+#     under its /app/temp bind mount as its own non-root user (issue #2174:
+#     Docker auto-creates a missing bind-mount host directory as root:root,
+#     which the immutable worker image cannot self-heal, so every slice job
+#     used to fail at 0% with UnauthorizedAccessException).
 #
 # Docker availability:
 #   This script requires a reachable Docker daemon. If `docker` is not
@@ -67,6 +72,11 @@ if ! docker info >/dev/null 2>&1; then
   log "SKIP: docker daemon is not reachable in this environment; smoke validation cannot run."
   exit 0
 fi
+
+# Shared with deploy-docker.sh: pre-creates the OrcaSlicer worker's /app/temp bind mount
+# with permissions the immutable, non-root worker container can write to (issue #2174).
+# shellcheck source=../docker-utils.sh
+source "$REPO_ROOT/scripts/docker-utils.sh"
 
 STACK_DIR="$(mktemp -d)"
 PROJECT_NAME="printfarmer-smoke-$$"
@@ -128,6 +138,9 @@ export ENABLE_DISTRIBUTED_SLICING=true
 export ENABLE_ORCA_WORKER=yes
 export ENABLE_ORCA_WORKER_PREVIOUS=no
 export ORCA_WORKER_COUNT=1
+# Absolute path so it resolves the same way whether Compose treats the project directory
+# as $STACK_DIR (the directory of the first -f file) or the script's own CWD.
+export EXTERNAL_ORCA_WORKER_TEMP="$STACK_DIR/.volumes/printfarmer-orcaslicer-temp"
 
 log "Generating microservices stack (registry=$USE_REGISTRY, project=$PROJECT_NAME) in $STACK_DIR"
 "$REPO_ROOT/scripts/docker/compose-generator.sh" \
@@ -143,6 +156,15 @@ log "Generating microservices stack (registry=$USE_REGISTRY, project=$PROJECT_NA
 mkdir -p "$STACK_DIR/deploy"
 cp -R "$REPO_ROOT/deploy/nginx" "$STACK_DIR/deploy/nginx"
 "$REPO_ROOT/scripts/generate-certs.sh" "$STACK_DIR/deploy/nginx/certs"
+
+# Pre-create the worker's /app/temp bind mount with appuser-writable permissions.
+# Without this, Docker auto-creates the host directory as root:root on first use, and
+# the immutable, non-root worker container fails every slice job with
+# UnauthorizedAccessException creating its per-job temp directory (issue #2174).
+if ! prepare_orcaslicer_worker_temp_directories; then
+  log "FAIL: could not prepare OrcaSlicer worker temp directories (see output above)"
+  exit 1
+fi
 
 if [[ "$USE_REGISTRY" == "true" ]]; then
   log "Pulling the exact digest-pinned daily image set"
@@ -305,5 +327,24 @@ if [[ "$worker_count" -ne 1 || "$worker_services" != "orcaslicer-worker" ]]; the
   exit 1
 fi
 log "OK: exactly one OrcaSlicer worker is running"
+
+# Regression test for #2174: the worker runs as non-root "appuser" against a bind-mounted
+# /app/temp (see docker-compose.orcaslicer-worker.yml's x-worker-volumes anchor). Docker
+# auto-creates a missing bind-mount host directory as root:root, which the immutable
+# worker image cannot self-heal (no root entrypoint, unlike the API container), so every
+# OrcaSlicingPipelineService.PrepareJobWorkDirectory call failed with
+# UnauthorizedAccessException. Exercise the exact same operation (mkdir + write + remove
+# under /app/temp, as the container's own non-root user) that a real slice job performs,
+# so a regression here fails this smoke test instead of surfacing only during a real print.
+log "Verifying the OrcaSlicer worker can create and write to a per-job temp directory (issue #2174)"
+smoke_job_dir="/app/temp/smoke-regression-$$"
+if ! compose exec -T orcaslicer-worker sh -c \
+  "mkdir -p '$smoke_job_dir' && echo ok > '$smoke_job_dir/probe.txt' && rm -rf '$smoke_job_dir'"; then
+  log "FAIL: OrcaSlicer worker could not create/write its per-job temp directory under /app/temp"
+  compose exec -T orcaslicer-worker sh -c "ls -la /app/temp; id" || true
+  compose logs orcaslicer-worker --no-color
+  exit 1
+fi
+log "OK: OrcaSlicer worker can create and write to its per-job temp directory"
 
 log "SUCCESS: daily validation stack smoke checks passed"
