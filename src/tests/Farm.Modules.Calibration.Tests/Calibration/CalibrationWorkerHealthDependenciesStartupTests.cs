@@ -148,16 +148,15 @@ public sealed class CalibrationWorkerHealthDependenciesStartupTests
     }
 
     [Fact]
-    public async Task AddCalibrationWorkerHealthDependencies_SplitDeploymentWithDbContextAlreadyRegistered_IsNoOp()
+    public async Task AddCalibrationWorkerHealthDependencies_SplitDeploymentWithDbContextAndFactoryAlreadyRegistered_IsNoOp()
     {
         // Distinct from the idempotency test above: this is a split/microservices host where some
         // other caller (e.g. AddModelStorageResolution, or AddMoonrakerEmulatorSeederDependencies)
         // already registered SlicerDbContext AND its factory (the two are always added together
-        // by SlicerModuleExtensions.AddSlicerDatabase — no real caller registers one without the
-        // other, so this reproduces the only reachable "already registered" state).
-        // AddCalibrationWorkerHealthDependencies must defer to that existing registration via
-        // EnsureSlicerDatabaseRegistered's own guard, rather than adding a second, conflicting
-        // one, and IDbContextFactory<SlicerDbContext> must still be resolvable afterward.
+        // by SlicerModuleExtensions.AddSlicerDatabase, which is what every real caller goes
+        // through). AddCalibrationWorkerHealthDependencies must defer to that existing
+        // registration entirely, adding nothing further, and IDbContextFactory<SlicerDbContext>
+        // must still be resolvable afterward.
         IConfiguration configuration = BuildSplitDeploymentConfiguration(
             Path.Combine(Path.GetTempPath(), $"calibration-worker-health-{Guid.NewGuid():N}.db"));
 
@@ -175,8 +174,40 @@ public sealed class CalibrationWorkerHealthDependenciesStartupTests
         await using AsyncServiceScope scope = provider.CreateAsyncScope();
         _ = scope.ServiceProvider.GetService<IDbContextFactory<SlicerDbContext>>().Should().NotBeNull(
             "the pre-existing registration must still resolve IDbContextFactory<SlicerDbContext> " +
-            "after this no-op — this method must never leave a context registered without its " +
-            "factory, which is exactly the state CalibrationCapabilityService.GetWorkerHealthAsync " +
-            "cannot tolerate");
+            "after this no-op");
+    }
+
+    [Fact]
+    public async Task AddCalibrationWorkerHealthDependencies_SplitDeploymentWithDbContextRegisteredWithoutFactory_StillRegistersFactory()
+    {
+        // Stress test for the defect two independent reviewers flagged in an earlier round: a
+        // caller that registers SlicerDbContext WITHOUT its factory is unreachable through any
+        // real startup path today (AddSlicerDatabase always adds both together), but
+        // EnsureSlicerDatabaseRegistered's guard must not silently bless this state as "already
+        // handled" just because SlicerDbContext happens to be present — doing so would leave
+        // IDbContextFactory<SlicerDbContext> unregistered, and
+        // CalibrationCapabilityService.GetWorkerHealthAsync would silently report worker health as
+        // Unavailable forever. AddCalibrationWorkerHealthDependencies (via
+        // EnsureSlicerDatabaseRegistered) must add the missing factory even when SlicerDbContext
+        // alone is already present, without duplicating SlicerDbContext itself.
+        IConfiguration configuration = BuildSplitDeploymentConfiguration(
+            Path.Combine(Path.GetTempPath(), $"calibration-worker-health-{Guid.NewGuid():N}.db"));
+
+        ServiceCollection services = new();
+        _ = services.AddDbContext<SlicerDbContext>(options => options.UseInMemoryDatabase("stand-in"));
+        int dbContextRegistrationCountBefore =
+            services.Count(sd => sd.ServiceType == typeof(SlicerDbContext));
+
+        _ = services.AddCalibrationWorkerHealthDependencies(configuration);
+
+        _ = services.Count(sd => sd.ServiceType == typeof(SlicerDbContext))
+            .Should().Be(dbContextRegistrationCountBefore, "SlicerDbContext must not be registered a second time");
+
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        await using AsyncServiceScope scope = provider.CreateAsyncScope();
+        _ = scope.ServiceProvider.GetService<IDbContextFactory<SlicerDbContext>>().Should().NotBeNull(
+            "AddCalibrationWorkerHealthDependencies must guarantee IDbContextFactory<SlicerDbContext> " +
+            "is resolvable even when some other caller registered SlicerDbContext on its own, " +
+            "otherwise CalibrationCapabilityService.GetWorkerHealthAsync would silently break");
     }
 }

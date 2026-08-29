@@ -47,7 +47,10 @@ namespace Farm.Modules.Calibration.Startup;
 /// <see cref="Farm.Slicer.Module.Data.SlicerDbContext"/> connection" rather than each
 /// independently re-deriving it — see
 /// <see cref="SlicerModuleExtensions.EnsureSlicerDatabaseRegistered"/>'s own idempotency guard,
-/// which makes calling it from multiple entry points safe.
+/// which makes calling it from multiple entry points safe, and which checks
+/// <see cref="Farm.Slicer.Module.Data.SlicerDbContext"/> and
+/// <see cref="Microsoft.EntityFrameworkCore.IDbContextFactory{TContext}"/> independently, so even
+/// a hypothetical caller that registered only one of the two would not leave the factory missing.
 /// </para>
 /// </remarks>
 public static class CalibrationWorkerHealthDependenciesStartup

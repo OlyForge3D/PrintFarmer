@@ -196,6 +196,16 @@ public static class SlicerModuleExtensions
     /// own early-return guard (which, if it were ever to fire for a reason other than "the
     /// monolith already registered everything," would otherwise leave <see cref="SlicerDbContext"/>
     /// unregistered too).
+    /// <para>
+    /// Checks <see cref="SlicerDbContext"/> and <see cref="IDbContextFactory{TContext}"/>
+    /// independently and registers whichever is missing, rather than assuming "one implies the
+    /// other." Every caller that goes through <see cref="AddSlicerDatabase"/> always registers both
+    /// together, so in practice this only matters if some future caller (or test double) ever
+    /// registers <see cref="SlicerDbContext"/> on its own — this guarantees
+    /// <c>CalibrationCapabilityService.GetWorkerHealthAsync</c>'s factory resolution can never
+    /// silently break because some other registration happened to satisfy only half of this
+    /// method's contract first.
+    /// </para>
     /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">Application configuration (reads DB_PROVIDER, ConnectionStrings:Default, etc.).</param>
@@ -207,12 +217,29 @@ public static class SlicerModuleExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        if (services.Any(sd => sd.ServiceType == typeof(SlicerDbContext)))
+        bool hasContext = services.Any(sd => sd.ServiceType == typeof(SlicerDbContext));
+        bool hasFactory = services.Any(sd => sd.ServiceType == typeof(IDbContextFactory<SlicerDbContext>));
+
+        if (hasContext && hasFactory)
         {
             return services;
         }
 
-        AddSlicerDatabase(services, configuration);
+        DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.FromConfiguration(configuration);
+
+        if (!hasContext)
+        {
+            _ = services.AddDbContext<SlicerDbContext>(options => ConfigureProvider(options, dbConfig));
+        }
+
+        if (!hasFactory)
+        {
+            // Use Scoped lifetime to match the scoped DbContextOptions registered by AddDbContext.
+            _ = services.AddDbContextFactory<SlicerDbContext>(
+                options => ConfigureProvider(options, dbConfig),
+                ServiceLifetime.Scoped);
+        }
+
         return services;
     }
 
