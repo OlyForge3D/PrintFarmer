@@ -1472,12 +1472,12 @@ cleanup_redeploy_docker_artifacts() {
 
     local cleanup_failed=false
 
-    print_info "Pruning unused Docker images and build cache..."
-    if ! docker image prune --all --force; then
-        print_warning "Unable to prune unused Docker images"
+    print_info "Pruning dangling Docker images and unused build cache..."
+    if ! docker image prune --force; then
+        print_warning "Unable to prune dangling Docker images"
         cleanup_failed=true
     fi
-    if ! docker builder prune --all --force; then
+    if ! docker builder prune --force; then
         print_warning "Unable to prune unused Docker build cache"
         cleanup_failed=true
     fi
@@ -1486,7 +1486,7 @@ cleanup_redeploy_docker_artifacts() {
         return 1
     fi
 
-    print_success "Unused Docker images and build cache pruned"
+    print_success "Dangling Docker images and unused build cache pruned"
 }
 
 # Pull all base images from registry
@@ -3590,8 +3590,10 @@ go2rtc_prompt_default() {
         "DEPLOY_GO2RTC" \
         "${DEPLOY_GO2RTC:-no}" \
         "yes" \
-        "no"; then
-        return 1
+        "no" >&2; then
+        print_warning "Ignoring malformed persisted DEPLOY_GO2RTC value; defaulting to no" >&2
+        printf '%s' "no"
+        return 0
     fi
 
     printf '%s' "$NORMALIZED_BOOLEAN_VALUE"

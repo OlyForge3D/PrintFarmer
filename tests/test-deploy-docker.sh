@@ -153,8 +153,9 @@ docker() {
 
 DRY_RUN=false
 cleanup_redeploy_docker_artifacts
-grep -Fxq "image prune --all --force" "\$DOCKER_CALLS"
-grep -Fxq "builder prune --all --force" "\$DOCKER_CALLS"
+grep -Fxq "image prune --force" "\$DOCKER_CALLS"
+grep -Fxq "builder prune --force" "\$DOCKER_CALLS"
+! grep -q -- "--all" "\$DOCKER_CALLS"
 ! grep -q "volume" "\$DOCKER_CALLS"
 
 : > "\$DOCKER_CALLS"
@@ -166,9 +167,68 @@ EOF
 
     assert_exit_code 0 "$helper_script" \
         "Cleanup should prune unused images/cache, preserve volumes, and skip dry-runs"
-    assert_contains "$(cat "$DEPLOY_SCRIPT")" \
-        "cleanup_redeploy_docker_artifacts" \
-        "Redeploy flow should invoke Docker artifact cleanup"
+
+    local redeploy_helper="$TEST_TEMP_DIR/redeploy-cleanup-failure-helper.sh"
+    local redeploy_calls="$TEST_TEMP_DIR/redeploy-cleanup-failure-calls"
+    local redeploy_warnings="$TEST_TEMP_DIR/redeploy-cleanup-failure-warnings"
+    local redeploy_config="$TEST_TEMP_DIR/redeploy-cleanup-config"
+    cat > "$redeploy_config" << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+NETWORK_MODE=bridge
+COMPOSE_FILE=docker-compose.yml
+EOF
+    cat > "$redeploy_helper" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$DEPLOY_SCRIPT"
+CONFIG_FILE="$redeploy_config"
+DRY_RUN=false
+REDEPLOY_CALLS="$redeploy_calls"
+REDEPLOY_WARNINGS="$redeploy_warnings"
+
+print_header() { :; }
+print_info() { :; }
+print_success() { :; }
+print_warning() { printf '%s\n' "\$*" >> "\$REDEPLOY_WARNINGS"; }
+capture_config_overrides() { :; }
+enforce_supported_orcaslicer_release() { :; }
+restore_config_overrides() { :; }
+normalize_worker_configuration() { return 0; }
+migrate_legacy_db_credentials() { :; }
+validate_configuration() { :; }
+save_deployment_config() { :; }
+generate_env_file() { :; }
+generate_react_env_production() { :; }
+generate_deployment_config() { return 0; }
+prepare_external_storage_directories() { return 0; }
+prepare_orcaslicer_worker_temp_directories() { return 0; }
+prepare_pgadmin_setup() { return 0; }
+validate_external_storage_permissions() { return 0; }
+ensure_tls_certificates() { :; }
+deploy_containers() { printf '%s\n' deployed >> "\$REDEPLOY_CALLS"; }
+setup_initial_admin() { :; }
+print_calibration_status_line() { :; }
+docker() {
+    printf '%s\n' "\$*" >> "\$REDEPLOY_CALLS"
+    [[ "\$*" != "image prune --force" ]]
+}
+
+redeploy_existing
+EOF
+    chmod +x "$redeploy_helper"
+
+    assert_exit_code 0 "$redeploy_helper" \
+        "A cleanup failure should not fail an otherwise successful redeploy"
+    assert_file_has_exact_line "$redeploy_calls" "deployed" \
+        "Redeploy should deploy containers before cleanup"
+    assert_file_has_exact_line "$redeploy_calls" "image prune --force" \
+        "Redeploy call site should invoke image cleanup"
+    assert_file_has_exact_line "$redeploy_calls" "builder prune --force" \
+        "Cleanup should continue to builder pruning after an image prune failure"
+    assert_contains "$(cat "$redeploy_warnings")" \
+        "Redeployment completed, but some unused Docker artifacts could not be pruned" \
+        "Redeploy call site should surface cleanup failure as a warning"
 
     pass_test
 }
