@@ -30,6 +30,12 @@ public sealed class CalibrationApiModule : IApiModule
         // exists and calibration discovery returns profile_service_unavailable).
         _ = services.AddCalibrationProfileResolution(configuration);
 
+        // Model storage resolution. Monolith hosts keep the local filesystem-backed resolver
+        // registered by AddSlicerModule; split/microservices hosts get it registered here too,
+        // sharing the same physical database and model-storage volume the API host already has
+        // (no HTTP hop needed) — see ModelStorageResolutionStartup and issue #2179.
+        _ = services.AddModelStorageResolution(configuration);
+
         _ = services.AddSingleton(
             new Farm.Infrastructure.PrinterCalibration.CalibrationSlicerCompatibilityPolicy(
                 configuration
