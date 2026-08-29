@@ -212,6 +212,34 @@ public class DesktopScopePermissionMapTests
         DesktopScopePermissionMap.GetUnsatisfiedDependencies(scopes).Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Round-3 review fix (Bishop B8, issue #2180): completing a calibration project promotes its
+    /// draft profile via a slicer-module endpoint class-gated by slicing:submit in addition to its
+    /// own method-level calibration:update requirement. Before this fix, calibration:read +
+    /// calibration:update was a validly-issuable combination that would nonetheless dead-end at
+    /// project completion.
+    /// </summary>
+    [Fact]
+    public void GetUnsatisfiedDependencies_FlagsCalibrationUpdateWithoutSlicing()
+    {
+        IReadOnlyList<(string Scope, string MissingPrerequisite)> unsatisfied =
+            DesktopScopePermissionMap.GetUnsatisfiedDependencies(
+                ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationUpdate);
+
+        unsatisfied.Select(u => u.MissingPrerequisite)
+            .Should().BeEquivalentTo(new[] { "SlicingSubmit" });
+    }
+
+    [Fact]
+    public void GetUnsatisfiedDependencies_AcceptsCompleteCalibrationUpdateSelection()
+    {
+        ApiKeyScope scopes = ApiKeyScope.CalibrationRead |
+            ApiKeyScope.CalibrationUpdate |
+            ApiKeyScope.SlicingSubmit;
+
+        DesktopScopePermissionMap.GetUnsatisfiedDependencies(scopes).Should().BeEmpty();
+    }
+
     #region ResolveEffectiveScopes (stored ∩ live)
 
     [Fact]

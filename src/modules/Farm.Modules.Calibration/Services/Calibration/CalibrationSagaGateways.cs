@@ -291,9 +291,13 @@ public sealed class InternalApiFilamentProfilePromotionGateway(
             var payload = new JsonObject
             {
                 ["rawJson"] = request.RawJson,
-                ["profileType"] = "filament",
                 ["name"] = request.Name,
             };
+
+            // Note: profileType is intentionally NOT sent here. The endpoint's request DTO
+            // (PromoteCalibrationDraftProfileRequestDto) only accepts rawJson/name and hardcodes
+            // filament server-side (round-2 review fix, Bishop B6/Vasquez Task 5) - sending it
+            // would be silently ignored, so omitting it avoids implying it still has any effect.
 
             // The client's BaseAddress is pinned via Program.cs's AddHttpClient registration from
             // trusted configuration - reusing the same named client as the slice-submission

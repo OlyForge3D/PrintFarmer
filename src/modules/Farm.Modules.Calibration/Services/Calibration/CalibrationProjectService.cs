@@ -496,13 +496,29 @@ public sealed class CalibrationProjectService(
                 .FirstOrDefaultAsync(profile => profile.ProjectId == project.Id, cancellationToken);
             if (draftProfile is not null && draftProfile.PromotedProfileId is null)
             {
-                if (draftProfile.PromotionClaimedAtUtc is not null)
+                // Round-3 review fix (Hicks Blocking #2, issue #2180): a claim is only a genuine,
+                // still-in-flight block while it is fresh. A claim left behind by a process crash
+                // between claiming the slot and either releasing or committing an outcome would
+                // otherwise strand the project's completion forever, with no operator remediation
+                // short of manual SQL. Once a claim is older than PromotionClaimStaleAfter, treat
+                // it as abandoned and allow reclaiming it - the Revision concurrency token still
+                // protects against two callers reclaiming the same stale row simultaneously.
+                //
+                // Residual, documented risk: if the ORIGINAL claimant crashed AFTER the external
+                // gateway call already created the real filament profile but BEFORE recording
+                // PromotedProfileId locally, a reclaim after the TTL calls the gateway again and
+                // creates a second, harmless orphaned external profile (never referenced by any
+                // project) rather than losing the first one. Fully preventing that duplicate would
+                // require an idempotency key threaded through the external profile-creation
+                // contract, which is out of scope for this PR; tracked as a follow-up.
+                if (draftProfile.PromotionClaimedAtUtc is not null &&
+                    !IsPromotionClaimStale(draftProfile.PromotionClaimedAtUtc.Value))
                 {
-                    // A prior request already holds an unresolved claim on this row (still
-                    // in-flight, or left behind by a crash before it could release/resolve). Fail
-                    // fast rather than stealing the claim and calling the gateway a second time
-                    // while the original claimant may still be mid-flight - the Revision check
-                    // below only catches *simultaneous* saves, not this sequential re-entry case.
+                    // A prior request already holds an unresolved, still-fresh claim on this row
+                    // (still in-flight). Fail fast rather than stealing the claim and calling the
+                    // gateway a second time while the original claimant may still be mid-flight -
+                    // the Revision check below only catches *simultaneous* saves, not this
+                    // sequential re-entry case.
                     return Validation<CalibrationProjectDto>("project_completion_promotion_conflict");
                 }
 
@@ -3439,12 +3455,25 @@ public sealed class CalibrationProjectService(
     }
 
     /// <summary>
+    /// Round-3 review fix (Hicks Blocking #2, issue #2180): how long a promotion claim may remain
+    /// unresolved before it is treated as abandoned (e.g. by a process crash) and reclaimable by a
+    /// later completion attempt, rather than permanently blocking the project. Generous relative to
+    /// the external gateway call this guards, which should normally complete in well under a
+    /// minute.
+    /// </summary>
+    private static readonly TimeSpan PromotionClaimStaleAfter = TimeSpan.FromMinutes(15);
+
+    private bool IsPromotionClaimStale(DateTime claimedAtUtc) =>
+        UtcNow() - claimedAtUtc >= PromotionClaimStaleAfter;
+
+    /// <summary>
     /// Round-2 review fix (Vasquez): claims the promotion slot on <paramref name="draftProfile"/>
     /// via its own dedicated save, distinguishing a genuine competing claim (fail fast, no retry)
     /// from an incidental concurrency conflict caused by an unrelated concurrent write to the same
     /// row (e.g. <c>AppendObservationAsync</c> updating <c>ValuesJson</c>) - which is safe to retry
     /// against a freshly reloaded row. Returns the (possibly reloaded) tracked entity with the
-    /// claim durably committed, or <c>null</c> if the slot is already claimed by someone else.
+    /// claim durably committed, or <c>null</c> if the slot is already claimed by someone else with
+    /// a still-fresh claim (see <see cref="IsPromotionClaimStale"/> for the abandoned-claim case).
     /// </summary>
     private async Task<CalibrationDraftProfile?> TryClaimPromotionSlotAsync(
         CalibrationDraftProfile draftProfile,
@@ -3463,20 +3492,23 @@ public sealed class CalibrationProjectService(
                 _ = await _dbContext.SaveChangesAsync(cancellationToken);
                 return draftProfile;
             }
-            catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
+            catch (DbUpdateConcurrencyException)
             {
                 Guid draftProfileId = draftProfile.Id;
                 _dbContext.Entry(draftProfile).State = EntityState.Detached;
                 draftProfile = await _dbContext.CalibrationDraftProfiles.SingleAsync(
                     profile => profile.Id == draftProfileId, cancellationToken);
-                if (draftProfile.PromotionClaimedAtUtc is not null)
+                if (draftProfile.PromotionClaimedAtUtc is not null &&
+                    !IsPromotionClaimStale(draftProfile.PromotionClaimedAtUtc.Value))
                 {
-                    // A genuine competing completion already holds the claim - do not steal it.
+                    // A genuine competing completion already holds a still-fresh claim - do not
+                    // steal it.
                     return null;
                 }
 
-                // The conflict was incidental (some other, unrelated field changed on this row);
-                // loop and retry the claim itself against the fresh row.
+                // The conflict was either incidental (some other, unrelated field changed on this
+                // row) or the claim it saw was abandoned/stale; loop and retry the claim itself
+                // against the fresh row.
             }
         }
 
@@ -3505,7 +3537,7 @@ public sealed class CalibrationProjectService(
                 _ = await _dbContext.SaveChangesAsync(CancellationToken.None);
                 return draftProfile;
             }
-            catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
+            catch (DbUpdateConcurrencyException)
             {
                 Guid draftProfileId = draftProfile.Id;
                 _dbContext.Entry(draftProfile).State = EntityState.Detached;
