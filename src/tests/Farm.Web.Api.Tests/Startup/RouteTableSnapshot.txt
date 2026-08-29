@@ -138,6 +138,7 @@ GET /api/calibration-photos/{photoId:guid}/content -> Farm.Modules.Calibration::
 GET /api/calibration-projects -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetProjectsAsync
 GET /api/calibration-projects/{projectId:guid} -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetProjectAsync
 GET /api/calibration-projects/{projectId:guid}/attempts -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetAttemptsAsync
+GET /api/calibration-projects/{projectId:guid}/in-flight -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetInFlightAsync
 GET /api/calibration-sync/changes -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationSyncController.GetChangesAsync
 GET /api/calibration/capabilities -> Farm.Web.Api::Farm.Web.Api.Controllers.CalibrationCapabilitiesController.GetCapabilitiesAsync
 GET /api/cameras -> Farm.Modules.Devices::Farm.Modules.Devices.Controllers.CamerasController.GetCamerasAsync

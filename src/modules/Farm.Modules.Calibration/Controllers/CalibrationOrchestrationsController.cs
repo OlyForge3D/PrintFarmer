@@ -63,6 +63,12 @@ public sealed class CalibrationOrchestrationsController(ICalibrationOrchestratio
     /// step already <c>completed</c> or terminally <c>failed</c> is answered from the current
     /// checkpoint without re-running anything.
     /// </summary>
+    /// <remarks>
+    /// Take-over semantics: any device with visibility into the orchestration's project may call
+    /// this endpoint, including a device that did not start the attempt. See the remarks on
+    /// <see cref="CalibrationOrchestrationAdvanceRequest"/> for the full adoption and
+    /// <c>Revision</c>-based concurrency contract this implies.
+    /// </remarks>
     [HttpPost("{orchestrationId:guid}/advance")]
     [RequirePermission(PrintFarmerPermissions.Calibration.Update)]
     public async Task<IActionResult> AdvanceAsync(
