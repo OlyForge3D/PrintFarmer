@@ -59,17 +59,11 @@ async function loadSquadStateServer() {
   const server = config.mcpServers?.squad_state;
 
   assert.ok(server, '.mcp.json must define mcpServers.squad_state');
-  assert.equal(server.command, 'npx');
+  assert.equal(server.command, 'squad');
   assert.deepEqual(
     server.args,
-    [
-      '-y',
-      '--package=@bradygaster/squad-cli@0.11.0',
-      '--package=@bradygaster/squad-sdk@0.11.0',
-      'squad',
-      'state-mcp',
-    ],
-    'the regression must exercise the repository-pinned Squad CLI and SDK integration',
+    ['state-mcp'],
+    'the regression must exercise the portable Squad state MCP integration',
   );
   assert.deepEqual(
     server.env,
