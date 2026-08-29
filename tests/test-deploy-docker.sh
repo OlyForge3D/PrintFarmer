@@ -1896,6 +1896,7 @@ run_all_tests() {
     test_pgadmin_postgres_only
     test_orcaslicer_container_digest_resolved_from_registry_image
     test_orcaslicer_container_digest_empty_for_local_build_control
+    test_orcaslicer_container_digest_rejects_malformed_operator_override
     
     teardown
 }
@@ -1946,12 +1947,19 @@ test_pgadmin_postgres_only() {
 # Test: resolve_orcaslicer_container_digest resolves ORCASLICER_CONTAINER_DIGEST
 # from the local worker image's repository digest when one is available (e.g.
 # after pull-from-registry.sh / build-and-push-registry.sh) -- issue #2164.
+# The mocked `docker image inspect` returns the full "repo@sha256:<hex>"
+# reference (what Docker actually returns), but the assertion checks for the
+# bare "sha256:<hex>" form, because that is the exact shape the API's
+# WorkerClaimIdentity.IsContainerDigest() (src/slicer/Farm.Slicer.Module/Domain/
+# WorkerClaimIdentity.cs) requires -- a repo-qualified reference would
+# silently fail attestation even though this script reported it as resolved.
 test_orcaslicer_container_digest_resolved_from_registry_image() {
     start_test "resolve_orcaslicer_container_digest resolves digest for registry-sourced image"
 
     cd "$TEST_TEMP_DIR"
 
-    local expected_digest="ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
+    local repo_digest_reference="ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
+    local expected_bare_digest="sha256:d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
     local helper_script="$TEST_TEMP_DIR/digest-resolved-helper.sh"
     cat > "$helper_script" << EOF
 #!/bin/bash
@@ -1961,7 +1969,7 @@ set -uo pipefail
 # leave a resolvable RepoDigests entry on the local tag after tagging/pushing.
 docker() {
     if [ "\$1" = "image" ] && [ "\$2" = "inspect" ]; then
-        printf '%s\n' "$expected_digest"
+        printf '%s\n' "$repo_digest_reference"
         return 0
     fi
     return 0
@@ -1981,7 +1989,7 @@ EOF
     local output
     output=$(get_output)
 
-    assert_contains "$output" "DIGEST=[$expected_digest]" "Digest should be resolved from the mocked docker image inspect output"
+    assert_contains "$output" "DIGEST=[$expected_bare_digest]" "Digest should be the bare sha256:<hex> form the API's IsContainerDigest() requires, not the full repo@sha256:<hex> reference"
     assert_contains "$output" "CALIBRATION=yes" "Calibration should be marked available when the digest resolves"
     assert_contains "$output" "Resolved OrcaSlicer worker container digest" "Should print a success message naming the resolved digest"
 
@@ -2034,6 +2042,53 @@ EOF
     assert_contains "$output" "CALIBRATION=no" "Calibration must be marked unavailable for a pure local build"
     assert_contains "$output" "Calibration generation will be unavailable" "Should print the operator-facing warning naming the consequence"
     assert_contains "$output" "pull-from-registry.sh or build-and-push-registry.sh" "Warning should name the scripts that enable calibration"
+
+    rm -f "$helper_script" 2>/dev/null || true
+
+    pass_test
+}
+
+# Test: an operator-supplied ORCASLICER_CONTAINER_DIGEST override that does not
+# match the exact bare "sha256:<64 lowercase hex>" shape must be rejected, not
+# trusted verbatim. This value is written into the unquoted .env heredoc /
+# via update_kv_file, which load_env_file() later `source`s with `set -a` --
+# an unvalidated value (e.g. containing a newline) could inject arbitrary
+# additional configuration into that source (issue #2164 review finding).
+test_orcaslicer_container_digest_rejects_malformed_operator_override() {
+    start_test "resolve_orcaslicer_container_digest rejects a malformed operator-supplied override"
+
+    cd "$TEST_TEMP_DIR"
+
+    local malformed_override="ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
+    local helper_script="$TEST_TEMP_DIR/digest-malformed-override-helper.sh"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -uo pipefail
+
+docker() {
+    return 0
+}
+
+source "$DEPLOY_SCRIPT"
+
+# Malformed: a full repo@sha256:<hex> reference is not the bare form the API
+# requires, and also exercises the same shape-check used to defend against
+# injection via an operator-supplied value.
+ORCASLICER_CONTAINER_DIGEST="$malformed_override"
+ENABLE_ORCA_WORKER=yes
+resolve_orcaslicer_container_digest
+echo "DIGEST=[\$ORCASLICER_CONTAINER_DIGEST]"
+echo "CALIBRATION=\$ORCASLICER_CALIBRATION_AVAILABLE"
+EOF
+    chmod +x "$helper_script"
+
+    capture_output "$helper_script 2>&1 || true"
+    local output
+    output=$(get_output)
+
+    assert_contains "$output" "DIGEST=[]" "A malformed operator override must be rejected, not written into .env verbatim"
+    assert_contains "$output" "CALIBRATION=no" "Calibration must be marked unavailable when the override is rejected"
+    assert_contains "$output" "malformed" "Should print a diagnostic explaining the override was rejected"
 
     rm -f "$helper_script" 2>/dev/null || true
 
