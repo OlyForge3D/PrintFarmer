@@ -137,6 +137,42 @@ EOF
     pass_test
 }
 
+test_redeploy_cleanup_prunes_only_unused_images_and_build_cache() {
+    start_test "redeploy cleanup prunes unused images and build cache"
+
+    local helper_script="$TEST_TEMP_DIR/redeploy-cleanup-helper.sh"
+    local docker_calls="$TEST_TEMP_DIR/redeploy-cleanup-docker-calls"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$DEPLOY_SCRIPT"
+DOCKER_CALLS="$docker_calls"
+docker() {
+    printf '%s\n' "\$*" >> "\$DOCKER_CALLS"
+}
+
+DRY_RUN=false
+cleanup_redeploy_docker_artifacts
+grep -Fxq "image prune --all --force" "\$DOCKER_CALLS"
+grep -Fxq "builder prune --all --force" "\$DOCKER_CALLS"
+! grep -q "volume" "\$DOCKER_CALLS"
+
+: > "\$DOCKER_CALLS"
+DRY_RUN=true
+cleanup_redeploy_docker_artifacts
+[[ ! -s "\$DOCKER_CALLS" ]]
+EOF
+    chmod +x "$helper_script"
+
+    assert_exit_code 0 "$helper_script" \
+        "Cleanup should prune unused images/cache, preserve volumes, and skip dry-runs"
+    assert_contains "$(cat "$DEPLOY_SCRIPT")" \
+        "cleanup_redeploy_docker_artifacts" \
+        "Redeploy flow should invoke Docker artifact cleanup"
+
+    pass_test
+}
+
 test_verification_uses_anonymous_api_endpoint() {
     start_test "deployment verification uses anonymous API endpoint"
 
@@ -1847,6 +1883,7 @@ run_all_tests() {
     test_basic_execution
     test_dry_run_mode
     test_compose_helper_available_when_sourced
+    test_redeploy_cleanup_prunes_only_unused_images_and_build_cache
     test_verification_uses_anonymous_api_endpoint
     test_batch_mode
     test_config_file_generation

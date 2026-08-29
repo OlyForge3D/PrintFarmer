@@ -1463,6 +1463,32 @@ prompt_yes_no() {
 # IMAGE MANAGEMENT FUNCTIONS
 # ============================================================================
 
+# Remove Docker artifacts that are no longer referenced after a redeployment.
+# Volumes and active images are intentionally excluded.
+cleanup_redeploy_docker_artifacts() {
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+        return 0
+    fi
+
+    local cleanup_failed=false
+
+    print_info "Pruning unused Docker images and build cache..."
+    if ! docker image prune --all --force; then
+        print_warning "Unable to prune unused Docker images"
+        cleanup_failed=true
+    fi
+    if ! docker builder prune --all --force; then
+        print_warning "Unable to prune unused Docker build cache"
+        cleanup_failed=true
+    fi
+
+    if [ "$cleanup_failed" = "true" ]; then
+        return 1
+    fi
+
+    print_success "Unused Docker images and build cache pruned"
+}
+
 # Pull all base images from registry
 pull_base_images() {
     print_header "📥 Pulling Base Container Images"
@@ -3559,6 +3585,18 @@ normalize_boolean_value() {
     esac
 }
 
+go2rtc_prompt_default() {
+    if ! normalize_boolean_value \
+        "DEPLOY_GO2RTC" \
+        "${DEPLOY_GO2RTC:-no}" \
+        "yes" \
+        "no"; then
+        return 1
+    fi
+
+    printf '%s' "$NORMALIZED_BOOLEAN_VALUE"
+}
+
 # Normalize worker settings after loading config and before validation or output.
 normalize_worker_configuration() {
     local distributed_is_set=false
@@ -4601,7 +4639,9 @@ configure_additional() {
         print_info "go2rtc enabled via CLI flag"
         DEPLOY_GO2RTC=yes
     else
-        prompt_yes_no "Deploy go2rtc sidecar for camera streaming?" "no" "DEPLOY_GO2RTC_ANSWER"
+        local default_go2rtc
+        default_go2rtc=$(go2rtc_prompt_default) || return 1
+        prompt_yes_no "Deploy go2rtc sidecar for camera streaming?" "$default_go2rtc" "DEPLOY_GO2RTC_ANSWER"
         if [ "$DEPLOY_GO2RTC_ANSWER" = "yes" ]; then
             DEPLOY_GO2RTC=yes
         else
@@ -7461,6 +7501,9 @@ redeploy_existing() {
     
     # Deploy with rebuild
     deploy_containers
+
+    cleanup_redeploy_docker_artifacts \
+        || print_warning "Redeployment completed, but some unused Docker artifacts could not be pruned"
 
     # A redeploy may be recovering a first deployment that stopped before the
     # configured initial-admin step. The setup endpoint is idempotent once an

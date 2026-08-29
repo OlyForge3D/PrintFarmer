@@ -99,6 +99,30 @@ test_worker_normalization_is_bash_3_2_compatible() {
     fi
 }
 
+test_go2rtc_interactive_default_uses_persisted_value() {
+    start_test "go2rtc interactive default preserves persisted enablement"
+
+    local helper_script="$TEST_TEMP_DIR/go2rtc-default-helper.sh"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$DEPLOY_SCRIPT"
+DEPLOY_GO2RTC=yes
+NON_INTERACTIVE=false
+prompt_yes_no \
+    "Deploy go2rtc sidecar for camera streaming?" \
+    "\$(go2rtc_prompt_default)" \
+    "DEPLOY_GO2RTC_ANSWER" <<< ""
+[[ "\$DEPLOY_GO2RTC_ANSWER" == "yes" ]]
+EOF
+    chmod +x "$helper_script"
+
+    assert_exit_code 0 "$helper_script" \
+        "Pressing Enter should retain persisted DEPLOY_GO2RTC=yes"
+
+    pass_test
+}
+
 # Test that monitoring/telemetry/security settings are saved to config file
 test_monitoring_config_persistence() {
     start_test "monitoring/telemetry/security configuration persistence"
@@ -743,6 +767,7 @@ run_all_tests() {
     test_monitoring_config_persistence
     test_cli_flag_override
     test_config_loading_display
+    test_go2rtc_interactive_default_uses_persisted_value
     test_legacy_distributed_slicing_config_migrates_worker_defaults
     test_explicit_worker_disable_remains_disabled
     test_disabled_slicing_defaults_missing_worker_settings
