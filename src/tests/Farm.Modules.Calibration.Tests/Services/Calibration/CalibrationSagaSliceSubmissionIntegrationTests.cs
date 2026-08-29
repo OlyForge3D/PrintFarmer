@@ -98,19 +98,21 @@ public sealed class CalibrationSagaSliceSubmissionIntegrationTests
             // The only acceptable 400 for a catalogued-but-not-yet-implemented method is the
             // distinct "not yet slicer-supported" business rejection, never an unrecognized-name
             // rejection - and only for methods actually marked unsupported.
-            if (!CalibrationMethods.IsSlicerSupported(method))
-            {
-                code.Should().Be("calibration_method_not_yet_supported");
-                return;
-            }
+            code.Should().Be(
+                "calibration_method_not_yet_supported",
+                $"a 400 for {method} may only be the distinct not-yet-supported business rejection");
+            CalibrationMethods.IsSlicerSupported(method).Should().BeFalse(
+                $"{method} returned calibration_method_not_yet_supported but is marked slicer-supported");
+            return;
         }
 
-        // A method the slicer does support today must be accepted outright.
-        if (CalibrationMethods.IsSlicerSupported(method))
-        {
-            result.Should().BeOfType<CreatedResult>(
-                $"{method} is slicer-supported and its request body must produce an ordinary slice job");
-        }
+        // A method the slicer does support today must be accepted outright; any method marked
+        // unsupported must have taken the 400 branch above, never fall through to here.
+        CalibrationMethods.IsSlicerSupported(method).Should().BeTrue(
+            $"{method} is not slicer-supported and must have been rejected with calibration_method_not_yet_supported, " +
+            $"but the controller returned {result.GetType().Name} instead");
+        result.Should().BeOfType<CreatedResult>(
+            $"{method} is slicer-supported and its request body must produce an ordinary slice job");
     }
 
     private static SliceJobController CreateController(

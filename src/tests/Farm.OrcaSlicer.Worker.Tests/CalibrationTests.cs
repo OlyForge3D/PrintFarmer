@@ -120,8 +120,16 @@ public class CalibrationTests : IDisposable
             CalibrationMethods.IsSlicerSupported(method).Should().BeTrue();
         }
 
+        // Issue #2161: the canonical catalogue now also lists methods the saga knows about but
+        // that have no executable worker implementation yet (PressureAdvanceLine,
+        // PressureAdvancePattern, FlowVerification, Shrinkage, FinalVerification), each marked
+        // IsSlicerSupported = false via the opt-out switch. ClientAcceptedWireNames is therefore
+        // a strict subset of SupportedWireNames now, not equal to it - every wire name still
+        // parses, but only the ones with a real implementation are advertised to clients.
         CalibrationMethods.ClientAcceptedWireNames.Should()
-            .HaveCount(CalibrationMethods.SupportedWireNames.Count);
+            .HaveCountLessThan(CalibrationMethods.SupportedWireNames.Count)
+            .And.OnlyHaveUniqueItems()
+            .And.BeSubsetOf(CalibrationMethods.SupportedWireNames);
     }
 
     [Theory]

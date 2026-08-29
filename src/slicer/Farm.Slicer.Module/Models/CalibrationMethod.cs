@@ -47,8 +47,11 @@
 /// </list>
 /// </para>
 /// <para>
-/// PA Pattern (GPL-3.0 provenance concerns) and PA Line (Bambu-specific) are intentionally not
-/// supported yet; see the issue for the licensing decision they still need.
+/// The short abbreviations <c>"pa_pattern"</c> and <c>"pa_line"</c> are never catalogued and do
+/// not parse; that is distinct from <see cref="PressureAdvancePattern"/>/<see cref="PressureAdvanceLine"/>
+/// (wire names <c>pressure_advance_pattern</c>/<c>pressure_advance_line</c>), which are catalogued
+/// here but not yet slicer-supported (GPL-3.0 provenance concerns for PA Pattern; Bambu-specific
+/// tooling for PA Line) — see the issue for the licensing decision they still need.
 /// </para>
 /// <para>
 /// Investigated as part of issue #2051: "max volumetric speed" and "retraction" calibration are
@@ -425,12 +428,13 @@ public static class CalibrationMethods
 
     /// <summary>
     /// Attempts to parse a client-supplied calibration method name against the full calibration
-    /// catalogue. A name that isn't catalogued at all (for example <c>"pa_pattern"</c> or
-    /// <c>"pa_line"</c>, both intentionally excluded — see the licensing note on
-    /// <see cref="CalibrationMethod"/>) returns <see langword="false"/>. Note this does
-    /// <em>not</em> mean the parsed method is ready for the worker to slice today — see
-    /// <see cref="IsSlicerSupported"/> and <see cref="ClientAcceptedWireNames"/> for the check
-    /// that actually gates client submission.
+    /// catalogue. A name that isn't catalogued at all (for example the short, never-catalogued
+    /// abbreviations <c>"pa_pattern"</c> or <c>"pa_line"</c> — distinct from the catalogued-but-
+    /// unsupported <c>pressure_advance_pattern</c>/<c>pressure_advance_line</c>, see
+    /// <see cref="CalibrationMethod.PressureAdvancePattern"/>/<see cref="CalibrationMethod.PressureAdvanceLine"/>) returns
+    /// <see langword="false"/>. Note this does <em>not</em> mean the parsed method is ready for
+    /// the worker to slice today — see <see cref="IsSlicerSupported"/> and
+    /// <see cref="ClientAcceptedWireNames"/> for the check that actually gates client submission.
     /// </summary>
     /// <remarks>
     /// Also accepts the pre-unification calibration saga's legacy wire names (see
