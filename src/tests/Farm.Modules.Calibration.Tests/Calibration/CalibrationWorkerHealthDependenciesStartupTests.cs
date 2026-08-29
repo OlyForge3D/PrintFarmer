@@ -36,13 +36,16 @@ public sealed class CalibrationWorkerHealthDependenciesStartupTests
     /// Every configuration shape that
     /// <see cref="CalibrationProfileResolutionStartup.IsSplitDeployment"/> recognizes as a
     /// split/microservices host: <c>DEPLOYMENT_MODE=split</c>, <c>DEPLOYMENT_MODE=microservices</c>,
-    /// and <c>DEPLOYMENT_TYPE=microservices</c>.
+    /// <c>DEPLOYMENT_TYPE=microservices</c>, <c>Deployment:Mode=split</c>, and
+    /// <c>Deployment:Mode=microservices</c>.
     /// </summary>
     public static IEnumerable<object[]> SplitAndMicroservicesDeploymentConfigurations()
     {
         yield return ["DEPLOYMENT_MODE", "split"];
         yield return ["DEPLOYMENT_MODE", "microservices"];
         yield return ["DEPLOYMENT_TYPE", "microservices"];
+        yield return ["Deployment:Mode", "split"];
+        yield return ["Deployment:Mode", "microservices"];
     }
 
     [Theory]
@@ -145,22 +148,35 @@ public sealed class CalibrationWorkerHealthDependenciesStartupTests
     }
 
     [Fact]
-    public void AddCalibrationWorkerHealthDependencies_SplitDeploymentWithDbContextAlreadyRegistered_IsNoOp()
+    public async Task AddCalibrationWorkerHealthDependencies_SplitDeploymentWithDbContextAlreadyRegistered_IsNoOp()
     {
         // Distinct from the idempotency test above: this is a split/microservices host where some
         // other caller (e.g. AddModelStorageResolution, or AddMoonrakerEmulatorSeederDependencies)
-        // already registered SlicerDbContext. AddCalibrationWorkerHealthDependencies must defer to
-        // that existing registration via EnsureSlicerDatabaseRegistered's own guard, rather than
-        // adding a second, conflicting one.
+        // already registered SlicerDbContext AND its factory (the two are always added together
+        // by SlicerModuleExtensions.AddSlicerDatabase — no real caller registers one without the
+        // other, so this reproduces the only reachable "already registered" state).
+        // AddCalibrationWorkerHealthDependencies must defer to that existing registration via
+        // EnsureSlicerDatabaseRegistered's own guard, rather than adding a second, conflicting
+        // one, and IDbContextFactory<SlicerDbContext> must still be resolvable afterward.
         IConfiguration configuration = BuildSplitDeploymentConfiguration(
             Path.Combine(Path.GetTempPath(), $"calibration-worker-health-{Guid.NewGuid():N}.db"));
 
         ServiceCollection services = new();
         _ = services.AddDbContext<SlicerDbContext>(options => options.UseInMemoryDatabase("stand-in"));
+        _ = services.AddDbContextFactory<SlicerDbContext>(
+            options => options.UseInMemoryDatabase("stand-in"), ServiceLifetime.Scoped);
         int countBefore = services.Count;
 
         _ = services.AddCalibrationWorkerHealthDependencies(configuration);
 
         _ = services.Count.Should().Be(countBefore);
+
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        await using AsyncServiceScope scope = provider.CreateAsyncScope();
+        _ = scope.ServiceProvider.GetService<IDbContextFactory<SlicerDbContext>>().Should().NotBeNull(
+            "the pre-existing registration must still resolve IDbContextFactory<SlicerDbContext> " +
+            "after this no-op — this method must never leave a context registered without its " +
+            "factory, which is exactly the state CalibrationCapabilityService.GetWorkerHealthAsync " +
+            "cannot tolerate");
     }
 }

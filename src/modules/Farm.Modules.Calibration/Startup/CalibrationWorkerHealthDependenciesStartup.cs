@@ -20,27 +20,32 @@ namespace Farm.Modules.Calibration.Startup;
 /// </para>
 /// <para>
 /// Split and microservices hosts deliberately skip <c>AddSlicerModule</c> (see
-/// <c>SlicerModuleExtensions.AddSlicerModule</c>'s early return). Before this registration
-/// existed, the only thing that happened to register
+/// <c>SlicerModuleExtensions.AddSlicerModule</c>'s early return). That previously left
 /// <see cref="Microsoft.EntityFrameworkCore.IDbContextFactory{TContext}"/> of
-/// <see cref="Farm.Slicer.Module.Data.SlicerDbContext"/> on such a host was an implementation
-/// detail of <c>Farm.Web.Api.Startup.MoonrakerEmulatorSeederDependenciesStartup</c>'s call chain
-/// (<c>AddMoonrakerEmulatorSeederDependencies</c> →
+/// <see cref="Farm.Slicer.Module.Data.SlicerDbContext"/> registered on such a host only as a side
+/// effect of two unrelated startup paths: <c>Farm.Web.Api.Startup.MoonrakerEmulatorSeederDependenciesStartup</c>'s
+/// call chain (<c>AddMoonrakerEmulatorSeederDependencies</c> →
 /// <see cref="SlicerModuleExtensions.AddSlicerCalibrationProfileRepositories"/> →
-/// <see cref="SlicerModuleExtensions.EnsureSlicerDatabaseRegistered"/>) — so
+/// <see cref="SlicerModuleExtensions.EnsureSlicerDatabaseRegistered"/>), and
+/// <see cref="ModelStorageResolutionStartup.AddModelStorageResolution"/> (#2179), which also
+/// reaches <see cref="SlicerModuleExtensions.EnsureSlicerDatabaseRegistered"/>. Neither of those
+/// startup methods exists for calibration worker health, so
 /// <c>CalibrationCapabilityService.GetWorkerHealthAsync</c>'s
 /// <c>_serviceProvider.GetService&lt;IDbContextFactory&lt;SlicerDbContext&gt;&gt;()</c> resolution
-/// depended entirely on Moonraker-emulator seeding wiring it has nothing to do with, and would
-/// have silently broken (worker health always reported <c>Unavailable</c>) had that wiring ever
-/// been removed or reshaped. This class makes the dependency explicit, named, and independently
-/// testable, following the same pattern <see cref="ModelStorageResolutionStartup"/> established
-/// for <see cref="Farm.Slicer.Module.Services.IModelStorageResolver"/> (#2179).
+/// depended entirely on wiring it has nothing to do with, and would have silently broken (worker
+/// health always reported <c>Unavailable</c>) had either of those unrelated startup paths ever
+/// been removed or reshaped without anyone noticing the incidental coupling. This class makes the
+/// dependency explicit, named, and independently testable, following the same pattern
+/// <see cref="ModelStorageResolutionStartup"/> itself established for
+/// <see cref="Farm.Slicer.Module.Services.IModelStorageResolver"/> (#2179).
 /// </para>
 /// <para>
 /// <c>Farm.Web.Api.Startup.MoonrakerEmulatorSeederDependenciesStartup.AddMoonrakerEmulatorSeederDependencies</c>
-/// still calls this method too, so both callers share the same single source of truth for "does
-/// this split host have a <see cref="Farm.Slicer.Module.Data.SlicerDbContext"/> connection"
-/// rather than each independently re-deriving it — see
+/// still calls this method too, and <see cref="ModelStorageResolutionStartup.AddModelStorageResolution"/>
+/// also reaches the same underlying registration — so all three callers share the same single
+/// source of truth for "does this split host have a
+/// <see cref="Farm.Slicer.Module.Data.SlicerDbContext"/> connection" rather than each
+/// independently re-deriving it — see
 /// <see cref="SlicerModuleExtensions.EnsureSlicerDatabaseRegistered"/>'s own idempotency guard,
 /// which makes calling it from multiple entry points safe.
 /// </para>

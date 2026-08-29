@@ -39,11 +39,16 @@ namespace Farm.Web.Api.Startup;
 /// <see cref="Farm.Slicer.Module.Data.SlicerDbContext"/> that
 /// <see cref="SlicerModuleExtensions.AddSlicerCalibrationProfileRepositories"/> registers below,
 /// via the shared <see cref="SlicerModuleExtensions.EnsureSlicerDatabaseRegistered"/> guard. That
-/// registration exists independently of this Moonraker-seeder wiring — it is what
+/// registration is what
 /// <c>CalibrationCapabilityService.GetWorkerHealthAsync</c> depends on to report calibration
-/// worker health on split/microservices hosts — but both callers share one source of truth for
-/// "does this split host have a <see cref="Farm.Slicer.Module.Data.SlicerDbContext"/> connection"
-/// instead of independently re-deriving it, so the two registrations cannot drift apart.
+/// worker health on split/microservices hosts, and exists independently of this Moonraker-seeder
+/// wiring — <c>Farm.Modules.Calibration.CalibrationApiModule.ConfigureServices</c> also calls it
+/// unconditionally, alongside
+/// <see cref="Farm.Modules.Calibration.Startup.ModelStorageResolutionStartup.AddModelStorageResolution"/>,
+/// which reaches the same underlying registration too (#2179). All three callers therefore share
+/// one source of truth for "does this split host have a
+/// <see cref="Farm.Slicer.Module.Data.SlicerDbContext"/> connection" instead of independently
+/// re-deriving it, so none of the registrations can drift apart.
 /// </para>
 /// </remarks>
 public static class MoonrakerEmulatorSeederDependenciesStartup
