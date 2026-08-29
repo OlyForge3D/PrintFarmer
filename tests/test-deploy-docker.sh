@@ -1894,6 +1894,8 @@ run_all_tests() {
     test_pgadmin_flag_parsing
     test_pgadmin_config_persistence
     test_pgadmin_postgres_only
+    test_orcaslicer_container_digest_resolved_from_registry_image
+    test_orcaslicer_container_digest_empty_for_local_build_control
     
     teardown
 }
@@ -1938,6 +1940,103 @@ test_pgadmin_postgres_only() {
     local compose_generator="$REPO_ROOT/scripts/docker/compose-generator.sh"
     assert_contains "$(grep -n 'postgres' "$compose_generator" | head -5)" "postgres" "compose-generator should reference PostgreSQL"
     
+    pass_test
+}
+
+# Test: resolve_orcaslicer_container_digest resolves ORCASLICER_CONTAINER_DIGEST
+# from the local worker image's repository digest when one is available (e.g.
+# after pull-from-registry.sh / build-and-push-registry.sh) -- issue #2164.
+test_orcaslicer_container_digest_resolved_from_registry_image() {
+    start_test "resolve_orcaslicer_container_digest resolves digest for registry-sourced image"
+
+    cd "$TEST_TEMP_DIR"
+
+    local expected_digest="ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
+    local helper_script="$TEST_TEMP_DIR/digest-resolved-helper.sh"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -uo pipefail
+
+# Mock a registry-sourced worker image: pull-from-registry.sh/build-and-push-registry.sh
+# leave a resolvable RepoDigests entry on the local tag after tagging/pushing.
+docker() {
+    if [ "\$1" = "image" ] && [ "\$2" = "inspect" ]; then
+        printf '%s\n' "$expected_digest"
+        return 0
+    fi
+    return 0
+}
+
+source "$DEPLOY_SCRIPT"
+
+unset ORCASLICER_CONTAINER_DIGEST 2>/dev/null || true
+ENABLE_ORCA_WORKER=yes
+resolve_orcaslicer_container_digest
+echo "DIGEST=[\$ORCASLICER_CONTAINER_DIGEST]"
+echo "CALIBRATION=\$ORCASLICER_CALIBRATION_AVAILABLE"
+EOF
+    chmod +x "$helper_script"
+
+    capture_output "$helper_script 2>&1 || true"
+    local output
+    output=$(get_output)
+
+    assert_contains "$output" "DIGEST=[$expected_digest]" "Digest should be resolved from the mocked docker image inspect output"
+    assert_contains "$output" "CALIBRATION=yes" "Calibration should be marked available when the digest resolves"
+    assert_contains "$output" "Resolved OrcaSlicer worker container digest" "Should print a success message naming the resolved digest"
+
+    rm -f "$helper_script" 2>/dev/null || true
+
+    pass_test
+}
+
+# Test (control, paired with the test above): a pure local build -- e.g.
+# build-orcaslicer-optimized.sh, which never pulls or pushes -- genuinely has
+# no RepoDigests entry, so resolve_orcaslicer_container_digest must leave
+# ORCASLICER_CONTAINER_DIGEST empty AND emit the operator-facing warning. This
+# is required alongside the resolved-digest test above so the pair cannot pass
+# by the resolver always (or never) setting the digest (issue #2164).
+test_orcaslicer_container_digest_empty_for_local_build_control() {
+    start_test "resolve_orcaslicer_container_digest stays empty and warns for a pure local build (control)"
+
+    cd "$TEST_TEMP_DIR"
+
+    local helper_script="$TEST_TEMP_DIR/digest-empty-helper.sh"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -uo pipefail
+
+# Simulate build-orcaslicer-optimized.sh's pure local build: the image exists
+# locally but was never pulled or pushed, so 'docker image inspect' has no
+# RepoDigests entry to report.
+docker() {
+    if [ "\$1" = "image" ] && [ "\$2" = "inspect" ]; then
+        return 1
+    fi
+    return 0
+}
+
+source "$DEPLOY_SCRIPT"
+
+unset ORCASLICER_CONTAINER_DIGEST 2>/dev/null || true
+ENABLE_ORCA_WORKER=yes
+resolve_orcaslicer_container_digest
+echo "DIGEST=[\$ORCASLICER_CONTAINER_DIGEST]"
+echo "CALIBRATION=\$ORCASLICER_CALIBRATION_AVAILABLE"
+EOF
+    chmod +x "$helper_script"
+
+    capture_output "$helper_script 2>&1 || true"
+    local output
+    output=$(get_output)
+
+    assert_contains "$output" "DIGEST=[]" "Digest must stay empty for a pure local build with no RepoDigests"
+    assert_contains "$output" "CALIBRATION=no" "Calibration must be marked unavailable for a pure local build"
+    assert_contains "$output" "Calibration generation will be unavailable" "Should print the operator-facing warning naming the consequence"
+    assert_contains "$output" "pull-from-registry.sh or build-and-push-registry.sh" "Warning should name the scripts that enable calibration"
+
+    rm -f "$helper_script" 2>/dev/null || true
+
     pass_test
 }
 
