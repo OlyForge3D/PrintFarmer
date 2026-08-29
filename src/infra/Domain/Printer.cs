@@ -323,26 +323,28 @@ public class Printer : IRevisionedEntity
 
     /// <summary>
     /// Marlin (classic) jerk setting in millimeters per second, as set via <c>M205 X/Y</c>.
-    /// Recorded only as an explicit, separate admin action (issue #2138) — never automatically
-    /// written by the cornering calibration flow, which is report-only. Mutually meaningful with
-    /// <see cref="JunctionDeviation"/>/<see cref="SquareCornerVelocity"/> only in the sense that
-    /// exactly one of the three corresponds to the printer's actual firmware flavor; the other
-    /// two are simply left unset.
+    /// Recorded only as an explicit, separate admin action (issue #2138) — an operator-maintained
+    /// record of the printer's own firmware configuration, not written by any calibration flow
+    /// (cornering/jerk calibration is a machine-level firmware calibration, not a filament-profile
+    /// calibration — see issue #2162). Mutually meaningful with <see cref="JunctionDeviation"/>/
+    /// <see cref="SquareCornerVelocity"/> only in the sense that exactly one of the three
+    /// corresponds to the printer's actual firmware flavor; the other two are simply left unset.
     /// </summary>
     public int? MaxJerk { get; set; }
 
     /// <summary>
     /// Marlin 2 junction deviation setting in millimeters, as set via <c>M205 J</c>. Recorded
-    /// only as an explicit, separate admin action (issue #2138) — never automatically written by
-    /// the cornering calibration flow, which is report-only. See <see cref="MaxJerk"/> remarks.
+    /// only as an explicit, separate admin action (issue #2138) — an operator-maintained record of
+    /// the printer's own firmware configuration, not written by any calibration flow (see issue
+    /// #2162). See <see cref="MaxJerk"/> remarks.
     /// </summary>
     public double? JunctionDeviation { get; set; }
 
     /// <summary>
     /// Klipper square corner velocity setting in millimeters per second, as set via
     /// <c>SQUARE_CORNER_VELOCITY</c>. Recorded only as an explicit, separate admin action (issue
-    /// #2138) — never automatically written by the cornering calibration flow, which is
-    /// report-only. See <see cref="MaxJerk"/> remarks.
+    /// #2138) — an operator-maintained record of the printer's own firmware configuration, not
+    /// written by any calibration flow (see issue #2162). See <see cref="MaxJerk"/> remarks.
     /// </summary>
     public double? SquareCornerVelocity { get; set; }
 

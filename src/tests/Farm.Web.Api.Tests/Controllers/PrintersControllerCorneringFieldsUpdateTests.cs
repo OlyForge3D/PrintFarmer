@@ -25,9 +25,9 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// </summary>
 /// <remarks>
 /// Per Dallas's architecture decision on #2138, this write is a distinct, explicit, separate
-/// admin action — the same admin-gated endpoint used for every other printer field, never
-/// automatically written by the (report-only) cornering calibration pipeline itself. No
-/// calibration-flow code path exercises this endpoint; only an explicit admin PUT does.
+/// admin action — the same admin-gated endpoint used for every other printer field. These three
+/// columns are an operator-maintained record of the printer's own firmware configuration (issue
+/// #2162): no calibration-flow code path exercises this endpoint; only an explicit admin PUT does.
 /// </remarks>
 [Trait("Category", "Integration")]
 public class PrintersControllerCorneringFieldsUpdateTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime

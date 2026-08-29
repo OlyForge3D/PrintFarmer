@@ -129,8 +129,8 @@ public sealed class InternalApiSliceSubmissionGateway(
             if (!response.IsSuccessStatusCode)
             {
                 // A 400 means SliceJobController rejected this exact request body as invalid
-                // (e.g. issue #2139's missing/unsupported input-shaping firmware flavor) -
-                // resubmitting the same body will always fail the same way, so this is terminal,
+                // (e.g. an unsupported or unknown calibration method) - resubmitting the same
+                // body will always fail the same way, so this is terminal,
                 // not retryable. Any other non-success status (5xx, etc.) is left retryable, since
                 // those can plausibly succeed on a later attempt.
                 bool isTerminal = response.StatusCode == System.Net.HttpStatusCode.BadRequest;

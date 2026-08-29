@@ -263,8 +263,9 @@ public class CalibrationCandidateDto
 
     /// <summary>
     /// Marlin (classic) jerk in millimeters per second (issue #2138). Recorded only via an
-    /// explicit, separate admin action on <c>PUT /api/printers/{id}</c> — never automatically
-    /// written by the report-only cornering calibration flow. See <see cref="Printer.MaxJerk"/>.
+    /// explicit, separate admin action on <c>PUT /api/printers/{id}</c> — an operator-maintained
+    /// record of the printer's own firmware configuration, not written by any calibration flow
+    /// (see issue #2162). See <see cref="Printer.MaxJerk"/>.
     /// </summary>
     public int? MaxJerk { get; init; }
 
