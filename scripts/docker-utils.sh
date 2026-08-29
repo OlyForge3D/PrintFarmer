@@ -26,6 +26,13 @@ if ! declare -F print_info > /dev/null 2>&1; then
     print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
     print_error() { echo -e "${RED}❌ $1${NC}"; }
 fi
+# print_header is normally provided by common-utils.sh, which callers such as
+# deploy-docker.sh already source alongside this file. Fall back to a plain print here so
+# this file stays safe to source standalone (e.g. scripts/ci/smoke-daily-validation-stack.sh,
+# which needs prepare_orcaslicer_worker_temp_directories but not the rest of common-utils.sh).
+if ! declare -F print_header > /dev/null 2>&1; then
+    print_header() { echo -e "${BLUE}=== $1 ===${NC}"; }
+fi
 
 # Read an image label without treating absent labels as valid empty values.
 # Usage: docker_image_label "image:tag" "orcaslicer.version"
@@ -316,6 +323,134 @@ prepare_orcaslicer_binary_cache() {
 
     print_error "Update the pinned image, unset ORCA_ASSET_IMAGE, or set ORCA_FORCE_REBUILD=1 (or pass --rebuild-orcaslicer)."
     return 1
+}
+
+# Pre-create the OrcaSlicer worker's per-job temp directory (and the previous-version
+# worker's temp directory, when enabled) with permissions the immutable worker container
+# can write to.
+#
+# Unlike EXTERNAL_MODELS_PATH/EXTERNAL_GCODE_PATH/EXTERNAL_PROFILES_PATH/etc. (handled by
+# prepare_external_storage_directories(), gated behind USE_EXTERNAL_STORAGE=yes), the worker's
+# /app/temp bind mount is NOT optional: docker-compose.orcaslicer-worker.yml (and the
+# -previous variant) always bind-mount a host directory there, falling back to
+# .volumes/printfarmer-orcaslicer-temp when EXTERNAL_ORCA_WORKER_TEMP is unset, regardless of
+# USE_EXTERNAL_STORAGE. If that host directory does not already exist, Docker auto-creates it
+# as root:root when the bind mount is first used, which shadows the appuser:appuser ownership
+# the image sets on /app/temp at build time (Dockerfile.multistage, orcaslicer-worker stage).
+#
+# The main API container recovers from the same root-owned-bind-mount situation because its
+# entrypoint.sh runs as root and chowns mounted volumes before dropping to appuser via gosu.
+# The OrcaSlicer worker intentionally has no such entrypoint -- it execs
+# `dotnet Farm.OrcaSlicer.Worker.dll` directly as `USER appuser` (read_only root filesystem,
+# cap_drop: ALL) as part of its immutable/non-root security posture -- so it has no
+# opportunity to self-heal permissions at container start. Every per-job temp directory
+# creation then fails with UnauthorizedAccessException (issue #1908, and issue #2174 for the
+# daily immutable-image validation stack, which boots via compose-generator.sh directly and
+# therefore must call this same helper itself rather than only through deploy-docker.sh).
+#
+# IMPORTANT: unlike the models/gcode/profiles bind mounts, chmod 775 alone does NOT
+# reliably grant appuser (container UID/GID 1001) write access here. Docker bind mounts
+# are checked against the host filesystem's numeric UID/GID with no remapping, and this
+# directory is created/owned by whichever host user runs the deploy script -- there is no
+# guarantee that user's UID/GID is 1001 or that its primary group matches GID 1001, so the
+# "group" bits of 775 may never apply to the container process, leaving it with only the
+# "other" bits (r-x, no write). We therefore: (1) best-effort chown the directory to
+# 1001:1001 so ownership matches appuser exactly whenever the deploy script has the
+# privilege to do so (e.g. running as root/via sudo); and (2) unconditionally chmod 777
+# (rwxrwxrwx) so appuser can write via the "other" bits even when the chown attempt fails
+# (the common case of a non-root deploy user). This directory only ever holds transient
+# per-job slicer scratch files, not persistent data, so trading directory-level
+# confidentiality for guaranteed write access across arbitrary host UID/GID combinations
+# is an acceptable, deliberate choice here.
+#
+# This must run whenever ENABLE_ORCA_WORKER=yes, independent of USE_EXTERNAL_STORAGE.
+prepare_orcaslicer_worker_temp_directories() {
+    if [ "${ENABLE_ORCA_WORKER:-no}" != "yes" ]; then
+        return 0
+    fi
+
+    print_header "📁 Pre-creating OrcaSlicer Worker Temp Directories"
+
+    local paths_created=0
+    local paths_failed=0
+
+    # Array of paths to create: "path:description"
+    local worker_paths_to_create=()
+
+    local orca_worker_temp="${EXTERNAL_ORCA_WORKER_TEMP:-.volumes/printfarmer-orcaslicer-temp}"
+    worker_paths_to_create+=("${orca_worker_temp}:OrcaSlicer Worker Temp")
+
+    if [ "${ENABLE_ORCA_WORKER_PREVIOUS:-no}" = "yes" ]; then
+        local orca_worker_previous_temp="${EXTERNAL_ORCA_WORKER_PREVIOUS_TEMP:-.volumes/printfarmer-orcaslicer-previous-temp}"
+        worker_paths_to_create+=("${orca_worker_previous_temp}:Previous OrcaSlicer Worker Temp")
+    fi
+
+    for path_entry in "${worker_paths_to_create[@]}"; do
+        local path="${path_entry%:*}"
+        local desc="${path_entry#*:}"
+
+        if [ -z "$path" ]; then
+            continue
+        fi
+
+        if [ ! -d "$path" ]; then
+            print_info "Creating directory: [$desc] $path"
+            if ! mkdir -p "$path" 2>/dev/null; then
+                print_error "Failed to create directory: $path"
+                paths_failed=$((paths_failed + 1))
+                continue
+            fi
+            print_success "Created: $path"
+            paths_created=$((paths_created + 1))
+        else
+            print_info "Directory already exists: [$desc] $path"
+        fi
+
+        # Best-effort: align ownership with the container's appuser (UID/GID 1001).
+        # This only succeeds when the deploy script is running as root (or via sudo);
+        # a non-root deploy user cannot chown to an arbitrary UID, so failure here is
+        # expected and silently ignored -- the chmod 777 below guarantees write access
+        # regardless of whether this succeeded.
+        chown 1001:1001 "$path" 2>/dev/null || true
+
+        # Guarantee appuser (UID/GID 1001) can write regardless of the host directory's
+        # actual owner/group: 777 grants write via the "other" bits even when neither the
+        # owning user nor group matches the container's UID/GID. See the function-level
+        # comment above for why 775 (the convention used elsewhere in this script) is not
+        # sufficient for this specific bind mount.
+        if ! chmod 777 "$path" 2>/dev/null; then
+            # A prior broken deploy (the exact bug this function fixes) can leave this
+            # directory already existing and owned by root:root, created by Docker
+            # itself the first time the bind mount was used. A non-root deploy user
+            # cannot chmod/chown a directory they don't own, so `chmod` above fails
+            # here for that upgrade-in-place case. Since this directory only ever
+            # holds transient per-job scratch files (nothing worth preserving across
+            # a broken deploy), recover by deleting and recreating it -- which only
+            # requires write access to the parent directory, which the deploy user
+            # does own -- rather than trying to chown/chmod something we don't own.
+            print_warning "Could not set permissions on $path (likely owned by another user from a prior broken deploy) - recreating it"
+            if ! rm -rf "$path" 2>/dev/null || ! mkdir -p "$path" 2>/dev/null || ! chmod 777 "$path" 2>/dev/null; then
+                print_warning "Could not recreate $path with correct permissions - may have restricted access"
+                paths_failed=$((paths_failed + 1))
+                continue
+            fi
+            chown 1001:1001 "$path" 2>/dev/null || true
+            print_success "  Recreated $path and set permissions to 777 (rwxrwxrwx) ✓"
+            continue
+        fi
+
+        print_success "  Permissions set to 777 (rwxrwxrwx) ✓"
+    done
+
+    if [ $paths_failed -gt 0 ]; then
+        print_warning "Failed to prepare $paths_failed OrcaSlicer worker temp directories"
+        print_warning "⚠️  Slice jobs may fail with UnauthorizedAccessException if permissions are not fixed."
+        print_info "Fix manually: mkdir -p <path> && chmod 777 <path>"
+        return 1
+    fi
+
+    print_success "✓ OrcaSlicer worker temp directories ready ($paths_created created)"
+    return 0
 }
 
 validate_orcaslicer_rebuild_request() {
