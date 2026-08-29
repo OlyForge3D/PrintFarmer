@@ -176,6 +176,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<string>("ProfileFormat")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("PromotedFromCalibrationDraftProfileId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
 
@@ -204,6 +207,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.HasIndex("IsSystem");
 
                     b.HasIndex("Material");
+
+                    b.HasIndex("PromotedFromCalibrationDraftProfileId")
+                        .IsUnique();
 
                     b.HasIndex("SlicerType");
 

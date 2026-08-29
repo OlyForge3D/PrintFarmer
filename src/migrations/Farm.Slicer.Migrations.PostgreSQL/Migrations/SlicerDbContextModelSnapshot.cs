@@ -182,6 +182,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<string>("ProfileFormat")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("PromotedFromCalibrationDraftProfileId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
 
@@ -210,6 +213,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.HasIndex("IsSystem");
 
                     b.HasIndex("Material");
+
+                    b.HasIndex("PromotedFromCalibrationDraftProfileId")
+                        .IsUnique();
 
                     b.HasIndex("SlicerType");
 

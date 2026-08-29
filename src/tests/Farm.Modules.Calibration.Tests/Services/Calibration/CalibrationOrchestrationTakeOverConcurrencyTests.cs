@@ -116,7 +116,8 @@ public sealed class CalibrationOrchestrationTakeOverConcurrencyTests
             db,
             new TestCalibrationBlobStore(),
             TimeProvider.System,
-            NullLogger<CalibrationProjectService>.Instance);
+            NullLogger<CalibrationProjectService>.Instance,
+            new NoopFilamentProfilePromotionGateway());
         CalibrationOrchestrationSagaService saga = new(
             db,
             projectService,
@@ -157,7 +158,12 @@ public sealed class CalibrationOrchestrationTakeOverConcurrencyTests
                 Method = "temperature_tower",
                 DefinitionVersion = "1",
                 Input = JsonSerializer.SerializeToElement(new { modelUrl = "https://example.test/model.3mf" }),
-                Specification = JsonSerializer.SerializeToElement(new { targetTemperatureC = 210 }),
+                Specification = JsonSerializer.SerializeToElement(new
+                {
+                    targetTemperatureC = 210,
+                    start_temperature_c = 220,
+                    end_temperature_c = 190,
+                }),
                 ProfileSnapshotIds = JsonSerializer.SerializeToElement(Array.Empty<Guid>()),
                 PrinterConfigurationRevision = 1,
             },
@@ -237,7 +243,16 @@ public sealed class CalibrationOrchestrationTakeOverConcurrencyTests
             context,
             new TestCalibrationBlobStore(),
             TimeProvider.System,
-            NullLogger<CalibrationProjectService>.Instance);
+            NullLogger<CalibrationProjectService>.Instance,
+            new NoopFilamentProfilePromotionGateway());
+
+    private sealed class NoopFilamentProfilePromotionGateway : IFilamentProfilePromotionGateway
+    {
+        public Task<FilamentProfilePromotionResult> PromoteAsync(
+            FilamentProfilePromotionRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(FilamentProfilePromotionResult.Ok(Guid.NewGuid()));
+    }
 
     private static CalibrationAttemptCreateRequest CreateAttemptRequest(string requestId) =>
         new()

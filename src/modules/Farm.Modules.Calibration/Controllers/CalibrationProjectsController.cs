@@ -179,6 +179,25 @@ public sealed class CalibrationProjectsController(ICalibrationProjectService cal
     }
 
     /// <summary>
+    /// Gets the server-owned, per-method guided-session metadata catalog (issue #2180, gap 3):
+    /// display title, purpose, wiki reference, required <c>setup</c> inputs, expected
+    /// <c>measure</c> quantity, and canonical step sequence. Served so clients never duplicate
+    /// this metadata locally.
+    /// </summary>
+    [HttpGet("method-guidance")]
+    [RequirePermission(PrintFarmerPermissions.Calibration.Read)]
+    public IActionResult GetMethodGuidanceCatalog()
+    {
+        CalibrationActor? actor = GetActor();
+        if (actor is null)
+        {
+            return AuthenticationProblem();
+        }
+
+        return Ok(_calibrationService.GetMethodGuidanceCatalog());
+    }
+
+    /// <summary>
     /// Answers "is anything already underway on this project, and where was it started?" for a
     /// fresh device that has no attempt or orchestration id to query by.
     /// </summary>
@@ -197,6 +216,74 @@ public sealed class CalibrationProjectsController(ICalibrationProjectService cal
             actor,
             cancellationToken);
         return InFlightResult(result);
+    }
+
+    /// <summary>
+    /// Gets the project-owned, non-device-scoped method dispositions (issue #2180, gap 2), so a
+    /// project resumed on any device reports the correct pending/completed/skipped state.
+    /// </summary>
+    [HttpGet("{projectId:guid}/method-progress")]
+    [RequirePermission(PrintFarmerPermissions.Calibration.Read)]
+    public async Task<IActionResult> GetMethodProgressAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        CalibrationActor? actor = GetActor();
+        if (actor is null)
+        {
+            return AuthenticationProblem();
+        }
+
+        CalibrationApiResult<IReadOnlyList<CalibrationMethodProgressDto>> result =
+            await _calibrationService.GetMethodProgressAsync(projectId, actor, cancellationToken);
+        return MethodProgressListResult(result);
+    }
+
+    /// <summary>
+    /// Explicitly sets a method's disposition to <c>Skipped</c> or <c>Pending</c> (issue #2180,
+    /// gap 2), so a deliberately skipped step is distinguishable from one the operator has not
+    /// yet reached and does not block project completion.
+    /// </summary>
+    [HttpPut("{projectId:guid}/method-progress/{method}")]
+    [RequirePermission(PrintFarmerPermissions.Calibration.Update)]
+    public async Task<IActionResult> SetMethodDispositionAsync(
+        Guid projectId,
+        string method,
+        [FromBody] CalibrationMethodDispositionRequest request,
+        CancellationToken cancellationToken)
+    {
+        CalibrationActor? actor = GetActor();
+        if (actor is null)
+        {
+            return AuthenticationProblem();
+        }
+
+        CalibrationApiResult<CalibrationMethodProgressDto> result = await _calibrationService.SetMethodDispositionAsync(
+            projectId,
+            method,
+            request,
+            Request.Headers.IfMatch.ToString(),
+            actor,
+            cancellationToken);
+        return MethodProgressResult(result);
+    }
+
+    /// <summary>
+    /// Gets the project-owned draft filament profile document (issue #2180, gap 1), accumulated
+    /// as each method's accepted result is merged in and promoted to a real custom filament
+    /// profile only once the project reaches <c>Completed</c>.
+    /// </summary>
+    [HttpGet("{projectId:guid}/draft-profile")]
+    [RequirePermission(PrintFarmerPermissions.Calibration.Read)]
+    public async Task<IActionResult> GetDraftProfileAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        CalibrationActor? actor = GetActor();
+        if (actor is null)
+        {
+            return AuthenticationProblem();
+        }
+
+        CalibrationApiResult<CalibrationDraftProfileDto> result =
+            await _calibrationService.GetDraftProfileAsync(projectId, actor, cancellationToken);
+        return DraftProfileResult(result);
     }
 
     /// <summary>Lists immutable plans belonging to a project.</summary>
@@ -665,6 +752,37 @@ public abstract class CalibrationControllerBase : ControllerBase
     /// <summary>Maps a filament-calibration saga orchestration operation result.</summary>
     protected IActionResult OrchestrationResult(CalibrationApiResult<CalibrationOrchestrationDto> result) =>
         Result(result);
+
+    /// <summary>Maps a method-progress operation result and emits a strong ETag on success.</summary>
+    protected IActionResult MethodProgressResult(CalibrationApiResult<CalibrationMethodProgressDto> result)
+    {
+        if (!result.IsSuccess || result.Value is null)
+        {
+            return Problem(result.StatusCode, result.Code ?? "calibration_operation_failed", result.Conflict);
+        }
+
+        SetReplayHeader(result);
+        SetETag("method-progress", result.Value.Id, result.Value.Revision);
+        return StatusCode(result.StatusCode, result.Value);
+    }
+
+    /// <summary>Maps a method-progress list result.</summary>
+    protected IActionResult MethodProgressListResult(
+        CalibrationApiResult<IReadOnlyList<CalibrationMethodProgressDto>> result) =>
+        Result(result);
+
+    /// <summary>Maps a draft-profile operation result and emits a strong ETag on success.</summary>
+    protected IActionResult DraftProfileResult(CalibrationApiResult<CalibrationDraftProfileDto> result)
+    {
+        if (!result.IsSuccess || result.Value is null)
+        {
+            return Problem(result.StatusCode, result.Code ?? "calibration_operation_failed", result.Conflict);
+        }
+
+        SetReplayHeader(result);
+        SetETag("draft-profile", result.Value.Id, result.Value.Revision);
+        return StatusCode(result.StatusCode, result.Value);
+    }
 
     /// <summary>Maps a project-scoped in-flight-state query result.</summary>
     protected IActionResult InFlightResult(CalibrationApiResult<CalibrationInFlightStateDto> result) =>

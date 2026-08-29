@@ -214,6 +214,139 @@ public sealed class InternalApiSliceSubmissionGateway(
     }
 }
 
+/// <summary>A calibration project's accumulated draft filament profile, ready for promotion.</summary>
+/// <param name="Name">The display name for the resulting custom filament profile.</param>
+/// <param name="RawJson">
+/// The filament-profile-shaped JSON document built from the project's accumulated draft values,
+/// posted verbatim as <c>UploadProfileRequestDto.RawJson</c>.
+/// </param>
+/// <param name="DraftProfileId">
+/// The calibration draft profile's own stable identifier (<c>CalibrationDraftProfile.Id</c>).
+/// Round-4 review fix (issue #2180 - Hicks Blocking #2): sent as an idempotency key so a
+/// retried/replayed promotion call (e.g. after a TTL-reclaimed stranded claim, see
+/// <c>CalibrationProjectService.PromotionClaimStaleAfter</c>) returns the SAME promoted profile
+/// instead of minting a visible duplicate in the owner's custom filament profile list.
+/// </param>
+public sealed record FilamentProfilePromotionRequest(string Name, string RawJson, Guid DraftProfileId);
+
+/// <summary>Outcome of promoting a project's draft profile to a real custom filament profile.</summary>
+/// <param name="Success">Whether the promotion was accepted.</param>
+/// <param name="ProfileId">The slicer module's new <c>FilamentProfile.Id</c>, when <paramref name="Success"/> is <c>true</c>.</param>
+/// <param name="ErrorCode">A stable machine-readable failure code, when <paramref name="Success"/> is <c>false</c>.</param>
+public sealed record FilamentProfilePromotionResult(bool Success, Guid? ProfileId, string? ErrorCode)
+{
+    public static FilamentProfilePromotionResult Ok(Guid profileId) => new(true, profileId, null);
+
+    public static FilamentProfilePromotionResult Failed(string errorCode) => new(false, null, errorCode);
+}
+
+/// <summary>
+/// Promotes a project's accumulated draft filament profile to a real custom filament profile on
+/// behalf of the filament-calibration saga by calling the existing <c>ProfilesController</c> HTTP
+/// contract (issue #2180, gap 1), never by writing directly into the separately deployed slicer
+/// module's <c>SlicerDbContext</c>.
+/// </summary>
+public interface IFilamentProfilePromotionGateway
+{
+    Task<FilamentProfilePromotionResult> PromoteAsync(FilamentProfilePromotionRequest request, CancellationToken ct);
+}
+
+/// <summary>
+/// Calls the real <c>POST /api/slicer/profiles/promote-from-calibration</c> HTTP contract on the
+/// current host, so promotion behaves identically whether the slicer module is loaded in-process
+/// (monolith) or reached through the gateway/nginx boundary (microservices), and so this saga
+/// never duplicates <c>ProfilesController</c>'s validation or persistence logic.
+/// </summary>
+/// <remarks>
+/// Review fix (issue #2180): this deliberately targets the dedicated
+/// <c>promote-from-calibration</c> route rather than the general-purpose <c>upload</c> route.
+/// <c>upload</c> is gated by <c>InteractiveSessionRequirement</c>, which explicitly rejects
+/// desktop exchange tokens - the realistic primary credential completing a calibration project -
+/// so forwarding the caller's header there would always be rejected and permanently block
+/// promotion. <c>promote-from-calibration</c> instead carries no interactive-session requirement,
+/// only <c>ProfilesController</c>'s existing class-level
+/// <see cref="Farm.Infrastructure.Security.PrintFarmerPermissions.Slicing"/>'s <c>Submit</c>
+/// requirement plus its own method-level
+/// <see cref="Farm.Infrastructure.Security.PrintFarmerPermissions.Calibration"/>'s <c>Update</c>
+/// requirement - both of which the desktop client's real calibration-scope token bundle already
+/// grants together (the same precedent <c>ResolveProfileForModelAsync</c> already relies on; see
+/// <c>DesktopCalibrationScopeIntegrationTests.CalibrationCompletionToken_ClearsPromoteFromCalibrationAuthorization</c>
+/// for the HTTP-level proof).
+/// </remarks>
+public sealed class InternalApiFilamentProfilePromotionGateway(
+    IHttpClientFactory httpClientFactory,
+    IHttpContextAccessor httpContextAccessor,
+    ILogger<InternalApiFilamentProfilePromotionGateway> logger) : IFilamentProfilePromotionGateway
+{
+    private readonly IHttpClientFactory _httpClientFactory =
+        httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+
+    private readonly IHttpContextAccessor _httpContextAccessor =
+        httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
+
+    private readonly ILogger<InternalApiFilamentProfilePromotionGateway> _logger =
+        logger ?? throw new ArgumentNullException(nameof(logger));
+
+    /// <inheritdoc />
+    public async Task<FilamentProfilePromotionResult> PromoteAsync(
+        FilamentProfilePromotionRequest request,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            var payload = new JsonObject
+            {
+                ["rawJson"] = request.RawJson,
+                ["name"] = request.Name,
+                ["sourceDraftProfileId"] = request.DraftProfileId.ToString(),
+            };
+
+            // Note: profileType is intentionally NOT sent here. The endpoint's request DTO
+            // (PromoteCalibrationDraftProfileRequestDto) only accepts rawJson/name/
+            // sourceDraftProfileId and hardcodes filament server-side (round-2 review fix, Bishop
+            // B6/Vasquez Task 5) - sending it would be silently ignored, so omitting it avoids
+            // implying it still has any effect.
+
+            // The client's BaseAddress is pinned via Program.cs's AddHttpClient registration from
+            // trusted configuration - reusing the same named client as the slice-submission
+            // gateway - never derived from the inbound request's own Host/Scheme.
+            HttpClient client = _httpClientFactory.CreateClient(InternalApiSliceSubmissionGateway.HttpClientName);
+            string? authorization = _httpContextAccessor.HttpContext?.Request.Headers.Authorization;
+            if (!string.IsNullOrEmpty(authorization) &&
+                AuthenticationHeaderValue.TryParse(authorization, out AuthenticationHeaderValue? parsedHeader))
+            {
+                client.DefaultRequestHeaders.Authorization = parsedHeader;
+            }
+
+            using HttpRequestMessage httpRequest = new(HttpMethod.Post, "api/slicer/profiles/promote-from-calibration")
+            {
+                Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json"),
+            };
+            using HttpResponseMessage response = await client.SendAsync(httpRequest, ct);
+            string body = await response.Content.ReadAsStringAsync(ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                return FilamentProfilePromotionResult.Failed("profile_promotion_rejected");
+            }
+
+            using JsonDocument document = JsonDocument.Parse(body);
+            if (!document.RootElement.TryGetProperty("id", out JsonElement idElement) ||
+                !idElement.TryGetGuid(out Guid profileId))
+            {
+                return FilamentProfilePromotionResult.Failed("profile_promotion_response_invalid");
+            }
+
+            return FilamentProfilePromotionResult.Ok(profileId);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning(exception, "Filament profile promotion for the calibration saga failed transiently.");
+            return FilamentProfilePromotionResult.Failed("profile_promotion_transport_error");
+        }
+    }
+}
+
 /// <summary>
 /// Calls the real <c>/api/slice/{id}/send-to-printer</c> HTTP contract on the current host so this
 /// saga never duplicates <c>SlicePrintBridgeController</c>'s upload, safety-validation, or

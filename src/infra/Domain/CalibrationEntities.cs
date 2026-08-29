@@ -43,6 +43,18 @@ public enum CalibrationIdempotencyState
 }
 
 /// <summary>
+/// The disposition of one calibration method within a project, distinguishing a step that was
+/// deliberately skipped from one that is simply not yet reached. A skipped method does not block
+/// project completion, unlike a pending one (issue #2180, gap 2).
+/// </summary>
+public enum CalibrationMethodDisposition
+{
+    Pending = 0,
+    Completed = 1,
+    Skipped = 2,
+}
+
+/// <summary>
 /// Authoritative editable root for a user's printer-calibration work.
 /// Slicer, printer, spool, and execution identifiers are soft references so this
 /// bounded context remains deployable independently from those services.
@@ -466,4 +478,81 @@ public sealed class CalibrationSyncCursor
     public long Sequence { get; set; }
 
     public DateTime CreatedAtUtc { get; set; }
+}
+
+/// <summary>
+/// Server-tracked disposition of one calibration method within a project (issue #2180, gap 2).
+/// Unlike <see cref="CalibrationDraft"/>, this is deliberately NOT device-lineage-scoped: it is
+/// the authoritative, project-owned resume state so a project started on one device shows the
+/// correct per-method disposition (pending/completed/skipped) when resumed on another.
+/// </summary>
+public sealed class CalibrationMethodProgress
+{
+    public Guid Id { get; set; }
+
+    public Guid ProjectId { get; set; }
+
+    public string Method { get; set; } = string.Empty;
+
+    public CalibrationMethodDisposition Disposition { get; set; }
+
+    public string? CurrentStepId { get; set; }
+
+    public long Revision { get; set; } = 1;
+
+    public DateTime CreatedAtUtc { get; set; }
+
+    public DateTime UpdatedAtUtc { get; set; }
+
+    public string CreatedBySubject { get; set; } = string.Empty;
+
+    public string UpdatedBySubject { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Project-owned draft filament profile document (issue #2180, gap 1) accumulated as each
+/// calibration method's result is accepted. It is promoted to a real custom filament profile
+/// (in the separately deployed slicer bounded context) only once the owning project reaches
+/// <see cref="CalibrationProjectLifecycleStatus.Completed"/>. An abandoned/archived project never
+/// promotes, so it leaves nothing in the user's profile list - unlike the old desktop behavior of
+/// cloning and mutating a real custom profile up front.
+/// </summary>
+public sealed class CalibrationDraftProfile
+{
+    public Guid Id { get; set; }
+
+    public Guid ProjectId { get; set; }
+
+    public string ValuesJson { get; set; } = "{}";
+
+    public long Revision { get; set; } = 1;
+
+    public DateTime CreatedAtUtc { get; set; }
+
+    public DateTime UpdatedAtUtc { get; set; }
+
+    public string CreatedBySubject { get; set; } = string.Empty;
+
+    public string UpdatedBySubject { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The slicer module's <c>FilamentProfile.Id</c> once promoted, obtained via the soft
+    /// cross-context reference returned by the promotion HTTP call. <see langword="null"/> until
+    /// promoted.
+    /// </summary>
+    public Guid? PromotedProfileId { get; set; }
+
+    public DateTime? PromotedAtUtc { get; set; }
+
+    /// <summary>
+    /// Review fix (issue #2180): an atomic claim marker, set via a targeted
+    /// <c>ExecuteUpdateAsync</c> immediately before the external promotion HTTP call and cleared
+    /// again if that call fails. Two genuinely concurrent <c>Active -&gt; Completed</c> PATCHes
+    /// for the same project both observe <see cref="PromotedProfileId"/> as
+    /// <see langword="null"/> before either commits, so gating only on that column would let both
+    /// call the external endpoint and create duplicate real filament profiles. Claiming this
+    /// column atomically, conditioned on it (and <see cref="PromotedProfileId"/>) still being
+    /// unset, ensures only one concurrent completion request ever reaches the external call.
+    /// </summary>
+    public DateTime? PromotionClaimedAtUtc { get; set; }
 }

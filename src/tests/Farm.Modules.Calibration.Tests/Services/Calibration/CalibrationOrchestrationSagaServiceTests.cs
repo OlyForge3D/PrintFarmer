@@ -588,7 +588,8 @@ public sealed class CalibrationOrchestrationSagaServiceTests
             db,
             new TestCalibrationBlobStore(),
             TimeProvider.System,
-            NullLogger<CalibrationProjectService>.Instance);
+            NullLogger<CalibrationProjectService>.Instance,
+            new FakeFilamentProfilePromotionGateway());
 
     private static CalibrationOrchestrationSagaService CreateSaga(
         AppDbContext db,
@@ -652,7 +653,15 @@ public sealed class CalibrationOrchestrationSagaServiceTests
                 Method = methodName,
                 DefinitionVersion = "1",
                 Input = JsonSerializer.SerializeToElement(new { modelUrl = "https://example.test/model.3mf" }),
-                Specification = specification ?? JsonSerializer.SerializeToElement(new { targetTemperatureC = 210 }),
+                // Issue #2180, gap 4: temperature_tower now declares required setup inputs, so the
+                // default specification must carry them (in range) or CreateAttemptAsync rejects
+                // with a validation error unrelated to what this saga suite is actually exercising.
+                Specification = specification ?? JsonSerializer.SerializeToElement(new
+                {
+                    targetTemperatureC = 210,
+                    start_temperature_c = 220,
+                    end_temperature_c = 190,
+                }),
                 ProfileSnapshotIds = JsonSerializer.SerializeToElement(Array.Empty<Guid>()),
                 PrinterConfigurationRevision = 1,
             },
@@ -769,5 +778,13 @@ public sealed class CalibrationOrchestrationSagaServiceTests
                 1,
                 sourceSha256);
         }
+    }
+
+    private sealed class FakeFilamentProfilePromotionGateway : IFilamentProfilePromotionGateway
+    {
+        public Task<FilamentProfilePromotionResult> PromoteAsync(
+            FilamentProfilePromotionRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(FilamentProfilePromotionResult.Ok(Guid.NewGuid()));
     }
 }

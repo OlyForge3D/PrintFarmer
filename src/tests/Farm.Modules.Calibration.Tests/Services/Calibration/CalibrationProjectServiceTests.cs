@@ -1585,7 +1585,8 @@ public sealed class CalibrationProjectServiceTests
             db,
             new TestCalibrationBlobStore(),
             TimeProvider.System,
-            NullLogger<CalibrationProjectService>.Instance);
+            NullLogger<CalibrationProjectService>.Instance,
+            new FakeFilamentProfilePromotionGateway());
 
     private static CalibrationProjectCreateRequest CreateProjectRequest(Guid printerId, string requestId) =>
         new()
@@ -1708,5 +1709,22 @@ public sealed class CalibrationProjectServiceTests
                 sourceSha256);
         }
     }
-}
 
+    /// <summary>
+    /// Always-succeeds fake for <see cref="IFilamentProfilePromotionGateway"/> (issue #2180,
+    /// gap 1). Returns a fresh <see cref="Guid"/> as the promoted profile id so promotion tests
+    /// can assert a project reaching <c>Completed</c> is idempotently promoted exactly once.
+    /// </summary>
+    private sealed class FakeFilamentProfilePromotionGateway : IFilamentProfilePromotionGateway
+    {
+        public int CallCount { get; private set; }
+
+        public Task<FilamentProfilePromotionResult> PromoteAsync(
+            FilamentProfilePromotionRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(FilamentProfilePromotionResult.Ok(Guid.NewGuid()));
+        }
+    }
+}
