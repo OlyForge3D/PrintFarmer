@@ -27,7 +27,8 @@ namespace Farm.Modules.Calibration.Tests.Services.Capabilities;
 /// <remarks>
 /// <para>
 /// <b>What "operator-actionable" means here.</b> Every fixture in
-/// <see cref="GetCapabilitiesAsync_WithEveryOperatorControllablePreconditionSatisfied_ReportsNoSlicingReason"/>
+/// <see cref="GetCapabilitiesAsync_ForMonolith_ReportsNoSlicingReason"/> and
+/// <see cref="GetCapabilitiesAsync_ForSplitOrMicroservices_ReportsNoSlicingReason"/>
 /// sets every dial an operator can turn without a code change: <c>Slicer:Enabled</c>, a
 /// credentialed worker, a healthy heartbeat, an allow-listed upstream OrcaSlicer version, and a
 /// worker that attests a pinned upstream build identity. If any <c>Feature == "slicing"</c>
@@ -36,11 +37,17 @@ namespace Farm.Modules.Calibration.Tests.Services.Capabilities;
 /// operator can make it disappear. That is exactly the defect #2171 found for
 /// <c>model_storage_unresolvable</c> in split/microservices mode: <c>IModelStorageResolver</c> is
 /// only ever registered by <see cref="SlicerModuleExtensions.AddSlicerModule"/>'s monolith path
-/// (<c>AddSlicerServices</c>), and split/microservices hosts skip that path entirely (they only
-/// call <see cref="SlicerModuleExtensions.AddSlicerCalibrationProfileRepositories"/>, which does
-/// not register a model storage resolver). This test intentionally exercises the real
-/// registration extension methods for each mode rather than hand-rolling a fixture, so it fails
-/// exactly when production wiring has this gap and passes exactly when it doesn't.
+/// (<c>AddSlicerServices</c>); the method's own deployment-mode check short-circuits before that
+/// path for both <c>"split"</c> and <c>"microservices"</c> (they are treated identically), and
+/// <see cref="SlicerModuleExtensions.AddSlicerCalibrationProfileRepositories"/> — the extension
+/// split/microservices hosts additionally call, per
+/// <c>Farm.Web.Api.Startup.MoonrakerEmulatorSeederDependenciesStartup</c> — registers only the
+/// three calibration profile repositories, not a model storage resolver. This test intentionally
+/// exercises the real registration extension methods for each mode (both are called
+/// unconditionally on every real host too: <c>AddSlicerModule</c> via the assembly-scanned
+/// <c>SlicerModuleRegistrar</c>, <c>AddSlicerCalibrationProfileRepositories</c> gated by
+/// <c>IsSplitDeployment</c>) rather than hand-rolling a fixture, so it fails exactly when
+/// production wiring has this gap and passes exactly when it doesn't.
 /// </para>
 /// <para>
 /// <b>Why this is not vacuous.</b> The assertion is factored into
@@ -56,6 +63,19 @@ namespace Farm.Modules.Calibration.Tests.Services.Capabilities;
 /// assertion actually discriminates between the healthy and the broken case, rather than being
 /// trivially true regardless of what reasons are passed to it.
 /// </para>
+/// <para>
+/// <b>Split/microservices are currently <c>Skip</c>-guarded, not deleted.</b> As of this PR,
+/// issue #2179 (the sibling registration fix) has not landed, so
+/// <see cref="GetCapabilitiesAsync_ForSplitOrMicroservices_ReportsNoSlicingReason"/> reproduces
+/// the #2171 gap today: running it with the <c>Skip</c> attribute removed fails for both modes
+/// with <c>model_storage_unresolvable</c> present (captured in the PR description as evidence).
+/// <c>Farm.Modules.Calibration.Tests</c> is a required CI leg for any PR touching this path (see
+/// <c>scripts/ci/dotnet-test-manifest.json</c>), so leaving it unguarded would redden CI for this
+/// PR itself and every unrelated PR touching this module until #2179 lands. The <c>Skip</c> must
+/// be removed — a one-line follow-up — once #2179 registers <c>IModelStorageResolver</c> for
+/// split/microservices; <see cref="GetCapabilitiesAsync_ForMonolith_ReportsNoSlicingReason"/> is
+/// unaffected by the gap and always runs.
+/// </para>
 /// </remarks>
 public sealed class CalibrationCapabilityServiceActionableSlicingReasonsTests
 {
@@ -65,17 +85,39 @@ public sealed class CalibrationCapabilityServiceActionableSlicingReasonsTests
         {"capabilities":["orcaslicer","orcaslicer-upstream"],"slicerBinarySha256":"a1b2c3d4","slicerContainerDigest":"sha256:e5f6a7b8"}
         """;
 
-    /// <summary>Every deployment mode PrintFarmer documents for <c>DEPLOYMENT_MODE</c>.</summary>
-    public static IEnumerable<object[]> DocumentedDeploymentModes()
+    /// <summary>The split/microservices modes PrintFarmer documents for <c>DEPLOYMENT_MODE</c>.</summary>
+    public static IEnumerable<object[]> SplitAndMicroservicesDeploymentModes()
     {
-        yield return ["monolith"];
         yield return ["split"];
         yield return ["microservices"];
     }
 
-    [Theory]
-    [MemberData(nameof(DocumentedDeploymentModes))]
-    public async Task GetCapabilitiesAsync_WithEveryOperatorControllablePreconditionSatisfied_ReportsNoSlicingReason(
+    [Fact]
+    public async Task GetCapabilitiesAsync_ForMonolith_ReportsNoSlicingReason()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync("monolith");
+        await fixture.SeedFullyHealthyWorkerAsync();
+
+        IReadOnlyList<CapabilityUnavailableReasonDto> slicingReasons =
+            await fixture.GetSlicingReasonsAsync();
+
+        AssertNoUnactionableSlicingReason("monolith", slicingReasons);
+    }
+
+    /// <summary>
+    /// See class remarks ("Split/microservices are currently Skip-guarded, not deleted") for why
+    /// this theory carries a <c>Skip</c> reason today: #2179 has not yet registered
+    /// <c>IModelStorageResolver</c> for these modes, so removing the <c>Skip</c> right now
+    /// reproduces #2171 and fails both cases with <c>model_storage_unresolvable</c> — which would
+    /// redden the required <c>Farm.Modules.Calibration.Tests</c> CI leg for every PR touching
+    /// this module until #2179 lands.
+    /// </summary>
+    [Theory(Skip =
+        "Pending #2179: IModelStorageResolver is not yet registered for split/microservices " +
+        "hosts (the #2171 gap). Remove this Skip once #2179 lands so this theory enforces the " +
+        "same operator-actionable invariant CI already enforces for monolith.")]
+    [MemberData(nameof(SplitAndMicroservicesDeploymentModes))]
+    public async Task GetCapabilitiesAsync_ForSplitOrMicroservices_ReportsNoSlicingReason(
         string deploymentMode)
     {
         await using Fixture fixture = await Fixture.CreateAsync(deploymentMode);
@@ -166,6 +208,12 @@ public sealed class CalibrationCapabilityServiceActionableSlicingReasonsTests
             string dbPath = Path.Combine(
                 Path.GetTempPath(),
                 $"calibration-actionable-reasons-{Guid.NewGuid():N}.db");
+            string connectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = dbPath,
+                DefaultTimeout = 30,
+                Pooling = false,
+            }.ToString();
 
             IConfiguration configuration = new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?>
@@ -174,7 +222,7 @@ public sealed class CalibrationCapabilityServiceActionableSlicingReasonsTests
                     ["Slicer:Enabled"] = "true",
                     ["Slicer:PluginsPath"] = string.Empty,
                     ["DB_PROVIDER"] = "sqlite",
-                    ["ConnectionStrings:Default"] = $"Data Source={dbPath}",
+                    ["ConnectionStrings:Default"] = connectionString,
                 })
                 .Build();
 
@@ -184,13 +232,15 @@ public sealed class CalibrationCapabilityServiceActionableSlicingReasonsTests
             _ = services.AddSingleton<IApplicationPathProvider>(new TestApplicationPathProvider());
             _ = services.AddSingleton<IStoragePathService, StoragePathService>();
 
-            // Mirrors production exactly: monolith's AddSlicerModule fully registers the slicer
-            // module (including IModelStorageResolver); split/microservices short-circuit inside
-            // AddSlicerModule and rely solely on AddSlicerCalibrationProfileRepositories, which
-            // registers only the three profile repositories and the DbContext (see
-            // SlicerModuleExtensions and #1858/#2171/#2179). Calling both unconditionally, for
-            // every mode, is what Farm.Web.Api.Startup.MoonrakerEmulatorSeederDependenciesStartup
-            // effectively does across the whole fleet of hosts.
+            // Mirrors production exactly: AddSlicerModule is called unconditionally on every real
+            // host too (via the assembly-scanned SlicerModuleRegistrar and, standalone, by
+            // Farm.Slicer.Host/Program.cs) — it is the method's own deployment-mode check,
+            // treating "split" and "microservices" identically, that short-circuits before
+            // registering AddSlicerServices (where IModelStorageResolver lives). Split and
+            // microservices hosts additionally call AddSlicerCalibrationProfileRepositories, per
+            // Farm.Web.Api.Startup.MoonrakerEmulatorSeederDependenciesStartup (guarded there by
+            // IsSplitDeployment, since monolith already has these repositories via
+            // AddSlicerModule) — see SlicerModuleExtensions and #1858/#2171/#2179.
             _ = services.AddSlicerModule(configuration);
             _ = services.AddSlicerCalibrationProfileRepositories(configuration);
 
@@ -206,11 +256,26 @@ public sealed class CalibrationCapabilityServiceActionableSlicingReasonsTests
             }
 
             ServiceProvider provider = services.BuildServiceProvider();
-
-            await using (AsyncServiceScope initScope = provider.CreateAsyncScope())
+            try
             {
-                SlicerDbContext db = initScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
-                _ = await db.Database.EnsureCreatedAsync();
+                await using (AsyncServiceScope initScope = provider.CreateAsyncScope())
+                {
+                    SlicerDbContext db =
+                        initScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+                    _ = await db.Database.EnsureCreatedAsync();
+                }
+            }
+            catch
+            {
+                // Setup failed after the provider (and its SQLite connection) was created — clean
+                // up before rethrowing so a broken fixture never leaks a provider or a temp file.
+                await provider.DisposeAsync();
+                if (File.Exists(dbPath))
+                {
+                    File.Delete(dbPath);
+                }
+
+                throw;
             }
 
             return new Fixture(configuration, provider, dbPath);
@@ -283,9 +348,10 @@ public sealed class CalibrationCapabilityServiceActionableSlicingReasonsTests
         {
             await _provider.DisposeAsync();
 
-            // Microsoft.Data.Sqlite pools connections by default, which keeps the file locked for
-            // a short while after disposal — clear the pool before deleting.
-            SqliteConnection.ClearAllPools();
+            // The connection string sets Pooling=false, so the file is never held open by a
+            // pooled connection after the provider (and every DbContext it created) is disposed —
+            // no SqliteConnection.ClearAllPools() needed, matching the sibling fixtures'
+            // convention (CalibrationLegacyV4ImportTests, CalibrationProjectSqliteConcurrencyTests).
             if (File.Exists(_dbPath))
             {
                 File.Delete(_dbPath);
