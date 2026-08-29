@@ -1316,15 +1316,18 @@ public sealed class CalibrationProjectServiceTests
     }
 
     [Fact]
-    public async Task GetInFlightAsync_AwaitingPrintWithoutPrintJobId_StillOutranksNewerPendingRetry()
+    public async Task GetInFlightAsync_AwaitingPrintWithoutPrintJobId_StillOutranksNewerRunningNonPrintStep()
     {
         // Reflects real production behavior: the saga's ad-hoc print-dispatch path
         // (RunSendingToPrinterStepAsync -> IPrintDispatchGateway.SendToPrinterAsync) never creates
         // a queued PrintJob, so CalibrationOrchestration.PrintJobId is always null even while a
         // print is genuinely running - only CurrentStep == "awaiting-print" is a signal the saga
-        // actually populates. The priority ranking must treat that step alone as "a physical print
-        // is underway," not merely rely on PrintJobId, or this whole endpoint would never actually
-        // distinguish printing from drafting outside hand-seeded test data.
+        // actually populates. The competing orchestration is deliberately ALSO Running (not merely
+        // Pending) with a newer timestamp: both score the same 3-point status tier, so if
+        // IsPhysicalPrintUnderway's CurrentStep check were reverted to rely on PrintJobId alone,
+        // both rows would tie at priority 3 and the tiebreak (ThenByDescending(UpdatedAtUtc)) would
+        // surface the newer non-printing row instead - making this test fail if the fix regresses,
+        // unlike a Pending competitor whose lower status tier alone would carry the assertion.
         await using AppDbContext db = CreateContext();
         Guid printerId = Guid.NewGuid();
         CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
@@ -1357,8 +1360,9 @@ public sealed class CalibrationProjectServiceTests
             Id = Guid.NewGuid(),
             ProjectId = project.Value.Id,
             AttemptId = newerAttemptId,
-            CurrentStep = CalibrationSagaSteps.Created,
-            Status = CalibrationOrchestrationStatus.Pending,
+            CurrentStep = CalibrationSagaSteps.SendingToPrinter,
+            Status = CalibrationOrchestrationStatus.Running,
+            PrintJobId = null,
             OperationId = $"operation-{newerAttemptId:N}",
             CreatedAtUtc = newerTouchedUtc,
             UpdatedAtUtc = newerTouchedUtc,
@@ -1373,7 +1377,8 @@ public sealed class CalibrationProjectServiceTests
         _ = result.Value!.Orchestration.Should().NotBeNull();
         _ = result.Value.Orchestration!.Id.Should().Be(runningOrchestrationId,
             "awaiting-print alone means a physical print is dispatched, even without a PrintJobId, " +
-            "and must never be masked by a more-recently-touched but less-advanced orchestration");
+            "and must outrank a more-recently-touched Running orchestration that has not yet " +
+            "reached that step, even though both share the same Running status tier");
         _ = result.Value.Orchestration.PrintJobId.Should().BeNull();
         _ = result.Value.Orchestration.CurrentStep.Should().Be(CalibrationSagaSteps.AwaitingPrint);
     }

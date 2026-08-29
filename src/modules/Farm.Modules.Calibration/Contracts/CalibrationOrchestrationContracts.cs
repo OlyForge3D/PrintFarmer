@@ -69,10 +69,11 @@ public sealed record CalibrationOrchestrationDto(
 /// <see cref="Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException"/>. That failure still
 /// prevents the loser's outcome from being persisted, but it cannot un-send an HTTP call that
 /// already reached a printer. Closing this fully would mean holding a cross-process lock (e.g. a
-/// database-level row lock) for the whole step, including its side effect, not just the checkpoint
-/// read-then-write - a change to how every saga step executes, not specific to take-over, and out
-/// of scope for the take-over semantics this type documents. It is called out explicitly here
-/// rather than left implicit because it is the kind of gap that is easy to assume
+/// database-level advisory/row lock (e.g. <c>SELECT ... FOR UPDATE</c>) held for the whole step
+/// including its side effect, not just the checkpoint read-then-write - a change to how every saga
+/// step executes, not specific to take-over, and out of scope for the take-over semantics this
+/// type documents. Tracked as a follow-up in issue #2186 rather than left only as a doc comment; it
+/// is called out explicitly here because it is the kind of gap that is easy to assume
 /// <see cref="ExpectedRevision"/> already closes.
 /// </remarks>
 public sealed class CalibrationOrchestrationAdvanceRequest

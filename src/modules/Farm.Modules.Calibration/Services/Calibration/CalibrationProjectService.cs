@@ -289,10 +289,10 @@ public sealed class CalibrationProjectService(
         // unique-indexed per ATTEMPT, not per project) - so more than one non-terminal
         // orchestration CAN and does coexist for one project (e.g. a retry attempt started while
         // an earlier one is still mid-print). Picking "most recently touched" alone would let a
-        // brand-new Pending retry mask an older Running orchestration that already has a
-        // PrintJobId - exactly the wasted-filament case this endpoint exists to prevent. Load the
-        // (small, per-project) candidate set and rank in memory: a physical print in progress
-        // (PrintJobId set) always outranks everything else, then Running outranks
+        // brand-new Pending retry mask an older Running orchestration that is physically printing
+        // (see IsPhysicalPrintUnderway) - exactly the wasted-filament case this endpoint exists to
+        // prevent. Load the (small, per-project) candidate set and rank in memory: a physical
+        // print in progress always outranks everything else, then Running outranks
         // WaitingToRetry outranks Pending, then most recently touched, with a fully deterministic
         // tiebreak so results are stable across providers and ticks that share a timestamp.
         List<CalibrationOrchestration> nonTerminalOrchestrations = await _dbContext.CalibrationOrchestrations
