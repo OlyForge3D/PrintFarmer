@@ -48,6 +48,9 @@ The main user-facing deployment script that handles interactive setup, validatio
 - Database credential management
 - Port conflict detection and remapping
 - Pre/post-deployment health verification
+- Bounded redeploy cleanup that keeps up to 20 GB of recent BuildKit cache,
+  removes dangling images, and reapplies the cache bound without pruning volumes
+  or tagged offline assets
 
 ### 2. Generation Layer: `scripts/docker/compose-generator.sh`
 

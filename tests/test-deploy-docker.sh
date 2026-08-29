@@ -138,7 +138,7 @@ EOF
 }
 
 test_redeploy_cleanup_prunes_only_unused_images_and_build_cache() {
-    start_test "redeploy cleanup prunes unused images and build cache"
+    start_test "redeploy cleanup bounds unused build cache before pruning images"
 
     local helper_script="$TEST_TEMP_DIR/redeploy-cleanup-helper.sh"
     local docker_calls="$TEST_TEMP_DIR/redeploy-cleanup-docker-calls"
@@ -149,13 +149,17 @@ source "$DEPLOY_SCRIPT"
 DOCKER_CALLS="$docker_calls"
 docker() {
     printf '%s\n' "\$*" >> "\$DOCKER_CALLS"
+    if [[ "\$*" == "builder prune --help" ]]; then
+        printf '%s\n' "      --max-used-space bytes"
+    fi
 }
 
 DRY_RUN=false
 cleanup_redeploy_docker_artifacts
-grep -Fxq "image prune --force" "\$DOCKER_CALLS"
-grep -Fxq "builder prune --force" "\$DOCKER_CALLS"
-! grep -q -- "--all" "\$DOCKER_CALLS"
+[[ "\$(sed -n '1p' "\$DOCKER_CALLS")" == "builder prune --help" ]]
+[[ "\$(sed -n '2p' "\$DOCKER_CALLS")" == "builder prune --all --force --max-used-space 20GB" ]]
+[[ "\$(sed -n '3p' "\$DOCKER_CALLS")" == "image prune --force" ]]
+[[ "\$(sed -n '4p' "\$DOCKER_CALLS")" == "builder prune --all --force --max-used-space 20GB" ]]
 ! grep -q "volume" "\$DOCKER_CALLS"
 
 : > "\$DOCKER_CALLS"
@@ -166,7 +170,29 @@ EOF
     chmod +x "$helper_script"
 
     assert_exit_code 0 "$helper_script" \
-        "Cleanup should prune unused images/cache, preserve volumes, and skip dry-runs"
+        "Cleanup should bound cache, prune images afterward, preserve volumes, and skip dry-runs"
+
+    local fallback_script="$TEST_TEMP_DIR/redeploy-cleanup-fallback-helper.sh"
+    local fallback_calls="$TEST_TEMP_DIR/redeploy-cleanup-fallback-calls"
+    cat > "$fallback_script" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$DEPLOY_SCRIPT"
+DOCKER_CALLS="$fallback_calls"
+docker() {
+    printf '%s\n' "\$*" >> "\$DOCKER_CALLS"
+}
+
+DRY_RUN=false
+cleanup_redeploy_docker_artifacts
+[[ "\$(grep -Fxc "builder prune --all --force --filter until=24h" "\$DOCKER_CALLS")" -eq 2 ]]
+[[ "\$(sed -n '3p' "\$DOCKER_CALLS")" == "image prune --force" ]]
+! grep -q "volume" "\$DOCKER_CALLS"
+EOF
+    chmod +x "$fallback_script"
+
+    assert_exit_code 0 "$fallback_script" \
+        "Older Docker versions should prune unused cache by age without touching volumes"
 
     local redeploy_helper="$TEST_TEMP_DIR/redeploy-cleanup-failure-helper.sh"
     local redeploy_calls="$TEST_TEMP_DIR/redeploy-cleanup-failure-calls"
@@ -215,6 +241,9 @@ setup_initial_admin() { :; }
 print_calibration_status_line() { :; }
 docker() {
     printf '%s\n' "\$*" >> "\$REDEPLOY_CALLS"
+    if [[ "\$*" == "builder prune --help" ]]; then
+        printf '%s\n' "      --max-used-space bytes"
+    fi
     [[ "\$*" != "image prune --force" ]]
 }
 
@@ -226,12 +255,14 @@ EOF
         "A cleanup failure should not fail an otherwise successful redeploy"
     assert_equals "containers-started" "$(sed -n '1p' "$redeploy_calls")" \
         "Redeploy should start rebuilt containers before cleanup begins"
-    assert_equals "image prune --force" "$(sed -n '2p' "$redeploy_calls")" \
-        "Image cleanup should begin only after rebuilt containers start"
+    assert_equals "builder prune --help" "$(sed -n '2p' "$redeploy_calls")" \
+        "Cleanup capability detection should begin only after rebuilt containers start"
+    assert_equals "builder prune --all --force --max-used-space 20GB" "$(sed -n '3p' "$redeploy_calls")" \
+        "Redeploy should bound unused build cache before image cleanup"
     assert_file_has_exact_line "$redeploy_calls" "image prune --force" \
-        "Redeploy call site should invoke image cleanup"
-    assert_file_has_exact_line "$redeploy_calls" "builder prune --force" \
-        "Cleanup should continue to builder pruning after an image prune failure"
+        "Cleanup should still attempt image pruning after cache cleanup"
+    assert_equals "builder prune --all --force --max-used-space 20GB" "$(sed -n '5p' "$redeploy_calls")" \
+        "Redeploy should reapply the cache bound after image cleanup releases shared layers"
     assert_contains "$(cat "$redeploy_warnings")" \
         "Redeployment completed, but some unused Docker artifacts could not be pruned" \
         "Redeploy call site should surface cleanup failure as a warning"
