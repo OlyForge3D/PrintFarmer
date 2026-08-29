@@ -45,6 +45,24 @@ namespace Farm.Modules.Calibration.Tests.Services.Calibration;
 /// never picked up by the DbHeavy job because it targets a different assembly). This mirrors the
 /// existing, untagged <c>CalibrationOrchestrationTakeOverConcurrencyTests</c> in this same project.
 /// </para>
+/// <para>
+/// The race is fired by capturing both step-method calls' <c>Task</c>s without awaiting either
+/// individually, then awaiting both together via <c>Task.WhenAll</c> - this assertion's validity
+/// does NOT depend on achieving true instruction-level interleaving between the two. Both
+/// <c>view1</c>/<c>view2</c> are separately-tracked snapshots that captured the SAME starting
+/// <c>Revision</c> before the race (asserted above), and <c>Revision</c> is a real EF Core
+/// concurrency token (<c>CalibrationConfiguration</c>). Whichever racer's claim-acquire
+/// <c>SaveChangesAsync</c> commits FIRST - whether the two truly overlapped or one ran to
+/// completion, synchronously, before the other's continuation was ever scheduled - moves the row
+/// to <c>Revision + 1</c>; the other racer's own save is still fenced against its own captured
+/// original value of <c>Revision</c> and therefore always fails with
+/// <see cref="DbUpdateConcurrencyException"/> regardless of scheduling. A test relying on true
+/// interleaving to prove correctness would need a synchronization barrier pausing both racers at
+/// the same instant (and, in this codebase, invoking one racer via <c>Task.Run</c> to force it
+/// onto its own thread-pool thread trips <c>IDISP013</c>'s disposal-safety heuristic against the
+/// enclosing <c>await using</c> contexts); this test does not need that, because the property
+/// under test is enforced by optimistic-concurrency fencing rather than by timing.
+/// </para>
 /// </remarks>
 public sealed class CalibrationOrchestrationClaimFencingConcurrencyTests : IAsyncDisposable
 {
@@ -147,6 +165,90 @@ public sealed class CalibrationOrchestrationClaimFencingConcurrencyTests : IAsyn
         _ = persisted.Revision.Should().Be(revisionBeforeRace + 1, "exactly one claim-acquire save committed");
     }
 
+    /// <summary>
+    /// Mirrors <see cref="TwoContexts_RaceSendingToPrinterStep_OnlyOneGatewayInvocation"/> for the
+    /// <c>slicing</c> step's identical claim-then-dispatch code path (Bishop's non-blocking review
+    /// observation on issue #2188: only <c>sending-to-printer</c> was directly raced, leaving
+    /// <see cref="CalibrationOrchestrationSagaService.RunSlicingStepAsync"/>'s own call to the same
+    /// (private) claim-acquire method unproven by a direct test even though it shares the same
+    /// implementation as the sending-to-printer step already raced above).
+    /// </summary>
+    [Fact]
+    public async Task TwoContexts_RaceSlicingStep_OnlyOneGatewayInvocation()
+    {
+        // Arrange: seed a project/attempt/orchestration and leave the orchestration at
+        // "slicing" - RunSlicingStepAsync only needs the attempt's method to be parseable, no
+        // slice job needs to already exist (unlike the sending-to-printer step above).
+        Guid ownerId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        Guid attemptId;
+        Guid orchestrationId;
+        await using (AppDbContext seedContext = CreateContext())
+        {
+            _ = await seedContext.Database.EnsureCreatedAsync();
+            SeedPrinter(seedContext, printerId);
+
+            CalibrationActor actor = new(ownerId, "owner", false);
+            CalibrationApiResult<CalibrationProjectDto> project = await CreateProjectService(seedContext)
+                .CreateProjectAsync(CreateProjectRequest(printerId), actor, CancellationToken.None);
+            _ = project.StatusCode.Should().Be(StatusCodes.Status201Created);
+            Guid projectId = project.Value!.Id;
+
+            CalibrationApiResult<CalibrationAttemptDto> attempt = await CreateProjectService(seedContext)
+                .CreateAttemptAsync(projectId, CreateAttemptRequest(), actor, CancellationToken.None);
+            _ = attempt.StatusCode.Should().Be(StatusCodes.Status201Created);
+            attemptId = attempt.Value!.Id;
+
+            CalibrationOrchestration orchestration = await seedContext.CalibrationOrchestrations
+                .SingleAsync(o => o.AttemptId == attemptId);
+            orchestrationId = orchestration.Id;
+            orchestration.CurrentStep = CalibrationSagaSteps.Slicing;
+            orchestration.Revision++;
+            _ = await seedContext.SaveChangesAsync();
+        }
+
+        CountingSliceSubmissionGateway sharedGateway = new();
+
+        await using AppDbContext ctx1 = CreateContext();
+        await using AppDbContext ctx2 = CreateContext();
+
+        CalibrationOrchestration view1 = await ctx1.CalibrationOrchestrations.SingleAsync(o => o.Id == orchestrationId);
+        CalibrationOrchestration view2 = await ctx2.CalibrationOrchestrations.SingleAsync(o => o.Id == orchestrationId);
+        CalibrationAttempt attempt1 = await ctx1.CalibrationAttempts.SingleAsync(a => a.Id == attemptId);
+        CalibrationAttempt attempt2 = await ctx2.CalibrationAttempts.SingleAsync(a => a.Id == attemptId);
+        _ = view1.Revision.Should().Be(view2.Revision, "both racers must start from the same committed snapshot");
+        _ = view1.LeaseOwner.Should().BeNull("no claim has been taken yet");
+        long revisionBeforeRace = view1.Revision;
+
+        CalibrationOrchestrationSagaService saga1 = CreateSaga(ctx1, sharedGateway, new NoopPrintDispatchGateway());
+        CalibrationOrchestrationSagaService saga2 = CreateSaga(ctx2, sharedGateway, new NoopPrintDispatchGateway());
+        DateTime nowUtc = DateTime.UtcNow;
+
+        // Act - see the remarks on the sending-to-printer race above for why this assertion's
+        // validity does not depend on true instruction-level overlap between t1 and t2.
+        Task<CalibrationOrchestrationSagaService.StepOutcome> t1 =
+            saga1.RunSlicingStepAsync(view1, attempt1, nowUtc, CancellationToken.None);
+        Task<CalibrationOrchestrationSagaService.StepOutcome> t2 =
+            saga2.RunSlicingStepAsync(view2, attempt2, nowUtc, CancellationToken.None);
+        CalibrationOrchestrationSagaService.StepOutcome[] outcomes = await Task.WhenAll(t1, t2);
+
+        int wonClaimCount = outcomes.Count(o => !o.ClaimConflict);
+        int lostClaimCount = outcomes.Count(o => o.ClaimConflict);
+        _ = wonClaimCount.Should().Be(1, "exactly one racer must win the claim");
+        _ = lostClaimCount.Should().Be(1, "exactly one racer must observe ClaimLost() without calling the gateway");
+        _ = sharedGateway.CallCount.Should().Be(1, "exactly one gateway invocation must occur for the whole race");
+
+        CalibrationOrchestrationSagaService.StepOutcome winnerOutcome = outcomes.Single(o => !o.ClaimConflict);
+        _ = winnerOutcome.Changed.Should().BeTrue();
+        _ = winnerOutcome.NextStep.Should().Be(CalibrationSagaSteps.AwaitingSlice);
+
+        await using AppDbContext verifyContext = CreateContext();
+        CalibrationOrchestration persisted = await verifyContext.CalibrationOrchestrations
+            .SingleAsync(o => o.Id == orchestrationId);
+        _ = persisted.LeaseOwner.Should().NotBeNull("the winning claim's lease is still recorded on the row");
+        _ = persisted.Revision.Should().Be(revisionBeforeRace + 1, "exactly one claim-acquire save committed");
+    }
+
     private AppDbContext CreateContext()
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
@@ -178,10 +280,16 @@ public sealed class CalibrationOrchestrationClaimFencingConcurrencyTests : IAsyn
     private static CalibrationOrchestrationSagaService CreateSaga(
         AppDbContext context,
         IPrintDispatchGateway printDispatchGateway) =>
+        CreateSaga(context, new StubSliceSubmissionGateway(), printDispatchGateway);
+
+    private static CalibrationOrchestrationSagaService CreateSaga(
+        AppDbContext context,
+        ISliceSubmissionGateway sliceSubmissionGateway,
+        IPrintDispatchGateway printDispatchGateway) =>
         new(
             context,
             CreateProjectService(context),
-            new StubSliceSubmissionGateway(),
+            sliceSubmissionGateway,
             printDispatchGateway,
             TimeProvider.System,
             NullLogger<CalibrationOrchestrationSagaService>.Instance);
@@ -232,6 +340,30 @@ public sealed class CalibrationOrchestrationClaimFencingConcurrencyTests : IAsyn
 
         public Task<SliceStatusResult> GetStatusAsync(Guid sliceJobId, CancellationToken ct) =>
             Task.FromResult(SliceStatusResult.Ok("Completed"));
+    }
+
+    /// <summary>Counts real invocations so the test can assert EXACTLY ONE occurred (AC #5).</summary>
+    private sealed class CountingSliceSubmissionGateway : ISliceSubmissionGateway
+    {
+        private int _callCount;
+
+        public int CallCount => _callCount;
+
+        public Task<SliceSubmissionResult> SubmitAsync(CalibrationSliceSubmission submission, CancellationToken ct)
+        {
+            _ = Interlocked.Increment(ref _callCount);
+            return Task.FromResult(SliceSubmissionResult.Ok(Guid.NewGuid()));
+        }
+
+        public Task<SliceStatusResult> GetStatusAsync(Guid sliceJobId, CancellationToken ct) =>
+            Task.FromResult(SliceStatusResult.Ok("Completed"));
+    }
+
+    /// <summary>Used only where the print-dispatch gateway is not the surface under test.</summary>
+    private sealed class NoopPrintDispatchGateway : IPrintDispatchGateway
+    {
+        public Task<PrintDispatchResult> SendToPrinterAsync(Guid sliceJobId, Guid printerId, CancellationToken ct) =>
+            Task.FromResult(PrintDispatchResult.Ok());
     }
 
     /// <summary>Counts real invocations so the test can assert EXACTLY ONE occurred (AC #5).</summary>

@@ -308,6 +308,14 @@ public sealed class CalibrationOrchestrationSagaService(
             return CalibrationApiResult<CalibrationOrchestrationDto>.Success(MapOrchestration(orchestration));
         }
 
+        // Captured before the timeline-event append below, which can (rarely) clear the change
+        // tracker - see the revision re-check after the re-fetch for why this matters (AC #2/#4,
+        // issue #2188 review follow-up). For the two claiming steps this already reflects the
+        // Revision that TryAcquireStepClaimAsync's own successful claim-acquire save committed
+        // (that method mutates orchestration.Revision in place before returning); for every other
+        // step it is simply the unchanged value read at the top of this method.
+        long revisionAtOutcome = orchestration.Revision;
+
         // Append the timeline event through the *first*, dedicated save. AppendAttemptEventAsync
         // may clear the change tracker on a transient DbUpdateException while retrying its own
         // idempotency bookkeeping, so the orchestration row is mutated and saved only afterward,
@@ -342,6 +350,10 @@ public sealed class CalibrationOrchestrationSagaService(
             // actually being recorded - the event *is* the audit trail this saga exists to keep.
             if (!appendResult.IsSuccess)
             {
+                // Release a claim taken above so this attempt's own failure never blocks the next
+                // Advance call for the full StepClaimLeaseDuration (a no-op for steps that never
+                // claim, since LeaseOwner is already null there).
+                await TryReleaseLeaseBestEffortAsync(orchestration, nowUtc, cancellationToken);
                 return CalibrationApiResult<CalibrationOrchestrationDto>.Failure(
                     appendResult.StatusCode,
                     appendResult.Code ?? "calibration_orchestration_event_append_failed");
@@ -350,6 +362,24 @@ public sealed class CalibrationOrchestrationSagaService(
             orchestration = await _dbContext.CalibrationOrchestrations.SingleAsync(
                 candidate => candidate.Id == orchestrationId,
                 cancellationToken);
+
+            // Guard against the narrow window where AppendAttemptEventAsync's own retry cleared
+            // the change tracker above: without that clear, the re-fetch above is identity-resolved
+            // back to this same tracked instance (EF Core never overwrites a still-tracked entity's
+            // properties from a query), so revisionAtOutcome trivially still matches and this is a
+            // no-op. When the tracker *was* cleared, the re-fetch instead returns the database's
+            // current row - if some other process (a reclaim of a lease that outlived
+            // StepClaimLeaseDuration, AC #3/#4) already advanced this orchestration in the
+            // meantime, silently proceeding to ApplyOutcome below would apply this attempt's own
+            // (now-stale) outcome on top of that newer state, potentially duplicating the timeline
+            // event/Revision bump for an external dispatch that has already been superseded. Fail
+            // the same way a losing claim attempt does instead of ever risking that.
+            if (orchestration.Revision != revisionAtOutcome)
+            {
+                return CalibrationApiResult<CalibrationOrchestrationDto>.Failure(
+                    StatusCodes.Status409Conflict,
+                    "calibration_orchestration_advance_conflict");
+            }
         }
 
         ApplyOutcome(orchestration, outcome, nowUtc);
@@ -749,19 +779,36 @@ public sealed class CalibrationOrchestrationSagaService(
     /// gateway call (AC #2/#3).
     /// </para>
     /// <para>
-    /// <b>Duplicate-dispatch-on-reclaim risk (accepted for v1, AC #4):</b> neither
-    /// <c>SliceJobController</c>'s <c>POST /api/slice</c> nor
-    /// <c>SlicePrintBridgeController</c>'s send-to-printer endpoint accepts a caller-supplied
-    /// idempotency/correlation key today (unlike <c>QueueDispatchAttempt.BackendCommandId</c>/
-    /// <c>BackendCorrelationId</c> for print-queue dispatch), so a reclaim that races a
-    /// legitimately-still-running (merely slow, not crashed) first attempt - i.e. one that has
-    /// simply outlived <see cref="StepClaimLeaseDuration"/> - can still result in two real external
-    /// dispatches for the same step. Wiring an idempotency key through would require changing those
-    /// two controllers' own request contracts, which is a cross-cutting change explicitly out of
-    /// this issue's scope (non-goals: do not change any other subsystem, and do not attempt a full
-    /// transactional-outbox migration). This risk is deliberately accepted for v1; closing it is
-    /// left to a future change to those controllers' contracts, optionally alongside the
-    /// transactional-outbox stretch goal called out in issue #2188.
+    /// <b>Duplicate-dispatch-on-reclaim risk (accepted for v1, AC #4):</b>
+    /// <c>SliceJobController</c>'s <c>POST /api/slice</c> does accept and persist caller-supplied
+    /// <c>SubmitSliceJobRequest.OperationId</c>/<c>CorrelationId</c>/<c>Checksum</c> onto the
+    /// resulting <c>SliceJob</c> (there is even a unique index over
+    /// <c>(UserId, IdempotencyScopeId, CorrelationId)</c>) - but
+    /// <c>SliceJobController.SubmitAsync</c> never reads them back to detect or coalesce a
+    /// resubmission into an already-existing job; every call creates a brand-new <c>SliceJob</c>
+    /// row regardless of the correlation id supplied (that dedup-by-correlation-id behavior exists
+    /// only on a separate code path this endpoint never calls -
+    /// <c>SlicerOrchestrator.SubmitJobAsync</c>/<c>EfSliceJobRepository.FindExistingJobAsync</c>).
+    /// <c>SlicePrintBridgeController</c>'s send-to-printer endpoint (<c>SendToPrinterRequest</c>)
+    /// has no idempotency/correlation field at all. So, unlike
+    /// <c>QueueDispatchAttempt.BackendCommandId</c>/<c>BackendCorrelationId</c> for print-queue
+    /// dispatch, simply threading a claim-derived correlation id through this saga's gateway calls
+    /// would not by itself close this risk - it would additionally require adding real dedup logic
+    /// to <c>SliceJobController</c> and a new idempotency field to
+    /// <c>SlicePrintBridgeController</c>, both cross-cutting changes to those controllers' own
+    /// request contracts and explicitly out of this issue's scope (non-goals: do not change any
+    /// other subsystem, and do not attempt a full transactional-outbox migration). This risk is
+    /// deliberately accepted for v1: a reclaim that races a legitimately-still-running (merely
+    /// slow, not crashed) first attempt - i.e. one that has simply outlived
+    /// <see cref="StepClaimLeaseDuration"/> - can still result in two real external dispatches for
+    /// the same step. For <c>sending-to-printer</c> specifically this is a physical-safety-relevant
+    /// risk, not just a bookkeeping one: a real printer could receive two upload/start-print
+    /// commands for the same calibration attempt, which can waste filament/machine time or, if the
+    /// bed was not cleared between the two, cause a physical collision - the same class of risk any
+    /// non-idempotent dispatch retry carries, bounded only by keeping
+    /// <see cref="StepClaimLeaseDuration"/> no longer than the rationale in its own remarks
+    /// requires. Closing it is left to a future change to those controllers' contracts, optionally
+    /// alongside the transactional-outbox stretch goal called out in issue #2188.
     /// </para>
     /// <para>
     /// Internal (rather than private) so <c>Farm.Modules.Calibration.Tests</c> can call it directly
@@ -812,6 +859,49 @@ public sealed class CalibrationOrchestrationSagaService(
             // AdvanceLockedAsync turns that into the existing take-over 409
             // calibration_orchestration_advance_conflict without ever calling the gateway.
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Best-effort release of a claim taken by <see cref="TryAcquireStepClaimAsync"/> when the
+    /// step's own outcome could not be fully applied (currently: a non-throwing
+    /// <c>AppendAttemptEventAsync</c> failure) - so a promptly-failed attempt does not block the
+    /// next <c>Advance</c> call for the whole <see cref="StepClaimLeaseDuration"/> the way a
+    /// crashed/hung process's claim legitimately does (review follow-up, issue #2188 AC #3/#4). A
+    /// no-op for every step that never calls <see cref="TryAcquireStepClaimAsync"/>, since
+    /// <see cref="CalibrationOrchestration.LeaseOwner"/> is already <see langword="null"/> there
+    /// (AC #6).
+    /// </summary>
+    /// <remarks>
+    /// Deliberately swallows a losing <see cref="DbUpdateConcurrencyException"/> instead of
+    /// surfacing it: the caller has already decided to fail this <c>Advance</c> attempt for its
+    /// own reason (the event-append failure), and if another process concurrently reclaimed this
+    /// same lease (because it had already outlived <see cref="StepClaimLeaseDuration"/>) that
+    /// process's own claim/outcome now owns the row - this best-effort release must never fight
+    /// that write or mask the original failure this method was called to report.
+    /// </remarks>
+    private async Task TryReleaseLeaseBestEffortAsync(
+        CalibrationOrchestration orchestration,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
+    {
+        if (orchestration.LeaseOwner is null)
+        {
+            return;
+        }
+
+        orchestration.LeaseOwner = null;
+        orchestration.LeaseExpiresAtUtc = null;
+        orchestration.Revision++;
+        orchestration.UpdatedAtUtc = nowUtc;
+        try
+        {
+            _ = await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Another process already changed this row (most likely: reclaimed the same lease
+            // after it expired) - that write wins, and this best-effort release is simply dropped.
         }
     }
 

@@ -78,16 +78,20 @@ public sealed record CalibrationOrchestrationDto(
 /// <c>created</c>/<c>completed</c> steps) have no external side effect to fence and are
 /// unaffected.
 ///
-/// <b>Residual risk accepted for v1 (documented, not closed).</b> Neither
-/// <c>SliceJobController</c>'s <c>POST /api/slice</c> nor <c>SlicePrintBridgeController</c>'s
-/// send-to-printer endpoint accepts a caller-supplied idempotency/correlation key today (unlike
+/// <b>Residual risk accepted for v1 (documented, not closed).</b> <c>SliceJobController</c>'s
+/// <c>POST /api/slice</c> accepts and persists caller-supplied correlation fields but never uses
+/// them to deduplicate a resubmission, and <c>SlicePrintBridgeController</c>'s send-to-printer
+/// endpoint has no idempotency field at all (unlike
 /// <c>QueueDispatchAttempt.BackendCommandId</c>/<c>BackendCorrelationId</c> for print-queue
 /// dispatch), so a *reclaim* of a lease that has genuinely expired - but whose original holder is
-/// merely slow, not crashed - can still result in two real external dispatches for the same step.
-/// This is deliberately accepted for v1 rather than changing those two controllers' own request
-/// contracts, which would be a cross-cutting change outside this saga; see
-/// <c>TryAcquireStepClaimAsync</c>'s remarks for the full reasoning. A full transactional-outbox
-/// migration of calibration dispatch remains an optional future stretch goal, not attempted here.
+/// merely slow, not crashed - can still result in two real external dispatches for the same step;
+/// for <c>sending-to-printer</c> that means a physical printer could receive two
+/// upload/start-print commands for the same calibration attempt. This is deliberately accepted
+/// for v1 rather than changing those two controllers' own request contracts, which would be a
+/// cross-cutting change outside this saga; see <c>TryAcquireStepClaimAsync</c>'s remarks for the
+/// full reasoning, including exactly what those two endpoints do and do not already support. A
+/// full transactional-outbox migration of calibration dispatch remains an optional future stretch
+/// goal, not attempted here.
 /// </remarks>
 public sealed class CalibrationOrchestrationAdvanceRequest
 {
