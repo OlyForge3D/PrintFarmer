@@ -1464,21 +1464,71 @@ prompt_yes_no() {
 # ============================================================================
 
 # Remove Docker artifacts that are no longer referenced after a redeployment.
-# Volumes and active images are intentionally excluded.
+# Volumes, active images, tagged offline assets, and most-recent build cache are preserved.
+prune_redeploy_build_cache() {
+    local prune_mode="$1"
+
+    case "$prune_mode" in
+        max-used-space)
+            if docker builder prune --all --force --max-used-space 20GB; then
+                return 0
+            fi
+
+            print_warning "Maximum cache-size pruning failed; retrying the legacy Docker cache limit"
+            docker builder prune --all --force --keep-storage 20GB
+            ;;
+        keep-storage)
+            docker builder prune --all --force --keep-storage 20GB
+            ;;
+        age)
+            docker builder prune --all --force --filter "until=24h"
+            ;;
+        *)
+            print_warning "Unknown Docker build-cache prune mode: $prune_mode"
+            return 1
+            ;;
+    esac
+}
+
 cleanup_redeploy_docker_artifacts() {
     if [ "${DRY_RUN:-false}" = "true" ]; then
         return 0
     fi
 
     local cleanup_failed=false
+    local builder_prune_help
+    local builder_prune_mode
 
-    print_info "Pruning dangling Docker images and unused build cache..."
+    print_info "Pruning unused Docker build cache and dangling images..."
+    if ! builder_prune_help=$(docker builder prune --help 2>&1); then
+        print_warning "Unable to detect Docker build-cache pruning capabilities"
+        cleanup_failed=true
+        builder_prune_mode="age"
+    elif grep -q -- "--max-used-space" <<< "$builder_prune_help"; then
+        builder_prune_mode="max-used-space"
+    elif grep -q -- "--keep-storage" <<< "$builder_prune_help"; then
+        builder_prune_mode="keep-storage"
+    else
+        print_warning "Docker does not support size-bounded cache pruning; removing unused cache older than 24 hours"
+        builder_prune_mode="age"
+    fi
+
+    if ! prune_redeploy_build_cache "$builder_prune_mode"; then
+        print_warning "Unable to prune unused Docker build cache"
+        cleanup_failed=true
+    fi
+
+    # BuildKit cache can retain old image layers. Prune images only after releasing
+    # those references so completed redeploys do not leave generations of dangling images.
     if ! docker image prune --force; then
         print_warning "Unable to prune dangling Docker images"
         cleanup_failed=true
     fi
-    if ! docker builder prune --force; then
-        print_warning "Unable to prune unused Docker build cache"
+
+    # Removing dangling images can make their shared BuildKit layers reclaimable.
+    # Repeat the bounded prune so the configured cache ceiling is actually reached.
+    if ! prune_redeploy_build_cache "$builder_prune_mode"; then
+        print_warning "Unable to finish pruning unused Docker build cache"
         cleanup_failed=true
     fi
 
@@ -1486,7 +1536,7 @@ cleanup_redeploy_docker_artifacts() {
         return 1
     fi
 
-    print_success "Dangling Docker images and unused build cache pruned"
+    print_success "Unused Docker build cache and dangling images pruned"
 }
 
 # Pull all base images from registry
@@ -7504,8 +7554,8 @@ redeploy_existing() {
     # Deploy with rebuild
     deploy_containers
 
-    # When requested, --no-cache still rebuilds application layers; pruning without
-    # --all preserves tagged offline assets and shared-host caches after startup.
+    # Keep a bounded recent cache for fast rebuilds. Cleanup alternates cache and
+    # image pruning because each can release references held by the other.
     cleanup_redeploy_docker_artifacts \
         || print_warning "Redeployment completed, but some unused Docker artifacts could not be pruned"
 
