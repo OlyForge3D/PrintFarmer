@@ -4,6 +4,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Modules.Calibration.Contracts;
 using Farm.Modules.Calibration.Services.Calibration;
+using Farm.Slicer.Module.Models;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -161,7 +162,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
         (Guid orchestrationId, _) = await CreateProjectAndAttemptAsync(
             actor,
             projectService,
-            methodName: CalibrationMethodNames.Retraction);
+            methodName: CalibrationMethods.ToWireName(CalibrationMethod.Retraction));
 
         _ = await AdvanceAsync(saga, orchestrationId, actor); // created -> cloning-profile
         _ = await AdvanceAsync(saga, orchestrationId, actor); // cloning-profile -> slicing
@@ -611,7 +612,7 @@ public sealed class CalibrationOrchestrationSagaServiceTests
     private static async Task<(Guid OrchestrationId, Guid AttemptId)> CreateProjectAndAttemptAsync(
         ICalibrationProjectService projectService,
         CalibrationActor actor,
-        string methodName = CalibrationMethodNames.Temperature) =>
+        string methodName = "temperature_tower") =>
         await CreateProjectAndAttemptAsync(actor, projectService, methodName);
 
     private static async Task<(Guid OrchestrationId, Guid AttemptId)> CreateProjectAndAttemptAsync(

@@ -7,6 +7,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.PrinterCalibration;
 using Farm.Modules.Calibration.Contracts;
+using Farm.Slicer.Module.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -787,7 +788,7 @@ public sealed class CalibrationProjectService(
         bool methodChangingToRecognized = draft is not null &&
             !string.Equals(draft.Method, trimmedMethod, StringComparison.Ordinal);
         if ((isNewDraft || methodChangingToRecognized) &&
-            CalibrationMethodNames.TryParse(trimmedMethod, out CalibrationMethod parsedMethod))
+            CalibrationMethods.TryParse(trimmedMethod, out CalibrationMethod parsedMethod))
         {
             int requestedIndex = CalibrationMethodSteps.IndexOf(parsedMethod, stepId);
             List<string> existingStepIds = await _dbContext.CalibrationDrafts
@@ -3008,13 +3009,13 @@ public sealed class CalibrationProjectService(
     /// <returns>A validation error code, or <see langword="null"/> when no range applies or the value is in range.</returns>
     private static string? ValidateMeasurementRange(string attemptMethod, JsonElement measurements)
     {
-        if (!CalibrationMethodNames.TryParse(attemptMethod, out CalibrationMethod method))
+        if (!CalibrationMethods.TryParse(attemptMethod, out CalibrationMethod method))
         {
             return null;
         }
 
         CalibrationMeasurementRange? range =
-            CalibrationMeasurementRanges.ForKind(CalibrationMethodNames.ToKind(method));
+            CalibrationMeasurementRanges.ForKind(CalibrationMethodKinds.ToKind(method));
         if (range is null ||
             measurements.ValueKind != JsonValueKind.Object ||
             !measurements.TryGetProperty(range.MeasurementKey, out JsonElement measurementValue))

@@ -4,16 +4,52 @@
 /// Calibration methods supported by the OrcaSlicer-worker calibration mode (issue #1938).
 /// </summary>
 /// <remarks>
-/// This is deliberately unrelated to the printer/toolhead <c>/api/calibration-projects</c> saga
-/// (<see cref="Domain.SliceJob.CalibrationProjectId"/>/<see cref="Domain.SliceJob.CalibrationAttemptId"/>/
-/// <see cref="Domain.SliceJob.CalibrationOrchestrationId"/>), which is being removed by a separate
-/// epic. A calibration-mode slice job produces a calibrated <em>filament</em> profile via an
-/// ordinary ad-hoc slice — it never sets those three fields, so
+/// This is the single canonical calibration-method vocabulary for PrintFarmer, per Dallas's
+/// amended architecture decision on issue #2151/#2161: it is used both for the OrcaSlicer-worker
+/// calibration mode described below and for the printer/toolhead <c>/api/calibration-projects</c>
+/// saga (<see cref="Domain.SliceJob.CalibrationProjectId"/>/<see cref="Domain.SliceJob.CalibrationAttemptId"/>/
+/// <see cref="Domain.SliceJob.CalibrationOrchestrationId"/>), which was retained/reshaped rather
+/// than removed (issue #1940). A calibration-mode slice job produces a calibrated <em>filament</em>
+/// profile via an ordinary ad-hoc slice — it never sets those three fields, so
 /// <c>SlicePrintBridgeController.IsCalibrationSlice()</c> stays false and send-to-printer keeps
 /// working for these jobs.
 /// <para>
-/// PA Pattern (GPL-3.0 provenance concerns) and PA Line (Bambu-specific) are intentionally not
-/// supported yet; see the issue for the licensing decision they still need.
+/// <strong>Unified vocabulary mapping table (issue #2161):</strong> before this change, the saga
+/// (<c>Farm.Modules.Calibration</c>) maintained its own, separately-evolving 15-member
+/// <c>CalibrationMethod</c> enum and wire-name dictionary, which agreed with this type's wire
+/// names for only 6 of its 15 members - a live bug, since
+/// <c>CalibrationOrchestrationSagaService.BuildSliceSubmissionBody</c> posted the saga's own wire
+/// name straight to the real <c>POST /api/slice</c>, which this type's <see cref="CalibrationMethods"/>
+/// parses against. The table below is the full old-name-to-new-name correspondence; the saga's
+/// duplicate type has been deleted and every consumer now uses this one directly.
+/// <list type="table">
+/// <listheader><term>Old saga wire name</term><description>Unified wire name / disposition</description></listheader>
+/// <item><term><c>temperature</c></term><description><c>temperature_tower</c> (<see cref="TemperatureTower"/>)</description></item>
+/// <item><term><c>flow_ratio_coarse</c></term><description><c>flow_rate_pass_1</c> (<see cref="FlowRatePass1"/>)</description></item>
+/// <item><term><c>flow_ratio_fine</c></term><description><c>flow_rate_pass_2</c> (<see cref="FlowRatePass2"/>)</description></item>
+/// <item><term><c>flow_ratio_high_range</c></term><description>
+/// Retired (see the audit note on <see cref="FlowRatePass1"/>/<see cref="FlowRateYoloRecommended"/>
+/// below) - superseded by <c>flow_rate_yolo_recommended</c> (<see cref="FlowRateYoloRecommended"/>).
+/// Still parses as a legacy alias of that method (never as a distinct canonical value) so a
+/// previously-stored attempt is not orphaned.</description></item>
+/// <item><term><c>pressure_advance_tower</c></term><description>unchanged (<see cref="PressureAdvanceTower"/>)</description></item>
+/// <item><term><c>pressure_advance_line</c></term><description>unchanged, now catalogued here too (<see cref="PressureAdvanceLine"/>); not yet slicer-supported</description></item>
+/// <item><term><c>pressure_advance_pattern</c></term><description>unchanged, now catalogued here too (<see cref="PressureAdvancePattern"/>); not yet slicer-supported</description></item>
+/// <item><term><c>flow_verification</c></term><description>unchanged, now catalogued here too (<see cref="FlowVerification"/>); not yet slicer-supported</description></item>
+/// <item><term><c>retraction</c></term><description>unchanged (<see cref="Retraction"/>)</description></item>
+/// <item><term><c>max_volumetric_speed</c></term><description>unchanged (<see cref="MaximumVolumetricSpeed"/>)</description></item>
+/// <item><term><c>shrinkage</c></term><description>unchanged, now catalogued here too (<see cref="Shrinkage"/>); not yet slicer-supported</description></item>
+/// <item><term><c>final_verification</c></term><description>unchanged, now catalogued here too (<see cref="FinalVerification"/>); not yet slicer-supported</description></item>
+/// <item><term><em>(slicer-only, now saga-visible too)</em></term><description><c>flow_rate_yolo_recommended</c>/<c>flow_rate_yolo_perfectionist</c> (<see cref="FlowRateYoloRecommended"/>/<see cref="FlowRateYoloPerfectionist"/>)</description></item>
+/// <item><term><c>cornering</c>/<c>input_shaping</c>/<c>vfa</c></term><description>removed entirely (issue #2162/#2168) - these are machine/firmware-level calibrations, not filament-profile calibrations, and are no longer part of either vocabulary</description></item>
+/// </list>
+/// </para>
+/// <para>
+/// The short abbreviations <c>"pa_pattern"</c> and <c>"pa_line"</c> are never catalogued and do
+/// not parse; that is distinct from <see cref="PressureAdvancePattern"/>/<see cref="PressureAdvanceLine"/>
+/// (wire names <c>pressure_advance_pattern</c>/<c>pressure_advance_line</c>), which are catalogued
+/// here but not yet slicer-supported (GPL-3.0 provenance concerns for PA Pattern; Bambu-specific
+/// tooling for PA Line) — see the issue for the licensing decision they still need.
 /// </para>
 /// <para>
 /// Investigated as part of issue #2051: "max volumetric speed" and "retraction" calibration are
@@ -153,6 +189,47 @@ public enum CalibrationMethod
     /// (<c>M900 K</c>) — see <c>PressureAdvanceTowerGcodeBuilder</c> in the OrcaSlicer worker.
     /// </summary>
     PressureAdvanceTower,
+
+    /// <summary>
+    /// Trusted server-generated pressure advance line (issue #2161 unification). Catalogued here
+    /// so the calibration saga's own wire name agrees with what <c>SliceJobController</c>
+    /// parses; intentionally not yet slicer-supported — no worker configurator exists for this
+    /// Bambu-specific method today (see <see cref="CalibrationMethods.IsSlicerSupported"/>).
+    /// </summary>
+    PressureAdvanceLine,
+
+    /// <summary>
+    /// Trusted server-generated pressure advance pattern (issue #2161 unification). Catalogued
+    /// here so the calibration saga's own wire name agrees with what <c>SliceJobController</c>
+    /// parses; intentionally not yet slicer-supported — no worker configurator exists for this
+    /// GPL-3.0-provenance-constrained method today (see <see cref="CalibrationMethods.IsSlicerSupported"/>).
+    /// </summary>
+    PressureAdvancePattern,
+
+    /// <summary>
+    /// Single-value flow verification print (issue #2161 unification). Catalogued here so the
+    /// calibration saga's own wire name agrees with what <c>SliceJobController</c> parses;
+    /// intentionally not yet slicer-supported — no worker configurator exists for this method
+    /// today (see <see cref="CalibrationMethods.IsSlicerSupported"/>).
+    /// </summary>
+    FlowVerification,
+
+    /// <summary>
+    /// Shrinkage compensation bars (issue #2161 unification). Catalogued here so the calibration
+    /// saga's own wire name agrees with what <c>SliceJobController</c> parses; intentionally
+    /// not yet slicer-supported — no worker configurator exists for this method today (see
+    /// <see cref="CalibrationMethods.IsSlicerSupported"/>).
+    /// </summary>
+    Shrinkage,
+
+    /// <summary>
+    /// Final verification against a linked imported asset or normal model (issue #2161
+    /// unification). Catalogued here so the calibration saga's own wire name agrees with what
+    /// <c>SliceJobController</c> parses; intentionally not yet slicer-supported — no worker
+    /// configurator exists for this method today (see
+    /// <see cref="CalibrationMethods.IsSlicerSupported"/>).
+    /// </summary>
+    FinalVerification,
 }
 
 /// <summary>
@@ -173,9 +250,40 @@ public static class CalibrationMethods
             ["retraction"] = CalibrationMethod.Retraction,
             ["max_volumetric_speed"] = CalibrationMethod.MaximumVolumetricSpeed,
 
-            // Matches Farm.Modules.Calibration.Services.Calibration.CalibrationMethodNames.PressureAdvanceTower
-            // so the two catalogues do not diverge further (issue #2136).
+            // Matches the calibration saga's own wire names (issue #2161 unification) so the two
+            // no longer diverge; #2136 already established this for pressure_advance_tower.
             ["pressure_advance_tower"] = CalibrationMethod.PressureAdvanceTower,
+
+            // The five saga-only methods added by issue #2161's unification. None has a worker
+            // configurator yet - see IsSlicerSupported.
+            ["pressure_advance_line"] = CalibrationMethod.PressureAdvanceLine,
+            ["pressure_advance_pattern"] = CalibrationMethod.PressureAdvancePattern,
+            ["flow_verification"] = CalibrationMethod.FlowVerification,
+            ["shrinkage"] = CalibrationMethod.Shrinkage,
+            ["final_verification"] = CalibrationMethod.FinalVerification,
+        };
+
+    /// <summary>
+    /// Legacy wire names the pre-unification calibration saga (<c>Farm.Modules.Calibration</c>)
+    /// used to post before issue #2161. These are accepted by <see cref="TryParse"/> only - never
+    /// by <see cref="ToWireName"/>, <see cref="SupportedWireNames"/>, or
+    /// <see cref="ClientAcceptedWireNames"/> - so a previously-persisted
+    /// <c>CalibrationAttempt.Method</c> value still parses (no data migration required, per the
+    /// issue's persisted-data-compatibility audit: no seed/migration data was found under these
+    /// names, and any pre-existing attempt using them always failed at the slicing step anyway,
+    /// since the two catalogues disagreed on 9 of 15 names), while new callers are steered onto
+    /// the one canonical name going forward. <c>flow_ratio_high_range</c> is a retirement alias:
+    /// it never had a working slicer counterpart and is superseded by the newer, delta-aware
+    /// <see cref="CalibrationMethod.FlowRateYoloRecommended"/>/<see cref="CalibrationMethod.FlowRateYoloPerfectionist"/>
+    /// methods (issues #2141/#2142).
+    /// </summary>
+    private static readonly Dictionary<string, CalibrationMethod> LegacyWireNameAliases =
+        new Dictionary<string, CalibrationMethod>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["temperature"] = CalibrationMethod.TemperatureTower,
+            ["flow_ratio_coarse"] = CalibrationMethod.FlowRatePass1,
+            ["flow_ratio_fine"] = CalibrationMethod.FlowRatePass2,
+            ["flow_ratio_high_range"] = CalibrationMethod.FlowRateYoloRecommended,
         };
 
     private static readonly Dictionary<CalibrationMethod, string> MethodToWireName =
@@ -189,12 +297,18 @@ public static class CalibrationMethods
             [CalibrationMethod.Retraction] = "retraction",
             [CalibrationMethod.MaximumVolumetricSpeed] = "max_volumetric_speed",
             [CalibrationMethod.PressureAdvanceTower] = "pressure_advance_tower",
+            [CalibrationMethod.PressureAdvanceLine] = "pressure_advance_line",
+            [CalibrationMethod.PressureAdvancePattern] = "pressure_advance_pattern",
+            [CalibrationMethod.FlowVerification] = "flow_verification",
+            [CalibrationMethod.Shrinkage] = "shrinkage",
+            [CalibrationMethod.FinalVerification] = "final_verification",
         };
 
     /// <summary>
-    /// The wire names of every calibration method <see cref="TryParse"/> recognizes.
-    /// Do not surface this list as "supported methods" in a client-facing error message — use
-    /// <see cref="ClientAcceptedWireNames"/> for that.
+    /// The wire names of every calibration method <see cref="TryParse"/> recognizes, excluding
+    /// legacy aliases (see <see cref="LegacyWireNameAliases"/>). Do not surface this list as
+    /// "supported methods" in a client-facing error message — use <see cref="ClientAcceptedWireNames"/>
+    /// for that.
     /// </summary>
     public static IReadOnlyList<string> SupportedWireNames { get; } = [.. WireNameToMethod.Keys];
 
@@ -210,19 +324,35 @@ public static class CalibrationMethods
 
     /// <summary>
     /// Attempts to parse a client-supplied calibration method name against the full calibration
-    /// catalogue. A name that isn't catalogued at all (for example <c>"pa_pattern"</c> or
-    /// <c>"pa_line"</c>, both intentionally excluded — see the licensing note on
-    /// <see cref="CalibrationMethod"/>) returns <see langword="false"/>. Note this does
-    /// <em>not</em> mean the parsed method is ready for the worker to slice today — see
-    /// <see cref="IsSlicerSupported"/> and <see cref="ClientAcceptedWireNames"/> for the check
-    /// that actually gates client submission.
+    /// catalogue. A name that isn't catalogued at all (for example the short, never-catalogued
+    /// abbreviations <c>"pa_pattern"</c> or <c>"pa_line"</c> — distinct from the catalogued-but-
+    /// unsupported <c>pressure_advance_pattern</c>/<c>pressure_advance_line</c>, see
+    /// <see cref="CalibrationMethod.PressureAdvancePattern"/>/<see cref="CalibrationMethod.PressureAdvanceLine"/>) returns
+    /// <see langword="false"/>. Note this does <em>not</em> mean the parsed method is ready for
+    /// the worker to slice today — see <see cref="IsSlicerSupported"/> and
+    /// <see cref="ClientAcceptedWireNames"/> for the check that actually gates client submission.
     /// </summary>
+    /// <remarks>
+    /// Also accepts the pre-unification calibration saga's legacy wire names (see
+    /// <see cref="LegacyWireNameAliases"/>) so a previously-persisted <c>CalibrationAttempt.Method</c>
+    /// value keeps parsing after issue #2161's unification. Legacy names are intentionally never
+    /// produced by <see cref="ToWireName"/> or listed in <see cref="SupportedWireNames"/>/
+    /// <see cref="ClientAcceptedWireNames"/>, so new callers are steered onto the canonical name.
+    /// </remarks>
     /// <param name="wireName">The client-supplied method name.</param>
     /// <param name="method">The parsed method, when this returns <see langword="true"/>.</param>
     /// <returns><see langword="true"/> when <paramref name="wireName"/> names a supported method.</returns>
     public static bool TryParse(string? wireName, out CalibrationMethod method)
     {
-        if (!string.IsNullOrWhiteSpace(wireName) && WireNameToMethod.TryGetValue(wireName.Trim(), out CalibrationMethod parsed))
+        if (string.IsNullOrWhiteSpace(wireName))
+        {
+            method = default;
+            return false;
+        }
+
+        string trimmed = wireName.Trim();
+        if (WireNameToMethod.TryGetValue(trimmed, out CalibrationMethod parsed) ||
+            LegacyWireNameAliases.TryGetValue(trimmed, out parsed))
         {
             method = parsed;
             return true;
@@ -252,8 +382,22 @@ public static class CalibrationMethods
     /// <see cref="CalibrationMethod.PressureAdvanceTower"/> (issue #2136) is therefore already
     /// slicer-supported without an entry here — the worker's
     /// <c>OrcaSlicingPipelineService.ApplyPressureAdvanceTowerGcodeAsync</c> implements it.
+    /// <see cref="CalibrationMethod.PressureAdvanceLine"/>, <see cref="CalibrationMethod.PressureAdvancePattern"/>,
+    /// <see cref="CalibrationMethod.FlowVerification"/>, <see cref="CalibrationMethod.Shrinkage"/>,
+    /// and <see cref="CalibrationMethod.FinalVerification"/> (issue #2161 unification) are the
+    /// current opt-out entries: they are catalogued (parseable, with a defined wire name) but no
+    /// worker configurator exists for any of them yet - do not flip any of these to
+    /// <see langword="true"/> until a real slicing implementation lands for it.
     /// </remarks>
-    public static bool IsSlicerSupported(CalibrationMethod method) => true;
+    public static bool IsSlicerSupported(CalibrationMethod method) => method switch
+    {
+        CalibrationMethod.PressureAdvanceLine
+            or CalibrationMethod.PressureAdvancePattern
+            or CalibrationMethod.FlowVerification
+            or CalibrationMethod.Shrinkage
+            or CalibrationMethod.FinalVerification => false,
+        _ => true,
+    };
 
     /// <summary>
     /// A descriptive placeholder model file name for a calibration job, used in place of a
