@@ -184,6 +184,7 @@ set -euo pipefail
 source "$DEPLOY_SCRIPT"
 CONFIG_FILE="$redeploy_config"
 DRY_RUN=false
+NO_CACHE=true
 REDEPLOY_CALLS="$redeploy_calls"
 REDEPLOY_WARNINGS="$redeploy_warnings"
 
@@ -206,7 +207,10 @@ prepare_orcaslicer_worker_temp_directories() { return 0; }
 prepare_pgadmin_setup() { return 0; }
 validate_external_storage_permissions() { return 0; }
 ensure_tls_certificates() { :; }
-deploy_containers() { printf '%s\n' deployed >> "\$REDEPLOY_CALLS"; }
+deploy_containers() {
+    [[ "\$NO_CACHE" == "true" ]]
+    printf '%s\n' containers-started >> "\$REDEPLOY_CALLS"
+}
 setup_initial_admin() { :; }
 print_calibration_status_line() { :; }
 docker() {
@@ -218,10 +222,12 @@ redeploy_existing
 EOF
     chmod +x "$redeploy_helper"
 
-    assert_exit_code 0 "$redeploy_helper" \
+    assert_exit_code 0 "cd '$TEST_TEMP_DIR' && '$redeploy_helper'" \
         "A cleanup failure should not fail an otherwise successful redeploy"
-    assert_file_has_exact_line "$redeploy_calls" "deployed" \
-        "Redeploy should deploy containers before cleanup"
+    assert_equals "containers-started" "$(sed -n '1p' "$redeploy_calls")" \
+        "Redeploy should start rebuilt containers before cleanup begins"
+    assert_equals "image prune --force" "$(sed -n '2p' "$redeploy_calls")" \
+        "Image cleanup should begin only after rebuilt containers start"
     assert_file_has_exact_line "$redeploy_calls" "image prune --force" \
         "Redeploy call site should invoke image cleanup"
     assert_file_has_exact_line "$redeploy_calls" "builder prune --force" \

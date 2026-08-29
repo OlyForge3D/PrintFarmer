@@ -7504,6 +7504,8 @@ redeploy_existing() {
     # Deploy with rebuild
     deploy_containers
 
+    # When requested, --no-cache still rebuilds application layers; pruning without
+    # --all preserves tagged offline assets and shared-host caches after startup.
     cleanup_redeploy_docker_artifacts \
         || print_warning "Redeployment completed, but some unused Docker artifacts could not be pruned"
 
