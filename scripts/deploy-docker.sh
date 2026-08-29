@@ -30,6 +30,14 @@
 
 set -euo pipefail
 
+# Internal state for resolve_orcaslicer_container_digest() (see its definition
+# below). This is deliberately reset here, unconditionally, rather than left
+# to default via "${_ORCASLICER_DIGEST_SOURCE:-}" -- an inherited/exported
+# value of "override" from the calling shell would make the function's first
+# call skip digest validation entirely (defense-in-depth: closes a residual
+# path back to the injection risk B3 fixed, per round-3 review).
+_ORCASLICER_DIGEST_SOURCE=""
+
 # Pre-process args to support verify-only mode with optional env/config file overrides.
 # Accept both '--flag value' and '--flag=value' forms.
 # Source shared utilities

@@ -1899,6 +1899,7 @@ run_all_tests() {
     test_orcaslicer_container_digest_rejects_malformed_operator_override
     test_orcaslicer_container_digest_second_call_refreshes_after_build
     test_orcaslicer_container_digest_operator_override_persists_across_second_call
+    test_orcaslicer_container_digest_rejected_override_stays_rejected_on_second_call
     
     teardown
 }
@@ -2214,6 +2215,68 @@ EOF
     assert_contains "$output" "DIGEST=[]" "A malformed operator override must be rejected, not written into .env verbatim"
     assert_contains "$output" "CALIBRATION=no" "Calibration must be marked unavailable when the override is rejected"
     assert_contains "$output" "malformed" "Should print a diagnostic explaining the override was rejected"
+
+    rm -f "$helper_script" 2>/dev/null || true
+
+    pass_test
+}
+
+# Test (round-3 review finding, Bishop/Hicks): a rejected malformed override
+# must stay rejected on a SECOND call, not get silently "resurrected" by
+# falling through to a fresh docker resolution. This is the sub-case that
+# _ORCASLICER_DIGEST_SOURCE="override" being set BEFORE shape validation (not
+# only on acceptance) exists to close -- without it, the first call would
+# clear ORCASLICER_CONTAINER_DIGEST to empty on rejection, and the second
+# call would see "empty" (not "already rejected"), proceed past the override
+# check, and adopt whatever the local image resolves to -- silently
+# overriding the operator's rejected intent (issue #2164).
+test_orcaslicer_container_digest_rejected_override_stays_rejected_on_second_call() {
+    start_test "resolve_orcaslicer_container_digest keeps a rejected malformed override rejected on a second call"
+
+    cd "$TEST_TEMP_DIR"
+
+    local malformed_override="ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
+    local image_digest="ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:555555555555555555555555555555555555555555555555555555555555eeee"
+    local helper_script="$TEST_TEMP_DIR/digest-rejected-override-second-call-helper.sh"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -uo pipefail
+
+# If the rejection were ever "forgotten" on a second call, this mock would
+# report a resolvable digest, letting the test catch the resurrection.
+docker() {
+    if [ "\$1" = "image" ] && [ "\$2" = "inspect" ]; then
+        printf '%s\n' "$image_digest"
+        return 0
+    fi
+    return 0
+}
+
+source "$DEPLOY_SCRIPT"
+
+# Malformed: a full repo@sha256:<hex> reference is not the bare form the API
+# requires.
+ORCASLICER_CONTAINER_DIGEST="$malformed_override"
+ENABLE_ORCA_WORKER=yes
+
+resolve_orcaslicer_container_digest
+echo "FIRST=[\$ORCASLICER_CONTAINER_DIGEST]"
+echo "FIRST_CALIBRATION=\$ORCASLICER_CALIBRATION_AVAILABLE"
+
+resolve_orcaslicer_container_digest
+echo "SECOND=[\$ORCASLICER_CONTAINER_DIGEST]"
+echo "SECOND_CALIBRATION=\$ORCASLICER_CALIBRATION_AVAILABLE"
+EOF
+    chmod +x "$helper_script"
+
+    capture_output "$helper_script 2>&1 || true"
+    local output
+    output=$(get_output)
+
+    assert_contains "$output" "FIRST=[]" "First call should reject the malformed override"
+    assert_contains "$output" "FIRST_CALIBRATION=no" "Calibration must be unavailable after the first call rejects the override"
+    assert_contains "$output" "SECOND=[]" "Second call must keep the rejection, not resurrect it via a fresh docker resolution"
+    assert_contains "$output" "SECOND_CALIBRATION=no" "Calibration must stay unavailable on the second call too"
 
     rm -f "$helper_script" 2>/dev/null || true
 
