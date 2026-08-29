@@ -1461,7 +1461,7 @@ public class ProfilesController(
     /// Uploads a draft calibration profile as a real custom filament profile from raw JSON
     /// content, on behalf of the calling calibration project's owner (#2180, gap 1).
     /// </summary>
-    /// <param name="request">Upload request with raw JSON and profile type.</param>
+    /// <param name="request">Promotion request with the resulting profile's name and raw JSON.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <remarks>
     /// This is the calibration-driven sibling of <see cref="UploadCustomProfileAsync"/>: it
@@ -1477,13 +1477,24 @@ public class ProfilesController(
     /// <see cref="ResolveProfileForModelAsync"/>, this is instead gated only by
     /// <see cref="PrintFarmerPermissions.Calibration.Update"/>, which the desktop client's
     /// calibration scope bundle already grants.
+    /// <para>
+    /// Round-2 review fix (issue #2180 - Bishop B6/Vasquez): removing the
+    /// <see cref="Farm.Infrastructure.Authorization.InteractiveSessionRequirement"/> gate must not
+    /// also turn this into a general-purpose, unrestricted upload endpoint for any caller holding
+    /// <see cref="PrintFarmerPermissions.Calibration.Update"/>. Unlike <c>upload</c>, this action
+    /// accepts <see cref="PromoteCalibrationDraftProfileRequestDto"/> - a deliberately narrower DTO
+    /// with no <c>ProfileType</c>, <c>PrinterModelId</c>, or <c>CompatiblePrinters</c> field at
+    /// all - and always constructs the internal upload request with <c>ProfileType = "filament"</c>
+    /// hardcoded server-side, so it is structurally impossible for this route to mint a machine or
+    /// process profile no matter what a caller sends.
+    /// </para>
     /// </remarks>
     [HttpPost("promote-from-calibration")]
     [RequirePermission(PrintFarmerPermissions.Calibration.Update)]
     [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> PromoteCalibrationDraftProfileAsync(
-        [FromBody] UploadProfileRequestDto? request,
+        [FromBody] PromoteCalibrationDraftProfileRequestDto? request,
         CancellationToken ct)
     {
         if (request is null)
@@ -1495,7 +1506,13 @@ public class ProfilesController(
         {
             Guid userId = GetCurrentUserId();
 
-            CustomProfileDto result = await _profilesService.UploadCustomProfileAsync(request, userId, ct);
+            var uploadRequest = new UploadProfileRequestDto
+            {
+                Name = request.Name,
+                RawJson = request.RawJson,
+                ProfileType = "filament",
+            };
+            CustomProfileDto result = await _profilesService.UploadCustomProfileAsync(uploadRequest, userId, ct);
             return Created($"/api/slicer/profiles/{result.Id}", result);
         }
         catch (ArgumentException ex)

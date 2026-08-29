@@ -256,9 +256,15 @@ public interface IFilamentProfilePromotionGateway
 /// <c>upload</c> is gated by <c>InteractiveSessionRequirement</c>, which explicitly rejects
 /// desktop exchange tokens - the realistic primary credential completing a calibration project -
 /// so forwarding the caller's header there would always be rejected and permanently block
-/// promotion. <c>promote-from-calibration</c> instead requires only
-/// <see cref="Farm.Infrastructure.Security.PrintFarmerPermissions.Calibration"/>'s
-/// <c>Update</c> permission, which the desktop client's calibration scope bundle already grants.
+/// promotion. <c>promote-from-calibration</c> instead carries no interactive-session requirement,
+/// only <c>ProfilesController</c>'s existing class-level
+/// <see cref="Farm.Infrastructure.Security.PrintFarmerPermissions.Slicing"/>'s <c>Submit</c>
+/// requirement plus its own method-level
+/// <see cref="Farm.Infrastructure.Security.PrintFarmerPermissions.Calibration"/>'s <c>Update</c>
+/// requirement - both of which the desktop client's real calibration-scope token bundle already
+/// grants together (the same precedent <c>ResolveProfileForModelAsync</c> already relies on; see
+/// <c>DesktopCalibrationScopeIntegrationTests.CalibrationCompletionToken_ClearsPromoteFromCalibrationAuthorization</c>
+/// for the HTTP-level proof).
 /// </remarks>
 public sealed class InternalApiFilamentProfilePromotionGateway(
     IHttpClientFactory httpClientFactory,

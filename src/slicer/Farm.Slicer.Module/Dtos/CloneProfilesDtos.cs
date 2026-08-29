@@ -131,6 +131,34 @@ public class UploadProfileRequestDto
 }
 
 /// <summary>
+/// Request DTO for promoting a calibration project's accumulated draft profile to a real custom
+/// filament profile (issue #2180, gap 1).
+/// </summary>
+/// <remarks>
+/// Review fix (issue #2180, round 2 - Bishop B6/Vasquez): deliberately a narrower shape than
+/// <see cref="UploadProfileRequestDto"/>, not just a validated subset of it. It carries no
+/// <c>ProfileType</c>, <c>PrinterModelId</c>, or <c>CompatiblePrinters</c> field at all, so the
+/// endpoint that accepts this DTO can never be used to create anything other than a filament
+/// profile, regardless of what a caller sends - the promotion route's whole reason for existing
+/// (bypassing <see cref="Farm.Infrastructure.Authorization.InteractiveSessionRequirement"/> for a
+/// desktop exchange token) must not also become a general-purpose, unrestricted arbitrary-profile
+/// upload path for any caller holding the calibration-update permission.
+/// </remarks>
+public sealed class PromoteCalibrationDraftProfileRequestDto
+{
+    /// <summary>
+    /// Name for the resulting custom filament profile.
+    /// </summary>
+    public string? Name { get; set; }
+
+    /// <summary>
+    /// Raw filament-profile-shaped JSON content built from the project's accumulated draft
+    /// values.
+    /// </summary>
+    public string RawJson { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// DTO representing a user's custom profile (IsSystem=false).
 /// </summary>
 public class CustomProfileDto

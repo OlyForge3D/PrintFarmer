@@ -20,6 +20,19 @@ namespace Farm.Slicer.Module.Tests.Controllers;
 /// session requirement of its own - a regression here would silently resurrect the exact bug this
 /// endpoint exists to fix.
 /// </summary>
+/// <remarks>
+/// Round-2 review finding (Hicks): a reflection test alone cannot prove the endpoint is actually
+/// reachable at runtime, because ASP.NET Core's <c>IAsyncActionFilter</c> pipeline runs the
+/// class-level <see cref="RequirePermissionAttribute"/> (<c>Slicing.Submit</c>) <i>and</i> the
+/// method-level one (<c>Calibration.Update</c>) - both must pass. The real HTTP-level proof that
+/// the actual Desktop calibration-completion token bundle (<c>Calibration.Update</c> +
+/// <c>Slicing.Submit</c>, per the same precedent as <c>ResolveProfileForModelAsync</c>) clears
+/// both filters - paired with a negative proving a token missing <c>Slicing.Submit</c> is still
+/// refused - lives in
+/// <c>Farm.Web.Api.Tests.Integration.DesktopCalibrationScopeIntegrationTests.CalibrationCompletionToken_ClearsPromoteFromCalibrationAuthorization</c>
+/// and its paired
+/// <c>CalibrationUpdateOnlyToken_WithoutSlicingSubmit_IsForbiddenOnPromoteFromCalibration</c>.
+/// </remarks>
 public sealed class ProfilesControllerPromoteCalibrationDraftProfileTests
 {
     [Fact]

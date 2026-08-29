@@ -517,32 +517,48 @@ public sealed class CalibrationProjectService(
                 // that conflict *after* both external calls already happened. Saving the claim on
                 // its own, immediately, means the second concurrent caller's own claim-save loses
                 // the Revision race and fails fast, before it ever reaches the gateway call.
-                DateTime claimedAtUtc = UtcNow();
-                draftProfile.PromotionClaimedAtUtc = claimedAtUtc;
-                draftProfile.Revision++;
-                draftProfile.UpdatedAtUtc = UtcNow();
-                draftProfile.UpdatedBySubject = actor.Subject;
-                try
-                {
-                    _ = await _dbContext.SaveChangesAsync(cancellationToken);
-                }
-                catch (DbUpdateConcurrencyException)
+                //
+                // Round-2 review fix (Vasquez): a simultaneous, *unrelated* write to this same row
+                // (e.g. AppendObservationAsync updating ValuesJson for a "selection" observation)
+                // also bumps Revision and would otherwise throw DbUpdateConcurrencyException here
+                // for a reason that has nothing to do with a competing completion attempt. Reload
+                // and distinguish: if the fresh row shows another claim already in place, this is a
+                // genuine competing completion - fail fast. Otherwise the conflict was incidental,
+                // so retry the claim itself against the fresh row (bounded, since two competing
+                // *completions* are the only case that should legitimately exhaust the retries).
+                CalibrationDraftProfile? claimedProfile = await TryClaimPromotionSlotAsync(
+                    draftProfile, actor, cancellationToken);
+                if (claimedProfile is null)
                 {
                     return Validation<CalibrationProjectDto>("project_completion_promotion_conflict");
                 }
+
+                draftProfile = claimedProfile;
 
                 FilamentProfilePromotionResult promotion = await _filamentProfilePromotionGateway.PromoteAsync(
                     new FilamentProfilePromotionRequest(project.Name, BuildDraftProfileRawJson(project, draftProfile)),
                     cancellationToken);
                 if (!promotion.Success || promotion.ProfileId is null)
                 {
-                    // Release the claim (its own dedicated save, same reasoning as above) so a
-                    // legitimate retry - e.g. after a transient transport failure - is not
-                    // permanently blocked by a stale claim from this attempt.
-                    draftProfile.PromotionClaimedAtUtc = null;
-                    draftProfile.Revision++;
-                    draftProfile.UpdatedAtUtc = UtcNow();
-                    _ = await _dbContext.SaveChangesAsync(cancellationToken);
+                    // Release the claim so a legitimate retry - e.g. after a transient transport
+                    // failure - is not permanently blocked by a stale claim from this attempt.
+                    //
+                    // Round-2 review fix (Bishop B5): use CancellationToken.None, not the caller's
+                    // token - an ordinary HTTP disconnect/timeout while the gateway call was
+                    // in-flight must not prevent releasing a claim we already know failed, or the
+                    // project would be stuck holding an unreleasable claim forever. Round-2 review
+                    // fix (Bishop B7/Vasquez): retry through a fresh reload on a concurrency
+                    // conflict, rather than letting DbUpdateConcurrencyException escape uncaught,
+                    // so a concurrent unrelated write to this row during the gateway call cannot
+                    // strand the claim either.
+                    await SavePromotionOutcomeWithRetryAsync(
+                        draftProfile,
+                        profile =>
+                        {
+                            profile.PromotionClaimedAtUtc = null;
+                            profile.Revision++;
+                            profile.UpdatedAtUtc = UtcNow();
+                        });
                     return Validation<CalibrationProjectDto>(promotion.ErrorCode ?? "profile_promotion_failed");
                 }
 
@@ -555,11 +571,21 @@ public sealed class CalibrationProjectService(
                 // later, unrelated failure land on an already-promoted draft profile, so a retry's
                 // promotion block above is skipped entirely (PromotedProfileId is no longer null)
                 // and only the project's own fields are retried.
-                draftProfile.PromotedProfileId = promotion.ProfileId;
-                draftProfile.PromotedAtUtc = UtcNow();
-                draftProfile.Revision++;
-                draftProfile.UpdatedAtUtc = UtcNow();
-                _ = await _dbContext.SaveChangesAsync(cancellationToken);
+                //
+                // Round-2 review fix (Bishop B5/B7, Vasquez): same CancellationToken.None +
+                // reload-and-retry-on-conflict rationale as the release path above - this save is
+                // strictly more important to never lose, since by this point the real external
+                // profile already exists and losing this write would both orphan it and strand the
+                // claim permanently.
+                draftProfile = await SavePromotionOutcomeWithRetryAsync(
+                    draftProfile,
+                    profile =>
+                    {
+                        profile.PromotedProfileId = promotion.ProfileId;
+                        profile.PromotedAtUtc = UtcNow();
+                        profile.Revision++;
+                        profile.UpdatedAtUtc = UtcNow();
+                    });
                 AddChange(
                     project,
                     "draft-profile",
@@ -3410,6 +3436,90 @@ public sealed class CalibrationProjectService(
         root["name"] = $"{project.Name} (Calibrated)";
         root["filament_type"] = project.FilamentMaterial;
         return root.ToJsonString();
+    }
+
+    /// <summary>
+    /// Round-2 review fix (Vasquez): claims the promotion slot on <paramref name="draftProfile"/>
+    /// via its own dedicated save, distinguishing a genuine competing claim (fail fast, no retry)
+    /// from an incidental concurrency conflict caused by an unrelated concurrent write to the same
+    /// row (e.g. <c>AppendObservationAsync</c> updating <c>ValuesJson</c>) - which is safe to retry
+    /// against a freshly reloaded row. Returns the (possibly reloaded) tracked entity with the
+    /// claim durably committed, or <c>null</c> if the slot is already claimed by someone else.
+    /// </summary>
+    private async Task<CalibrationDraftProfile?> TryClaimPromotionSlotAsync(
+        CalibrationDraftProfile draftProfile,
+        CalibrationActor actor,
+        CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 5;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            draftProfile.PromotionClaimedAtUtc = UtcNow();
+            draftProfile.Revision++;
+            draftProfile.UpdatedAtUtc = UtcNow();
+            draftProfile.UpdatedBySubject = actor.Subject;
+            try
+            {
+                _ = await _dbContext.SaveChangesAsync(cancellationToken);
+                return draftProfile;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
+            {
+                Guid draftProfileId = draftProfile.Id;
+                _dbContext.Entry(draftProfile).State = EntityState.Detached;
+                draftProfile = await _dbContext.CalibrationDraftProfiles.SingleAsync(
+                    profile => profile.Id == draftProfileId, cancellationToken);
+                if (draftProfile.PromotionClaimedAtUtc is not null)
+                {
+                    // A genuine competing completion already holds the claim - do not steal it.
+                    return null;
+                }
+
+                // The conflict was incidental (some other, unrelated field changed on this row);
+                // loop and retry the claim itself against the fresh row.
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Round-2 review fix (Bishop B5/B7, Vasquez): persists a promotion outcome (claim release on
+    /// gateway failure, or the promoted profile id on success) with a bounded reload-and-retry loop
+    /// on <see cref="DbUpdateConcurrencyException"/>, so an unrelated concurrent write to the same
+    /// draft profile row during the gateway call - or an ordinary caller-side cancellation, since
+    /// this always saves with <see cref="CancellationToken.None"/> - can never strand the
+    /// promotion claim or lose an already-completed external promotion. <paramref name="applyOutcome"/>
+    /// must be idempotent/re-appliable to a freshly reloaded entity, since it may run more than once.
+    /// </summary>
+    private async Task<CalibrationDraftProfile> SavePromotionOutcomeWithRetryAsync(
+        CalibrationDraftProfile draftProfile,
+        Action<CalibrationDraftProfile> applyOutcome)
+    {
+        const int maxAttempts = 5;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            applyOutcome(draftProfile);
+            try
+            {
+                _ = await _dbContext.SaveChangesAsync(CancellationToken.None);
+                return draftProfile;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
+            {
+                Guid draftProfileId = draftProfile.Id;
+                _dbContext.Entry(draftProfile).State = EntityState.Detached;
+                draftProfile = await _dbContext.CalibrationDraftProfiles.SingleAsync(
+                    profile => profile.Id == draftProfileId, CancellationToken.None);
+            }
+        }
+
+        // Exceedingly unlikely (five consecutive concurrency conflicts on one row) - surface a
+        // hard failure rather than letting the outcome be silently lost, so it is visible to
+        // operators instead of permanently stranding the promotion claim without any trace.
+        throw new InvalidOperationException(
+            $"Unable to persist calibration draft profile promotion outcome for '{draftProfile.Id}' " +
+            $"after {maxAttempts} attempts due to repeated concurrency conflicts.");
     }
 
     private static CalibrationAttemptDto MapAttempt(CalibrationAttempt attempt, string status) =>
