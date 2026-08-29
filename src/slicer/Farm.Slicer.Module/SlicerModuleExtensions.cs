@@ -132,6 +132,19 @@ public static class SlicerModuleExtensions
     /// services, plugin discovery, or anything beyond the three repositories and the DbContext
     /// they need.
     /// </para>
+    /// <para>
+    /// The <see cref="SlicerDbContext"/>/<see cref="IDbContextFactory{TContext}"/> registration
+    /// this method guarantees (via <see cref="EnsureSlicerDatabaseRegistered"/>) is also the
+    /// registration
+    /// <c>Farm.Modules.Calibration.Startup.CalibrationWorkerHealthDependenciesStartup.AddCalibrationWorkerHealthDependencies</c>
+    /// (#2178) explicitly names and independently tests: calibration worker-health capability
+    /// detection (<c>CalibrationCapabilityService.GetWorkerHealthAsync</c>) resolves
+    /// <see cref="IDbContextFactory{TContext}"/> of <see cref="SlicerDbContext"/> from its own DI
+    /// scope, and previously depended entirely on this method being reachable through
+    /// <c>Farm.Web.Api.Startup.MoonrakerEmulatorSeederDependenciesStartup</c>'s call chain even
+    /// though it has nothing to do with seeding Moonraker emulator fixtures. See that class for
+    /// the explicit, Moonraker-seeder-independent registration path.
+    /// </para>
     /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">Application configuration (reads DB_PROVIDER, ConnectionStrings:Default, etc.).</param>

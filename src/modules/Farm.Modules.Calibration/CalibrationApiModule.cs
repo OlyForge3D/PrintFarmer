@@ -36,6 +36,13 @@ public sealed class CalibrationApiModule : IApiModule
         // (no HTTP hop needed) — see ModelStorageResolutionStartup and issue #2179.
         _ = services.AddModelStorageResolution(configuration);
 
+        // Calibration worker-health capability detection. Monolith hosts keep the
+        // IDbContextFactory<SlicerDbContext> registered by AddSlicerModule; split/microservices
+        // hosts get it registered here too, independently of whatever other split-host startup
+        // wiring this process also runs — see CalibrationWorkerHealthDependenciesStartup and
+        // issue #2178.
+        _ = services.AddCalibrationWorkerHealthDependencies(configuration);
+
         _ = services.AddSingleton(
             new Farm.Infrastructure.PrinterCalibration.CalibrationSlicerCompatibilityPolicy(
                 configuration
