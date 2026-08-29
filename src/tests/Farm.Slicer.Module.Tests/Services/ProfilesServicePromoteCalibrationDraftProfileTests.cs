@@ -18,11 +18,14 @@ namespace Farm.Slicer.Module.Tests.Services;
 
 /// <summary>
 /// Covers <see cref="ProfilesService.PromoteCalibrationDraftProfileAsync"/>'s idempotent-replay
-/// behavior (issue #2180, gap 1, round-4 review fix - Hicks Blocking #2). The calibration-side
+/// behavior (issue #2180, gap 1, round-4 review fix - Hicks Blocking #2) and its ownership
+/// enforcement (round-5 review fix - Bishop/Hicks Blocking, round 5). The calibration-side
 /// promotion claim is TTL-reclaimable, so this endpoint's own service method may legitimately be
 /// invoked more than once for the same draft profile; a replayed call must return the SAME
 /// promoted filament profile rather than minting a second, user-visible duplicate in the owner's
-/// custom filament profile list.
+/// custom filament profile list - and must never return (or silently accept, on the race-loser
+/// path) a profile promoted from that draft ID by a DIFFERENT user, since the draft profile ID is
+/// caller-supplied and not itself an authorization boundary.
 /// </summary>
 public class ProfilesServicePromoteCalibrationDraftProfileTests
 {
@@ -166,5 +169,93 @@ public class ProfilesServicePromoteCalibrationDraftProfileTests
         Assert.False(wasCreated);
         Assert.Equal(winner.Id, profile.Id);
         filamentRepo.Verify(r => r.GetByPromotedFromCalibrationDraftProfileIdAsync(draftProfileId, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task PromoteCalibrationDraftProfileAsync_Throws_WhenExistingProfileOwnedByDifferentUser()
+    {
+        // Round-5 review fix (issue #2180 - Bishop/Hicks Blocking, round 5): sourceDraftProfileId
+        // is fully caller-supplied and this endpoint is reachable by any holder of the ordinary
+        // Calibration.Update permission - the idempotency lookup must never disclose another
+        // user's already-promoted profile just because the caller happens to know (or guess) its
+        // draft profile ID.
+        Guid callerUserId = Guid.NewGuid();
+        Guid otherUserId = Guid.NewGuid();
+        Guid draftProfileId = Guid.NewGuid();
+        FilamentProfile othersProfile = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Someone Else's PLA",
+            RawJson = "{\"name\":\"Someone Else's PLA\"}",
+            CreatedByUserId = otherUserId,
+            PromotedFromCalibrationDraftProfileId = draftProfileId,
+            CreatedAt = DateTime.UtcNow.AddMinutes(-20),
+            UpdatedAt = DateTime.UtcNow.AddMinutes(-20),
+        };
+
+        Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Strict);
+        _ = filamentRepo
+            .Setup(r => r.GetByPromotedFromCalibrationDraftProfileIdAsync(draftProfileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(othersProfile);
+
+        ProfilesService svc = CreateService(filamentRepo.Object);
+
+        _ = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => svc.PromoteCalibrationDraftProfileAsync(
+            MakeRequest(), callerUserId, draftProfileId, CancellationToken.None));
+
+        // Strict mock: AddAsync was never Setup, so the caller must never have fallen through to
+        // an insert attempt after the ownership check rejected the lookup hit.
+        filamentRepo.Verify(r => r.GetByPromotedFromCalibrationDraftProfileIdAsync(draftProfileId, It.IsAny<CancellationToken>()), Times.Once);
+        filamentRepo.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task PromoteCalibrationDraftProfileAsync_Throws_WhenRaceWinnerOwnedByDifferentUser()
+    {
+        Guid callerUserId = Guid.NewGuid();
+        Guid otherUserId = Guid.NewGuid();
+        Guid draftProfileId = Guid.NewGuid();
+        FilamentProfile othersProfile = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Someone Else's PLA",
+            RawJson = "{\"name\":\"Someone Else's PLA\"}",
+            CreatedByUserId = otherUserId,
+            PromotedFromCalibrationDraftProfileId = draftProfileId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Strict);
+        int lookupCalls = 0;
+        _ = filamentRepo
+            .Setup(r => r.GetByPromotedFromCalibrationDraftProfileIdAsync(draftProfileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                lookupCalls++;
+                return lookupCalls == 1 ? null : othersProfile;
+            });
+        _ = filamentRepo
+            .Setup(r => r.AddAsync(It.IsAny<FilamentProfile>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("unique constraint violation"));
+
+        ProfilesService svc = CreateService(filamentRepo.Object);
+
+        _ = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => svc.PromoteCalibrationDraftProfileAsync(
+            MakeRequest(), callerUserId, draftProfileId, CancellationToken.None));
+
+        filamentRepo.Verify(r => r.GetByPromotedFromCalibrationDraftProfileIdAsync(draftProfileId, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task PromoteCalibrationDraftProfileAsync_Throws_WhenSourceDraftProfileIdIsEmpty()
+    {
+        Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Strict);
+        ProfilesService svc = CreateService(filamentRepo.Object);
+
+        _ = await Assert.ThrowsAsync<ArgumentException>(() => svc.PromoteCalibrationDraftProfileAsync(
+            MakeRequest(), Guid.NewGuid(), Guid.Empty, CancellationToken.None));
+
+        filamentRepo.VerifyNoOtherCalls();
     }
 }

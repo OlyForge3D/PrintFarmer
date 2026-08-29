@@ -1539,6 +1539,16 @@ public class ProfilesController(
             _logger.LogWarning("Promote calibration draft profile validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            // Round-5 review fix (issue #2180 - Bishop/Hicks Blocking, round 5): the caller
+            // supplied a draft profile ID promoted by a different user. Deliberately mapped to
+            // Forbid() (403), matching UpdateCustomProfileAsync/DeleteCustomProfileAsync's
+            // existing precedent for this exception, rather than NotFound - do not disclose
+            // whether the ID exists.
+            _logger.LogWarning("Promote calibration draft profile unauthorized: {Message}", LogSanitizer.Sanitize(ex.Message));
+            return Forbid();
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Promote calibration draft profile failed");

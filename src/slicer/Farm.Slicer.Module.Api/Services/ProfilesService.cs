@@ -3786,6 +3786,14 @@ public class ProfilesService(
     /// path that avoids the round trip to the database's constraint violation on the common,
     /// non-racing case, and the catch handles the narrow window where two concurrent replays both
     /// miss the initial check.
+    ///
+    /// Round-5 review fix (issue #2180 - Bishop/Hicks Blocking, round 5): <paramref name="sourceDraftProfileId"/>
+    /// is caller-supplied and this endpoint is reachable by any holder of the ordinary
+    /// <c>Calibration.Update</c> permission, not just the specific project's own owner - the
+    /// slicer module cannot itself validate the ID against the calibration module's database. A
+    /// lookup hit for a draft ID this caller does not own must never be returned (data
+    /// disclosure) or silently claimed by a second insert attempt (foreign-ownership row churn);
+    /// see <see cref="EnsureOwnedByCallerOrThrow"/>.
     /// </remarks>
     public async Task<(CustomProfileDto Profile, bool WasCreated)> PromoteCalibrationDraftProfileAsync(
         UploadProfileRequestDto request, Guid userId, Guid sourceDraftProfileId, CancellationToken ct)
@@ -3797,10 +3805,16 @@ public class ProfilesService(
             throw new ArgumentException("RawJson is required.");
         }
 
+        if (sourceDraftProfileId == Guid.Empty)
+        {
+            throw new ArgumentException("sourceDraftProfileId is required.", nameof(sourceDraftProfileId));
+        }
+
         FilamentProfile? existing = await _filamentProfileRepo
             .GetByPromotedFromCalibrationDraftProfileIdAsync(sourceDraftProfileId, ct);
         if (existing is not null)
         {
+            EnsureOwnedByCallerOrThrow(existing, userId);
             return (ToCustomProfileDto(existing), false);
         }
 
@@ -3836,6 +3850,7 @@ public class ProfilesService(
                 .GetByPromotedFromCalibrationDraftProfileIdAsync(sourceDraftProfileId, ct);
             if (winner is not null)
             {
+                EnsureOwnedByCallerOrThrow(winner, userId);
                 return (ToCustomProfileDto(winner), false);
             }
 
@@ -3847,6 +3862,38 @@ public class ProfilesService(
             sourceDraftProfileId, LogSanitizer.Sanitize(name), userId);
 
         return (ToCustomProfileDto(profile), true);
+    }
+
+    /// <summary>
+    /// Round-5 review fix (issue #2180 - Bishop/Hicks Blocking, round 5): the idempotency lookup
+    /// in <see cref="PromoteCalibrationDraftProfileAsync"/> resolves purely on the caller-supplied
+    /// <c>sourceDraftProfileId</c>, which the slicer module cannot itself validate against the
+    /// separately-owned calibration module's data. A GUID is not an authorization boundary - if a
+    /// lookup or race-loser reload finds a profile promoted from that draft ID but owned by a
+    /// DIFFERENT user, it must never be returned (would disclose that user's profile name/raw
+    /// JSON to the caller) or treated as a normal idempotent replay. This mirrors the existing
+    /// ownership check already enforced by <c>UpdateCustomProfileAsync</c>/<c>DeleteCustomProfileAsync</c>
+    /// elsewhere in this file.
+    ///
+    /// Residual, documented risk: since <see cref="FilamentProfile.PromotedFromCalibrationDraftProfileId"/>
+    /// is a single GLOBAL unique index (not scoped per-owner), a caller who already knows another
+    /// user's draft profile ID could still race to claim it first, permanently blocking that
+    /// user's own later promotion (this method would then reject the true owner's call too, since
+    /// the row's <c>CreatedByUserId</c> would not match). This requires the attacker to already
+    /// possess the victim's specific draft profile GUID (122 bits of entropy, never guessable,
+    /// and only ever surfaced to the owning project's own caller) - a prerequisite that itself
+    /// implies a separate, prior authorization break. Fully eliminating this residual risk would
+    /// require a composite unique index scoped by owner (e.g. <c>(CreatedByUserId, PromotedFromCalibrationDraftProfileId)</c>),
+    /// which was intentionally deferred to avoid a second migration round for a defense-in-depth
+    /// improvement against an already-implausible prerequisite; tracked as a follow-up if desired.
+    /// </summary>
+    private static void EnsureOwnedByCallerOrThrow(FilamentProfile profile, Guid userId)
+    {
+        if (profile.CreatedByUserId != userId)
+        {
+            throw new UnauthorizedAccessException(
+                "You do not have permission to promote this calibration draft profile.");
+        }
     }
 
     private static (string Name, string? CompatiblePrinters) ParseFilamentProfileMetadata(UploadProfileRequestDto request)
