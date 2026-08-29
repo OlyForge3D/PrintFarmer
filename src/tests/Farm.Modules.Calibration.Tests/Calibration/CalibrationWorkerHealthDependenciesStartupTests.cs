@@ -190,11 +190,23 @@ public sealed class CalibrationWorkerHealthDependenciesStartupTests
         // Unavailable forever. AddCalibrationWorkerHealthDependencies (via
         // EnsureSlicerDatabaseRegistered) must add the missing factory even when SlicerDbContext
         // alone is already present, without duplicating SlicerDbContext itself.
-        IConfiguration configuration = BuildSplitDeploymentConfiguration(
-            Path.Combine(Path.GetTempPath(), $"calibration-worker-health-{Guid.NewGuid():N}.db"));
+        //
+        // The pre-existing context is registered using the SAME provider/connection string that
+        // this configuration resolves to — mirroring the only realistic way this state can arise
+        // (some other caller ran AddDbContext<SlicerDbContext> against the same IConfiguration and
+        // forgot the factory). A follow-up review round confirmed by actually creating and
+        // querying through the resulting factory that a mismatched-provider stand-in (e.g.
+        // UseInMemoryDatabase) throws EF Core's "multiple database providers registered"
+        // exception — that failure is an inherent, unavoidable consequence of configuring the same
+        // DbContext type against two different providers in one container, not a defect in
+        // EnsureSlicerDatabaseRegistered, so this test deliberately keeps both registrations on the
+        // one provider a real caller would actually use.
+        string dbPath = Path.Combine(Path.GetTempPath(), $"calibration-worker-health-{Guid.NewGuid():N}.db");
+        IConfiguration configuration = BuildSplitDeploymentConfiguration(dbPath);
+        string connectionString = configuration.GetValue<string>("ConnectionStrings:Default")!;
 
         ServiceCollection services = new();
-        _ = services.AddDbContext<SlicerDbContext>(options => options.UseInMemoryDatabase("stand-in"));
+        _ = services.AddDbContext<SlicerDbContext>(options => options.UseSqlite(connectionString));
         int dbContextRegistrationCountBefore =
             services.Count(sd => sd.ServiceType == typeof(SlicerDbContext));
 
@@ -203,11 +215,28 @@ public sealed class CalibrationWorkerHealthDependenciesStartupTests
         _ = services.Count(sd => sd.ServiceType == typeof(SlicerDbContext))
             .Should().Be(dbContextRegistrationCountBefore, "SlicerDbContext must not be registered a second time");
 
-        await using ServiceProvider provider = services.BuildServiceProvider();
-        await using AsyncServiceScope scope = provider.CreateAsyncScope();
-        _ = scope.ServiceProvider.GetService<IDbContextFactory<SlicerDbContext>>().Should().NotBeNull(
-            "AddCalibrationWorkerHealthDependencies must guarantee IDbContextFactory<SlicerDbContext> " +
-            "is resolvable even when some other caller registered SlicerDbContext on its own, " +
-            "otherwise CalibrationCapabilityService.GetWorkerHealthAsync would silently break");
+        try
+        {
+            await using ServiceProvider provider = services.BuildServiceProvider();
+            await using AsyncServiceScope scope = provider.CreateAsyncScope();
+            IDbContextFactory<SlicerDbContext>? factory =
+                scope.ServiceProvider.GetService<IDbContextFactory<SlicerDbContext>>();
+            _ = factory.Should().NotBeNull(
+                "AddCalibrationWorkerHealthDependencies must guarantee IDbContextFactory<SlicerDbContext> " +
+                "is resolvable even when some other caller registered SlicerDbContext on its own, " +
+                "otherwise CalibrationCapabilityService.GetWorkerHealthAsync would silently break");
+
+            // Not just resolvable — actually usable: create a real DbContext from the filled-in
+            // factory and query it, proving the half-fill path leaves a fully working factory
+            // rather than one that merely resolves and then explodes on first use.
+            await using SlicerDbContext db = await factory!.CreateDbContextAsync();
+            _ = await db.Database.EnsureCreatedAsync();
+            _ = await db.SlicerServices.CountAsync();
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            File.Delete(dbPath);
+        }
     }
 }
