@@ -99,6 +99,62 @@ test_worker_normalization_is_bash_3_2_compatible() {
     fi
 }
 
+test_go2rtc_interactive_default_uses_persisted_value() {
+    start_test "go2rtc interactive default preserves persisted enablement"
+
+    local helper_script="$TEST_TEMP_DIR/go2rtc-default-helper.sh"
+    local prompt_log="$TEST_TEMP_DIR/go2rtc-default-prompts"
+    local warning_log="$TEST_TEMP_DIR/go2rtc-default-warnings"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$DEPLOY_SCRIPT"
+PROMPT_LOG="$prompt_log"
+WARNING_LOG="$warning_log"
+prompt_with_default() {
+    printf -v "\$3" '%s' "\$2"
+}
+prompt_yes_no() {
+    printf '%s=%s\n' "\$3" "\$2" >> "\$PROMPT_LOG"
+    printf -v "\$3" '%s' "\$2"
+}
+print_header() { :; }
+print_info() { :; }
+print_success() { :; }
+print_error() { printf '%s\n' "\$*" >> "\$WARNING_LOG"; }
+print_warning() { printf '%s\n' "\$*" >> "\$WARNING_LOG"; }
+
+ENV_FILE="$TEST_TEMP_DIR/go2rtc-default.env"
+OS=linux
+ARCHITECTURE=microservices
+DEPLOY_GO2RTC=yes
+NON_INTERACTIVE=false
+CLI_INCLUDE_MONITORING=true
+CLI_INCLUDE_TELEMETRY=true
+CLI_INCLUDE_SECURITY=true
+CLI_INCLUDE_REGISTRY=true
+CLI_INCLUDE_DISCOVERY=true
+configure_additional
+[[ "\$DEPLOY_GO2RTC_ANSWER" == "yes" ]]
+[[ "\$DEPLOY_GO2RTC" == "yes" ]]
+
+: > "\$PROMPT_LOG"
+DEPLOY_GO2RTC=malformed
+configure_additional
+[[ "\$DEPLOY_GO2RTC_ANSWER" == "no" ]]
+[[ "\$DEPLOY_GO2RTC" == "no" ]]
+grep -Fq "Ignoring malformed persisted DEPLOY_GO2RTC value; defaulting to no" "\$WARNING_LOG"
+EOF
+    chmod +x "$helper_script"
+
+    assert_exit_code 0 "$helper_script" \
+        "configure_additional should preserve valid go2rtc state and safely default malformed state"
+    assert_file_has_exact_line "$prompt_log" "DEPLOY_GO2RTC_ANSWER=no" \
+        "configure_additional should pass the safe fallback to its go2rtc prompt"
+
+    pass_test
+}
+
 # Test that monitoring/telemetry/security settings are saved to config file
 test_monitoring_config_persistence() {
     start_test "monitoring/telemetry/security configuration persistence"
@@ -743,6 +799,7 @@ run_all_tests() {
     test_monitoring_config_persistence
     test_cli_flag_override
     test_config_loading_display
+    test_go2rtc_interactive_default_uses_persisted_value
     test_legacy_distributed_slicing_config_migrates_worker_defaults
     test_explicit_worker_disable_remains_disabled
     test_disabled_slicing_defaults_missing_worker_settings
