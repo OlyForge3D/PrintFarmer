@@ -59,22 +59,42 @@ public sealed record CalibrationOrchestrationDto(
 /// 409 also exists as defense in depth for the multi-instance case, where two API processes each
 /// hold their own independent in-process lock.
 ///
-/// <b>Known residual gap (accepted, not fixed by this feature).</b> The <see
-/// cref="ExpectedRevision"/> check only guarantees that a caller's *read* of the checkpoint was
-/// current at the moment it read it - within a single process, the in-process lock then serializes
-/// everything else, so no second caller can act on that same stale read. Across two separate API
-/// process instances, however, both can pass the staleness check and both can begin a step's
-/// external side effect (e.g. two overlapping calls to <c>IPrintDispatchGateway.SendToPrinterAsync</c>)
-/// before either one's write reaches the database and the loser's save fails with
-/// <see cref="Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException"/>. That failure still
-/// prevents the loser's outcome from being persisted, but it cannot un-send an HTTP call that
-/// already reached a printer. Closing this fully would mean holding a cross-process lock (e.g. a
-/// database-level advisory/row lock (e.g. <c>SELECT ... FOR UPDATE</c>) held for the whole step
-/// including its side effect, not just the checkpoint read-then-write - a change to how every saga
-/// step executes, not specific to take-over, and out of scope for the take-over semantics this
-/// type documents. Tracked as a follow-up in issue #2186 rather than left only as a doc comment; it
-/// is called out explicitly here because it is the kind of gap that is easy to assume
-/// <see cref="ExpectedRevision"/> already closes.
+/// <b>Cross-process external-dispatch race - closed for the two steps with external side effects
+/// (issue #2188).</b> The gap previously documented here - that two separate API process
+/// instances could each pass the <see cref="ExpectedRevision"/> staleness check and both begin a
+/// step's external side effect before either one's write reached the database - is now closed for
+/// the two steps that ever call an external gateway: <c>slicing</c> (<c>ISliceSubmissionGateway.SubmitAsync</c>)
+/// and <c>sending-to-printer</c> (<c>IPrintDispatchGateway.SendToPrinterAsync</c>). Both now
+/// acquire an atomic, row-version-fenced claim/lease (<c>CalibrationOrchestration.LeaseOwner</c>/
+/// <c>LeaseExpiresAtUtc</c>, mirroring the <c>PrinterDispatchState</c>/<c>QueueDispatchAttempt</c>
+/// claim-before-dispatch shape used for print-queue dispatch) immediately before calling their
+/// gateway, and a losing claim attempt returns the existing <c>calibration_orchestration_advance_conflict</c>
+/// 409 without ever calling the gateway - see
+/// <c>CalibrationOrchestrationSagaService.TryAcquireStepClaimAsync</c> for the full design,
+/// including why the lease-expiry check is required in addition to <see cref="ExpectedRevision"/>/
+/// <c>Revision</c> fencing, and the lease-duration rationale. The remaining eight saga steps
+/// (<c>cloning-profile</c>, <c>awaiting-slice</c>, <c>awaiting-print</c>,
+/// <c>awaiting-measurement</c>, <c>applying-measurement</c>, <c>advancing</c>, plus the terminal
+/// <c>created</c>/<c>completed</c> steps) have no external side effect to fence and are
+/// unaffected.
+///
+/// <b>Residual risk accepted for v1 (documented, not closed).</b> <c>SliceJobController</c>'s
+/// <c>POST /api/slice</c> does enforce a real unique-index dedup guard on caller-supplied
+/// correlation/checksum fields, but only for project-scoped (non-empty <c>IdempotencyScopeId</c>)
+/// submissions - this saga's own gateway deliberately strips <c>calibrationProjectId</c> from its
+/// request body, so every submission it makes falls outside that guard regardless of correlation
+/// id, and <c>SlicePrintBridgeController</c>'s send-to-printer endpoint has no idempotency field at
+/// all (unlike
+/// <c>QueueDispatchAttempt.BackendCommandId</c>/<c>BackendCorrelationId</c> for print-queue
+/// dispatch), so a *reclaim* of a lease that has genuinely expired - but whose original holder is
+/// merely slow, not crashed - can still result in two real external dispatches for the same step;
+/// for <c>sending-to-printer</c> that means a physical printer could receive two
+/// upload/start-print commands for the same calibration attempt. This is deliberately accepted
+/// for v1 rather than changing those two controllers' own request contracts, which would be a
+/// cross-cutting change outside this saga; see <c>TryAcquireStepClaimAsync</c>'s remarks for the
+/// full reasoning, including exactly what those two endpoints do and do not already support. A
+/// full transactional-outbox migration of calibration dispatch remains an optional future stretch
+/// goal, not attempted here.
 /// </remarks>
 public sealed class CalibrationOrchestrationAdvanceRequest
 {

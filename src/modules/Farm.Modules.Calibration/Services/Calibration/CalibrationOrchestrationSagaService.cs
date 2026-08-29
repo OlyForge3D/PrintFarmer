@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Data.Common;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -275,11 +276,11 @@ public sealed class CalibrationOrchestrationSagaService(
             CalibrationSagaSteps.CloningProfile =>
                 RunCloningProfileStep(attempt),
             CalibrationSagaSteps.Slicing =>
-                await RunSlicingStepAsync(orchestration, attempt, cancellationToken),
+                await RunSlicingStepAsync(orchestration, attempt, nowUtc, cancellationToken),
             CalibrationSagaSteps.AwaitingSlice =>
                 await RunAwaitingSliceStepAsync(orchestration, cancellationToken),
             CalibrationSagaSteps.SendingToPrinter =>
-                await RunSendingToPrinterStepAsync(orchestration, project, cancellationToken),
+                await RunSendingToPrinterStepAsync(orchestration, project, nowUtc, cancellationToken),
             CalibrationSagaSteps.AwaitingPrint =>
                 RunAwaitingPrintStep(orchestration, request),
             CalibrationSagaSteps.AwaitingMeasurement =>
@@ -291,10 +292,30 @@ public sealed class CalibrationOrchestrationSagaService(
             _ => StepOutcome.NoChange(),
         };
 
+        // A losing claim attempt (AC #2, issue #2188) must return the existing take-over 409
+        // exactly as-is - without ever having called the gateway, without appending a timeline
+        // event for a step attempt that never happened, and without touching Revision again via
+        // ApplyOutcome/the final save below (TryAcquireStepClaimAsync's own SaveChangesAsync,
+        // when it lost, either never ran at all or already failed/rolled back on its own).
+        if (outcome.ClaimConflict)
+        {
+            return CalibrationApiResult<CalibrationOrchestrationDto>.Failure(
+                StatusCodes.Status409Conflict,
+                "calibration_orchestration_advance_conflict");
+        }
+
         if (!outcome.Changed)
         {
             return CalibrationApiResult<CalibrationOrchestrationDto>.Success(MapOrchestration(orchestration));
         }
+
+        // Captured before the timeline-event append below, which can (rarely) clear the change
+        // tracker - see the revision re-check after the re-fetch for why this matters (AC #2/#4,
+        // issue #2188 review follow-up). For the two claiming steps this already reflects the
+        // Revision that TryAcquireStepClaimAsync's own successful claim-acquire save committed
+        // (that method mutates orchestration.Revision in place before returning); for every other
+        // step it is simply the unchanged value read at the top of this method.
+        long revisionAtOutcome = orchestration.Revision;
 
         // Append the timeline event through the *first*, dedicated save. AppendAttemptEventAsync
         // may clear the change tracker on a transient DbUpdateException while retrying its own
@@ -330,6 +351,10 @@ public sealed class CalibrationOrchestrationSagaService(
             // actually being recorded - the event *is* the audit trail this saga exists to keep.
             if (!appendResult.IsSuccess)
             {
+                // Release a claim taken above so this attempt's own failure never blocks the next
+                // Advance call for the full StepClaimLeaseDuration (a no-op for steps that never
+                // claim, since LeaseOwner is already null there).
+                await TryReleaseLeaseBestEffortAsync(orchestration, nowUtc, cancellationToken);
                 return CalibrationApiResult<CalibrationOrchestrationDto>.Failure(
                     appendResult.StatusCode,
                     appendResult.Code ?? "calibration_orchestration_event_append_failed");
@@ -338,6 +363,24 @@ public sealed class CalibrationOrchestrationSagaService(
             orchestration = await _dbContext.CalibrationOrchestrations.SingleAsync(
                 candidate => candidate.Id == orchestrationId,
                 cancellationToken);
+
+            // Guard against the narrow window where AppendAttemptEventAsync's own retry cleared
+            // the change tracker above: without that clear, the re-fetch above is identity-resolved
+            // back to this same tracked instance (EF Core never overwrites a still-tracked entity's
+            // properties from a query), so revisionAtOutcome trivially still matches and this is a
+            // no-op. When the tracker *was* cleared, the re-fetch instead returns the database's
+            // current row - if some other process (a reclaim of a lease that outlived
+            // StepClaimLeaseDuration, AC #3/#4) already advanced this orchestration in the
+            // meantime, silently proceeding to ApplyOutcome below would apply this attempt's own
+            // (now-stale) outcome on top of that newer state, potentially duplicating the timeline
+            // event/Revision bump for an external dispatch that has already been superseded. Fail
+            // the same way a losing claim attempt does instead of ever risking that.
+            if (orchestration.Revision != revisionAtOutcome)
+            {
+                return CalibrationApiResult<CalibrationOrchestrationDto>.Failure(
+                    StatusCodes.Status409Conflict,
+                    "calibration_orchestration_advance_conflict");
+            }
         }
 
         ApplyOutcome(orchestration, outcome, nowUtc);
@@ -400,9 +443,21 @@ public sealed class CalibrationOrchestrationSagaService(
             ? StepOutcome.Advance(CalibrationSagaSteps.Slicing, "step:cloning-profile")
             : StepOutcome.TerminalFailure("unknown_calibration_method", $"Method '{attempt.Method}' is not a recognized calibration method.");
 
-    private async Task<StepOutcome> RunSlicingStepAsync(
+    /// <summary>
+    /// Runs the <c>slicing</c> step, claiming (AC #2, issue #2188) then calling
+    /// <see cref="ISliceSubmissionGateway.SubmitAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// Internal (rather than private) so <c>Farm.Modules.Calibration.Tests</c> can call it
+    /// directly from two independent <see cref="AppDbContext"/>/orchestration-instance pairs to
+    /// prove, via a genuine database-level race, that racing <c>Advance</c> calls for the same
+    /// orchestration at this step result in exactly one gateway invocation (AC #5). See
+    /// <c>CalibrationOrchestrationClaimFencingConcurrencyTests</c>.
+    /// </remarks>
+    internal async Task<StepOutcome> RunSlicingStepAsync(
         CalibrationOrchestration orchestration,
         CalibrationAttempt attempt,
+        DateTime nowUtc,
         CancellationToken cancellationToken)
     {
         if (!CalibrationMethods.TryParse(attempt.Method, out CalibrationMethod method))
@@ -410,6 +465,14 @@ public sealed class CalibrationOrchestrationSagaService(
             return StepOutcome.TerminalFailure(
                 "unknown_calibration_method",
                 $"Method '{attempt.Method}' is not a recognized calibration method.");
+        }
+
+        // Claim BEFORE the external, non-idempotent gateway call below (AC #2, issue #2188) -
+        // see TryAcquireStepClaimAsync for the full claim/lease design and its documented v1
+        // duplicate-dispatch-on-reclaim risk (AC #4).
+        if (!await TryAcquireStepClaimAsync(orchestration, CalibrationSagaSteps.Slicing, nowUtc, cancellationToken))
+        {
+            return StepOutcome.ClaimLost();
         }
 
         JsonNode requestBody = BuildSliceSubmissionBody(attempt, method);
@@ -487,14 +550,31 @@ public sealed class CalibrationOrchestrationSagaService(
         return StepOutcome.NoChange();
     }
 
-    private async Task<StepOutcome> RunSendingToPrinterStepAsync(
+    /// <summary>
+    /// Runs the <c>sending-to-printer</c> step, claiming (AC #2, issue #2188) then calling
+    /// <see cref="IPrintDispatchGateway.SendToPrinterAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// Internal for the same reason as <see cref="RunSlicingStepAsync"/> - direct test access for
+    /// the AC #5 concurrency proof.
+    /// </remarks>
+    internal async Task<StepOutcome> RunSendingToPrinterStepAsync(
         CalibrationOrchestration orchestration,
         CalibrationProject project,
+        DateTime nowUtc,
         CancellationToken cancellationToken)
     {
         if (orchestration.SliceJobId is not Guid sliceJobId)
         {
             return StepOutcome.TerminalFailure("slice_job_missing", "No slice job was recorded for this orchestration.");
+        }
+
+        // Claim BEFORE the external, non-idempotent gateway call below (AC #2, issue #2188) -
+        // see TryAcquireStepClaimAsync for the full claim/lease design and its documented v1
+        // duplicate-dispatch-on-reclaim risk (AC #4).
+        if (!await TryAcquireStepClaimAsync(orchestration, CalibrationSagaSteps.SendingToPrinter, nowUtc, cancellationToken))
+        {
+            return StepOutcome.ClaimLost();
         }
 
         PrintDispatchResult result = await _printDispatchGateway.SendToPrinterAsync(
@@ -630,7 +710,214 @@ public sealed class CalibrationOrchestrationSagaService(
         orchestration.StepStartedAtUtc = nowUtc;
         orchestration.UpdatedAtUtc = nowUtc;
         orchestration.CompletedAtUtc = outcome.Completed ? nowUtc : orchestration.CompletedAtUtc;
+
+        // Release the claim as soon as this process's own step attempt concludes - whether it
+        // succeeded, is retrying, or failed terminally - so a later Advance call (for this step or
+        // any subsequent one) never has to wait out the full StepClaimLeaseDuration just because
+        // the process that held it is done. This unconditional clear is a no-op for every step
+        // that never calls TryAcquireStepClaimAsync in the first place (LeaseOwner/LeaseExpiresAtUtc
+        // are already null there), so it changes no behavior for CloningProfile, AwaitingSlice,
+        // AwaitingPrint, AwaitingMeasurement, ApplyingMeasurement, or Advancing (AC #6).
+        orchestration.LeaseOwner = null;
+        orchestration.LeaseExpiresAtUtc = null;
         orchestration.Revision++;
+    }
+
+    /// <summary>
+    /// How long a claim on <see cref="CalibrationOrchestration.LeaseOwner"/> remains valid before a
+    /// subsequent <c>Advance</c> call - from any process - may reclaim it and retry the external
+    /// dispatch it guards (AC #3, issue #2188).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Chosen to comfortably exceed the worst-case duration of either external call this claim
+    /// guards: <see cref="ISliceSubmissionGateway.SubmitAsync"/>'s <c>POST /api/slice</c> and
+    /// <see cref="IPrintDispatchGateway.SendToPrinterAsync"/>'s send-to-printer call are both
+    /// issued over the "CalibrationSagaInternalApi" named <see cref="HttpClient"/> registered in
+    /// <c>CalibrationApiModule</c> with no explicit <c>Timeout</c> override, so both inherit
+    /// .NET's default 100-second <see cref="HttpClient.Timeout"/>. 120 seconds leaves roughly 20
+    /// seconds of margin over that worst case for local scheduling/GC overhead, so a call that is
+    /// still genuinely in flight is (almost) never reclaimed out from under it while its own
+    /// gateway call could still legitimately complete.
+    /// </para>
+    /// <para>
+    /// 120 seconds is also comparable to - well under - the existing step-retry backoff ceiling
+    /// (see <see cref="RetryBackoff"/>, capped at 300 seconds): a crashed or hung process that
+    /// never releases its claim blocks this orchestration's progress for no longer than roughly
+    /// one retry-backoff cycle before another process can take over, instead of blocking it
+    /// indefinitely.
+    /// </para>
+    /// </remarks>
+    private static readonly TimeSpan StepClaimLeaseDuration = TimeSpan.FromSeconds(120);
+
+    /// <summary>
+    /// Atomically claims <paramref name="orchestration"/> for <paramref name="stepName"/> before its
+    /// caller is allowed to invoke an external, non-idempotent gateway
+    /// (<see cref="ISliceSubmissionGateway.SubmitAsync"/> or
+    /// <see cref="IPrintDispatchGateway.SendToPrinterAsync"/>) - mirroring the claim-before-dispatch
+    /// shape <c>PrinterDispatchState</c>/<c>QueueDispatchAttempt</c> already use for print-queue
+    /// dispatch (issue #2188 AC #2, referencing #2186's scoping). Reuses the existing,
+    /// previously-unwired <see cref="CalibrationOrchestration.LeaseOwner"/>/
+    /// <see cref="CalibrationOrchestration.LeaseExpiresAtUtc"/> columns - both already present in
+    /// every migrated <c>AppDbContext</c> provider (PostgreSQL, SqlServer, and Sqlite) since a
+    /// prior migration, so acquiring this claim requires no new EF Core migration (AC #1).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the lease-expiry check is required in addition to the <c>Revision</c> concurrency
+    /// token:</b> two truly-simultaneous claim attempts are already mutually exclusive because
+    /// this method's own <c>SaveChangesAsync</c> call is fenced
+    /// by <see cref="CalibrationOrchestration.Revision"/> (only one writer's UPDATE can match the
+    /// row's current Revision; the loser gets a genuine <see cref="DbUpdateConcurrencyException"/>).
+    /// But a *later* call - one that arrives strictly after the first call's claim already
+    /// committed, while that first call is still awaiting its own gateway response - would read a
+    /// fresh, non-conflicting Revision snapshot (the one the first call just committed) and,
+    /// without an explicit unexpired-lease check, would successfully "reclaim" and dispatch a
+    /// second, concurrent gateway call for the same step. The unexpired-lease check below closes
+    /// that window: it fails the claim attempt outright, without touching the database at all,
+    /// whenever a live (non-expired) lease is already held by anyone, so only the process already
+    /// in flight - or a process arriving after the lease has genuinely expired - can ever reach the
+    /// gateway call (AC #2/#3).
+    /// </para>
+    /// <para>
+    /// <b>Duplicate-dispatch-on-reclaim risk (accepted for v1, AC #4):</b>
+    /// <c>SliceJobController</c>'s <c>POST /api/slice</c> does enforce a real, DB-level
+    /// idempotency guard for project-scoped submissions - a unique index over
+    /// <c>(UserId, IdempotencyScopeId, CorrelationId)</c> (and one over
+    /// <c>(UserId, IdempotencyScopeId, Checksum)</c>) rejects a genuine duplicate with
+    /// <c>409 slice_job_duplicate</c> - but that guard is filtered to exclude rows whose
+    /// <c>IdempotencyScopeId</c> is <see cref="Guid.Empty"/> (see
+    /// <c>SlicerDbContext.ApplyProviderSpecificIdempotencyFilters</c>: "standard jobs use
+    /// <see cref="Guid.Empty"/> and must remain repeatable"), and <see cref="BuildSliceSubmissionBody"/>
+    /// deliberately strips <c>calibrationProjectId</c> from this saga's own request body, so every
+    /// submission this gateway makes resolves <c>IdempotencyScopeId</c> to <see cref="Guid.Empty"/>
+    /// regardless of what <c>OperationId</c>/<c>CorrelationId</c>/<c>Checksum</c> it carries. The
+    /// unique-index guard therefore never applies to this saga's own calls: every call creates a
+    /// brand-new <c>SliceJob</c> row regardless of the correlation id supplied. (A separate,
+    /// unrelated code path this endpoint never calls -
+    /// <c>SlicerOrchestrator.SubmitJobAsync</c>/<c>EfSliceJobRepository.FindExistingJobAsync</c> -
+    /// does look up an existing job by correlation id, but only for its own callers.)
+    /// <c>SlicePrintBridgeController</c>'s send-to-printer endpoint (<c>SendToPrinterRequest</c>)
+    /// has no idempotency/correlation field at all. So, unlike
+    /// <c>QueueDispatchAttempt.BackendCommandId</c>/<c>BackendCorrelationId</c> for print-queue
+    /// dispatch, simply threading a claim-derived correlation id through this saga's gateway calls
+    /// would not by itself close this risk - it would additionally require adding real dedup logic
+    /// to <c>SliceJobController</c> and a new idempotency field to
+    /// <c>SlicePrintBridgeController</c>, both cross-cutting changes to those controllers' own
+    /// request contracts and explicitly out of this issue's scope (non-goals: do not change any
+    /// other subsystem, and do not attempt a full transactional-outbox migration). This risk is
+    /// deliberately accepted for v1: a reclaim that races a legitimately-still-running (merely
+    /// slow, not crashed) first attempt - i.e. one that has simply outlived
+    /// <see cref="StepClaimLeaseDuration"/> - can still result in two real external dispatches for
+    /// the same step. For <c>sending-to-printer</c> specifically this is a physical-safety-relevant
+    /// risk, not just a bookkeeping one: a real printer could receive two upload/start-print
+    /// commands for the same calibration attempt, which can waste filament/machine time or, if the
+    /// bed was not cleared between the two, cause a physical collision - the same class of risk any
+    /// non-idempotent dispatch retry carries, bounded only by keeping
+    /// <see cref="StepClaimLeaseDuration"/> no longer than the rationale in its own remarks
+    /// requires. Closing it is left to a future change to those controllers' contracts, optionally
+    /// alongside the transactional-outbox stretch goal called out in issue #2188.
+    /// </para>
+    /// <para>
+    /// Internal (rather than private) so <c>Farm.Modules.Calibration.Tests</c> can call it directly
+    /// from two independent <see cref="AppDbContext"/>/orchestration-instance pairs to exercise a
+    /// genuine database-level race (AC #5) - the in-process <c>AdvanceLocks</c> semaphore that
+    /// serializes <see cref="AdvanceAsync"/> would otherwise make two concurrent calls into that
+    /// entry point, from the same test process, impossible to race at the database layer. See
+    /// <c>CalibrationOrchestrationClaimFencingConcurrencyTests</c>.
+    /// </para>
+    /// </remarks>
+    /// <returns>
+    /// <see langword="true"/> if the claim was newly acquired and the caller may proceed to call
+    /// the gateway; <see langword="false"/> if a live lease is already held by anyone, or if this
+    /// attempt lost a genuine <see cref="DbUpdateConcurrencyException"/> race to commit its own
+    /// claim - in either case the caller must return <see cref="StepOutcome.ClaimLost"/> and must
+    /// never call the gateway.
+    /// </returns>
+    internal async Task<bool> TryAcquireStepClaimAsync(
+        CalibrationOrchestration orchestration,
+        string stepName,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
+    {
+        if (orchestration.LeaseOwner is not null &&
+            orchestration.LeaseExpiresAtUtc is DateTime existingExpiry &&
+            existingExpiry > nowUtc)
+        {
+            // A live lease is already held (by this very orchestration's own in-flight attempt,
+            // or another process's) - never call the gateway while that's true, and never touch
+            // the database to find out more, since the answer is already known from the
+            // in-memory snapshot this caller already holds.
+            return false;
+        }
+
+        orchestration.LeaseOwner = $"{stepName}:{Guid.NewGuid():N}";
+        orchestration.LeaseExpiresAtUtc = nowUtc + StepClaimLeaseDuration;
+        orchestration.Revision++;
+        try
+        {
+            _ = await _dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Another process's claim (for this step, or a reclaim of an expired lease) committed
+            // first between this method's initial in-memory check and its own SaveChangesAsync.
+            // Report a straightforward loss; the caller returns StepOutcome.ClaimLost(), and
+            // AdvanceLockedAsync turns that into the existing take-over 409
+            // calibration_orchestration_advance_conflict without ever calling the gateway.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Best-effort release of a claim taken by <see cref="TryAcquireStepClaimAsync"/> when the
+    /// step's own outcome could not be fully applied (currently: a non-throwing
+    /// <c>AppendAttemptEventAsync</c> failure) - so a promptly-failed attempt does not block the
+    /// next <c>Advance</c> call for the whole <see cref="StepClaimLeaseDuration"/> the way a
+    /// crashed/hung process's claim legitimately does (review follow-up, issue #2188 AC #3/#4). A
+    /// no-op for every step that never calls <see cref="TryAcquireStepClaimAsync"/>, since
+    /// <see cref="CalibrationOrchestration.LeaseOwner"/> is already <see langword="null"/> there
+    /// (AC #6).
+    /// </summary>
+    /// <remarks>
+    /// Deliberately swallows a losing <see cref="DbUpdateConcurrencyException"/> instead of
+    /// surfacing it: the caller has already decided to fail this <c>Advance</c> attempt for its
+    /// own reason (the event-append failure), and if another process concurrently reclaimed this
+    /// same lease (because it had already outlived <see cref="StepClaimLeaseDuration"/>) that
+    /// process's own claim/outcome now owns the row - this best-effort release must never fight
+    /// that write or mask the original failure this method was called to report. Also swallows any
+    /// other <see cref="DbUpdateException"/>/<see cref="DbException"/> (e.g. a transient
+    /// connection failure on this best-effort save) for the same reason: this method's entire
+    /// purpose is to never let its own cleanup attempt replace the original failure's status code
+    /// with an unrelated 500 (review follow-up, issue #2188).
+    /// </remarks>
+    private async Task TryReleaseLeaseBestEffortAsync(
+        CalibrationOrchestration orchestration,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
+    {
+        if (orchestration.LeaseOwner is null)
+        {
+            return;
+        }
+
+        orchestration.LeaseOwner = null;
+        orchestration.LeaseExpiresAtUtc = null;
+        orchestration.Revision++;
+        orchestration.UpdatedAtUtc = nowUtc;
+        try
+        {
+            _ = await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is DbUpdateException or DbException)
+        {
+            // Covers both a losing DbUpdateConcurrencyException (another process already changed
+            // this row, most likely by reclaiming the same lease after it expired - that write
+            // wins) and any other transient save failure - either way this best-effort release is
+            // simply dropped rather than masking the original failure this method was called to
+            // report.
+        }
     }
 
     private static TimeSpan RetryBackoff(int retryCount) =>
@@ -698,7 +985,12 @@ public sealed class CalibrationOrchestrationSagaService(
         orchestration.CompletedAtUtc);
 
     /// <summary>Outcome of running one saga step, describing exactly how the checkpoint should change.</summary>
-    private sealed record StepOutcome(
+    /// <remarks>
+    /// Internal (rather than private) so it can be named as the return type of the internal
+    /// <see cref="RunSlicingStepAsync"/>/<see cref="RunSendingToPrinterStepAsync"/> methods from
+    /// <c>Farm.Modules.Calibration.Tests</c> (AC #5, issue #2188).
+    /// </remarks>
+    internal sealed record StepOutcome(
         bool Changed,
         string? NextStep,
         string? EventType,
@@ -708,7 +1000,8 @@ public sealed class CalibrationOrchestrationSagaService(
         int? RetryCount,
         bool WaitingToRetry,
         bool Terminal,
-        bool Completed)
+        bool Completed,
+        bool ClaimConflict = false)
     {
         public static StepOutcome NoChange() =>
             new(false, null, null, null, null, null, null, false, false, false);
@@ -741,5 +1034,15 @@ public sealed class CalibrationOrchestrationSagaService(
 
         public static StepOutcome TerminalFailure(string errorCode, string? detail) =>
             new(true, null, "step:failed", null, errorCode, detail, null, false, true, false);
+
+        /// <summary>
+        /// A losing <see cref="TryAcquireStepClaimAsync"/> attempt (AC #2, issue #2188): the caller
+        /// must never have called the gateway, and <see cref="AdvanceLockedAsync"/> must translate
+        /// this directly into the existing take-over 409 <c>calibration_orchestration_advance_conflict</c>
+        /// without appending a timeline event or touching <see cref="CalibrationOrchestration.Revision"/>
+        /// again.
+        /// </summary>
+        public static StepOutcome ClaimLost() =>
+            new(false, null, null, null, null, null, null, false, false, false, ClaimConflict: true);
     }
 }
