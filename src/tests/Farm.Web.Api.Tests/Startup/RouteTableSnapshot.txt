@@ -140,6 +140,7 @@ GET /api/calibration-projects/method-guidance -> Farm.Modules.Calibration::Farm.
 GET /api/calibration-projects/{projectId:guid} -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetProjectAsync
 GET /api/calibration-projects/{projectId:guid}/attempts -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetAttemptsAsync
 GET /api/calibration-projects/{projectId:guid}/draft-profile -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetDraftProfileAsync
+GET /api/calibration-projects/{projectId:guid}/in-flight -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetInFlightAsync
 GET /api/calibration-projects/{projectId:guid}/method-progress -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationProjectsController.GetMethodProgressAsync
 GET /api/calibration-sync/changes -> Farm.Modules.Calibration::Farm.Modules.Calibration.Controllers.CalibrationSyncController.GetChangesAsync
 GET /api/calibration/capabilities -> Farm.Web.Api::Farm.Web.Api.Controllers.CalibrationCapabilitiesController.GetCapabilitiesAsync

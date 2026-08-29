@@ -188,13 +188,28 @@ public sealed class CalibrationProjectsController(ICalibrationProjectService cal
     [RequirePermission(PrintFarmerPermissions.Calibration.Read)]
     public IActionResult GetMethodGuidanceCatalog()
     {
+        return Ok(_calibrationService.GetMethodGuidanceCatalog());
+    }
+
+    /// <summary>
+    /// Answers "is anything already underway on this project, and where was it started?" for a
+    /// fresh device that has no attempt or orchestration id to query by.
+    /// </summary>
+    [HttpGet("{projectId:guid}/in-flight")]
+    [RequirePermission(PrintFarmerPermissions.Calibration.Read)]
+    public async Task<IActionResult> GetInFlightAsync(Guid projectId, CancellationToken cancellationToken)
+    {
         CalibrationActor? actor = GetActor();
         if (actor is null)
         {
             return AuthenticationProblem();
         }
 
-        return Ok(_calibrationService.GetMethodGuidanceCatalog());
+        CalibrationApiResult<CalibrationInFlightStateDto> result = await _calibrationService.GetInFlightAsync(
+            projectId,
+            actor,
+            cancellationToken);
+        return InFlightResult(result);
     }
 
     /// <summary>
@@ -762,6 +777,10 @@ public abstract class CalibrationControllerBase : ControllerBase
         SetETag("draft-profile", result.Value.Id, result.Value.Revision);
         return StatusCode(result.StatusCode, result.Value);
     }
+
+    /// <summary>Maps a project-scoped in-flight-state query result.</summary>
+    protected IActionResult InFlightResult(CalibrationApiResult<CalibrationInFlightStateDto> result) =>
+        Result(result);
 
     private IActionResult Result<T>(CalibrationApiResult<T> result)
     {

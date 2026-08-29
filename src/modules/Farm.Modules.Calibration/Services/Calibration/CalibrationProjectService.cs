@@ -99,6 +99,16 @@ public interface ICalibrationProjectService
         CalibrationActor actor,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Answers "is anything already underway on this project, and where was it started?" without
+    /// requiring the caller to know any attempt or orchestration id up front. See
+    /// <see cref="CalibrationInFlightStateDto"/> for how to interpret the result.
+    /// </summary>
+    Task<CalibrationApiResult<CalibrationInFlightStateDto>> GetInFlightAsync(
+        Guid projectId,
+        CalibrationActor actor,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<CalibrationAttemptDto>> GetAttemptsAsync(
         Guid projectId,
         CalibrationActor actor,
@@ -293,6 +303,105 @@ public sealed class CalibrationProjectService(
             ? NotFound<CalibrationProjectDto>()
             : CalibrationApiResult<CalibrationProjectDto>.Success(MapProject(project));
     }
+
+    /// <inheritdoc />
+    public async Task<CalibrationApiResult<CalibrationInFlightStateDto>> GetInFlightAsync(
+        Guid projectId,
+        CalibrationActor actor,
+        CancellationToken cancellationToken)
+    {
+        CalibrationProject? project = await FindVisibleProjectAsync(projectId, actor, false, cancellationToken);
+        if (project is null)
+        {
+            return NotFound<CalibrationInFlightStateDto>();
+        }
+
+        // Attempts are append-only and retryable (ParentAttemptId), and each CreateAttemptAsync
+        // call inserts its own orchestration row (CalibrationOrchestration.AttemptId is
+        // unique-indexed per ATTEMPT, not per project) - so more than one non-terminal
+        // orchestration CAN and does coexist for one project (e.g. a retry attempt started while
+        // an earlier one is still mid-print). Picking "most recently touched" alone would let a
+        // brand-new Pending retry mask an older Running orchestration that is physically printing
+        // (see IsPhysicalPrintUnderway) - exactly the wasted-filament case this endpoint exists to
+        // prevent. Load the (small, per-project) candidate set and rank in memory: a physical
+        // print in progress always outranks everything else, then Running outranks
+        // WaitingToRetry outranks Pending, then most recently touched, with a fully deterministic
+        // tiebreak so results are stable across providers and ticks that share a timestamp.
+        List<CalibrationOrchestration> nonTerminalOrchestrations = await _dbContext.CalibrationOrchestrations
+            .AsNoTracking()
+            .Where(candidate => candidate.ProjectId == projectId &&
+                (candidate.Status == CalibrationOrchestrationStatus.Pending ||
+                    candidate.Status == CalibrationOrchestrationStatus.Running ||
+                    candidate.Status == CalibrationOrchestrationStatus.WaitingToRetry))
+            .ToListAsync(cancellationToken);
+        CalibrationOrchestration? orchestration = nonTerminalOrchestrations
+            .OrderByDescending(InFlightPriority)
+            .ThenByDescending(candidate => candidate.UpdatedAtUtc)
+            .ThenByDescending(candidate => candidate.CreatedAtUtc)
+            .ThenBy(candidate => candidate.Id)
+            .FirstOrDefault();
+
+        CalibrationDraftExistenceDto[] drafts = await _dbContext.CalibrationDrafts
+            .AsNoTracking()
+            .Where(candidate => candidate.ProjectId == projectId && candidate.DeletedAtUtc == null)
+            .OrderByDescending(candidate => candidate.UpdatedAtUtc)
+            .Select(candidate => new CalibrationDraftExistenceDto(
+                candidate.StepId,
+                candidate.DeviceLineageId,
+                candidate.UpdatedAtUtc))
+            .Take(MaxInFlightDrafts)
+            .ToArrayAsync(cancellationToken);
+
+        CalibrationInFlightStateDto dto = new(
+            projectId,
+            orchestration is null ? null : MapOrchestration(orchestration),
+            drafts);
+        return CalibrationApiResult<CalibrationInFlightStateDto>.Success(dto);
+    }
+
+    /// <summary>
+    /// Ranking key for <see cref="GetInFlightAsync"/>: higher always wins. A physical print
+    /// already underway must never be masked by a newer but less-advanced orchestration.
+    /// </summary>
+    private static int InFlightPriority(CalibrationOrchestration orchestration) =>
+        (IsPhysicalPrintUnderway(orchestration) ? 100 : 0) +
+        orchestration.Status switch
+        {
+            CalibrationOrchestrationStatus.Running => 3,
+            CalibrationOrchestrationStatus.WaitingToRetry => 2,
+            CalibrationOrchestrationStatus.Pending => 1,
+            _ => 0,
+        };
+
+    /// <summary>
+    /// Whether an orchestration has an actual physical print dispatched to a printer right now -
+    /// the case where starting a second print on another device wastes filament.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="CalibrationOrchestration.PrintJobId"/> is checked first for forward
+    /// compatibility, but the saga's ad-hoc dispatch path
+    /// (<c>CalibrationOrchestrationSagaService.RunSendingToPrinterStepAsync</c> calling
+    /// <c>IPrintDispatchGateway.SendToPrinterAsync</c>) never creates a queued
+    /// <c>PrintJob</c> and so never populates <see cref="CalibrationOrchestration.PrintJobId"/>
+    /// today - wiring that up would mean teaching the ad-hoc dispatch bridge
+    /// (<c>SlicePrintBridgeController</c>/<c>DispatchClaimService</c>, a different module) to mint
+    /// and return an identifier, which is out of this endpoint's scope. The signal that IS real
+    /// today is <see cref="CalibrationOrchestration.CurrentStep"/> reaching
+    /// <c>CalibrationSagaSteps.AwaitingPrint</c>: <c>RunSendingToPrinterStepAsync</c> only advances
+    /// to that step after <c>SendToPrinterAsync</c> reports success, so a <c>Running</c>
+    /// orchestration sitting at <c>awaiting-print</c> means gcode has actually been uploaded and a
+    /// print started on a physical printer, not merely that a step is in progress.
+    /// </remarks>
+    private static bool IsPhysicalPrintUnderway(CalibrationOrchestration orchestration) =>
+        orchestration.PrintJobId.HasValue ||
+        string.Equals(orchestration.CurrentStep, CalibrationSagaSteps.AwaitingPrint, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Defensive cap on drafts returned by <see cref="GetInFlightAsync"/>: existence metadata is
+    /// cheap, but an unbounded number of devices leaving stale drafts on one project should not
+    /// let a single request load an unbounded result set into memory.
+    /// </summary>
+    private const int MaxInFlightDrafts = 200;
 
     /// <inheritdoc />
     public async Task<CalibrationApiResult<CalibrationProjectDto>> CreateProjectAsync(
@@ -3566,6 +3675,23 @@ public sealed class CalibrationProjectService(
             $"Unable to persist calibration draft profile promotion outcome for '{draftProfile.Id}' " +
             $"after {maxAttempts} attempts due to repeated concurrency conflicts.");
     }
+
+    private static CalibrationOrchestrationDto MapOrchestration(CalibrationOrchestration orchestration) => new(
+        orchestration.Id,
+        orchestration.ProjectId,
+        orchestration.AttemptId,
+        orchestration.CurrentStep,
+        orchestration.Status.ToString(),
+        orchestration.RetryCount,
+        orchestration.NextRetryAtUtc,
+        orchestration.LastErrorCode,
+        orchestration.SliceJobId,
+        orchestration.GcodeFileId,
+        orchestration.PrintJobId,
+        orchestration.Revision,
+        orchestration.CreatedAtUtc,
+        orchestration.UpdatedAtUtc,
+        orchestration.CompletedAtUtc);
 
     private static CalibrationAttemptDto MapAttempt(CalibrationAttempt attempt, string status) =>
         new(
