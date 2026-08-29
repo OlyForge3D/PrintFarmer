@@ -161,12 +161,45 @@ public static class SlicerModuleExtensions
 
         _ = services.AddSingleton<SlicerCalibrationProfileRepositoriesMarker>();
 
-        AddSlicerDatabase(services, configuration);
+        EnsureSlicerDatabaseRegistered(services, configuration);
         _ = services.AddScoped<IMachineProfileRepository, EfMachineProfileRepository>();
         _ = services.AddScoped<IProcessProfileRepository, EfProcessProfileRepository>();
         _ = services.AddScoped<IFilamentProfileRepository, EfFilamentProfileRepository>();
         _ = services.AddScoped<IModel3DFileRepository, EfModel3DFileRepository>();
 
+        return services;
+    }
+
+    /// <summary>
+    /// Ensures <see cref="SlicerDbContext"/> and its <see cref="IDbContextFactory{TContext}"/> are
+    /// registered, without duplicating the registration if some other caller already added them.
+    /// </summary>
+    /// <remarks>
+    /// Exposed as public (rather than folded silently into <see cref="AddSlicerCalibrationProfileRepositories"/>)
+    /// so a caller adding a repository that depends on <see cref="SlicerDbContext"/> — e.g.
+    /// <c>ModelStorageResolutionStartup</c>'s <c>TryAddScoped&lt;IModel3DFileRepository,
+    /// EfModel3DFileRepository&gt;</c> insurance registration — can guarantee the full dependency
+    /// chain is present, rather than relying on <see cref="AddSlicerCalibrationProfileRepositories"/>'s
+    /// own early-return guard (which, if it were ever to fire for a reason other than "the
+    /// monolith already registered everything," would otherwise leave <see cref="SlicerDbContext"/>
+    /// unregistered too).
+    /// </remarks>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">Application configuration (reads DB_PROVIDER, ConnectionStrings:Default, etc.).</param>
+    /// <returns>The service collection for chaining.</returns>
+    public static IServiceCollection EnsureSlicerDatabaseRegistered(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        if (services.Any(sd => sd.ServiceType == typeof(SlicerDbContext)))
+        {
+            return services;
+        }
+
+        AddSlicerDatabase(services, configuration);
         return services;
     }
 

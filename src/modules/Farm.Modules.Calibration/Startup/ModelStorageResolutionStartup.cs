@@ -71,11 +71,13 @@ public static class ModelStorageResolutionStartup
 
         // Insurance against AddSlicerCalibrationProfileRepositories' own early return: it no-ops
         // whenever IMachineProfileRepository is already registered by *some other* caller, which
-        // today always also means IModel3DFileRepository was registered alongside it (both are
-        // added together, so they cannot diverge in practice). Should a future caller ever
-        // register IMachineProfileRepository without IModel3DFileRepository, TryAddScoped here
-        // guarantees Model3DStorageResolver still has a resolvable dependency instead of throwing
-        // out of CalibrationCapabilityService.GetCapabilitiesAsync's GetService<T>() call.
+        // today always also means SlicerDbContext and IModel3DFileRepository were registered
+        // alongside it (all three are added together, so they cannot diverge in practice). Should
+        // a future caller ever register IMachineProfileRepository without the rest of that chain,
+        // these two TryAdd/Ensure calls guarantee Model3DStorageResolver still has a fully
+        // resolvable dependency chain instead of throwing out of
+        // CalibrationCapabilityService.GetCapabilitiesAsync's GetService<T>() call.
+        services.EnsureSlicerDatabaseRegistered(configuration);
         services.TryAddScoped<IModel3DFileRepository, EfModel3DFileRepository>();
         _ = services.AddScoped<IModelStorageResolver, Model3DStorageResolver>();
 
