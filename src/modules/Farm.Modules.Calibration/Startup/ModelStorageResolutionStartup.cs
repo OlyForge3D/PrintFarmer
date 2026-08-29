@@ -3,6 +3,7 @@ using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Farm.Modules.Calibration.Startup;
 
@@ -67,6 +68,15 @@ public static class ModelStorageResolutionStartup
         }
 
         _ = services.AddSlicerCalibrationProfileRepositories(configuration);
+
+        // Insurance against AddSlicerCalibrationProfileRepositories' own early return: it no-ops
+        // whenever IMachineProfileRepository is already registered by *some other* caller, which
+        // today always also means IModel3DFileRepository was registered alongside it (both are
+        // added together, so they cannot diverge in practice). Should a future caller ever
+        // register IMachineProfileRepository without IModel3DFileRepository, TryAddScoped here
+        // guarantees Model3DStorageResolver still has a resolvable dependency instead of throwing
+        // out of CalibrationCapabilityService.GetCapabilitiesAsync's GetService<T>() call.
+        services.TryAddScoped<IModel3DFileRepository, EfModel3DFileRepository>();
         _ = services.AddScoped<IModelStorageResolver, Model3DStorageResolver>();
 
         return services;
