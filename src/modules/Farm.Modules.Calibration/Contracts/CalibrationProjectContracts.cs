@@ -379,3 +379,62 @@ public sealed record LegacyCalibrationImportResultDto(
     IReadOnlyList<string> Warnings,
     IReadOnlyList<string> RejectedRecords,
     IReadOnlyList<Guid> ProjectIds);
+
+/// <summary>
+/// Server-tracked, project-owned (not device-scoped) disposition for one calibration method
+/// (issue #2180, gap 2). A <c>Skipped</c> method is distinguishable from a <c>Pending</c> one and
+/// does not block project completion.
+/// </summary>
+public sealed record CalibrationMethodProgressDto(
+    Guid Id,
+    Guid ProjectId,
+    string Method,
+    string Disposition,
+    string? CurrentStepId,
+    long Revision,
+    DateTime CreatedAtUtc,
+    DateTime UpdatedAtUtc);
+
+/// <summary>Request to explicitly set a method's disposition to <c>Skipped</c> or <c>Pending</c>.</summary>
+/// <remarks><c>Completed</c> is never client-settable; it is only derived from an accepted selection.</remarks>
+public sealed class CalibrationMethodDispositionRequest
+{
+    public long? BaseRevision { get; init; }
+
+    public string Disposition { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// The project-owned draft filament profile document (issue #2180, gap 1), accumulated as each
+/// method's result is accepted and promoted to a real custom filament profile only once the
+/// project reaches <c>Completed</c>.
+/// </summary>
+public sealed record CalibrationDraftProfileDto(
+    Guid Id,
+    Guid ProjectId,
+    JsonElement Values,
+    long Revision,
+    Guid? PromotedProfileId,
+    DateTime? PromotedAtUtc,
+    DateTime CreatedAtUtc,
+    DateTime UpdatedAtUtc);
+
+/// <summary>A required <c>setup</c>-step input declared for a calibration method (issue #2180, gap 4).</summary>
+public sealed record CalibrationSetupInputDto(string Key, string Label, string Unit, decimal Minimum, decimal Maximum);
+
+/// <summary>The measurement quantity the <c>measure</c> step expects for a calibration method.</summary>
+public sealed record CalibrationMeasureQuantityDto(string Key, decimal Minimum, decimal Maximum);
+
+/// <summary>
+/// Server-owned per-method guidance (issue #2180, gap 3): display title, purpose, wiki reference,
+/// required setup inputs, expected measurement quantity, and canonical step sequence. Served so
+/// clients never duplicate this metadata locally.
+/// </summary>
+public sealed record CalibrationMethodGuidanceDto(
+    string Method,
+    string Title,
+    string Purpose,
+    string WikiUrl,
+    IReadOnlyList<CalibrationSetupInputDto> SetupInputs,
+    CalibrationMeasureQuantityDto? MeasureQuantity,
+    IReadOnlyList<string> Steps);

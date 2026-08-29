@@ -283,7 +283,7 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
 
         _ = attempt.StatusCode.Should().Be(StatusCodes.Status201Created);
         _ = changes.Value!.Changes.Select(change => change.EntityType)
-            .Should().Equal("project", "attempt", "orchestration");
+            .Should().Equal("project", "method-progress", "attempt", "orchestration");
     }
 
     [Fact]
@@ -419,7 +419,8 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
             context,
             new TestCalibrationBlobStore(),
             TimeProvider.System,
-            NullLogger<CalibrationProjectService>.Instance);
+            NullLogger<CalibrationProjectService>.Instance,
+            new FakeFilamentProfilePromotionGateway());
 
     private static CalibrationDraftUpsertRequest CreateDraftRequest(
         string method = "manual",
@@ -684,5 +685,13 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
                 new string('a', 64),
                 1,
                 1));
+    }
+
+    private sealed class FakeFilamentProfilePromotionGateway : IFilamentProfilePromotionGateway
+    {
+        public Task<FilamentProfilePromotionResult> PromoteAsync(
+            FilamentProfilePromotionRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(FilamentProfilePromotionResult.Ok(Guid.NewGuid()));
     }
 }

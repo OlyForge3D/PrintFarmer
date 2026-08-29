@@ -132,7 +132,8 @@ public sealed class CalibrationLegacyV4ImportTests
             context,
             new TestCalibrationBlobStore(),
             TimeProvider.System,
-            NullLogger<CalibrationProjectService>.Instance);
+            NullLogger<CalibrationProjectService>.Instance,
+            new FakeFilamentProfilePromotionGateway());
 
     private static LegacyCalibrationImportRequest CreateImportRequest(
         string operationId,
@@ -270,5 +271,13 @@ public sealed class CalibrationLegacyV4ImportTests
                 1,
                 sourceSha256);
         }
+    }
+
+    private sealed class FakeFilamentProfilePromotionGateway : IFilamentProfilePromotionGateway
+    {
+        public Task<FilamentProfilePromotionResult> PromoteAsync(
+            FilamentProfilePromotionRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(FilamentProfilePromotionResult.Ok(Guid.NewGuid()));
     }
 }

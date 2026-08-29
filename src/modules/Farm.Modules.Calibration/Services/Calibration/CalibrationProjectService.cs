@@ -196,6 +196,34 @@ public interface ICalibrationProjectService
         CancellationToken cancellationToken);
 
     Task<int> ReconcilePendingPhotoDeletesAsync(CancellationToken cancellationToken);
+
+    /// <summary>Gets the server-owned, per-method guided-session metadata catalog (issue #2180, gap 3).</summary>
+    IReadOnlyList<CalibrationMethodGuidanceDto> GetMethodGuidanceCatalog();
+
+    /// <summary>Gets the project-owned, non-device-scoped method dispositions (issue #2180, gap 2).</summary>
+    Task<CalibrationApiResult<IReadOnlyList<CalibrationMethodProgressDto>>> GetMethodProgressAsync(
+        Guid projectId,
+        CalibrationActor actor,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Explicitly sets a method's disposition to <c>Skipped</c> or <c>Pending</c> (issue #2180,
+    /// gap 2). <c>Completed</c> is never client-settable here; it is only derived from an
+    /// accepted selection observation.
+    /// </summary>
+    Task<CalibrationApiResult<CalibrationMethodProgressDto>> SetMethodDispositionAsync(
+        Guid projectId,
+        string method,
+        CalibrationMethodDispositionRequest request,
+        string? ifMatch,
+        CalibrationActor actor,
+        CancellationToken cancellationToken);
+
+    /// <summary>Gets the project-owned draft filament profile document (issue #2180, gap 1).</summary>
+    Task<CalibrationApiResult<CalibrationDraftProfileDto>> GetDraftProfileAsync(
+        Guid projectId,
+        CalibrationActor actor,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -207,7 +235,8 @@ public sealed class CalibrationProjectService(
     AppDbContext dbContext,
     ICalibrationBlobStore blobStore,
     TimeProvider timeProvider,
-    ILogger<CalibrationProjectService> logger)
+    ILogger<CalibrationProjectService> logger,
+    IFilamentProfilePromotionGateway filamentProfilePromotionGateway)
     : ICalibrationProjectService
 {
     private const int MaximumChangePageSize = 250;
@@ -229,6 +258,9 @@ public sealed class CalibrationProjectService(
     private readonly TimeProvider _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
 
     private readonly ILogger<CalibrationProjectService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+    private readonly IFilamentProfilePromotionGateway _filamentProfilePromotionGateway =
+        filamentProfilePromotionGateway ?? throw new ArgumentNullException(nameof(filamentProfilePromotionGateway));
 
     private readonly Dictionary<CalibrationChange, long> _pendingChangeOrders = [];
     private long _nextPendingChangeOrder;
@@ -549,6 +581,147 @@ public sealed class CalibrationProjectService(
             }
 
             normalizedLifecycleStatus = status;
+        }
+
+        // Issue #2180, gaps 1 and 2: only a genuine Active -> Completed transition gates and
+        // promotes. Completing an already-Completed project (e.g. a benign re-PATCH), and any
+        // transition that does not originate from Active (including Archived -> Completed, which
+        // would otherwise let an abandoned project be revived into a promotion by a later PATCH)
+        // never re-runs this - an abandoned/archived project's draft profile is simply never
+        // promoted, so it leaves nothing in the user's custom filament profile list.
+        if (normalizedLifecycleStatus == CalibrationProjectLifecycleStatus.Completed &&
+            project.LifecycleStatus == CalibrationProjectLifecycleStatus.Active)
+        {
+            bool hasPendingMethod = await _dbContext.CalibrationMethodProgresses.AnyAsync(
+                progress => progress.ProjectId == project.Id &&
+                    progress.Disposition == CalibrationMethodDisposition.Pending,
+                cancellationToken);
+            if (hasPendingMethod)
+            {
+                return Validation<CalibrationProjectDto>("project_completion_blocked_pending_method");
+            }
+
+            CalibrationDraftProfile? draftProfile = await _dbContext.CalibrationDraftProfiles
+                .FirstOrDefaultAsync(profile => profile.ProjectId == project.Id, cancellationToken);
+            if (draftProfile is not null && draftProfile.PromotedProfileId is null)
+            {
+                // Round-3 review fix (Hicks Blocking #2, issue #2180): a claim is only a genuine,
+                // still-in-flight block while it is fresh. A claim left behind by a process crash
+                // between claiming the slot and either releasing or committing an outcome would
+                // otherwise strand the project's completion forever, with no operator remediation
+                // short of manual SQL. Once a claim is older than PromotionClaimStaleAfter, treat
+                // it as abandoned and allow reclaiming it - the Revision concurrency token still
+                // protects against two callers reclaiming the same stale row simultaneously.
+                //
+                // Round-4 review fix (Hicks Blocking #2, issue #2180): a reclaim after the TTL
+                // that calls the gateway again is now genuinely safe, not merely "harmless" -
+                // PromoteCalibrationDraftProfileAsync dedups on the draft profile's own stable ID
+                // (a unique-indexed column on FilamentProfile), so a replayed gateway call returns
+                // the SAME already-promoted profile instead of minting a second, user-visible
+                // duplicate in the owner's custom filament profile list. (An earlier version of
+                // this comment described the duplicate as a "harmless orphaned" profile; that
+                // framing was incorrect - a duplicate is a real, visible entry in the user's
+                // profile list, not an orphan - and is what motivated this fix.)
+                if (draftProfile.PromotionClaimedAtUtc is not null &&
+                    !IsPromotionClaimStale(draftProfile.PromotionClaimedAtUtc.Value))
+                {
+                    // A prior request already holds an unresolved, still-fresh claim on this row
+                    // (still in-flight). Fail fast rather than stealing the claim and calling the
+                    // gateway a second time while the original claimant may still be mid-flight -
+                    // the Revision check below only catches *simultaneous* saves, not this
+                    // sequential re-entry case.
+                    return Validation<CalibrationProjectDto>("project_completion_promotion_conflict");
+                }
+
+                // Review fix (issue #2180): atomically claim the promotion slot with a dedicated
+                // SaveChangesAsync *before* calling the external gateway, guarded by the existing
+                // Revision concurrency token (not ExecuteUpdateAsync, which the EF Core InMemory
+                // provider used by this service's test suite does not support at all). Two
+                // genuinely concurrent Active -> Completed PATCHes for the same project would
+                // otherwise both observe PromotedProfileId as null before either commits and both
+                // call the external endpoint, creating duplicate real filament profiles - the
+                // *combined* project+draft-profile save at the end of this method only catches
+                // that conflict *after* both external calls already happened. Saving the claim on
+                // its own, immediately, means the second concurrent caller's own claim-save loses
+                // the Revision race and fails fast, before it ever reaches the gateway call.
+                //
+                // Round-2 review fix (Vasquez): a simultaneous, *unrelated* write to this same row
+                // (e.g. AppendObservationAsync updating ValuesJson for a "selection" observation)
+                // also bumps Revision and would otherwise throw DbUpdateConcurrencyException here
+                // for a reason that has nothing to do with a competing completion attempt. Reload
+                // and distinguish: if the fresh row shows another claim already in place, this is a
+                // genuine competing completion - fail fast. Otherwise the conflict was incidental,
+                // so retry the claim itself against the fresh row (bounded, since two competing
+                // *completions* are the only case that should legitimately exhaust the retries).
+                CalibrationDraftProfile? claimedProfile = await TryClaimPromotionSlotAsync(
+                    draftProfile, actor, cancellationToken);
+                if (claimedProfile is null)
+                {
+                    return Validation<CalibrationProjectDto>("project_completion_promotion_conflict");
+                }
+
+                draftProfile = claimedProfile;
+
+                FilamentProfilePromotionResult promotion = await _filamentProfilePromotionGateway.PromoteAsync(
+                    new FilamentProfilePromotionRequest(project.Name, BuildDraftProfileRawJson(project, draftProfile), draftProfile.Id),
+                    cancellationToken);
+                if (!promotion.Success || promotion.ProfileId is null)
+                {
+                    // Release the claim so a legitimate retry - e.g. after a transient transport
+                    // failure - is not permanently blocked by a stale claim from this attempt.
+                    //
+                    // Round-2 review fix (Bishop B5): use CancellationToken.None, not the caller's
+                    // token - an ordinary HTTP disconnect/timeout while the gateway call was
+                    // in-flight must not prevent releasing a claim we already know failed, or the
+                    // project would be stuck holding an unreleasable claim forever. Round-2 review
+                    // fix (Bishop B7/Vasquez): retry through a fresh reload on a concurrency
+                    // conflict, rather than letting DbUpdateConcurrencyException escape uncaught,
+                    // so a concurrent unrelated write to this row during the gateway call cannot
+                    // strand the claim either.
+                    await SavePromotionOutcomeWithRetryAsync(
+                        draftProfile,
+                        profile =>
+                        {
+                            profile.PromotionClaimedAtUtc = null;
+                            profile.Revision++;
+                            profile.UpdatedAtUtc = UtcNow();
+                        });
+                    return Validation<CalibrationProjectDto>(promotion.ErrorCode ?? "profile_promotion_failed");
+                }
+
+                // Persist the promotion result on its own too, independently of the rest of this
+                // method's project-field changes below: if the later, combined
+                // SaveJournaledChangesAsync call fails for an unrelated reason (e.g. a concurrent
+                // edit to the project itself), the fact that the external profile now exists must
+                // not be lost - otherwise a retry would see PromotedProfileId still null and call
+                // the gateway a second time, creating a duplicate. Recording it here first makes a
+                // later, unrelated failure land on an already-promoted draft profile, so a retry's
+                // promotion block above is skipped entirely (PromotedProfileId is no longer null)
+                // and only the project's own fields are retried.
+                //
+                // Round-2 review fix (Bishop B5/B7, Vasquez): same CancellationToken.None +
+                // reload-and-retry-on-conflict rationale as the release path above - this save is
+                // strictly more important to never lose, since by this point the real external
+                // profile already exists and losing this write would both orphan it and strand the
+                // claim permanently.
+                draftProfile = await SavePromotionOutcomeWithRetryAsync(
+                    draftProfile,
+                    profile =>
+                    {
+                        profile.PromotedProfileId = promotion.ProfileId;
+                        profile.PromotedAtUtc = UtcNow();
+                        profile.Revision++;
+                        profile.UpdatedAtUtc = UtcNow();
+                    });
+                AddChange(
+                    project,
+                    "draft-profile",
+                    draftProfile.Id,
+                    draftProfile.Revision,
+                    CalibrationChangeType.Updated,
+                    mutationIdentity?.OperationId ?? MutationId(),
+                    actor);
+            }
         }
 
         string? orderedStepsJson = null;
@@ -1040,6 +1213,195 @@ public sealed class CalibrationProjectService(
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<CalibrationMethodGuidanceDto> GetMethodGuidanceCatalog() =>
+        Enum.GetValues<CalibrationMethod>().Select(MapMethodGuidance).ToArray();
+
+    /// <inheritdoc />
+    public async Task<CalibrationApiResult<IReadOnlyList<CalibrationMethodProgressDto>>> GetMethodProgressAsync(
+        Guid projectId,
+        CalibrationActor actor,
+        CancellationToken cancellationToken)
+    {
+        CalibrationProject? project = await FindVisibleProjectAsync(projectId, actor, false, cancellationToken);
+        if (project is null)
+        {
+            return NotFound<IReadOnlyList<CalibrationMethodProgressDto>>();
+        }
+
+        CalibrationMethodProgress[] progressRows = await _dbContext.CalibrationMethodProgresses
+            .AsNoTracking()
+            .Where(progress => progress.ProjectId == projectId)
+            .OrderBy(progress => progress.CreatedAtUtc)
+            .ToArrayAsync(cancellationToken);
+        return CalibrationApiResult<IReadOnlyList<CalibrationMethodProgressDto>>.Success(
+            progressRows.Select(MapMethodProgress).ToArray());
+    }
+
+    /// <inheritdoc />
+    public async Task<CalibrationApiResult<CalibrationMethodProgressDto>> SetMethodDispositionAsync(
+        Guid projectId,
+        string method,
+        CalibrationMethodDispositionRequest request,
+        string? ifMatch,
+        CalibrationActor actor,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Completed is never client-settable (issue #2180, gap 2): it is only derived from an
+        // accepted "selection" observation in AppendObservationAsync. A client may only ever
+        // assert Pending (undo a skip) or Skipped. The method key is normalized through the same
+        // CalibrationMethods.TryParse/ToWireName pair every other method-consuming path uses, so
+        // an unrecognized or differently-cased method string can never create an orphaned
+        // "junk" progress row that permanently blocks project completion, and never collides
+        // under a case-insensitive database collation (e.g. SQL Server's default).
+        if (string.IsNullOrWhiteSpace(method) || method.Length > 128 ||
+            !CalibrationMethods.TryParse(method.Trim(), out CalibrationMethod parsedMethod) ||
+            !Enum.TryParse(request.Disposition, true, out CalibrationMethodDisposition disposition) ||
+            disposition == CalibrationMethodDisposition.Completed)
+        {
+            return Validation<CalibrationMethodProgressDto>("method_disposition_invalid");
+        }
+
+        CalibrationProject? project = await FindVisibleProjectAsync(projectId, actor, false, cancellationToken);
+        if (project is null)
+        {
+            return NotFound<CalibrationMethodProgressDto>();
+        }
+
+        string trimmedMethod = CalibrationMethods.ToWireName(parsedMethod);
+        CalibrationMethodProgress? progress = await _dbContext.CalibrationMethodProgresses.SingleOrDefaultAsync(
+            candidate => candidate.ProjectId == projectId && candidate.Method == trimmedMethod,
+            cancellationToken);
+        DateTime nowUtc = UtcNow();
+        bool isNew = progress is null;
+
+        if (progress is null)
+        {
+            if (request.BaseRevision.HasValue || !string.IsNullOrWhiteSpace(ifMatch))
+            {
+                return Validation<CalibrationMethodProgressDto>("method_progress_not_found_for_precondition");
+            }
+
+            progress = new CalibrationMethodProgress
+            {
+                Id = Guid.NewGuid(),
+                ProjectId = projectId,
+                Method = trimmedMethod,
+                Disposition = disposition,
+                Revision = 1,
+                CreatedAtUtc = nowUtc,
+                UpdatedAtUtc = nowUtc,
+                CreatedBySubject = actor.Subject,
+                UpdatedBySubject = actor.Subject,
+            };
+            _ = _dbContext.CalibrationMethodProgresses.Add(progress);
+            AddChange(
+                project,
+                "method-progress",
+                progress.Id,
+                progress.Revision,
+                CalibrationChangeType.Created,
+                MutationId(),
+                actor);
+        }
+        else
+        {
+            CalibrationApiResult<CalibrationMethodProgressDto>? precondition = CheckPrecondition(
+                progress.Revision,
+                progress.Id,
+                "method-progress",
+                request.BaseRevision,
+                ifMatch,
+                MapMethodProgress(progress));
+            if (precondition is not null)
+            {
+                return precondition;
+            }
+
+            progress.Disposition = disposition;
+            progress.Revision++;
+            progress.UpdatedAtUtc = nowUtc;
+            progress.UpdatedBySubject = actor.Subject;
+            AddChange(
+                project,
+                "method-progress",
+                progress.Id,
+                progress.Revision,
+                CalibrationChangeType.Updated,
+                MutationId(),
+                actor);
+        }
+
+        CalibrationMethodProgressDto result = MapMethodProgress(progress);
+        try
+        {
+            _ = await SaveJournaledChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException) when (!isNew)
+        {
+            ClearTrackedState();
+            CalibrationMethodProgress? current = await _dbContext.CalibrationMethodProgresses
+                .Join(
+                    VisibleProjects(actor, true),
+                    candidate => candidate.ProjectId,
+                    visibleProject => visibleProject.Id,
+                    (candidate, _) => candidate)
+                .SingleOrDefaultAsync(candidate => candidate.Id == progress.Id, cancellationToken);
+            return current is null
+                ? NotFound<CalibrationMethodProgressDto>()
+                : RevisionConflict(current.Revision, request.BaseRevision, MapMethodProgress(current));
+        }
+        catch (DbUpdateException) when (isNew)
+        {
+            ClearTrackedState();
+            CalibrationMethodProgress? current = await _dbContext.CalibrationMethodProgresses
+                .SingleOrDefaultAsync(
+                    candidate => candidate.ProjectId == projectId && candidate.Method == trimmedMethod,
+                    cancellationToken);
+            if (current is null)
+            {
+                throw new InvalidOperationException(
+                    "The concurrent calibration method-progress insert did not produce a row.");
+            }
+
+            return current.Disposition == disposition
+                ? CalibrationApiResult<CalibrationMethodProgressDto>.Success(MapMethodProgress(current), replayed: true)
+                : CalibrationApiResult<CalibrationMethodProgressDto>.Failure(
+                    StatusCodes.Status409Conflict,
+                    "method_progress_create_conflict",
+                    new(
+                        current.Revision,
+                        null,
+                        MapMethodProgress(current),
+                        ["method-progress"],
+                        ["refresh", "fork", "discard-local-change"]));
+        }
+
+        return CalibrationApiResult<CalibrationMethodProgressDto>.Success(result);
+    }
+
+    /// <inheritdoc />
+    public async Task<CalibrationApiResult<CalibrationDraftProfileDto>> GetDraftProfileAsync(
+        Guid projectId,
+        CalibrationActor actor,
+        CancellationToken cancellationToken)
+    {
+        CalibrationProject? project = await FindVisibleProjectAsync(projectId, actor, false, cancellationToken);
+        if (project is null)
+        {
+            return NotFound<CalibrationDraftProfileDto>();
+        }
+
+        CalibrationDraftProfile? draftProfile = await _dbContext.CalibrationDraftProfiles
+            .AsNoTracking()
+            .SingleOrDefaultAsync(profile => profile.ProjectId == projectId, cancellationToken);
+        return draftProfile is null
+            ? NotFound<CalibrationDraftProfileDto>()
+            : CalibrationApiResult<CalibrationDraftProfileDto>.Success(MapDraftProfile(draftProfile));
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<CalibrationAttemptDto>> GetAttemptsAsync(
         Guid projectId,
         CalibrationActor actor,
@@ -1092,6 +1454,21 @@ public sealed class CalibrationProjectService(
             !IsJsonContainer(request.Specification) || !IsJsonContainer(request.ProfileSnapshotIds))
         {
             return Validation<CalibrationAttemptDto>("attempt_invalid");
+        }
+
+        string trimmedAttemptMethod = request.Method.Trim();
+        bool attemptMethodRecognized = CalibrationMethods.TryParse(trimmedAttemptMethod, out CalibrationMethod parsedAttemptMethod);
+
+        // Issue #2180, gap 4: the setup step collects nothing today; when the method declares
+        // required setup inputs (e.g. a temperature tower's start/end range), the submitted
+        // specification must carry them, in range, mirroring ValidateMeasurementRange's
+        // server-side enforcement for the measure step. An unrecognized method has no declared
+        // inputs to enforce here and is rejected later by CreateAttemptAsync's own method
+        // recognition, unchanged.
+        if (attemptMethodRecognized &&
+            CalibrationMethodGuidanceCatalog.ValidateSetupInputs(parsedAttemptMethod, request.Specification) is string setupInputCode)
+        {
+            return Validation<CalibrationAttemptDto>(setupInputCode);
         }
 
         string? payloadSafetyCode = new[]
@@ -1159,6 +1536,47 @@ public sealed class CalibrationProjectService(
                 .Max() + 1;
             Guid attemptId = Guid.NewGuid();
             DateTime nowUtc = UtcNow();
+
+            // Issue #2180, gap 2: ensure a project-owned (not device-scoped) disposition row
+            // exists for this method so it is resumable with the correct pending/completed/
+            // skipped state on any device. A race on the (ProjectId, Method) unique index is
+            // handled by this same append-retry loop, exactly like the attempt Sequence race.
+            // The key is normalized to the canonical wire name (falling back to the raw trimmed
+            // value only for a legacy/unrecognized method) so it always matches what
+            // SetMethodDispositionAsync and AppendObservationAsync normalize to - otherwise
+            // differently-cased submissions of the same method would create two progress rows on
+            // a case-sensitive collation (Postgres) or a unique-index conflict on a
+            // case-insensitive one (SQL Server).
+            string normalizedProgressMethod = NormalizeMethodKey(trimmedAttemptMethod);
+            CalibrationMethodProgress? methodProgress = await _dbContext.CalibrationMethodProgresses
+                .FirstOrDefaultAsync(
+                    progress => progress.ProjectId == projectId && progress.Method == normalizedProgressMethod,
+                    cancellationToken);
+            if (methodProgress is null)
+            {
+                methodProgress = new CalibrationMethodProgress
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = projectId,
+                    Method = normalizedProgressMethod,
+                    Disposition = CalibrationMethodDisposition.Pending,
+                    Revision = 1,
+                    CreatedAtUtc = nowUtc,
+                    UpdatedAtUtc = nowUtc,
+                    CreatedBySubject = actor.Subject,
+                    UpdatedBySubject = actor.Subject,
+                };
+                _ = _dbContext.CalibrationMethodProgresses.Add(methodProgress);
+                AddChange(
+                    project,
+                    "method-progress",
+                    methodProgress.Id,
+                    methodProgress.Revision,
+                    CalibrationChangeType.Created,
+                    MutationId(),
+                    actor);
+            }
+
             CalibrationAttempt attempt = new()
             {
                 Id = attemptId,
@@ -1478,6 +1896,56 @@ public sealed class CalibrationProjectService(
             CalibrationProject project = await _dbContext.CalibrationProjects.SingleAsync(
                 candidate => candidate.Id == attempt.ProjectId,
                 cancellationToken);
+
+            // Issue #2180, gaps 1 and 2: an accepted "selection" observation is the operator's
+            // conclusion for this method, so (a) merge its measurements into the project's
+            // accumulating draft profile document (never a real custom filament profile - that
+            // only happens on project completion, see UpdateProjectInternalAsync) and (b) mark
+            // the method's disposition Completed so it stops blocking project completion and is
+            // no longer reported as Pending on resume.
+            if (string.Equals(observation.ObservationType, "selection", StringComparison.OrdinalIgnoreCase))
+            {
+                CalibrationDraftProfile? draftProfile = await _dbContext.CalibrationDraftProfiles
+                    .FirstOrDefaultAsync(profile => profile.ProjectId == attempt.ProjectId, cancellationToken);
+                bool isNewDraftProfile = draftProfile is null;
+                draftProfile ??= new CalibrationDraftProfile
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = attempt.ProjectId,
+                    ValuesJson = "{}",
+                    Revision = 0,
+                    CreatedAtUtc = observation.ObservedAtUtc,
+                    CreatedBySubject = actor.Subject,
+                };
+                draftProfile.ValuesJson = MergeDraftProfileValues(draftProfile.ValuesJson, attempt.Method, request.Measurements);
+                draftProfile.Revision++;
+                draftProfile.UpdatedAtUtc = UtcNow();
+                draftProfile.UpdatedBySubject = actor.Subject;
+                if (isNewDraftProfile)
+                {
+                    _ = _dbContext.CalibrationDraftProfiles.Add(draftProfile);
+                    AddChange(project, "draft-profile", draftProfile.Id, draftProfile.Revision, CalibrationChangeType.Created, MutationId(), actor);
+                }
+                else
+                {
+                    AddChange(project, "draft-profile", draftProfile.Id, draftProfile.Revision, CalibrationChangeType.Updated, MutationId(), actor);
+                }
+
+                string normalizedAttemptMethodKey = NormalizeMethodKey(attempt.Method);
+                CalibrationMethodProgress? methodProgress = await _dbContext.CalibrationMethodProgresses
+                    .FirstOrDefaultAsync(
+                        progress => progress.ProjectId == attempt.ProjectId && progress.Method == normalizedAttemptMethodKey,
+                        cancellationToken);
+                if (methodProgress is not null && methodProgress.Disposition != CalibrationMethodDisposition.Completed)
+                {
+                    methodProgress.Disposition = CalibrationMethodDisposition.Completed;
+                    methodProgress.Revision++;
+                    methodProgress.UpdatedAtUtc = UtcNow();
+                    methodProgress.UpdatedBySubject = actor.Subject;
+                    AddChange(project, "method-progress", methodProgress.Id, methodProgress.Revision, CalibrationChangeType.Updated, MutationId(), actor);
+                }
+            }
+
             AddChange(
                 project,
                 "observation",
@@ -3019,6 +3487,194 @@ public sealed class CalibrationProjectService(
             draft.CreatedAtUtc,
             draft.UpdatedAtUtc,
             draft.DeletedAtUtc);
+
+    // Issue #2180, gap 2 (review fix): a single normalization rule for the CalibrationMethodProgress
+    // "Method" lookup/storage key, shared by CreateAttemptAsync's ensure-block and
+    // AppendObservationAsync's completion lookup. Recognized methods always normalize to their
+    // canonical wire name so differently-cased submissions of the same method resolve to the same
+    // progress row; an unrecognized/legacy method key is preserved verbatim (CreateAttemptAsync
+    // already accepts freeform method strings it does not otherwise validate).
+    private static string NormalizeMethodKey(string method) =>
+        CalibrationMethods.TryParse(method, out CalibrationMethod parsed) ? CalibrationMethods.ToWireName(parsed) : method;
+
+    private static CalibrationMethodProgressDto MapMethodProgress(CalibrationMethodProgress progress) =>
+        new(
+            progress.Id,
+            progress.ProjectId,
+            progress.Method,
+            progress.Disposition.ToString(),
+            progress.CurrentStepId,
+            progress.Revision,
+            progress.CreatedAtUtc,
+            progress.UpdatedAtUtc);
+
+    private static CalibrationDraftProfileDto MapDraftProfile(CalibrationDraftProfile draftProfile) =>
+        new(
+            draftProfile.Id,
+            draftProfile.ProjectId,
+            Parse(draftProfile.ValuesJson),
+            draftProfile.Revision,
+            draftProfile.PromotedProfileId,
+            draftProfile.PromotedAtUtc,
+            draftProfile.CreatedAtUtc,
+            draftProfile.UpdatedAtUtc);
+
+    private static CalibrationMethodGuidanceDto MapMethodGuidance(CalibrationMethod method)
+    {
+        CalibrationMethodGuidance guidance = CalibrationMethodGuidanceCatalog.ForMethod(method);
+        CalibrationMeasurementRange? measureRange = CalibrationMethodGuidanceCatalog.MeasureQuantityFor(method);
+        CalibrationMeasureQuantityDto? measureQuantity = measureRange is null
+            ? null
+            : new CalibrationMeasureQuantityDto(measureRange.MeasurementKey, measureRange.Minimum, measureRange.Maximum);
+        return new(
+            CalibrationMethods.ToWireName(method),
+            guidance.Title,
+            guidance.Purpose,
+            guidance.WikiUrl,
+            guidance.SetupInputs
+                .Select(input => new CalibrationSetupInputDto(input.Key, input.Label, input.Unit, input.Minimum, input.Maximum))
+                .ToArray(),
+            measureQuantity,
+            CalibrationMethodSteps.GetSequence(method));
+    }
+
+    /// <summary>
+    /// Merges an accepted selection observation's measurements into the project's accumulating
+    /// draft profile document (issue #2180, gap 1), nested under the calibration method's own
+    /// wire name so two methods can never collide on the same measurement key.
+    /// </summary>
+    private static string MergeDraftProfileValues(string existingValuesJson, string method, JsonElement measurements)
+    {
+        JsonObject root = JsonNode.Parse(existingValuesJson) as JsonObject ?? [];
+        root[method] = JsonNode.Parse(measurements.GetRawText());
+        return root.ToJsonString();
+    }
+
+    /// <summary>
+    /// Builds the filament-profile-shaped raw JSON document posted to the slicer module's upload
+    /// contract on promotion (issue #2180, gap 1). Deliberately not <c>GeneratedProfileRevision</c>
+    /// (deleted by #1998's generator teardown): this is the project's own accumulated draft
+    /// values, keyed by calibration method, plus the minimal identity fields the upload contract
+    /// inspects (<c>name</c>).
+    /// </summary>
+    private static string BuildDraftProfileRawJson(CalibrationProject project, CalibrationDraftProfile draftProfile)
+    {
+        JsonObject root = JsonNode.Parse(draftProfile.ValuesJson) as JsonObject ?? [];
+        root["name"] = $"{project.Name} (Calibrated)";
+        root["filament_type"] = project.FilamentMaterial;
+        return root.ToJsonString();
+    }
+
+    /// <summary>
+    /// Round-3 review fix (Hicks Blocking #2, issue #2180): how long a promotion claim may remain
+    /// unresolved before it is treated as abandoned (e.g. by a process crash) and reclaimable by a
+    /// later completion attempt, rather than permanently blocking the project. Generous relative to
+    /// the external gateway call this guards, which should normally complete in well under a
+    /// minute.
+    /// </summary>
+    private static readonly TimeSpan PromotionClaimStaleAfter = TimeSpan.FromMinutes(15);
+
+    private bool IsPromotionClaimStale(DateTime claimedAtUtc) =>
+        UtcNow() - claimedAtUtc >= PromotionClaimStaleAfter;
+
+    /// <summary>
+    /// Round-2 review fix (Vasquez): claims the promotion slot on <paramref name="draftProfile"/>
+    /// via its own dedicated save, distinguishing a genuine competing claim (fail fast, no retry)
+    /// from an incidental concurrency conflict caused by an unrelated concurrent write to the same
+    /// row (e.g. <c>AppendObservationAsync</c> updating <c>ValuesJson</c>) - which is safe to retry
+    /// against a freshly reloaded row. Returns the (possibly reloaded) tracked entity with the
+    /// claim durably committed, or <c>null</c> if the slot is already claimed by someone else with
+    /// a still-fresh claim (see <see cref="IsPromotionClaimStale"/> for the abandoned-claim case).
+    /// </summary>
+    private async Task<CalibrationDraftProfile?> TryClaimPromotionSlotAsync(
+        CalibrationDraftProfile draftProfile,
+        CalibrationActor actor,
+        CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 5;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            draftProfile.PromotionClaimedAtUtc = UtcNow();
+            draftProfile.Revision++;
+            draftProfile.UpdatedAtUtc = UtcNow();
+            draftProfile.UpdatedBySubject = actor.Subject;
+            try
+            {
+                _ = await _dbContext.SaveChangesAsync(cancellationToken);
+                return draftProfile;
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                Guid draftProfileId = draftProfile.Id;
+                _dbContext.Entry(draftProfile).State = EntityState.Detached;
+                draftProfile = await _dbContext.CalibrationDraftProfiles.SingleAsync(
+                    profile => profile.Id == draftProfileId, cancellationToken);
+                if (draftProfile.PromotedProfileId is not null)
+                {
+                    // Bishop round-4 hardening (issue #2180): a concurrent caller already
+                    // completed promotion for this draft while we were retrying the claim.
+                    // Promotion is now idempotent end-to-end (see PromoteCalibrationDraftProfileAsync's
+                    // draft-profile-id dedup key), so reclaiming here would not be unsafe, but it
+                    // would be a wasted gateway round trip for a promotion that has already
+                    // succeeded - fail fast instead.
+                    return null;
+                }
+
+                if (draftProfile.PromotionClaimedAtUtc is not null &&
+                    !IsPromotionClaimStale(draftProfile.PromotionClaimedAtUtc.Value))
+                {
+                    // A genuine competing completion already holds a still-fresh claim - do not
+                    // steal it.
+                    return null;
+                }
+
+                // The conflict was either incidental (some other, unrelated field changed on this
+                // row) or the claim it saw was abandoned/stale; loop and retry the claim itself
+                // against the fresh row.
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Round-2 review fix (Bishop B5/B7, Vasquez): persists a promotion outcome (claim release on
+    /// gateway failure, or the promoted profile id on success) with a bounded reload-and-retry loop
+    /// on <see cref="DbUpdateConcurrencyException"/>, so an unrelated concurrent write to the same
+    /// draft profile row during the gateway call - or an ordinary caller-side cancellation, since
+    /// this always saves with <see cref="CancellationToken.None"/> - can never strand the
+    /// promotion claim or lose an already-completed external promotion. <paramref name="applyOutcome"/>
+    /// must be idempotent/re-appliable to a freshly reloaded entity, since it may run more than once.
+    /// </summary>
+    private async Task<CalibrationDraftProfile> SavePromotionOutcomeWithRetryAsync(
+        CalibrationDraftProfile draftProfile,
+        Action<CalibrationDraftProfile> applyOutcome)
+    {
+        const int maxAttempts = 5;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            applyOutcome(draftProfile);
+            try
+            {
+                _ = await _dbContext.SaveChangesAsync(CancellationToken.None);
+                return draftProfile;
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                Guid draftProfileId = draftProfile.Id;
+                _dbContext.Entry(draftProfile).State = EntityState.Detached;
+                draftProfile = await _dbContext.CalibrationDraftProfiles.SingleAsync(
+                    profile => profile.Id == draftProfileId, CancellationToken.None);
+            }
+        }
+
+        // Exceedingly unlikely (five consecutive concurrency conflicts on one row) - surface a
+        // hard failure rather than letting the outcome be silently lost, so it is visible to
+        // operators instead of permanently stranding the promotion claim without any trace.
+        throw new InvalidOperationException(
+            $"Unable to persist calibration draft profile promotion outcome for '{draftProfile.Id}' " +
+            $"after {maxAttempts} attempts due to repeated concurrency conflicts.");
+    }
 
     private static CalibrationOrchestrationDto MapOrchestration(CalibrationOrchestration orchestration) => new(
         orchestration.Id,

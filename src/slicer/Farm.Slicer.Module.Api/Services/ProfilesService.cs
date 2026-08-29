@@ -3747,6 +3747,157 @@ public class ProfilesService(
 
     private async Task<CustomProfileDto> UploadFilamentProfileAsync(UploadProfileRequestDto request, Guid userId, CancellationToken ct)
     {
+        (string name, string? compatiblePrinters) = ParseFilamentProfileMetadata(request);
+
+        FilamentProfile profile = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            SlicerType = SlicerType.OrcaSlicer,
+            IsSystem = false,
+            IsPublic = false,
+            CreatedByUserId = userId,
+            RawJson = request.RawJson,
+            Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
+            CompatiblePrinters = compatiblePrinters,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        await _filamentProfileRepo.AddAsync(profile, ct);
+        _logger.LogInformation("Uploaded filament profile '{Name}' for user {UserId} (CompatiblePrinters={CompatiblePrinters})", LogSanitizer.Sanitize(name), userId, LogSanitizer.Sanitize(profile.CompatiblePrinters ?? "<none>"));
+
+        return ToCustomProfileDto(profile);
+    }
+
+    /// <summary>
+    /// Promotes a calibration project's draft profile to a real, owner-visible custom filament
+    /// profile (#2180, gap 1), idempotently keyed on <paramref name="sourceDraftProfileId"/>.
+    /// </summary>
+    /// <remarks>
+    /// Round-4 review fix (issue #2180 - Hicks Blocking #2): the calibration-side promotion claim
+    /// is TTL-reclaimable (see <c>CalibrationProjectService.PromotionClaimStaleAfter</c>), so this
+    /// endpoint may legitimately be called more than once for the same draft profile - most
+    /// plausibly after a process crash or lost response between the original call succeeding here
+    /// and the caller recording the result locally. Replaying the call must return the SAME
+    /// filament profile rather than minting a visible duplicate in the owner's custom profile
+    /// list. The unique index on <see cref="FilamentProfile.PromotedFromCalibrationDraftProfileId"/>
+    /// is the actual source of truth for this guarantee; the check-then-insert below is a fast
+    /// path that avoids the round trip to the database's constraint violation on the common,
+    /// non-racing case, and the catch handles the narrow window where two concurrent replays both
+    /// miss the initial check.
+    ///
+    /// Round-5 review fix (issue #2180 - Bishop/Hicks Blocking, round 5): <paramref name="sourceDraftProfileId"/>
+    /// is caller-supplied and this endpoint is reachable by any holder of the ordinary
+    /// <c>Calibration.Update</c> permission, not just the specific project's own owner - the
+    /// slicer module cannot itself validate the ID against the calibration module's database. A
+    /// lookup hit for a draft ID this caller does not own must never be returned (data
+    /// disclosure) or silently claimed by a second insert attempt (foreign-ownership row churn);
+    /// see <see cref="EnsureOwnedByCallerOrThrow"/>.
+    /// </remarks>
+    public async Task<(CustomProfileDto Profile, bool WasCreated)> PromoteCalibrationDraftProfileAsync(
+        UploadProfileRequestDto request, Guid userId, Guid sourceDraftProfileId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.IsNullOrWhiteSpace(request.RawJson))
+        {
+            throw new ArgumentException("RawJson is required.");
+        }
+
+        if (sourceDraftProfileId == Guid.Empty)
+        {
+            throw new ArgumentException("sourceDraftProfileId is required.", nameof(sourceDraftProfileId));
+        }
+
+        FilamentProfile? existing = await _filamentProfileRepo
+            .GetByPromotedFromCalibrationDraftProfileIdAsync(sourceDraftProfileId, ct);
+        if (existing is not null)
+        {
+            EnsureOwnedByCallerOrThrow(existing, userId);
+            return (ToCustomProfileDto(existing), false);
+        }
+
+        (string name, string? compatiblePrinters) = ParseFilamentProfileMetadata(request);
+
+        FilamentProfile profile = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            SlicerType = SlicerType.OrcaSlicer,
+            IsSystem = false,
+            IsPublic = false,
+            CreatedByUserId = userId,
+            RawJson = request.RawJson,
+            Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
+            CompatiblePrinters = compatiblePrinters,
+            PromotedFromCalibrationDraftProfileId = sourceDraftProfileId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            await _filamentProfileRepo.AddAsync(profile, ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Lost the race: another concurrent/replayed request already promoted this exact
+            // draft and won the unique-index race. Reload and return the winner instead of
+            // surfacing a spurious failure to a caller that is itself only retrying the same
+            // idempotent completion.
+            FilamentProfile? winner = await _filamentProfileRepo
+                .GetByPromotedFromCalibrationDraftProfileIdAsync(sourceDraftProfileId, ct);
+            if (winner is not null)
+            {
+                EnsureOwnedByCallerOrThrow(winner, userId);
+                return (ToCustomProfileDto(winner), false);
+            }
+
+            throw;
+        }
+
+        _logger.LogInformation(
+            "Promoted calibration draft profile {DraftProfileId} to filament profile '{Name}' for user {UserId}",
+            sourceDraftProfileId, LogSanitizer.Sanitize(name), userId);
+
+        return (ToCustomProfileDto(profile), true);
+    }
+
+    /// <summary>
+    /// Round-5 review fix (issue #2180 - Bishop/Hicks Blocking, round 5): the idempotency lookup
+    /// in <see cref="PromoteCalibrationDraftProfileAsync"/> resolves purely on the caller-supplied
+    /// <c>sourceDraftProfileId</c>, which the slicer module cannot itself validate against the
+    /// separately-owned calibration module's data. A GUID is not an authorization boundary - if a
+    /// lookup or race-loser reload finds a profile promoted from that draft ID but owned by a
+    /// DIFFERENT user, it must never be returned (would disclose that user's profile name/raw
+    /// JSON to the caller) or treated as a normal idempotent replay. This mirrors the existing
+    /// ownership check already enforced by <c>UpdateCustomProfileAsync</c>/<c>DeleteCustomProfileAsync</c>
+    /// elsewhere in this file.
+    ///
+    /// Residual, documented risk: since <see cref="FilamentProfile.PromotedFromCalibrationDraftProfileId"/>
+    /// is a single GLOBAL unique index (not scoped per-owner), a caller who already knows another
+    /// user's draft profile ID could still race to claim it first, permanently blocking that
+    /// user's own later promotion (this method would then reject the true owner's call too, since
+    /// the row's <c>CreatedByUserId</c> would not match). This requires the attacker to already
+    /// possess the victim's specific draft profile GUID (122 bits of entropy, never guessable,
+    /// and only ever surfaced to the owning project's own caller) - a prerequisite that itself
+    /// implies a separate, prior authorization break. Fully eliminating this residual risk would
+    /// require a composite unique index scoped by owner (e.g. <c>(CreatedByUserId, PromotedFromCalibrationDraftProfileId)</c>),
+    /// which was intentionally deferred to avoid a second migration round for a defense-in-depth
+    /// improvement against an already-implausible prerequisite; tracked as a follow-up if desired.
+    /// </summary>
+    private static void EnsureOwnedByCallerOrThrow(FilamentProfile profile, Guid userId)
+    {
+        if (profile.CreatedByUserId != userId)
+        {
+            throw new UnauthorizedAccessException(
+                "You do not have permission to promote this calibration draft profile.");
+        }
+    }
+
+    private static (string Name, string? CompatiblePrinters) ParseFilamentProfileMetadata(UploadProfileRequestDto request)
+    {
         string name = request.Name ?? "Uploaded Filament";
         try
         {
@@ -3767,39 +3918,23 @@ public class ProfilesService(
         string? compatiblePrinters = NormalizeCompatiblePrintersList(request.CompatiblePrinters)
             ?? ExtractCompatiblePrintersFromRawJson(request.RawJson);
 
-        FilamentProfile profile = new()
-        {
-            Id = Guid.NewGuid(),
-            Name = name,
-            SlicerType = SlicerType.OrcaSlicer,
-            IsSystem = false,
-            IsPublic = false,
-            CreatedByUserId = userId,
-            RawJson = request.RawJson,
-            Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
-            CompatiblePrinters = compatiblePrinters,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        await _filamentProfileRepo.AddAsync(profile, ct);
-        _logger.LogInformation("Uploaded filament profile '{Name}' for user {UserId} (CompatiblePrinters={CompatiblePrinters})", LogSanitizer.Sanitize(name), userId, LogSanitizer.Sanitize(profile.CompatiblePrinters ?? "<none>"));
-
-        // Filament profiles do not carry a PrinterModelId column; they are matched to
-        // printers via CompatiblePrinters strings instead. Always emit null PrinterModelId.
-        return new CustomProfileDto
-        {
-            Id = profile.Id,
-            Name = profile.Name,
-            ProfileType = "filament",
-            IsSystem = false,
-            CreatedAt = profile.CreatedAt,
-            UpdatedAt = profile.UpdatedAt,
-            RawJson = profile.RawJson,
-            PrinterModelId = null,
-            CompatiblePrinters = SplitCompatiblePrinters(profile.CompatiblePrinters)
-        };
+        return (name, compatiblePrinters);
     }
+
+    // Filament profiles do not carry a PrinterModelId column; they are matched to
+    // printers via CompatiblePrinters strings instead. Always emit null PrinterModelId.
+    private static CustomProfileDto ToCustomProfileDto(FilamentProfile profile) => new()
+    {
+        Id = profile.Id,
+        Name = profile.Name,
+        ProfileType = "filament",
+        IsSystem = false,
+        CreatedAt = profile.CreatedAt,
+        UpdatedAt = profile.UpdatedAt,
+        RawJson = profile.RawJson,
+        PrinterModelId = null,
+        CompatiblePrinters = SplitCompatiblePrinters(profile.CompatiblePrinters)
+    };
 
     private async Task<CustomProfileDto> UploadMachineProfileAsync(UploadProfileRequestDto request, Guid userId, CancellationToken ct)
     {

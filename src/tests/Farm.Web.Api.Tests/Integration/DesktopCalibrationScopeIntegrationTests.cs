@@ -780,4 +780,69 @@ public class DesktopCalibrationScopeIntegrationTests : IClassFixture<DesktopCali
     }
 
     #endregion
+
+    #region Calibration draft profile promotion (issue #2180, gap 1)
+
+    /// <summary>
+    /// Round-2 review finding (Hicks, issue #2180): <c>PromoteCalibrationDraftProfileAsync</c> is
+    /// gated by a method-level <c>Calibration.Update</c> requirement layered on top of
+    /// <c>ProfilesController</c>'s class-level <c>Slicing.Submit</c> requirement - ASP.NET
+    /// Core's <c>IAsyncActionFilter</c> pipeline runs both and requires both to pass. A reflection
+    /// test alone cannot prove a real Desktop calibration-completion token actually clears this
+    /// endpoint, only that the attributes are present. This exercises the real HTTP pipeline with
+    /// a token carrying exactly the two scopes the codebase already documents as the real Desktop
+    /// calibration token bundle (see the identical rationale on
+    /// <c>ProfilesControllerResolveProfileTests.ResolveProfileForModelAsync_IsGatedByCalibrationUpdate_NotAdmin</c>,
+    /// the precedent this promotion endpoint follows: "matching the desktop client's actual scopes
+    /// (Slicing.Submit + Calibration read/write)") - proving the round-1 interactive-session fix
+    /// is not a no-op for the realistic desktop completion flow.
+    /// </summary>
+    [Fact]
+    public async Task CalibrationCompletionToken_ClearsPromoteFromCalibrationAuthorization()
+    {
+        await GrantOwnerPermissionsAsync(
+            PrintFarmerPermissions.Calibration.Update,
+            PrintFarmerPermissions.Slicing.Submit);
+        using HttpClient client = await ExchangeClientAsync(
+            ApiKeyScope.CalibrationUpdate | ApiKeyScope.SlicingSubmit);
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/promote-from-calibration",
+            new { name = "Calibrated Filament", rawJson = "{}" });
+
+        response.StatusCode.Should().NotBe(
+            HttpStatusCode.Forbidden,
+            "a Desktop calibration-completion token carrying Calibration.Update + Slicing.Submit " +
+            "must clear both the method-level and class-level permission filters");
+        response.StatusCode.Should().NotBe(
+            HttpStatusCode.Unauthorized,
+            "a 401 would mean the fixture client is not authenticated, which would make the assertion above pass vacuously");
+    }
+
+    /// <summary>
+    /// Paired negative: a token holding only <c>Calibration.Update</c>, without
+    /// <c>Slicing.Submit</c>, must still be refused by the class-level filter - proving the
+    /// success above genuinely comes from both scopes being present, not from the endpoint being
+    /// left unguarded. This is the scenario Hicks's review flagged as still-broken; documenting it
+    /// explicitly here makes the real constraint (both scopes required) a tested, visible contract
+    /// rather than an unstated assumption resting only on the sibling
+    /// <c>ResolveProfileForModelAsync</c> precedent.
+    /// </summary>
+    [Fact]
+    public async Task CalibrationUpdateOnlyToken_WithoutSlicingSubmit_IsForbiddenOnPromoteFromCalibration()
+    {
+        await GrantOwnerPermissionsAsync(PrintFarmerPermissions.Calibration.Update);
+        using HttpClient client = await ExchangeClientAsync(ApiKeyScope.CalibrationUpdate);
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/promote-from-calibration",
+            new { name = "Calibrated Filament", rawJson = "{}" });
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            "the class-level Slicing.Submit requirement still applies on top of the method-level " +
+            "Calibration.Update requirement - a token without it must not reach this endpoint");
+    }
+
+    #endregion
 }

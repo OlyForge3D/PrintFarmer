@@ -1458,6 +1458,105 @@ public class ProfilesController(
     }
 
     /// <summary>
+    /// Uploads a draft calibration profile as a real custom filament profile from raw JSON
+    /// content, on behalf of the calling calibration project's owner (#2180, gap 1).
+    /// </summary>
+    /// <param name="request">Promotion request with the resulting profile's name and raw JSON.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// This is the calibration-driven sibling of <see cref="UploadCustomProfileAsync"/>: it
+    /// performs the exact same upload (same service call, same caller-scoped
+    /// <see cref="GetCurrentUserId"/> identity, no impersonation), but is deliberately NOT gated
+    /// by <see cref="Farm.Infrastructure.Authorization.InteractiveSessionRequirement"/>. That
+    /// policy exists to keep short-lived desktop exchange tokens away from ad hoc,
+    /// human-directed profile mutation - but a calibration project's completion is itself
+    /// triggered by a request that may legitimately be authenticated with exactly such an
+    /// exchange token (the primary desktop calibration flow), so forwarding it to the
+    /// interactive-session-gated <c>upload</c> endpoint would always be rejected and permanently
+    /// block Gap 1's promotion-on-completion behavior. Following the same precedent as
+    /// <see cref="ResolveProfileForModelAsync"/>, this is instead gated only by
+    /// <see cref="PrintFarmerPermissions.Calibration.Update"/>, which the desktop client's
+    /// calibration scope bundle already grants.
+    /// <para>
+    /// Round-2 review fix (issue #2180 - Bishop B6/Vasquez): removing the
+    /// <see cref="Farm.Infrastructure.Authorization.InteractiveSessionRequirement"/> gate must not
+    /// also turn this into a general-purpose, unrestricted upload endpoint for any caller holding
+    /// <see cref="PrintFarmerPermissions.Calibration.Update"/>. Unlike <c>upload</c>, this action
+    /// accepts <see cref="PromoteCalibrationDraftProfileRequestDto"/> - a deliberately narrower DTO
+    /// with no <c>ProfileType</c>, <c>PrinterModelId</c>, or <c>CompatiblePrinters</c> field at
+    /// all - and always constructs the internal upload request with <c>ProfileType = "filament"</c>
+    /// hardcoded server-side, so it is structurally impossible for this route to mint a machine or
+    /// process profile no matter what a caller sends.
+    /// </para>
+    /// <para>
+    /// Round-4 review fix (issue #2180 - Hicks Blocking #2): the calibration-side promotion claim
+    /// is TTL-reclaimable, so this endpoint may legitimately be called more than once for the same
+    /// draft profile (e.g. a crash or lost response between this call succeeding and the caller
+    /// recording the outcome locally). <see cref="PromoteCalibrationDraftProfileRequestDto.SourceDraftProfileId"/>
+    /// is therefore required and used as an idempotency key: a replayed call with the same value
+    /// returns the SAME profile (200 OK) rather than minting a second, user-visible duplicate in
+    /// the owner's custom filament profile list (201 Created only on first promotion).
+    /// </para>
+    /// </remarks>
+    [HttpPost("promote-from-calibration")]
+    [RequirePermission(PrintFarmerPermissions.Calibration.Update)]
+    [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> PromoteCalibrationDraftProfileAsync(
+        [FromBody] PromoteCalibrationDraftProfileRequestDto? request,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
+
+        if (request.SourceDraftProfileId == Guid.Empty)
+        {
+            return BadRequest("SourceDraftProfileId is required");
+        }
+
+        try
+        {
+            Guid userId = GetCurrentUserId();
+
+            var uploadRequest = new UploadProfileRequestDto
+            {
+                Name = request.Name,
+                RawJson = request.RawJson,
+                ProfileType = "filament",
+            };
+            (CustomProfileDto result, bool wasCreated) = await _profilesService.PromoteCalibrationDraftProfileAsync(
+                uploadRequest, userId, request.SourceDraftProfileId, ct);
+
+            return wasCreated
+                ? Created($"/api/slicer/profiles/{result.Id}", result)
+                : Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning("Promote calibration draft profile validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
+            return BadRequest(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            // Round-5 review fix (issue #2180 - Bishop/Hicks Blocking, round 5): the caller
+            // supplied a draft profile ID promoted by a different user. Deliberately mapped to
+            // Forbid() (403), matching UpdateCustomProfileAsync/DeleteCustomProfileAsync's
+            // existing precedent for this exception, rather than NotFound - do not disclose
+            // whether the ID exists.
+            _logger.LogWarning("Promote calibration draft profile unauthorized: {Message}", LogSanitizer.Sanitize(ex.Message));
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Promote calibration draft profile failed");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Promote calibration draft profile failed");
+        }
+    }
+
+    /// <summary>
     /// Lists all custom profiles owned by the current user.
     /// </summary>
     /// <param name="ct">Cancellation token.</param>

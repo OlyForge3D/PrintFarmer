@@ -209,6 +209,25 @@ public interface IProfilesService
     /// <param name="ct">Cancellation token.</param>
     Task<CustomProfileDto> UploadCustomProfileAsync(UploadProfileRequestDto request, Guid userId, CancellationToken ct);
 
+    /// <summary>
+    /// Promotes a calibration project's draft profile to a real, owner-visible custom filament
+    /// profile (#2180, gap 1), idempotently keyed on <paramref name="sourceDraftProfileId"/> so a
+    /// retried/replayed call after a reclaimed promotion claim returns the SAME profile instead of
+    /// minting a duplicate.
+    /// </summary>
+    /// <param name="request">Promotion request with raw JSON content and optional name.</param>
+    /// <param name="userId">ID of the calibration project's owner.</param>
+    /// <param name="sourceDraftProfileId">
+    /// The calibration draft profile's own stable identifier - the idempotency key.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// The promoted (or, on replay, the already-promoted) profile, and whether this call created
+    /// it (<c>true</c>) or found and returned an existing one (<c>false</c>).
+    /// </returns>
+    Task<(CustomProfileDto Profile, bool WasCreated)> PromoteCalibrationDraftProfileAsync(
+        UploadProfileRequestDto request, Guid userId, Guid sourceDraftProfileId, CancellationToken ct);
+
     /// <summary>Lists all custom profiles owned by a specific user.</summary>
     /// <param name="userId">ID of the user.</param>
     /// <param name="ct">Cancellation token.</param>

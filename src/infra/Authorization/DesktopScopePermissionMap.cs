@@ -93,8 +93,21 @@ public static class DesktopScopePermissionMap
                 PrintFarmerPermissions.Calibration.Read, []),
             new(ApiKeyScope.CalibrationCreate, nameof(ApiKeyScope.CalibrationCreate),
                 PrintFarmerPermissions.Calibration.Create, [ApiKeyScope.CalibrationRead]),
+
+            // Round-3 review fix (Bishop B8, issue #2180): completing a calibration project
+            // (Active -> Completed) promotes its draft profile via a slicer-module endpoint that
+            // is class-gated by slicing:submit in addition to its own method-level
+            // calibration:update requirement - so a key holding calibration:update alone would be
+            // a validly-issuable combination (calibration:update only implies calibration:read)
+            // that nonetheless dead-ends at completion. Mirrors CalibrationGenerate's rationale
+            // below: declare the real dependency so GetUnsatisfiedDependencies rejects the
+            // dead-end combination at key-creation time instead of failing silently mid-workflow.
+            // NOTE: this only guards *new* keys - a key already stored as
+            // calibration:read|calibration:update before this fix remains unable to complete a
+            // project; such keys must be re-issued with slicing:submit added.
             new(ApiKeyScope.CalibrationUpdate, nameof(ApiKeyScope.CalibrationUpdate),
-                PrintFarmerPermissions.Calibration.Update, [ApiKeyScope.CalibrationRead]),
+                PrintFarmerPermissions.Calibration.Update,
+                [ApiKeyScope.CalibrationRead, ApiKeyScope.SlicingSubmit]),
             new(ApiKeyScope.CalibrationDelete, nameof(ApiKeyScope.CalibrationDelete),
                 PrintFarmerPermissions.Calibration.Delete, [ApiKeyScope.CalibrationRead]),
 

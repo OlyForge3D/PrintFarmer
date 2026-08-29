@@ -236,7 +236,8 @@ public sealed class CalibrationProjectServiceToolheadSelectionTests
             db,
             new NoopCalibrationBlobStore(),
             TimeProvider.System,
-            NullLogger<CalibrationProjectService>.Instance);
+            NullLogger<CalibrationProjectService>.Instance,
+            new NoopFilamentProfilePromotionGateway());
 
     private static CalibrationProjectCreateRequest BaseRequest(Guid printerId, string requestId) =>
         new()
@@ -317,5 +318,13 @@ public sealed class CalibrationProjectServiceToolheadSelectionTests
                 1,
                 1,
                 new string('0', 64)));
+    }
+
+    private sealed class NoopFilamentProfilePromotionGateway : IFilamentProfilePromotionGateway
+    {
+        public Task<FilamentProfilePromotionResult> PromoteAsync(
+            FilamentProfilePromotionRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(FilamentProfilePromotionResult.Ok(Guid.NewGuid()));
     }
 }
