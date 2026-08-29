@@ -58,7 +58,7 @@ moved in this phase.</Description>
          so the DI-extensions package must be referenced directly here too.
          Version pinned to the one FluentValidation.AspNetCore 11.3.1 currently
          resolves to solution-wide. -->
-    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.11.0" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
   </ItemGroup>
 
 </Project>
