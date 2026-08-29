@@ -1897,6 +1897,8 @@ run_all_tests() {
     test_orcaslicer_container_digest_resolved_from_registry_image
     test_orcaslicer_container_digest_empty_for_local_build_control
     test_orcaslicer_container_digest_rejects_malformed_operator_override
+    test_orcaslicer_container_digest_second_call_refreshes_after_build
+    test_orcaslicer_container_digest_operator_override_persists_across_second_call
     
     teardown
 }
@@ -2042,6 +2044,129 @@ EOF
     assert_contains "$output" "CALIBRATION=no" "Calibration must be marked unavailable for a pure local build"
     assert_contains "$output" "Calibration generation will be unavailable" "Should print the operator-facing warning naming the consequence"
     assert_contains "$output" "pull-from-registry.sh or build-and-push-registry.sh" "Warning should name the scripts that enable calibration"
+
+    rm -f "$helper_script" 2>/dev/null || true
+
+    pass_test
+}
+
+# Test: resolve_orcaslicer_container_digest is called TWICE per real deploy
+# (once from generate_env_file() before the worker image build/pull, again
+# from deploy_containers() right after it completes). The second call must
+# NOT mistake the first call's own resolved value for an operator override
+# and freeze it in place -- it must re-query the (possibly now different)
+# local image and pick up the fresh digest, closing the stale-attestation gap
+# a prior round of review found in this two-call design (issue #2164).
+test_orcaslicer_container_digest_second_call_refreshes_after_build() {
+    start_test "resolve_orcaslicer_container_digest re-resolves on a second call instead of freezing the first result"
+
+    cd "$TEST_TEMP_DIR"
+
+    local digest_before="ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:111111111111111111111111111111111111111111111111111111111111aaaa"
+    local digest_after="ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:222222222222222222222222222222222222222222222222222222222222bbbb"
+    local bare_digest_before="sha256:111111111111111111111111111111111111111111111111111111111111aaaa"
+    local bare_digest_after="sha256:222222222222222222222222222222222222222222222222222222222222bbbb"
+    local call_count_file="$TEST_TEMP_DIR/inspect-call-count"
+    local helper_script="$TEST_TEMP_DIR/digest-refresh-helper.sh"
+    printf '0' > "$call_count_file"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -uo pipefail
+
+# Simulate the local worker image changing between the two resolution calls
+# (i.e. deploy_containers() built/pulled a new image after generate_env_file()
+# ran): the first 'docker image inspect' call reports the pre-build digest,
+# every subsequent call reports the post-build digest.
+docker() {
+    if [ "\$1" = "image" ] && [ "\$2" = "inspect" ]; then
+        local count
+        count=\$(cat "$call_count_file")
+        count=\$((count + 1))
+        printf '%s' "\$count" > "$call_count_file"
+        if [ "\$count" -eq 1 ]; then
+            printf '%s\n' "$digest_before"
+        else
+            printf '%s\n' "$digest_after"
+        fi
+        return 0
+    fi
+    return 0
+}
+
+source "$DEPLOY_SCRIPT"
+
+unset ORCASLICER_CONTAINER_DIGEST 2>/dev/null || true
+ENABLE_ORCA_WORKER=yes
+
+# First call: mirrors generate_env_file(), before the (simulated) build.
+resolve_orcaslicer_container_digest
+echo "FIRST=[\$ORCASLICER_CONTAINER_DIGEST]"
+
+# Second call: mirrors deploy_containers(), after the (simulated) build.
+resolve_orcaslicer_container_digest
+echo "SECOND=[\$ORCASLICER_CONTAINER_DIGEST]"
+EOF
+    chmod +x "$helper_script"
+
+    capture_output "$helper_script 2>&1 || true"
+    local output
+    output=$(get_output)
+
+    assert_contains "$output" "FIRST=[$bare_digest_before]" "First call should resolve the pre-build digest"
+    assert_contains "$output" "SECOND=[$bare_digest_after]" "Second call must re-query the image and pick up the new digest, not freeze the first call's value"
+
+    rm -f "$helper_script" "$call_count_file" 2>/dev/null || true
+
+    pass_test
+}
+
+# Test (paired with the refresh test above): when the FIRST call sees a valid
+# operator-supplied override, that override must stick across a SECOND call
+# too -- deploy_containers()'s re-resolution must not silently replace an
+# explicit operator override with whatever the local image resolves to
+# (issue #2164).
+test_orcaslicer_container_digest_operator_override_persists_across_second_call() {
+    start_test "resolve_orcaslicer_container_digest keeps honoring an operator override on a second call"
+
+    cd "$TEST_TEMP_DIR"
+
+    local operator_override="sha256:333333333333333333333333333333333333333333333333333333333333cccc"
+    local image_digest="ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:444444444444444444444444444444444444444444444444444444444444dddd"
+    local helper_script="$TEST_TEMP_DIR/digest-override-persists-helper.sh"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -uo pipefail
+
+# If the resolver ever fell through to actually querying docker after the
+# override was accepted, this mock would report a DIFFERENT digest, letting
+# the test catch that regression.
+docker() {
+    if [ "\$1" = "image" ] && [ "\$2" = "inspect" ]; then
+        printf '%s\n' "$image_digest"
+        return 0
+    fi
+    return 0
+}
+
+source "$DEPLOY_SCRIPT"
+
+ORCASLICER_CONTAINER_DIGEST="$operator_override"
+ENABLE_ORCA_WORKER=yes
+
+resolve_orcaslicer_container_digest
+echo "FIRST=[\$ORCASLICER_CONTAINER_DIGEST]"
+
+resolve_orcaslicer_container_digest
+echo "SECOND=[\$ORCASLICER_CONTAINER_DIGEST]"
+EOF
+    chmod +x "$helper_script"
+
+    capture_output "$helper_script 2>&1 || true"
+    local output
+    output=$(get_output)
+
+    assert_contains "$output" "FIRST=[$operator_override]" "First call should honor the operator override"
+    assert_contains "$output" "SECOND=[$operator_override]" "Second call must keep honoring the operator override, not replace it with the resolved image digest"
 
     rm -f "$helper_script" 2>/dev/null || true
 

@@ -306,13 +306,36 @@ resolve_image_tag() {
 # configuration or code into that source.
 #
 # Sets (as globals): ORCASLICER_CONTAINER_DIGEST, ORCASLICER_CALIBRATION_AVAILABLE ("yes"/"no")
+#
+# This function is called TWICE per deploy: once from generate_env_file()
+# (before the worker image is built/pulled) and again from deploy_containers()
+# right after the build/pull/dry-run step converges, so the digest reflects
+# the image actually being deployed rather than whatever existed beforehand
+# (issue #2164). Because both calls share the same ORCASLICER_CONTAINER_DIGEST
+# global, the second call cannot simply treat "already non-empty" as "operator
+# override" -- that value could just as easily be this function's OWN first-call
+# resolution, and treating it as an override would freeze the (possibly stale)
+# first-call digest in place forever, defeating the whole point of the second
+# call. _ORCASLICER_DIGEST_SOURCE (an internal, non-.env global) records which
+# case applied on the first call, so every later call can tell the two apart:
+# an operator override is honored on every call, while a self-resolved value is
+# always re-resolved from the current image.
 resolve_orcaslicer_container_digest() {
     local worker_image="printfarmer-orcaslicer-worker:latest"
     local bare_digest_regex='^sha256:[0-9a-f]{64}$'
 
-    if [ -n "${ORCASLICER_CONTAINER_DIGEST:-}" ]; then
-        # Operator explicitly supplied a digest override. Validate its shape
-        # before trusting it -- see the function comment above for why.
+    if [ "${_ORCASLICER_DIGEST_SOURCE:-}" = "override" ]; then
+        # An operator override was already accepted on an earlier call in this
+        # run; keep honoring it rather than re-resolving from the (possibly
+        # different) image on a later call.
+        return 0
+    fi
+
+    if [ -z "${_ORCASLICER_DIGEST_SOURCE:-}" ] && [ -n "${ORCASLICER_CONTAINER_DIGEST:-}" ]; then
+        # Operator explicitly supplied a digest override on the FIRST call only.
+        # Validate its shape before trusting it -- see the function comment
+        # above for why.
+        _ORCASLICER_DIGEST_SOURCE="override"
         if [[ "$ORCASLICER_CONTAINER_DIGEST" =~ $bare_digest_regex ]]; then
             ORCASLICER_CALIBRATION_AVAILABLE="yes"
         else
@@ -322,6 +345,11 @@ resolve_orcaslicer_container_digest() {
         fi
         return 0
     fi
+
+    # No operator override (on this call or an earlier one) -- always
+    # re-resolve from the current local image so a later call picks up any
+    # image that was built/pulled since the previous call.
+    _ORCASLICER_DIGEST_SOURCE="resolved"
 
     if [ "${ENABLE_ORCA_WORKER:-no}" != "yes" ]; then
         # Worker disabled entirely; nothing to resolve and no need to warn.
