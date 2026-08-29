@@ -807,6 +807,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("PromotedProfileId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime?>("PromotionClaimedAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<long>("Revision")
                         .IsConcurrencyToken()
                         .HasColumnType("bigint");

@@ -543,4 +543,16 @@ public sealed class CalibrationDraftProfile
     public Guid? PromotedProfileId { get; set; }
 
     public DateTime? PromotedAtUtc { get; set; }
+
+    /// <summary>
+    /// Review fix (issue #2180): an atomic claim marker, set via a targeted
+    /// <c>ExecuteUpdateAsync</c> immediately before the external promotion HTTP call and cleared
+    /// again if that call fails. Two genuinely concurrent <c>Active -&gt; Completed</c> PATCHes
+    /// for the same project both observe <see cref="PromotedProfileId"/> as
+    /// <see langword="null"/> before either commits, so gating only on that column would let both
+    /// call the external endpoint and create duplicate real filament profiles. Claiming this
+    /// column atomically, conditioned on it (and <see cref="PromotedProfileId"/>) still being
+    /// unset, ensures only one concurrent completion request ever reaches the external call.
+    /// </summary>
+    public DateTime? PromotionClaimedAtUtc { get; set; }
 }

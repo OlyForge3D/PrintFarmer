@@ -1458,6 +1458,59 @@ public class ProfilesController(
     }
 
     /// <summary>
+    /// Uploads a draft calibration profile as a real custom filament profile from raw JSON
+    /// content, on behalf of the calling calibration project's owner (#2180, gap 1).
+    /// </summary>
+    /// <param name="request">Upload request with raw JSON and profile type.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// This is the calibration-driven sibling of <see cref="UploadCustomProfileAsync"/>: it
+    /// performs the exact same upload (same service call, same caller-scoped
+    /// <see cref="GetCurrentUserId"/> identity, no impersonation), but is deliberately NOT gated
+    /// by <see cref="Farm.Infrastructure.Authorization.InteractiveSessionRequirement"/>. That
+    /// policy exists to keep short-lived desktop exchange tokens away from ad hoc,
+    /// human-directed profile mutation - but a calibration project's completion is itself
+    /// triggered by a request that may legitimately be authenticated with exactly such an
+    /// exchange token (the primary desktop calibration flow), so forwarding it to the
+    /// interactive-session-gated <c>upload</c> endpoint would always be rejected and permanently
+    /// block Gap 1's promotion-on-completion behavior. Following the same precedent as
+    /// <see cref="ResolveProfileForModelAsync"/>, this is instead gated only by
+    /// <see cref="PrintFarmerPermissions.Calibration.Update"/>, which the desktop client's
+    /// calibration scope bundle already grants.
+    /// </remarks>
+    [HttpPost("promote-from-calibration")]
+    [RequirePermission(PrintFarmerPermissions.Calibration.Update)]
+    [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> PromoteCalibrationDraftProfileAsync(
+        [FromBody] UploadProfileRequestDto? request,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required");
+        }
+
+        try
+        {
+            Guid userId = GetCurrentUserId();
+
+            CustomProfileDto result = await _profilesService.UploadCustomProfileAsync(request, userId, ct);
+            return Created($"/api/slicer/profiles/{result.Id}", result);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning("Promote calibration draft profile validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Promote calibration draft profile failed");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Promote calibration draft profile failed");
+        }
+    }
+
+    /// <summary>
     /// Lists all custom profiles owned by the current user.
     /// </summary>
     /// <param name="ct">Cancellation token.</param>

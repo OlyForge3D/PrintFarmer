@@ -1,6 +1,7 @@
 ﻿using System.Security.Cryptography;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.PrinterCalibration;
 using Farm.Modules.Calibration.Contracts;
 using Farm.Modules.Calibration.Services.Calibration;
@@ -394,6 +395,64 @@ public sealed class CalibrationGuidedSessionTests
             actor,
             CancellationToken.None);
         _ = draftProfile.Value!.PromotedProfileId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UpdateProjectAsync_ConcurrentCompletionAlreadyClaimed_NeverInvokesGatewayAndReturnsConflict()
+    {
+        // Review fix (Vasquez/Hicks/Bishop, issue #2180): simulates a second, genuinely
+        // concurrent Active -> Completed request racing this one. Directly stamping
+        // PromotionClaimedAtUtc on the draft profile row (bypassing the service) reproduces the
+        // state a competing request would have already committed via its own atomic
+        // ExecuteUpdateAsync claim, before this request's UpdateProjectAsync call runs. The claim
+        // gate must reject this request's completion attempt WITHOUT ever calling the external
+        // promotion gateway - the whole point of the claim is that at most one caller ever
+        // reaches the external side effect.
+        await using AppDbContext db = CreateContext();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        FakeFilamentProfilePromotionGateway gateway = new();
+        CalibrationProjectService service = CreateService(db, gateway);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(Guid.NewGuid(), "concurrent-completion-project"),
+            actor,
+            CancellationToken.None);
+        CalibrationApiResult<CalibrationAttemptDto> attempt = await service.CreateAttemptAsync(
+            project.Value!.Id,
+            CreateTemperatureTowerAttemptRequest(
+                "concurrent-completion-attempt",
+                specification: new { start_temperature_c = 230, end_temperature_c = 190 }),
+            actor,
+            CancellationToken.None);
+        _ = await service.AppendObservationAsync(
+            attempt.Value!.Id,
+            CreateSelectionObservationRequest("concurrent-completion-selection", 215m),
+            actor,
+            CancellationToken.None);
+
+        CalibrationDraftProfile draftRow = await db.CalibrationDraftProfiles
+            .SingleAsync(profile => profile.ProjectId == project.Value.Id);
+        draftRow.PromotionClaimedAtUtc = DateTime.UtcNow;
+        _ = await db.SaveChangesAsync();
+
+        CalibrationApiResult<CalibrationProjectDto> completed = await service.UpdateProjectAsync(
+            project.Value.Id,
+            new CalibrationProjectUpdateRequest { BaseRevision = project.Value.Revision, LifecycleStatus = "Completed" },
+            IfMatch(project.Value),
+            actor,
+            CancellationToken.None);
+
+        _ = completed.IsSuccess.Should().BeFalse(
+            "a project whose draft profile is already claimed by a concurrent completion must not also complete");
+        _ = gateway.CallCount.Should().Be(
+            0,
+            "the external promotion gateway must never be called once another request already holds the claim");
+
+        CalibrationApiResult<CalibrationDraftProfileDto> draftAfterConflict = await service.GetDraftProfileAsync(
+            project.Value.Id,
+            actor,
+            CancellationToken.None);
+        _ = draftAfterConflict.Value!.PromotedProfileId.Should().BeNull(
+            "a rejected concurrent completion must not leave a promoted profile behind");
     }
 
     private static string IfMatch(CalibrationProjectDto project) =>

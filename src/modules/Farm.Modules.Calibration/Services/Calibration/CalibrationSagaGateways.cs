@@ -245,11 +245,21 @@ public interface IFilamentProfilePromotionGateway
 }
 
 /// <summary>
-/// Calls the real <c>POST /api/slicer/profiles/upload</c> HTTP contract on the current host, so
-/// promotion behaves identically whether the slicer module is loaded in-process (monolith) or
-/// reached through the gateway/nginx boundary (microservices), and so this saga never duplicates
-/// <c>ProfilesController</c>'s validation or persistence logic.
+/// Calls the real <c>POST /api/slicer/profiles/promote-from-calibration</c> HTTP contract on the
+/// current host, so promotion behaves identically whether the slicer module is loaded in-process
+/// (monolith) or reached through the gateway/nginx boundary (microservices), and so this saga
+/// never duplicates <c>ProfilesController</c>'s validation or persistence logic.
 /// </summary>
+/// <remarks>
+/// Review fix (issue #2180): this deliberately targets the dedicated
+/// <c>promote-from-calibration</c> route rather than the general-purpose <c>upload</c> route.
+/// <c>upload</c> is gated by <c>InteractiveSessionRequirement</c>, which explicitly rejects
+/// desktop exchange tokens - the realistic primary credential completing a calibration project -
+/// so forwarding the caller's header there would always be rejected and permanently block
+/// promotion. <c>promote-from-calibration</c> instead requires only
+/// <see cref="Farm.Infrastructure.Security.PrintFarmerPermissions.Calibration"/>'s
+/// <c>Update</c> permission, which the desktop client's calibration scope bundle already grants.
+/// </remarks>
 public sealed class InternalApiFilamentProfilePromotionGateway(
     IHttpClientFactory httpClientFactory,
     IHttpContextAccessor httpContextAccessor,
@@ -290,7 +300,7 @@ public sealed class InternalApiFilamentProfilePromotionGateway(
                 client.DefaultRequestHeaders.Authorization = parsedHeader;
             }
 
-            using HttpRequestMessage httpRequest = new(HttpMethod.Post, "api/slicer/profiles/upload")
+            using HttpRequestMessage httpRequest = new(HttpMethod.Post, "api/slicer/profiles/promote-from-calibration")
             {
                 Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json"),
             };

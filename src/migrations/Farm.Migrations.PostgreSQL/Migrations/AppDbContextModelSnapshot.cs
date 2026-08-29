@@ -805,6 +805,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid?>("PromotedProfileId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("PromotionClaimedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<long>("Revision")
                         .IsConcurrencyToken()
                         .HasColumnType("bigint");
