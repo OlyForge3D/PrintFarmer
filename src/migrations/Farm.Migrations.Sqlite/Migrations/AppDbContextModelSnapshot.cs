@@ -773,6 +773,53 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.ToTable("CalibrationDrafts");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationDraftProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBySubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("PromotedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PromotedProfileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBySubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ValuesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId")
+                        .IsUnique();
+
+                    b.ToTable("CalibrationDraftProfiles");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationIdempotencyRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -846,6 +893,55 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .IsUnique();
 
                     b.ToTable("CalibrationIdempotencyRecords");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationMethodProgress", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBySubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CurrentStepId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Disposition")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBySubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "Method")
+                        .IsUnique();
+
+                    b.ToTable("CalibrationMethodProgresses");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationObservation", b =>
@@ -8267,12 +8363,30 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationDraftProfile", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.CalibrationProject", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationIdempotencyRecord", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.CalibrationProject", null)
                         .WithMany()
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationMethodProgress", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.CalibrationProject", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationObservation", b =>

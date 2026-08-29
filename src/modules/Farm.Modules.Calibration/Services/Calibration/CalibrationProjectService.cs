@@ -186,6 +186,34 @@ public interface ICalibrationProjectService
         CancellationToken cancellationToken);
 
     Task<int> ReconcilePendingPhotoDeletesAsync(CancellationToken cancellationToken);
+
+    /// <summary>Gets the server-owned, per-method guided-session metadata catalog (issue #2180, gap 3).</summary>
+    IReadOnlyList<CalibrationMethodGuidanceDto> GetMethodGuidanceCatalog();
+
+    /// <summary>Gets the project-owned, non-device-scoped method dispositions (issue #2180, gap 2).</summary>
+    Task<CalibrationApiResult<IReadOnlyList<CalibrationMethodProgressDto>>> GetMethodProgressAsync(
+        Guid projectId,
+        CalibrationActor actor,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Explicitly sets a method's disposition to <c>Skipped</c> or <c>Pending</c> (issue #2180,
+    /// gap 2). <c>Completed</c> is never client-settable here; it is only derived from an
+    /// accepted selection observation.
+    /// </summary>
+    Task<CalibrationApiResult<CalibrationMethodProgressDto>> SetMethodDispositionAsync(
+        Guid projectId,
+        string method,
+        CalibrationMethodDispositionRequest request,
+        string? ifMatch,
+        CalibrationActor actor,
+        CancellationToken cancellationToken);
+
+    /// <summary>Gets the project-owned draft filament profile document (issue #2180, gap 1).</summary>
+    Task<CalibrationApiResult<CalibrationDraftProfileDto>> GetDraftProfileAsync(
+        Guid projectId,
+        CalibrationActor actor,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -197,7 +225,8 @@ public sealed class CalibrationProjectService(
     AppDbContext dbContext,
     ICalibrationBlobStore blobStore,
     TimeProvider timeProvider,
-    ILogger<CalibrationProjectService> logger)
+    ILogger<CalibrationProjectService> logger,
+    IFilamentProfilePromotionGateway filamentProfilePromotionGateway)
     : ICalibrationProjectService
 {
     private const int MaximumChangePageSize = 250;
@@ -219,6 +248,9 @@ public sealed class CalibrationProjectService(
     private readonly TimeProvider _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
 
     private readonly ILogger<CalibrationProjectService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+    private readonly IFilamentProfilePromotionGateway _filamentProfilePromotionGateway =
+        filamentProfilePromotionGateway ?? throw new ArgumentNullException(nameof(filamentProfilePromotionGateway));
 
     private readonly Dictionary<CalibrationChange, long> _pendingChangeOrders = [];
     private long _nextPendingChangeOrder;
@@ -440,6 +472,51 @@ public sealed class CalibrationProjectService(
             }
 
             normalizedLifecycleStatus = status;
+        }
+
+        // Issue #2180, gaps 1 and 2: only the Active -> Completed transition gates and promotes.
+        // Completing an already-Completed project (e.g. a benign re-PATCH) and any other
+        // transition (including into Archived) never re-runs this - an abandoned/archived
+        // project's draft profile is simply never promoted, so it leaves nothing in the user's
+        // custom filament profile list.
+        if (normalizedLifecycleStatus == CalibrationProjectLifecycleStatus.Completed &&
+            project.LifecycleStatus != CalibrationProjectLifecycleStatus.Completed)
+        {
+            bool hasPendingMethod = await _dbContext.CalibrationMethodProgresses.AnyAsync(
+                progress => progress.ProjectId == project.Id &&
+                    progress.Disposition == CalibrationMethodDisposition.Pending,
+                cancellationToken);
+            if (hasPendingMethod)
+            {
+                return Validation<CalibrationProjectDto>("project_completion_blocked_pending_method");
+            }
+
+            CalibrationDraftProfile? draftProfile = await _dbContext.CalibrationDraftProfiles
+                .FirstOrDefaultAsync(profile => profile.ProjectId == project.Id, cancellationToken);
+            if (draftProfile is not null && draftProfile.PromotedProfileId is null)
+            {
+                FilamentProfilePromotionResult promotion = await _filamentProfilePromotionGateway.PromoteAsync(
+                    new FilamentProfilePromotionRequest(project.Name, BuildDraftProfileRawJson(project, draftProfile)),
+                    cancellationToken);
+                if (!promotion.Success || promotion.ProfileId is null)
+                {
+                    return Validation<CalibrationProjectDto>(promotion.ErrorCode ?? "profile_promotion_failed");
+                }
+
+                draftProfile.PromotedProfileId = promotion.ProfileId;
+                draftProfile.PromotedAtUtc = UtcNow();
+                draftProfile.Revision++;
+                draftProfile.UpdatedAtUtc = UtcNow();
+                draftProfile.UpdatedBySubject = actor.Subject;
+                AddChange(
+                    project,
+                    "draft-profile",
+                    draftProfile.Id,
+                    draftProfile.Revision,
+                    CalibrationChangeType.Updated,
+                    mutationIdentity?.OperationId ?? MutationId(),
+                    actor);
+            }
         }
 
         string? orderedStepsJson = null;
@@ -931,6 +1008,190 @@ public sealed class CalibrationProjectService(
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<CalibrationMethodGuidanceDto> GetMethodGuidanceCatalog() =>
+        Enum.GetValues<CalibrationMethod>().Select(MapMethodGuidance).ToArray();
+
+    /// <inheritdoc />
+    public async Task<CalibrationApiResult<IReadOnlyList<CalibrationMethodProgressDto>>> GetMethodProgressAsync(
+        Guid projectId,
+        CalibrationActor actor,
+        CancellationToken cancellationToken)
+    {
+        CalibrationProject? project = await FindVisibleProjectAsync(projectId, actor, false, cancellationToken);
+        if (project is null)
+        {
+            return NotFound<IReadOnlyList<CalibrationMethodProgressDto>>();
+        }
+
+        CalibrationMethodProgress[] progressRows = await _dbContext.CalibrationMethodProgresses
+            .AsNoTracking()
+            .Where(progress => progress.ProjectId == projectId)
+            .OrderBy(progress => progress.CreatedAtUtc)
+            .ToArrayAsync(cancellationToken);
+        return CalibrationApiResult<IReadOnlyList<CalibrationMethodProgressDto>>.Success(
+            progressRows.Select(MapMethodProgress).ToArray());
+    }
+
+    /// <inheritdoc />
+    public async Task<CalibrationApiResult<CalibrationMethodProgressDto>> SetMethodDispositionAsync(
+        Guid projectId,
+        string method,
+        CalibrationMethodDispositionRequest request,
+        string? ifMatch,
+        CalibrationActor actor,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Completed is never client-settable (issue #2180, gap 2): it is only derived from an
+        // accepted "selection" observation in AppendObservationAsync. A client may only ever
+        // assert Pending (undo a skip) or Skipped.
+        if (string.IsNullOrWhiteSpace(method) || method.Length > 128 ||
+            !Enum.TryParse(request.Disposition, true, out CalibrationMethodDisposition disposition) ||
+            disposition == CalibrationMethodDisposition.Completed)
+        {
+            return Validation<CalibrationMethodProgressDto>("method_disposition_invalid");
+        }
+
+        CalibrationProject? project = await FindVisibleProjectAsync(projectId, actor, false, cancellationToken);
+        if (project is null)
+        {
+            return NotFound<CalibrationMethodProgressDto>();
+        }
+
+        string trimmedMethod = method.Trim();
+        CalibrationMethodProgress? progress = await _dbContext.CalibrationMethodProgresses.SingleOrDefaultAsync(
+            candidate => candidate.ProjectId == projectId && candidate.Method == trimmedMethod,
+            cancellationToken);
+        DateTime nowUtc = UtcNow();
+        bool isNew = progress is null;
+
+        if (progress is null)
+        {
+            if (request.BaseRevision.HasValue || !string.IsNullOrWhiteSpace(ifMatch))
+            {
+                return Validation<CalibrationMethodProgressDto>("method_progress_not_found_for_precondition");
+            }
+
+            progress = new CalibrationMethodProgress
+            {
+                Id = Guid.NewGuid(),
+                ProjectId = projectId,
+                Method = trimmedMethod,
+                Disposition = disposition,
+                Revision = 1,
+                CreatedAtUtc = nowUtc,
+                UpdatedAtUtc = nowUtc,
+                CreatedBySubject = actor.Subject,
+                UpdatedBySubject = actor.Subject,
+            };
+            _ = _dbContext.CalibrationMethodProgresses.Add(progress);
+            AddChange(
+                project,
+                "method-progress",
+                progress.Id,
+                progress.Revision,
+                CalibrationChangeType.Created,
+                MutationId(),
+                actor);
+        }
+        else
+        {
+            CalibrationApiResult<CalibrationMethodProgressDto>? precondition = CheckPrecondition(
+                progress.Revision,
+                progress.Id,
+                "method-progress",
+                request.BaseRevision,
+                ifMatch,
+                MapMethodProgress(progress));
+            if (precondition is not null)
+            {
+                return precondition;
+            }
+
+            progress.Disposition = disposition;
+            progress.Revision++;
+            progress.UpdatedAtUtc = nowUtc;
+            progress.UpdatedBySubject = actor.Subject;
+            AddChange(
+                project,
+                "method-progress",
+                progress.Id,
+                progress.Revision,
+                CalibrationChangeType.Updated,
+                MutationId(),
+                actor);
+        }
+
+        CalibrationMethodProgressDto result = MapMethodProgress(progress);
+        try
+        {
+            _ = await SaveJournaledChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException) when (!isNew)
+        {
+            ClearTrackedState();
+            CalibrationMethodProgress? current = await _dbContext.CalibrationMethodProgresses
+                .Join(
+                    VisibleProjects(actor, true),
+                    candidate => candidate.ProjectId,
+                    visibleProject => visibleProject.Id,
+                    (candidate, _) => candidate)
+                .SingleOrDefaultAsync(candidate => candidate.Id == progress.Id, cancellationToken);
+            return current is null
+                ? NotFound<CalibrationMethodProgressDto>()
+                : RevisionConflict(current.Revision, request.BaseRevision, MapMethodProgress(current));
+        }
+        catch (DbUpdateException) when (isNew)
+        {
+            ClearTrackedState();
+            CalibrationMethodProgress? current = await _dbContext.CalibrationMethodProgresses
+                .SingleOrDefaultAsync(
+                    candidate => candidate.ProjectId == projectId && candidate.Method == trimmedMethod,
+                    cancellationToken);
+            if (current is null)
+            {
+                throw new InvalidOperationException(
+                    "The concurrent calibration method-progress insert did not produce a row.");
+            }
+
+            return current.Disposition == disposition
+                ? CalibrationApiResult<CalibrationMethodProgressDto>.Success(MapMethodProgress(current), replayed: true)
+                : CalibrationApiResult<CalibrationMethodProgressDto>.Failure(
+                    StatusCodes.Status409Conflict,
+                    "method_progress_create_conflict",
+                    new(
+                        current.Revision,
+                        null,
+                        MapMethodProgress(current),
+                        ["method-progress"],
+                        ["refresh", "fork", "discard-local-change"]));
+        }
+
+        return CalibrationApiResult<CalibrationMethodProgressDto>.Success(result);
+    }
+
+    /// <inheritdoc />
+    public async Task<CalibrationApiResult<CalibrationDraftProfileDto>> GetDraftProfileAsync(
+        Guid projectId,
+        CalibrationActor actor,
+        CancellationToken cancellationToken)
+    {
+        CalibrationProject? project = await FindVisibleProjectAsync(projectId, actor, false, cancellationToken);
+        if (project is null)
+        {
+            return NotFound<CalibrationDraftProfileDto>();
+        }
+
+        CalibrationDraftProfile? draftProfile = await _dbContext.CalibrationDraftProfiles
+            .AsNoTracking()
+            .SingleOrDefaultAsync(profile => profile.ProjectId == projectId, cancellationToken);
+        return draftProfile is null
+            ? NotFound<CalibrationDraftProfileDto>()
+            : CalibrationApiResult<CalibrationDraftProfileDto>.Success(MapDraftProfile(draftProfile));
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<CalibrationAttemptDto>> GetAttemptsAsync(
         Guid projectId,
         CalibrationActor actor,
@@ -983,6 +1244,20 @@ public sealed class CalibrationProjectService(
             !IsJsonContainer(request.Specification) || !IsJsonContainer(request.ProfileSnapshotIds))
         {
             return Validation<CalibrationAttemptDto>("attempt_invalid");
+        }
+
+        string trimmedAttemptMethod = request.Method.Trim();
+
+        // Issue #2180, gap 4: the setup step collects nothing today; when the method declares
+        // required setup inputs (e.g. a temperature tower's start/end range), the submitted
+        // specification must carry them, in range, mirroring ValidateMeasurementRange's
+        // server-side enforcement for the measure step. An unrecognized method has no declared
+        // inputs to enforce here and is rejected later by CreateAttemptAsync's own method
+        // recognition, unchanged.
+        if (CalibrationMethods.TryParse(trimmedAttemptMethod, out CalibrationMethod parsedAttemptMethod) &&
+            CalibrationMethodGuidanceCatalog.ValidateSetupInputs(parsedAttemptMethod, request.Specification) is string setupInputCode)
+        {
+            return Validation<CalibrationAttemptDto>(setupInputCode);
         }
 
         string? payloadSafetyCode = new[]
@@ -1050,6 +1325,40 @@ public sealed class CalibrationProjectService(
                 .Max() + 1;
             Guid attemptId = Guid.NewGuid();
             DateTime nowUtc = UtcNow();
+
+            // Issue #2180, gap 2: ensure a project-owned (not device-scoped) disposition row
+            // exists for this method so it is resumable with the correct pending/completed/
+            // skipped state on any device. A race on the (ProjectId, Method) unique index is
+            // handled by this same append-retry loop, exactly like the attempt Sequence race.
+            CalibrationMethodProgress? methodProgress = await _dbContext.CalibrationMethodProgresses
+                .FirstOrDefaultAsync(
+                    progress => progress.ProjectId == projectId && progress.Method == trimmedAttemptMethod,
+                    cancellationToken);
+            if (methodProgress is null)
+            {
+                methodProgress = new CalibrationMethodProgress
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = projectId,
+                    Method = trimmedAttemptMethod,
+                    Disposition = CalibrationMethodDisposition.Pending,
+                    Revision = 1,
+                    CreatedAtUtc = nowUtc,
+                    UpdatedAtUtc = nowUtc,
+                    CreatedBySubject = actor.Subject,
+                    UpdatedBySubject = actor.Subject,
+                };
+                _ = _dbContext.CalibrationMethodProgresses.Add(methodProgress);
+                AddChange(
+                    project,
+                    "method-progress",
+                    methodProgress.Id,
+                    methodProgress.Revision,
+                    CalibrationChangeType.Created,
+                    MutationId(),
+                    actor);
+            }
+
             CalibrationAttempt attempt = new()
             {
                 Id = attemptId,
@@ -1369,6 +1678,55 @@ public sealed class CalibrationProjectService(
             CalibrationProject project = await _dbContext.CalibrationProjects.SingleAsync(
                 candidate => candidate.Id == attempt.ProjectId,
                 cancellationToken);
+
+            // Issue #2180, gaps 1 and 2: an accepted "selection" observation is the operator's
+            // conclusion for this method, so (a) merge its measurements into the project's
+            // accumulating draft profile document (never a real custom filament profile - that
+            // only happens on project completion, see UpdateProjectInternalAsync) and (b) mark
+            // the method's disposition Completed so it stops blocking project completion and is
+            // no longer reported as Pending on resume.
+            if (string.Equals(observation.ObservationType, "selection", StringComparison.OrdinalIgnoreCase))
+            {
+                CalibrationDraftProfile? draftProfile = await _dbContext.CalibrationDraftProfiles
+                    .FirstOrDefaultAsync(profile => profile.ProjectId == attempt.ProjectId, cancellationToken);
+                bool isNewDraftProfile = draftProfile is null;
+                draftProfile ??= new CalibrationDraftProfile
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = attempt.ProjectId,
+                    ValuesJson = "{}",
+                    Revision = 0,
+                    CreatedAtUtc = observation.ObservedAtUtc,
+                    CreatedBySubject = actor.Subject,
+                };
+                draftProfile.ValuesJson = MergeDraftProfileValues(draftProfile.ValuesJson, attempt.Method, request.Measurements);
+                draftProfile.Revision++;
+                draftProfile.UpdatedAtUtc = UtcNow();
+                draftProfile.UpdatedBySubject = actor.Subject;
+                if (isNewDraftProfile)
+                {
+                    _ = _dbContext.CalibrationDraftProfiles.Add(draftProfile);
+                    AddChange(project, "draft-profile", draftProfile.Id, draftProfile.Revision, CalibrationChangeType.Created, MutationId(), actor);
+                }
+                else
+                {
+                    AddChange(project, "draft-profile", draftProfile.Id, draftProfile.Revision, CalibrationChangeType.Updated, MutationId(), actor);
+                }
+
+                CalibrationMethodProgress? methodProgress = await _dbContext.CalibrationMethodProgresses
+                    .FirstOrDefaultAsync(
+                        progress => progress.ProjectId == attempt.ProjectId && progress.Method == attempt.Method,
+                        cancellationToken);
+                if (methodProgress is not null && methodProgress.Disposition != CalibrationMethodDisposition.Completed)
+                {
+                    methodProgress.Disposition = CalibrationMethodDisposition.Completed;
+                    methodProgress.Revision++;
+                    methodProgress.UpdatedAtUtc = UtcNow();
+                    methodProgress.UpdatedBySubject = actor.Subject;
+                    AddChange(project, "method-progress", methodProgress.Id, methodProgress.Revision, CalibrationChangeType.Updated, MutationId(), actor);
+                }
+            }
+
             AddChange(
                 project,
                 "observation",
@@ -2910,6 +3268,74 @@ public sealed class CalibrationProjectService(
             draft.CreatedAtUtc,
             draft.UpdatedAtUtc,
             draft.DeletedAtUtc);
+
+    private static CalibrationMethodProgressDto MapMethodProgress(CalibrationMethodProgress progress) =>
+        new(
+            progress.Id,
+            progress.ProjectId,
+            progress.Method,
+            progress.Disposition.ToString(),
+            progress.CurrentStepId,
+            progress.Revision,
+            progress.CreatedAtUtc,
+            progress.UpdatedAtUtc);
+
+    private static CalibrationDraftProfileDto MapDraftProfile(CalibrationDraftProfile draftProfile) =>
+        new(
+            draftProfile.Id,
+            draftProfile.ProjectId,
+            Parse(draftProfile.ValuesJson),
+            draftProfile.Revision,
+            draftProfile.PromotedProfileId,
+            draftProfile.PromotedAtUtc,
+            draftProfile.CreatedAtUtc,
+            draftProfile.UpdatedAtUtc);
+
+    private static CalibrationMethodGuidanceDto MapMethodGuidance(CalibrationMethod method)
+    {
+        CalibrationMethodGuidance guidance = CalibrationMethodGuidanceCatalog.ForMethod(method);
+        CalibrationMeasurementRange? measureRange = CalibrationMethodGuidanceCatalog.MeasureQuantityFor(method);
+        CalibrationMeasureQuantityDto? measureQuantity = measureRange is null
+            ? null
+            : new CalibrationMeasureQuantityDto(measureRange.MeasurementKey, measureRange.Minimum, measureRange.Maximum);
+        return new(
+            CalibrationMethods.ToWireName(method),
+            guidance.Title,
+            guidance.Purpose,
+            guidance.WikiUrl,
+            guidance.SetupInputs
+                .Select(input => new CalibrationSetupInputDto(input.Key, input.Label, input.Unit, input.Minimum, input.Maximum))
+                .ToArray(),
+            measureQuantity,
+            CalibrationMethodSteps.GetSequence(method));
+    }
+
+    /// <summary>
+    /// Merges an accepted selection observation's measurements into the project's accumulating
+    /// draft profile document (issue #2180, gap 1), nested under the calibration method's own
+    /// wire name so two methods can never collide on the same measurement key.
+    /// </summary>
+    private static string MergeDraftProfileValues(string existingValuesJson, string method, JsonElement measurements)
+    {
+        JsonObject root = JsonNode.Parse(existingValuesJson) as JsonObject ?? [];
+        root[method] = JsonNode.Parse(measurements.GetRawText());
+        return root.ToJsonString();
+    }
+
+    /// <summary>
+    /// Builds the filament-profile-shaped raw JSON document posted to the slicer module's upload
+    /// contract on promotion (issue #2180, gap 1). Deliberately not <c>GeneratedProfileRevision</c>
+    /// (deleted by #1998's generator teardown): this is the project's own accumulated draft
+    /// values, keyed by calibration method, plus the minimal identity fields the upload contract
+    /// inspects (<c>name</c>).
+    /// </summary>
+    private static string BuildDraftProfileRawJson(CalibrationProject project, CalibrationDraftProfile draftProfile)
+    {
+        JsonObject root = JsonNode.Parse(draftProfile.ValuesJson) as JsonObject ?? [];
+        root["name"] = $"{project.Name} (Calibrated)";
+        root["filament_type"] = project.FilamentMaterial;
+        return root.ToJsonString();
+    }
 
     private static CalibrationAttemptDto MapAttempt(CalibrationAttempt attempt, string status) =>
         new(

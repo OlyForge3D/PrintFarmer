@@ -299,6 +299,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<CalibrationSyncCursor> CalibrationSyncCursors => Set<CalibrationSyncCursor>();
 
+    /// <summary>Project-owned, non-device-scoped per-method disposition (issue #2180, gap 2).</summary>
+    public DbSet<CalibrationMethodProgress> CalibrationMethodProgresses => Set<CalibrationMethodProgress>();
+
+    /// <summary>Project-owned draft filament profile document, promoted on completion (issue #2180, gap 1).</summary>
+    public DbSet<CalibrationDraftProfile> CalibrationDraftProfiles => Set<CalibrationDraftProfile>();
+
     /// <summary>Durable checkpoints for slicer artifact to G-code library promotions.</summary>
     public DbSet<GcodePromotionCheckpoint> GcodePromotionCheckpoints =>
         Set<GcodePromotionCheckpoint>();

@@ -88,6 +88,14 @@ public sealed class CalibrationApiModule : IApiModule
         _ = services.AddScoped<
             Farm.Modules.Calibration.Services.Calibration.ICalibrationOrchestrationSagaService,
             Farm.Modules.Calibration.Services.Calibration.CalibrationOrchestrationSagaService>();
+
+        // Issue #2180, gap 1: promotion of a project's accumulated draft profile to a real
+        // custom filament profile, posted to the slicer module's own internal HTTP contract
+        // (never a direct EF/domain reference across the bounded-context boundary). Reuses the
+        // same trusted, configuration-pinned named HttpClient as the other saga gateways above.
+        _ = services.AddScoped<
+            Farm.Modules.Calibration.Services.Calibration.IFilamentProfilePromotionGateway,
+            Farm.Modules.Calibration.Services.Calibration.InternalApiFilamentProfilePromotionGateway>();
     }
 
     /// <inheritdoc />

@@ -214,6 +214,110 @@ public sealed class InternalApiSliceSubmissionGateway(
     }
 }
 
+/// <summary>A calibration project's accumulated draft filament profile, ready for promotion.</summary>
+/// <param name="Name">The display name for the resulting custom filament profile.</param>
+/// <param name="RawJson">
+/// The filament-profile-shaped JSON document built from the project's accumulated draft values,
+/// posted verbatim as <c>UploadProfileRequestDto.RawJson</c>.
+/// </param>
+public sealed record FilamentProfilePromotionRequest(string Name, string RawJson);
+
+/// <summary>Outcome of promoting a project's draft profile to a real custom filament profile.</summary>
+/// <param name="Success">Whether the promotion was accepted.</param>
+/// <param name="ProfileId">The slicer module's new <c>FilamentProfile.Id</c>, when <paramref name="Success"/> is <c>true</c>.</param>
+/// <param name="ErrorCode">A stable machine-readable failure code, when <paramref name="Success"/> is <c>false</c>.</param>
+public sealed record FilamentProfilePromotionResult(bool Success, Guid? ProfileId, string? ErrorCode)
+{
+    public static FilamentProfilePromotionResult Ok(Guid profileId) => new(true, profileId, null);
+
+    public static FilamentProfilePromotionResult Failed(string errorCode) => new(false, null, errorCode);
+}
+
+/// <summary>
+/// Promotes a project's accumulated draft filament profile to a real custom filament profile on
+/// behalf of the filament-calibration saga by calling the existing <c>ProfilesController</c> HTTP
+/// contract (issue #2180, gap 1), never by writing directly into the separately deployed slicer
+/// module's <c>SlicerDbContext</c>.
+/// </summary>
+public interface IFilamentProfilePromotionGateway
+{
+    Task<FilamentProfilePromotionResult> PromoteAsync(FilamentProfilePromotionRequest request, CancellationToken ct);
+}
+
+/// <summary>
+/// Calls the real <c>POST /api/slicer/profiles/upload</c> HTTP contract on the current host, so
+/// promotion behaves identically whether the slicer module is loaded in-process (monolith) or
+/// reached through the gateway/nginx boundary (microservices), and so this saga never duplicates
+/// <c>ProfilesController</c>'s validation or persistence logic.
+/// </summary>
+public sealed class InternalApiFilamentProfilePromotionGateway(
+    IHttpClientFactory httpClientFactory,
+    IHttpContextAccessor httpContextAccessor,
+    ILogger<InternalApiFilamentProfilePromotionGateway> logger) : IFilamentProfilePromotionGateway
+{
+    private readonly IHttpClientFactory _httpClientFactory =
+        httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+
+    private readonly IHttpContextAccessor _httpContextAccessor =
+        httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
+
+    private readonly ILogger<InternalApiFilamentProfilePromotionGateway> _logger =
+        logger ?? throw new ArgumentNullException(nameof(logger));
+
+    /// <inheritdoc />
+    public async Task<FilamentProfilePromotionResult> PromoteAsync(
+        FilamentProfilePromotionRequest request,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            var payload = new JsonObject
+            {
+                ["rawJson"] = request.RawJson,
+                ["profileType"] = "filament",
+                ["name"] = request.Name,
+            };
+
+            // The client's BaseAddress is pinned via Program.cs's AddHttpClient registration from
+            // trusted configuration - reusing the same named client as the slice-submission
+            // gateway - never derived from the inbound request's own Host/Scheme.
+            HttpClient client = _httpClientFactory.CreateClient(InternalApiSliceSubmissionGateway.HttpClientName);
+            string? authorization = _httpContextAccessor.HttpContext?.Request.Headers.Authorization;
+            if (!string.IsNullOrEmpty(authorization) &&
+                AuthenticationHeaderValue.TryParse(authorization, out AuthenticationHeaderValue? parsedHeader))
+            {
+                client.DefaultRequestHeaders.Authorization = parsedHeader;
+            }
+
+            using HttpRequestMessage httpRequest = new(HttpMethod.Post, "api/slicer/profiles/upload")
+            {
+                Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json"),
+            };
+            using HttpResponseMessage response = await client.SendAsync(httpRequest, ct);
+            string body = await response.Content.ReadAsStringAsync(ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                return FilamentProfilePromotionResult.Failed("profile_promotion_rejected");
+            }
+
+            using JsonDocument document = JsonDocument.Parse(body);
+            if (!document.RootElement.TryGetProperty("id", out JsonElement idElement) ||
+                !idElement.TryGetGuid(out Guid profileId))
+            {
+                return FilamentProfilePromotionResult.Failed("profile_promotion_response_invalid");
+            }
+
+            return FilamentProfilePromotionResult.Ok(profileId);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning(exception, "Filament profile promotion for the calibration saga failed transiently.");
+            return FilamentProfilePromotionResult.Failed("profile_promotion_transport_error");
+        }
+    }
+}
+
 /// <summary>
 /// Calls the real <c>/api/slice/{id}/send-to-printer</c> HTTP contract on the current host so this
 /// saga never duplicates <c>SlicePrintBridgeController</c>'s upload, safety-validation, or
