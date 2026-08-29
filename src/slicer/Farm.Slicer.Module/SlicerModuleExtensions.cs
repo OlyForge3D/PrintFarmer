@@ -84,7 +84,7 @@ public static class SlicerModuleExtensions
     }
 
     /// <summary>
-    /// Registers only the machine/process/filament profile repositories (and the
+    /// Registers the machine/process/filament/model-3D-file repositories (and the
     /// <see cref="SlicerDbContext"/> they depend on) without loading the rest of the slicer
     /// module: no plugin discovery, no hosted services, no job orchestration.
     /// </summary>
@@ -96,6 +96,15 @@ public static class SlicerModuleExtensions
     /// <c>IMachineProfileRepository</c>/<c>IProcessProfileRepository</c>/
     /// <c>IFilamentProfileRepository</c> registered when resolving them from its DI scope,
     /// throwing and turning the daily-validation reset endpoint into an unconditional 500 (#1858).
+    /// </para>
+    /// <para>
+    /// <see cref="IModel3DFileRepository"/> was added alongside those three (#2179) so
+    /// <c>Farm.Modules.Calibration.Startup.ModelStorageResolutionStartup</c> can register
+    /// <see cref="Farm.Slicer.Module.Services.IModelStorageResolver"/> on split/microservices
+    /// hosts too: the API and slicer-host containers already share the same physical database
+    /// (<c>ConnectionStrings:Default</c>) and the same model-storage volume, so
+    /// <c>Model3DStorageResolver</c> needs only this repository plus the already-unconditionally
+    /// registered <c>IStoragePathService</c> — no new network hop.
     /// </para>
     /// <para>
     /// This does not reuse the HTTP-hop pattern used by
@@ -156,6 +165,7 @@ public static class SlicerModuleExtensions
         _ = services.AddScoped<IMachineProfileRepository, EfMachineProfileRepository>();
         _ = services.AddScoped<IProcessProfileRepository, EfProcessProfileRepository>();
         _ = services.AddScoped<IFilamentProfileRepository, EfFilamentProfileRepository>();
+        _ = services.AddScoped<IModel3DFileRepository, EfModel3DFileRepository>();
 
         return services;
     }

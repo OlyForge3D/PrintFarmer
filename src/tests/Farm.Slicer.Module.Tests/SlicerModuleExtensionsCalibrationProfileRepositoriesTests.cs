@@ -5,10 +5,10 @@ namespace Farm.Slicer.Module.Tests;
 
 /// <summary>
 /// Regression tests for <see cref="SlicerModuleExtensions.AddSlicerCalibrationProfileRepositories"/>
-/// (#1858): split/microservices API hosts must be able to resolve
-/// <see cref="IMachineProfileRepository"/>, <see cref="IProcessProfileRepository"/>, and
-/// <see cref="IFilamentProfileRepository"/> from their own composition root, without loading the
-/// rest of the slicer module.
+/// (#1858, extended by #2179): split/microservices API hosts must be able to resolve
+/// <see cref="IMachineProfileRepository"/>, <see cref="IProcessProfileRepository"/>,
+/// <see cref="IFilamentProfileRepository"/>, and <see cref="IModel3DFileRepository"/> from their
+/// own composition root, without loading the rest of the slicer module.
 /// </summary>
 public sealed class SlicerModuleExtensionsCalibrationProfileRepositoriesTests
 {
@@ -51,12 +51,15 @@ public sealed class SlicerModuleExtensionsCalibrationProfileRepositoriesTests
                 scope.ServiceProvider.GetRequiredService<IProcessProfileRepository>();
             IFilamentProfileRepository filamentProfiles =
                 scope.ServiceProvider.GetRequiredService<IFilamentProfileRepository>();
+            IModel3DFileRepository modelFiles =
+                scope.ServiceProvider.GetRequiredService<IModel3DFileRepository>();
 
             // Prove the repositories are backed by a real, functioning SlicerDbContext
             // connection, not just resolvable-but-broken registrations.
             Assert.Null(await machineProfiles.GetByHashAsync("missing-hash", CancellationToken.None));
             Assert.Null(await processProfiles.GetByHashAsync("missing-hash", CancellationToken.None));
             Assert.Null(await filamentProfiles.GetByHashAsync("missing-hash", CancellationToken.None));
+            Assert.Null(await modelFiles.GetByIdAsync(Guid.NewGuid(), CancellationToken.None));
         }
         finally
         {
@@ -112,10 +115,13 @@ public sealed class SlicerModuleExtensionsCalibrationProfileRepositoriesTests
                 scope.ServiceProvider.GetRequiredService<IProcessProfileRepository>();
             IFilamentProfileRepository filamentProfiles =
                 scope.ServiceProvider.GetRequiredService<IFilamentProfileRepository>();
+            IModel3DFileRepository modelFiles =
+                scope.ServiceProvider.GetRequiredService<IModel3DFileRepository>();
 
             Assert.Null(await machineProfiles.GetByHashAsync("missing-hash", CancellationToken.None));
             Assert.Null(await processProfiles.GetByHashAsync("missing-hash", CancellationToken.None));
             Assert.Null(await filamentProfiles.GetByHashAsync("missing-hash", CancellationToken.None));
+            Assert.Null(await modelFiles.GetByIdAsync(Guid.NewGuid(), CancellationToken.None));
         }
         finally
         {
