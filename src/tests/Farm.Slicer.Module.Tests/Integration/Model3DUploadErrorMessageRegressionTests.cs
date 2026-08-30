@@ -81,8 +81,9 @@ public class Model3DUploadErrorMessageRegressionTests : IAsyncLifetime, IDisposa
             "REGRESSION #2215: the response body must carry a specific reason, not the opaque status text");
         message.Should().Contain("malformed.stl",
             "the message should name the rejected file so the user can identify it in the queue");
-        message.Should().MatchRegex("triangle|mesh|STL|validation",
-            "the message must explain what was structurally wrong with the file");
+        message.Should().Contain("No triangles found in mesh",
+            "the message must explain what was structurally wrong with the file, not just that " +
+            "'validation' failed generically");
     }
 
     [Fact]
