@@ -88,6 +88,15 @@ export interface AttentionItemDto {
 export interface AdminOverviewDto {
   /** UTC ISO-8601 timestamp when the snapshot was generated. */
   checkedAt: string;
+  /**
+   * The single worst status across `subsystems` (server-computed roll-up; see
+   * `AdminOverviewService.ComputeOverallStatus`). Always render this for any
+   * overall/summary status indicator instead of assuming "Healthy" — a degraded
+   * or unhealthy subsystem must never be masked by a contradictory "all clear"
+   * header (see issue #2222). Typed as `string` for the same forward-compatibility
+   * reason as {@link SubsystemHealthDto.status}; use {@link isKnownSubsystemStatus}.
+   */
+  overallStatus: string;
   /** Subsystem tiles in stable display order. */
   subsystems: SubsystemHealthDto[];
   /** Attention items pre-sorted Error → Warning → Info by the server. */

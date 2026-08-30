@@ -39,6 +39,7 @@ const mockedUseAuth = vi.mocked(useAuth);
 function makeOverview(overrides: Partial<AdminOverviewDto> = {}): AdminOverviewDto {
   return {
     checkedAt: '2026-07-25T17:04:00Z',
+    overallStatus: 'Healthy',
     subsystems: [{ key: 'api', name: 'API', status: 'Healthy', detail: 'Responding' }],
     attention: [],
     ...overrides,

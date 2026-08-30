@@ -74,9 +74,34 @@ public sealed class AdminOverviewService : IAdminOverviewService
         return new AdminOverviewDto
         {
             CheckedAt = checkedAt,
+            OverallStatus = ComputeOverallStatus(subsystems),
             Subsystems = subsystems,
             Attention = attention,
         };
+    }
+
+    /// <summary>
+    /// Rolls up every subsystem tile into a single overall status. Per the ordering
+    /// documented on <see cref="SubsystemStatus"/>, higher ordinal is worse, so the
+    /// overall status is simply the worst (highest-ordinal) subsystem status. A
+    /// single degraded or unhealthy subsystem must therefore always pull the overall
+    /// status down with it — the header must never report Healthy while any tile
+    /// reports otherwise (issue #2222). An empty subsystem list — never expected in
+    /// practice, since the core tiles are always emitted — defaults to Healthy rather
+    /// than throwing.
+    /// </summary>
+    private static SubsystemStatus ComputeOverallStatus(IReadOnlyList<SubsystemHealthDto> subsystems)
+    {
+        SubsystemStatus worst = SubsystemStatus.Healthy;
+        foreach (SubsystemHealthDto subsystem in subsystems)
+        {
+            if (subsystem.Status > worst)
+            {
+                worst = subsystem.Status;
+            }
+        }
+
+        return worst;
     }
 
     private PrinterConnectivitySnapshot GetPrinterConnectivity()

@@ -48,6 +48,15 @@ public record AdminOverviewDto
     public required DateTime CheckedAt { get; init; }
 
     /// <summary>
+    /// The single worst status across <see cref="Subsystems"/>, per the roll-up rule
+    /// documented on <see cref="SubsystemStatus"/> (higher ordinal wins). Callers must
+    /// render this — not assume "Healthy" — for any overall status indicator, so a
+    /// degraded or unhealthy subsystem is never masked by a contradictory "all clear"
+    /// header (see issue #2222).
+    /// </summary>
+    public required SubsystemStatus OverallStatus { get; init; }
+
+    /// <summary>
     /// Subsystem health tiles in stable display order. Always includes the core subsystems
     /// (api, database, signalr, backends); optional subsystems (e.g. spoolman) appear only
     /// when configured.
