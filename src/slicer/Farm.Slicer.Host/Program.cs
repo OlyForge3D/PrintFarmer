@@ -126,6 +126,7 @@ builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler
 Action<JsonSerializerOptions> configureJson = options =>
 {
     options.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    options.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
     options.Converters.Add(new JsonStringEnumConverter());
 };
 
