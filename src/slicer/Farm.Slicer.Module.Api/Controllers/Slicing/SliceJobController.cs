@@ -115,6 +115,17 @@ public partial class SliceJobController(
                 "Priority must be between 0 (Low) and 3 (Critical).");
         }
 
+        // Issue #2229: a caller can bypass the frontend's #2223 inline validation entirely by
+        // POSTing negative print-setting overrides (perimeters/wall_loops, infill density,
+        // top/bottom shell layers) directly to this endpoint. Reject those here, before the job
+        // is persisted, so the failure is a clear 400 instead of a late, generic "Slicing failed"
+        // once the worker rejects the unsliceable settings. Zero remains accepted for these
+        // fields — see ProcessOverrideSettingsValidation's remarks.
+        if (!ProcessOverrideSettingsValidation.TryValidate(request.SlicerProfileJson, out string? printSettingsError))
+        {
+            return SlicerApiProblems.InvalidRequest(this, "invalid_print_settings", printSettingsError!);
+        }
+
         // Calibration mode (issue #1938): the method name is validated at the API boundary, before
         // the job ever reaches the queue/worker, so an unknown/unsupported method fails with a
         // clear, actionable error rather than a generic slice failure surfacing later.
