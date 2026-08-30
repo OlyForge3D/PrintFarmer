@@ -570,7 +570,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Install Syft
-        uses: anchore/sbom-action/download-syft@v0.24.0
+        uses: anchore/sbom-action/download-syft@v0.24.1
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2
@@ -746,7 +746,7 @@ jobs:
             ORCASLICER_SHA256=${{ env.ORCA_SHA256 }}
 
       - name: Install Syft
-        uses: anchore/sbom-action/download-syft@v0.24.0
+        uses: anchore/sbom-action/download-syft@v0.24.1
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2
