@@ -75,6 +75,15 @@ public class SlicingJobsController(
             profile = System.Text.Json.JsonSerializer.Deserialize<SlicerProfileDto>(profileJson);
         }
 
+        // Issue #2229: this legacy route (superseded by POST /api/slice) carries the same
+        // wall/infill/shell-layer settings as strongly-typed ProcessProfileDto properties instead
+        // of the overrides object SliceJobController.SubmitAsync validates, so it needs its own
+        // check to close the same negative-value bypass.
+        if (!ProcessOverrideSettingsValidation.TryValidate(profile?.ProcessProfile, out string? printSettingsError))
+        {
+            return BadRequest(new { error = printSettingsError });
+        }
+
         var request = new SlicingJobRequest
         {
             ModelFileUrl = new Uri(tempPath),

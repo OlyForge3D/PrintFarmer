@@ -69,6 +69,13 @@ public class SlicingSubmissionController(
 
         SlicerProfileDto profile = DeserializeProfile(profileJson);
 
+        // Issue #2229: closes the same negative-value bypass as SliceJobController.SubmitAsync
+        // for this legacy route's strongly-typed profile shape.
+        if (!ProcessOverrideSettingsValidation.TryValidate(profile.ProcessProfile, out string? printSettingsError))
+        {
+            return BadRequest(new { error = printSettingsError });
+        }
+
         SlicingSubmissionResult result = await _submissionService.SubmitSlicingJobAsync(
             file,
             slicerEngine ?? SlicerEngineType.OrcaSlicer.ToString(),
@@ -123,6 +130,13 @@ public class SlicingSubmissionController(
         }
 
         SlicerProfileDto profile = DeserializeProfile(profileJson);
+
+        // Issue #2229: closes the same negative-value bypass as SliceJobController.SubmitAsync
+        // for this legacy route's strongly-typed profile shape.
+        if (!ProcessOverrideSettingsValidation.TryValidate(profile.ProcessProfile, out string? printSettingsError))
+        {
+            return BadRequest(new { error = printSettingsError });
+        }
 
         SlicingSubmissionResult result = await _submissionService.SubmitSlicingJobFromModelAsync(
             modelId,

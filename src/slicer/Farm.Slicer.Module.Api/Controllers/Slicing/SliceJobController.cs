@@ -121,7 +121,15 @@ public partial class SliceJobController(
         // is persisted, so the failure is a clear 400 instead of a late, generic "Slicing failed"
         // once the worker rejects the unsliceable settings. Zero remains accepted for these
         // fields — see ProcessOverrideSettingsValidation's remarks.
-        if (!ProcessOverrideSettingsValidation.TryValidate(request.SlicerProfileJson, out string? printSettingsError))
+        //
+        // Validated against the exact JSON that will be persisted below (post-
+        // EmbedExtruderFilamentNames), not the raw request body: EmbedExtruderFilamentNames
+        // re-serializes the profile through a last-wins dictionary when it needs to inject
+        // extruderFilamentProfileNames, so validating the pre-embed string could be bypassed by a
+        // duplicate top-level "overrides" key that survives re-serialization with a different
+        // (unvalidated) value than the one JsonDocument saw first.
+        string? effectiveSlicerProfileJson = EmbedExtruderFilamentNames(request.SlicerProfileJson, request.ExtruderFilamentProfileNames);
+        if (!ProcessOverrideSettingsValidation.TryValidate(effectiveSlicerProfileJson, out string? printSettingsError))
         {
             return SlicerApiProblems.InvalidRequest(this, "invalid_print_settings", printSettingsError!);
         }
@@ -259,7 +267,7 @@ public partial class SliceJobController(
                 : request.ModelFileName,
             SlicerEngine = (int)request.SlicerEngine,
             SlicerEngineName = request.SlicerEngine.ToString(),
-            SlicerProfileJson = EmbedExtruderFilamentNames(request.SlicerProfileJson, request.ExtruderFilamentProfileNames),
+            SlicerProfileJson = effectiveSlicerProfileJson,
             SlicerProfileId = request.SlicerProfileId,
 
             // Server derives RequiredCapabilitiesJson from the (engine, version) tuple below.

@@ -160,6 +160,55 @@ public sealed class SliceJobControllerPrintSettingsValidationTests
             Times.Once);
     }
 
+    [Fact]
+    public async Task SubmitAsync_OverridesNotAnObject_ReturnsInvalidRequest()
+    {
+        // Every downstream consumer expects "overrides" to be a JSON object and calls
+        // EnumerateObject() on it; a malformed shape must fail fast with a clear 400 instead of
+        // reaching the worker as a late, generic failure.
+        SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out _);
+        var request = new SubmitSliceJobRequest
+        {
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            Priority = 1,
+            SlicerProfileJson = """{"overrides":[1,2,3]}""",
+        };
+
+        IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
+
+        var objectResult = result.Should().BeOfType<ObjectResult>().Subject;
+        _ = objectResult.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        var problem = objectResult.Value.Should().BeOfType<ProblemDetails>().Subject;
+        _ = problem.Extensions["code"].Should().Be("invalid_print_settings");
+
+        repository.Verify(instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_NegativeOverrideSurvivingExtruderFilamentEmbed_ReturnsInvalidRequest()
+    {
+        // Validation must run against the exact SlicerProfileJson persisted on the job (after
+        // EmbedExtruderFilamentNames re-serializes it), not the pre-embed request body, otherwise
+        // a duplicate top-level "overrides" key could smuggle a negative value past validation.
+        SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out _);
+        var request = new SubmitSliceJobRequest
+        {
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            Priority = 1,
+            SlicerProfileJson = """{"overrides":{"wall_loops":-4}}""",
+            ExtruderFilamentProfileNames = ["PLA-Left", "PLA-Right"],
+        };
+
+        IActionResult result = await controller.SubmitAsync(request, CancellationToken.None);
+
+        var objectResult = result.Should().BeOfType<ObjectResult>().Subject;
+        _ = objectResult.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        var problem = objectResult.Value.Should().BeOfType<ProblemDetails>().Subject;
+        _ = problem.Extensions["code"].Should().Be("invalid_print_settings");
+
+        repository.Verify(instance => instance.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private static SliceJobController CreateController(
         out Mock<ISliceJobRepository> repository,
         out Mock<ISliceJobEventService> events)

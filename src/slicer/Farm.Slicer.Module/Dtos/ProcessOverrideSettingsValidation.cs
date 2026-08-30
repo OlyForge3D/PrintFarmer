@@ -51,7 +51,7 @@ public static class ProcessOverrideSettingsValidation
         };
 
     private static readonly Regex LeadingNumberPattern = new(
-        @"^\s*[-+]?\d+(\.\d+)?",
+        @"^\s*[-+]?(\d+(\.\d+)?|\.\d+)([eE][-+]?\d+)?",
         RegexOptions.Compiled,
         TimeSpan.FromMilliseconds(250));
 
@@ -74,38 +74,95 @@ public static class ProcessOverrideSettingsValidation
             return true;
         }
 
-        JsonElement root;
         try
         {
             using JsonDocument doc = JsonDocument.Parse(slicerProfileJson);
-            root = doc.RootElement.Clone();
+            JsonElement root = doc.RootElement;
+
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("overrides", out JsonElement overridesElem))
+            {
+                return true;
+            }
+
+            if (overridesElem.ValueKind != JsonValueKind.Object)
+            {
+                // Every downstream consumer (ApplyProcessOverrides, the worker's
+                // ResolveProfileFromJsonAsync) expects "overrides" to be a JSON object and calls
+                // EnumerateObject() on it. Reject a malformed shape here with a clear 400 instead
+                // of letting it reach the worker as a late, generic failure.
+                errorMessage = "\"overrides\" must be a JSON object.";
+                return false;
+            }
+
+            foreach (JsonProperty prop in overridesElem.EnumerateObject())
+            {
+                if (!NonNegativeFields.TryGetValue(prop.Name, out string? label))
+                {
+                    continue;
+                }
+
+                double? numeric = CoerceToNumber(prop.Value);
+                if (numeric is double value && (double.IsNaN(value) || value < 0))
+                {
+                    errorMessage = double.IsNaN(value)
+                        ? $"{label} must be a non-negative number."
+                        : $"{label} cannot be negative.";
+                    return false;
+                }
+            }
+
+            return true;
         }
         catch (JsonException)
         {
             // Malformed SlicerProfileJson is not this validator's concern.
             return true;
         }
+    }
 
-        if (root.ValueKind != JsonValueKind.Object ||
-            !root.TryGetProperty("overrides", out JsonElement overridesElem) ||
-            overridesElem.ValueKind != JsonValueKind.Object)
+    /// <summary>
+    /// Validates the same non-negative print-quality fields on the legacy, typed
+    /// <see cref="ProcessProfileDto"/> submission shape used by the deprecated
+    /// <c>POST /api/slicer/jobs</c> and <c>POST /api/slicer/slice(-model)</c> routes. Those routes
+    /// predate the <c>overrides</c>-object convention validated by
+    /// <see cref="TryValidate(string?, out string?)"/> and carry the same fields as strongly-typed
+    /// properties instead, so they need their own check to close the same bypass.
+    /// </summary>
+    /// <param name="processProfile">The submission's process/quality profile, if any.</param>
+    /// <param name="errorMessage">The rejection reason when validation fails; otherwise null.</param>
+    /// <returns><see langword="true"/> when no negative value was found.</returns>
+    public static bool TryValidate(ProcessProfileDto? processProfile, out string? errorMessage)
+    {
+        errorMessage = null;
+
+        if (processProfile is null)
         {
             return true;
         }
 
-        foreach (JsonProperty prop in overridesElem.EnumerateObject())
+        if (processProfile.WallCount < 0)
         {
-            if (!NonNegativeFields.TryGetValue(prop.Name, out string? label))
-            {
-                continue;
-            }
+            errorMessage = "Perimeters (wallCount) cannot be negative.";
+            return false;
+        }
 
-            double? numeric = CoerceToNumber(prop.Value);
-            if (numeric is double value && (double.IsNaN(value) || value < 0))
-            {
-                errorMessage = $"{label} cannot be negative.";
-                return false;
-            }
+        if (processProfile.InfillPercentage < 0)
+        {
+            errorMessage = "Infill density (infillPercentage) cannot be negative.";
+            return false;
+        }
+
+        if (processProfile.TopLayers < 0)
+        {
+            errorMessage = "Top shell layers (topLayers) cannot be negative.";
+            return false;
+        }
+
+        if (processProfile.BottomLayers < 0)
+        {
+            errorMessage = "Bottom shell layers (bottomLayers) cannot be negative.";
+            return false;
         }
 
         return true;
@@ -145,7 +202,19 @@ public static class ProcessOverrideSettingsValidation
     /// </summary>
     private static double ParseLeadingNumber(string s)
     {
-        Match match = LeadingNumberPattern.Match(s);
+        Match match;
+        try
+        {
+            match = LeadingNumberPattern.Match(s);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // Pathologically long/adversarial input: fail closed as "not a usable number" (NaN),
+            // which the caller treats as a rejection, rather than letting the timeout surface as
+            // an unhandled 500.
+            return double.NaN;
+        }
+
         if (!match.Success)
         {
             return double.NaN;
