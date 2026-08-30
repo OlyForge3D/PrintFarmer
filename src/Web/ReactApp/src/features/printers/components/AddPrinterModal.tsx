@@ -22,6 +22,36 @@ const PRINTER_NAME_MAX_LENGTH = 100;
 const PRINTER_NAME_LENGTH_ERROR = `Printer name must be between 1 and ${PRINTER_NAME_MAX_LENGTH} characters`;
 
 /**
+ * Valid TCP port range (1-65535). Enforced client-side only: `CreatePrinterValidator`
+ * has no port range rule today, so this form is currently the only guard against
+ * out-of-range ports reaching the server. See #2216.
+ */
+const MIN_PORT = 1;
+const MAX_PORT = 65535;
+
+/**
+ * Validates a port value entered in the Add Printer form is an integer within the
+ * valid TCP port range (1-65535). Returns an error message when invalid, or
+ * `undefined` when the value is acceptable. See #2216: the form previously let
+ * out-of-range values (e.g. -1, 70000) reach the Test/submit API calls, which the
+ * server rejected with an HTTP 400 that gave the user no visible feedback.
+ */
+function validatePortValue(value: number | undefined, label: string): string | undefined {
+  if (value === undefined || Number.isNaN(value)) {
+    return `${label} is required`;
+  }
+  if (!Number.isInteger(value) || value < MIN_PORT || value > MAX_PORT) {
+    return `${label} must be a whole number between ${MIN_PORT} and ${MAX_PORT}`;
+  }
+  return undefined;
+}
+
+/** Whether the given backend type exposes the backend/frontend port fields in the form. */
+function backendUsesPortFields(backend: PrinterBackend): boolean {
+  return backend === PrinterBackend.Moonraker || backend === PrinterBackend.FlashForge;
+}
+
+/**
  * Converts a PascalCase key (as produced by ASP.NET's `ModelState`/`SerializableError`)
  * to the camelCase key used by the frontend form state.
  */
@@ -112,11 +142,15 @@ function AddPrinterModalContent({
       const filtered = models.filter(m => m.manufacturerId === value);
       setFilteredModels(filtered);
     }
-    // Clear validation error when user starts typing
-    if (validationErrors[field]) {
+    // Clear validation error when user starts typing. Also clear `backendPort`'s
+    // error when the backend type changes: `backend` change above resets
+    // `backendPort` to a known-valid default, so any prior out-of-range error for
+    // it would otherwise linger stale in the UI (#2216).
+    const fieldsToClear = field === 'backend' ? [field, 'backendPort'] : [field];
+    if (fieldsToClear.some(f => validationErrors[f])) {
       setValidationErrors(prev => {
         const newErrors = { ...prev };
-        delete newErrors[field];
+        for (const f of fieldsToClear) delete newErrors[f];
         return newErrors;
       });
     }
@@ -153,8 +187,31 @@ function AddPrinterModalContent({
       errors.apiKey = ['API Key is required for OctoPrint'];
     }
 
+    // Validate port ranges before firing the API call (#2216): out-of-range ports
+    // (e.g. -1, 70000) reach the server and return an HTTP 400 with no visible
+    // feedback if not caught here.
+    if (backendUsesPortFields(formData.backend)) {
+      const backendPortError = validatePortValue(formData.backendPort, 'Backend port');
+      if (backendPortError) errors.backendPort = [backendPortError];
+
+      const frontendPortError = validatePortValue(formData.frontendPort, 'Frontend port');
+      if (frontendPortError) errors.frontendPort = [frontendPortError];
+    }
+
+    // Fields this function is responsible for validating. Always replace their
+    // prior state with the result of this run, rather than only merging in new
+    // errors - otherwise a field that became valid programmatically (e.g. its
+    // value was reset when `backend` changed, rather than edited directly by the
+    // user via `handleInputChange`) could leave a stale error message on screen
+    // even though the field is no longer invalid.
+    const testFieldKeys = ['serverUrl', 'password', 'apiKey', 'backendPort', 'frontendPort'] as const;
+    setValidationErrors(prev => {
+      const next = { ...prev };
+      for (const key of testFieldKeys) delete next[key];
+      return { ...next, ...errors };
+    });
+
     if (Object.keys(errors).length > 0) {
-      setValidationErrors(prev => ({ ...prev, ...errors }));
       return;
     }
 
@@ -214,6 +271,40 @@ function AddPrinterModalContent({
     
     if (formData.backend === PrinterBackend.OctoPrint && !formData.apiKey?.trim()) {
       errors.apiKey = ['API Key is required for OctoPrint printers'];
+    }
+
+    // Validate port ranges before submission (#2216).
+    if (backendUsesPortFields(formData.backend)) {
+      const backendPortError = validatePortValue(formData.backendPort, 'Backend port');
+      if (backendPortError) errors.backendPort = [backendPortError];
+
+      const frontendPortError = validatePortValue(formData.frontendPort, 'Frontend port');
+      if (frontendPortError) errors.frontendPort = [frontendPortError];
+    }
+
+    // Wattage and Machine Hourly Rate are optional, but when provided must be
+    // non-negative. Previously the inputs' native `min={0}` constraint enforced this;
+    // adding `noValidate` to the form (see below, #2216) disables that native check,
+    // so it must be replicated here to avoid silently accepting negative values.
+    if (formData.wattage !== undefined && (Number.isNaN(formData.wattage) || formData.wattage < 0)) {
+      errors.wattage = ['Wattage must be zero or greater'];
+    }
+
+    if (formData.machineHourlyRate !== undefined && (Number.isNaN(formData.machineHourlyRate) || formData.machineHourlyRate < 0)) {
+      errors.machineHourlyRate = ['Machine hourly rate must be zero or greater'];
+    }
+
+    // Date Acquired's native `max` (today) constraint is also disabled by `noValidate`;
+    // replicate it in JS so a manually-typed future date is caught before submission
+    // instead of relying solely on the server's `DateAcquired` rule.
+    if (formData.dateAcquired) {
+      const dateAcquiredValue = typeof formData.dateAcquired === 'string'
+        ? formData.dateAcquired
+        : formData.dateAcquired.toISOString().split('T')[0];
+      const todayValue = new Date().toISOString().split('T')[0];
+      if (dateAcquiredValue > todayValue) {
+        errors.dateAcquired = ['Date acquired cannot be in the future'];
+      }
     }
 
     setValidationErrors(errors);
@@ -350,7 +441,14 @@ function AddPrinterModalContent({
       )}
 
       {/* Form */}
-      <form id="add-printer-form" onSubmit={handleSubmit} className="space-y-4">
+      {/* noValidate: disable native HTML5 constraint validation (e.g. the number
+          inputs' min/max) so it can never silently block form submission before our
+          own validateForm/handleSubmit logic runs. Native rangeUnderflow/Overflow
+          checks apply regardless of how the value was set (unlike maxLength, which
+          is gated on the dirty-value flag), so without this an out-of-range port
+          would block the native submit event entirely with no inline feedback -
+          see #2216. */}
+      <form id="add-printer-form" onSubmit={handleSubmit} className="space-y-4" noValidate>
             {/* Basic Info Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Printer Name */}
@@ -457,22 +555,22 @@ function AddPrinterModalContent({
             {/* Show backend/frontend port fields for Moonraker and FlashForge */}
             {(formData.backend === PrinterBackend.Moonraker || formData.backend === PrinterBackend.FlashForge) && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <FormField label="Backend Port (API)">
+                <FormField label="Backend Port (API)" error={validationErrors.backendPort?.[0]}>
                   <Input
                     type="number"
-                    value={formData.backendPort ?? getDefaultBackendPort(formData.backend)}
-                    onChange={e => handleInputChange('backendPort', parseInt(e.target.value, 10) || getDefaultBackendPort(formData.backend))}
+                    value={formData.backendPort ?? ''}
+                    onChange={e => handleInputChange('backendPort', e.target.value === '' ? undefined : e.target.valueAsNumber)}
                     placeholder={String(getDefaultBackendPort(formData.backend))}
                     min={1}
                     max={65535}
                     aria-label="Backend port"
                   />
                 </FormField>
-                <FormField label="Frontend Port (UI)">
+                <FormField label="Frontend Port (UI)" error={validationErrors.frontendPort?.[0]}>
                   <Input
                     type="number"
-                    value={formData.frontendPort ?? 80}
-                    onChange={e => handleInputChange('frontendPort', parseInt(e.target.value, 10) || 80)}
+                    value={formData.frontendPort ?? ''}
+                    onChange={e => handleInputChange('frontendPort', e.target.value === '' ? undefined : e.target.valueAsNumber)}
                     placeholder="80"
                     min={1}
                     max={65535}
@@ -558,6 +656,7 @@ function AddPrinterModalContent({
                 <FormField
                   label="Wattage (W)"
                   helper="Power consumption in watts. Leave blank to use model default or global setting."
+                  error={validationErrors.wattage?.[0]}
                 >
                   <Input
                     type="number"
@@ -572,6 +671,7 @@ function AddPrinterModalContent({
                 <FormField
                   label="Machine Hourly Rate ($)"
                   helper="Hourly operating cost. Leave blank to use the global default."
+                  error={validationErrors.machineHourlyRate?.[0]}
                 >
                   <Input
                     type="number"
