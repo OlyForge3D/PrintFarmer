@@ -415,19 +415,26 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   // Aggregates the four validated fields' live (pre-commit) validity so the
   // caller can block submission while an inline error is showing, rather
   // than silently slicing with the last committed value (issue #2223).
-  const [fieldValidity, setFieldValidity] = useState<Record<string, boolean>>({
+  //
+  // This intentionally does NOT use React state + a `useEffect` to lift the
+  // aggregate up to `onValidationChange`: a state update only takes effect on
+  // a later render, so a fast "type invalid value, then immediately click
+  // Slice" sequence could read stale (pre-effect) validity at submit time
+  // (review finding). A ref mutated synchronously — and reported to the
+  // caller synchronously, in the same call — has no such window: by the time
+  // `handleFieldValidityChange` returns, `onValidationChange` has already
+  // been called with the current aggregate.
+  const fieldValidityRef = useRef<Record<string, boolean>>({
     wallLoops: true,
     infillPercent: true,
     topShellLayers: true,
     bottomShellLayers: true,
   });
   const handleFieldValidityChange = (field: string) => (isValid: boolean) => {
-    setFieldValidity((prev) => (prev[field] === isValid ? prev : { ...prev, [field]: isValid }));
+    if (fieldValidityRef.current[field] === isValid) return;
+    fieldValidityRef.current = { ...fieldValidityRef.current, [field]: isValid };
+    onValidationChange?.(Object.values(fieldValidityRef.current).every(Boolean));
   };
-  useEffect(() => {
-    onValidationChange?.(Object.values(fieldValidity).every(Boolean));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fieldValidity]);
 
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 space-y-4 ${className ?? ''}`}>

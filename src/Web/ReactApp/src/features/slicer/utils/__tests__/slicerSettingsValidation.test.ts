@@ -133,4 +133,20 @@ describe('validateOrcaPrintSettings — lenient aggregate/defense-in-depth guard
     const settings = { bottom_shell_layers: '' } as unknown as OrcaProcessSettings;
     expect(validateOrcaPrintSettings(settings)).toEqual([]);
   });
+
+  // Bishop review (issue #2223): sparse_infill_density is a coPercent field
+  // and this repo's OrcaSlicer configs encode percent values as "15%"
+  // strings (see processSettingsBaseline.test.ts, slicerProfilePayload.test.ts).
+  // Number("15%") is NaN, which would wrongly report "cannot be negative";
+  // parseFloat("15%") correctly reads 15.
+  it('parses a percent-suffixed string value instead of misreading it as invalid', () => {
+    const settings = { sparse_infill_density: '15%' } as unknown as OrcaProcessSettings;
+    expect(validateOrcaPrintSettings(settings)).toEqual([]);
+  });
+
+  it('parses a percent-suffixed negative string value and rejects it', () => {
+    const settings = { sparse_infill_density: '-15%' } as unknown as OrcaProcessSettings;
+    const errors = validateOrcaPrintSettings(settings);
+    expect(errors).toEqual([{ field: 'infillPercent', message: 'Infill density cannot be negative.' }]);
+  });
 });

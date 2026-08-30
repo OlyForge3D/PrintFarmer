@@ -81,7 +81,11 @@ function coerceToNumber(value: unknown): number | undefined {
     return value;
   }
   if (typeof value === 'string') {
-    const parsed = Number(value);
+    // Use parseFloat (matching this repo's toNumber convention in
+    // metadataTypes.ts) rather than Number(): OrcaSlicer percent-typed
+    // fields like sparse_infill_density are sometimes encoded as "15%",
+    // which Number() rejects as NaN but parseFloat correctly reads as 15.
+    const parsed = parseFloat(value);
     return Number.isFinite(parsed) ? parsed : NaN;
   }
   if (Array.isArray(value) && value.length > 0) {
