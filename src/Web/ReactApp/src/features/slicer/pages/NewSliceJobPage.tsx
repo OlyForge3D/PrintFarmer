@@ -786,12 +786,21 @@ export const NewSliceJobPage: React.FC = () => {
     requiredNozzleDiameter: number | undefined;
   } | null>(null);
 
-  // Auto-clear submittedJobId (and snapshot) when the job reaches a terminal state
+  // Auto-clear submittedJobId (and snapshot) when the job completes successfully,
+  // returning the form to a fresh "ready to slice" state. This intentionally does
+  // NOT fire for 'Failed': a failed job's failure/retry UI must stay visible until
+  // the user explicitly acts (Retry or New Job) via onRetry/onNewJob below — those
+  // are the only paths that clear `message`, so auto-clearing 'Failed' here left
+  // `message` still holding the original "Job queued (id ...)" text, which would
+  // reappear as soon as submittedJobId went null (the `!submittedJobId && message`
+  // Alert), making a terminal failure look like it silently reverted to a stale
+  // "Job queued" state (issue #2214).
   useEffect(() => {
-    if (jobProgress.status === 'Completed' || jobProgress.status === 'Failed') {
+    if (jobProgress.status === 'Completed') {
       const timer = setTimeout(() => {
         setSubmittedJobId(prev => prev ? null : prev);
         setSliceSnapshot(null);
+        setMessage(null);
       }, 3000);
       return () => clearTimeout(timer);
     }

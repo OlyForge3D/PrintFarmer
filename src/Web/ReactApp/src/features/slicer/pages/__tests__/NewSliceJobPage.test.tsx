@@ -19,6 +19,57 @@ import { toast } from 'sonner';
 // Hoisted because vi.mock factories run before module-body initialization.
 const slicerModeRef = vi.hoisted(() => ({ value: 'Simple' as 'Simple' | 'Advanced' }));
 
+// Mutable real-time job progress ref (issue #2214). The real hook subscribes
+// to SignalR + REST reconciliation; none of that plumbing is meaningful in
+// jsdom. Tests that need to drive the job through a terminal status call
+// `jobProgressRef.set(...)`, which updates the ref AND notifies subscribers via a
+// tiny external-store pattern — mutating the ref alone and calling
+// `rerender()` is NOT enough, because react-router's route matching can reuse
+// the previously-rendered element for an unchanged location/element identity
+// and never re-invoke `NewSliceJobPage`'s render, so the mocked hook is never
+// called again. Subscribing for real re-render notifications (mirroring how
+// the actual hook pushes SignalR updates) sidesteps that entirely. Hoisted
+// because vi.mock factories run before module-body initialization.
+const jobProgressRef = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  const initial = {
+    progressPercent: 0,
+    progressMessage: null as string | null,
+    status: null as string | null,
+    estimatedPrintTimeSeconds: null as number | null,
+    filamentUsedGrams: null as number | null,
+    resultFileUrl: null as string | null,
+    error: null as string | null,
+    isConnected: true,
+  };
+  return {
+    value: initial,
+    listeners,
+    set(next: typeof initial) {
+      this.value = next;
+      this.listeners.forEach((listener) => listener());
+    },
+    reset() {
+      this.set(initial);
+    },
+  };
+});
+
+vi.mock('../../hooks/useSliceJobProgress', async () => {
+  const react = await vi.importActual<typeof import('react')>('react');
+  return {
+    useSliceJobProgress: vi.fn(() =>
+      react.useSyncExternalStore(
+        (listener) => {
+          jobProgressRef.listeners.add(listener);
+          return () => jobProgressRef.listeners.delete(listener);
+        },
+        () => jobProgressRef.value,
+      ),
+    ),
+  };
+});
+
 // === Mock Data ===
 const mockPrinters = [
   {
@@ -254,6 +305,14 @@ vi.mock('@/services/sliceJobService', async () => {
       parseOrcaNumeric: vi.fn(() => undefined),
       getSpoolCostPerGram: vi.fn(() => Promise.resolve({ costPerGram: null, currency: '$', source: null })),
       addSliceToQueue: vi.fn(() => Promise.resolve({ printJobId: 'pj-1', queuePosition: 1, message: 'Queued' })),
+      // Pure formatting/computation helpers used by SliceProgressOverlay /
+      // SliceJobProgressPanel once a job is submitted. Delegate to the real
+      // implementations instead of stubbing, since no test previously
+      // exercised the submitted-job UI far enough to need them.
+      computeMaterialCost: actual.sliceJobService.computeMaterialCost,
+      computeMaterialCostPerGram: actual.sliceJobService.computeMaterialCostPerGram,
+      formatPrintTime: actual.sliceJobService.formatPrintTime,
+      formatFilamentUsed: actual.sliceJobService.formatFilamentUsed,
     },
     formatQueuePositionSuffix: actual.formatQueuePositionSuffix,
   };
@@ -2085,6 +2144,157 @@ describe('NewSliceJobPage', () => {
 
       expect(await screen.findByText(/OrcaSlicer 2\.3\.1 has no online worker/i)).toBeInTheDocument();
       expect(sliceJobService.submitJob).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Failed job status survives a responsive breakpoint resize (issue #2214)', () => {
+    beforeEach(() => {
+      jobProgressRef.reset();
+      vi.mocked(slicerService.listEngines).mockResolvedValue([
+        { engine: 'OrcaSlicer', versions: ['2.4.2'], versionEntries: [{ version: '2.4.2', available: true }], latest: '2.4.2' },
+      ]);
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
+        { name: 'Prusa MK4S 0.4 nozzle', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'MK4S' },
+      ] as OrcaMachineProfile[]);
+      vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue([
+        {
+          name: '0.20mm Standard @MK4S',
+          quality: 'Standard',
+          layerHeight: 0.2,
+          infillPercentage: 15,
+          printSpeed: 60,
+          supports: false,
+          compatiblePrinters: ['Prusa MK4S 0.4 nozzle'],
+        },
+      ] as OrcaProcessProfile[]);
+      // The file-level default (`{ id: 'job-1', status: 'Queued' }`) does not
+      // match `SubmitSliceJobResponse` (`jobId`, not `id`), so
+      // `submitMutation.onSuccess` throws on `res.jobId.substring(...)` before
+      // it ever calls `setSubmittedJobId` — invisible to the other submit
+      // tests here because none of them assert on the post-submit UI. Use the
+      // real response shape so this suite can actually reach a submitted job.
+      vi.mocked(sliceJobService.submitJob).mockResolvedValue({
+        jobId: 'job-1',
+        queuePosition: null,
+      } as Awaited<ReturnType<typeof sliceJobService.submitJob>>);
+    });
+
+    // Reused so all renders within a test share the same MemoryRouter /
+    // QueryClientProvider / AuthProvider ancestors.
+    function buildWrappedPage(route: string) {
+      const queryClient = createTestQueryClient();
+      return (
+        <MemoryRouter initialEntries={[route]}>
+          <QueryClientProvider client={queryClient}>
+            <AuthProvider>
+              <Routes>
+                <Route path="/slicer" element={<NewSliceJobPage />} />
+              </Routes>
+            </AuthProvider>
+          </QueryClientProvider>
+        </MemoryRouter>
+      );
+    }
+
+    async function submitAndFail() {
+      const wrappedPage = buildWrappedPage('/slicer?modelId=model-3d-1');
+      render(wrappedPage);
+
+      await waitFor(() => {
+        expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      await waitFor(() => {
+        const processSelect = Array.from(document.querySelectorAll('select'))
+          .find((s) => s.value.startsWith('system:'));
+        expect(processSelect?.value).toBe('system:0.20mm Standard @MK4S');
+      });
+
+      const latestOnSlice = () =>
+        (slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as { onSlice?: (ids?: string[]) => void } | undefined)?.onSlice;
+      await waitFor(() => {
+        expect(latestOnSlice()).toBeTypeOf('function');
+      });
+      await act(async () => { latestOnSlice()!(); });
+
+      await waitFor(() => {
+        expect(sliceJobService.submitJob).toHaveBeenCalled();
+      }, { timeout: 3000 });
+
+      // Simulate the real-time SignalR event carrying the terminal Failed
+      // status (rather than driving the mocked SignalR transport end to end).
+      act(() => {
+        jobProgressRef.set({
+          ...jobProgressRef.value,
+          status: 'Failed',
+          error: 'Slicer worker crashed while processing the plate.',
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
+      });
+    }
+
+    afterEach(() => {
+      // Restore jsdom's default viewport so later tests in this file are not
+      // affected by a resize simulated here.
+      window.innerWidth = 1024;
+      window.innerHeight = 768;
+    });
+
+    it('keeps the Failed/Retry UI visible — with no stale "Job queued" alert — after resizing to mobile and back', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        await submitAndFail();
+
+        expect(screen.queryByText(/Job queued/i)).not.toBeInTheDocument();
+        expect(screen.getAllByRole('button', { name: 'Retry' }).length).toBeGreaterThan(0);
+
+        // Cross the mobile responsive breakpoint (1026x877 -> 375x667), per
+        // the issue's exact repro steps.
+        act(() => {
+          window.innerWidth = 375;
+          window.innerHeight = 667;
+          window.dispatchEvent(new Event('resize'));
+        });
+
+        // Let the pre-fix 3s auto-clear timer window elapse. Before the fix,
+        // this wiped `submittedJobId` (and NOT `message`) for a Failed job,
+        // which resurfaced the stale "Job queued (id ...)" alert.
+        await act(async () => { await vi.advanceTimersByTimeAsync(3500); });
+
+        // Cross back to desktop (375x667 -> 1026x877).
+        act(() => {
+          window.innerWidth = 1026;
+          window.innerHeight = 877;
+          window.dispatchEvent(new Event('resize'));
+        });
+
+        expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
+        expect(screen.getAllByRole('button', { name: 'Retry' }).length).toBeGreaterThan(0);
+        expect(screen.queryByText(/Job queued/i)).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not auto-clear the Failed job after the completion-only 3s timer window, even without a resize', async () => {
+      // Regression guard for the root cause itself, independent of the
+      // resize repro: the auto-clear effect must only fire for 'Completed',
+      // never 'Failed'.
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        await submitAndFail();
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+
+        expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
+        expect(screen.queryByText(/Job queued/i)).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
