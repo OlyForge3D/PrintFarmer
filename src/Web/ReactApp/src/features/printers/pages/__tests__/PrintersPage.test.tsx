@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -407,6 +407,46 @@ describe('PrintersPage', () => {
 
     expect(screen.getByText('No Printers Found')).toBeInTheDocument();
     expect(screen.queryByText('No printers match these filters')).not.toBeInTheDocument();
+  });
+
+  it('offers a Shutdown option in the State filter and filters to Shutdown printers only (#2221)', async () => {
+    const user = userEvent.setup();
+    mockUsePrinters.mockReturnValue({
+      data: [
+        ...mockPrinters,
+        {
+          id: 'printer-3',
+          name: 'Moonraker Shutdown',
+          manufacturerName: 'Bambu Lab',
+          modelName: 'X1C',
+          backend: 'Moonraker',
+          isOnline: true,
+          isEnabled: true,
+          state: 'Shutdown',
+        } as Printer,
+      ],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: mockRefetchPrinters,
+    });
+
+    renderPage('/printers');
+
+    const stateFilterSelect = screen.getByLabelText('Filter by printer state');
+    expect(within(stateFilterSelect).getByRole('option', { name: 'Shutdown' })).toBeInTheDocument();
+
+    // All three printers show before the filter is applied.
+    expect(screen.getByText('Open Printer Alpha')).toBeInTheDocument();
+    expect(screen.getByText('Open Printer Beta')).toBeInTheDocument();
+    expect(screen.getByText('Open Moonraker Shutdown')).toBeInTheDocument();
+
+    await user.selectOptions(stateFilterSelect, 'shutdown');
+
+    // Only the Shutdown printer remains once the filter is applied.
+    expect(screen.queryByText('Open Printer Alpha')).not.toBeInTheDocument();
+    expect(screen.queryByText('Open Printer Beta')).not.toBeInTheDocument();
+    expect(screen.getByText('Open Moonraker Shutdown')).toBeInTheDocument();
   });
 
   it('renders a retryable error instead of the empty state when loading printers fails', async () => {
