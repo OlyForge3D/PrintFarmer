@@ -109,7 +109,11 @@ public sealed class TasksContractTests : IAsyncLifetime
         // JsonStringEnumConverter (registered in ControllerStartup's Converters list) takes
         // precedence over the type-level [JsonConverter] attribute on UserTaskAnchorKind/
         // UserTaskSourceKind, so these are PascalCase over the wire too. See class remarks.
-        JsonContractAssertions.AssertEnumToken(created, "anchorKind", "Unspecified");
+        // NEGATIVE CONTROL (issue #2238 acceptance criterion): this line is deliberately
+        // wrong (asserting a value the real wire contract never emits) to prove the CI leg
+        // that runs Farm.Web.Api.Tests.Contracts.* actually executes and turns RED. It is
+        // reverted immediately after the red run is captured -- see the linked run in the PR.
+        JsonContractAssertions.AssertEnumToken(created, "anchorKind", "unspecified");
         JsonContractAssertions.AssertEnumToken(created, "sourceKind", "Unspecified");
 
         var volatilePaths = new HashSet<string> { "$.id", "$.entityId", "$.createdAt" };
