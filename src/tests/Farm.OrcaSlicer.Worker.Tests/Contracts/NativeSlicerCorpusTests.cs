@@ -210,7 +210,7 @@ public sealed class NativeSlicerCorpusTests : IDisposable
         Assert.Equal(8, profile.CompatiblePrinters.Count);
         Assert.Contains("Prusa MK3S 0.4 nozzle", profile.CompatiblePrinters);
 
-        string json = JsonSerializer.Serialize(profile.Settings, new JsonSerializerOptions { WriteIndented = true });
+        string json = ExtractSingleProfileSettingsRawJson(responseBody);
         await WireContractFixtureWriter.CaptureOrVerifyAsync(
             corpusRoot: WireContractCorpusPaths.NativeSlicerRoot,
             relativePath: "filament/prusa-generic-pla.populated.json",
@@ -260,7 +260,7 @@ public sealed class NativeSlicerCorpusTests : IDisposable
 
         Assert.Empty(profile.CompatiblePrinters);
 
-        string json = JsonSerializer.Serialize(profile.Settings, new JsonSerializerOptions { WriteIndented = true });
+        string json = ExtractSingleProfileSettingsRawJson(responseBody);
         await WireContractFixtureWriter.CaptureOrVerifyAsync(
             corpusRoot: WireContractCorpusPaths.NativeSlicerRoot,
             relativePath: "filament/minimal.missing-compatible-printers.json",
@@ -272,6 +272,28 @@ public sealed class NativeSlicerCorpusTests : IDisposable
         using JsonDocument document = JsonDocument.Parse(json);
         Assert.False(document.RootElement.TryGetProperty("compatible_printers", out _),
             "compatible_printers is genuinely absent from the native profile file — the raw settings bag must not fabricate the key");
+    }
+
+    /// <summary>
+    /// Extracts the <c>settings</c> sub-element's raw JSON directly from the real HTTP response
+    /// body via <see cref="JsonDocument"/> — never through a CLR round-trip. Each test in this
+    /// class produces a response grouping a single manufacturer to a single profile, so this
+    /// walks <c>{ "&lt;manufacturer&gt;": [ { ..., "settings": {...} } ] }</c> down to that one
+    /// <c>settings</c> object and returns its exact bytes as they crossed the wire (via
+    /// <see cref="JsonElement.GetRawText"/>), so the captured fixture is provably identical to
+    /// what the real MVC/System.Text.Json pipeline emitted — not a value that has been
+    /// deserialized into <see cref="FilamentProfileDto.Settings"/> and re-serialized through a
+    /// second, locally-constructed <see cref="JsonSerializerOptions"/> that could mask a real
+    /// drift in the production options (e.g. a naming policy or converter difference).
+    /// </summary>
+    private static string ExtractSingleProfileSettingsRawJson(string responseBody)
+    {
+        using JsonDocument document = JsonDocument.Parse(responseBody);
+        JsonProperty manufacturerGroup = Assert.Single(document.RootElement.EnumerateObject());
+        JsonElement profileArray = manufacturerGroup.Value;
+        JsonElement profileElement = Assert.Single(profileArray.EnumerateArray());
+        JsonElement settings = profileElement.GetProperty("settings");
+        return settings.GetRawText();
     }
 
     private void WriteManufacturerBundle(

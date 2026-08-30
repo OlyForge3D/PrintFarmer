@@ -25,6 +25,11 @@ namespace Farm.Web.Api.Tests.Contracts;
 /// every run, by the explicit per-item assertions below (<see cref="AssertKnownEnumToken"/>,
 /// <see cref="JsonContractAssertions.AssertProperty"/>) — those still fail on a renamed
 /// property, a missing key, or a numeric/mis-cased enum token, regardless of array shape.
+/// This explicitly covers every documented property of <c>SubsystemHealthDto</c> and
+/// <c>AttentionItemDto</c> (including <c>detail</c>, <c>title</c>, and the optional
+/// <c>action*</c> triplet), not just the identifying <c>key</c>/<c>status</c>/<c>severity</c>
+/// fields, so a rename anywhere in either item shape still fails this test even though the
+/// fixture diff itself cannot see it.
 /// </para>
 /// <para>
 /// The "each public enum as its exact string token" requirement is satisfied independently of
@@ -76,6 +81,17 @@ public sealed class AdminOverviewContractTests : IAsyncLifetime
             _ = JsonContractAssertions.AssertProperty(subsystem, "key", JsonValueKind.String);
             _ = JsonContractAssertions.AssertProperty(subsystem, "name", JsonValueKind.String);
             AssertKnownEnumToken(subsystem, "status", KnownSubsystemStatusTokens);
+
+            // SubsystemHealthDto.Detail is nullable: when present it must serialize as a
+            // string (not renamed/dropped); when the live probe omits it, the property is
+            // absent per the hub's DefaultIgnoreCondition=WhenWritingNull policy. Either way
+            // this line still fails on a rename to e.g. "message" or a wrong JsonValueKind,
+            // closing the gap the whole-subtree volatility above would otherwise leave open
+            // for this property.
+            if (subsystem.TryGetProperty("detail", out JsonElement detail))
+            {
+                Assert.Equal(JsonValueKind.String, detail.ValueKind);
+            }
         }
 
         JsonElement attention = root.GetProperty("attention");
@@ -84,6 +100,23 @@ public sealed class AdminOverviewContractTests : IAsyncLifetime
             JsonElement item = attention[i];
             _ = JsonContractAssertions.AssertProperty(item, "key", JsonValueKind.String);
             AssertKnownEnumToken(item, "severity", KnownAttentionSeverityTokens);
+
+            // AttentionItemDto.Title/Detail are required strings; assert them explicitly so a
+            // rename or dropped property fails here even though the enclosing array's
+            // length/order is (correctly) volatile above.
+            _ = JsonContractAssertions.AssertProperty(item, "title", JsonValueKind.String);
+            _ = JsonContractAssertions.AssertProperty(item, "detail", JsonValueKind.String);
+
+            // ActionLabel/ActionDestinationId/ActionRoute are all optional (present together
+            // per the DTO's documented invariant); assert only their JsonValueKind when
+            // present, so a rename is still caught without asserting a specific action exists.
+            foreach (string optionalStringProperty in new[] { "actionLabel", "actionDestinationId", "actionRoute" })
+            {
+                if (item.TryGetProperty(optionalStringProperty, out JsonElement optionalValue))
+                {
+                    Assert.Equal(JsonValueKind.String, optionalValue.ValueKind);
+                }
+            }
         }
 
         await WireContractFixtureWriter.CaptureOrVerifyAsync(
