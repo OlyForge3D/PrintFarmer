@@ -85,10 +85,10 @@ public sealed class ProfilesControllerDeleteCustomProfileTests
         Mock<ICatalogServiceAdapter> catalogService = new(MockBehavior.Strict);
         ProfilesController controller = new(logger, profilesService, catalogService.Object);
 
-        // GetCurrentUserId() reads User.FindFirst(ClaimTypes.NameIdentifier), which needs a
-        // populated HttpContext.User - without it the action throws a NullReferenceException
-        // before ever reaching IProfilesService, which every test below would otherwise
-        // misreport as an unrelated 500.
+        // DeleteCustomProfileAsync reads User.FindFirst(ClaimTypes.NameIdentifier) directly, which
+        // needs a populated HttpContext.User - without it the action throws a
+        // NullReferenceException before ever reaching IProfilesService, which every test below
+        // would otherwise misreport as an unrelated 500.
         ClaimsPrincipal principal = new(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())],
             authenticationType: "TestAuth"));
@@ -97,6 +97,41 @@ public sealed class ProfilesControllerDeleteCustomProfileTests
             HttpContext = new DefaultHttpContext { User = principal },
         };
         return controller;
+    }
+
+    private static ProfilesController CreateControllerWithoutIdentity(IProfilesService profilesService)
+    {
+        ILogger<ProfilesController> logger = NullLogger<ProfilesController>.Instance;
+        Mock<ICatalogServiceAdapter> catalogService = new(MockBehavior.Strict);
+        ProfilesController controller = new(logger, profilesService, catalogService.Object);
+
+        // An authenticated principal with no NameIdentifier claim at all - e.g. a token that
+        // authenticates but carries no subject claim - must be rejected before the service is
+        // ever consulted, rather than silently resolving to a fallback identity.
+        ClaimsPrincipal principal = new(new ClaimsIdentity(authenticationType: "TestAuth"));
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = principal },
+        };
+        return controller;
+    }
+
+    [Fact]
+    public async Task DeleteCustomProfileAsync_ReturnsUnauthorized_WhenNoUserIdentityClaimPresent()
+    {
+        // Issue #2203 review finding (Hicks): unlike GetCurrentUserId()'s shared dev-fallback used
+        // by UpdateCustomProfileAsync/PromoteCalibrationDraftProfileAsync, this destructive
+        // endpoint must not silently resolve a missing identity claim to a hardcoded user ID and
+        // proceed to delete that fallback identity's data. A strict mock with no setups proves
+        // IProfilesService is never even called.
+        Mock<IProfilesService> service = new(MockBehavior.Strict);
+
+        ProfilesController controller = CreateControllerWithoutIdentity(service.Object);
+
+        IActionResult result = await controller.DeleteCustomProfileAsync(Guid.NewGuid(), CancellationToken.None);
+
+        _ = Assert.IsType<UnauthorizedObjectResult>(result);
+        service.VerifyNoOtherCalls();
     }
 
     [Fact]

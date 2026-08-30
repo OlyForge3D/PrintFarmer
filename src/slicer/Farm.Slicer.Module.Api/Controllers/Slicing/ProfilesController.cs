@@ -1663,19 +1663,30 @@ public class ProfilesController(
     /// treated as not-found), the same way <c>PromoteCalibrationDraftProfileAsync</c> hardcodes
     /// <c>ProfileType = "filament"</c> server-side rather than trusting caller input. This keeps the
     /// destructive blast radius of a leaked desktop token limited to what the calibration wizard
-    /// actually needs to clean up.
+    /// actually needs to clean up. Finally, unlike every other action in this controller, this one
+    /// deletes data, so - unlike <see cref="GetCurrentUserId"/>'s shared dev-fallback behavior used
+    /// by <see cref="UpdateCustomProfileAsync"/> et al., which is out of scope to change here - this
+    /// action does not fall back to a hardcoded user ID when the identity claim is missing. A
+    /// missing/malformed <c>NameIdentifier</c> claim returns 401 instead of silently resolving to
+    /// (and potentially deleting) the shared dev-fallback identity's profiles.
     /// </remarks>
     [HttpDelete("custom/{id:guid}")]
     [RequirePermission(PrintFarmerPermissions.Calibration.Update)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteCustomProfileAsync(Guid id, CancellationToken ct)
     {
         try
         {
-            Guid userId = GetCurrentUserId();
+            string? userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!Guid.TryParse(userIdClaim, out Guid userId))
+            {
+                _logger.LogWarning("Delete custom profile rejected: no valid user identity claim present");
+                return Unauthorized("A valid user identity is required to delete a custom profile.");
+            }
 
             await _profilesService.DeleteCustomProfileAsync(id, userId, ct);
             return NoContent();
