@@ -1,0 +1,14 @@
+{
+  "id": "11ed0b1f-7129-43e8-a627-d13313201568",
+  "taskType": "Custom",
+  "entityType": "Manual",
+  "entityId": "00000000-0000-0000-0000-000000000000",
+  "title": "SignalR wire contract manual task (update)",
+  "status": "Completed",
+  "priority": "Normal",
+  "createdAt": "2026-08-30T23:54:11.6820705",
+  "completedAt": "2026-08-30T23:54:11.814433Z",
+  "relatedEntityCount": 0,
+  "anchorKind": "unspecified",
+  "sourceKind": "unspecified"
+}

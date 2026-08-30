@@ -91,6 +91,20 @@
     "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
   },
   {
+    "Path": "api/signalr-events/taskcreated.populated.json",
+    "Endpoint": "SignalR PrinterHub \u0022taskcreated\u0022 (POST /api/tasks)",
+    "ProducingTest": "SignalREventContractTests.CreateManualTask_RealBroadcast_SendsTaskCreatedWithLowercaseEnumTokens",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "88753836826591a2a0fcc3193743d29742ede93d"
+  },
+  {
+    "Path": "api/signalr-events/taskupdated.completed.json",
+    "Endpoint": "SignalR PrinterHub \u0022taskupdated\u0022 (POST /api/tasks/{id}/complete)",
+    "ProducingTest": "SignalREventContractTests.CompleteTask_RealBroadcast_SendsTaskUpdatedWithLowercaseEnumTokens",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "88753836826591a2a0fcc3193743d29742ede93d"
+  },
+  {
     "Path": "api/slice-jobs/job.completed-populated.json",
     "Endpoint": "GET /api/slice/{id}",
     "ProducingTest": "SliceJobContractTests.GetJob_Completed_PopulatedFieldsMatchCorpus",
@@ -137,21 +151,21 @@
     "Endpoint": "GET /api/tasks",
     "ProducingTest": "TasksContractTests.GetTasks_NoTasks_ReturnsEmptyCollection",
     "SchemaVersion": "1.0",
-    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+    "RefreshCommit": "88753836826591a2a0fcc3193743d29742ede93d"
   },
   {
     "Path": "api/tasks/tasks.populated.json",
     "Endpoint": "POST /api/tasks",
     "ProducingTest": "TasksContractTests.CreateThenGetTask_Populated_MatchesCorpus",
     "SchemaVersion": "1.0",
-    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+    "RefreshCommit": "88753836826591a2a0fcc3193743d29742ede93d"
   },
   {
     "Path": "api/tasks/tasks.unknown-additive-request-field.json",
     "Endpoint": "POST /api/tasks (unknown additive request field)",
     "ProducingTest": "TasksContractTests.CreateTask_UnknownAdditiveRequestField_IsIgnoredNotRejected",
     "SchemaVersion": "1.0",
-    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+    "RefreshCommit": "88753836826591a2a0fcc3193743d29742ede93d"
   },
   {
     "Path": "native-slicer/filament/minimal.missing-compatible-printers.json",

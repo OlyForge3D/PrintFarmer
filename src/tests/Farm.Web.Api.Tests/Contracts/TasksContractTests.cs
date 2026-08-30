@@ -11,20 +11,18 @@ namespace Farm.Web.Api.Tests.Contracts;
 /// <c>WebApplicationFactory</c> HTTP round trip through the actual registered MVC
 /// <c>JsonSerializerOptions</c>.
 /// <para>
-/// Real production evidence, not an assumption: <c>UserTaskDto.AnchorKind</c>/<c>SourceKind</c>
-/// declare a bespoke, type-level <c>[JsonConverter(typeof(UserTaskAnchorKindJsonConverter))]</c>
-/// (and the source-kind equivalent) whose <c>ToWire</c> logic emits lowercase camelCase tokens
-/// (e.g. <c>"unspecified"</c>). Over the real MVC pipeline they do NOT take effect: this corpus
-/// captured <c>"Unspecified"</c> (PascalCase) for both properties instead. The reason is System.Text.Json's
-/// converter-resolution precedence — a converter registered into the global
-/// <c>JsonSerializerOptions.Converters</c> list (here, <c>ControllerStartup</c>'s trailing
-/// <c>new JsonStringEnumConverter()</c>) outranks a <c>[JsonConverter]</c> attribute applied to
-/// the enum TYPE itself (it is only outranked by a property-level attribute, which
-/// <c>UserTaskDto.AnchorKind</c>/<c>SourceKind</c> do not carry). The bespoke converters are
-/// therefore effectively dead code for this DTO's real wire output, contradicting their own doc
-/// comments. This is a candidate serialization defect and is filed as its own linked finding on
-/// #2237 rather than fixed here; this corpus intentionally asserts the REAL observed token, not
-/// the one the enum's own converter attribute would suggest.
+/// Issue #2246: <c>UserTaskDto.AnchorKind</c>/<c>SourceKind</c> (and
+/// <c>ShiftPlanGroupDto.AnchorKind</c>) now carry PROPERTY-level
+/// <c>[JsonConverter(typeof(UserTaskAnchorKindJsonConverter))]</c> (and the source-kind
+/// equivalent) attributes, whose <c>ToWire</c> logic emits lowercase camelCase tokens (e.g.
+/// <c>"unspecified"</c>). A property-level attribute is the only thing that outranks a converter
+/// registered into the global <c>JsonSerializerOptions.Converters</c> list (here,
+/// <c>ControllerStartup</c>'s trailing <c>new JsonStringEnumConverter()</c>), which in turn
+/// outranks a type-level <c>[JsonConverter]</c> attribute on the enum itself. Before this fix, the
+/// type-level attributes on <c>UserTaskAnchorKind</c>/<c>UserTaskSourceKind</c> were dead code for
+/// this DTO's real wire output: the corpus previously captured <c>"Unspecified"</c> (PascalCase)
+/// for both properties. This corpus now asserts the corrected, canonical lowercase camelCase
+/// tokens per Dallas's sign-off on #2246.
 /// </para>
 /// </summary>
 public sealed class TasksContractTests : IAsyncLifetime
@@ -61,14 +59,13 @@ public sealed class TasksContractTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// Populated + missing-key + real-vs-declared-converter variant, created through the real
+    /// Populated + missing-key + property-level-converter variant, created through the real
     /// <c>POST /api/tasks</c> endpoint (never seeded directly): a manual task has no
     /// due date, no completion, no metadata, and no shift-plan anchor/source, so those
     /// optional properties are entirely missing from the wire payload — while
-    /// <c>status</c>/<c>priority</c>/<c>taskType</c>/<c>anchorKind</c>/<c>sourceKind</c> are all
-    /// present as their exact real production string tokens (see class remarks: all five are
-    /// PascalCase in practice, because the global <c>JsonStringEnumConverter</c> wins over the
-    /// bespoke <c>AnchorKind</c>/<c>SourceKind</c> converters' type-level attribute).
+    /// <c>status</c>/<c>priority</c>/<c>taskType</c> remain PascalCase (global
+    /// <c>JsonStringEnumConverter</c>) and <c>anchorKind</c>/<c>sourceKind</c> are lowercase
+    /// camelCase (property-level converter attributes; see class remarks).
     /// </summary>
     [Fact]
     public async Task CreateThenGetTask_Populated_MatchesCorpus()
@@ -105,12 +102,11 @@ public sealed class TasksContractTests : IAsyncLifetime
         JsonContractAssertions.AssertEnumToken(created, "priority", "High");
         JsonContractAssertions.AssertEnumToken(created, "taskType", "Custom");
 
-        // Real behavior, NOT the bespoke converters' documented intent: the global
-        // JsonStringEnumConverter (registered in ControllerStartup's Converters list) takes
-        // precedence over the type-level [JsonConverter] attribute on UserTaskAnchorKind/
-        // UserTaskSourceKind, so these are PascalCase over the wire too. See class remarks.
-        JsonContractAssertions.AssertEnumToken(created, "anchorKind", "Unspecified");
-        JsonContractAssertions.AssertEnumToken(created, "sourceKind", "Unspecified");
+        // Property-level [JsonConverter] attributes on UserTaskDto.AnchorKind/SourceKind now
+        // outrank the global JsonStringEnumConverter, so these are the canonical lowercase
+        // camelCase tokens (issue #2246). See class remarks.
+        JsonContractAssertions.AssertEnumToken(created, "anchorKind", "unspecified");
+        JsonContractAssertions.AssertEnumToken(created, "sourceKind", "unspecified");
 
         var volatilePaths = new HashSet<string> { "$.id", "$.entityId", "$.createdAt" };
         await WireContractFixtureWriter.CaptureOrVerifyAsync(

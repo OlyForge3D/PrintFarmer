@@ -1,12 +1,12 @@
 {
-  "id": "9f1eb941-8e88-4f82-8a4a-b1b3c538568f",
+  "id": "dd9b0e2c-4a6e-4c70-bfad-c7e9b821948d",
   "taskType": "Custom",
   "entityType": "Manual",
   "entityId": "00000000-0000-0000-0000-000000000000",
-  "title": "Wire contract additive field task",
+  "title": "SignalR wire contract manual task",
   "status": "Pending",
   "priority": "Normal",
-  "createdAt": "2026-08-30T23:54:03.5169677Z",
+  "createdAt": "2026-08-30T23:54:08.5761089Z",
   "relatedEntityCount": 0,
   "anchorKind": "unspecified",
   "sourceKind": "unspecified"

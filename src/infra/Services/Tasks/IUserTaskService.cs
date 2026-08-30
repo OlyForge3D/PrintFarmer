@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using System.Text.Json.Serialization;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Services.Tasks;
 
@@ -28,6 +29,15 @@ public record CreateManualTaskDto(
 /// <c>Unspecified</c> for both — this is compatible with existing clients that
 /// simply ignore the new fields.
 /// </remarks>
+/// <remarks>
+/// <see cref="AnchorKind"/> and <see cref="SourceKind"/> carry property-level
+/// <c>[JsonConverter]</c> attributes (issue #2246) because a property-level
+/// attribute is the only thing that outranks the global
+/// <c>JsonStringEnumConverter</c> registered in <c>ControllerStartup</c>/
+/// <c>SignalRStartup</c>; the type-level attributes on the enums themselves are
+/// otherwise dead code for real MVC/SignalR output. Keep both properties'
+/// canonical lowercase camelCase tokens working across HTTP and SignalR.
+/// </remarks>
 public record UserTaskDto(
     Guid Id,
     UserTaskType TaskType,
@@ -42,11 +52,11 @@ public record UserTaskDto(
     DateTime? CompletedAt,
     int RelatedEntityCount,
     string? MetadataJson,
-    UserTaskAnchorKind AnchorKind,
+    [property: JsonConverter(typeof(UserTaskAnchorKindJsonConverter))] UserTaskAnchorKind AnchorKind,
     DateTime? AnchorAtUtc,
     DateTime? WindowStartUtc,
     DateTime? WindowEndUtc,
-    UserTaskSourceKind SourceKind,
+    [property: JsonConverter(typeof(UserTaskSourceKindJsonConverter))] UserTaskSourceKind SourceKind,
     string? SourceId);
 
 /// <summary>
@@ -60,8 +70,13 @@ public record UserTaskDto(
 /// <see cref="UserTaskAnchorKind.AnytimeToday"/>.
 /// </param>
 /// <param name="Tasks">Tasks in this group, deterministically ordered per contract.</param>
+/// <remarks>
+/// <see cref="AnchorKind"/> carries a property-level <c>[JsonConverter]</c> attribute
+/// (issue #2246) for the same reason as <see cref="UserTaskDto.AnchorKind"/> — see that
+/// property's remarks.
+/// </remarks>
 public sealed record ShiftPlanGroupDto(
-    UserTaskAnchorKind AnchorKind,
+    [property: JsonConverter(typeof(UserTaskAnchorKindJsonConverter))] UserTaskAnchorKind AnchorKind,
     IReadOnlyList<UserTaskDto> Tasks);
 
 /// <summary>
