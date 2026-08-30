@@ -21,6 +21,32 @@ interface AddPrinterModalProps {
 const PRINTER_NAME_MAX_LENGTH = 100;
 const PRINTER_NAME_LENGTH_ERROR = `Printer name must be between 1 and ${PRINTER_NAME_MAX_LENGTH} characters`;
 
+/** Valid TCP port range. Matches the backend's `CreatePrinterValidator` port checks. */
+const MIN_PORT = 1;
+const MAX_PORT = 65535;
+
+/**
+ * Validates a port value entered in the Add Printer form is an integer within the
+ * valid TCP port range (1-65535). Returns an error message when invalid, or
+ * `undefined` when the value is acceptable. See #2216: the form previously let
+ * out-of-range values (e.g. -1, 70000) reach the Test/submit API calls, which the
+ * server rejected with an HTTP 400 that gave the user no visible feedback.
+ */
+function validatePortValue(value: number | undefined, label: string): string | undefined {
+  if (value === undefined || Number.isNaN(value)) {
+    return `${label} is required`;
+  }
+  if (!Number.isInteger(value) || value < MIN_PORT || value > MAX_PORT) {
+    return `${label} must be a whole number between ${MIN_PORT} and ${MAX_PORT}`;
+  }
+  return undefined;
+}
+
+/** Whether the given backend type exposes the backend/frontend port fields in the form. */
+function backendUsesPortFields(backend: PrinterBackend): boolean {
+  return backend === PrinterBackend.Moonraker || backend === PrinterBackend.FlashForge;
+}
+
 /**
  * Converts a PascalCase key (as produced by ASP.NET's `ModelState`/`SerializableError`)
  * to the camelCase key used by the frontend form state.
@@ -153,6 +179,17 @@ function AddPrinterModalContent({
       errors.apiKey = ['API Key is required for OctoPrint'];
     }
 
+    // Validate port ranges before firing the API call (#2216): out-of-range ports
+    // (e.g. -1, 70000) reach the server and return an HTTP 400 with no visible
+    // feedback if not caught here.
+    if (backendUsesPortFields(formData.backend)) {
+      const backendPortError = validatePortValue(formData.backendPort, 'Backend port');
+      if (backendPortError) errors.backendPort = [backendPortError];
+
+      const frontendPortError = validatePortValue(formData.frontendPort, 'Frontend port');
+      if (frontendPortError) errors.frontendPort = [frontendPortError];
+    }
+
     if (Object.keys(errors).length > 0) {
       setValidationErrors(prev => ({ ...prev, ...errors }));
       return;
@@ -214,6 +251,15 @@ function AddPrinterModalContent({
     
     if (formData.backend === PrinterBackend.OctoPrint && !formData.apiKey?.trim()) {
       errors.apiKey = ['API Key is required for OctoPrint printers'];
+    }
+
+    // Validate port ranges before submission (#2216).
+    if (backendUsesPortFields(formData.backend)) {
+      const backendPortError = validatePortValue(formData.backendPort, 'Backend port');
+      if (backendPortError) errors.backendPort = [backendPortError];
+
+      const frontendPortError = validatePortValue(formData.frontendPort, 'Frontend port');
+      if (frontendPortError) errors.frontendPort = [frontendPortError];
     }
 
     setValidationErrors(errors);
@@ -350,7 +396,14 @@ function AddPrinterModalContent({
       )}
 
       {/* Form */}
-      <form id="add-printer-form" onSubmit={handleSubmit} className="space-y-4">
+      {/* noValidate: disable native HTML5 constraint validation (e.g. the number
+          inputs' min/max) so it can never silently block form submission before our
+          own validateForm/handleSubmit logic runs. Native rangeUnderflow/Overflow
+          checks apply regardless of how the value was set (unlike maxLength, which
+          is gated on the dirty-value flag), so without this an out-of-range port
+          would block the native submit event entirely with no inline feedback -
+          see #2216. */}
+      <form id="add-printer-form" onSubmit={handleSubmit} className="space-y-4" noValidate>
             {/* Basic Info Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Printer Name */}
@@ -457,22 +510,22 @@ function AddPrinterModalContent({
             {/* Show backend/frontend port fields for Moonraker and FlashForge */}
             {(formData.backend === PrinterBackend.Moonraker || formData.backend === PrinterBackend.FlashForge) && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <FormField label="Backend Port (API)">
+                <FormField label="Backend Port (API)" error={validationErrors.backendPort?.[0]}>
                   <Input
                     type="number"
                     value={formData.backendPort ?? getDefaultBackendPort(formData.backend)}
-                    onChange={e => handleInputChange('backendPort', parseInt(e.target.value, 10) || getDefaultBackendPort(formData.backend))}
+                    onChange={e => handleInputChange('backendPort', parseInt(e.target.value, 10))}
                     placeholder={String(getDefaultBackendPort(formData.backend))}
                     min={1}
                     max={65535}
                     aria-label="Backend port"
                   />
                 </FormField>
-                <FormField label="Frontend Port (UI)">
+                <FormField label="Frontend Port (UI)" error={validationErrors.frontendPort?.[0]}>
                   <Input
                     type="number"
                     value={formData.frontendPort ?? 80}
-                    onChange={e => handleInputChange('frontendPort', parseInt(e.target.value, 10) || 80)}
+                    onChange={e => handleInputChange('frontendPort', parseInt(e.target.value, 10))}
                     placeholder="80"
                     min={1}
                     max={65535}

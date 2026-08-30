@@ -227,4 +227,93 @@ describe('AddPrinterModal', () => {
       });
     });
   });
+
+  // #2216: out-of-range backend/frontend ports (e.g. -1, 70000) reached the server and
+  // returned an HTTP 400 with no visible feedback. Client-side validation must block
+  // Test/submit and show an inline message next to the offending field instead.
+  describe('Port range validation (#2216)', () => {
+    it('blocks Test and shows an inline error for an out-of-range backend port', async () => {
+      const user = userEvent.setup();
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      const backendPortInput = screen.getByLabelText('Backend port');
+      fireEvent.change(backendPortInput, { target: { value: '-1' } });
+
+      await user.click(screen.getByRole('button', { name: /test/i }));
+
+      expect(await screen.findByText('Backend port must be a whole number between 1 and 65535')).toBeInTheDocument();
+      expect(testConnection).not.toHaveBeenCalled();
+    });
+
+    it('blocks Test and shows an inline error for an out-of-range frontend port', async () => {
+      const user = userEvent.setup();
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      const frontendPortInput = screen.getByLabelText('Frontend port');
+      fireEvent.change(frontendPortInput, { target: { value: '70000' } });
+
+      await user.click(screen.getByRole('button', { name: /test/i }));
+
+      expect(await screen.findByText('Frontend port must be a whole number between 1 and 65535')).toBeInTheDocument();
+      expect(testConnection).not.toHaveBeenCalled();
+    });
+
+    it('blocks Add Printer submission and shows an inline error for out-of-range ports', async () => {
+      const user = userEvent.setup();
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      fireEvent.change(screen.getByLabelText('Backend port'), { target: { value: '-1' } });
+      fireEvent.change(screen.getByLabelText('Frontend port'), { target: { value: '70000' } });
+
+      await user.click(screen.getByRole('button', { name: /add printer/i }));
+
+      expect(await screen.findByText('Backend port must be a whole number between 1 and 65535')).toBeInTheDocument();
+      expect(screen.getByText('Frontend port must be a whole number between 1 and 65535')).toBeInTheDocument();
+      expect(createPrinter).not.toHaveBeenCalled();
+    });
+
+    it('clears the port validation error once the user enters a valid value', async () => {
+      const user = userEvent.setup();
+      testConnection.mockResolvedValue({ success: true, message: 'Connected successfully' });
+
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      const backendPortInput = screen.getByLabelText('Backend port');
+      fireEvent.change(backendPortInput, { target: { value: '-1' } });
+      await user.click(screen.getByRole('button', { name: /test/i }));
+      expect(await screen.findByText('Backend port must be a whole number between 1 and 65535')).toBeInTheDocument();
+
+      fireEvent.change(backendPortInput, { target: { value: '7125' } });
+      await user.click(screen.getByRole('button', { name: /test/i }));
+
+      await waitFor(() => expect(testConnection).toHaveBeenCalled());
+      expect(screen.queryByText('Backend port must be a whole number between 1 and 65535')).not.toBeInTheDocument();
+    });
+
+    it('surfaces a server-side 400 rejection for the Test action even when client-side port validation passes', async () => {
+      const user = userEvent.setup();
+      testConnection.mockRejectedValue({
+        message: 'Backend port is not reachable',
+        statusCode: 400,
+        data: { success: false, message: 'Backend port is not reachable' },
+        isAxiosError: true,
+      });
+
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      await user.click(screen.getByRole('button', { name: /test/i }));
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith(
+          'Backend port is not reachable',
+          expect.objectContaining({ duration: 8000 })
+        );
+      });
+    });
+  });
 });
