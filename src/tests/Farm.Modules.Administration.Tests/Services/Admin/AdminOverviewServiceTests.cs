@@ -330,6 +330,12 @@ public class AdminOverviewServiceTests
             && a.ActionRoute == null);
         overview.Attention.Should().Contain(a => a.Key == $"printer-{offlinePrinterId}-unreachable"
             && a.Severity == AttentionSeverity.Warning);
+
+        // Regression: this response already mixes a confirmed Unhealthy tile (backends)
+        // with Unknown tiles (database, signalr) from the same probe failure. Unhealthy
+        // must win the roll-up — a confirmed failure must never be masked behind an
+        // "Unknown" reported by an unrelated subsystem in the same overview.
+        overview.OverallStatus.Should().Be(SubsystemStatus.Unhealthy);
     }
 
     [Fact]
@@ -472,6 +478,7 @@ public class AdminOverviewServiceTests
 
         string json = JsonSerializer.Serialize(dto, options);
 
+        json.Should().Contain("\"overallStatus\":\"Degraded\"");
         json.Should().Contain("\"status\":\"Healthy\"");
         json.Should().Contain("\"status\":\"Degraded\"");
         json.Should().Contain("\"severity\":\"Warning\"");
