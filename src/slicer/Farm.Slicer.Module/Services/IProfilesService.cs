@@ -249,4 +249,25 @@ public interface IProfilesService
     /// <param name="userId">ID of the user requesting the update.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<CustomProfileDto> UpdateCustomProfileAsync(Guid profileId, UpdateCustomProfileRequestDto request, Guid userId, CancellationToken ct);
+
+    /// <summary>
+    /// Deletes a custom (non-system) <b>filament</b> profile owned by the calling user (issue #2203).
+    /// </summary>
+    /// <param name="profileId">ID of the filament profile to delete.</param>
+    /// <param name="userId">ID of the user requesting the deletion.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// Deliberately narrowed to filament profiles only, the same way
+    /// <see cref="PromoteCalibrationDraftProfileAsync"/> hardcodes <c>ProfileType = "filament"</c>
+    /// server-side: this path is reachable by a Desktop API-key exchange token (unlike
+    /// <c>UpdateCustomProfileAsync</c>, which requires an interactive session), so its destructive
+    /// blast radius must stay limited to what PrintFarmerDesktop's calibration wizard actually needs
+    /// to clean up (filament clones) rather than spanning process/machine profiles too. A process or
+    /// machine profile ID is treated as not-found by this method (<see cref="KeyNotFoundException"/>),
+    /// not silently ignored.
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">No filament profile with this ID exists (or the ID belongs to a process/machine profile).</exception>
+    /// <exception cref="InvalidOperationException">The profile is a system profile (<c>IsSystem == true</c>) and cannot be targeted by this owner-scoped path.</exception>
+    /// <exception cref="UnauthorizedAccessException">The profile exists but is owned by a different user.</exception>
+    Task DeleteCustomProfileAsync(Guid profileId, Guid userId, CancellationToken ct);
 }

@@ -4270,6 +4270,45 @@ public class ProfilesService(
     }
 
     /// <summary>
+    /// Deletes a custom (non-system) <b>filament</b> profile owned by the calling user (issue #2203).
+    /// </summary>
+    /// <remarks>
+    /// Owner-scoped sibling of the admin-only <see cref="DeleteProfileAsync"/>: gated at the
+    /// controller by <see cref="Farm.Infrastructure.Security.PrintFarmerPermissions.Calibration.Update"/> rather than
+    /// <c>slicer_engines:admin</c>, so it must never be usable to delete another user's profile
+    /// or a system profile. Reuses the ownership/system checks from
+    /// <see cref="UpdateCustomProfileAsync"/>, but - unlike that endpoint, which requires an
+    /// interactive session and can target any custom profile type - this path is reachable by a
+    /// Desktop API-key exchange token, so it is deliberately narrowed to filament profiles only,
+    /// the same way <see cref="PromoteCalibrationDraftProfileAsync"/> hardcodes
+    /// <c>ProfileType = "filament"</c> server-side rather than trusting caller input. That keeps a
+    /// short-lived desktop token from being able to irreversibly delete a caller's process or
+    /// machine profiles, matching PrintFarmerDesktop's actual need (cleaning up filament clones
+    /// created by its calibration wizard).
+    /// </remarks>
+    public async Task DeleteCustomProfileAsync(Guid profileId, Guid userId, CancellationToken ct)
+    {
+        FilamentProfile? filamentProfile = await _filamentProfileRepo.GetByIdAsync(profileId, ct);
+        if (filamentProfile == null)
+        {
+            throw new KeyNotFoundException($"Filament profile with ID {profileId} not found.");
+        }
+
+        if (filamentProfile.IsSystem)
+        {
+            throw new InvalidOperationException("Cannot delete a system profile.");
+        }
+
+        if (filamentProfile.CreatedByUserId != userId)
+        {
+            throw new UnauthorizedAccessException("You do not have permission to delete this profile.");
+        }
+
+        await _filamentProfileRepo.DeleteAsync(filamentProfile, ct);
+        _logger.LogInformation("Deleted custom filament profile '{ProfileName}' for user {UserId}", LogSanitizer.Sanitize(filamentProfile.Name), userId);
+    }
+
+    /// <summary>
     /// Best-effort resolution of a catalog PrinterModel ID from a raw OrcaSlicer profile JSON.
     /// </summary>
     /// <remarks>
