@@ -49,7 +49,7 @@ public class Model3DFilesController(
     {
         if (modelFile is null || modelFile.Length == 0)
         {
-            return BadRequest("No file uploaded or file is empty.");
+            return BadRequest(new { message = "No file uploaded or file is empty." });
         }
 
         _logger.LogInformation("Upload request received: {FileName} ({FileSize} bytes)", LogSanitizer.Sanitize(modelFile.FileName), modelFile.Length);
@@ -62,7 +62,7 @@ public class Model3DFilesController(
         {
             if (!Guid.TryParse(clientUploadId, out Guid value) || value == Guid.Empty)
             {
-                return BadRequest("clientUploadId must be a non-empty GUID.");
+                return BadRequest(new { message = "clientUploadId must be a non-empty GUID." });
             }
 
             parsedClientUploadId = value;
@@ -94,7 +94,7 @@ public class Model3DFilesController(
         catch (ArgumentException ex)
         {
             _logger.LogWarning("Model upload validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
-            return BadRequest(ex.Message);
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -127,7 +127,7 @@ public class Model3DFilesController(
     {
         if (thumbnailFile is null || thumbnailFile.Length == 0)
         {
-            return BadRequest("No thumbnail uploaded or thumbnail is empty.");
+            return BadRequest(new { message = "No thumbnail uploaded or thumbnail is empty." });
         }
 
         bool isAdmin = User.IsInRole("farm_admin");
@@ -159,7 +159,7 @@ public class Model3DFilesController(
         catch (ArgumentException ex)
         {
             _logger.LogWarning("Thumbnail replacement validation failed for model {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
-            return BadRequest(ex.Message);
+            return BadRequest(new { message = ex.Message });
         }
         catch (UnauthorizedAccessException)
         {
@@ -494,7 +494,7 @@ public class Model3DFilesController(
     {
         if (modelFile is null || modelFile.Length == 0)
         {
-            return BadRequest("No file uploaded or file is empty.");
+            return BadRequest(new { message = "No file uploaded or file is empty." });
         }
 
         Model3DValidationResultDto result = _modelService.ValidateModel(modelFile);
@@ -518,7 +518,7 @@ public class Model3DFilesController(
     {
         if (geometryFile is null || geometryFile.Length == 0)
         {
-            return BadRequest("No file uploaded or file is empty.");
+            return BadRequest(new { message = "No file uploaded or file is empty." });
         }
 
         try
@@ -530,7 +530,7 @@ public class Model3DFilesController(
         catch (ArgumentException ex)
         {
             _logger.LogWarning("Geometry upload validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
-            return BadRequest(ex.Message);
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {
