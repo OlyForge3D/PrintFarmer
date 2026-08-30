@@ -93,3 +93,55 @@ jobs:
           setup
           test_model_thumbnail_replacement_routing
           teardown
+
+  split-topology-route-smoke:
+    # Issue #2239: tests/test-compose-generator.sh (above) proves the
+    # generated nginx/compose *text* is correct; it never proves a live
+    # request is actually answered by the service the text says it should.
+    # This job stands up the real generated split topology (nginx + main
+    # API + slicer-host + a worker) and issues authenticated HTTP/WebSocket
+    # requests against it, asserting route-by-route which service answers -
+    # including the required negative assertion that the main API does not
+    # serve slicer-owned namespaces.
+    name: Split-topology route ownership smoke (live, authenticated)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Ensure scripts are executable
+        run: |
+          chmod +x ./scripts/deploy-docker.sh
+          chmod +x ./scripts/docker/compose-generator.sh
+          chmod +x ./scripts/generate-certs.sh
+          chmod +x ./tests/*.sh
+
+      - name: Install Python deps
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install ruamel.yaml
+
+      - name: Show Docker Compose version
+        run: docker compose version
+
+      - name: Run split-topology route ownership smoke
+        env:
+          # This job's sole purpose is the live proof #2239 requires; a
+          # missing prerequisite (docker/compose/curl/jq/openssl) must fail
+          # the job loudly instead of silently SKIP-passing (exit 0).
+          REQUIRE_LIVE_SMOKE: "true"
+        run: |
+          set -o pipefail
+          bash tests/test-split-topology-route-smoke.sh 2>&1 | tee split-topology-smoke.log
+
+      - name: Upload split-topology route smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: split-topology-route-smoke-log
+          path: split-topology-smoke.log
+          if-no-files-found: ignore
+          retention-days: 14
