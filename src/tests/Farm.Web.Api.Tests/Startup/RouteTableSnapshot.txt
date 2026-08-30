@@ -60,6 +60,7 @@ DELETE /api/projects/{id:guid} -> Farm.Modules.Inventory::Farm.Modules.Inventory
 DELETE /api/projects/{id:guid}/files/{fileId:guid} -> Farm.Modules.Inventory::Farm.Modules.Inventory.Controllers.PrintProjectsController.RemoveFileFromProjectAsync
 DELETE /api/quotas/user/{userId:guid}/groups/{groupName} -> Farm.Modules.Identity::Farm.Modules.Identity.Controllers.QuotaController.RemoveUserFromGroupAsync
 DELETE /api/quotas/{id:guid} -> Farm.Modules.Identity::Farm.Modules.Identity.Controllers.QuotaController.DeleteQuotaAsync
+DELETE /api/slicer/profiles/custom/{id:guid} -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.DeleteCustomProfileAsync
 DELETE /api/slicer/profiles/families/{familyId:guid} -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfileFamiliesController.DeleteFamilyAsync
 DELETE /api/slicer/profiles/system/cleanup -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.DeleteAllSystemProfilesAsync
 DELETE /api/slicer/profiles/{id:guid} -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.DeleteProfileAsync

@@ -1637,6 +1637,63 @@ public class ProfilesController(
         }
     }
 
+    /// <summary>
+    /// Deletes a custom profile owned by the calling user (issue #2203).
+    /// </summary>
+    /// <param name="id">ID of the custom profile to delete.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// Owner-scoped sibling of the admin-only <see cref="DeleteProfileAsync"/> and
+    /// <see cref="BulkDeleteProfilesAsync"/> routes (both still gated by
+    /// <c>slicer_engines:admin</c> and unaffected by this endpoint). This route exists
+    /// specifically so a non-admin caller - e.g. PrintFarmerDesktop's filament calibration
+    /// wizard, which creates working custom profile clones via
+    /// <see cref="PromoteCalibrationDraftProfileAsync"/>/<see cref="UpdateCustomProfileAsync"/> -
+    /// can clean up their own custom profiles without <c>farm_admin</c>. Gated by
+    /// <see cref="PrintFarmerPermissions.Calibration.Update"/>, matching those siblings, and
+    /// scoped strictly to the caller's own profiles via <see cref="IProfilesService.DeleteCustomProfileAsync"/>:
+    /// a system profile can never be targeted (structurally excluded server-side, mirroring
+    /// <c>PromoteCalibrationDraftProfileAsync</c> hardcoding <c>ProfileType = "filament"</c>), and
+    /// an ownership mismatch returns 403 (not 404), matching <see cref="UpdateCustomProfileAsync"/>
+    /// and <see cref="PromoteCalibrationDraftProfileAsync"/> precedent.
+    /// </remarks>
+    [HttpDelete("custom/{id:guid}")]
+    [RequirePermission(PrintFarmerPermissions.Calibration.Update)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteCustomProfileAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            Guid userId = GetCurrentUserId();
+
+            await _profilesService.DeleteCustomProfileAsync(id, userId, ct);
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex)
+        {
+            _logger.LogWarning("Custom profile not found: {Message}", LogSanitizer.Sanitize(ex.Message));
+            return NotFound(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning("Delete profile unauthorized: {Message}", LogSanitizer.Sanitize(ex.Message));
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning("Delete profile invalid operation: {Message}", LogSanitizer.Sanitize(ex.Message));
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Delete custom profile failed");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Delete custom profile failed");
+        }
+    }
+
     // ── Schema metadata endpoints (engine-version-aware, cached) ─────────────
 
     /// <summary>

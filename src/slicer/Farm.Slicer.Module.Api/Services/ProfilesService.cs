@@ -4270,6 +4270,67 @@ public class ProfilesService(
     }
 
     /// <summary>
+    /// Deletes a custom (non-system) profile owned by the calling user (issue #2203).
+    /// </summary>
+    /// <remarks>
+    /// Owner-scoped sibling of the admin-only <see cref="DeleteProfileAsync"/>: gated at the
+    /// controller by <see cref="Farm.Infrastructure.Security.PrintFarmerPermissions.Calibration.Update"/> rather than
+    /// <c>slicer_engines:admin</c>, so it must never be usable to delete another user's profile
+    /// or a system profile. Follows the exact same lookup order and ownership/system checks as
+    /// <see cref="UpdateCustomProfileAsync"/> so the two owner-scoped mutation paths stay
+    /// consistent.
+    /// </remarks>
+    public async Task DeleteCustomProfileAsync(Guid profileId, Guid userId, CancellationToken ct)
+    {
+        ProcessProfile? processProfile = await _processProfileRepo.GetByIdAsync(profileId, ct);
+        if (processProfile != null)
+        {
+            AssertOwnedCustomProfile(processProfile.IsSystem, processProfile.CreatedByUserId, userId);
+            await _processProfileRepo.DeleteAsync(processProfile, ct);
+            _logger.LogInformation("Deleted custom process profile '{ProfileName}' for user {UserId}", LogSanitizer.Sanitize(processProfile.Name), userId);
+            return;
+        }
+
+        FilamentProfile? filamentProfile = await _filamentProfileRepo.GetByIdAsync(profileId, ct);
+        if (filamentProfile != null)
+        {
+            AssertOwnedCustomProfile(filamentProfile.IsSystem, filamentProfile.CreatedByUserId, userId);
+            await _filamentProfileRepo.DeleteAsync(filamentProfile, ct);
+            _logger.LogInformation("Deleted custom filament profile '{ProfileName}' for user {UserId}", LogSanitizer.Sanitize(filamentProfile.Name), userId);
+            return;
+        }
+
+        MachineProfile? machineProfile = await _machineProfileRepo.GetByIdAsync(profileId, ct);
+        if (machineProfile != null)
+        {
+            AssertOwnedCustomProfile(machineProfile.IsSystem, machineProfile.CreatedByUserId, userId);
+            await _machineProfileRepo.DeleteAsync(machineProfile, ct);
+            _logger.LogInformation("Deleted custom machine profile '{ProfileName}' for user {UserId}", LogSanitizer.Sanitize(machineProfile.Name), userId);
+            return;
+        }
+
+        throw new KeyNotFoundException($"Profile with ID {profileId} not found.");
+    }
+
+    /// <summary>
+    /// Shared guard for owner-scoped custom-profile mutation paths (<see cref="DeleteCustomProfileAsync"/>):
+    /// structurally excludes system profiles and enforces ownership, matching
+    /// <see cref="UpdateProcessProfileAsync"/>/<see cref="UpdateFilamentProfileAsync"/>/<see cref="UpdateMachineProfileAsync"/>.
+    /// </summary>
+    private static void AssertOwnedCustomProfile(bool isSystem, Guid? createdByUserId, Guid userId)
+    {
+        if (isSystem)
+        {
+            throw new InvalidOperationException("Cannot delete a system profile.");
+        }
+
+        if (createdByUserId != userId)
+        {
+            throw new UnauthorizedAccessException("You do not have permission to delete this profile.");
+        }
+    }
+
+    /// <summary>
     /// Best-effort resolution of a catalog PrinterModel ID from a raw OrcaSlicer profile JSON.
     /// </summary>
     /// <remarks>
