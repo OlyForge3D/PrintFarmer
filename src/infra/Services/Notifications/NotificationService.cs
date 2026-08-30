@@ -357,44 +357,84 @@ public class NotificationService(
             }
 
             IReadOnlyList<UserDto> users = await usersRepository.GetUsersAsync(cancellationToken);
-            IEnumerable<UserDto> activeUsers = users.Where(u => u.IsActive);
+            List<UserDto> activeUsers = users.Where(u => u.IsActive).ToList();
             var pendingEmailTargets = new List<EmailDispatchTarget>();
             var pendingPushTargets = new List<PushDispatchTarget>();
+            var pendingInAppNotifications = new List<Notification>();
             bool shouldDispatchTelegram = false;
 
-            foreach (UserDto user in activeUsers)
+            if (activeUsers.Count > 0)
             {
-                NotificationPreferences? prefs = await GetPreferencesAsync(user.Id, cancellationToken);
-                NotificationPreferences effectivePrefs = prefs ?? BuildDefaultPreferences(user.Id);
+                // Issue #2226: resolve preferences for every active recipient with a single
+                // batched query (instead of one query per user) before the fan-out loop.
+                List<Guid> activeUserIds = activeUsers.ConvertAll(u => u.Id);
+                Dictionary<Guid, NotificationPreferences> preferencesByUserId =
+                    await LoadPreferencesByUserIdAsync(activeUserIds, cancellationToken);
+                var pushEnabledUserIds = new List<Guid>();
 
-                if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.InApp))
+                foreach (UserDto user in activeUsers)
                 {
-                    await SendNotificationAsync(user.Id, type, subject, body, parsedJobId, cancellationToken);
-                }
+                    NotificationPreferences effectivePrefs = preferencesByUserId.TryGetValue(user.Id, out NotificationPreferences? prefs)
+                        ? prefs
+                        : BuildDefaultPreferences(user.Id);
 
-                if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.Email))
-                {
-                    pendingEmailTargets.Add(new EmailDispatchTarget(user));
-                }
-
-                if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.Push))
-                {
-                    List<PushSubscription> userSubscriptions = await dbContext.PushSubscriptions
-                        .AsNoTracking()
-                        .Where(s => s.UserId == user.Id)
-                        .ToListAsync(cancellationToken);
-                    foreach (PushSubscription subscription in userSubscriptions)
+                    if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.InApp))
                     {
-                        pendingPushTargets.Add(new PushDispatchTarget(
-                            subscription.Id,
-                            user.Id,
-                            subscription.Endpoint,
-                            subscription.P256dh,
-                            subscription.Auth));
+                        // Accumulate rather than write per-user: persisted together after
+                        // the loop via a single AddRangeAsync/SaveChanges commit.
+                        pendingInAppNotifications.Add(new Notification
+                        {
+                            UserId = user.Id,
+                            JobId = parsedJobId,
+                            Type = type,
+                            Subject = subject,
+                            Body = body,
+                            CreatedAt = DateTime.UtcNow
+                        });
+                    }
+
+                    if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.Email))
+                    {
+                        pendingEmailTargets.Add(new EmailDispatchTarget(user));
+                    }
+
+                    if (ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.Push))
+                    {
+                        pushEnabledUserIds.Add(user.Id);
+                    }
+
+                    shouldDispatchTelegram |= ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.Telegram);
+                }
+
+                if (pushEnabledUserIds.Count > 0)
+                {
+                    // Single batched query for the subset of users with push enabled,
+                    // instead of one PushSubscriptions query per user.
+                    ILookup<Guid, PushSubscription> subscriptionsByUserId =
+                        await LoadPushSubscriptionsByUserIdAsync(pushEnabledUserIds, cancellationToken);
+
+                    foreach (Guid userId in pushEnabledUserIds)
+                    {
+                        foreach (PushSubscription subscription in subscriptionsByUserId[userId])
+                        {
+                            pendingPushTargets.Add(new PushDispatchTarget(
+                                subscription.Id,
+                                userId,
+                                subscription.Endpoint,
+                                subscription.P256dh,
+                                subscription.Auth));
+                        }
                     }
                 }
 
-                shouldDispatchTelegram |= ShouldDeliverToChannel(effectivePrefs, type, NotificationDeliveryChannel.Telegram);
+                if (pendingInAppNotifications.Count > 0)
+                {
+                    // Single commit for the whole batch instead of one SaveChanges per user.
+                    await notificationRepository.AddRangeAsync(pendingInAppNotifications, cancellationToken);
+                    logger.LogInformation(
+                        "Persisted {Count} in-app notifications for {Type} broadcast",
+                        pendingInAppNotifications.Count, type);
+                }
             }
 
             Guid? printerId = await ResolvePrinterIdForJobAsync(parsedJobId, cancellationToken);
@@ -515,6 +555,70 @@ public class NotificationService(
         return await dbContext.NotificationPreferences
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
+    }
+
+    // Issue #2226: max user ids per IN(...) filter. Keeps a single fan-out
+    // broadcast well clear of SQL Server's ~2100 parameter limit even for
+    // large deployments, at the cost of one extra query per 500 recipients.
+    private const int UserIdBatchSize = 500;
+
+    /// <summary>
+    /// Resolves <see cref="NotificationPreferences"/> for a set of users with a small,
+    /// constant number of batched queries instead of one query per user.
+    /// </summary>
+    private async Task<Dictionary<Guid, NotificationPreferences>> LoadPreferencesByUserIdAsync(
+        List<Guid> userIds,
+        CancellationToken cancellationToken)
+    {
+        var preferencesByUserId = new Dictionary<Guid, NotificationPreferences>(userIds.Count);
+
+        foreach (IReadOnlyList<Guid> batch in ChunkUserIds(userIds))
+        {
+            List<NotificationPreferences> batchPreferences = await dbContext.NotificationPreferences
+                .AsNoTracking()
+                .Where(p => batch.Contains(p.UserId))
+                .ToListAsync(cancellationToken);
+
+            foreach (NotificationPreferences preferences in batchPreferences)
+            {
+                preferencesByUserId[preferences.UserId] = preferences;
+            }
+        }
+
+        return preferencesByUserId;
+    }
+
+    /// <summary>
+    /// Resolves <see cref="PushSubscription"/> rows for a set of users with a small,
+    /// constant number of batched queries instead of one query per user.
+    /// </summary>
+    private async Task<ILookup<Guid, PushSubscription>> LoadPushSubscriptionsByUserIdAsync(
+        List<Guid> userIds,
+        CancellationToken cancellationToken)
+    {
+        var subscriptions = new List<PushSubscription>();
+
+        foreach (IReadOnlyList<Guid> batch in ChunkUserIds(userIds))
+        {
+            List<PushSubscription> batchSubscriptions = await dbContext.PushSubscriptions
+                .AsNoTracking()
+                .Where(s => batch.Contains(s.UserId))
+                .ToListAsync(cancellationToken);
+            subscriptions.AddRange(batchSubscriptions);
+        }
+
+        return subscriptions.ToLookup(s => s.UserId);
+    }
+
+    private static IEnumerable<IReadOnlyList<Guid>> ChunkUserIds(List<Guid> userIds)
+    {
+        for (int offset = 0; offset < userIds.Count; offset += UserIdBatchSize)
+        {
+            yield return userIds
+                .Skip(offset)
+                .Take(UserIdBatchSize)
+                .ToList();
+        }
     }
 
     public async Task UpdatePreferencesAsync(Guid userId, NotificationPreferences preferences, bool preserveAttentionFields = false, CancellationToken cancellationToken = default)

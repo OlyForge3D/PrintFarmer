@@ -15,6 +15,15 @@ public interface INotificationRepository
     Task AddAsync(Notification notification, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Add multiple notifications and persist them in a single commit.
+    /// Used by fan-out paths (e.g. job lifecycle broadcasts) so that
+    /// N recipients cost one <c>SaveChanges</c> call instead of N.
+    /// </summary>
+    /// <param name="notifications">The notifications to add.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task AddRangeAsync(IEnumerable<Notification> notifications, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Get notification by ID
     /// </summary>
     /// <param name="id">The notification identifier.</param>

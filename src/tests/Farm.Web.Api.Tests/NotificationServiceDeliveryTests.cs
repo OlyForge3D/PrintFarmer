@@ -32,6 +32,8 @@ public class NotificationServiceDeliveryTests : IDisposable
         _dbContext = new AppDbContext(options);
         _notificationRepository.Setup(x => x.AddAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        _notificationRepository.Setup(x => x.AddRangeAsync(It.IsAny<IEnumerable<Notification>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         _telegramChannel.SetupGet(x => x.Channel).Returns(NotificationDeliveryChannel.Telegram);
         _telegramChannel.Setup(x => x.SendAsync(It.IsAny<NotificationChannelMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(NotificationChannelDispatchResult.Succeeded);
@@ -114,7 +116,11 @@ public class NotificationServiceDeliveryTests : IDisposable
         NotificationService service = CreateService(endpointValidator: (_, _) => Task.FromResult(true));
         await service.SendJobResumedAsync(Guid.NewGuid().ToString(), "Test");
 
-        _notificationRepository.Verify(x => x.AddAsync(It.Is<Notification>(n => n.Type == NotificationType.JobResumed), It.IsAny<CancellationToken>()), Times.Once);
+        _notificationRepository.Verify(
+            x => x.AddRangeAsync(
+                It.Is<IEnumerable<Notification>>(notifications => notifications.Count(n => n.Type == NotificationType.JobResumed) == 1),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
         _emailService.Verify(x => x.SendAsync(It.Is<EmailMessage>(m => m.To == user.Email), It.IsAny<CancellationToken>()), Times.Once);
         _webPushSender.Verify(x => x.SendAsync(It.IsAny<PushSubscription>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -142,7 +148,7 @@ public class NotificationServiceDeliveryTests : IDisposable
         NotificationService service = CreateService(endpointValidator: (_, _) => Task.FromResult(true));
         await service.SendJobResumedAsync(Guid.NewGuid().ToString(), "Test");
 
-        _notificationRepository.Verify(x => x.AddAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()), Times.Never);
+        _notificationRepository.Verify(x => x.AddRangeAsync(It.IsAny<IEnumerable<Notification>>(), It.IsAny<CancellationToken>()), Times.Never);
         _emailService.Verify(x => x.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()), Times.Never);
         _webPushSender.Verify(x => x.SendAsync(It.IsAny<PushSubscription>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -406,7 +412,7 @@ public class NotificationServiceDeliveryTests : IDisposable
         NotificationService service = CreateService();
         await service.SendJobCompletedAsync(Guid.NewGuid().ToString(), "Test", "Printer A");
 
-        _notificationRepository.Verify(x => x.AddAsync(It.IsAny<Notification>(), It.IsAny<CancellationToken>()), Times.Never);
+        _notificationRepository.Verify(x => x.AddRangeAsync(It.IsAny<IEnumerable<Notification>>(), It.IsAny<CancellationToken>()), Times.Never);
         _emailService.Verify(x => x.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()), Times.Never);
         _webPushSender.Verify(x => x.SendAsync(It.IsAny<PushSubscription>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -433,7 +439,11 @@ public class NotificationServiceDeliveryTests : IDisposable
         NotificationService service = CreateService();
         await service.SendJobFailedAsync(Guid.NewGuid().ToString(), "Test", "Jam detected");
 
-        _notificationRepository.Verify(x => x.AddAsync(It.Is<Notification>(n => n.Type == NotificationType.JobFailed), It.IsAny<CancellationToken>()), Times.Once);
+        _notificationRepository.Verify(
+            x => x.AddRangeAsync(
+                It.Is<IEnumerable<Notification>>(notifications => notifications.Count(n => n.Type == NotificationType.JobFailed) == 1),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -676,7 +686,9 @@ public class NotificationServiceDeliveryTests : IDisposable
         bool expectedTelegram = channel == NotificationDeliveryChannel.Telegram && enabled;
 
         _notificationRepository.Verify(
-            x => x.AddAsync(It.Is<Notification>(n => n.Type == eventType), It.IsAny<CancellationToken>()),
+            x => x.AddRangeAsync(
+                It.Is<IEnumerable<Notification>>(notifications => notifications.Count(n => n.Type == eventType) == 1),
+                It.IsAny<CancellationToken>()),
             expectedInApp ? Times.Once() : Times.Never());
         _emailService.Verify(
             x => x.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()),

@@ -12,6 +12,21 @@ public class EfNotificationRepository(AppDbContext context) : INotificationRepos
         await context.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task AddRangeAsync(IEnumerable<Notification> notifications, CancellationToken cancellationToken = default)
+    {
+        // Single commit for the whole batch: fan-out callers (job lifecycle
+        // broadcasts) accumulate one Notification per recipient and persist
+        // them together instead of one SaveChangesAsync per recipient.
+        var notificationList = notifications as IReadOnlyCollection<Notification> ?? notifications.ToList();
+        if (notificationList.Count == 0)
+        {
+            return;
+        }
+
+        await context.Notifications.AddRangeAsync(notificationList, cancellationToken);
+        await context.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<Notification?> GetByIdAsync(string id, CancellationToken cancellationToken = default)
     {
         return await context.Notifications.AsNoTracking()
