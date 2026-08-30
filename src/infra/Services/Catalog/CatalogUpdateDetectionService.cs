@@ -107,7 +107,6 @@ public class CatalogUpdateDetectionService(
     {
         using IServiceScope scope = _serviceProvider.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        IPrintersService printersService = scope.ServiceProvider.GetRequiredService<IPrintersService>();
         IUsersRepository usersRepository = scope.ServiceProvider.GetRequiredService<IUsersRepository>();
 
         // Load all enabled printers that have a real model assigned
@@ -137,7 +136,7 @@ public class CatalogUpdateDetectionService(
 
         if (settings.AutoApply)
         {
-            await AutoApplyUpdatesAsync(db, printersService, outdated, ct);
+            await AutoApplyUpdatesAsync(outdated, ct);
         }
         else
         {
@@ -147,21 +146,26 @@ public class CatalogUpdateDetectionService(
 
     /// <summary>
     /// Automatically applies the latest catalog model template to all outdated printers.
+    /// Each printer is processed in its own service scope (fresh <see cref="AppDbContext"/> and
+    /// <see cref="IPrintersService"/>) so that a failure applying one printer's template cannot
+    /// leave partially-tracked changes in a shared change tracker that a later, successful
+    /// iteration's <c>SaveChangesAsync</c> would unintentionally commit.
     /// </summary>
-    private async Task AutoApplyUpdatesAsync(
-        AppDbContext db,
-        IPrintersService printersService,
-        List<Printer> outdated,
-        CancellationToken ct)
+    private async Task AutoApplyUpdatesAsync(List<Printer> outdated, CancellationToken ct)
     {
-        // Reload with tracking for write operations
         foreach (Printer readonly_p in outdated)
         {
             try
             {
+                using IServiceScope iterationScope = _serviceProvider.CreateScope();
+                AppDbContext db = iterationScope.ServiceProvider.GetRequiredService<AppDbContext>();
+                IPrintersService printersService = iterationScope.ServiceProvider.GetRequiredService<IPrintersService>();
+
+                // Reload with tracking for write operations
                 Printer? p = await db.Printers
                     .Include(p => p.Model)
                     .Include(p => p.Toolheads)
+                    .Include(p => p.ServiceState)
                     .FirstOrDefaultAsync(x => x.Id == readonly_p.Id, ct);
 
                 if (p is null)

@@ -28,6 +28,14 @@ namespace Farm.Infrastructure.Tests.Services.Catalog;
 /// <see cref="CatalogUpdateDetectionService.DetectAndHandleUpdatesAsync"/> (made <c>internal</c>
 /// for this purpose) directly against a real EF Core query pipeline, proving detection actually
 /// fires when a printer's model is genuinely newer than its last recorded sync.
+///
+/// <see cref="AppDbContext"/> is registered per-<see cref="IServiceScope"/> (not as a singleton)
+/// so that each internal <c>CreateScope()</c> call inside the service under test — including the
+/// dedicated per-printer scope used by the auto-apply path — resolves a genuinely fresh context
+/// instance, exactly like production DI. Sharing a single context instance across those scopes
+/// would let EF Core's relationship-fixup silently re-populate the <c>ServiceState</c> navigation
+/// from already-tracked entities even when the real query is missing its <c>.Include()</c>,
+/// masking the exact bug these tests exist to catch.
 /// </summary>
 public class CatalogUpdateDetectionServiceTests
 {
@@ -36,14 +44,15 @@ public class CatalogUpdateDetectionServiceTests
     {
         // Model was updated AFTER the printer's last recorded model sync — a genuine update is
         // available and detection must fire.
-        (AppDbContext db, Guid printerId, Guid userId) = await SeedAsync(
+        (string dbName, _, Guid userId) = await SeedAsync(
             modelUpdatedAt: DateTime.UtcNow,
             lastModelSyncAt: DateTime.UtcNow.AddDays(-1));
 
-        CatalogUpdateDetectionService service = CreateService(db, userId, out CatalogUpdateSettings settings);
+        CatalogUpdateDetectionService service = CreateService(dbName, userId, autoApply: false, out CatalogUpdateSettings settings);
 
         await service.DetectAndHandleUpdatesAsync(settings, CancellationToken.None);
 
+        await using AppDbContext db = OpenDbContext(dbName);
         List<Notification> notifications = await db.Notifications.ToListAsync();
         notifications.Should().ContainSingle(
             n => n.UserId == userId && n.Type == NotificationType.CatalogUpdateAvailable,
@@ -57,29 +66,81 @@ public class CatalogUpdateDetectionServiceTests
     {
         // Negative control: the last recorded sync happened AFTER the model's most recent
         // update, so no catalog update is pending and no notification should be created.
-        (AppDbContext db, Guid printerId, Guid userId) = await SeedAsync(
+        (string dbName, _, _) = await SeedAsync(
             modelUpdatedAt: DateTime.UtcNow.AddDays(-1),
             lastModelSyncAt: DateTime.UtcNow);
 
-        CatalogUpdateDetectionService service = CreateService(db, userId, out CatalogUpdateSettings settings);
+        CatalogUpdateDetectionService service = CreateService(dbName, Guid.NewGuid(), autoApply: false, out CatalogUpdateSettings settings);
 
         await service.DetectAndHandleUpdatesAsync(settings, CancellationToken.None);
 
+        await using AppDbContext db = OpenDbContext(dbName);
         List<Notification> notifications = await db.Notifications.ToListAsync();
         notifications.Should().BeEmpty();
-        _ = printerId;
-        _ = userId;
     }
 
-    private static async Task<(AppDbContext Db, Guid PrinterId, Guid UserId)> SeedAsync(
+    [Fact]
+    public async Task DetectAndHandleUpdatesAsync_AutoApplyEnabled_PersistsSyncWithoutDuplicateServiceStateRow()
+    {
+        // Regression coverage for a review finding on the #2228 fix: the AutoApply re-query
+        // (which reloads each outdated printer WITH tracking, in its own per-printer service
+        // scope) must also Include(ServiceState). PrintersService's real ApplyModelTemplateAsync
+        // unconditionally calls an "EnsureServiceState" helper that creates a brand-new
+        // PrinterServiceState when the navigation is null. If the re-query omits the Include,
+        // that helper always sees null (every outdated printer already has a ServiceState row by
+        // construction of the "outdated" filter) and creates a duplicate row colliding on the
+        // PrinterId primary key — SaveChangesAsync then throws, is swallowed by the per-printer
+        // catch block, and LastModelSyncAt silently never advances, reproducing the exact
+        // "detection is dead" symptom of #2228 one level deeper, in the auto-apply path.
+        (string dbName, Guid printerId, Guid userId) = await SeedAsync(
+            modelUpdatedAt: DateTime.UtcNow,
+            lastModelSyncAt: DateTime.UtcNow.AddDays(-1));
+
+        var printersService = new Mock<IPrintersService>();
+        printersService
+            .Setup(s => s.ApplyModelTemplateAsync(It.IsAny<Printer>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Callback<Printer, bool, CancellationToken>((printer, _, _) =>
+            {
+                // Mirrors PrintersService.EnsureServiceState + the "always mark sync complete"
+                // line in ApplyModelTemplateAsync: creates a ServiceState row from scratch when
+                // the navigation was never loaded, exactly like the production helper does.
+                printer.ServiceState ??= new PrinterServiceState { PrinterId = printer.Id };
+                printer.ServiceState.LastModelSyncAt = DateTime.UtcNow;
+            })
+            .ReturnsAsync(true);
+
+        CatalogUpdateDetectionService service = CreateService(
+            dbName, userId, autoApply: true, out CatalogUpdateSettings settings, printersService.Object);
+
+        await service.DetectAndHandleUpdatesAsync(settings, CancellationToken.None);
+
+        await using AppDbContext db = OpenDbContext(dbName);
+
+        (await db.PrinterServiceStates.AsNoTracking().CountAsync()).Should().Be(
+            1, "the auto-apply re-query must Include(ServiceState) so the existing row is reused " +
+               "instead of creating a duplicate that collides on the PrinterId primary key");
+
+        PrinterServiceState? state = await db.PrinterServiceStates
+            .AsNoTracking()
+            .SingleOrDefaultAsync(s => s.PrinterId == printerId);
+        state.Should().NotBeNull();
+        state!.LastModelSyncAt.Should().NotBeNull().And.BeAfter(DateTime.UtcNow.AddMinutes(-1),
+            "a successful auto-apply must persist the new sync timestamp — before the ServiceState " +
+            "Include was added to the re-query, the duplicate-key failure was silently swallowed and " +
+            "LastModelSyncAt never advanced from its stale seeded value");
+    }
+
+    private static async Task<(string DbName, Guid PrinterId, Guid UserId)> SeedAsync(
         DateTime modelUpdatedAt,
         DateTime? lastModelSyncAt)
     {
-        AppDbContext db = CreateDbContext();
+        string dbName = $"CatalogUpdateDetectionServiceTests_{Guid.NewGuid():N}";
 
         Guid modelId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
         Guid userId = Guid.NewGuid();
+
+        await using AppDbContext db = OpenDbContext(dbName);
 
         db.PrinterModels.Add(new PrinterModel
         {
@@ -105,21 +166,26 @@ public class CatalogUpdateDetectionServiceTests
         });
 
         await db.SaveChangesAsync();
-        return (db, printerId, userId);
+        return (dbName, printerId, userId);
     }
 
-    private static AppDbContext CreateDbContext()
+    private static AppDbContext OpenDbContext(string dbName)
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase($"CatalogUpdateDetectionServiceTests_{Guid.NewGuid():N}")
+            .UseInMemoryDatabase(dbName)
             .Options;
 
         return new AppDbContext(options);
     }
 
-    private static CatalogUpdateDetectionService CreateService(AppDbContext db, Guid userId, out CatalogUpdateSettings settings)
+    private static CatalogUpdateDetectionService CreateService(
+        string dbName,
+        Guid userId,
+        bool autoApply,
+        out CatalogUpdateSettings settings,
+        IPrintersService? printersService = null)
     {
-        settings = new CatalogUpdateSettings { Enabled = true, AutoApply = false };
+        settings = new CatalogUpdateSettings { Enabled = true, AutoApply = autoApply };
 
         var usersRepository = new Mock<IUsersRepository>();
         usersRepository
@@ -130,9 +196,14 @@ public class CatalogUpdateDetectionServiceTests
             });
 
         var services = new ServiceCollection();
-        services.AddSingleton(db);
+
+        // Scoped (the AddDbContext default), backed by the same named InMemory database, so
+        // every IServiceScope created inside the service under test — including the dedicated
+        // per-printer scopes in the auto-apply path — gets its own fresh AppDbContext instance
+        // that must rely on explicit .Include() calls, just like production.
+        services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase(dbName));
         services.AddSingleton(usersRepository.Object);
-        services.AddSingleton(Mock.Of<IPrintersService>());
+        services.AddSingleton(printersService ?? Mock.Of<IPrintersService>());
         ServiceProvider provider = services.BuildServiceProvider();
 
         var settingsMonitor = new Mock<IOptionsMonitor<CatalogUpdateSettings>>();
