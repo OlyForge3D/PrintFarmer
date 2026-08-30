@@ -15,12 +15,16 @@
 /** Known subsystem status values sent by the API. */
 export type KnownSubsystemStatus = 'Healthy' | 'Degraded' | 'Unhealthy' | 'Unknown';
 
-/** Every known subsystem status, in the order the server treats as "worse". */
+/** Every known subsystem status, in the order the server treats as "worse".
+ * `Unhealthy` (a confirmed, actionable failure) outranks `Unknown` (an
+ * unconfirmed probe timeout/parse failure) so a real failure in one subsystem
+ * is never masked behind an "Unknown" reported by a different subsystem in
+ * the same overview (see issue #2222). */
 export const KNOWN_SUBSYSTEM_STATUSES: readonly KnownSubsystemStatus[] = [
   'Healthy',
   'Degraded',
-  'Unhealthy',
   'Unknown',
+  'Unhealthy',
 ];
 
 /** Type guard: does the raw value from the API match a known status? */
