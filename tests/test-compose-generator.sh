@@ -300,6 +300,49 @@ test_model_thumbnail_replacement_routing() {
     pass_test
 }
 
+test_workers_exact_match_routing() {
+    start_test "workers exact match routing"
+
+    local split_config="$REPO_ROOT/deploy/nginx/nginx-proxy-split.conf"
+    assert_file_exists "$split_config" || return 1
+
+    local route_count
+    route_count=$(grep -c "location /api/workers/ {" "$split_config")
+    assert_equals "2" "$route_count" "Split proxy should route worker endpoints over HTTP and HTTPS" || return 1
+
+    # Regression test for issue #2245: the bare "/api/workers" path (no
+    # trailing slash) only matched nginx's own default redirect because only
+    # a trailing-slash prefix location existed. An exact-match
+    # "location = /api/workers" block (matching the bare collection-root
+    # path) must exist ahead of the trailing-slash block in both the HTTP
+    # and HTTPS server blocks so the bare request is proxied directly to
+    # slicer-host instead of being redirected.
+    local exact_match_count
+    exact_match_count=$(grep -c "location = /api/workers {" "$split_config")
+    assert_equals "2" "$exact_match_count" \
+        "Split proxy should have an exact-match /api/workers route (no trailing slash) over HTTP and HTTPS (issue #2245)" || return 1
+
+    local exact_match_routed_to_slicer
+    exact_match_routed_to_slicer=$(awk '
+        /location = \/api\/workers \{/ { in_route = 1; next }
+        in_route && /proxy_pass \$slicer_upstream\$request_uri;/ { routed++; in_route = 0 }
+        in_route && /^        }/ { in_route = 0 }
+        END { print routed + 0 }
+    ' "$split_config")
+    assert_equals "2" "$exact_match_routed_to_slicer" "Both exact-match worker routes should target the slicer upstream" || return 1
+
+    local routed_to_slicer
+    routed_to_slicer=$(awk '
+        /location \/api\/workers\// { in_route = 1; next }
+        in_route && /proxy_pass \$slicer_upstream\$request_uri;/ { routed++; in_route = 0 }
+        in_route && /^        }/ { in_route = 0 }
+        END { print routed + 0 }
+    ' "$split_config")
+    assert_equals "2" "$routed_to_slicer" "Both trailing-slash worker routes should target the slicer upstream" || return 1
+
+    pass_test
+}
+
 test_slice_print_bridge_routing() {
     start_test "slice print bridge routing"
 
@@ -2009,6 +2052,7 @@ run_all_tests() {
     test_telemetry_stack_configuration
     test_orcaslicer_worker_config
     test_model_thumbnail_replacement_routing
+    test_workers_exact_match_routing
     test_slice_print_bridge_routing
     test_orcaslicer_worker_variations
     test_prusaslicer_worker_disabled
