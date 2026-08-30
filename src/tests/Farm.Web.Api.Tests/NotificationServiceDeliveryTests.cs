@@ -1,13 +1,17 @@
-﻿using System.Text.Json;
+﻿using System.Data.Common;
+using System.Text.Json;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.Notifications;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -418,6 +422,181 @@ public class NotificationServiceDeliveryTests : IDisposable
     }
 
     [Fact]
+    public async Task SendJobCompletedAsync_MultipleUsersWithMixedPreferences_BatchesQueriesAndPersistsExactRecipients()
+    {
+        // Issue #2226 regression coverage: exercises the batched preferences/push-subscription
+        // reads and the single AddRangeAsync write across FOUR distinct recipient shapes in one
+        // broadcast, which a single- or dual-user test cannot distinguish from a correct
+        // per-user implementation:
+        //   - userWithPrefs: an explicit, enabled NotificationPreferences row + 2 push subs.
+        //   - userWithoutPrefs: NO preferences row at all -> must fall back to the canonical
+        //     defaults (BuildDefaultPreferences) via the batched dictionary, not be silently
+        //     dropped because it has no dictionary entry.
+        //   - userWithDisabledPush: an explicit row with InApp/Push disabled but a STORED push
+        //     subscription -> the subscription must never be queried/dispatched.
+        //   - inactiveUser: IsActive = false -> must be excluded from every query and every
+        //     dispatch channel entirely.
+        UserDto userWithPrefs = CreateUser("with-prefs@example.com");
+        UserDto userWithoutPrefs = CreateUser("without-prefs@example.com");
+        UserDto userWithDisabledPush = CreateUser("disabled-push@example.com");
+        UserDto inactiveUser = CreateUser("inactive@example.com");
+        inactiveUser.IsActive = false;
+
+        _usersRepository.Setup(x => x.GetUsersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<UserDto> { userWithPrefs, userWithoutPrefs, userWithDisabledPush, inactiveUser });
+        _webPushSender.Setup(x => x.SendAsync(It.IsAny<PushSubscription>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WebPushDispatchResult(true));
+
+        _dbContext.NotificationPreferences.Add(new NotificationPreferences
+        {
+            UserId = userWithPrefs.Id,
+            EnableInAppNotifications = true,
+            EnablePushNotifications = true,
+            InAppOnJobCompleted = true,
+            PushOnJobCompleted = true
+        });
+        _dbContext.NotificationPreferences.Add(new NotificationPreferences
+        {
+            UserId = userWithDisabledPush.Id,
+            EnableInAppNotifications = true,
+            EnablePushNotifications = true,
+            InAppOnJobCompleted = false,
+            PushOnJobCompleted = false
+        });
+        // inactiveUser gets a fully-enabled row too, proving IsActive (not preference
+        // absence) is what excludes them.
+        _dbContext.NotificationPreferences.Add(new NotificationPreferences
+        {
+            UserId = inactiveUser.Id,
+            EnableInAppNotifications = true,
+            EnablePushNotifications = true,
+            InAppOnJobCompleted = true,
+            PushOnJobCompleted = true
+        });
+
+        PushSubscription subA1 = CreatePushSubscription(userWithPrefs.Id);
+        PushSubscription subA2 = CreatePushSubscription(userWithPrefs.Id);
+        PushSubscription subDisabled = CreatePushSubscription(userWithDisabledPush.Id);
+        PushSubscription subInactive = CreatePushSubscription(inactiveUser.Id);
+        _dbContext.PushSubscriptions.AddRange(subA1, subA2, subDisabled, subInactive);
+        await _dbContext.SaveChangesAsync();
+
+        NotificationService service = CreateService(endpointValidator: (_, _) => Task.FromResult(true));
+        await service.SendJobCompletedAsync(Guid.NewGuid().ToString(), "Test", "Printer A");
+
+        // NotificationPreferencesDefaults.Create defaults InAppOnJobCompleted/PushOnJobCompleted
+        // to true, so userWithoutPrefs (no row) must still receive both channels via fallback.
+        _notificationRepository.Verify(
+            x => x.AddRangeAsync(
+                It.Is<IEnumerable<Notification>>(notifications =>
+                    notifications.Select(n => n.UserId).OrderBy(id => id).SequenceEqual(
+                        new[] { userWithPrefs.Id, userWithoutPrefs.Id }.OrderBy(id => id))
+                    && notifications.All(n => n.Type == NotificationType.JobCompleted)),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        _webPushSender.Verify(
+            x => x.SendAsync(It.Is<PushSubscription>(s => s.Id == subA1.Id), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        _webPushSender.Verify(
+            x => x.SendAsync(It.Is<PushSubscription>(s => s.Id == subA2.Id), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        _webPushSender.Verify(
+            x => x.SendAsync(It.Is<PushSubscription>(s => s.Id == subDisabled.Id), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _webPushSender.Verify(
+            x => x.SendAsync(It.Is<PushSubscription>(s => s.Id == subInactive.Id), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _webPushSender.Verify(
+            x => x.SendAsync(It.IsAny<PushSubscription>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task SendJobCompletedAsync_MultipleActiveUsers_ResolvesPreferencesAndPushSubscriptionsWithConstantQueryCount()
+    {
+        // Issue #2226: proves the read side is genuinely batched (a fixed, small number of SQL
+        // commands regardless of recipient count) using a real SQLite connection + command
+        // counter, rather than only asserting on outcomes via mocks. Uses its own DbContext
+        // (not the shared in-memory-provider _dbContext) because the InMemory provider does not
+        // execute DbCommands, so a command-counting interceptor cannot observe it.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var interceptor = new CommandCountingInterceptor();
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+
+        await using var sqliteDbContext = new AppDbContext(options);
+        await sqliteDbContext.Database.EnsureCreatedAsync();
+
+        var users = new List<UserDto>();
+        for (int i = 0; i < 12; i++)
+        {
+            UserDto user = CreateUser($"user{i}@example.com");
+            users.Add(user);
+            sqliteDbContext.Users.Add(new User
+            {
+                Id = user.Id,
+                Username = $"user{i}",
+                Email = user.Email,
+                PasswordHash = "x"
+            });
+            sqliteDbContext.NotificationPreferences.Add(new NotificationPreferences
+            {
+                UserId = user.Id,
+                EnableInAppNotifications = true,
+                EnablePushNotifications = true,
+                InAppOnJobCompleted = true,
+                PushOnJobCompleted = true
+            });
+            sqliteDbContext.PushSubscriptions.Add(CreatePushSubscription(user.Id));
+        }
+
+        await sqliteDbContext.SaveChangesAsync();
+        interceptor.Reset();
+
+        _usersRepository.Setup(x => x.GetUsersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(users);
+        // Success:false avoids the unrelated "mark subscription LastUsedAt" write path
+        // (an existing, pre-#2226 per-successful-target update) so this assertion isolates
+        // the batched-read behaviour this issue is actually about, instead of conflating it
+        // with SQLite's lack of UPDATE batching for that separate write.
+        _webPushSender.Setup(x => x.SendAsync(It.IsAny<PushSubscription>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WebPushDispatchResult(false));
+
+        var service = new NotificationService(
+            _notificationRepository.Object,
+            _usersRepository.Object,
+            NullLogger<NotificationService>.Instance,
+            sqliteDbContext,
+            null,
+            null,
+            _emailService.Object,
+            _webPushSender.Object,
+            (_, _) => Task.FromResult(true),
+            [_telegramChannel.Object]);
+
+        await service.SendJobCompletedAsync(Guid.NewGuid().ToString(), "Test", "Printer A");
+
+        // Two batched queries for preferences + push subscriptions, plus one query to resolve
+        // the job's printer id (ResolvePrinterIdForJobAsync, unrelated to this issue and
+        // already a single query) = 3 commands total, independent of the 12 recipients above.
+        // A per-user N+1 implementation would issue 24+ commands instead.
+        interceptor.CommandCount.Should().Be(3);
+        _notificationRepository.Verify(
+            x => x.AddRangeAsync(
+                It.Is<IEnumerable<Notification>>(notifications => notifications.Count() == 12),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        _webPushSender.Verify(
+            x => x.SendAsync(It.IsAny<PushSubscription>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(12));
+    }
+
+    [Fact]
     public async Task SendJobFailedAsync_InAppDisabledInPreferences_StillCreatesInAppNotification()
     {
         UserDto user = CreateUser();
@@ -721,5 +900,34 @@ public class NotificationServiceDeliveryTests : IDisposable
     public void Dispose()
     {
         _dbContext.Dispose();
+    }
+
+    private sealed class CommandCountingInterceptor : DbCommandInterceptor
+    {
+        public int CommandCount { get; private set; }
+
+        public void Reset()
+        {
+            CommandCount = 0;
+        }
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            CommandCount++;
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            CommandCount++;
+            return ValueTask.FromResult(result);
+        }
     }
 }

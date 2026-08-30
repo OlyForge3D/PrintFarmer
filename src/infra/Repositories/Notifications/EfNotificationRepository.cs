@@ -24,7 +24,23 @@ public class EfNotificationRepository(AppDbContext context) : INotificationRepos
         }
 
         await context.Notifications.AddRangeAsync(notificationList, cancellationToken);
-        await context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            // Detach on failure: callers (e.g. job lifecycle broadcasts) may swallow this
+            // exception to avoid breaking job processing, but the shared scoped DbContext
+            // would otherwise keep these entities tracked in the Added state and a later,
+            // unrelated SaveChangesAsync on the same context would re-attempt to flush them.
+            foreach (Notification notification in notificationList)
+            {
+                context.Entry(notification).State = EntityState.Detached;
+            }
+
+            throw;
+        }
     }
 
     public async Task<Notification?> GetByIdAsync(string id, CancellationToken cancellationToken = default)

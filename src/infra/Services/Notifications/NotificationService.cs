@@ -430,10 +430,25 @@ public class NotificationService(
                 if (pendingInAppNotifications.Count > 0)
                 {
                     // Single commit for the whole batch instead of one SaveChanges per user.
-                    await notificationRepository.AddRangeAsync(pendingInAppNotifications, cancellationToken);
-                    logger.LogInformation(
-                        "Persisted {Count} in-app notifications for {Type} broadcast",
-                        pendingInAppNotifications.Count, type);
+                    // Isolated in its own try/catch: a persistence failure must not prevent
+                    // email/push/telegram dispatch for this event (the previous per-user loop
+                    // called SendNotificationAsync inline, so an in-app save failure aborted
+                    // the whole loop and every downstream dispatch too - do not reintroduce
+                    // that coupling now that the write is a single batched call).
+                    try
+                    {
+                        await notificationRepository.AddRangeAsync(pendingInAppNotifications, cancellationToken);
+                        logger.LogInformation(
+                            "Persisted {Count} in-app notifications for {Type} broadcast",
+                            pendingInAppNotifications.Count, type);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(
+                            ex,
+                            "Failed to persist {Count} in-app notifications for {Type} broadcast; continuing with other channels",
+                            pendingInAppNotifications.Count, type);
+                    }
                 }
             }
 
