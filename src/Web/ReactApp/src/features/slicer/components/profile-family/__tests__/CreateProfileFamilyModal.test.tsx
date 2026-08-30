@@ -1,12 +1,32 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CreateProfileFamilyModal } from '../CreateProfileFamilyModal';
-import { slicerProfilesService, type CloneProfileFamilyResponse } from '@/services/slicerProfilesService';
+import {
+  slicerProfilesService,
+  type CloneProfileFamilyResponse,
+  type OrcaProcessProfile,
+} from '@/services/slicerProfilesService';
 import { toast } from 'sonner';
+
+function createProcessProfiles(machineName: string, count: number): OrcaProcessProfile[] {
+  return Array.from({ length: count }, (_, index) => ({
+    name: `${(index + 1) * 0.04}mm Voron process ${index + 1}`,
+    quality: 'Standard',
+    layerHeight: (index + 1) * 0.04,
+    infillPercentage: 15,
+    printSpeed: 60,
+    supports: false,
+    compatible_printers: [machineName],
+  }));
+}
+
+const voronPointTwo = 'Voron 2.4 250 0.2 nozzle';
+const voronPointFour = 'Voron 2.4 250 0.4 nozzle';
+const voronPointSix = 'Voron 2.4 250 0.6 nozzle';
 
 const mockWorkerHierarchy = {
   byHierarchy: {
@@ -17,7 +37,17 @@ const mockWorkerHierarchy = {
           name: 'Voron 2.4 250',
           machineProfiles: [
             {
-              name: 'Voron 2.4 250 0.4 nozzle',
+              name: voronPointTwo,
+              manufacturer: 'Voron',
+              nozzleDiameter: 0.2,
+              printerModel: 'Voron 2.4 250',
+              settings: {
+                printable_area: '0x0,250x0,250x250,0x250',
+                printable_height: 250,
+              },
+            },
+            {
+              name: voronPointFour,
               manufacturer: 'Voron',
               nozzleDiameter: 0.4,
               printerModel: 'Voron 2.4 250',
@@ -27,7 +57,7 @@ const mockWorkerHierarchy = {
               },
             },
             {
-              name: 'Voron 2.4 250 0.6 nozzle',
+              name: voronPointSix,
               manufacturer: 'Voron',
               nozzleDiameter: 0.6,
               printerModel: 'Voron 2.4 250',
@@ -39,24 +69,19 @@ const mockWorkerHierarchy = {
           ],
           filamentProfiles: [
             {
-              name: 'Generic PLA @Voron',
+              name: 'Generic PLA @Orca',
               material: 'PLA',
+              manufacturer: 'OrcaFilamentLibrary',
               nozzleTemperature: 215,
               bedTemperature: 60,
               printSpeed: 60,
-              compatiblePrinters: ['Voron 2.4 250 0.4 nozzle'],
+              compatible_printers: [voronPointTwo, voronPointFour, voronPointSix],
             },
           ],
           processProfiles: [
-            {
-              name: '0.20mm Standard @Voron',
-              quality: 'Standard',
-              layerHeight: 0.2,
-              infillPercentage: 15,
-              printSpeed: 60,
-              supports: false,
-              compatiblePrinters: ['Voron 2.4 250 0.4 nozzle'],
-            },
+            ...createProcessProfiles(voronPointTwo, 5),
+            ...createProcessProfiles(voronPointFour, 6),
+            ...createProcessProfiles(voronPointSix, 6),
           ],
         },
       },
@@ -189,7 +214,7 @@ describe('CreateProfileFamilyModal', () => {
     expect(await screen.findByRole('heading', { name: 'Choose source machine model' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Voron' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Prusa' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Voron 2.4 250/i })).toHaveTextContent('2 nozzle variants: 0.4, 0.6');
+    expect(screen.getByRole('button', { name: /Voron 2.4 250/i })).toHaveTextContent('3 nozzle variants: 0.2, 0.4, 0.6');
 
     await user.type(screen.getByLabelText('Search source models'), 'voron');
     expect(screen.getByRole('button', { name: /Voron 2.4 250/i })).toBeInTheDocument();
@@ -209,7 +234,7 @@ describe('CreateProfileFamilyModal', () => {
       targetPrinterModelId: 'target-model-1',
       sourceManufacturer: 'Voron',
       sourceMachineModelName: 'Voron 2.4 250',
-      nozzleDiameters: [0.4, 0.6],
+      nozzleDiameters: [0.2, 0.4, 0.6],
       familyOverrides: {
         printable_area: '0x0,250x0,250x250,0x250',
         printable_height: 250,
@@ -217,6 +242,25 @@ describe('CreateProfileFamilyModal', () => {
       slicerEngineVersion: '2.4.2',
       slicerDistribution: 'OrcaSlicer',
     });
+  });
+
+  it('estimates each nozzle process count and excludes Orca library filaments', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await advanceToReview(user);
+
+    const expectedProcessCounts = new Map([
+      ['0.2', '5 estimated'],
+      ['0.4', '6 estimated'],
+      ['0.6', '6 estimated'],
+    ]);
+    for (const [nozzle, processCount] of expectedProcessCounts) {
+      const card = screen.getByText(`My Voron Family ${nozzle} nozzle`).closest('[data-pf-card]');
+      expect(card).not.toBeNull();
+      expect(within(card as HTMLElement).getByText(processCount)).toBeInTheDocument();
+      expect(within(card as HTMLElement).getByText('0 estimated')).toBeInTheDocument();
+    }
   });
 
   it('fires success callback and invalidates the required query keys on 201 success', async () => {

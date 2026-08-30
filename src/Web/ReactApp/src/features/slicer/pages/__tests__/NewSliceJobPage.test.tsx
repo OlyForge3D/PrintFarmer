@@ -133,7 +133,7 @@ const mockFilamentProfiles: OrcaFilamentProfile[] = [
     nozzleTemperature: 215,
     bedTemperature: 60,
     printSpeed: 60,
-    compatiblePrinters: ['Prusa MK4 0.4 nozzle'],
+    compatible_printers: ['Prusa MK4 0.4 nozzle'],
   },
   {
     name: 'Prusament PETG @MK4',
@@ -141,7 +141,7 @@ const mockFilamentProfiles: OrcaFilamentProfile[] = [
     nozzleTemperature: 240,
     bedTemperature: 85,
     printSpeed: 50,
-    compatiblePrinters: ['Prusa MK4 0.4 nozzle'],
+    compatible_printers: ['Prusa MK4 0.4 nozzle'],
   },
   {
     name: 'Generic ABS @MK4',
@@ -149,7 +149,7 @@ const mockFilamentProfiles: OrcaFilamentProfile[] = [
     nozzleTemperature: 255,
     bedTemperature: 100,
     printSpeed: 50,
-    compatiblePrinters: ['Prusa MK4 0.4 nozzle'],
+    compatible_printers: ['Prusa MK4 0.4 nozzle'],
   }
 ];
 
@@ -161,7 +161,7 @@ const mockProcessProfiles: OrcaProcessProfile[] = [
     infillPercentage: 15,
     printSpeed: 60,
     supports: false,
-    compatiblePrinters: ['Prusa MK4 0.4 nozzle'],
+    compatible_printers: ['Prusa MK4 0.4 nozzle'],
   },
   {
     name: '0.10mm Fine @MK4',
@@ -170,7 +170,7 @@ const mockProcessProfiles: OrcaProcessProfile[] = [
     infillPercentage: 20,
     printSpeed: 40,
     supports: false,
-    compatiblePrinters: ['Prusa MK4 0.4 nozzle'],
+    compatible_printers: ['Prusa MK4 0.4 nozzle'],
   },
   {
     name: '0.30mm Draft @MK4',
@@ -179,7 +179,7 @@ const mockProcessProfiles: OrcaProcessProfile[] = [
     infillPercentage: 10,
     printSpeed: 80,
     supports: false,
-    compatiblePrinters: ['Prusa MK4 0.4 nozzle'],
+    compatible_printers: ['Prusa MK4 0.4 nozzle'],
   }
 ];
 
@@ -907,7 +907,7 @@ describe('NewSliceJobPage', () => {
           infillPercentage: 15,
           printSpeed: 60,
           supports: false,
-          compatiblePrinters: ['Prusa MK4S 0.4 nozzle', 'Prusa MK4S HF0.4 nozzle'],
+          compatible_printers: ['Prusa MK4S 0.4 nozzle', 'Prusa MK4S HF0.4 nozzle'],
         },
       ] as OrcaProcessProfile[]);
 
@@ -1149,10 +1149,10 @@ describe('NewSliceJobPage', () => {
 
     describe('CORE One HF variant guard (issue #1782)', () => {
       // The bug: Guard 2 detected a candidate's HF variant by joining the
-      // profile name WITH its entire `compatiblePrinters` list into one
+      // profile name WITH its entire `compatible_printers` list into one
       // string before testing for "HF". A process profile that legitimately
       // supports both CORE One variants lists both machine names in
-      // `compatiblePrinters`, so the joined text always mentions "HF" — which
+      // `compatible_printers`, so the joined text always mentions "HF" — which
       // made the guard drop the profile for the STANDARD machine while
       // wrongly keeping it for the HF one. Guard 1 (a few lines above) had
       // already proven the profile lists the selected machine as compatible.
@@ -1172,7 +1172,7 @@ describe('NewSliceJobPage', () => {
             infillPercentage: 15,
             printSpeed: 60,
             supports: false,
-            compatiblePrinters: ['Prusa CORE One 0.4 nozzle', 'Prusa CORE One HF 0.4 nozzle'],
+            compatible_printers: ['Prusa CORE One 0.4 nozzle', 'Prusa CORE One HF 0.4 nozzle'],
           },
         ] as OrcaProcessProfile[]);
 
@@ -1231,7 +1231,7 @@ describe('NewSliceJobPage', () => {
             infillPercentage: 15,
             printSpeed: 60,
             supports: false,
-            compatiblePrinters: ['Prusa CORE One HF 0.4 nozzle'],
+            compatible_printers: ['Prusa CORE One HF 0.4 nozzle'],
           },
         ] as OrcaProcessProfile[]);
 
@@ -1679,7 +1679,7 @@ describe('NewSliceJobPage', () => {
             infillPercentage: 15,
             printSpeed: 60,
             supports: false,
-            compatiblePrinters: ['Prusa MK4S 0.4 nozzle'],
+            compatible_printers: ['Prusa MK4S 0.4 nozzle'],
           },
         ] as OrcaProcessProfile[]);
 
@@ -1944,7 +1944,7 @@ describe('NewSliceJobPage', () => {
           infillPercentage: 15,
           printSpeed: 60,
           supports: false,
-          compatiblePrinters: ['Prusa MK4S 0.4 nozzle'],
+          compatible_printers: ['Prusa MK4S 0.4 nozzle'],
         },
       ] as OrcaProcessProfile[]);
 
@@ -2189,7 +2189,7 @@ describe('NewSliceJobPage', () => {
           infillPercentage: 15,
           printSpeed: 60,
           supports: false,
-          compatiblePrinters: ['Prusa MK4S 0.4 nozzle'],
+          compatible_printers: ['Prusa MK4S 0.4 nozzle'],
         },
       ] as OrcaProcessProfile[]);
 
@@ -2260,7 +2260,7 @@ describe('NewSliceJobPage', () => {
           infillPercentage: 15,
           printSpeed: 60,
           supports: false,
-          compatiblePrinters: ['Prusa MK4S 0.4 nozzle'],
+          compatible_printers: ['Prusa MK4S 0.4 nozzle'],
         },
       ] as OrcaProcessProfile[]);
       // The file-level default (`{ id: 'job-1', status: 'Queued' }`) does not

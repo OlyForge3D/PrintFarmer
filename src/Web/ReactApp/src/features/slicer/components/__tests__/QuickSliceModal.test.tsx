@@ -39,10 +39,10 @@ vi.mock('@/services/slicerProfilesService', () => ({
       { name: 'Machine A', manufacturer: 'Prusa', nozzleDiameter: 0.4 },
     ])),
     getFilamentProfilesForMachines: vi.fn(() => Promise.resolve([
-      { name: 'PLA Generic', material: 'PLA', nozzleTemperature: 210, bedTemperature: 60, printSpeed: 60, compatiblePrinters: ['Machine A'] },
+      { name: 'PLA Generic', material: 'PLA', nozzleTemperature: 210, bedTemperature: 60, printSpeed: 60, compatible_printers: ['Machine A'] },
     ])),
     getProcessProfilesForMachines: vi.fn(() => Promise.resolve([
-      { name: '0.20mm Standard', quality: 'standard', layerHeight: 0.2, infillPercentage: 15, printSpeed: 60, supports: false, compatiblePrinters: ['Machine A'] },
+      { name: '0.20mm Standard', quality: 'standard', layerHeight: 0.2, infillPercentage: 15, printSpeed: 60, supports: false, compatible_printers: ['Machine A'] },
     ])),
   },
 }));
