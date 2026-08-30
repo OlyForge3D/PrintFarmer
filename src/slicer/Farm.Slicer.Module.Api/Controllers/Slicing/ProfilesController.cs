@@ -1638,24 +1638,32 @@ public class ProfilesController(
     }
 
     /// <summary>
-    /// Deletes a custom profile owned by the calling user (issue #2203).
+    /// Deletes a custom filament profile owned by the calling user (issue #2203).
     /// </summary>
-    /// <param name="id">ID of the custom profile to delete.</param>
+    /// <param name="id">ID of the custom filament profile to delete.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <remarks>
     /// Owner-scoped sibling of the admin-only <see cref="DeleteProfileAsync"/> and
     /// <see cref="BulkDeleteProfilesAsync"/> routes (both still gated by
     /// <c>slicer_engines:admin</c> and unaffected by this endpoint). This route exists
-    /// specifically so a non-admin caller - e.g. PrintFarmerDesktop's filament calibration
+    /// specifically so a non-admin caller - PrintFarmerDesktop's filament calibration
     /// wizard, which creates working custom profile clones via
-    /// <see cref="PromoteCalibrationDraftProfileAsync"/>/<see cref="UpdateCustomProfileAsync"/> -
-    /// can clean up their own custom profiles without <c>farm_admin</c>. Gated by
-    /// <see cref="PrintFarmerPermissions.Calibration.Update"/>, matching those siblings, and
-    /// scoped strictly to the caller's own profiles via <see cref="IProfilesService.DeleteCustomProfileAsync"/>:
-    /// a system profile can never be targeted (structurally excluded server-side, mirroring
-    /// <c>PromoteCalibrationDraftProfileAsync</c> hardcoding <c>ProfileType = "filament"</c>), and
-    /// an ownership mismatch returns 403 (not 404), matching <see cref="UpdateCustomProfileAsync"/>
-    /// and <see cref="PromoteCalibrationDraftProfileAsync"/> precedent.
+    /// <see cref="PromoteCalibrationDraftProfileAsync"/> - can clean up its own filament clones
+    /// without <c>farm_admin</c>. Gated by <see cref="PrintFarmerPermissions.Calibration.Update"/>,
+    /// matching that sibling (deliberately <b>not</b>
+    /// <see cref="Farm.Infrastructure.Authorization.InteractiveSessionRequirement"/> like
+    /// <see cref="UpdateCustomProfileAsync"/>, because the desktop calls this endpoint with a
+    /// short-lived API-key exchange token, which that policy would reject outright), and scoped
+    /// strictly to the caller's own profiles via <see cref="IProfilesService.DeleteCustomProfileAsync"/>:
+    /// a system profile can never be targeted (structurally excluded server-side), an ownership
+    /// mismatch returns 403 (not 404, matching <see cref="UpdateCustomProfileAsync"/> and
+    /// <see cref="PromoteCalibrationDraftProfileAsync"/> precedent), and - because this endpoint is
+    /// reachable by a desktop exchange token rather than only an interactive session - the target
+    /// is deliberately narrowed to filament profiles only (a process or machine profile ID is
+    /// treated as not-found), the same way <c>PromoteCalibrationDraftProfileAsync</c> hardcodes
+    /// <c>ProfileType = "filament"</c> server-side rather than trusting caller input. This keeps the
+    /// destructive blast radius of a leaked desktop token limited to what the calibration wizard
+    /// actually needs to clean up.
     /// </remarks>
     [HttpDelete("custom/{id:guid}")]
     [RequirePermission(PrintFarmerPermissions.Calibration.Update)]
