@@ -1390,6 +1390,12 @@ Implementation notes that shape client expectations:
 - **String enums.** `SubsystemStatus` and `AttentionSeverity` are serialized as strings
   via `JsonStringEnumConverter`. Clients receive `"Healthy" | "Degraded" | "Unhealthy" |
   "Unknown"` and `"Info" | "Warning" | "Error"`, not integers.
+- **`overallStatus` reflects the worst subsystem, always.** It is computed server-side as
+  the worst (most severe) status across every entry in `subsystems[]` —
+  `Unhealthy` > `Unknown` > `Degraded` > `Healthy`. Clients must render this field
+  directly and must not independently derive an overall status from the tiles (e.g. by
+  assuming Healthy unless told otherwise) — doing so previously let the header show
+  "Healthy" while a subsystem tile reported "Degraded" (issue #2222).
 
 **Status codes:**
 
@@ -1402,6 +1408,7 @@ Implementation notes that shape client expectations:
 ```json
 {
   "checkedAt": "2025-12-19T10:30:00Z",
+  "overallStatus": "Degraded",
   "subsystems": [
     {
       "key": "api",
@@ -1444,6 +1451,9 @@ Implementation notes that shape client expectations:
 Fields:
 
 - `checkedAt` — UTC timestamp when the snapshot was generated.
+- `overallStatus` — server-computed worst status across every `subsystems[]` entry
+  (`Unhealthy` > `Unknown` > `Degraded` > `Healthy`). Clients render this directly rather
+  than deriving their own overall status from the tiles (issue #2222).
 - `subsystems[]` — ordered subsystem tiles. Always includes `api`, `database`, `signalr`,
   `backends`. Optional subsystems (e.g. `spoolman`) appear only when configured.
 - `subsystems[].key` — stable machine key. Do not localize.
