@@ -54,6 +54,7 @@ const mockedUseAuth = vi.mocked(useAuth);
 function makeOverview(overrides: Partial<AdminOverviewDto> = {}): AdminOverviewDto {
   return {
     checkedAt: '2026-07-25T17:04:00Z',
+    overallStatus: 'Degraded',
     subsystems: [
       { key: 'api', name: 'API', status: 'Healthy', detail: 'Responding' },
       {
@@ -170,6 +171,61 @@ describe('AdminControlCenterPage', () => {
 
     // Status text is present alongside icon (WCAG: no color-only signalling).
     expect(within(tiles[3]).getByText('Degraded')).toBeInTheDocument();
+  });
+
+  it('reflects the worst subsystem status in the overall badge (issue #2222 regression)', async () => {
+    // Reproduces the exact reported scenario: printer backends degraded
+    // (4/5 reachable) while every other subsystem is healthy. The overall
+    // status must roll up to Degraded, not silently report Healthy.
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        overallStatus: 'Degraded',
+        subsystems: [
+          { key: 'api', name: 'API', status: 'Healthy', detail: 'Responding' },
+          { key: 'database', name: 'Database', status: 'Healthy', detail: 'Connected' },
+          { key: 'signalr', name: 'SignalR', status: 'Healthy', detail: 'Connected' },
+          {
+            key: 'backends',
+            name: 'Printer Backends',
+            status: 'Degraded',
+            detail: '4/5 reachable',
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-subsystems')).toBeInTheDocument();
+    });
+
+    const overallBadge = screen.getByTestId('admin-hub-overall-status');
+    expect(overallBadge).toHaveAttribute('data-overall-status', 'Degraded');
+    expect(within(overallBadge).getByText(/System Degraded/i)).toBeInTheDocument();
+    expect(within(overallBadge).queryByText(/System Healthy/i)).not.toBeInTheDocument();
+  });
+
+  it('shows a healthy overall badge when every subsystem is healthy', async () => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        overallStatus: 'Healthy',
+        subsystems: [
+          { key: 'api', name: 'API', status: 'Healthy', detail: 'Responding' },
+          { key: 'database', name: 'Database', status: 'Healthy', detail: 'Connected' },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-subsystems')).toBeInTheDocument();
+    });
+
+    const overallBadge = screen.getByTestId('admin-hub-overall-status');
+    expect(overallBadge).toHaveAttribute('data-overall-status', 'Healthy');
+    expect(within(overallBadge).getByText(/System Healthy/i)).toBeInTheDocument();
   });
 
   it('does not hardcode the four subsystems — renders whatever arrives (e.g. spoolman)', async () => {

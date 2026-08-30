@@ -63,8 +63,86 @@ public class AdminOverviewServiceTests
         overview.Subsystems.Should().HaveCount(4); // api, database, signalr, backends (spoolman hidden)
         overview.Subsystems.Select(s => s.Key).Should().ContainInOrder("api", "database", "signalr", "backends");
         overview.Subsystems.Should().OnlyContain(s => s.Status == SubsystemStatus.Healthy);
+        overview.OverallStatus.Should().Be(SubsystemStatus.Healthy);
         overview.Attention.Should().BeEmpty();
         overview.CheckedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
+    }
+
+    // ─── Overall status roll-up (regression for #2222) ────────────────────────
+
+    [Fact]
+    public async Task GetOverviewAsync_WhenOnlyPrinterBackendsAreDegraded_OverallStatusIsDegradedNotHealthy()
+    {
+        // Regression test for #2222: the Admin Control Center reported "System Healthy"
+        // in the header while the "Printer Backends" tile simultaneously reported
+        // "Degraded (4/5 reachable)". Every other subsystem is Healthy here — only the
+        // backends tile is Degraded — so a naive "first tile wins" or "ignore backends"
+        // rollup would report Healthy. The overall status must reflect the worst
+        // subsystem status across the board.
+        SetPrinterConnectivity(
+            ConnectedPrinter("printer-01"),
+            ConnectedPrinter("printer-02"),
+            ConnectedPrinter("printer-03"),
+            ConnectedPrinter("printer-04"),
+            new PrinterConnectionHealth
+            {
+                PrinterId = Guid.NewGuid(),
+                PrinterName = "Moonraker Offline",
+                Backend = PrinterBackend.Moonraker,
+                ConnectionState = PrinterConnectionState.Offline,
+            });
+
+        HealthReport report = BuildReport(
+            comprehensive: HealthCheckResult.Healthy("All systems operational", BuildComprehensiveData()),
+            signalr: HealthCheckResult.Healthy("SignalR fully operational"),
+            spoolman: HealthCheckResult.Healthy("Spoolman not configured"));
+
+        _healthCheckService.Setup(s => s.CheckHealthAsync(It.IsAny<System.Func<HealthCheckRegistration, bool>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(report);
+
+        AdminOverviewDto overview = await CreateService().GetOverviewAsync();
+
+        SubsystemHealthDto backends = overview.Subsystems.Single(s => s.Key == "backends");
+        backends.Status.Should().Be(SubsystemStatus.Degraded);
+        backends.Detail.Should().Be("4 / 5 reachable");
+
+        overview.Subsystems.Where(s => s.Key != "backends").Should().OnlyContain(s => s.Status == SubsystemStatus.Healthy);
+        overview.OverallStatus.Should().Be(SubsystemStatus.Degraded);
+    }
+
+    [Fact]
+    public async Task GetOverviewAsync_WhenDatabaseUnhealthyAndBackendsDegraded_OverallStatusIsUnhealthy()
+    {
+        // Unhealthy must outrank Degraded in the roll-up even though Degraded is also present.
+        SetPrinterConnectivity(
+            ConnectedPrinter("printer-01"),
+            new PrinterConnectionHealth
+            {
+                PrinterId = Guid.NewGuid(),
+                PrinterName = "printer-offline",
+                Backend = PrinterBackend.Moonraker,
+                ConnectionState = PrinterConnectionState.Offline,
+            });
+
+        HealthReport report = BuildReport(
+            comprehensive: new HealthCheckResult(
+                HealthStatus.Unhealthy,
+                "Database not initialized",
+                data: new Dictionary<string, object>
+                {
+                    ["Database"] = new { Status = "Unhealthy", Provider = "Microsoft.EntityFrameworkCore.Sqlite", ManufacturerCount = 0, Initialized = false },
+                }),
+            signalr: HealthCheckResult.Healthy("ok"),
+            spoolman: HealthCheckResult.Healthy("Spoolman not configured"));
+
+        _healthCheckService.Setup(s => s.CheckHealthAsync(It.IsAny<System.Func<HealthCheckRegistration, bool>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(report);
+
+        AdminOverviewDto overview = await CreateService().GetOverviewAsync();
+
+        overview.Subsystems.Single(s => s.Key == "database").Status.Should().Be(SubsystemStatus.Unhealthy);
+        overview.Subsystems.Single(s => s.Key == "backends").Status.Should().Be(SubsystemStatus.Degraded);
+        overview.OverallStatus.Should().Be(SubsystemStatus.Unhealthy);
     }
 
     [Fact]
@@ -252,6 +330,12 @@ public class AdminOverviewServiceTests
             && a.ActionRoute == null);
         overview.Attention.Should().Contain(a => a.Key == $"printer-{offlinePrinterId}-unreachable"
             && a.Severity == AttentionSeverity.Warning);
+
+        // Regression: this response already mixes a confirmed Unhealthy tile (backends)
+        // with Unknown tiles (database, signalr) from the same probe failure. Unhealthy
+        // must win the roll-up — a confirmed failure must never be masked behind an
+        // "Unknown" reported by an unrelated subsystem in the same overview.
+        overview.OverallStatus.Should().Be(SubsystemStatus.Unhealthy);
     }
 
     [Fact]
@@ -363,6 +447,7 @@ public class AdminOverviewServiceTests
         AdminOverviewDto dto = new()
         {
             CheckedAt = new DateTime(2026, 7, 25, 17, 4, 0, DateTimeKind.Utc),
+            OverallStatus = SubsystemStatus.Degraded,
             Subsystems = new[]
             {
                 new SubsystemHealthDto { Key = "api", Name = "API", Status = SubsystemStatus.Healthy, Detail = "Responding" },
@@ -393,6 +478,7 @@ public class AdminOverviewServiceTests
 
         string json = JsonSerializer.Serialize(dto, options);
 
+        json.Should().Contain("\"overallStatus\":\"Degraded\"");
         json.Should().Contain("\"status\":\"Healthy\"");
         json.Should().Contain("\"status\":\"Degraded\"");
         json.Should().Contain("\"severity\":\"Warning\"");
