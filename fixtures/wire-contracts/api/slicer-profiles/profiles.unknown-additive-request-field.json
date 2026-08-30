@@ -1,6 +1,6 @@
 {
-  "id": "659e811d-5767-4649-ba52-03a3c47b2b6b",
-  "name": "Wire Contract PLA Profile",
+  "id": "7d55fb80-e39b-4338-b660-d27a3d8fe64a",
+  "name": "Wire Contract Additive Field Profile",
   "slicerType": "OrcaSlicer",
   "layerHeight": 0.2,
   "infillPercentage": 20,
@@ -12,6 +12,6 @@
   "quality": "Standard",
   "isDefault": false,
   "isPublic": true,
-  "createdAt": "2026-08-30T23:27:02.1499949",
-  "updatedAt": "2026-08-30T23:27:02.149995"
+  "createdAt": "2026-08-30T23:26:59.3706729Z",
+  "updatedAt": "2026-08-30T23:26:59.3706938Z"
 }

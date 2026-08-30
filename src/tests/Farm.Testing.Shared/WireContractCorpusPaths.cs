@@ -32,31 +32,26 @@ public static class WireContractCorpusPaths
             current = parent.FullName;
         }
 
-        return Directory.GetCurrentDirectory();
+        // Never fall back to the current working directory: a misresolved root combined
+        // with the fixture writer's "missing fixture" handling must fail loudly, not
+        // silently redirect every fixture in the corpus to a fresh, empty directory.
+        throw new InvalidOperationException(
+            $"Could not resolve the repository root from '{AppContext.BaseDirectory}': " +
+            "no ancestor directory contains farm-web.sln.");
     });
 
     /// <summary>Root of the canonical corpus: <c>&lt;repo-root&gt;/fixtures/wire-contracts</c>.</summary>
-    public static string CorpusRoot => EnsureCreated(Path.Join(_repoRoot.Value, "fixtures", "wire-contracts"));
+    public static string CorpusRoot => Path.Join(_repoRoot.Value, "fixtures", "wire-contracts");
 
     /// <summary>PrintFarmer DTO fixtures (camelCase, string enums) produced by real ASP.NET/SignalR serialization.</summary>
-    public static string ApiRoot => EnsureCreated(Path.Join(CorpusRoot, "api"));
+    public static string ApiRoot => Path.Join(CorpusRoot, "api");
 
     /// <summary>
     /// Native OrcaSlicer snake_case fixtures (e.g. <c>compatible_printers</c>). Never merged
     /// with the PrintFarmer DTO corpus under <see cref="ApiRoot"/>.
     /// </summary>
-    public static string NativeSlicerRoot => EnsureCreated(Path.Join(CorpusRoot, "native-slicer"));
+    public static string NativeSlicerRoot => Path.Join(CorpusRoot, "native-slicer");
 
     /// <summary>Provenance registry: one entry per fixture (endpoint/event, producing test, schema version, refresh commit).</summary>
     public static string ManifestPath => Path.Join(CorpusRoot, "manifest.json");
-
-    private static string EnsureCreated(string path)
-    {
-        if (!Directory.Exists(path))
-        {
-            _ = Directory.CreateDirectory(path);
-        }
-
-        return path;
-    }
 }
