@@ -298,38 +298,6 @@ describe('SlicerSettingsPanel — simpleMode hides layer height', () => {
 });
 
 describe('SlicerSettingsPanel — input clamping', () => {
-  it('clamps wallLoops to minimum 1 when 0 is entered', () => {
-    const { onChange } = renderPanel({ wallLoops: 2 });
-    const input = screen.getByRole('spinbutton', { name: /perimeters/i });
-    fireEvent.change(input, { target: { value: '0' } });
-    fireEvent.blur(input);
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ wallLoops: 1 }));
-  });
-
-  it('clamps wallLoops to minimum 1 when negative value is entered', () => {
-    const { onChange } = renderPanel({ wallLoops: 2 });
-    const input = screen.getByRole('spinbutton', { name: /perimeters/i });
-    fireEvent.change(input, { target: { value: '-3' } });
-    fireEvent.blur(input);
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ wallLoops: 1 }));
-  });
-
-  it('clamps topShellLayers to minimum 0 when negative value is entered', () => {
-    const { onChange } = renderPanel({ topShellLayers: 4 });
-    const input = screen.getByRole('spinbutton', { name: /top layers/i });
-    fireEvent.change(input, { target: { value: '-1' } });
-    fireEvent.blur(input);
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ topShellLayers: 0 }));
-  });
-
-  it('clamps bottomShellLayers to minimum 0 when negative value is entered', () => {
-    const { onChange } = renderPanel({ bottomShellLayers: 3 });
-    const input = screen.getByRole('spinbutton', { name: /bottom layers/i });
-    fireEvent.change(input, { target: { value: '-5' } });
-    fireEvent.blur(input);
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bottomShellLayers: 0 }));
-  });
-
   it('clamps infillPercent to 100 when value above max is entered via number input', () => {
     const { onChange } = renderPanel({ infillPercent: 50 });
     const input = screen.getByRole('spinbutton', { name: /infill density/i });
@@ -337,12 +305,103 @@ describe('SlicerSettingsPanel — input clamping', () => {
     fireEvent.blur(input);
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ infillPercent: 100 }));
   });
+});
 
-  it('clamps infillPercent to 0 when negative value is entered via number input', () => {
+// Issue #2223: negative perimeter/infill values and a zero top/bottom shell
+// layer count must be REJECTED with inline feedback rather than silently
+// clamped into a "safe" value and committed. onSettingsChange must not fire
+// for these invalid drafts, and an accessible alert must appear.
+describe('SlicerSettingsPanel — rejects invalid values with inline feedback (#2223)', () => {
+  it('rejects wallLoops of 0 without committing, and shows an inline error', () => {
+    const { onChange } = renderPanel({ wallLoops: 2 });
+    const input = screen.getByRole('spinbutton', { name: /perimeters/i });
+    fireEvent.change(input, { target: { value: '0' } });
+    fireEvent.blur(input);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('alert')).toHaveTextContent(/perimeters must be at least 1/i);
+  });
+
+  it('rejects a negative wallLoops value without committing', () => {
+    const { onChange } = renderPanel({ wallLoops: 2 });
+    const input = screen.getByRole('spinbutton', { name: /perimeters/i });
+    fireEvent.change(input, { target: { value: '-3' } });
+    fireEvent.blur(input);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent(/perimeters must be at least 1/i);
+  });
+
+  it('rejects a negative topShellLayers value without committing', () => {
+    const { onChange } = renderPanel({ topShellLayers: 4 });
+    const input = screen.getByRole('spinbutton', { name: /top layers/i });
+    fireEvent.change(input, { target: { value: '-1' } });
+    fireEvent.blur(input);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent(/top layers must be at least 1/i);
+  });
+
+  it('rejects a topShellLayers value of 0 without committing', () => {
+    const { onChange } = renderPanel({ topShellLayers: 4 });
+    const input = screen.getByRole('spinbutton', { name: /top layers/i });
+    fireEvent.change(input, { target: { value: '0' } });
+    fireEvent.blur(input);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent(/top layers must be at least 1/i);
+  });
+
+  it('rejects a negative bottomShellLayers value without committing', () => {
+    const { onChange } = renderPanel({ bottomShellLayers: 3 });
+    const input = screen.getByRole('spinbutton', { name: /bottom layers/i });
+    fireEvent.change(input, { target: { value: '-5' } });
+    fireEvent.blur(input);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent(/bottom layers must be at least 1/i);
+  });
+
+  it('rejects a bottomShellLayers value of 0 without committing', () => {
+    const { onChange } = renderPanel({ bottomShellLayers: 3 });
+    const input = screen.getByRole('spinbutton', { name: /bottom layers/i });
+    fireEvent.change(input, { target: { value: '0' } });
+    fireEvent.blur(input);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent(/bottom layers must be at least 1/i);
+  });
+
+  it('rejects a negative infillPercent value without committing', () => {
     const { onChange } = renderPanel({ infillPercent: 50 });
     const input = screen.getByRole('spinbutton', { name: /infill density/i });
     fireEvent.change(input, { target: { value: '-10' } });
     fireEvent.blur(input);
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ infillPercent: 0 }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent(/infill density cannot be negative/i);
+  });
+
+  it('reports validity via onValidationChange and clears it once the value becomes valid again', () => {
+    const onValidationChange = vi.fn();
+    render(
+      <SlicerSettingsPanel
+        settings={DEFAULT_SETTINGS}
+        onSettingsChange={vi.fn()}
+        onValidationChange={onValidationChange}
+        simpleMode
+      />
+    );
+    const input = screen.getByRole('spinbutton', { name: /perimeters/i });
+
+    fireEvent.change(input, { target: { value: '-1' } });
+    expect(onValidationChange).toHaveBeenLastCalledWith(false);
+
+    fireEvent.change(input, { target: { value: '3' } });
+    fireEvent.blur(input);
+    expect(onValidationChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it('still allows a valid wallLoops edit to commit normally', () => {
+    const { onChange } = renderPanel({ wallLoops: 2 });
+    const input = screen.getByRole('spinbutton', { name: /perimeters/i });
+    fireEvent.change(input, { target: { value: '4' } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ wallLoops: 4 }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

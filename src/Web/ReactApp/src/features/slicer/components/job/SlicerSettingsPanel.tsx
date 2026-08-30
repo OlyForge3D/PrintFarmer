@@ -2,6 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Checkbox, Select } from '@/common/components/ui';
 import { INFILL_PATTERNS } from '@/features/slicer/components/settings/metadataTypes';
 import { ChevronDownIcon } from '@/common/components/icons/MdiIcons';
+import {
+  validateWallLoops,
+  validateInfillPercent,
+  validateTopShellLayers,
+  validateBottomShellLayers,
+} from '@/features/slicer/utils/slicerSettingsValidation';
 
 export interface SlicerSettings {
   layerHeight: number;
@@ -28,6 +34,13 @@ interface SlicerSettingsPanelProps {
   simpleMode?: boolean;
   /** Optional CSS class name */
   className?: string;
+  /**
+   * Notified whenever the panel's overall field validity changes (issue
+   * #2223). `false` while any of perimeters/infill/top/bottom layers holds
+   * an uncommitted invalid value, so the caller can block submission instead
+   * of silently slicing with a stale (last valid) value.
+   */
+  onValidationChange?: (isValid: boolean) => void;
 }
 
 const BED_ADHESION_OPTIONS: { value: SlicerSettings['bedAdhesionType']; label: string }[] = [
@@ -252,8 +265,12 @@ function DeferredNumberInput({
   className,
   onCommit,
   normalize,
+  validate,
+  errorId,
+  onValidityChange,
+  'aria-describedby': describedBy,
   ...rest
-}: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onChange' | 'min' | 'max' | 'step' | 'className'> & {
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onChange' | 'min' | 'max' | 'step' | 'className' | 'aria-describedby'> & {
   value: number;
   min: number;
   max: number;
@@ -261,6 +278,18 @@ function DeferredNumberInput({
   className: string;
   onCommit: (value: number) => void;
   normalize?: (value: number) => number;
+  /**
+   * Optional live validator (issue #2223). Returning a message blocks the
+   * value from being committed and surfaces inline, field-specific feedback
+   * instead of silently clamping an out-of-range entry (e.g. a negative
+   * perimeter count) into a "safe" one.
+   */
+  validate?: (value: number) => string | null;
+  /** Id of the paragraph rendering the validation message, wired via aria-describedby. */
+  errorId?: string;
+  /** Notified whenever this field's current (uncommitted) validity changes. */
+  onValidityChange?: (isValid: boolean) => void;
+  'aria-describedby'?: string;
 }) {
   const [draft, setDraft] = useState(String(value));
 
@@ -268,10 +297,27 @@ function DeferredNumberInput({
     setDraft(String(value));
   }, [value]);
 
+  const draftNumber = Number(draft);
+  const liveError = validate && Number.isFinite(draftNumber) ? validate(draftNumber) : null;
+
+  useEffect(() => {
+    onValidityChange?.(!liveError);
+    // Only the error text itself should re-trigger the parent notification.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveError]);
+
   const commitValue = () => {
     const parsed = Number(draft);
     if (!Number.isFinite(parsed)) {
       setDraft(String(value));
+      return;
+    }
+
+    if (validate?.(parsed)) {
+      // Invalid: keep the raw draft and inline error visible. Do NOT clamp or
+      // silently commit a "corrected" value — the acceptance criteria for
+      // issue #2223 requires the field to reject the value, not paper over
+      // it, so the last known-good `settings` value is preserved instead.
       return;
     }
 
@@ -281,23 +327,32 @@ function DeferredNumberInput({
   };
 
   return (
-    <input
-      {...rest}
-      type="number"
-      value={draft}
-      min={min}
-      max={max}
-      step={step}
-      className={className}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commitValue}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          event.currentTarget.blur();
-        }
-      }}
-    />
+    <>
+      <input
+        {...rest}
+        type="number"
+        value={draft}
+        min={min}
+        max={max}
+        step={step}
+        className={className}
+        aria-invalid={liveError ? true : undefined}
+        aria-describedby={[describedBy, liveError ? errorId : undefined].filter(Boolean).join(' ') || undefined}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commitValue}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      {liveError && errorId && (
+        <p id={errorId} role="alert" className="mt-1 text-xs text-red-400">
+          {liveError}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -311,18 +366,23 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   onSettingsChange,
   simpleMode = false,
   className,
+  onValidationChange,
 }) => {
   const panelId = React.useId();
   const layerHeightId = `${panelId}-layer-height`;
   const layerHeightDescId = `${panelId}-layer-height-desc`;
   const wallLoopsId = `${panelId}-wall-loops`;
   const wallLoopsDescId = `${panelId}-wall-loops-desc`;
+  const wallLoopsErrorId = `${panelId}-wall-loops-error`;
   const topLayersId = `${panelId}-top-layers`;
   const topLayersDescId = `${panelId}-top-layers-desc`;
+  const topLayersErrorId = `${panelId}-top-layers-error`;
   const bottomLayersId = `${panelId}-bottom-layers`;
   const bottomLayersDescId = `${panelId}-bottom-layers-desc`;
+  const bottomLayersErrorId = `${panelId}-bottom-layers-error`;
   const infillDensityId = `${panelId}-infill-density`;
   const infillDensityDescId = `${panelId}-infill-density-desc`;
+  const infillDensityErrorId = `${panelId}-infill-density-error`;
   const infillPatternLabelId = `${panelId}-infill-pattern-label`;
   const infillPatternDescId = `${panelId}-infill-pattern-desc`;
   const supportTypeId = `${panelId}-support-type`;
@@ -332,6 +392,23 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   const updateSetting = <K extends keyof SlicerSettings>(key: K, value: SlicerSettings[K]) => {
     onSettingsChange({ ...settings, [key]: value });
   };
+
+  // Aggregates the four validated fields' live (pre-commit) validity so the
+  // caller can block submission while an inline error is showing, rather
+  // than silently slicing with the last committed value (issue #2223).
+  const [fieldValidity, setFieldValidity] = useState<Record<string, boolean>>({
+    wallLoops: true,
+    infillPercent: true,
+    topShellLayers: true,
+    bottomShellLayers: true,
+  });
+  const handleFieldValidityChange = (field: string) => (isValid: boolean) => {
+    setFieldValidity((prev) => (prev[field] === isValid ? prev : { ...prev, [field]: isValid }));
+  };
+  useEffect(() => {
+    onValidationChange?.(Object.values(fieldValidity).every(Boolean));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fieldValidity]);
 
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg p-4 space-y-4 ${className ?? ''}`}>
@@ -381,6 +458,9 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
             step={1}
             value={settings.wallLoops}
             normalize={(nextValue) => Math.max(1, Math.round(nextValue))}
+            validate={validateWallLoops}
+            errorId={wallLoopsErrorId}
+            onValidityChange={handleFieldValidityChange('wallLoops')}
             onCommit={(nextValue) => updateSetting('wallLoops', nextValue)}
             aria-describedby={wallLoopsDescId}
           />
@@ -397,11 +477,14 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
           <DeferredNumberInput
             id={topLayersId}
             className="w-20 shrink-0 px-2 py-1 text-sm bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary text-right"
-            min={0}
+            min={1}
             max={30}
             step={1}
             value={settings.topShellLayers}
-            normalize={(nextValue) => Math.max(0, Math.round(nextValue))}
+            normalize={(nextValue) => Math.max(1, Math.round(nextValue))}
+            validate={validateTopShellLayers}
+            errorId={topLayersErrorId}
+            onValidityChange={handleFieldValidityChange('topShellLayers')}
             onCommit={(nextValue) => updateSetting('topShellLayers', nextValue)}
             aria-describedby={topLayersDescId}
           />
@@ -418,11 +501,14 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
           <DeferredNumberInput
             id={bottomLayersId}
             className="w-20 shrink-0 px-2 py-1 text-sm bg-pf-bg-1 border border-pf-border rounded text-pf-text-primary text-right"
-            min={0}
+            min={1}
             max={30}
             step={1}
             value={settings.bottomShellLayers}
-            normalize={(nextValue) => Math.max(0, Math.round(nextValue))}
+            normalize={(nextValue) => Math.max(1, Math.round(nextValue))}
+            validate={validateBottomShellLayers}
+            errorId={bottomLayersErrorId}
+            onValidityChange={handleFieldValidityChange('bottomShellLayers')}
             onCommit={(nextValue) => updateSetting('bottomShellLayers', nextValue)}
             aria-describedby={bottomLayersDescId}
           />
@@ -459,6 +545,9 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
               step={5}
               value={settings.infillPercent}
               normalize={(nextValue) => Math.min(100, Math.max(0, Math.round(nextValue)))}
+              validate={validateInfillPercent}
+              errorId={infillDensityErrorId}
+              onValidityChange={handleFieldValidityChange('infillPercent')}
               onCommit={(nextValue) => updateSetting('infillPercent', nextValue)}
               aria-labelledby={infillDensityId}
               aria-describedby={infillDensityDescId}

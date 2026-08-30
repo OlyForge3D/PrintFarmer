@@ -430,7 +430,28 @@ vi.mock('../../components/job', () => ({
       </div>
     );
   },
-  SlicerSettingsPanel: () => <div data-testid="slicer-settings-panel">Settings Panel</div>,
+  SlicerSettingsPanel: (props: { onValidationChange?: (isValid: boolean) => void }) => (
+    <div data-testid="slicer-settings-panel">
+      Settings Panel
+      {/* Lets submit-guard tests simulate an uncommitted invalid Simple-mode
+          field (issue #2223) without depending on the real component's
+          internals — mirrors the pin-engine-version button pattern above. */}
+      <button
+        type="button"
+        data-testid="invalidate-simple-settings"
+        onClick={() => props.onValidationChange?.(false)}
+      >
+        invalidate settings
+      </button>
+      <button
+        type="button"
+        data-testid="revalidate-simple-settings"
+        onClick={() => props.onValidationChange?.(true)}
+      >
+        revalidate settings
+      </button>
+    </div>
+  ),
 }));
 
 const slicerWorkspaceSpy = vi.fn();
@@ -2144,6 +2165,81 @@ describe('NewSliceJobPage', () => {
 
       expect(await screen.findByText(/OrcaSlicer 2\.3\.1 has no online worker/i)).toBeInTheDocument();
       expect(sliceJobService.submitJob).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Field validation submit guard (issue #2223)', () => {
+    // Simple mode is the default (slicerModeRef starts at 'Simple'), matching
+    // the issue's repro. The panel itself is mocked (see the `../../components/job`
+    // mock above), so its `onValidationChange` callback is driven directly via
+    // the mock's test-only buttons rather than typing into real inputs — the
+    // component-level rejection/inline-error behavior is already covered by
+    // `SlicerSettingsPanel.test.tsx`. This suite proves the page-level submit
+    // guard itself: an invalid Simple-mode field must block the "Slice Plate"
+    // action instead of letting the job reach the backend and fail generically.
+    async function reachSubmittableState() {
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
+        { name: 'Prusa MK4S 0.4 nozzle', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'MK4S' },
+      ] as OrcaMachineProfile[]);
+      vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue([
+        {
+          name: '0.20mm Standard @MK4S',
+          quality: 'Standard',
+          layerHeight: 0.2,
+          infillPercentage: 15,
+          printSpeed: 60,
+          supports: false,
+          compatiblePrinters: ['Prusa MK4S 0.4 nozzle'],
+        },
+      ] as OrcaProcessProfile[]);
+
+      renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
+
+      await waitFor(() => {
+        expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      await waitFor(() => {
+        const processSelect = Array.from(document.querySelectorAll('select'))
+          .find((s) => s.value.startsWith('system:'));
+        expect(processSelect?.value).toBe('system:0.20mm Standard @MK4S');
+      });
+    }
+
+    const latestOnSlice = () =>
+      (slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as { onSlice?: (ids?: string[]) => void } | undefined)?.onSlice;
+
+    async function submit() {
+      await waitFor(() => {
+        expect(latestOnSlice()).toBeTypeOf('function');
+      });
+      await act(async () => { latestOnSlice()!(); });
+    }
+
+    it('blocks submission while the Simple settings panel reports an invalid field', async () => {
+      await reachSubmittableState();
+
+      fireEvent.click(screen.getByTestId('invalidate-simple-settings'));
+      await submit();
+
+      expect(await screen.findByText(/fix the highlighted print setting/i)).toBeInTheDocument();
+      expect(sliceJobService.submitJob).not.toHaveBeenCalled();
+    });
+
+    it('allows submission again once the Simple settings panel reports valid fields', async () => {
+      await reachSubmittableState();
+
+      fireEvent.click(screen.getByTestId('invalidate-simple-settings'));
+      await submit();
+      expect(sliceJobService.submitJob).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByTestId('revalidate-simple-settings'));
+      await submit();
+
+      await waitFor(() => {
+        expect(sliceJobService.submitJob).toHaveBeenCalled();
+      });
     });
   });
 
