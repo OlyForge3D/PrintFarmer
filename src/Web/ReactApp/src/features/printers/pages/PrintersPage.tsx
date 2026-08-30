@@ -62,7 +62,7 @@ const PrinterDiscoveryModal = lazyWithPreload<PrinterDiscoveryModalProps, React.
 
 
 
-type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
+type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'shutdown' | 'offline';
 type BackendFilter = 'all' | 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint' | 'FlashForge';
 type AvailabilityFilter = 'all' | '1' | '2' | '4' | '8' | '12' | '24';
 
@@ -289,6 +289,7 @@ export function PrintersPage() {
         if (stateFilter === 'online') return p.isOnline;
         if (stateFilter === 'printing') return state.includes('printing');
         if (stateFilter === 'paused') return state.includes('paused');
+        if (stateFilter === 'shutdown') return state.includes('shutdown');
         if (stateFilter === 'offline') return !p.isOnline;
         return true;
       });
@@ -586,6 +587,7 @@ export function PrintersPage() {
                     <option value="online">Online</option>
                     <option value="printing">Printing</option>
                     <option value="paused">Paused</option>
+                    <option value="shutdown">Shutdown</option>
                     <option value="offline">Offline</option>
                   </Select>
                 </div>
