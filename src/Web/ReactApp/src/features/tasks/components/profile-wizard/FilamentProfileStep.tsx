@@ -107,9 +107,9 @@ export const FilamentProfileStep: React.FC<FilamentProfileStepProps> = ({
       return Array.from(combined.values());
     } else {
       // Filter to specific machine's compatible filaments (exclude templates)
-      // Only show filaments that explicitly list this machine in compatiblePrinters
+      // Only show filaments that explicitly list this machine in compatible_printers
       return machineFilamentProfiles.filter(
-        (f) => f.compatiblePrinters?.includes(selectedPrinter) === true
+        (f) => f.compatible_printers?.includes(selectedPrinter) === true
       );
     }
   }, [selectedPrinter, machineFilamentProfiles, templateFilamentProfiles]);
