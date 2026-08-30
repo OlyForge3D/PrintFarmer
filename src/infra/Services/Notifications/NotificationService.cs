@@ -446,8 +446,8 @@ public class NotificationService(
                     {
                         logger.LogError(
                             ex,
-                            "Failed to persist {Count} in-app notifications for {Type} broadcast; continuing with other channels",
-                            pendingInAppNotifications.Count, type);
+                            "Failed to persist {Count} in-app notifications for {Type} broadcast on job {JobId}; continuing with other channels",
+                            pendingInAppNotifications.Count, type, LogSanitizer.Sanitize(jobId));
                     }
                 }
             }
