@@ -12,6 +12,37 @@ public class EfNotificationRepository(AppDbContext context) : INotificationRepos
         await context.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task AddRangeAsync(IEnumerable<Notification> notifications, CancellationToken cancellationToken = default)
+    {
+        // Single commit for the whole batch: fan-out callers (job lifecycle
+        // broadcasts) accumulate one Notification per recipient and persist
+        // them together instead of one SaveChangesAsync per recipient.
+        var notificationList = notifications as IReadOnlyCollection<Notification> ?? notifications.ToList();
+        if (notificationList.Count == 0)
+        {
+            return;
+        }
+
+        await context.Notifications.AddRangeAsync(notificationList, cancellationToken);
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            // Detach on failure: callers (e.g. job lifecycle broadcasts) may swallow this
+            // exception to avoid breaking job processing, but the shared scoped DbContext
+            // would otherwise keep these entities tracked in the Added state and a later,
+            // unrelated SaveChangesAsync on the same context would re-attempt to flush them.
+            foreach (Notification notification in notificationList)
+            {
+                context.Entry(notification).State = EntityState.Detached;
+            }
+
+            throw;
+        }
+    }
+
     public async Task<Notification?> GetByIdAsync(string id, CancellationToken cancellationToken = default)
     {
         return await context.Notifications.AsNoTracking()
