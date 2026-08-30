@@ -572,6 +572,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<string>("AdvancedSettings")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("BedTemperature")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("CompatiblePrinters")
                         .HasColumnType("TEXT");
 
@@ -609,10 +612,17 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<double>("LayerHeight")
                         .HasColumnType("REAL");
 
+                    b.Property<string>("Material")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("NozzleTemperature")
+                        .HasColumnType("INTEGER");
 
                     b.Property<double>("PrintSpeed")
                         .HasColumnType("REAL");

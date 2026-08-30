@@ -1,0 +1,19 @@
+{
+  "id": "f00d7a9f-72f5-44df-9843-0bb8bbc08fd8",
+  "name": "Wire Contract PETG Profile",
+  "description": "Populated wire-contract fixture profile.",
+  "slicerType": "PrusaSlicer",
+  "layerHeight": 0.16,
+  "infillPercentage": 35,
+  "printSpeed": 60,
+  "nozzleTemperature": 235,
+  "bedTemperature": 80,
+  "enableSupports": true,
+  "material": "PETG",
+  "quality": "Fine",
+  "advancedSettings": "{\u0022retractionDistance\u0022:1.2}",
+  "isDefault": false,
+  "isPublic": true,
+  "createdAt": "2026-08-30T21:50:41.0794544Z",
+  "updatedAt": "2026-08-30T21:50:41.0794547Z"
+}

@@ -1,0 +1,23 @@
+[
+  {
+    "Path": "api/slicer-profiles/profiles.empty-collection.json",
+    "Endpoint": "GET /api/slicer/profiles",
+    "ProducingTest": "SlicerProfileContractTests.GetProfiles_NoProfiles_ReturnsEmptyCollection",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "137ded60522a5e82a4200831ff743b0bb39dc973"
+  },
+  {
+    "Path": "api/slicer-profiles/profiles.missing-key.json",
+    "Endpoint": "GET /api/slicer/profiles/{id}",
+    "ProducingTest": "SlicerProfileContractTests.CreateThenGetProfile_MissingOptionalDescription_OmitsKeyAndMatchesCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "137ded60522a5e82a4200831ff743b0bb39dc973"
+  },
+  {
+    "Path": "api/slicer-profiles/profiles.populated.json",
+    "Endpoint": "POST /api/slicer/profiles",
+    "ProducingTest": "SlicerProfileContractTests.CreateThenGetProfile_Populated_MatchesCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "137ded60522a5e82a4200831ff743b0bb39dc973"
+  }
+]

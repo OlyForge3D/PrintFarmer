@@ -578,6 +578,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<string>("AdvancedSettings")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("BedTemperature")
+                        .HasColumnType("integer");
+
                     b.Property<string>("CompatiblePrinters")
                         .HasColumnType("text");
 
@@ -615,10 +618,17 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<double>("LayerHeight")
                         .HasColumnType("double precision");
 
+                    b.Property<string>("Material")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
+
+                    b.Property<int>("NozzleTemperature")
+                        .HasColumnType("integer");
 
                     b.Property<double>("PrintSpeed")
                         .HasColumnType("double precision");
