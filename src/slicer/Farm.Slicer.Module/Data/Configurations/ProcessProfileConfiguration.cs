@@ -28,6 +28,7 @@ public class ProcessProfileConfiguration : IEntityTypeConfiguration<ProcessProfi
         _ = builder.Property(p => p.SettingsJson).HasColumnType("TEXT");
         _ = builder.Property(p => p.Hash).HasMaxLength(64);
         _ = builder.Property(p => p.IsSystem).HasDefaultValue(false);
+        _ = builder.Property(p => p.Material).IsRequired().HasMaxLength(64);
 
         // Soft-reference indexes (no FK constraints — these entities live in the core module)
         _ = builder.HasIndex(p => p.PrinterModelId);

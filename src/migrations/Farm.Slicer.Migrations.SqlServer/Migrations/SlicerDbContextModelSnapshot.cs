@@ -584,6 +584,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<string>("AdvancedSettings")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("BedTemperature")
+                        .HasColumnType("int");
+
                     b.Property<string>("CompatiblePrinters")
                         .HasColumnType("nvarchar(max)");
 
@@ -621,10 +624,18 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<double>("LayerHeight")
                         .HasColumnType("float");
 
+                    b.Property<string>("Material")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
+
+                    b.Property<int>("NozzleTemperature")
+                        .HasColumnType("int");
 
                     b.Property<double>("PrintSpeed")
                         .HasColumnType("float");

@@ -109,28 +109,28 @@
     "Endpoint": "GET /api/slicer/profiles",
     "ProducingTest": "SlicerProfileContractTests.GetProfiles_NoProfiles_ReturnsEmptyCollection",
     "SchemaVersion": "1.0",
-    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+    "RefreshCommit": "d66a4cd69cdfbb33c18adc856903fe66891e94b0"
   },
   {
     "Path": "api/slicer-profiles/profiles.missing-key.json",
     "Endpoint": "GET /api/slicer/profiles/{id}",
     "ProducingTest": "SlicerProfileContractTests.CreateThenGetProfile_MissingOptionalDescription_OmitsKeyAndMatchesCorpus",
     "SchemaVersion": "1.0",
-    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+    "RefreshCommit": "d66a4cd69cdfbb33c18adc856903fe66891e94b0"
   },
   {
     "Path": "api/slicer-profiles/profiles.populated.json",
-    "Endpoint": "POST /api/slicer/profiles",
+    "Endpoint": "GET /api/slicer/profiles/{id}",
     "ProducingTest": "SlicerProfileContractTests.CreateThenGetProfile_Populated_MatchesCorpus",
     "SchemaVersion": "1.0",
-    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+    "RefreshCommit": "d66a4cd69cdfbb33c18adc856903fe66891e94b0"
   },
   {
     "Path": "api/slicer-profiles/profiles.unknown-additive-request-field.json",
     "Endpoint": "POST /api/slicer/profiles (unknown additive request field)",
     "ProducingTest": "SlicerProfileContractTests.CreateProfile_UnknownAdditiveRequestField_IsIgnoredNotRejected",
     "SchemaVersion": "1.0",
-    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+    "RefreshCommit": "d66a4cd69cdfbb33c18adc856903fe66891e94b0"
   },
   {
     "Path": "api/tasks/tasks.empty-collection.json",

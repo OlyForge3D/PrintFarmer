@@ -1,17 +1,17 @@
 {
-  "id": "ceedc202-1c1f-4ffd-b324-eb1d17f08e07",
+  "id": "659e811d-5767-4649-ba52-03a3c47b2b6b",
   "name": "Wire Contract PLA Profile",
   "slicerType": "OrcaSlicer",
   "layerHeight": 0.2,
   "infillPercentage": 20,
   "printSpeed": 50,
-  "nozzleTemperature": 0,
-  "bedTemperature": 0,
+  "nozzleTemperature": 210,
+  "bedTemperature": 60,
   "enableSupports": false,
-  "material": "",
+  "material": "PLA",
   "quality": "Standard",
   "isDefault": false,
   "isPublic": true,
-  "createdAt": "2026-08-30T21:24:50.212397",
-  "updatedAt": "2026-08-30T21:24:50.212397"
+  "createdAt": "2026-08-30T23:27:02.1499949",
+  "updatedAt": "2026-08-30T23:27:02.149995"
 }
