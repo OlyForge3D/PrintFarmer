@@ -815,6 +815,10 @@ describe('NewSliceJobPage', () => {
         expect(slicerProfilesService.getProcessProfilesForMachines).toHaveBeenCalledWith(['Prusa MK4 0.4 nozzle'], expect.anything());
       });
 
+      const changeAffordance = screen.getByTestId('machine-profile-change-affordance');
+      expect(machineProfileTrigger.lastElementChild).toContainElement(changeAffordance);
+      expect(changeAffordance).toHaveClass('shrink-0');
+
       // There is no longer a standalone nozzle dropdown in the sidebar.
       expect(screen.queryByLabelText('Nozzle diameter')).not.toBeInTheDocument();
 

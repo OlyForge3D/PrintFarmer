@@ -2247,17 +2247,6 @@ export const NewSliceJobPage: React.FC = () => {
     setSelectedBedModelId(prev => (prev && removed.has(prev) ? null : prev));
   }, []);
 
-  const handleWorkspaceSettingsProfiles = useCallback(() => {
-    const settingsPanel = document.querySelector('[aria-label="Process profile options menu"]');
-    if (settingsPanel instanceof HTMLElement) {
-      settingsPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      settingsPanel.focus();
-      return;
-    }
-
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
-
   // Show onboarding banner only when the installation truly has no usable
   // profile source at all: nothing imported into the database AND no
   // registered OrcaSlicer/PrusaSlicer worker to fall back to. A healthy
@@ -2457,6 +2446,11 @@ export const NewSliceJobPage: React.FC = () => {
                           ? 'No machine profiles for this printer — use the options menu to import one'
                           : undefined}
                         className={`group flex min-w-0 flex-1 items-center gap-2 rounded-md border border-pf-border bg-pf-bg-1 px-2.5 py-1.5 text-left transition-colors hover:border-pf-border-strong disabled:cursor-not-allowed disabled:opacity-60 ${isMachineProfilesLoading ? 'opacity-50' : ''}`}
+                        iconRight={(
+                          <span data-testid="machine-profile-change-affordance" className="shrink-0">
+                            <SwapHorizontalIcon className="h-4 w-4 text-pf-text-muted" />
+                          </span>
+                        )}
                       >
                         {/* The accessible name must carry the SELECTION, so it is built
                             from content rather than an aria-label (which would override
@@ -2483,9 +2477,6 @@ export const NewSliceJobPage: React.FC = () => {
                             {formatNozzleDiameter(selectedMachineNozzleDiameter)}mm
                           </span>
                         )}
-                        <span aria-hidden="true" className="shrink-0">
-                          <SwapHorizontalIcon className="w-4 h-4 text-pf-text-muted" />
-                        </span>
                       </Button>
                       )}
                       <div className="relative shrink-0" ref={machineMenuRef}>
@@ -3230,7 +3221,6 @@ export const NewSliceJobPage: React.FC = () => {
                 onModelSelect={handleWorkspaceModelSelect}
                 onModelTransform={handleWorkspaceModelTransform}
                 onAddModel={handleWorkspaceAddModel}
-                onSettingsProfiles={handleWorkspaceSettingsProfiles}
                 onSlice={submitSliceJob}
                 slicing={submitMutation.isPending}
                 canSlice={!submittedJobId && workspaceModels.length > 0 && (!!selectedModelId || !!modelFileUrl.trim()) && !!selectedMachineProfileId && (printerIsMultiToolhead ? physicalToolheads.every((_, i) => !!extruderFilamentProfileIds[i]) : !!selectedFilamentProfileId) && !!selectedProcessPresetId}
