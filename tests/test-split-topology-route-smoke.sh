@@ -40,7 +40,11 @@
 #   installed or the daemon is unreachable, this prints an explicit SKIP
 #   and exits 0 (matching scripts/ci/smoke-daily-validation-stack.sh's
 #   convention) rather than substituting a mocked routing check, which
-#   would recreate the exact gap #2239 exists to close.
+#   would recreate the exact gap #2239 exists to close. Set
+#   REQUIRE_LIVE_SMOKE=true (as .github/workflows/deployment-tests.yml
+#   does for its dedicated job) to turn a missing prerequisite into a hard
+#   FAIL instead - so the one job whose entire purpose is this proof can
+#   never go green having silently skipped.
 #
 # Usage:
 #   tests/test-split-topology-route-smoke.sh
@@ -62,26 +66,35 @@ log() {
   printf '[split-topology-route-smoke] %s\n' "$1"
 }
 
-# --- Docker-unavailable behavior is explicit and non-fatal (see header). ---
-if ! command -v docker >/dev/null 2>&1; then
-  log "SKIP: docker is not installed in this environment; route smoke cannot run."
+# --- Docker-unavailable behavior is explicit (see header). REQUIRE_LIVE_SMOKE=true
+# (set by the dedicated CI job) turns a missing prerequisite into a hard FAIL
+# instead of a silent SKIP/exit 0, so the job whose entire purpose is this
+# proof cannot go green having run nothing.
+skip_or_fail() {
+  local msg="$1"
+  if [[ "${REQUIRE_LIVE_SMOKE:-false}" == "true" ]]; then
+    log "FAIL: $msg (REQUIRE_LIVE_SMOKE=true; refusing to silently skip)"
+    exit 1
+  fi
+  log "SKIP: $msg"
   exit 0
+}
+
+if ! command -v docker >/dev/null 2>&1; then
+  skip_or_fail "docker is not installed in this environment; route smoke cannot run."
 fi
 
 if ! docker info >/dev/null 2>&1; then
-  log "SKIP: docker daemon is not reachable in this environment; route smoke cannot run."
-  exit 0
+  skip_or_fail "docker daemon is not reachable in this environment; route smoke cannot run."
 fi
 
 if ! docker compose version >/dev/null 2>&1; then
-  log "SKIP: docker compose subcommand is not available in this environment; route smoke cannot run."
-  exit 0
+  skip_or_fail "docker compose subcommand is not available in this environment; route smoke cannot run."
 fi
 
 for tool in curl jq openssl; do
   if ! command -v "$tool" >/dev/null 2>&1; then
-    log "SKIP: required tool '$tool' is not available in this environment; route smoke cannot run."
-    exit 0
+    skip_or_fail "required tool '$tool' is not available in this environment; route smoke cannot run."
   fi
 done
 
@@ -118,7 +131,10 @@ source "$REPO_ROOT/scripts/docker-utils.sh"
 source "$REPO_ROOT/scripts/docker/container-versions.conf"
 
 STACK_DIR="$(mktemp -d)"
-PROJECT_NAME="printfarmer-route-smoke-$$"
+# GITHUB_RUN_ID+$RANDOM entropy avoids project-name/port collisions between
+# concurrent runs (parallel CI jobs, or a concurrent local run) - a bare
+# bash PID ($$) can wrap and is guessable, so it alone is not enough.
+PROJECT_NAME="printfarmer-route-smoke-${GITHUB_RUN_ID:-$$}-$RANDOM"
 FAILURES=0
 
 compose() {
@@ -127,6 +143,7 @@ compose() {
 
 cleanup() {
   local exit_code=$?
+  trap - EXIT INT TERM
   local cleanup_image
   cleanup_image="$(compose images -q api 2>/dev/null | head -n 1 || true)"
   compose down --volumes --remove-orphans >/dev/null 2>&1 || true
@@ -140,14 +157,14 @@ cleanup() {
   rm -rf "$STACK_DIR" || true
   exit "$exit_code"
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 # --- Isolated secrets/ports for this run (never reused outside this stack) ---
 : "${POSTGRES_PASSWORD:=$(openssl rand -base64 24)}"
 : "${POSTGRES_USER:=printfarmer}"
 : "${Jwt__Key:=$(openssl rand -base64 48)}"
 : "${WORKER_SHARED_API_KEY:=$(openssl rand -hex 32)}"
-: "${ConnectionStrings__Default:=Host=database;Port=5432;Database=printfarmer;Username=printfarmer;Pwd=${POSTGRES_PASSWORD}}"
+: "${ConnectionStrings__Default:=Host=database;Port=5432;Database=printfarmer;Username=${POSTGRES_USER};Pwd=${POSTGRES_PASSWORD}}"
 : "${API_PORT:=15245}"
 : "${SLICER_HOST_PORT:=15246}"
 : "${HTTP_PORT:=18080}"
@@ -205,6 +222,10 @@ if ! grep -q 'slicer_upstream' "$STACK_DIR/deploy/nginx/nginx-proxy-split.conf" 
 fi
 if ! grep -q 'slicer-host' "$STACK_DIR/docker-compose.yml"; then
   log "FAIL: generated docker-compose.yml does not include the slicer-host service"
+  exit 1
+fi
+if ! grep -q 'nginx-proxy-split.conf' "$STACK_DIR/docker-compose.yml"; then
+  log "FAIL: generated docker-compose.yml does not mount nginx-proxy-split.conf; split nginx config was generated but not wired into the running stack"
   exit 1
 fi
 log "OK: generated stack includes slicer-host and a split nginx config"
@@ -287,27 +308,44 @@ assert_slicer_route() {
   local path="$1"
   local label="${2:-$path}"
 
-  local direct_body
-  direct_body="$(curl --silent --show-error \
+  local direct_raw direct_status direct_body
+  direct_raw="$(curl --silent --show-error \
     -H "Authorization: Bearer ${AUTH_TOKEN}" \
+    --write-out '\n%{http_code}' \
     "http://localhost:${API_PORT}${path}")"
+  direct_status="${direct_raw##*$'\n'}"
+  direct_body="${direct_raw%$'\n'"$direct_status"}"
   if [[ "$direct_body" != *"SLICER_DISABLED"* ]]; then
-    log "FAIL: [$label] expected main API (direct, port $API_PORT) to report SLICER_DISABLED for $path, got: $direct_body"
+    log "FAIL: [$label] expected main API (direct, port $API_PORT) to report SLICER_DISABLED for $path, got (status $direct_status): $direct_body"
     FAILURES=$((FAILURES + 1))
     return
   fi
-  log "OK: [$label] main API (direct) does NOT serve $path (SLICER_DISABLED) - negative assertion holds"
+  log "OK: [$label] main API (direct) does NOT serve $path (SLICER_DISABLED, status $direct_status) - negative assertion holds"
 
-  local nginx_body
-  nginx_body="$(curl --silent --show-error \
+  local nginx_raw nginx_status nginx_body
+  nginx_raw="$(curl --silent --show-error \
     -H "Authorization: Bearer ${AUTH_TOKEN}" \
+    --write-out '\n%{http_code}' \
     "http://localhost:${HTTP_PORT}${path}")"
+  nginx_status="${nginx_raw##*$'\n'}"
+  nginx_body="${nginx_raw%$'\n'"$nginx_status"}"
+  # A 3xx/5xx/000 (or a transport failure) does NOT prove slicer-host
+  # answered - "absence of the SLICER_DISABLED marker" is trivially true for
+  # an empty body, a gateway error, or a redirect nginx issued itself
+  # without ever reaching an upstream. Require a genuine response FROM an
+  # upstream (2xx or 4xx - a 401/403 still proves slicer-host was reached,
+  # per the comment above assert_slicer_route).
+  if [[ ! "$nginx_status" =~ ^(2|4)[0-9][0-9]$ ]]; then
+    log "FAIL: [$label] expected nginx (port $HTTP_PORT) to route $path to slicer-host and get a real upstream response, got status '$nginx_status' (body: $nginx_body)"
+    FAILURES=$((FAILURES + 1))
+    return
+  fi
   if [[ "$nginx_body" == *"SLICER_DISABLED"* ]]; then
     log "FAIL: [$label] expected nginx (port $HTTP_PORT) to route $path to slicer-host, but main API's SLICER_DISABLED marker leaked through: $nginx_body"
     FAILURES=$((FAILURES + 1))
     return
   fi
-  log "OK: [$label] nginx routes $path to slicer-host (no SLICER_DISABLED marker) - positive assertion holds"
+  log "OK: [$label] nginx routes $path to slicer-host (status $nginx_status, no SLICER_DISABLED marker) - positive assertion holds"
 }
 
 log "Asserting slicer-owned namespace: /api/workers"
@@ -339,14 +377,20 @@ assert_slicer_route "/api/admin/slicer/settings" "admin/slicer"
 # --- Control: a main-API-owned route must still resolve normally via nginx,
 # proving nginx is NOT blanket-routing everything to slicer-host.
 log "Asserting main-API-owned control route /api/printers is NOT routed to slicer-host"
-control_body="$(curl --silent --show-error \
+control_raw="$(curl --silent --show-error \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
+  --write-out '\n%{http_code}' \
   "http://localhost:${HTTP_PORT}/api/printers")"
-if [[ "$control_body" == *"SLICER_DISABLED"* ]]; then
+control_status="${control_raw##*$'\n'}"
+control_body="${control_raw%$'\n'"$control_status"}"
+if [[ ! "$control_status" =~ ^(2|4)[0-9][0-9]$ ]]; then
+  log "FAIL: control route /api/printers via nginx did not get a real upstream response, got status '$control_status' (body: $control_body)"
+  FAILURES=$((FAILURES + 1))
+elif [[ "$control_body" == *"SLICER_DISABLED"* ]]; then
   log "FAIL: control route /api/printers unexpectedly returned SLICER_DISABLED via nginx"
   FAILURES=$((FAILURES + 1))
 else
-  log "OK: control route /api/printers is served normally via nginx (not slicer-host)"
+  log "OK: control route /api/printers is served normally via nginx (status $control_status, not slicer-host)"
 fi
 
 # --- WebSocket UPGRADE proof -------------------------------------------------
@@ -381,9 +425,17 @@ assert_hub_upgrade() {
   ws_key="$(openssl rand -base64 16)"
   ws_accept_expected="$(printf '%s258EAFA5-E914-47DA-95CA-C5AB0DC85B11' "$ws_key" | openssl dgst -sha1 -binary | openssl base64)"
 
+  # connectionToken is base64 and access_token is a JWT - both routinely
+  # contain '+', '/', '=' which are query-string metacharacters ('+' decodes
+  # to a literal space server-side), so both must be percent-encoded or the
+  # handshake corrupts intermittently.
+  local connection_token_enc access_token_enc
+  connection_token_enc="$(jq -rn --arg s "$connection_token" '$s|@uri')"
+  access_token_enc="$(jq -rn --arg s "$AUTH_TOKEN" '$s|@uri')"
+
   response="$(printf 'GET %s?id=%s&access_token=%s HTTP/1.1\r\nHost: localhost:%s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n' \
-    "$hub_path" "$connection_token" "$AUTH_TOKEN" "$HTTP_PORT" "$ws_key" \
-    | timeout 10 bash -c "exec 3<>/dev/tcp/localhost/${HTTP_PORT}; cat >&3; timeout 5 cat <&3" 2>/dev/null || true)"
+    "$hub_path" "$connection_token_enc" "$access_token_enc" "$HTTP_PORT" "$ws_key" \
+    | timeout 10 bash -c "exec 3<>/dev/tcp/127.0.0.1/${HTTP_PORT}; cat >&3; timeout 5 cat <&3" 2>/dev/null || true)"
 
   if [[ "$response" != *"HTTP/1.1 101"* ]]; then
     log "FAIL: [$label] expected a genuine HTTP/1.1 101 Switching Protocols upgrade through nginx for $hub_path, got:"
@@ -393,11 +445,13 @@ assert_hub_upgrade() {
   fi
   log "OK: [$label] real WebSocket UPGRADE (HTTP/1.1 101) negotiated through nginx for $hub_path"
 
-  if [[ "$response" == *"Sec-WebSocket-Accept: ${ws_accept_expected}"* ]]; then
-    log "OK: [$label] Sec-WebSocket-Accept matches the value computed from our Sec-WebSocket-Key (genuine negotiated handshake, not a canned response)"
-  else
-    log "WARN: [$label] could not verify Sec-WebSocket-Accept in the response (non-fatal; 101 status line already proves a real upgrade)"
+  if [[ "$response" != *"Sec-WebSocket-Accept: ${ws_accept_expected}"* ]]; then
+    log "FAIL: [$label] Sec-WebSocket-Accept did not match the value computed from our Sec-WebSocket-Key - not a genuine negotiated handshake:"
+    printf '%s\n' "$response"
+    FAILURES=$((FAILURES + 1))
+    return
   fi
+  log "OK: [$label] Sec-WebSocket-Accept matches the value computed from our Sec-WebSocket-Key (genuine negotiated handshake, not a canned response)"
 }
 
 log "Asserting genuine WebSocket UPGRADE for /hubs/slicer-registry"

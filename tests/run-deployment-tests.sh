@@ -31,9 +31,15 @@
 #                               split-topology Docker stack and proves live,
 #                               authenticated route ownership + a WebSocket
 #                               upgrade. Off by default for `--full`/no-args runs
-#                               since it builds Docker images; always run (this
-#                               variable set) by
-#                               .github/workflows/deployment-tests.yml.
+#                               since it builds Docker images. This env var is a
+#                               convenience for running the smoke through this
+#                               harness locally; .github/workflows/deployment-tests.yml
+#                               does NOT set it and does NOT invoke this script -
+#                               its dedicated `split-topology-route-smoke` job
+#                               runs tests/test-split-topology-route-smoke.sh
+#                               directly (with REQUIRE_LIVE_SMOKE=true so a
+#                               missing prerequisite fails the job instead of
+#                               silently skipping).
 #
 # Exit codes:
 #   0 = All tests passed
@@ -478,7 +484,9 @@ run_full_tests() {
     # split-topology stack (nginx + API + slicer-host + a worker) and proves
     # authenticated route ownership + a live WebSocket upgrade (issue #2239).
     # Gated so `--full` doesn't surprise local devs with an unexpected Docker
-    # build; .github/workflows/deployment-tests.yml runs it unconditionally.
+    # build. .github/workflows/deployment-tests.yml does NOT set this env var
+    # or invoke this script - its dedicated `split-topology-route-smoke` job
+    # runs tests/test-split-topology-route-smoke.sh directly instead.
     if [[ "${RUN_LIVE_SMOKE_TESTS:-false}" == "true" ]]; then
         log_subsection "Test: Split-Topology Route Smoke (live, authenticated)"
         run_test_suite "split-topology route smoke tests" "$SCRIPT_DIR/test-split-topology-route-smoke.sh" || true
