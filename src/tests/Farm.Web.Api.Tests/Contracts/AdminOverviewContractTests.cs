@@ -1,6 +1,15 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Testing.Shared;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Moq;
 
 namespace Farm.Web.Api.Tests.Contracts;
 
@@ -40,11 +49,37 @@ namespace Farm.Web.Api.Tests.Contracts;
 /// output (not a numeric ordinal, not a differently-cased variant) without needing to predict
 /// which member a live health probe reports.
 /// </para>
+/// <para>
+/// Two DI overrides make the array-item coverage below deterministic rather than dependent on
+/// whatever the live probe happens to report: an additional, always-<c>Unhealthy</c> named
+/// health check (<c>wire-contract-test-attention</c>) forces a real
+/// <c>AttentionSeverity.Error</c> item through the health-check attention path (covering
+/// <c>actionDestinationId</c>), and a stubbed <see cref="IPrinterConnectionHealthProvider"/>
+/// reporting one offline printer forces a real <c>AttentionSeverity.Warning</c> item through
+/// the printer-connectivity attention path (covering <c>actionRoute</c>). Without these,
+/// <c>attention</c> is empty on a clean test host and every per-item assertion below —
+/// including the property-name allowlist that is the actual defence against a field rename —
+/// would never execute at all.
+/// </para>
 /// </remarks>
 public sealed class AdminOverviewContractTests : IAsyncLifetime
 {
     private static readonly string[] KnownSubsystemStatusTokens = Enum.GetNames<Farm.Infrastructure.Dtos.SubsystemStatus>();
     private static readonly string[] KnownAttentionSeverityTokens = Enum.GetNames<Farm.Infrastructure.Dtos.AttentionSeverity>();
+
+    // The full, exact set of properties SubsystemHealthDto/AttentionItemDto may legally emit.
+    // Enumerating each item's actual property names against this allowlist is what actually
+    // catches a rename of an OPTIONAL field (detail/actionLabel/actionDestinationId/
+    // actionRoute): a conditional `if (item.TryGetProperty(oldName, out _))` check alone would
+    // simply skip a renamed property rather than fail, since the property is legitimately
+    // allowed to be absent. An unrecognized property name means the wire produced something
+    // this allowlist doesn't know about — either a rename or a genuinely new additive field
+    // that must be added here deliberately, not silently tolerated.
+    private static readonly HashSet<string> KnownSubsystemProperties = new(StringComparer.Ordinal) { "key", "name", "status", "detail" };
+    private static readonly HashSet<string> KnownAttentionProperties = new(StringComparer.Ordinal)
+    {
+        "key", "severity", "title", "detail", "actionLabel", "actionDestinationId", "actionRoute",
+    };
 
     private readonly CustomWebApplicationFactory _factory = CustomWebApplicationFactory.CreateWithIsolatedDatabase();
 
@@ -55,9 +90,42 @@ public sealed class AdminOverviewContractTests : IAsyncLifetime
     [Fact]
     public async Task GetOverview_RealHealthProbes_MatchesShapeAndExactEnumTokens()
     {
-        using HttpClient client = await _factory.CreateAdminClientAsync(
+        using HttpClient adminClient = await _factory.CreateAdminClientAsync(
             username: "wire-contract-admin-overview",
             email: "wire-contract-admin-overview@example.com");
+
+        Mock<IPrinterConnectionHealthProvider> offlinePrinterProvider = new();
+        _ = offlinePrinterProvider
+            .Setup(p => p.GetConnectionHealth())
+            .Returns(new Dictionary<Guid, PrinterConnectionHealth>
+            {
+                [Guid.NewGuid()] = new PrinterConnectionHealth
+                {
+                    PrinterId = Guid.NewGuid(),
+                    PrinterName = "wire-contract-offline-printer",
+                    Backend = PrinterBackend.Moonraker,
+                    ConnectionState = PrinterConnectionState.Offline,
+                },
+            });
+
+        // Forces at least one real, deterministic attention item through EACH of the two
+        // production code paths that populate AttentionItemDto — see class remarks — so the
+        // per-item assertions below are never vacuous, regardless of what the live host's own
+        // health probes happen to report.
+        await using WebApplicationFactory<Program> host = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IPrinterConnectionHealthProvider>();
+                services.AddSingleton(offlinePrinterProvider.Object);
+
+                _ = services.AddHealthChecks().AddCheck(
+                    "wire-contract-test-attention",
+                    () => HealthCheckResult.Unhealthy("Deliberately forced unhealthy for issue #2238 wire-contract coverage."));
+            });
+        });
+        using HttpClient client = host.CreateClient();
+        client.DefaultRequestHeaders.Authorization = adminClient.DefaultRequestHeaders.Authorization;
 
         using HttpResponseMessage response = await client.GetAsync("/api/admin/overview");
         _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -92,9 +160,19 @@ public sealed class AdminOverviewContractTests : IAsyncLifetime
             {
                 Assert.Equal(JsonValueKind.String, detail.ValueKind);
             }
+
+            AssertKnownPropertyNames(subsystem, KnownSubsystemProperties, "subsystems[]");
         }
 
         JsonElement attention = root.GetProperty("attention");
+        // Guaranteed non-empty by the two DI overrides above — see class remarks. This
+        // assertion documents that guarantee as an explicit test precondition: if it ever
+        // fails, the DI overrides stopped working (e.g. a production change bypassed
+        // IPrinterConnectionHealthProvider or the health-check pipeline), not that the
+        // per-item assertions below became vacuous silently.
+        _ = attention.GetArrayLength().Should().BeGreaterThanOrEqualTo(2,
+            because: "the health-check and printer-connectivity DI overrides above must each contribute a real attention item");
+
         for (int i = 0; i < attention.GetArrayLength(); i++)
         {
             JsonElement item = attention[i];
@@ -107,9 +185,10 @@ public sealed class AdminOverviewContractTests : IAsyncLifetime
             _ = JsonContractAssertions.AssertProperty(item, "title", JsonValueKind.String);
             _ = JsonContractAssertions.AssertProperty(item, "detail", JsonValueKind.String);
 
-            // ActionLabel/ActionDestinationId/ActionRoute are all optional (present together
-            // per the DTO's documented invariant); assert only their JsonValueKind when
-            // present, so a rename is still caught without asserting a specific action exists.
+            // ActionLabel/ActionDestinationId/ActionRoute are all optional; assert only their
+            // JsonValueKind when present. The property-name allowlist below (not this loop
+            // alone) is what actually catches a rename of one of these three fields, since a
+            // rename simply makes TryGetProperty return false here rather than fail.
             foreach (string optionalStringProperty in new[] { "actionLabel", "actionDestinationId", "actionRoute" })
             {
                 if (item.TryGetProperty(optionalStringProperty, out JsonElement optionalValue))
@@ -117,7 +196,18 @@ public sealed class AdminOverviewContractTests : IAsyncLifetime
                     Assert.Equal(JsonValueKind.String, optionalValue.ValueKind);
                 }
             }
+
+            AssertKnownPropertyNames(item, KnownAttentionProperties, "attention[]");
         }
+
+        // The forced health-check and printer-connectivity attention items are real, distinct
+        // AttentionSeverity values (Error and Warning respectively) carrying actionDestinationId
+        // and actionRoute respectively, so both optional action-field variants get genuine,
+        // non-vacuous coverage above rather than merely being reachable in principle.
+        _ = attention.EnumerateArray().Any(HasActionDestinationId).Should().BeTrue(
+            because: "the forced health-check attention item must carry actionDestinationId");
+        _ = attention.EnumerateArray().Any(HasActionRoute).Should().BeTrue(
+            because: "the forced printer-connectivity attention item must carry actionRoute");
 
         await WireContractFixtureWriter.CaptureOrVerifyAsync(
             WireContractCorpusPaths.ApiRoot,
@@ -127,6 +217,27 @@ public sealed class AdminOverviewContractTests : IAsyncLifetime
             schemaVersion: "1.0",
             actualJson: json,
             volatilePaths: volatilePaths);
+    }
+
+    private static bool HasActionDestinationId(JsonElement element) => element.TryGetProperty("actionDestinationId", out _);
+
+    private static bool HasActionRoute(JsonElement element) => element.TryGetProperty("actionRoute", out _);
+
+    /// <summary>
+    /// Asserts every property name actually present on <paramref name="element"/> is a member
+    /// of <paramref name="knownProperties"/>. This is the real defence against a rename of an
+    /// OPTIONAL field: a conditional presence check (<c>TryGetProperty</c>) on the old name
+    /// simply no-ops when a property has been renamed away, since the property is legitimately
+    /// allowed to be absent — it does not detect that the wire now emits a DIFFERENT,
+    /// unexpected name in its place. Enumerating the actual property set closes that gap.
+    /// </summary>
+    private static void AssertKnownPropertyNames(JsonElement element, HashSet<string> knownProperties, string context)
+    {
+        foreach (JsonProperty property in element.EnumerateObject())
+        {
+            _ = knownProperties.Should().Contain(property.Name,
+                because: $"'{context}' must not emit an unrecognized property (rename or genuinely new field) without updating this allowlist");
+        }
     }
 
     /// <summary>
