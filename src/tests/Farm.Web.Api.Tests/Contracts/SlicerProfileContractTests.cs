@@ -199,5 +199,20 @@ public sealed class SlicerProfileContractTests : IAsyncLifetime
 
         using HttpResponseMessage response = await client.PostAsJsonAsync("/api/slicer/profiles", createRequest);
         _ = response.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        string json = await response.Content.ReadAsStringAsync();
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement created = document.RootElement;
+        JsonContractAssertions.AssertMissingKey(created, "futureFieldNotYetKnown");
+
+        var volatilePaths = new HashSet<string> { "$.id", "$.createdAt", "$.updatedAt" };
+        await WireContractFixtureWriter.CaptureOrVerifyAsync(
+            WireContractCorpusPaths.ApiRoot,
+            "slicer-profiles/profiles.unknown-additive-request-field.json",
+            endpoint: "POST /api/slicer/profiles (unknown additive request field)",
+            producingTest: $"{nameof(SlicerProfileContractTests)}.{nameof(CreateProfile_UnknownAdditiveRequestField_IsIgnoredNotRejected)}",
+            schemaVersion: "1.0",
+            actualJson: json,
+            volatilePaths: volatilePaths);
     }
 }

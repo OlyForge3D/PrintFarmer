@@ -68,7 +68,7 @@ public static class WireContractFixtureWriter
         string fullPath = System.IO.Path.Join(corpusRoot, relativePath);
         using JsonDocument actualDocument = JsonDocument.Parse(actualJson);
 
-        if (RegenerationMode || !File.Exists(fullPath))
+        if (RegenerationMode)
         {
             string? directory = System.IO.Path.GetDirectoryName(fullPath);
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
@@ -87,6 +87,18 @@ public static class WireContractFixtureWriter
             return;
         }
 
+        if (!File.Exists(fullPath))
+        {
+            // A missing fixture must fail loudly, never silently self-heal by writing one.
+            // Otherwise a deleted/never-committed fixture, or a misresolved corpus root,
+            // would make every subsequent run pass having asserted nothing about the wire
+            // shape — precisely the regression this corpus exists to catch.
+            throw new JsonContractAssertionException(
+                $"Wire-contract fixture not found: '{fullPath}'. If this is a new fixture, " +
+                "run with the WIRE_CONTRACT_REGEN=1 environment variable set to author it, " +
+                "review the generated JSON, then commit it under fixtures/wire-contracts/.");
+        }
+
         string checkedInJson = await File.ReadAllTextAsync(fullPath);
         using JsonDocument expectedDocument = JsonDocument.Parse(checkedInJson);
         JsonContractAssertions.AssertStructurallyEqual(expectedDocument.RootElement, actualDocument.RootElement, volatilePaths);
@@ -99,12 +111,24 @@ public static class WireContractFixtureWriter
         return relativeToCorpusRoot;
     }
 
+    /// <summary>
+    /// Regenerating the corpus can involve multiple test assemblies (<c>Farm.Web.Api.Tests</c>,
+    /// <c>Farm.Slicer.Module.Tests</c>, <c>Farm.OrcaSlicer.Worker.Tests</c>) running as separate
+    /// <c>dotnet test</c> processes, each with its own independent <see cref="ManifestLock"/>
+    /// instance — an in-process <see cref="SemaphoreSlim"/> alone cannot serialize their access
+    /// to the single shared <c>manifest.json</c> file. This claims an OS-level exclusive lock on
+    /// a sidecar <c>.lock</c> file for the read-modify-write, which is honored across processes
+    /// on both Windows and Unix, then replaces <c>manifest.json</c> via an atomic rename so a
+    /// reader never observes a partially-written file.
+    /// </summary>
     private static async Task RecordProvenanceAsync(WireContractFixtureProvenance provenance)
     {
         await ManifestLock.WaitAsync();
         try
         {
             string manifestPath = WireContractCorpusPaths.ManifestPath;
+            using FileStream crossProcessLock = await AcquireCrossProcessManifestLockAsync(manifestPath + ".lock");
+
             var entries = new List<WireContractFixtureProvenance>();
             if (File.Exists(manifestPath))
             {
@@ -120,11 +144,32 @@ public static class WireContractFixtureWriter
             entries = [.. entries.OrderBy(e => e.Path, StringComparer.Ordinal)];
 
             string serialized = JsonSerializer.Serialize(entries, PrettyPrintOptions);
-            await File.WriteAllTextAsync(manifestPath, serialized + Environment.NewLine);
+            string tempPath = $"{manifestPath}.tmp-{Guid.NewGuid():N}";
+            await File.WriteAllTextAsync(tempPath, serialized + Environment.NewLine);
+            File.Move(tempPath, manifestPath, overwrite: true);
         }
         finally
         {
             _ = ManifestLock.Release();
+        }
+    }
+
+    private static async Task<FileStream> AcquireCrossProcessManifestLockAsync(string lockPath)
+    {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        while (true)
+        {
+            try
+            {
+                // Opening with FileShare.None is an OS-level exclusive lock honored across
+                // processes (unlike SemaphoreSlim, which is process-local), so concurrent
+                // dotnet test processes regenerating fixtures serialize on this handle.
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (stopwatch.Elapsed < TimeSpan.FromSeconds(30))
+            {
+                await Task.Delay(50);
+            }
         }
     }
 

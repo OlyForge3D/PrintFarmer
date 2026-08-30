@@ -122,4 +122,43 @@ public sealed class TasksContractTests : IAsyncLifetime
             actualJson: createdJson,
             volatilePaths: volatilePaths);
     }
+
+    /// <summary>
+    /// Unknown-additive-field tolerance: production JSON reads via <c>System.Text.Json</c>'s
+    /// default (non-strict) object binding silently ignore extra properties in a request body
+    /// rather than rejecting it — proven here against the real <c>POST /api/tasks</c> endpoint,
+    /// not a hand-rolled deserializer.
+    /// </summary>
+    [Fact]
+    public async Task CreateTask_UnknownAdditiveRequestField_IsIgnoredNotRejected()
+    {
+        using HttpClient client = await _factory.CreateAuthenticatedClientAsync(
+            username: "wire-contract-tasks-additive",
+            email: "wire-contract-tasks-additive@example.com");
+
+        var createRequest = new Dictionary<string, object?>
+        {
+            ["title"] = "Wire contract additive field task",
+            ["priority"] = "Normal",
+            ["futureFieldNotYetKnown"] = "some-future-value",
+        };
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync("/api/tasks", createRequest);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        string json = await response.Content.ReadAsStringAsync();
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement created = document.RootElement;
+        JsonContractAssertions.AssertMissingKey(created, "futureFieldNotYetKnown");
+
+        var volatilePaths = new HashSet<string> { "$.id", "$.entityId", "$.createdAt" };
+        await WireContractFixtureWriter.CaptureOrVerifyAsync(
+            WireContractCorpusPaths.ApiRoot,
+            "tasks/tasks.unknown-additive-request-field.json",
+            endpoint: "POST /api/tasks (unknown additive request field)",
+            producingTest: $"{nameof(TasksContractTests)}.{nameof(CreateTask_UnknownAdditiveRequestField_IsIgnoredNotRejected)}",
+            schemaVersion: "1.0",
+            actualJson: json,
+            volatilePaths: volatilePaths);
+    }
 }

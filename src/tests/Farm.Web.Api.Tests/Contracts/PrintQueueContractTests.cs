@@ -84,6 +84,8 @@ public sealed class PrintQueueContractTests : IAsyncLifetime
         _ = root.GetArrayLength().Should().Be(1);
         JsonElement entry = root[0];
 
+        JsonElement printerIdElement = JsonContractAssertions.AssertProperty(entry, "printerId", JsonValueKind.String);
+        Assert.Equal(printerId.ToString(), printerIdElement.GetString(), ignoreCase: true);
         JsonContractAssertions.AssertMissingKey(entry, "nozzleDiameter");
         JsonContractAssertions.AssertEmptyCollection(entry, "modelAliases");
         JsonContractAssertions.AssertMissingKey(entry, "currentJobId");
@@ -102,8 +104,6 @@ public sealed class PrintQueueContractTests : IAsyncLifetime
             schemaVersion: "1.0",
             actualJson: json,
             volatilePaths: volatilePaths);
-
-        _ = printerId.Should().NotBe(Guid.Empty);
     }
 
     private async Task<Guid> SeedAvailablePrinterAsync()

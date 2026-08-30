@@ -13,8 +13,17 @@ namespace Farm.Web.Api.Tests.Contracts;
 /// string-enum→numeric-enum swap must each fail at least one assertion" (per the issue's
 /// acceptance criteria), without touching any production code.
 /// </summary>
-public sealed class WireContractGuardTests
+public sealed class WireContractGuardTests : IDisposable
 {
+    private readonly List<JsonDocument> _trackedDocuments = new();
+
+    public void Dispose()
+    {
+        foreach (JsonDocument document in _trackedDocuments)
+        {
+            document.Dispose();
+        }
+    }
     /// <summary>
     /// Loads <c>tasks/tasks.populated.json</c> (a real fixture with camelCase properties) and
     /// renames one property to its snake_case equivalent. The structural diff must report both
@@ -82,12 +91,13 @@ public sealed class WireContractGuardTests
         _ = differences.Should().BeEmpty();
     }
 
-    private static JsonElement LoadFixture(string relativePath)
+    private JsonElement LoadFixture(string relativePath)
     {
         string fullPath = Path.Join(WireContractCorpusPaths.ApiRoot, relativePath);
         string json = File.ReadAllText(fullPath);
-        using JsonDocument document = JsonDocument.Parse(json);
-        return JsonDocument.Parse(document.RootElement.GetRawText()).RootElement;
+        JsonDocument document = JsonDocument.Parse(json);
+        _trackedDocuments.Add(document);
+        return document.RootElement;
     }
 
     private static string RenameProperty(JsonElement source, string fromName, string toName)

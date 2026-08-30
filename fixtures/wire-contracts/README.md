@@ -36,8 +36,16 @@ adding one.
 ## Fixture naming
 
 Each payload family gets one file per variant covering, where applicable to that payload:
-`minimal`, `missing-key`, `explicit-null`, `empty-collection`, `populated`,
-`unknown-additive-field`, and one file per public enum showing its exact string token.
+`minimal`, `missing-key`, `empty-collection`, `populated`, `unknown-additive-field`, and one
+file per public enum showing its exact string token.
+
+An `explicit-null` variant is added only for the rare payload shape whose serializer options
+do *not* apply the project's global `DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull`
+policy. For the overwhelming majority of nullable optional properties in this corpus, that
+global policy means a `null` value is OMITTED entirely — it never reaches the wire as an
+explicit JSON `null` — so the correct, and only meaningful, variant for those fields is
+`missing-key`, not `explicit-null`. Do not add an `explicit-null` fixture for a field that the
+policy would only ever omit; that variant name is reserved for genuine explicit-null cases.
 
 ## Provenance (`manifest.json`)
 

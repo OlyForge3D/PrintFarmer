@@ -6,6 +6,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Discovery;
+using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
@@ -30,20 +31,18 @@ namespace Farm.Web.Api.Tests.Contracts;
 /// <c>IHubContext&lt;T&gt;.Clients...SendAsync</c> — never a hand-built DTO serialized locally.
 /// </summary>
 /// <remarks>
-/// Per issue #2238's acceptance criteria, this file also documents the one PascalCase
-/// exception to the lowercase SignalR event-name convention: <c>SlicerHub</c> (the
-/// administrator-only worker-registration hub, distinct from <c>SlicerProgressHub</c> covered
-/// here) sends <c>SlicerHubEvents.SlicerRegistered</c>/<c>SlicerHeartbeat</c>/
-/// <c>SlicerDeregistered</c>/<c>SlicerApiKeyRotated</c> — all PascalCase constants (see
-/// <c>src/slicer/Farm.Slicer.Module.Api/Hubs/SlicerHub.cs</c>). Driving that hub's full
-/// worker-registration flow through a real HTTP/SignalR round trip requires standing up a
-/// registered slicer-service identity and worker heartbeat plumbing that is out of proportion
-/// to what this corpus needs to prove; the exact PascalCase tokens are already pinned as CLR
-/// constants by the existing <c>SlicerHubTests.SlicerHubEvents_*_HasCorrectValue</c> unit tests
-/// in <c>Farm.Slicer.Module.Tests</c>, and since the event names are literal C# string
-/// constants sent verbatim (no enum conversion, no camelCase-ing applied to event/method
-/// names by the SignalR protocol), those tests are equivalent proof that the wire token is
-/// exactly the PascalCase constant value.
+/// Per issue #2238's acceptance criteria, this file also proves the one PascalCase exception
+/// to the lowercase SignalR event-name convention: <c>SlicerHub</c> (the administrator-only
+/// worker-registration hub, distinct from <c>SlicerProgressHub</c> covered here) sends
+/// <c>SlicerHubEvents.SlicerRegistered</c> — a PascalCase constant (see
+/// <c>src/slicer/Farm.Slicer.Module.Api/Hubs/SlicerHub.cs</c>) — with a real producer and
+/// consumer: <see cref="SlicerRegister_RealBroadcast_SendsSlicerRegisteredMatchingCorpus"/>
+/// connects a real <see cref="HubConnection"/> to <c>/hubs/slicer-registry</c> and drives the
+/// production <c>ISlicersService.RegisterAsync</c> call whose <c>SlicersService.RegisterAsync</c>
+/// implementation performs the real <c>IHubContext&lt;SlicerHub&gt;.Clients...SendAsync</c>
+/// broadcast — the same real-producer/real-consumer pattern used for every other event in this
+/// file, not a hand-built object. The token itself remains additionally pinned as a CLR constant
+/// by <c>SlicerHubTests.SlicerHubEvents_*_HasCorrectValue</c> in <c>Farm.Slicer.Module.Tests</c>.
 /// </remarks>
 public sealed class SignalREventContractTests : IAsyncLifetime
 {
@@ -117,10 +116,82 @@ public sealed class SignalREventContractTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Same event as <see cref="JoinDiscoveryGroup_CachedProgress_ReplaysDiscoveryProgressEvent"/>
+    /// with <c>Message: null</c> — the optional-with-default-null property has no per-property
+    /// <c>JsonIgnore</c> override, so it falls through to the hub's global
+    /// <c>DefaultIgnoreCondition = WhenWritingNull</c> policy and the key is OMITTED, not
+    /// serialized as an explicit JSON null. This is the "missing key" variant for a payload
+    /// whose optional field is legal to omit (issue #2238's variant matrix).
+    /// </summary>
+    [Fact]
+    public async Task JoinDiscoveryGroup_CachedProgressNoMessage_OmitsMessageKey()
+    {
+        string sessionId = $"wire-contract-session-{Guid.NewGuid():N}";
+        Guid userId;
+
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            IDiscoverySessionRegistry sessions = scope.ServiceProvider.GetRequiredService<IDiscoverySessionRegistry>();
+            IDiscoveryProgressCache cache = scope.ServiceProvider.GetRequiredService<IDiscoveryProgressCache>();
+            userId = Guid.NewGuid();
+            sessions.RegisterSession(sessionId, userId);
+            cache.Set(
+                sessionId,
+                new DiscoveryProgressDto(
+                    SessionId: sessionId,
+                    CurrentNetwork: "192.168.1.0/24",
+                    CurrentIp: "192.168.1.42",
+                    TotalIps: 254,
+                    ScannedIps: 0,
+                    PrintersFound: 0,
+                    PrintersExcluded: 0,
+                    ProgressPercentage: 0.0,
+                    Status: DiscoveryStatus.Scanning,
+                    Message: null));
+        }
+
+        string token = await CreateFarmAdminTokenAsync();
+        var receivedTcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using HubConnection connection = BuildHubConnection("/hubs/printers", token);
+        _ = connection.On<JsonElement>("discoveryprogress", payload => receivedTcs.TrySetResult(payload));
+
+        await connection.StartAsync();
+        await connection.InvokeAsync("JoinDiscoveryGroupAsync", sessionId);
+
+        JsonElement received = await WaitForEventAsync(receivedTcs);
+
+        JsonContractAssertions.AssertMissingKey(received, "message");
+
+        string json = received.GetRawText();
+        var volatilePaths = new HashSet<string> { "$.sessionId" };
+        await WireContractFixtureWriter.CaptureOrVerifyAsync(
+            WireContractCorpusPaths.ApiRoot,
+            "signalr-events/discoveryprogress.missing-message.json",
+            endpoint: "SignalR PrinterHub \"discoveryprogress\" (JoinDiscoveryGroupAsync, null Message)",
+            producingTest: $"{nameof(SignalREventContractTests)}.{nameof(JoinDiscoveryGroup_CachedProgressNoMessage_OmitsMessageKey)}",
+            schemaVersion: "1.0",
+            actualJson: json,
+            volatilePaths: volatilePaths);
+    }
+
+    /// <summary>
     /// <c>SlicerProgressHub</c> <c>"slicejobevent"</c>, real-broadcast via
     /// <see cref="ISliceJobEventService.NotifyJobQueuedAsync"/> to the <c>SlicingMonitors</c>
     /// group a <c>farm_admin</c> connection auto-joins on connect.
     /// </summary>
+    /// <remarks>
+    /// <see cref="HubConnection.StartAsync"/> completing only proves the client received the
+    /// SignalR handshake response — it does NOT guarantee the server's
+    /// <c>SlicerProgressHub.OnConnectedAsync</c> (which does the actual
+    /// <c>Groups.AddToGroupAsync(..., SlicingMonitors)</c> call this test relies on) has
+    /// finished running. Invoking the harmless, idempotent <c>JoinMonitoringGroupAsync</c> hub
+    /// method immediately after <c>StartAsync</c> forces a synchronization point: SignalR
+    /// guarantees a connection's <c>OnConnectedAsync</c> completes before any of its hub-method
+    /// invocations are dispatched, so once this call returns, the group join from
+    /// <c>OnConnectedAsync</c> is guaranteed complete. Without this, the broadcast below could
+    /// race ahead of the group join under load and the event would never arrive — a flake, not
+    /// a production defect.
+    /// </remarks>
     [Fact]
     public async Task NotifyJobQueued_RealBroadcast_SendsSliceJobEventMatchingCorpus()
     {
@@ -129,6 +200,7 @@ public sealed class SignalREventContractTests : IAsyncLifetime
         await using HubConnection connection = BuildHubConnection("/hubs/slicers", token);
         _ = connection.On<JsonElement>("slicejobevent", payload => receivedTcs.TrySetResult(payload));
         await connection.StartAsync();
+        await connection.InvokeAsync("JoinMonitoringGroupAsync");
 
         var job = new SliceJob
         {
@@ -178,6 +250,7 @@ public sealed class SignalREventContractTests : IAsyncLifetime
         await using HubConnection connection = BuildHubConnection("/hubs/slicers", token);
         _ = connection.On<JsonElement>("slicingprogress", payload => receivedTcs.TrySetResult(payload));
         await connection.StartAsync();
+        await connection.InvokeAsync("JoinMonitoringGroupAsync");
 
         var update = new SlicingProgressUpdate
         {
@@ -212,6 +285,53 @@ public sealed class SignalREventContractTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Same event as <see cref="NotifyProgress_RealBroadcast_SendsSlicingProgressMatchingCorpus"/>
+    /// with <c>CurrentStep: null</c> — the nullable property has no explicit-null override, so it
+    /// falls through to the hub's global <c>DefaultIgnoreCondition = WhenWritingNull</c> policy
+    /// and the key is OMITTED. This is the "missing key" variant for this payload's one optional
+    /// field (issue #2238's variant matrix).
+    /// </summary>
+    [Fact]
+    public async Task NotifyProgress_RealBroadcastNoCurrentStep_OmitsCurrentStepKey()
+    {
+        string token = await CreateFarmAdminTokenAsync();
+        var receivedTcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using HubConnection connection = BuildHubConnection("/hubs/slicers", token);
+        _ = connection.On<JsonElement>("slicingprogress", payload => receivedTcs.TrySetResult(payload));
+        await connection.StartAsync();
+        await connection.InvokeAsync("JoinMonitoringGroupAsync");
+
+        var update = new SlicingProgressUpdate
+        {
+            JobId = Guid.NewGuid(),
+            Progress = 0,
+            Status = SlicingJobStatus.Queued,
+            CurrentStep = null,
+        };
+
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            ISlicerProgressNotifier notifier = scope.ServiceProvider.GetRequiredService<ISlicerProgressNotifier>();
+            await notifier.NotifyProgressAsync(update);
+        }
+
+        JsonElement received = await WaitForEventAsync(receivedTcs);
+
+        JsonContractAssertions.AssertMissingKey(received, "currentStep");
+
+        string json = received.GetRawText();
+        var volatilePaths = new HashSet<string> { "$.jobId", "$.timestamp" };
+        await WireContractFixtureWriter.CaptureOrVerifyAsync(
+            WireContractCorpusPaths.ApiRoot,
+            "signalr-events/slicingprogress.missing-currentstep.json",
+            endpoint: "SignalR SlicerProgressHub \"slicingprogress\" (NotifyProgressAsync, null CurrentStep)",
+            producingTest: $"{nameof(SignalREventContractTests)}.{nameof(NotifyProgress_RealBroadcastNoCurrentStep_OmitsCurrentStepKey)}",
+            schemaVersion: "1.0",
+            actualJson: json,
+            volatilePaths: volatilePaths);
+    }
+
+    /// <summary>
     /// <c>SlicerProgressHub</c> <c>"slicingcompleted"</c>, real-broadcast via
     /// <see cref="ISlicerProgressNotifier.NotifyCompletionAsync"/>.
     /// </summary>
@@ -223,6 +343,7 @@ public sealed class SignalREventContractTests : IAsyncLifetime
         await using HubConnection connection = BuildHubConnection("/hubs/slicers", token);
         _ = connection.On<JsonElement>("slicingcompleted", payload => receivedTcs.TrySetResult(payload));
         await connection.StartAsync();
+        await connection.InvokeAsync("JoinMonitoringGroupAsync");
 
         var job = new DistributedSlicingJob
         {
@@ -279,6 +400,7 @@ public sealed class SignalREventContractTests : IAsyncLifetime
         await using HubConnection connection = BuildHubConnection("/hubs/slicers", token);
         _ = connection.On<JsonElement>("slicingfailed", payload => receivedTcs.TrySetResult(payload));
         await connection.StartAsync();
+        await connection.InvokeAsync("JoinMonitoringGroupAsync");
 
         var job = new DistributedSlicingJob
         {
@@ -313,6 +435,63 @@ public sealed class SignalREventContractTests : IAsyncLifetime
             volatilePaths: volatilePaths);
     }
 
+    /// <summary>
+    /// <c>SlicerHub</c> <c>"SlicerRegistered"</c> (PascalCase — the one deliberate exception to
+    /// this file's lowercase event-name convention). Real producer and consumer: a real
+    /// <see cref="HubConnection"/> joins <c>/hubs/slicer-registry</c> as farm_admin (every
+    /// connected client is auto-added to the hub's <c>Administrators</c> group by
+    /// <c>SlicerHub.OnConnectedAsync</c>), then the production
+    /// <see cref="ISlicersService.RegisterAsync"/> implementation performs the real
+    /// <c>IHubContext&lt;SlicerHub&gt;</c> broadcast — never a hand-built object serialized
+    /// locally.
+    /// </summary>
+    [Fact]
+    public async Task SlicerRegister_RealBroadcast_SendsSlicerRegisteredMatchingCorpus()
+    {
+        string token = await CreateFarmAdminTokenAsync();
+        var receivedTcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using HubConnection connection = BuildHubConnection("/hubs/slicer-registry", token);
+        _ = connection.On<JsonElement>("SlicerRegistered", payload => receivedTcs.TrySetResult(payload));
+        await connection.StartAsync();
+        await connection.InvokeAsync("JoinProgressGroupAsync");
+
+        var dto = new RegisterSlicerDto
+        {
+            Name = $"wire-contract-worker-{Guid.NewGuid():N}",
+            SlicerType = 1,
+            Version = "2.1.0",
+            Host = "http://127.0.0.1:9500",
+            MaxConcurrentJobs = 2,
+        };
+
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            ISlicersService slicers = scope.ServiceProvider.GetRequiredService<ISlicersService>();
+            _ = await slicers.RegisterAsync(dto, CancellationToken.None);
+        }
+
+        JsonElement received = await WaitForEventAsync(receivedTcs);
+
+        _ = JsonContractAssertions.AssertProperty(received, "id", JsonValueKind.String);
+        JsonElement name = JsonContractAssertions.AssertProperty(received, "name", JsonValueKind.String);
+        Assert.Equal(dto.Name, name.GetString());
+        _ = JsonContractAssertions.AssertProperty(received, "slicerType", JsonValueKind.Number);
+        _ = JsonContractAssertions.AssertProperty(received, "version", JsonValueKind.String);
+        _ = JsonContractAssertions.AssertProperty(received, "maxConcurrentJobs", JsonValueKind.Number);
+        _ = JsonContractAssertions.AssertProperty(received, "status", JsonValueKind.String);
+
+        string json = received.GetRawText();
+        var volatilePaths = new HashSet<string> { "$.id", "$.name", "$.lastSeen" };
+        await WireContractFixtureWriter.CaptureOrVerifyAsync(
+            WireContractCorpusPaths.ApiRoot,
+            "signalr-events/SlicerRegistered.populated.json",
+            endpoint: "SignalR SlicerHub \"SlicerRegistered\" (PascalCase; ISlicersService.RegisterAsync)",
+            producingTest: $"{nameof(SignalREventContractTests)}.{nameof(SlicerRegister_RealBroadcast_SendsSlicerRegisteredMatchingCorpus)}",
+            schemaVersion: "1.0",
+            actualJson: json,
+            volatilePaths: volatilePaths);
+    }
+
     private HubConnection BuildHubConnection(string path, string token) =>
         new HubConnectionBuilder()
             .WithUrl(
@@ -339,7 +518,7 @@ public sealed class SignalREventContractTests : IAsyncLifetime
 
     private static async Task<JsonElement> WaitForEventAsync(TaskCompletionSource<JsonElement> tcs)
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using CancellationTokenRegistration registration = cts.Token.Register(
             () => tcs.TrySetException(new TimeoutException("Timed out waiting for the SignalR event to arrive.")));
 

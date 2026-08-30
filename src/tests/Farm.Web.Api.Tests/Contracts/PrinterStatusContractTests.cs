@@ -18,9 +18,11 @@ namespace Farm.Web.Api.Tests.Contracts;
 /// captured payload is the exact bytes the real <c>PrinterHub</c> sends over a real
 /// <c>HubConnection</c> against the in-process <c>TestServer</c> — never a hand-built
 /// <see cref="PrinterStatusDto"/> serialized locally. The hub's wire method name
-/// (<c>"RequestPrinterStatus"</c>, via <c>[HubMethodName]</c>) and its two lowercase event
-/// names (<c>"printerupdated"</c>, <c>"printerstatusesreplayed"</c>) are exercised exactly as a
-/// real client would invoke/subscribe to them.
+/// (<c>"RequestPrinterStatus"</c>, via <c>[HubMethodName]</c>) and its lowercase
+/// <c>"printerupdated"</c> event are exercised exactly as a real client would invoke/subscribe
+/// to them. (<c>PrinterHub</c> also broadcasts a <c>"printerstatusesreplayed"</c> event on
+/// bulk resync, which is NOT covered by this file — that is a candidate gap for a future
+/// corpus addition, not claimed here.)
 /// </summary>
 public sealed class PrinterStatusContractTests : IAsyncLifetime
 {

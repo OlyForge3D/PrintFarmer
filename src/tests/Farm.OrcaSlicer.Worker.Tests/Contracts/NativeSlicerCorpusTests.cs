@@ -1,17 +1,30 @@
-﻿using System.Text.Json;
+﻿using System.Net;
+using System.Text.Json;
+using Farm.Infrastructure.OrcaSlicer;
+using Farm.OrcaSlicer.Worker.Controllers;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Worker.Core;
 using Farm.Testing.Shared;
+using FluentAssertions;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Farm.OrcaSlicer.Worker.Tests.Contracts;
 
 /// <summary>
-/// Native-Orca wire-contract corpus for issue #2238. Drives REAL production profile parsing
-/// (<see cref="OrcaProfilesService"/>, the same code the standalone worker uses to answer
-/// <c>GET /api/profiles</c>) over genuine, verbatim OrcaSlicer bundle content, and captures the
-/// resulting raw <c>snake_case</c> settings bag — never a PrintFarmer-mapped DTO field — to
+/// Native-Orca wire-contract corpus for issue #2238. Drives the REAL production HTTP pipeline —
+/// <c>GET /api/profiles/filament</c> served by <c>ProfilesController</c> over a real
+/// <see cref="WebApplicationFactory{TEntryPoint}"/>-hosted <c>Farm.OrcaSlicer.Worker</c>, backed
+/// by a real <see cref="OrcaProfilesService"/> pointed at genuine, verbatim OrcaSlicer bundle
+/// content — and captures the resulting raw <c>snake_case</c> settings bag exactly as it crosses
+/// the wire, never a hand-built PrintFarmer DTO field, to
 /// <see cref="WireContractCorpusPaths.NativeSlicerRoot"/>.
 /// </summary>
 /// <remarks>
@@ -23,7 +36,11 @@ namespace Farm.OrcaSlicer.Worker.Tests.Contracts;
 /// <c>OrcaProfilesService</c> from <c>SerializeElementToDict(root)</c> over the fully-resolved
 /// (post-<c>inherits</c>-merge) profile JSON, so its keys are the exact native Orca field names
 /// (<c>filament_flow_ratio</c>, <c>compatible_printers</c>, etc.) with no naming transformation
-/// applied anywhere in this pipeline.
+/// applied anywhere in this pipeline. Only <see cref="ISlicerProfilesService"/> and the
+/// unrelated worker background services are swapped out via
+/// <see cref="WebApplicationFactory{TEntryPoint}.ConfigureWebHost"/> — the controller, routing,
+/// and JSON serialization pipeline that actually answer the HTTP request are 100% the real
+/// production code.
 /// </remarks>
 public sealed class NativeSlicerCorpusTests : IDisposable
 {
@@ -63,6 +80,7 @@ public sealed class NativeSlicerCorpusTests : IDisposable
         """;
 
     private readonly string _profilesRoot;
+    private WebApplicationFactory<Program>? _factory;
 
     public NativeSlicerCorpusTests()
     {
@@ -72,10 +90,87 @@ public sealed class NativeSlicerCorpusTests : IDisposable
 
     public void Dispose()
     {
+        _factory?.Dispose();
         if (Directory.Exists(_profilesRoot))
         {
             Directory.Delete(_profilesRoot, recursive: true);
         }
+    }
+
+    /// <summary>
+    /// Builds the real worker host (real <see cref="ProfilesController"/>, real routing, real
+    /// System.Text.Json output pipeline) with only <see cref="ISlicerProfilesService"/> and the
+    /// unrelated worker background services swapped so the test host starts instantly against
+    /// this test's isolated, per-test <see cref="_profilesRoot"/> directory instead of a real
+    /// on-disk OrcaSlicer installation. Must be called only AFTER the bundle/profile files for
+    /// the test have been written, because <see cref="OrcaProfilesService"/> is constructed
+    /// eagerly here and caches its directory listing.
+    /// </summary>
+    private HttpClient CreateWorkerClient()
+    {
+        _factory = new NativeSlicerCorpusApplicationFactory(_profilesRoot);
+        return _factory.CreateClient();
+    }
+
+    private sealed class NativeSlicerCorpusApplicationFactory(string profilesRoot) : WebApplicationFactory<Program>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            _ = builder.ConfigureAppConfiguration((_, configuration) =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["WorkerAuth:SharedKey"] = "test-registration-key",
+                    ["Worker:EngineVersion"] = "test-version",
+                    ["Worker:VerifyBinaryVersion"] = "true",
+                }));
+
+            _ = builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IOrcaBinaryDetector>();
+                _ = services.AddSingleton<IOrcaBinaryDetector>(new StubBinaryDetector("test-version"));
+
+                // Point the real ProfilesController at this test's isolated profiles
+                // directory instead of a real OrcaSlicer installation, without touching
+                // process-wide environment variables (which would race with any other
+                // test in this assembly running in parallel).
+                services.RemoveAll<ISlicerProfilesService>();
+                _ = services.AddSingleton<ISlicerProfilesService>(
+                    new OrcaProfilesService(NullLogger.Instance, profilesRoot));
+
+                services.RemoveAll<IProfilePreloadService>();
+                _ = services.AddSingleton<IProfilePreloadService, NoOpProfilePreloadService>();
+
+                Type[] workerHostedServiceTypes =
+                [
+                    typeof(GracefulShutdownService),
+                    typeof(QueueConsumerService),
+                    typeof(RegistrationBackgroundService),
+                    typeof(CustomProfilesReconciliationService),
+                ];
+                ServiceDescriptor[] workerHostedServices = services
+                    .Where(descriptor =>
+                        descriptor.ServiceType == typeof(IHostedService) &&
+                        descriptor.ImplementationType is not null &&
+                        workerHostedServiceTypes.Contains(descriptor.ImplementationType))
+                    .ToArray();
+                foreach (ServiceDescriptor descriptor in workerHostedServices)
+                {
+                    _ = services.Remove(descriptor);
+                }
+            });
+        }
+    }
+
+    private sealed class NoOpProfilePreloadService : IProfilePreloadService
+    {
+        public Task PreloadProfilesAsync(CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    private sealed class StubBinaryDetector(string version) : IOrcaBinaryDetector
+    {
+        public bool IsRealBinaryPresent() => true;
+
+        public Task<string?> GetVersionAsync() => Task.FromResult<string?>(version);
     }
 
     /// <summary>
@@ -85,7 +180,7 @@ public sealed class NativeSlicerCorpusTests : IDisposable
     /// (<c>filament_flow_ratio</c> etc.) survive real production parsing untouched.
     /// </summary>
     [Fact]
-    public async Task ListAvailableFilamentProfilesAsync_RealPrusaGenericPla_CapturesNativeSnakeCaseSettings()
+    public async Task GetFilamentProfilesEndpoint_RealPrusaGenericPla_CapturesNativeSnakeCaseSettings()
     {
         WriteManufacturerBundle("Prusa", filamentEntries: [("Prusa Generic PLA", "filament/prusa_generic_pla.json")]);
         WriteProfile("Prusa", "filament/prusa_generic_pla.json", RealPrusaGenericPlaFilamentJson);
@@ -100,8 +195,16 @@ public sealed class NativeSlicerCorpusTests : IDisposable
             }
             """);
 
-        var service = new OrcaProfilesService(NullLogger.Instance, _profilesRoot);
-        IList<FilamentProfileDto> profiles = await service.ListAvailableFilamentProfilesAsync();
+        using HttpClient client = CreateWorkerClient();
+        using HttpResponseMessage response = await client.GetAsync("/api/profiles/filament");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        string responseBody = await response.Content.ReadAsStringAsync();
+        Dictionary<string, IList<FilamentProfileDto>>? grouped = JsonSerializer.Deserialize<Dictionary<string, IList<FilamentProfileDto>>>(
+            responseBody,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.NotNull(grouped);
+        IList<FilamentProfileDto> profiles = Assert.Single(grouped!.Values);
         FilamentProfileDto profile = Assert.Single(profiles);
 
         Assert.Equal(8, profile.CompatiblePrinters.Count);
@@ -111,8 +214,8 @@ public sealed class NativeSlicerCorpusTests : IDisposable
         await WireContractFixtureWriter.CaptureOrVerifyAsync(
             corpusRoot: WireContractCorpusPaths.NativeSlicerRoot,
             relativePath: "filament/prusa-generic-pla.populated.json",
-            endpoint: "OrcaProfilesService.ListAvailableFilamentProfilesAsync (native settings bag)",
-            producingTest: "Farm.OrcaSlicer.Worker.Tests.Contracts.NativeSlicerCorpusTests.ListAvailableFilamentProfilesAsync_RealPrusaGenericPla_CapturesNativeSnakeCaseSettings",
+            endpoint: "GET /api/profiles/filament (native settings bag, real HTTP response)",
+            producingTest: "Farm.OrcaSlicer.Worker.Tests.Contracts.NativeSlicerCorpusTests.GetFilamentProfilesEndpoint_RealPrusaGenericPla_CapturesNativeSnakeCaseSettings",
             schemaVersion: "1.0",
             actualJson: json);
 
@@ -131,7 +234,7 @@ public sealed class NativeSlicerCorpusTests : IDisposable
     /// list, but that is a PrintFarmer-side convenience, not a claim about the native payload).
     /// </summary>
     [Fact]
-    public async Task ListAvailableFilamentProfilesAsync_MinimalProfile_OmitsCompatiblePrintersKeyEntirely()
+    public async Task GetFilamentProfilesEndpoint_MinimalProfile_OmitsCompatiblePrintersKeyEntirely()
     {
         WriteManufacturerBundle("Acme", filamentEntries: [("Acme Minimal PLA", "filament/minimal.json")]);
         WriteProfile("Acme", "filament/minimal.json", """
@@ -143,8 +246,16 @@ public sealed class NativeSlicerCorpusTests : IDisposable
             }
             """);
 
-        var service = new OrcaProfilesService(NullLogger.Instance, _profilesRoot);
-        IList<FilamentProfileDto> profiles = await service.ListAvailableFilamentProfilesAsync();
+        using HttpClient client = CreateWorkerClient();
+        using HttpResponseMessage response = await client.GetAsync("/api/profiles/filament");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        string responseBody = await response.Content.ReadAsStringAsync();
+        Dictionary<string, IList<FilamentProfileDto>>? grouped = JsonSerializer.Deserialize<Dictionary<string, IList<FilamentProfileDto>>>(
+            responseBody,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.NotNull(grouped);
+        IList<FilamentProfileDto> profiles = Assert.Single(grouped!.Values);
         FilamentProfileDto profile = Assert.Single(profiles);
 
         Assert.Empty(profile.CompatiblePrinters);
@@ -153,8 +264,8 @@ public sealed class NativeSlicerCorpusTests : IDisposable
         await WireContractFixtureWriter.CaptureOrVerifyAsync(
             corpusRoot: WireContractCorpusPaths.NativeSlicerRoot,
             relativePath: "filament/minimal.missing-compatible-printers.json",
-            endpoint: "OrcaProfilesService.ListAvailableFilamentProfilesAsync (native settings bag)",
-            producingTest: "Farm.OrcaSlicer.Worker.Tests.Contracts.NativeSlicerCorpusTests.ListAvailableFilamentProfilesAsync_MinimalProfile_OmitsCompatiblePrintersKeyEntirely",
+            endpoint: "GET /api/profiles/filament (native settings bag, real HTTP response)",
+            producingTest: "Farm.OrcaSlicer.Worker.Tests.Contracts.NativeSlicerCorpusTests.GetFilamentProfilesEndpoint_MinimalProfile_OmitsCompatiblePrintersKeyEntirely",
             schemaVersion: "1.0",
             actualJson: json);
 

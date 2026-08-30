@@ -1,9 +1,9 @@
 {
-  "jobId": "5a943a5d-6c6c-4732-bab7-5200f0a8f318",
-  "userId": "ea3ff13a-6215-49b5-9c79-7e497c97318e",
+  "jobId": "bcfec465-7cf5-42d8-b368-cb1f9c891342",
+  "userId": "794e6caf-ec7e-4028-b1cd-f80d58746d0e",
   "status": "Error",
   "errorMessage": "Slicing failed.",
-  "failedAt": "2026-08-30T20:20:28.357927Z",
+  "failedAt": "2026-08-30T21:25:01.4337866Z",
   "retryCount": 1,
   "canRetry": true
 }

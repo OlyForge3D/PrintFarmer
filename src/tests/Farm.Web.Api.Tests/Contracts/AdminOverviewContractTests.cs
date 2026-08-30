@@ -13,14 +13,18 @@ namespace Farm.Web.Api.Tests.Contracts;
 /// non-deterministic at the JSON-tree level, not just in its leaf values: the number, order,
 /// and keys of <c>subsystems</c>/<c>attention</c> entries depend on live health-probe state
 /// (see <c>AdminOverviewService</c>), which can differ between the fixture-capture run and any
-/// later verify run even in this isolated test host. Hardcoding a fixed set of volatile JSON
-/// Pointer paths would therefore either be wrong (too few paths, spurious CI flakiness) or
-/// silently stop catching real drift (too many paths). Instead, this test computes its
-/// <c>volatilePaths</c> set DYNAMICALLY from the actual live response's array lengths at test
-/// time, marking every per-item leaf that legitimately varies with live health-check content
-/// (<c>detail</c>, <c>title</c>, <c>actionLabel</c>, <c>actionDestinationId</c>,
-/// <c>actionRoute</c>) as volatile, while still enforcing the STRUCTURAL shape (property names,
-/// array presence, and JSON value kinds) via the fixture diff.
+/// later verify run even in this isolated test host. A per-leaf <c>volatilePaths</c> entry
+/// cannot express "this array's length/order may differ" — <see cref="JsonContractAssertions.CompareStructurally"/>
+/// still requires equal array length and index-aligned elements for anything it descends into.
+/// So instead of enumerating leaves, the whole <c>$.subsystems</c>/<c>$.attention</c>/
+/// <c>$.overallStatus</c> subtrees are declared volatile: for a volatile path,
+/// <c>CompareInto</c> checks only that both sides share the same <see cref="JsonValueKind"/>
+/// (i.e. still an array/string) and never descends further, so a run with a different item
+/// count or item order is not treated as corpus drift. Real structural/enum-token discipline
+/// for whatever the live response actually contains is instead enforced unconditionally, on
+/// every run, by the explicit per-item assertions below (<see cref="AssertKnownEnumToken"/>,
+/// <see cref="JsonContractAssertions.AssertProperty"/>) — those still fail on a renamed
+/// property, a missing key, or a numeric/mis-cased enum token, regardless of array shape.
 /// </para>
 /// <para>
 /// The "each public enum as its exact string token" requirement is satisfied independently of
@@ -63,14 +67,15 @@ public sealed class AdminOverviewContractTests : IAsyncLifetime
 
         AssertKnownEnumToken(root, "overallStatus", KnownSubsystemStatusTokens);
 
-        var volatilePaths = new HashSet<string> { "$.checkedAt" };
+        // Whole subtrees, not individual leaves: see the class remarks for why per-leaf
+        // volatility can't express "this array's length/order may legitimately differ."
+        var volatilePaths = new HashSet<string> { "$.checkedAt", "$.overallStatus", "$.subsystems", "$.attention" };
         for (int i = 0; i < subsystems.GetArrayLength(); i++)
         {
             JsonElement subsystem = subsystems[i];
             _ = JsonContractAssertions.AssertProperty(subsystem, "key", JsonValueKind.String);
             _ = JsonContractAssertions.AssertProperty(subsystem, "name", JsonValueKind.String);
             AssertKnownEnumToken(subsystem, "status", KnownSubsystemStatusTokens);
-            volatilePaths.Add($"$.subsystems[{i}].detail");
         }
 
         JsonElement attention = root.GetProperty("attention");
@@ -79,11 +84,6 @@ public sealed class AdminOverviewContractTests : IAsyncLifetime
             JsonElement item = attention[i];
             _ = JsonContractAssertions.AssertProperty(item, "key", JsonValueKind.String);
             AssertKnownEnumToken(item, "severity", KnownAttentionSeverityTokens);
-            volatilePaths.Add($"$.attention[{i}].title");
-            volatilePaths.Add($"$.attention[{i}].detail");
-            volatilePaths.Add($"$.attention[{i}].actionLabel");
-            volatilePaths.Add($"$.attention[{i}].actionDestinationId");
-            volatilePaths.Add($"$.attention[{i}].actionRoute");
         }
 
         await WireContractFixtureWriter.CaptureOrVerifyAsync(
