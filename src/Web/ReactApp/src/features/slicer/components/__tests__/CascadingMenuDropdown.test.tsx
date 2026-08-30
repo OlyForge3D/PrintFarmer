@@ -11,7 +11,7 @@ function filament(name: string, material: string): OrcaFilamentProfile {
     nozzleTemperature: 210,
     bedTemperature: 60,
     printSpeed: 50,
-    compatiblePrinters: [],
+    compatible_printers: [],
   };
 }
 

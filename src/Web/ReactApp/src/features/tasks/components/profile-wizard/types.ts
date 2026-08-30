@@ -16,13 +16,13 @@ export interface FilamentProfileDto {
   material: string;
   nozzleTemperature?: number;
   bedTemperature?: number;
-  compatiblePrinters?: string[];
+  compatible_printers?: string[];
 }
 
 export interface ProcessProfileDto {
   name: string;
   manufacturer?: string;
-  compatiblePrinters?: string[];
+  compatible_printers?: string[];
 }
 
 export interface PrinterModelDto {
