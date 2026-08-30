@@ -130,7 +130,7 @@ public class ModelControllerTests
             CancellationToken.None);
 
         BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal("clientUploadId must be a non-empty GUID.", badRequest.Value);
+        Assert.Equal("clientUploadId must be a non-empty GUID.", badRequest.Value!.GetType().GetProperty("message")?.GetValue(badRequest.Value));
     }
 
     /// <summary>
@@ -161,7 +161,7 @@ public class ModelControllerTests
             CancellationToken.None);
 
         BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal(validationMessage, badRequest.Value);
+        Assert.Equal(validationMessage, badRequest.Value!.GetType().GetProperty("message")?.GetValue(badRequest.Value));
     }
 
     [Fact]
