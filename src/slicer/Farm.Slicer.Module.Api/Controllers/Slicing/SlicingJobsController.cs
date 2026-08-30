@@ -63,12 +63,6 @@ public class SlicingJobsController(
         }
 
         // Store the uploaded file
-        string tempPath = _tempPathProvider.GetTempFilePath(Path.GetExtension(file.FileName));
-        await using (var stream = new FileStream(tempPath, FileMode.Create))
-        {
-            await file.CopyToAsync(stream, ct);
-        }
-
         SlicerProfileDto? profile = null;
         if (!string.IsNullOrWhiteSpace(profileJson))
         {
@@ -78,10 +72,17 @@ public class SlicingJobsController(
         // Issue #2229: this legacy route (superseded by POST /api/slice) carries the same
         // wall/infill/shell-layer settings as strongly-typed ProcessProfileDto properties instead
         // of the overrides object SliceJobController.SubmitAsync validates, so it needs its own
-        // check to close the same negative-value bypass.
+        // check to close the same negative-value bypass. Validate before writing the uploaded
+        // file to disk so a rejected submission doesn't leave an orphaned temp file behind.
         if (!ProcessOverrideSettingsValidation.TryValidate(profile?.ProcessProfile, out string? printSettingsError))
         {
             return BadRequest(new { error = printSettingsError });
+        }
+
+        string tempPath = _tempPathProvider.GetTempFilePath(Path.GetExtension(file.FileName));
+        await using (var stream = new FileStream(tempPath, FileMode.Create))
+        {
+            await file.CopyToAsync(stream, ct);
         }
 
         var request = new SlicingJobRequest

@@ -188,14 +188,19 @@ public sealed class SliceJobControllerPrintSettingsValidationTests
     public async Task SubmitAsync_NegativeOverrideSurvivingExtruderFilamentEmbed_ReturnsInvalidRequest()
     {
         // Validation must run against the exact SlicerProfileJson persisted on the job (after
-        // EmbedExtruderFilamentNames re-serializes it), not the pre-embed request body, otherwise
-        // a duplicate top-level "overrides" key could smuggle a negative value past validation.
+        // EmbedExtruderFilamentNames re-serializes it), not the pre-embed request body. This
+        // payload deliberately duplicates the top-level "overrides" key: a first-wins reader
+        // (JsonDocument.TryGetProperty, used pre-fix) sees only the positive first occurrence and
+        // would have accepted this, while the last-wins re-serialization performed by
+        // EmbedExtruderFilamentNames (JsonSerializer.Deserialize<Dictionary<string, JsonElement>>)
+        // collapses to the negative second occurrence, which is what actually gets persisted and
+        // later applied. Validating the post-embed string closes that gap.
         SliceJobController controller = CreateController(out Mock<ISliceJobRepository> repository, out _);
         var request = new SubmitSliceJobRequest
         {
             SlicerEngine = SlicerEngineType.OrcaSlicer,
             Priority = 1,
-            SlicerProfileJson = """{"overrides":{"wall_loops":-4}}""",
+            SlicerProfileJson = """{"overrides":{"wall_loops":4},"overrides":{"wall_loops":-4}}""",
             ExtruderFilamentProfileNames = ["PLA-Left", "PLA-Right"],
         };
 

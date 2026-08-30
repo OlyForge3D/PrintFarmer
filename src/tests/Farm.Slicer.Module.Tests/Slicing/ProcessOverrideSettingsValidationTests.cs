@@ -1,5 +1,4 @@
-﻿using Farm.Slicer.Module.Dtos;
-using FluentAssertions;
+﻿using FluentAssertions;
 
 namespace Farm.Slicer.Module.Tests.Slicing;
 
@@ -42,6 +41,19 @@ public sealed class ProcessOverrideSettingsValidationTests
     public void TryValidate_NonNumericString_IsRejectedWithNonNegativeMessage()
     {
         const string json = """{"overrides":{"wall_loops":"not-a-number"}}""";
+
+        bool ok = ProcessOverrideSettingsValidation.TryValidate(json, out string? error);
+
+        _ = ok.Should().BeFalse();
+        _ = error.Should().Contain("must be a non-negative number");
+    }
+
+    [Fact]
+    public void TryValidate_PositiveInfinityString_IsRejected()
+    {
+        // "1e999" overflows double parsing to PositiveInfinity, which is not itself negative but
+        // is just as invalid a print setting as NaN — both must be rejected, not just negatives.
+        const string json = """{"overrides":{"wall_loops":"1e999"}}""";
 
         bool ok = ProcessOverrideSettingsValidation.TryValidate(json, out string? error);
 

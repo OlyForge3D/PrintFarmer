@@ -103,11 +103,11 @@ public static class ProcessOverrideSettingsValidation
                 }
 
                 double? numeric = CoerceToNumber(prop.Value);
-                if (numeric is double value && (double.IsNaN(value) || value < 0))
+                if (numeric is double value && (!double.IsFinite(value) || value < 0))
                 {
-                    errorMessage = double.IsNaN(value)
-                        ? $"{label} must be a non-negative number."
-                        : $"{label} cannot be negative.";
+                    errorMessage = double.IsFinite(value)
+                        ? $"{label} cannot be negative."
+                        : $"{label} must be a non-negative number.";
                     return false;
                 }
             }
