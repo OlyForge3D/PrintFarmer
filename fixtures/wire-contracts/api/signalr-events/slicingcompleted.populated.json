@@ -1,0 +1,12 @@
+{
+  "jobId": "ba92113b-98a3-40d1-9654-0fbd0b41fe46",
+  "userId": "4ae02ffa-0731-4e60-a55a-6cf8612ae8d2",
+  "status": "Completed",
+  "success": true,
+  "artifactsRoute": "/api/artifacts/job/ba92113b-98a3-40d1-9654-0fbd0b41fe46",
+  "processingTimeSeconds": 12.5,
+  "estimatedPrintTimeSeconds": 5400,
+  "estimatedFilamentUsageGrams": 42.75,
+  "layerCount": 180,
+  "completedAt": "2026-08-30T20:20:20.9792764Z"
+}
