@@ -1244,9 +1244,13 @@ export const NewSliceJobPage: React.FC = () => {
     const selectedIsHighFlow = resolveHighFlow(selectedMachineProfile?.isHighFlowNozzle, selectedMachineName);
 
     const filtered = profiles.filter((profile) => {
+      const compatiblePrinters = Array.isArray(profile.compatible_printers)
+        ? profile.compatible_printers
+        : [];
+
       // Guard 1: Compatible printer names must include the selected machine when provided.
-      if (selectedMachineName && profile.compatible_printers.length > 0) {
-        const compatible = profile.compatible_printers.some((printerName) => printerName === selectedMachineName);
+      if (selectedMachineName && compatiblePrinters.length > 0) {
+        const compatible = compatiblePrinters.some((printerName) => printerName === selectedMachineName);
         if (!compatible) {
           return false;
         }
@@ -1260,7 +1264,7 @@ export const NewSliceJobPage: React.FC = () => {
       // isProcessProfileCoreOneVariantCompatible for why this can't be decided
       // by joining the whole compatible_printers list into one string.
       if (selectedMachineLower.includes('core one')) {
-        if (!isProcessProfileCoreOneVariantCompatible(profile.name, profile.compatible_printers, selectedIsHighFlow)) {
+        if (!isProcessProfileCoreOneVariantCompatible(profile.name, compatiblePrinters, selectedIsHighFlow)) {
           return false;
         }
       }

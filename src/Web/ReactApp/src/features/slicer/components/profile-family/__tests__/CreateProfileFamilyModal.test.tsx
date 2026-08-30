@@ -8,6 +8,7 @@ import { CreateProfileFamilyModal } from '../CreateProfileFamilyModal';
 import {
   slicerProfilesService,
   type CloneProfileFamilyResponse,
+  type OrcaFilamentProfile,
   type OrcaProcessProfile,
 } from '@/services/slicerProfilesService';
 import { toast } from 'sonner';
@@ -20,6 +21,18 @@ function createProcessProfiles(machineName: string, count: number): OrcaProcessP
     infillPercentage: 15,
     printSpeed: 60,
     supports: false,
+    compatible_printers: [machineName],
+  }));
+}
+
+function createFilamentProfiles(machineNames: string[]): OrcaFilamentProfile[] {
+  return machineNames.map((machineName) => ({
+    name: `Generic PLA @${machineName}`,
+    material: 'PLA',
+    manufacturer: 'Voron',
+    nozzleTemperature: 215,
+    bedTemperature: 60,
+    printSpeed: 60,
     compatible_printers: [machineName],
   }));
 }
@@ -69,6 +82,23 @@ const mockWorkerHierarchy = {
           ],
           filamentProfiles: [
             {
+              name: 'Missing compatibility',
+              material: 'PLA',
+              manufacturer: 'Voron',
+              nozzleTemperature: 215,
+              bedTemperature: 60,
+              printSpeed: 60,
+            },
+            {
+              name: 'Null compatibility',
+              material: 'PLA',
+              manufacturer: 'Voron',
+              nozzleTemperature: 215,
+              bedTemperature: 60,
+              printSpeed: 60,
+              compatible_printers: null,
+            },
+            {
               name: 'Generic PLA @Orca',
               material: 'PLA',
               manufacturer: 'OrcaFilamentLibrary',
@@ -77,8 +107,26 @@ const mockWorkerHierarchy = {
               printSpeed: 60,
               compatible_printers: [voronPointTwo, voronPointFour, voronPointSix],
             },
+            ...createFilamentProfiles([voronPointTwo, voronPointFour, voronPointSix]),
           ],
           processProfiles: [
+            {
+              name: 'Missing compatibility',
+              quality: 'Standard',
+              layerHeight: 0.2,
+              infillPercentage: 15,
+              printSpeed: 60,
+              supports: false,
+            },
+            {
+              name: 'Null compatibility',
+              quality: 'Standard',
+              layerHeight: 0.2,
+              infillPercentage: 15,
+              printSpeed: 60,
+              supports: false,
+              compatible_printers: null,
+            },
             ...createProcessProfiles(voronPointTwo, 5),
             ...createProcessProfiles(voronPointFour, 6),
             ...createProcessProfiles(voronPointSix, 6),
@@ -244,7 +292,7 @@ describe('CreateProfileFamilyModal', () => {
     });
   });
 
-  it('estimates each nozzle process count and excludes Orca library filaments', async () => {
+  it('counts compatible derived profiles without counting missing compatibility or Orca library filaments', async () => {
     const user = userEvent.setup();
     renderModal();
 
@@ -259,7 +307,7 @@ describe('CreateProfileFamilyModal', () => {
       const card = screen.getByText(`My Voron Family ${nozzle} nozzle`).closest('[data-pf-card]');
       expect(card).not.toBeNull();
       expect(within(card as HTMLElement).getByText(processCount)).toBeInTheDocument();
-      expect(within(card as HTMLElement).getByText('0 estimated')).toBeInTheDocument();
+      expect(within(card as HTMLElement).getByText('1 estimated')).toBeInTheDocument();
     }
   });
 

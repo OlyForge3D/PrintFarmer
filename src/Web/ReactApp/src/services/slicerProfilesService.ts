@@ -200,7 +200,7 @@ export interface OrcaFilamentProfile {
   nozzleTemperature: number;
   bedTemperature: number;
   printSpeed: number;
-  compatible_printers: string[];
+  compatible_printers?: string[] | null;
   instantiation?: boolean;
   inherits?: string;
   settings?: Record<string, unknown>;
@@ -218,7 +218,7 @@ export interface OrcaProcessProfile {
   printSpeed: number;
   supports: boolean;
   description?: string;
-  compatible_printers: string[];
+  compatible_printers?: string[] | null;
   instantiation?: boolean;
   inherits?: string;
   settings?: Record<string, unknown>;

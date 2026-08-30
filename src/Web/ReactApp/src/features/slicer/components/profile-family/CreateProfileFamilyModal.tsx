@@ -649,12 +649,13 @@ export function CreateProfileFamilyModal({
                 const sourceProfile = sourceMachineByNozzle.get(Number(diameter.toFixed(3)));
                 const compatibleName = sourceProfile?.name ?? '';
                 const processCount = selectedSource.model.processProfiles?.filter(
-                  (profile) => compatibleName && profile.compatible_printers.includes(compatibleName)
+                  (profile) => compatibleName !== ''
+                    && profile.compatible_printers?.includes(compatibleName) === true
                 ).length ?? 0;
                 const filamentCount = selectedSource.model.filamentProfiles?.filter(
                   (profile) => profile.manufacturer?.toLowerCase() !== 'orcafilamentlibrary'
-                    && compatibleName
-                    && profile.compatible_printers.includes(compatibleName)
+                    && compatibleName !== ''
+                    && profile.compatible_printers?.includes(compatibleName) === true
                 ).length ?? 0;
                 return (
                   <Card key={diameter}>
