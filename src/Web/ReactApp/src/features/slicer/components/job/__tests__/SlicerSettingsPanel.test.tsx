@@ -4,7 +4,7 @@
  * support toggle + type, and bed adhesion dropdown.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { SlicerSettingsPanel, type SlicerSettings } from '../SlicerSettingsPanel';
@@ -394,6 +394,50 @@ describe('SlicerSettingsPanel — rejects invalid values with inline feedback (#
     fireEvent.change(input, { target: { value: '3' } });
     fireEvent.blur(input);
     expect(onValidationChange).toHaveBeenLastCalledWith(true);
+  });
+
+  // Bishop review round 3 (issue #2223): switching Simple -> Advanced -> Simple
+  // unmounts and remounts this panel (it's conditionally rendered by
+  // NewSliceJobPage), resetting its internal validity tracking to all-valid.
+  // If that reset doesn't re-notify the caller, a caller left holding a
+  // stale `false` (from before the unmount) stays permanently blocked with
+  // no field showing an error — the exact "silent, undiscoverable submit
+  // block" failure class the validation feature exists to prevent.
+  it('re-notifies the caller with a fresh valid aggregate after an unmount/remount (mode toggle)', () => {
+    const onValidationChange = vi.fn();
+    const { unmount } = render(
+      <SlicerSettingsPanel
+        settings={DEFAULT_SETTINGS}
+        onSettingsChange={vi.fn()}
+        onValidationChange={onValidationChange}
+        simpleMode
+      />
+    );
+    const input = screen.getByRole('spinbutton', { name: /perimeters/i });
+
+    // Invalidate, then leave Simple mode (unmount) without correcting it -
+    // simulating a user who typed a bad value and switched to Advanced mode.
+    fireEvent.change(input, { target: { value: '-1' } });
+    expect(onValidationChange).toHaveBeenLastCalledWith(false);
+    unmount();
+    cleanup();
+
+    // Switch back to Simple mode: a fresh mount of the same panel type.
+    const onValidationChangeAfterRemount = vi.fn();
+    render(
+      <SlicerSettingsPanel
+        settings={DEFAULT_SETTINGS}
+        onSettingsChange={vi.fn()}
+        onValidationChange={onValidationChangeAfterRemount}
+        simpleMode
+      />
+    );
+
+    // The remounted panel must re-report its (valid) aggregate so a caller
+    // that was left holding a stale `false` gets corrected - not just stay
+    // silent because "nothing changed" from the panel's own fresh-mount
+    // perspective.
+    expect(onValidationChangeAfterRemount).toHaveBeenCalledWith(true);
   });
 
   it('still allows a valid wallLoops edit to commit normally', () => {

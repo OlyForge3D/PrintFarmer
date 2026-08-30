@@ -423,7 +423,10 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   // (review finding). A ref mutated synchronously — and reported to the
   // caller synchronously, in the same call — has no such window: by the time
   // `handleFieldValidityChange` returns, `onValidationChange` has already
-  // been called with the current aggregate.
+  // been called with the current aggregate. (`DeferredNumberInput`'s own
+  // `[liveError]` effect still exists and should: it is what re-reports
+  // validity on mount and on prop-driven `value` changes, not on keystrokes,
+  // so it is not part of the keystroke -> submit race this ref closes.)
   const fieldValidityRef = useRef<Record<string, boolean>>({
     wallLoops: true,
     infillPercent: true,
@@ -431,8 +434,19 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
     bottomShellLayers: true,
   });
   const handleFieldValidityChange = (field: string) => (isValid: boolean) => {
-    if (fieldValidityRef.current[field] === isValid) return;
-    fieldValidityRef.current = { ...fieldValidityRef.current, [field]: isValid };
+    // Always notify the caller, even when this field's own value is
+    // unchanged: on a Simple -> Advanced -> Simple mode toggle the panel
+    // unmounts and remounts, resetting this ref to all-true, but the
+    // caller's own validity state can still be stale (e.g. left `false`
+    // from before the unmount). Each field's mount-time effect re-reports
+    // its (unchanged, already-true) validity, and that re-sync must reach
+    // the caller or submission stays invisibly blocked with no field
+    // showing an error (review finding). `onValidationChange` is a plain
+    // setState, so re-notifying with an identical value is a harmless
+    // no-op render bail-out, not a perf or correctness concern.
+    if (fieldValidityRef.current[field] !== isValid) {
+      fieldValidityRef.current = { ...fieldValidityRef.current, [field]: isValid };
+    }
     onValidationChange?.(Object.values(fieldValidityRef.current).every(Boolean));
   };
 
