@@ -131,9 +131,15 @@ source "$REPO_ROOT/scripts/docker-utils.sh"
 source "$REPO_ROOT/scripts/docker/container-versions.conf"
 
 STACK_DIR="$(mktemp -d)"
-# GITHUB_RUN_ID+$RANDOM entropy avoids project-name/port collisions between
-# concurrent runs (parallel CI jobs, or a concurrent local run) - a bare
-# bash PID ($$) can wrap and is guessable, so it alone is not enough.
+# GITHUB_RUN_ID+$RANDOM entropy avoids Docker Compose project/network/volume
+# name collisions between concurrent runs (parallel CI jobs, or a concurrent
+# local run) - a bare bash PID ($$) can wrap and is guessable, so it alone is
+# not enough. This does NOT avoid host PORT or container_name collisions:
+# API_PORT/HTTP_PORT/HTTPS_PORT/POSTGRES_PORT/SLICER_HOST_PORT below, and the
+# container_name values baked into the generated compose file, are fixed
+# regardless of PROJECT_NAME, so two runs of this script must not be executed
+# concurrently on the same Docker host (this matches how the CI job runs -
+# one job per commit, never in parallel with itself).
 PROJECT_NAME="printfarmer-route-smoke-${GITHUB_RUN_ID:-$$}-$RANDOM"
 FAILURES=0
 
@@ -142,7 +148,7 @@ compose() {
 }
 
 cleanup() {
-  local exit_code=$?
+  local exit_code="${1:-$?}"
   trap - EXIT INT TERM
   local cleanup_image
   cleanup_image="$(compose images -q api 2>/dev/null | head -n 1 || true)"
@@ -157,7 +163,13 @@ cleanup() {
   rm -rf "$STACK_DIR" || true
   exit "$exit_code"
 }
-trap cleanup EXIT INT TERM
+# EXIT uses the script's real exit status. INT/TERM force the standard
+# 128+signum exit codes explicitly: relying on "$?" at signal-delivery time
+# would reflect whatever the last foreground command happened to return
+# (often 0), which could make a killed run falsely report success.
+trap 'cleanup $?' EXIT
+trap 'cleanup 130' INT
+trap 'cleanup 143' TERM
 
 # --- Isolated secrets/ports for this run (never reused outside this stack) ---
 : "${POSTGRES_PASSWORD:=$(openssl rand -base64 24)}"
@@ -296,14 +308,26 @@ log "OK: isolated route-smoke administrator authenticated (real JWT obtained)"
 # --- Route-ownership assertions --------------------------------------------
 #
 # assert_slicer_route <path>: hits <path> directly on the main API (expects
-# the SLICER_DISABLED marker - the negative assertion) AND via nginx
-# (expects the marker is ABSENT - the positive assertion that slicer-host,
-# not the main API, answered). Every request carries the real bearer token
-# obtained above; a 401/403 on the slicer-host side is not treated as a
-# failure here (some endpoints require additional permissions the seeded
-# admin may or may not hold) because the SLICER_DISABLED marker - not the
-# HTTP status code - is what proves ownership. This is exactly what makes
-# the assertion immune to "a 401 looks like it didn't get routed".
+# the SLICER_DISABLED marker - the negative assertion), directly on
+# slicer-host's own published port (the positive-identification baseline),
+# and via nginx (expects nginx's response to share the SAME HTTP status AND
+# Content-Type as slicer-host's own direct answer, and to NOT be text/html -
+# the positive assertion that slicer-host, not the main API and not some
+# other upstream such as the SPA static-file backend or an nginx-generated
+# error page (both of which serve text/html), answered). Status+Content-Type
+# equality is used instead of full byte-for-byte body equality because
+# ASP.NET Core's default ProblemDetails error bodies (and some success
+# payloads) embed per-request-varying fields (e.g. traceId), so two separate
+# requests to the SAME backend can legitimately return different bytes for
+# an identical logical response - byte equality produced false failures
+# here in practice. Every request carries the real bearer token obtained
+# above; a 401/403 on the slicer-host side is not treated as a failure here
+# (some endpoints require additional permissions the seeded admin may or
+# may not hold) because status+content-type identity with slicer-host's own
+# direct response - not the HTTP status code alone - is what proves
+# ownership. This is exactly what makes the assertion immune to "a 401 looks
+# like it didn't get routed" AND to "some other 2xx/4xx-returning upstream
+# answered instead of slicer-host".
 assert_slicer_route() {
   local path="$1"
   local label="${2:-$path}"
@@ -322,11 +346,13 @@ assert_slicer_route() {
   fi
   log "OK: [$label] main API (direct) does NOT serve $path (SLICER_DISABLED, status $direct_status) - negative assertion holds"
 
-  local nginx_raw nginx_status nginx_body
+  local nginx_raw nginx_status nginx_ctype nginx_body
   nginx_raw="$(curl --silent --show-error \
     -H "Authorization: Bearer ${AUTH_TOKEN}" \
-    --write-out '\n%{http_code}' \
+    --write-out '\n%{http_code}\n%{content_type}' \
     "http://localhost:${HTTP_PORT}${path}")"
+  nginx_ctype="${nginx_raw##*$'\n'}"
+  nginx_raw="${nginx_raw%$'\n'"$nginx_ctype"}"
   nginx_status="${nginx_raw##*$'\n'}"
   nginx_body="${nginx_raw%$'\n'"$nginx_status"}"
   # A 3xx/5xx/000 (or a transport failure) does NOT prove slicer-host
@@ -345,11 +371,46 @@ assert_slicer_route() {
     FAILURES=$((FAILURES + 1))
     return
   fi
-  log "OK: [$label] nginx routes $path to slicer-host (status $nginx_status, no SLICER_DISABLED marker) - positive assertion holds"
+
+  # Positive identification: absence of the main API's marker only proves
+  # "not the main API" - it does not prove slicer-host specifically answered
+  # (a misroute to the SPA static-file backend, or an nginx-generated error
+  # page, could also be 2xx/4xx with no marker, and both serve text/html).
+  # Query slicer-host directly on its own published port and require
+  # nginx's response to share its status AND Content-Type, and require
+  # neither is text/html.
+  local direct_slicer_raw direct_slicer_status direct_slicer_ctype
+  direct_slicer_raw="$(curl --silent --show-error \
+    -H "Authorization: Bearer ${AUTH_TOKEN}" \
+    --write-out '%{http_code}\n%{content_type}' \
+    -o /dev/null \
+    "http://localhost:${SLICER_HOST_PORT}${path}")"
+  direct_slicer_ctype="${direct_slicer_raw##*$'\n'}"
+  direct_slicer_status="${direct_slicer_raw%$'\n'"$direct_slicer_ctype"}"
+  if [[ "$nginx_ctype" == text/html* ]]; then
+    log "FAIL: [$label] nginx's response for $path via port $HTTP_PORT is text/html (Content-Type: $nginx_ctype) - looks like an SPA/static-file response or nginx's own error page, not slicer-host"
+    FAILURES=$((FAILURES + 1))
+    return
+  fi
+  if [[ "$nginx_status" != "$direct_slicer_status" || "$nginx_ctype" != "$direct_slicer_ctype" ]]; then
+    log "FAIL: [$label] nginx's response for $path (status $nginx_status, Content-Type $nginx_ctype) does not match slicer-host's own direct response (status $direct_slicer_status, Content-Type $direct_slicer_ctype) - nginx may not actually be routing to slicer-host"
+    FAILURES=$((FAILURES + 1))
+    return
+  fi
+  log "OK: [$label] nginx routes $path to slicer-host (status $nginx_status, Content-Type $nginx_ctype matches slicer-host's direct answer) - positive assertion holds"
 }
 
 log "Asserting slicer-owned namespace: /api/workers"
-assert_slicer_route "/api/workers" "workers"
+# The generated nginx-proxy-split.conf only defines a trailing-slash prefix
+# location (`location /api/workers/`), so the bare collection-root path
+# (no trailing slash) does not match it and falls through to nginx's own
+# default redirect instead of reaching slicer-host - a real routing defect
+# filed separately as issue #2245 (linked to epic #2237) and intentionally
+# NOT fixed here (nginx templates are out of this issue's scope). Assert
+# against a real, matchable sub-route instead (WorkersController exposes
+# GET /api/workers/{id}), consistent with how /api/3d-models and
+# /api/artifacts are already asserted below.
+assert_slicer_route "/api/workers/$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)" "workers"
 
 log "Asserting slicer-owned namespace: /api/slicers"
 assert_slicer_route "/api/slicers/engines" "slicers"
@@ -375,12 +436,26 @@ log "Asserting slicer-owned namespace: /api/admin/slicer"
 assert_slicer_route "/api/admin/slicer/settings" "admin/slicer"
 
 # --- Control: a main-API-owned route must still resolve normally via nginx,
-# proving nginx is NOT blanket-routing everything to slicer-host.
+# proving nginx is NOT blanket-routing everything to slicer-host. Positive
+# identification mirrors assert_slicer_route: nginx's response must share
+# status + Content-Type with the main API's own direct response (not full
+# body bytes, which can legitimately vary per request - see the comment on
+# assert_slicer_route above).
+control_direct_raw="$(curl --silent --show-error \
+  -H "Authorization: Bearer ${AUTH_TOKEN}" \
+  --write-out '%{http_code}\n%{content_type}' \
+  -o /dev/null \
+  "http://localhost:${API_PORT}/api/printers")"
+control_direct_ctype="${control_direct_raw##*$'\n'}"
+control_direct_status="${control_direct_raw%$'\n'"$control_direct_ctype"}"
+
 log "Asserting main-API-owned control route /api/printers is NOT routed to slicer-host"
 control_raw="$(curl --silent --show-error \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  --write-out '\n%{http_code}' \
+  --write-out '\n%{http_code}\n%{content_type}' \
   "http://localhost:${HTTP_PORT}/api/printers")"
+control_ctype="${control_raw##*$'\n'}"
+control_raw="${control_raw%$'\n'"$control_ctype"}"
 control_status="${control_raw##*$'\n'}"
 control_body="${control_raw%$'\n'"$control_status"}"
 if [[ ! "$control_status" =~ ^(2|4)[0-9][0-9]$ ]]; then
@@ -389,8 +464,11 @@ if [[ ! "$control_status" =~ ^(2|4)[0-9][0-9]$ ]]; then
 elif [[ "$control_body" == *"SLICER_DISABLED"* ]]; then
   log "FAIL: control route /api/printers unexpectedly returned SLICER_DISABLED via nginx"
   FAILURES=$((FAILURES + 1))
+elif [[ "$control_status" != "$control_direct_status" || "$control_ctype" != "$control_direct_ctype" ]]; then
+  log "FAIL: control route /api/printers via nginx (status $control_status, Content-Type $control_ctype) does not match the main API's own direct response (status $control_direct_status, Content-Type $control_direct_ctype) - nginx may not actually be routing /api/printers to the main API"
+  FAILURES=$((FAILURES + 1))
 else
-  log "OK: control route /api/printers is served normally via nginx (status $control_status, not slicer-host)"
+  log "OK: control route /api/printers is served normally via nginx (status $control_status, Content-Type $control_ctype matches the main API's direct answer, not slicer-host)"
 fi
 
 # --- WebSocket UPGRADE proof -------------------------------------------------
