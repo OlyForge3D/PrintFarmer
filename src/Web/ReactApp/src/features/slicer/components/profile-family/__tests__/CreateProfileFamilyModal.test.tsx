@@ -121,6 +121,14 @@ function createTestQueryClient() {
   });
 }
 
+function restoreOwnProperty(target: object, property: PropertyKey, descriptor: PropertyDescriptor | undefined) {
+  if (descriptor) {
+    Object.defineProperty(target, property, descriptor);
+  } else if (!Reflect.deleteProperty(target, property)) {
+    throw new Error(`Failed to restore inherited property ${String(property)}`);
+  }
+}
+
 function renderModal(queryClient = createTestQueryClient(), onSuccess = vi.fn(), onClose = vi.fn()) {
   const result = render(
     <QueryClientProvider client={queryClient}>
@@ -278,6 +286,42 @@ describe('CreateProfileFamilyModal', () => {
 
     expect(screen.getByText('“nozzle_diameter” is an identity key and cannot be sent.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  });
+
+  it('adds advanced overrides when crypto.randomUUID is unavailable', async () => {
+    const originalRandomUUIDDescriptor = Object.getOwnPropertyDescriptor(crypto, 'randomUUID');
+    Object.defineProperty(crypto, 'randomUUID', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    let fillValue = 0x10;
+    const getRandomValuesSpy = vi.spyOn(crypto, 'getRandomValues').mockImplementation((array) => {
+      new Uint8Array(array.buffer, array.byteOffset, array.byteLength).fill(++fillValue);
+      return array;
+    });
+
+    try {
+      const user = userEvent.setup();
+      renderModal();
+      await selectVoronSource(user);
+      await fillNameAndAdvance(user);
+      await user.click(screen.getByRole('button', { name: 'Next' }));
+      await user.click(screen.getByText('Add advanced override'));
+
+      await user.click(screen.getByRole('button', { name: 'Add override' }));
+      await user.click(screen.getByRole('button', { name: 'Add override' }));
+
+      const keyInputs = screen.getAllByLabelText('Orca key');
+      expect(keyInputs).toHaveLength(2);
+      expect(keyInputs[0]).toHaveAttribute('id', 'advanced-key-11111111-1111-4111-9111-111111111111');
+      expect(keyInputs[1]).toHaveAttribute('id', 'advanced-key-12121212-1212-4212-9212-121212121212');
+    } finally {
+      getRandomValuesSpy.mockRestore();
+      restoreOwnProperty(crypto, 'randomUUID', originalRandomUUIDDescriptor);
+    }
+
+    expect(Object.getOwnPropertyDescriptor(crypto, 'randomUUID')).toEqual(originalRandomUUIDDescriptor);
   });
 
   it('disables Next when the nozzle selection is empty on step 3', async () => {

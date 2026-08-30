@@ -1,6 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
 import { generateUUID } from '../uuid';
 
+function restoreOwnProperty(target: object, property: PropertyKey, descriptor: PropertyDescriptor | undefined) {
+  if (descriptor) {
+    Object.defineProperty(target, property, descriptor);
+  } else if (!Reflect.deleteProperty(target, property)) {
+    throw new Error(`Failed to restore inherited property ${String(property)}`);
+  }
+}
+
 describe('generateUUID', () => {
   it('should generate a valid UUID format', () => {
     const uuid = generateUUID();
@@ -65,12 +73,12 @@ describe('generateUUID', () => {
         expect(getRandomValuesSpy).toHaveBeenCalled();
         expect(randomSpy).not.toHaveBeenCalled();
       } finally {
-        if (originalDescriptor) {
-          Object.defineProperty(crypto, 'randomUUID', originalDescriptor);
-        }
+        restoreOwnProperty(crypto, 'randomUUID', originalDescriptor);
         randomSpy.mockRestore();
         getRandomValuesSpy.mockRestore();
       }
+
+      expect(Object.getOwnPropertyDescriptor(crypto, 'randomUUID')).toEqual(originalDescriptor);
     });
 
     it('throws (never falls back to Math.random) when no CSPRNG is available at all', () => {
@@ -84,14 +92,13 @@ describe('generateUUID', () => {
         expect(() => generateUUID()).toThrow(/no cryptographically secure random source available/i);
         expect(randomSpy).not.toHaveBeenCalled();
       } finally {
-        if (originalRandomUUIDDescriptor) {
-          Object.defineProperty(crypto, 'randomUUID', originalRandomUUIDDescriptor);
-        }
-        if (originalGetRandomValuesDescriptor) {
-          Object.defineProperty(crypto, 'getRandomValues', originalGetRandomValuesDescriptor);
-        }
+        restoreOwnProperty(crypto, 'randomUUID', originalRandomUUIDDescriptor);
+        restoreOwnProperty(crypto, 'getRandomValues', originalGetRandomValuesDescriptor);
         randomSpy.mockRestore();
       }
+
+      expect(Object.getOwnPropertyDescriptor(crypto, 'randomUUID')).toEqual(originalRandomUUIDDescriptor);
+      expect(Object.getOwnPropertyDescriptor(crypto, 'getRandomValues')).toEqual(originalGetRandomValuesDescriptor);
     });
   });
 });
