@@ -173,8 +173,8 @@
         },
         {
           "name": "printers",
-          "namespacePrefixes": ["Services/Printers", "Services/Cameras", "Locations", "Discovery"],
-          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Services.Printers.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Cameras.|FullyQualifiedName~Farm.Infrastructure.Tests.Locations.|FullyQualifiedName~Farm.Infrastructure.Tests.Discovery."
+          "namespacePrefixes": ["Services/Printers", "Services/Cameras", "Locations", "Discovery", "Services/Catalog"],
+          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Services.Printers.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Cameras.|FullyQualifiedName~Farm.Infrastructure.Tests.Locations.|FullyQualifiedName~Farm.Infrastructure.Tests.Discovery.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Catalog."
         },
         {
           "name": "slicing",
