@@ -100,7 +100,7 @@
     "esbuild": "0.28.1",
     "eslint": "^10.9.1",
     "eslint-plugin-local": "file:eslint-rules",
-    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.5",
     "globals": "^17.11.0",
     "jsdom": "^27.4.0",
