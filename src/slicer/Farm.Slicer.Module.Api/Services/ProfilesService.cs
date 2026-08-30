@@ -146,6 +146,8 @@ public class ProfilesService(
         int infillPct = 20;
         string material = "PLA";
         string quality = "Standard";
+        int nozzleTemperature = 210;
+        int bedTemperature = 60;
         try
         {
             using JsonDocument doc = JsonDocument.Parse(settingsJson ?? "{}");
@@ -170,6 +172,16 @@ public class ProfilesService(
                 quality = q.GetString() ?? quality;
             }
 
+            if (root.TryGetProperty("nozzleTemperature", out JsonElement nozzleTemp) && nozzleTemp.TryGetInt32(out int nozzleTempVal))
+            {
+                nozzleTemperature = nozzleTempVal;
+            }
+
+            if (root.TryGetProperty("bedTemperature", out JsonElement bedTemp) && bedTemp.TryGetInt32(out int bedTempVal))
+            {
+                bedTemperature = bedTempVal;
+            }
+
             _logger.LogDebug("[ImportProfileAsync] Metadata extracted: layerHeight={LayerHeight}, infillPct={InfillPct}, material={Material}, quality={Quality}", layerHeight, infillPct, material, quality);
         }
         catch (Exception ex)
@@ -189,6 +201,9 @@ public class ProfilesService(
             RawJson = sanitizedRaw,
             SettingsJson = settingsJson,
             Hash = hash,
+            Material = material,
+            NozzleTemperature = nozzleTemperature,
+            BedTemperature = bedTemperature,
             IsSystem = false,
             IsDefault = req.SetDefault,
             IsPublic = req.IsPublic,
@@ -2864,6 +2879,9 @@ public class ProfilesService(
                     RawJson = systemProfile.RawJson,
                     SettingsJson = systemProfile.SettingsJson,
                     Hash = systemProfile.Hash,
+                    Material = systemProfile.Material,
+                    NozzleTemperature = systemProfile.NozzleTemperature,
+                    BedTemperature = systemProfile.BedTemperature,
                     IsSystem = false,
                     IsDefault = false,
                     IsPublic = request.MakePublic ?? false,
@@ -2952,6 +2970,9 @@ public class ProfilesService(
                     RawJson = profile.RawJson,
                     SettingsJson = profile.SettingsJson,
                     Hash = (profile.Hash ?? string.Empty) + "_clone",
+                    Material = profile.Material,
+                    NozzleTemperature = profile.NozzleTemperature,
+                    BedTemperature = profile.BedTemperature,
                     IsSystem = false,
                     IsDefault = false,
                     IsPublic = false,
@@ -3067,6 +3088,9 @@ public class ProfilesService(
                     PrintSpeed = processProfile.PrintSpeed,
                     EnableSupports = processProfile.Supports,
                     Quality = Enum.TryParse(quality, true, out ProfileQuality q) ? q : ProfileQuality.Standard,
+                    Material = material,
+                    NozzleTemperature = processProfile.NozzleTemp ?? 210,
+                    BedTemperature = processProfile.BedTemp ?? 60,
                     IsSystem = false,
                     IsDefault = false,
                     IsPublic = request.MakePublic ?? false,
@@ -3139,8 +3163,12 @@ public class ProfilesService(
             LayerHeight = req.LayerHeight,
             InfillPercentage = req.InfillPercentage,
             PrintSpeed = req.PrintSpeed,
+            NozzleTemperature = req.NozzleTemperature,
+            BedTemperature = req.BedTemperature,
             EnableSupports = req.EnableSupports,
+            Material = NormalizeString(req.Material, "PLA"),
             Quality = quality,
+            AdvancedSettings = req.AdvancedSettings,
             IsDefault = req.IsDefault,
             IsPublic = req.IsPublic
         };
@@ -3326,8 +3354,12 @@ public class ProfilesService(
             LayerHeight = profile.LayerHeight,
             InfillPercentage = profile.InfillPercentage,
             PrintSpeed = (int)profile.PrintSpeed,
+            NozzleTemperature = profile.NozzleTemperature,
+            BedTemperature = profile.BedTemperature,
             EnableSupports = profile.EnableSupports,
+            Material = profile.Material ?? string.Empty,
             Quality = profile.Quality.ToString(),
+            AdvancedSettings = profile.AdvancedSettings,
             IsDefault = profile.IsDefault,
             IsPublic = profile.IsPublic,
             CreatedAt = profile.CreatedAt,
@@ -3558,7 +3590,10 @@ public class ProfilesService(
             LayerHeight = source.LayerHeight,
             InfillPercentage = source.InfillPercentage,
             PrintSpeed = source.PrintSpeed,
+            NozzleTemperature = source.NozzleTemperature,
+            BedTemperature = source.BedTemperature,
             EnableSupports = source.EnableSupports,
+            Material = source.Material,
             Quality = source.Quality,
             AdvancedSettings = source.AdvancedSettings,
             SlicerVersion = source.SlicerVersion,

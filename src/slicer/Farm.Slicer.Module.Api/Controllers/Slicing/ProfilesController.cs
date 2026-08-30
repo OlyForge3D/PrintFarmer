@@ -230,6 +230,8 @@ public class ProfilesController(
                 LayerHeight = request.LayerHeight,
                 InfillPercentage = request.InfillPercentage,
                 PrintSpeed = request.PrintSpeed,
+                NozzleTemperature = request.NozzleTemperature,
+                BedTemperature = request.BedTemperature,
                 EnableSupports = request.EnableSupports,
                 Material = request.Material,
                 Quality = request.Quality,

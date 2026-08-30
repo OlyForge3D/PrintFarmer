@@ -5,7 +5,12 @@ namespace Farm.Slicer.Module.Domain;
 /// <summary>
 /// Process/Quality profile from OrcaSlicer.
 /// Contains quality/speed settings like layer height, infill density, print speeds, etc.
-/// Does NOT contain material or machine settings - those are stored in separate FilamentProfile and MachineProfile entities.
+/// Machine-specific hardware settings are stored in the separate MachineProfile entity, and
+/// dedicated FilamentProfile records remain the source of truth for material catalogs. This
+/// entity also carries a simple <see cref="Material"/>/<see cref="NozzleTemperature"/>/
+/// <see cref="BedTemperature"/> default for the ad-hoc, user-created profile flow
+/// (<c>POST /api/slicer/profiles</c>), where the caller does not necessarily reference a
+/// FilamentProfile.
 /// </summary>
 public class ProcessProfile
 {
@@ -30,6 +35,15 @@ public class ProcessProfile
     public double PrintSpeed { get; set; } = 50; // mm/s
 
     public bool EnableSupports { get; set; }
+
+    /// <summary>Nozzle temperature in °C for this process profile's default material.</summary>
+    public int NozzleTemperature { get; set; } = 210;
+
+    /// <summary>Bed temperature in °C for this process profile's default material.</summary>
+    public int BedTemperature { get; set; } = 60;
+
+    /// <summary>Default material name (e.g. "PLA", "PETG") associated with this process profile.</summary>
+    public string Material { get; set; } = "PLA";
 
     public ProfileQuality Quality { get; set; } = ProfileQuality.Standard;
 
