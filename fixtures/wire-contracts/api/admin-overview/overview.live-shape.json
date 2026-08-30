@@ -1,0 +1,31 @@
+{
+  "checkedAt": "2026-08-30T21:24:35.5300609Z",
+  "overallStatus": "Healthy",
+  "subsystems": [
+    {
+      "key": "api",
+      "name": "API",
+      "status": "Healthy",
+      "detail": "Responding"
+    },
+    {
+      "key": "database",
+      "name": "Database",
+      "status": "Healthy",
+      "detail": "Sqlite \u00B7 seeded (31 manufacturers)"
+    },
+    {
+      "key": "signalr",
+      "name": "SignalR Hub",
+      "status": "Healthy",
+      "detail": "Hub accessible"
+    },
+    {
+      "key": "backends",
+      "name": "Printer Backends",
+      "status": "Healthy",
+      "detail": "No registered printers reported"
+    }
+  ],
+  "attention": []
+}

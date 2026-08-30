@@ -1,0 +1,17 @@
+{
+  "id": "1316e7a6-a61a-4d06-855d-9dfbee829365",
+  "name": "Wire Contract Additive Field Profile",
+  "slicerType": "OrcaSlicer",
+  "layerHeight": 0.2,
+  "infillPercentage": 20,
+  "printSpeed": 50,
+  "nozzleTemperature": 0,
+  "bedTemperature": 0,
+  "enableSupports": false,
+  "material": "",
+  "quality": "Standard",
+  "isDefault": false,
+  "isPublic": true,
+  "createdAt": "2026-08-30T21:24:42.1095719Z",
+  "updatedAt": "2026-08-30T21:24:42.1095949Z"
+}

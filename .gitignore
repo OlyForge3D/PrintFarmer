@@ -169,3 +169,7 @@ layout_diff.txt
 # Python
 __pycache__/
 *.py[cod]
+
+# Wire-contract corpus cross-process manifest lock (issue #2238) - runtime artifact, never committed
+fixtures/wire-contracts/manifest.json.lock
+

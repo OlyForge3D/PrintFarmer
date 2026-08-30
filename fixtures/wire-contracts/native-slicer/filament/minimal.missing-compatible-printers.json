@@ -1,0 +1,8 @@
+{
+  "type": "filament",
+  "name": "Acme Minimal PLA",
+  "instantiation": "true",
+  "filament_type": [
+    "PLA"
+  ]
+}

@@ -134,6 +134,10 @@ if ! test_model_thumbnail_replacement_routing; then
   log "FAIL: tests/test-compose-generator.sh's model-thumbnail routing assertion failed - the generated split nginx text is already wrong, so a live stack would only reconfirm a known-bad route table. Not starting Docker."
   exit 1
 fi
+if ! test_workers_exact_match_routing; then
+  log "FAIL: tests/test-compose-generator.sh's workers exact-match routing assertion failed - the generated split nginx text is already wrong, so a live stack would only reconfirm a known-bad route table. Not starting Docker."
+  exit 1
+fi
 if ! test_slice_print_bridge_routing; then
   log "FAIL: tests/test-compose-generator.sh's slice/print-bridge routing assertion failed - the generated split nginx text is already wrong, so a live stack would only reconfirm a known-bad route table. Not starting Docker."
   exit 1
@@ -419,15 +423,14 @@ assert_slicer_route() {
 }
 
 log "Asserting slicer-owned namespace: /api/workers"
-# The generated nginx-proxy-split.conf only defines a trailing-slash prefix
-# location (`location /api/workers/`), so the bare collection-root path
-# (no trailing slash) does not match it and falls through to nginx's own
-# default redirect instead of reaching slicer-host - a real routing defect
-# filed separately as issue #2245 (linked to epic #2237) and intentionally
-# NOT fixed here (nginx templates are out of this issue's scope). Assert
-# against a real, matchable sub-route instead (WorkersController exposes
-# GET /api/workers/{id}), consistent with how /api/3d-models and
-# /api/artifacts are already asserted below.
+# nginx-proxy-split.conf defines both an exact-match location for the bare
+# collection-root path (`location = /api/workers`, no trailing slash) and a
+# trailing-slash prefix location (`location /api/workers/`) for sub-paths -
+# issue #2245 fixed a regression where the bare path fell through to
+# nginx's own default redirect instead of reaching slicer-host. Assert both
+# the bare path and a real sub-route (WorkersController exposes
+# GET /api/workers/{id}) so a regression on either is caught.
+assert_slicer_route "/api/workers" "workers (bare, no trailing slash)"
 assert_slicer_route "/api/workers/$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)" "workers"
 
 log "Asserting slicer-owned namespace: /api/slicers"

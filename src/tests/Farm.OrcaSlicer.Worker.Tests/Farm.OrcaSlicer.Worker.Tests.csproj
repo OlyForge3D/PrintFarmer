@@ -20,5 +20,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\orcaslicer-worker\Farm.OrcaSlicer.Worker.csproj" />
+    <ProjectReference Include="..\Farm.Testing.Shared\Farm.Testing.Shared.csproj" />
   </ItemGroup>
 </Project>

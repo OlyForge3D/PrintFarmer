@@ -1,0 +1,11 @@
+{
+  "sessionId": "wire-contract-session-81a5782e6d264bed9721d7960610cf42",
+  "totalIps": 254,
+  "scannedIps": 128,
+  "printersFound": 2,
+  "printersExcluded": 1,
+  "progressPercentage": 50,
+  "status": "Scanning",
+  "message": "Scanning network",
+  "autoDetectedNetworks": false
+}

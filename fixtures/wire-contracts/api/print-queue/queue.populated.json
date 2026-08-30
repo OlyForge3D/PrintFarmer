@@ -1,0 +1,14 @@
+[
+  {
+    "printerId": "cff522cb-5810-4db3-99df-47ff1343fd47",
+    "printerName": "Wire Contract Queue Printer",
+    "printerModel": "Wire Contract Model",
+    "modelAliases": [],
+    "isAvailable": true,
+    "queuedJobsCount": 0,
+    "supportedMaterials": [
+      "PLA",
+      "PETG"
+    ]
+  }
+]

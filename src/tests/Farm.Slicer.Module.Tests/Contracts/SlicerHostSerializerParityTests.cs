@@ -1,7 +1,9 @@
 ﻿extern alias SlicerHost;
 
 using System.Text.Json;
+using Farm.Slicer.Module.Dtos;
 using Farm.Slicers.OrcaSlicer.v2_4_0;
+using Farm.Testing.Shared;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -14,14 +16,15 @@ using SlicerHostProgram = SlicerHost::Program;
 namespace Farm.Slicer.Module.Tests.Contracts;
 
 /// <summary>
-/// Wire-contract parity guard for issue #2248: proves the standalone slicer host's
-/// (<c>Farm.Slicer.Host/Program.cs</c>) shared <c>configureJson</c> delegate applies
-/// <c>DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull</c> to BOTH its MVC (via
-/// <c>IOptions&lt;JsonOptions&gt;</c>) and SignalR (via
-/// <c>IOptions&lt;JsonHubProtocolOptions&gt;</c>) options objects, matching the main API's
-/// <c>ControllerStartup.cs</c>/<c>SignalRStartup.cs</c> null-handling policy. Resolves the REAL
-/// registered options from the slicer host's DI container (never a locally-reimplemented copy)
-/// and inspects the serialized JSON bytes directly, never the CLR options object's properties.
+/// Wire-contract parity guard for issue #2238: proves the standalone slicer host's
+/// (<c>Farm.Slicer.Host/Program.cs</c>) independently-configured MVC and SignalR
+/// <see cref="JsonSerializerOptions"/> instances are what's actually registered in that host's
+/// DI container (never a locally-reimplemented copy), and serializes a representative payload
+/// through each of those two REAL registered option objects to prove — from the resulting JSON
+/// bytes, never from inspecting the CLR options object's properties — that this host shares the
+/// main API's camelCase-naming + string-enum convention. Also covers issue #2248: the null-field
+/// handling test below proves this host's null-handling now matches the main API's (a null field
+/// is omitted, not serialized as an explicit JSON null).
 /// </summary>
 public sealed class SlicerHostSerializerParityTests : IClassFixture<SlicerHostSerializerParityTests.Factory>
 {
@@ -30,10 +33,54 @@ public sealed class SlicerHostSerializerParityTests : IClassFixture<SlicerHostSe
     public SlicerHostSerializerParityTests(Factory factory) => _factory = factory;
 
     /// <summary>
-    /// A null field serializes as a MISSING key, not an explicit JSON <c>null</c> — matching the
-    /// main API's null-handling policy (issue #2248's fix). Previously this test pinned the
-    /// opposite (explicit-null) behavior as a known, intentional divergence; the assertion below
-    /// was updated in lockstep with the <c>configureJson</c> production fix.
+    /// The slicer host's registered MVC <see cref="JsonSerializerOptions"/> (via
+    /// <c>AddJsonOptions</c>) uses camelCase property names and the exact enum string token —
+    /// matching the main API's controller convention.
+    /// </summary>
+    [Fact]
+    public void MvcJsonSerializerOptions_SerializesCamelCaseWithStringEnumToken()
+    {
+        using IServiceScope scope = _factory.Services.CreateScope();
+        JsonSerializerOptions options = scope.ServiceProvider
+            .GetRequiredService<IOptions<JsonOptions>>().Value.JsonSerializerOptions;
+
+        string json = JsonSerializer.Serialize(SampleDto(), options);
+        using JsonDocument document = JsonDocument.Parse(json);
+
+        JsonContractAssertions.AssertEnumToken(document.RootElement, "status", "Slicing");
+        _ = JsonContractAssertions.AssertProperty(document.RootElement, "jobId", JsonValueKind.String);
+        _ = JsonContractAssertions.AssertProperty(document.RootElement, "progress", JsonValueKind.Number);
+    }
+
+    /// <summary>
+    /// The slicer host's registered SignalR payload <see cref="JsonSerializerOptions"/> (via
+    /// <c>AddJsonProtocol</c>) uses the identical camelCase + string-enum convention as its MVC
+    /// options — both are configured by the same shared <c>configureJson</c> delegate in
+    /// <c>Farm.Slicer.Host/Program.cs</c>, so this proves that sharing hasn't drifted.
+    /// </summary>
+    [Fact]
+    public void SignalRJsonSerializerOptions_SerializesCamelCaseWithStringEnumToken()
+    {
+        using IServiceScope scope = _factory.Services.CreateScope();
+        JsonSerializerOptions options = scope.ServiceProvider
+            .GetRequiredService<IOptions<JsonHubProtocolOptions>>().Value.PayloadSerializerOptions;
+
+        string json = JsonSerializer.Serialize(SampleDto(), options);
+        using JsonDocument document = JsonDocument.Parse(json);
+
+        JsonContractAssertions.AssertEnumToken(document.RootElement, "status", "Slicing");
+        _ = JsonContractAssertions.AssertProperty(document.RootElement, "jobId", JsonValueKind.String);
+        _ = JsonContractAssertions.AssertProperty(document.RootElement, "progress", JsonValueKind.Number);
+    }
+
+    /// <summary>
+    /// Fixed by issue #2248: the slicer host's shared <c>configureJson</c> delegate in
+    /// <c>Farm.Slicer.Host/Program.cs</c> now sets
+    /// <c>DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull</c>, matching the main
+    /// API's <c>ControllerStartup.cs</c>/<c>SignalRStartup.cs</c> policy. A null field now
+    /// serializes as a MISSING key, not an explicit JSON <c>null</c> — this test was updated in
+    /// lockstep with that production fix (previously it pinned the opposite, explicit-null
+    /// behavior as a known, intentional divergence from the main API).
     /// </summary>
     [Fact]
     public void MvcJsonSerializerOptions_NullField_IsMissingKey_MatchesMainApi()
@@ -42,20 +89,15 @@ public sealed class SlicerHostSerializerParityTests : IClassFixture<SlicerHostSe
         JsonSerializerOptions options = scope.ServiceProvider
             .GetRequiredService<IOptions<JsonOptions>>().Value.JsonSerializerOptions;
 
-        string json = JsonSerializer.Serialize(SampleDto(message: null), options);
+        var dto = SampleDto();
+        dto.Message = null;
+        string json = JsonSerializer.Serialize(dto, options);
         using JsonDocument document = JsonDocument.Parse(json);
 
-        Assert.False(
-            document.RootElement.TryGetProperty("message", out _),
-            "Expected 'message' to be omitted from the payload, matching the main API's " +
-            "DefaultIgnoreCondition = WhenWritingNull policy, but the key was present.");
+        JsonContractAssertions.AssertMissingKey(document.RootElement, "message");
     }
 
-    /// <summary>
-    /// The slicer host's registered SignalR payload <see cref="JsonSerializerOptions"/> agrees
-    /// with its MVC options: both are configured by the same shared <c>configureJson</c> delegate
-    /// in <c>Farm.Slicer.Host/Program.cs</c>, so a null field is omitted from both, not just one.
-    /// </summary>
+    /// <summary>Proves the MVC and SignalR options within this host agree with each other (both derive from the same shared delegate).</summary>
     [Fact]
     public void MvcAndSignalRJsonSerializerOptions_ShareIdenticalNullHandling_WithinThisHost()
     {
@@ -65,39 +107,30 @@ public sealed class SlicerHostSerializerParityTests : IClassFixture<SlicerHostSe
         JsonSerializerOptions signalROptions = scope.ServiceProvider
             .GetRequiredService<IOptions<JsonHubProtocolOptions>>().Value.PayloadSerializerOptions;
 
-        SampleSlicingStatus dto = SampleDto(message: null);
+        var dto = SampleDto();
+        dto.Message = null;
         string mvcJson = JsonSerializer.Serialize(dto, mvcOptions);
         string signalRJson = JsonSerializer.Serialize(dto, signalROptions);
 
         using JsonDocument mvcDocument = JsonDocument.Parse(mvcJson);
         using JsonDocument signalRDocument = JsonDocument.Parse(signalRJson);
+        IReadOnlyList<string> differences = JsonContractAssertions.CompareStructurally(
+            mvcDocument.RootElement,
+            signalRDocument.RootElement);
 
-        bool mvcHasMessage = mvcDocument.RootElement.TryGetProperty("message", out _);
-        bool signalRHasMessage = signalRDocument.RootElement.TryGetProperty("message", out _);
-
-        Assert.False(mvcHasMessage, "MVC options should omit a null 'message' field.");
-        Assert.False(signalRHasMessage, "SignalR options should omit a null 'message' field.");
+        Assert.Empty(differences);
     }
 
-    private static SampleSlicingStatus SampleDto(string? message) => new()
+    private static SlicingJobDto SampleDto() => new()
     {
         JobId = Guid.NewGuid().ToString(),
-        Status = "Slicing",
+        UserId = Guid.NewGuid(),
+        Status = SlicingJobStatus.Slicing,
         Progress = 42,
-        Message = message,
+        Message = "Generating toolpaths",
+        SlicerEngine = "OrcaSlicer",
+        CreatedAt = DateTime.UtcNow,
     };
-
-    /// <summary>Minimal, self-contained DTO shape used only to exercise null-handling — deliberately not one of the production slicer DTOs, to keep this regression guard independent of unrelated schema changes.</summary>
-    private sealed class SampleSlicingStatus
-    {
-        public string JobId { get; set; } = string.Empty;
-
-        public string Status { get; set; } = string.Empty;
-
-        public int Progress { get; set; }
-
-        public string? Message { get; set; }
-    }
 
     /// <summary>
     /// Hosts the real production standalone slicer entry point (<c>Farm.Slicer.Host</c>) purely
