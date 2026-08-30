@@ -260,6 +260,24 @@ describe('AddPrinterModal', () => {
       expect(testConnection).not.toHaveBeenCalled();
     });
 
+    it('reproduces the reported bug: -1 backend port and 70000 frontend port both block Test with inline errors', async () => {
+      // Exact repro from the issue: /printers -> Add Printer, backend port -1,
+      // frontend port 70000, click Test. Previously this reached the server and
+      // came back as an HTTP 400 with no visible feedback.
+      const user = userEvent.setup();
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      fireEvent.change(screen.getByLabelText('Backend port'), { target: { value: '-1' } });
+      fireEvent.change(screen.getByLabelText('Frontend port'), { target: { value: '70000' } });
+
+      await user.click(screen.getByRole('button', { name: /test/i }));
+
+      expect(await screen.findByText('Backend port must be a whole number between 1 and 65535')).toBeInTheDocument();
+      expect(screen.getByText('Frontend port must be a whole number between 1 and 65535')).toBeInTheDocument();
+      expect(testConnection).not.toHaveBeenCalled();
+    });
+
     it('blocks Add Printer submission and shows an inline error for out-of-range ports', async () => {
       const user = userEvent.setup();
       render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
@@ -273,6 +291,48 @@ describe('AddPrinterModal', () => {
       expect(await screen.findByText('Backend port must be a whole number between 1 and 65535')).toBeInTheDocument();
       expect(screen.getByText('Frontend port must be a whole number between 1 and 65535')).toBeInTheDocument();
       expect(createPrinter).not.toHaveBeenCalled();
+    });
+
+    it('rejects a port of 0 (below the valid range)', async () => {
+      const user = userEvent.setup();
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      fireEvent.change(screen.getByLabelText('Backend port'), { target: { value: '0' } });
+      await user.click(screen.getByRole('button', { name: /test/i }));
+
+      expect(await screen.findByText('Backend port must be a whole number between 1 and 65535')).toBeInTheDocument();
+      expect(testConnection).not.toHaveBeenCalled();
+    });
+
+    it('rejects a fractional port instead of silently truncating it to an integer', async () => {
+      const user = userEvent.setup();
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      // parseInt('1.5', 10) === 1, which would silently accept a value the user
+      // never entered. Parsing via valueAsNumber preserves the fraction so it is
+      // correctly rejected instead.
+      fireEvent.change(screen.getByLabelText('Backend port'), { target: { value: '1.5' } });
+      await user.click(screen.getByRole('button', { name: /test/i }));
+
+      expect(await screen.findByText('Backend port must be a whole number between 1 and 65535')).toBeInTheDocument();
+      expect(testConnection).not.toHaveBeenCalled();
+    });
+
+    it('accepts the boundary values 1 and 65535', async () => {
+      const user = userEvent.setup();
+      testConnection.mockResolvedValue({ success: true, message: 'Connected successfully' });
+
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      fireEvent.change(screen.getByLabelText('Backend port'), { target: { value: '1' } });
+      fireEvent.change(screen.getByLabelText('Frontend port'), { target: { value: '65535' } });
+      await user.click(screen.getByRole('button', { name: /test/i }));
+
+      await waitFor(() => expect(testConnection).toHaveBeenCalled());
+      expect(screen.queryByText(/must be a whole number between 1 and 65535/)).not.toBeInTheDocument();
     });
 
     it('clears the port validation error once the user enters a valid value', async () => {
@@ -294,6 +354,25 @@ describe('AddPrinterModal', () => {
       expect(screen.queryByText('Backend port must be a whole number between 1 and 65535')).not.toBeInTheDocument();
     });
 
+    it('clears a stale backend port error when the backend type changes and resets the port programmatically', async () => {
+      const user = userEvent.setup();
+      testConnection.mockResolvedValue({ success: true, message: 'Connected successfully' });
+
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      fireEvent.change(screen.getByLabelText('Backend port'), { target: { value: '-1' } });
+      await user.click(screen.getByRole('button', { name: /test/i }));
+      expect(await screen.findByText('Backend port must be a whole number between 1 and 65535')).toBeInTheDocument();
+
+      // Switching backend type auto-resets `backendPort` to a valid default
+      // programmatically (not via the port input's own onChange), which must
+      // also clear the now-stale error rather than leaving it on screen.
+      await user.selectOptions(screen.getByLabelText('Backend type'), 'FlashForge');
+
+      expect(screen.queryByText('Backend port must be a whole number between 1 and 65535')).not.toBeInTheDocument();
+    });
+
     it('surfaces a server-side 400 rejection for the Test action even when client-side port validation passes', async () => {
       const user = userEvent.setup();
       testConnection.mockRejectedValue({
@@ -305,6 +384,10 @@ describe('AddPrinterModal', () => {
 
       render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
       await fillRequiredFields(user, 'Valid Name');
+      // Use a valid, non-default port to prove this is exercising client-side port
+      // validation (which passes) followed by a genuine server-side rejection,
+      // rather than accidentally passing due to the field being left untouched.
+      fireEvent.change(screen.getByLabelText('Backend port'), { target: { value: '9999' } });
 
       await user.click(screen.getByRole('button', { name: /test/i }));
 
@@ -314,6 +397,35 @@ describe('AddPrinterModal', () => {
           expect.objectContaining({ duration: 8000 })
         );
       });
+      expect(screen.queryByText(/must be a whole number between 1 and 65535/)).not.toBeInTheDocument();
+    });
+  });
+
+  // #2216 collateral: adding `noValidate` to the form removes the native `min={0}`
+  // guard on Wattage/Machine Hourly Rate, so these must now be enforced in JS.
+  describe('Wattage / Machine Hourly Rate validation (#2216 noValidate collateral)', () => {
+    it('blocks submission and shows an inline error for a negative wattage', async () => {
+      const user = userEvent.setup();
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      fireEvent.change(screen.getByLabelText('Wattage'), { target: { value: '-50' } });
+      await user.click(screen.getByRole('button', { name: /add printer/i }));
+
+      expect(await screen.findByText('Wattage must be zero or greater')).toBeInTheDocument();
+      expect(createPrinter).not.toHaveBeenCalled();
+    });
+
+    it('blocks submission and shows an inline error for a negative machine hourly rate', async () => {
+      const user = userEvent.setup();
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      fireEvent.change(screen.getByLabelText('Machine hourly rate'), { target: { value: '-0.5' } });
+      await user.click(screen.getByRole('button', { name: /add printer/i }));
+
+      expect(await screen.findByText('Machine hourly rate must be zero or greater')).toBeInTheDocument();
+      expect(createPrinter).not.toHaveBeenCalled();
     });
   });
 });

@@ -21,7 +21,11 @@ interface AddPrinterModalProps {
 const PRINTER_NAME_MAX_LENGTH = 100;
 const PRINTER_NAME_LENGTH_ERROR = `Printer name must be between 1 and ${PRINTER_NAME_MAX_LENGTH} characters`;
 
-/** Valid TCP port range. Matches the backend's `CreatePrinterValidator` port checks. */
+/**
+ * Valid TCP port range (1-65535). Enforced client-side only: `CreatePrinterValidator`
+ * has no port range rule today, so this form is currently the only guard against
+ * out-of-range ports reaching the server. See #2216.
+ */
 const MIN_PORT = 1;
 const MAX_PORT = 65535;
 
@@ -138,11 +142,15 @@ function AddPrinterModalContent({
       const filtered = models.filter(m => m.manufacturerId === value);
       setFilteredModels(filtered);
     }
-    // Clear validation error when user starts typing
-    if (validationErrors[field]) {
+    // Clear validation error when user starts typing. Also clear `backendPort`'s
+    // error when the backend type changes: `backend` change above resets
+    // `backendPort` to a known-valid default, so any prior out-of-range error for
+    // it would otherwise linger stale in the UI (#2216).
+    const fieldsToClear = field === 'backend' ? [field, 'backendPort'] : [field];
+    if (fieldsToClear.some(f => validationErrors[f])) {
       setValidationErrors(prev => {
         const newErrors = { ...prev };
-        delete newErrors[field];
+        for (const f of fieldsToClear) delete newErrors[f];
         return newErrors;
       });
     }
@@ -190,8 +198,20 @@ function AddPrinterModalContent({
       if (frontendPortError) errors.frontendPort = [frontendPortError];
     }
 
+    // Fields this function is responsible for validating. Always replace their
+    // prior state with the result of this run, rather than only merging in new
+    // errors - otherwise a field that became valid programmatically (e.g. its
+    // value was reset when `backend` changed, rather than edited directly by the
+    // user via `handleInputChange`) could leave a stale error message on screen
+    // even though the field is no longer invalid.
+    const testFieldKeys = ['serverUrl', 'password', 'apiKey', 'backendPort', 'frontendPort'] as const;
+    setValidationErrors(prev => {
+      const next = { ...prev };
+      for (const key of testFieldKeys) delete next[key];
+      return { ...next, ...errors };
+    });
+
     if (Object.keys(errors).length > 0) {
-      setValidationErrors(prev => ({ ...prev, ...errors }));
       return;
     }
 
@@ -260,6 +280,18 @@ function AddPrinterModalContent({
 
       const frontendPortError = validatePortValue(formData.frontendPort, 'Frontend port');
       if (frontendPortError) errors.frontendPort = [frontendPortError];
+    }
+
+    // Wattage and Machine Hourly Rate are optional, but when provided must be
+    // non-negative. Previously the inputs' native `min={0}` constraint enforced this;
+    // adding `noValidate` to the form (see below, #2216) disables that native check,
+    // so it must be replicated here to avoid silently accepting negative values.
+    if (formData.wattage !== undefined && (Number.isNaN(formData.wattage) || formData.wattage < 0)) {
+      errors.wattage = ['Wattage must be zero or greater'];
+    }
+
+    if (formData.machineHourlyRate !== undefined && (Number.isNaN(formData.machineHourlyRate) || formData.machineHourlyRate < 0)) {
+      errors.machineHourlyRate = ['Machine hourly rate must be zero or greater'];
     }
 
     setValidationErrors(errors);
@@ -513,8 +545,8 @@ function AddPrinterModalContent({
                 <FormField label="Backend Port (API)" error={validationErrors.backendPort?.[0]}>
                   <Input
                     type="number"
-                    value={formData.backendPort ?? getDefaultBackendPort(formData.backend)}
-                    onChange={e => handleInputChange('backendPort', parseInt(e.target.value, 10))}
+                    value={formData.backendPort ?? ''}
+                    onChange={e => handleInputChange('backendPort', e.target.value === '' ? undefined : e.target.valueAsNumber)}
                     placeholder={String(getDefaultBackendPort(formData.backend))}
                     min={1}
                     max={65535}
@@ -524,8 +556,8 @@ function AddPrinterModalContent({
                 <FormField label="Frontend Port (UI)" error={validationErrors.frontendPort?.[0]}>
                   <Input
                     type="number"
-                    value={formData.frontendPort ?? 80}
-                    onChange={e => handleInputChange('frontendPort', parseInt(e.target.value, 10))}
+                    value={formData.frontendPort ?? ''}
+                    onChange={e => handleInputChange('frontendPort', e.target.value === '' ? undefined : e.target.valueAsNumber)}
                     placeholder="80"
                     min={1}
                     max={65535}
@@ -611,6 +643,7 @@ function AddPrinterModalContent({
                 <FormField
                   label="Wattage (W)"
                   helper="Power consumption in watts. Leave blank to use model default or global setting."
+                  error={validationErrors.wattage?.[0]}
                 >
                   <Input
                     type="number"
@@ -625,6 +658,7 @@ function AddPrinterModalContent({
                 <FormField
                   label="Machine Hourly Rate ($)"
                   helper="Hourly operating cost. Leave blank to use the global default."
+                  error={validationErrors.machineHourlyRate?.[0]}
                 >
                   <Input
                     type="number"
