@@ -66,6 +66,26 @@ log() {
   printf '[split-topology-route-smoke] %s\n' "$1"
 }
 
+# parse_curl_response <raw>: splits curl output captured with
+# --write-out '\n%{http_code}\nCTYPE:%{content_type}' into globals
+# PARSED_BODY/PARSED_STATUS/PARSED_CTYPE. The literal "CTYPE:" prefix is
+# required, not cosmetic: curl emits an empty string for %{content_type}
+# when a response has no Content-Type header (e.g. some empty-body 401/403
+# responses), and command substitution strips trailing newlines, so a bare
+# trailing empty field would silently disappear and shift every parsed
+# field by one (status read as body, ctype read as status, etc.) instead
+# of failing loudly. Prefixing the field with "CTYPE:" guarantees the last
+# line is never empty, so the field boundary survives regardless of
+# whether Content-Type was present.
+parse_curl_response() {
+  local raw="$1"
+  local ctype_line="${raw##*$'\n'}"
+  PARSED_CTYPE="${ctype_line#CTYPE:}"
+  local rest="${raw%$'\n'"$ctype_line"}"
+  PARSED_STATUS="${rest##*$'\n'}"
+  PARSED_BODY="${rest%$'\n'"$PARSED_STATUS"}"
+}
+
 # --- Docker-unavailable behavior is explicit (see header). REQUIRE_LIVE_SMOKE=true
 # (set by the dedicated CI job) turns a missing prerequisite into a hard FAIL
 # instead of a silent SKIP/exit 0, so the job whose entire purpose is this
@@ -346,15 +366,13 @@ assert_slicer_route() {
   fi
   log "OK: [$label] main API (direct) does NOT serve $path (SLICER_DISABLED, status $direct_status) - negative assertion holds"
 
-  local nginx_raw nginx_status nginx_ctype nginx_body
+  local nginx_raw
   nginx_raw="$(curl --silent --show-error \
     -H "Authorization: Bearer ${AUTH_TOKEN}" \
-    --write-out '\n%{http_code}\n%{content_type}' \
+    --write-out '\n%{http_code}\nCTYPE:%{content_type}' \
     "http://localhost:${HTTP_PORT}${path}")"
-  nginx_ctype="${nginx_raw##*$'\n'}"
-  nginx_raw="${nginx_raw%$'\n'"$nginx_ctype"}"
-  nginx_status="${nginx_raw##*$'\n'}"
-  nginx_body="${nginx_raw%$'\n'"$nginx_status"}"
+  parse_curl_response "$nginx_raw"
+  local nginx_body="$PARSED_BODY" nginx_status="$PARSED_STATUS" nginx_ctype="$PARSED_CTYPE"
   # A 3xx/5xx/000 (or a transport failure) does NOT prove slicer-host
   # answered - "absence of the SLICER_DISABLED marker" is trivially true for
   # an empty body, a gateway error, or a redirect nginx issued itself
@@ -379,14 +397,14 @@ assert_slicer_route() {
   # Query slicer-host directly on its own published port and require
   # nginx's response to share its status AND Content-Type, and require
   # neither is text/html.
-  local direct_slicer_raw direct_slicer_status direct_slicer_ctype
+  local direct_slicer_raw
   direct_slicer_raw="$(curl --silent --show-error \
     -H "Authorization: Bearer ${AUTH_TOKEN}" \
-    --write-out '%{http_code}\n%{content_type}' \
+    --write-out '\n%{http_code}\nCTYPE:%{content_type}' \
     -o /dev/null \
     "http://localhost:${SLICER_HOST_PORT}${path}")"
-  direct_slicer_ctype="${direct_slicer_raw##*$'\n'}"
-  direct_slicer_status="${direct_slicer_raw%$'\n'"$direct_slicer_ctype"}"
+  parse_curl_response "$direct_slicer_raw"
+  local direct_slicer_status="$PARSED_STATUS" direct_slicer_ctype="$PARSED_CTYPE"
   if [[ "$nginx_ctype" == text/html* ]]; then
     log "FAIL: [$label] nginx's response for $path via port $HTTP_PORT is text/html (Content-Type: $nginx_ctype) - looks like an SPA/static-file response or nginx's own error page, not slicer-host"
     FAILURES=$((FAILURES + 1))
@@ -443,21 +461,22 @@ assert_slicer_route "/api/admin/slicer/settings" "admin/slicer"
 # assert_slicer_route above).
 control_direct_raw="$(curl --silent --show-error \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  --write-out '%{http_code}\n%{content_type}' \
+  --write-out '\n%{http_code}\nCTYPE:%{content_type}' \
   -o /dev/null \
   "http://localhost:${API_PORT}/api/printers")"
-control_direct_ctype="${control_direct_raw##*$'\n'}"
-control_direct_status="${control_direct_raw%$'\n'"$control_direct_ctype"}"
+parse_curl_response "$control_direct_raw"
+control_direct_status="$PARSED_STATUS"
+control_direct_ctype="$PARSED_CTYPE"
 
 log "Asserting main-API-owned control route /api/printers is NOT routed to slicer-host"
 control_raw="$(curl --silent --show-error \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  --write-out '\n%{http_code}\n%{content_type}' \
+  --write-out '\n%{http_code}\nCTYPE:%{content_type}' \
   "http://localhost:${HTTP_PORT}/api/printers")"
-control_ctype="${control_raw##*$'\n'}"
-control_raw="${control_raw%$'\n'"$control_ctype"}"
-control_status="${control_raw##*$'\n'}"
-control_body="${control_raw%$'\n'"$control_status"}"
+parse_curl_response "$control_raw"
+control_body="$PARSED_BODY"
+control_status="$PARSED_STATUS"
+control_ctype="$PARSED_CTYPE"
 if [[ ! "$control_status" =~ ^(2|4)[0-9][0-9]$ ]]; then
   log "FAIL: control route /api/printers via nginx did not get a real upstream response, got status '$control_status' (body: $control_body)"
   FAILURES=$((FAILURES + 1))
