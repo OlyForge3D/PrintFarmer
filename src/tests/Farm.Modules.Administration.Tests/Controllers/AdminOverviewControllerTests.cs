@@ -21,6 +21,7 @@ public class AdminOverviewControllerTests
         AdminOverviewDto expected = new()
         {
             CheckedAt = new DateTime(2026, 7, 25, 17, 4, 0, DateTimeKind.Utc),
+            OverallStatus = SubsystemStatus.Healthy,
             Subsystems = new[]
             {
                 new SubsystemHealthDto { Key = "api", Name = "API", Status = SubsystemStatus.Healthy, Detail = "Responding" },

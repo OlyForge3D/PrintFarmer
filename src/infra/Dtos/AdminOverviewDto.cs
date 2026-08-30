@@ -3,8 +3,12 @@
 /// <summary>
 /// Status of a subsystem in the admin overview. Serialized as a string via
 /// <c>JsonStringEnumConverter</c>, so clients receive <c>"Healthy"</c>, <c>"Degraded"</c>,
-/// <c>"Unhealthy"</c>, or <c>"Unknown"</c>. Ordering matters for roll-up:
+/// <c>"Unknown"</c>, or <c>"Unhealthy"</c>. Ordering matters for roll-up:
 /// higher ordinal is worse and wins when combining several sub-checks.
+/// <c>Unhealthy</c> — a confirmed, actionable failure — deliberately outranks
+/// <c>Unknown</c> — an unconfirmed probe timeout/failure elsewhere — so a real
+/// failure in one subsystem is never masked behind an "Unknown" reported by a
+/// different, unrelated subsystem in the same overview (see issue #2222).
 /// </summary>
 public enum SubsystemStatus
 {
@@ -14,11 +18,11 @@ public enum SubsystemStatus
     /// <summary>The subsystem is running but with non-critical issues that warrant attention.</summary>
     Degraded = 1,
 
-    /// <summary>The subsystem is not functioning correctly and needs immediate attention.</summary>
-    Unhealthy = 2,
-
     /// <summary>Status could not be determined (probe timed out or threw).</summary>
-    Unknown = 3,
+    Unknown = 2,
+
+    /// <summary>The subsystem is not functioning correctly and needs immediate attention.</summary>
+    Unhealthy = 3,
 }
 
 /// <summary>
@@ -46,6 +50,15 @@ public record AdminOverviewDto
 {
     /// <summary>UTC timestamp when the snapshot was generated. Renders as ISO-8601 in JSON.</summary>
     public required DateTime CheckedAt { get; init; }
+
+    /// <summary>
+    /// The single worst status across <see cref="Subsystems"/>, per the roll-up rule
+    /// documented on <see cref="SubsystemStatus"/> (higher ordinal wins). Callers must
+    /// render this — not assume "Healthy" — for any overall status indicator, so a
+    /// degraded or unhealthy subsystem is never masked by a contradictory "all clear"
+    /// header (see issue #2222).
+    /// </summary>
+    public required SubsystemStatus OverallStatus { get; init; }
 
     /// <summary>
     /// Subsystem health tiles in stable display order. Always includes the core subsystems
