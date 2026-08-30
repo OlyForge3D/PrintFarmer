@@ -61,6 +61,7 @@ import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 import { buildSlicerViewerModelUrl, getSlicerViewerFileType } from '@/features/slicer/utils/model-file-utils';
 import { loadModelArrayBuffer, isAuthenticatedModelUrl } from '@/common/utils/authenticatedModelUrl';
 import { buildSlicePayloadModels, resolveModel3DId, modelTransformJson, diffProcessOverrides } from '@/features/slicer/utils/slicePayload';
+import { validateOrcaPrintSettings } from '@/features/slicer/utils/slicerSettingsValidation';
 import { readOrcaBundle } from '@/features/slicer/utils/orcaBundleLoader';
 import { SlicerWorkspaceBoundary } from '@/features/slicer/components/viewer/SlicerWorkspaceBoundary';
 import { X } from 'lucide-react';
@@ -457,6 +458,12 @@ export const NewSliceJobPage: React.FC = () => {
   const handleSimpleSettingsChange = useCallback((settings: SlicerSettings) => {
     setSlicerSettings((prev) => simpleToOrcaSettings(settings, prev));
   }, []);
+
+  // Simple-mode inline field validity (issue #2223): false while the Simple
+  // settings panel is showing an uncommitted invalid perimeter/infill/shell
+  // layer value. Gates submission so a rejected edit can never be silently
+  // replaced by the last valid value at slice time.
+  const [isSimpleSlicerSettingsValid, setIsSimpleSlicerSettingsValid] = useState(true);
 
   // === Process Profile Management handlers ===
   const handleResetProcessProfile = useCallback(() => {
@@ -1783,6 +1790,23 @@ export const NewSliceJobPage: React.FC = () => {
   const submitSliceJob = useCallback((activeModelIds?: string[]) => {
     setError(null);
 
+    // Issue #2223: block submission on invalid print settings instead of
+    // letting a negative perimeter/infill count or a zero top/bottom shell
+    // layer count reach the worker and fail generically later. The Simple
+    // panel surfaces its own inline errors live (uncommitted invalid drafts),
+    // so `isSimpleSlicerSettingsValid` catches those; `validateOrcaPrintSettings`
+    // is a defense-in-depth check against the committed `slicerSettings` that
+    // also covers Advanced mode and profile-import paths.
+    if (slicerMode !== 'Advanced' && !isSimpleSlicerSettingsValid) {
+      setError('Fix the highlighted print setting before slicing.');
+      return;
+    }
+    const settingsErrors = validateOrcaPrintSettings(slicerSettings);
+    if (settingsErrors.length > 0) {
+      setError(settingsErrors[0].message);
+      return;
+    }
+
     // Issue #578 dual-engine (Hicks R3, refined R4): reject submission until
     // the engine registry has resolved. Otherwise Latest-mode would build
     // profile queries against `effectiveEngineVersion === undefined` and
@@ -2032,6 +2056,8 @@ export const NewSliceJobPage: React.FC = () => {
     versionEntriesForEngine,
     slicerInfo.engine,
     slicerSettings,
+    slicerMode,
+    isSimpleSlicerSettingsValid,
     submitMutation,
     user?.id,
     selectedModelId,
@@ -3115,6 +3141,7 @@ export const NewSliceJobPage: React.FC = () => {
             <SimpleSlicerSettingsPanel
               settings={simpleSlicerSettings}
               onSettingsChange={handleSimpleSettingsChange}
+              onValidationChange={setIsSimpleSlicerSettingsValid}
               simpleMode
             />
           )}
