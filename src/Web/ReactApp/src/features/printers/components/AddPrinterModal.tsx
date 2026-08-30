@@ -294,6 +294,19 @@ function AddPrinterModalContent({
       errors.machineHourlyRate = ['Machine hourly rate must be zero or greater'];
     }
 
+    // Date Acquired's native `max` (today) constraint is also disabled by `noValidate`;
+    // replicate it in JS so a manually-typed future date is caught before submission
+    // instead of relying solely on the server's `DateAcquired` rule.
+    if (formData.dateAcquired) {
+      const dateAcquiredValue = typeof formData.dateAcquired === 'string'
+        ? formData.dateAcquired
+        : formData.dateAcquired.toISOString().split('T')[0];
+      const todayValue = new Date().toISOString().split('T')[0];
+      if (dateAcquiredValue > todayValue) {
+        errors.dateAcquired = ['Date acquired cannot be in the future'];
+      }
+    }
+
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
   };

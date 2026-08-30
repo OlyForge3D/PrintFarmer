@@ -428,4 +428,41 @@ describe('AddPrinterModal', () => {
       expect(createPrinter).not.toHaveBeenCalled();
     });
   });
+
+  // #2216 collateral: `noValidate` also disables Date Acquired's native `max={today}`
+  // constraint, which previously blocked a manually-typed future date at the browser
+  // level. `CreatePrinterValidator` rejects a future `DateAcquired` server-side too,
+  // but replicating the check in JS avoids an unnecessary round trip and keeps this
+  // field consistent with the port/wattage/hourly-rate fixes above.
+  describe('Date Acquired validation (#2216 noValidate collateral)', () => {
+    it('blocks submission and shows an inline error for a future date acquired', async () => {
+      const user = userEvent.setup();
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + 1);
+      const futureDateValue = futureDate.toISOString().split('T')[0];
+
+      fireEvent.change(screen.getByLabelText('Date acquired'), { target: { value: futureDateValue } });
+      await user.click(screen.getByRole('button', { name: /add printer/i }));
+
+      expect(await screen.findByText('Date acquired cannot be in the future')).toBeInTheDocument();
+      expect(createPrinter).not.toHaveBeenCalled();
+    });
+
+    it('accepts today as a valid date acquired', async () => {
+      const user = userEvent.setup();
+      createPrinter.mockResolvedValueOnce({ id: 1 });
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Valid Name');
+
+      const todayValue = new Date().toISOString().split('T')[0];
+      fireEvent.change(screen.getByLabelText('Date acquired'), { target: { value: todayValue } });
+      await user.click(screen.getByRole('button', { name: /add printer/i }));
+
+      await waitFor(() => expect(createPrinter).toHaveBeenCalled());
+      expect(screen.queryByText('Date acquired cannot be in the future')).not.toBeInTheDocument();
+    });
+  });
 });
