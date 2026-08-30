@@ -122,6 +122,12 @@ public sealed class NativeSlicerCorpusTests : IDisposable
                     ["WorkerAuth:SharedKey"] = "test-registration-key",
                     ["Worker:EngineVersion"] = "test-version",
                     ["Worker:VerifyBinaryVersion"] = "true",
+                    // appsettings.json's "/app/temp" is a Docker-deployment path that
+                    // doesn't exist (and isn't writable) in the CI test sandbox that hosts
+                    // this WebApplicationFactory; every other test in this assembly already
+                    // overrides this key for the same reason (see e.g. CalibrationTests,
+                    // ProfileHandoffIntegrationTests, WorkerVersionEndpointTests).
+                    ["Worker:WorkingDirectory"] = Path.Join(profilesRoot, "work"),
                 }));
 
             _ = builder.ConfigureServices(services =>
