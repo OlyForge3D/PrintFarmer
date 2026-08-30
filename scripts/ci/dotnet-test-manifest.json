@@ -23,8 +23,8 @@
       "shards": [
         {
           "name": "core",
-          "namespacePrefixes": ["Architecture", "Calibration", "Capabilities", "Controllers", "Data", "DataManagement", "Dispatch"],
-          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Architecture.|FullyQualifiedName~Farm.Web.Api.Tests.Calibration.|FullyQualifiedName~Farm.Web.Api.Tests.Capabilities.|FullyQualifiedName~Farm.Web.Api.Tests.Controllers.|FullyQualifiedName~Farm.Web.Api.Tests.Data.|FullyQualifiedName~Farm.Web.Api.Tests.DataManagement.|FullyQualifiedName~Farm.Web.Api.Tests.Dispatch."
+          "namespacePrefixes": ["Architecture", "Calibration", "Capabilities", "Contracts", "Controllers", "Data", "DataManagement", "Dispatch"],
+          "filter": "FullyQualifiedName~Farm.Web.Api.Tests.Architecture.|FullyQualifiedName~Farm.Web.Api.Tests.Calibration.|FullyQualifiedName~Farm.Web.Api.Tests.Capabilities.|FullyQualifiedName~Farm.Web.Api.Tests.Contracts.|FullyQualifiedName~Farm.Web.Api.Tests.Controllers.|FullyQualifiedName~Farm.Web.Api.Tests.Data.|FullyQualifiedName~Farm.Web.Api.Tests.DataManagement.|FullyQualifiedName~Farm.Web.Api.Tests.Dispatch."
         },
         {
           "name": "infra",
