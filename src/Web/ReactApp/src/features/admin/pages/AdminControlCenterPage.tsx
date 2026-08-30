@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
+import clsx from 'clsx';
 import { Link } from 'react-router';
-import { Button, Card } from '@/common/components/ui';
+import { Badge, Button, Card } from '@/common/components/ui';
 import {
   AdminEmpty,
   AdminError,
@@ -95,6 +96,19 @@ function presentationForSubsystemStatus(raw: string): StatusPresentation {
 // Attention severity presentation now lives in the shared AttentionRow so the
 // hub and the settings page cannot drift apart. See
 // `common/components/admin/AttentionRow.tsx`.
+
+function OverallStatusBadge({ status }: { status: string }) {
+  const presentation = presentationForSubsystemStatus(status);
+  const { Icon } = presentation;
+  return (
+    <span data-testid="admin-hub-overall-status" data-overall-status={status}>
+      <Badge variant={presentation.badgeVariant} size="sm" className="gap-1.5">
+        <Icon className={clsx('h-3.5 w-3.5', presentation.iconClass)} ariaLabel="" />
+        System {presentation.label}
+      </Badge>
+    </span>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Formatting helpers
@@ -267,6 +281,7 @@ export function AdminControlCenterPage() {
         <AdminSection
           caption="System health"
           captionId="admin-hub-health-heading"
+          captionAside={data ? <OverallStatusBadge status={data.overallStatus} /> : null}
           headerAside={
             data?.checkedAt ? (
               <p className="text-xs text-pf-text-tertiary">
