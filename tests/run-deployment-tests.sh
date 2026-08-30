@@ -25,6 +25,22 @@
 #   ./run-deployment-tests.sh --quick            # Run quick sanity checks only
 #   ./run-deployment-tests.sh --help             # Show help
 #
+# Environment variables:
+#   RUN_LIVE_SMOKE_TESTS=true   Also run tests/test-split-topology-route-smoke.sh
+#                               (issue #2239): builds and starts a real generated
+#                               split-topology Docker stack and proves live,
+#                               authenticated route ownership + a WebSocket
+#                               upgrade. Off by default for `--full`/no-args runs
+#                               since it builds Docker images. This env var is a
+#                               convenience for running the smoke through this
+#                               harness locally; .github/workflows/deployment-tests.yml
+#                               does NOT set it and does NOT invoke this script -
+#                               its dedicated `split-topology-route-smoke` job
+#                               runs tests/test-split-topology-route-smoke.sh
+#                               directly (with REQUIRE_LIVE_SMOKE=true so a
+#                               missing prerequisite fails the job instead of
+#                               silently skipping).
+#
 # Exit codes:
 #   0 = All tests passed
 #   1 = Some tests failed
@@ -463,6 +479,20 @@ run_full_tests() {
     
     log_subsection "Test: User Scenario"
     run_test_suite "user scenario tests" "$SCRIPT_DIR/test-user-scenario-complete.sh" || true
+
+    # Opt-in (RUN_LIVE_SMOKE_TESTS=true): builds and starts a real generated
+    # split-topology stack (nginx + API + slicer-host + a worker) and proves
+    # authenticated route ownership + a live WebSocket upgrade (issue #2239).
+    # Gated so `--full` doesn't surprise local devs with an unexpected Docker
+    # build. .github/workflows/deployment-tests.yml does NOT set this env var
+    # or invoke this script - its dedicated `split-topology-route-smoke` job
+    # runs tests/test-split-topology-route-smoke.sh directly instead.
+    if [[ "${RUN_LIVE_SMOKE_TESTS:-false}" == "true" ]]; then
+        log_subsection "Test: Split-Topology Route Smoke (live, authenticated)"
+        run_test_suite "split-topology route smoke tests" "$SCRIPT_DIR/test-split-topology-route-smoke.sh" || true
+    else
+        log_info "Skipping split-topology route smoke tests (set RUN_LIVE_SMOKE_TESTS=true to include; builds a live Docker stack)"
+    fi
 }
 
 ################################################################################
