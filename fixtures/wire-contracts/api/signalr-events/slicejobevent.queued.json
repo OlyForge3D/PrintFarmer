@@ -1,0 +1,10 @@
+{
+  "eventType": "JobQueued",
+  "jobId": "5c2deb31-f2f1-4ad1-bc37-27970c1f5452",
+  "userId": "24b9ee51-7450-4c8e-977f-022ae009dfe6",
+  "status": "Queued",
+  "progressPercent": 0,
+  "queuedAt": "2026-08-30T20:20:14.5448572Z",
+  "priority": 1,
+  "timestamp": "2026-08-30T20:20:14.5513451Z"
+}

@@ -1,0 +1,13 @@
+{
+  "id": "fc829f10-3457-44c8-926d-1c1d44c27ac8",
+  "taskType": "Custom",
+  "entityType": "Manual",
+  "entityId": "00000000-0000-0000-0000-000000000000",
+  "title": "Wire contract manual task",
+  "status": "Pending",
+  "priority": "High",
+  "createdAt": "2026-08-30T21:24:39.0901462Z",
+  "relatedEntityCount": 0,
+  "anchorKind": "Unspecified",
+  "sourceKind": "Unspecified"
+}

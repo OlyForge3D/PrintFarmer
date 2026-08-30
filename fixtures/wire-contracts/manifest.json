@@ -1,0 +1,170 @@
+[
+  {
+    "Path": "api/admin-overview/overview.live-shape.json",
+    "Endpoint": "GET /api/admin/overview",
+    "ProducingTest": "AdminOverviewContractTests.GetOverview_RealHealthProbes_MatchesShapeAndExactEnumTokens",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/print-queue/queue.empty-collection.json",
+    "Endpoint": "GET /api/job-queue",
+    "ProducingTest": "PrintQueueContractTests.GetQueue_NoPrinters_ReturnsEmptyCollection",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/print-queue/queue.populated.json",
+    "Endpoint": "GET /api/job-queue",
+    "ProducingTest": "PrintQueueContractTests.GetQueue_PopulatedPrinter_MatchesCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/printer-status/printerupdated.missing-key.json",
+    "Endpoint": "SignalR PrinterHub \u0022printerupdated\u0022 (RequestPrinterStatus)",
+    "ProducingTest": "PrinterStatusContractTests.RequestPrinterStatus_MinimalStatus_OmitsOptionalKeys",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/printer-status/printerupdated.populated.json",
+    "Endpoint": "SignalR PrinterHub \u0022printerupdated\u0022 (RequestPrinterStatus)",
+    "ProducingTest": "PrinterStatusContractTests.RequestPrinterStatus_CachedStatus_SendsPrinterUpdatedEventMatchingCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/signalr-events/SlicerRegistered.populated.json",
+    "Endpoint": "SignalR SlicerHub \u0022SlicerRegistered\u0022 (PascalCase; ISlicersService.RegisterAsync)",
+    "ProducingTest": "SignalREventContractTests.SlicerRegister_RealBroadcast_SendsSlicerRegisteredMatchingCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/signalr-events/discoveryprogress.missing-message.json",
+    "Endpoint": "SignalR PrinterHub \u0022discoveryprogress\u0022 (JoinDiscoveryGroupAsync, null Message)",
+    "ProducingTest": "SignalREventContractTests.JoinDiscoveryGroup_CachedProgressNoMessage_OmitsMessageKey",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/signalr-events/discoveryprogress.populated.json",
+    "Endpoint": "SignalR PrinterHub \u0022discoveryprogress\u0022 (JoinDiscoveryGroupAsync)",
+    "ProducingTest": "SignalREventContractTests.JoinDiscoveryGroup_CachedProgress_ReplaysDiscoveryProgressEvent",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/signalr-events/slicejobevent.queued.json",
+    "Endpoint": "SignalR SlicerProgressHub \u0022slicejobevent\u0022 (NotifyJobQueuedAsync)",
+    "ProducingTest": "SignalREventContractTests.NotifyJobQueued_RealBroadcast_SendsSliceJobEventMatchingCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "b198c8f46ad028f951cd8fc5aaea3ceac0eccb45"
+  },
+  {
+    "Path": "api/signalr-events/slicingcompleted.populated.json",
+    "Endpoint": "SignalR SlicerProgressHub \u0022slicingcompleted\u0022 (NotifyCompletionAsync)",
+    "ProducingTest": "SignalREventContractTests.NotifyCompletion_RealBroadcast_SendsSlicingCompletedMatchingCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/signalr-events/slicingfailed.populated.json",
+    "Endpoint": "SignalR SlicerProgressHub \u0022slicingfailed\u0022 (NotifyFailureAsync)",
+    "ProducingTest": "SignalREventContractTests.NotifyFailure_RealBroadcast_SendsSlicingFailedMatchingCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/signalr-events/slicingprogress.missing-currentstep.json",
+    "Endpoint": "SignalR SlicerProgressHub \u0022slicingprogress\u0022 (NotifyProgressAsync, null CurrentStep)",
+    "ProducingTest": "SignalREventContractTests.NotifyProgress_RealBroadcastNoCurrentStep_OmitsCurrentStepKey",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/signalr-events/slicingprogress.populated.json",
+    "Endpoint": "SignalR SlicerProgressHub \u0022slicingprogress\u0022 (NotifyProgressAsync)",
+    "ProducingTest": "SignalREventContractTests.NotifyProgress_RealBroadcast_SendsSlicingProgressMatchingCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/slice-jobs/job.completed-populated.json",
+    "Endpoint": "GET /api/slice/{id}",
+    "ProducingTest": "SliceJobContractTests.GetJob_Completed_PopulatedFieldsMatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/slice-jobs/job.minimal-status.json",
+    "Endpoint": "GET /api/slice/{id}",
+    "ProducingTest": "SliceJobContractTests.GetJob_JustSubmitted_MinimalStatusOmitsOptionalKeys",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/slicer-profiles/profiles.empty-collection.json",
+    "Endpoint": "GET /api/slicer/profiles",
+    "ProducingTest": "SlicerProfileContractTests.GetProfiles_NoProfiles_ReturnsEmptyCollection",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/slicer-profiles/profiles.missing-key.json",
+    "Endpoint": "GET /api/slicer/profiles/{id}",
+    "ProducingTest": "SlicerProfileContractTests.CreateThenGetProfile_MissingOptionalDescription_OmitsKeyAndMatchesCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/slicer-profiles/profiles.populated.json",
+    "Endpoint": "POST /api/slicer/profiles",
+    "ProducingTest": "SlicerProfileContractTests.CreateThenGetProfile_Populated_MatchesCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/slicer-profiles/profiles.unknown-additive-request-field.json",
+    "Endpoint": "POST /api/slicer/profiles (unknown additive request field)",
+    "ProducingTest": "SlicerProfileContractTests.CreateProfile_UnknownAdditiveRequestField_IsIgnoredNotRejected",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/tasks/tasks.empty-collection.json",
+    "Endpoint": "GET /api/tasks",
+    "ProducingTest": "TasksContractTests.GetTasks_NoTasks_ReturnsEmptyCollection",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/tasks/tasks.populated.json",
+    "Endpoint": "POST /api/tasks",
+    "ProducingTest": "TasksContractTests.CreateThenGetTask_Populated_MatchesCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/tasks/tasks.unknown-additive-request-field.json",
+    "Endpoint": "POST /api/tasks (unknown additive request field)",
+    "ProducingTest": "TasksContractTests.CreateTask_UnknownAdditiveRequestField_IsIgnoredNotRejected",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "native-slicer/filament/minimal.missing-compatible-printers.json",
+    "Endpoint": "GET /api/profiles/filament (native settings bag, real HTTP response)",
+    "ProducingTest": "Farm.OrcaSlicer.Worker.Tests.Contracts.NativeSlicerCorpusTests.GetFilamentProfilesEndpoint_MinimalProfile_OmitsCompatiblePrintersKeyEntirely",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "native-slicer/filament/prusa-generic-pla.populated.json",
+    "Endpoint": "GET /api/profiles/filament (native settings bag, real HTTP response)",
+    "ProducingTest": "Farm.OrcaSlicer.Worker.Tests.Contracts.NativeSlicerCorpusTests.GetFilamentProfilesEndpoint_RealPrusaGenericPla_CapturesNativeSnakeCaseSettings",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  }
+]

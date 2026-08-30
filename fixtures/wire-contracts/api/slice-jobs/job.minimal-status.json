@@ -1,0 +1,9 @@
+{
+  "id": "77a1b709-86e2-409f-af67-7e1f12788b63",
+  "status": "Queued",
+  "progressPercent": 0,
+  "queuedAt": "2026-08-30T21:24:50.8317191",
+  "modelFileName": "wire-contract-model.3mf",
+  "slicerEngine": "OrcaSlicer",
+  "artifactsRoute": "/api/artifacts/job/77a1b709-86e2-409f-af67-7e1f12788b63"
+}

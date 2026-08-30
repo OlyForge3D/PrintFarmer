@@ -1,0 +1,12 @@
+{
+  "id": "b3a9ea38-d5af-41df-9678-35fc3745e6a4",
+  "status": "Completed",
+  "progressPercent": 100,
+  "queuedAt": "2026-08-30T21:24:44.5673144",
+  "completedAt": "2026-08-30T21:24:44.6868755",
+  "estimatedPrintTimeSeconds": 5400,
+  "filamentUsedGrams": 42.75,
+  "modelFileName": "wire-contract-model.3mf",
+  "slicerEngine": "OrcaSlicer",
+  "artifactsRoute": "/api/artifacts/job/b3a9ea38-d5af-41df-9678-35fc3745e6a4"
+}

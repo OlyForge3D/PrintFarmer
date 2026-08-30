@@ -1,0 +1,13 @@
+{
+  "id": "5367c359-749f-4f1f-9581-45f4128d0890",
+  "taskType": "Custom",
+  "entityType": "Manual",
+  "entityId": "00000000-0000-0000-0000-000000000000",
+  "title": "Wire contract additive field task",
+  "status": "Pending",
+  "priority": "Normal",
+  "createdAt": "2026-08-30T21:24:49.2291709Z",
+  "relatedEntityCount": 0,
+  "anchorKind": "Unspecified",
+  "sourceKind": "Unspecified"
+}

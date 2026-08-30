@@ -1,0 +1,13 @@
+{
+  "id": "ca24825a-7d8c-49e9-9c99-f795b242474f",
+  "isOnline": true,
+  "state": "printing",
+  "progress": 42.5,
+  "jobName": "wire-contract-fixture.gcode",
+  "fileName": "wire-contract-fixture.gcode",
+  "hotendTemp": 215.4,
+  "bedTemp": 60.2,
+  "hotendTarget": 220,
+  "bedTarget": 60,
+  "speedMultiplier": 100
+}
