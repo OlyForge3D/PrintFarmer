@@ -98,7 +98,12 @@ public class CatalogUpdateDetectionService(
         _serviceMonitor.ReportStopped(ServiceId);
     }
 
-    private async Task DetectAndHandleUpdatesAsync(CatalogUpdateSettings settings, CancellationToken ct)
+    /// <summary>
+    /// Internal (not private) so that <c>Farm.Infrastructure.Tests</c> (granted access via
+    /// <c>InternalsVisibleTo</c> in <c>Properties/AssemblyInfo.TestsVisible.cs</c>) can exercise
+    /// this method directly without running the full background-service polling loop.
+    /// </summary>
+    internal async Task DetectAndHandleUpdatesAsync(CatalogUpdateSettings settings, CancellationToken ct)
     {
         using IServiceScope scope = _serviceProvider.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -110,6 +115,7 @@ public class CatalogUpdateDetectionService(
             .AsNoTracking()
             .Include(p => p.Model)
             .Include(p => p.Toolheads)
+            .Include(p => p.ServiceState)
             .Where(p => p.IsEnabled && p.Model != null)
             .ToListAsync(ct);
 
