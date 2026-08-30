@@ -121,6 +121,14 @@ function createTestQueryClient() {
   });
 }
 
+function restoreOwnProperty(target: object, property: PropertyKey, descriptor: PropertyDescriptor | undefined) {
+  if (descriptor) {
+    Object.defineProperty(target, property, descriptor);
+  } else if (!Reflect.deleteProperty(target, property)) {
+    throw new Error(`Failed to restore inherited property ${String(property)}`);
+  }
+}
+
 function renderModal(queryClient = createTestQueryClient(), onSuccess = vi.fn(), onClose = vi.fn()) {
   const result = render(
     <QueryClientProvider client={queryClient}>
@@ -310,10 +318,10 @@ describe('CreateProfileFamilyModal', () => {
       expect(keyInputs[1]).toHaveAttribute('id', 'advanced-key-12121212-1212-4212-9212-121212121212');
     } finally {
       getRandomValuesSpy.mockRestore();
-      if (originalRandomUUIDDescriptor) {
-        Object.defineProperty(crypto, 'randomUUID', originalRandomUUIDDescriptor);
-      }
+      restoreOwnProperty(crypto, 'randomUUID', originalRandomUUIDDescriptor);
     }
+
+    expect(Object.getOwnPropertyDescriptor(crypto, 'randomUUID')).toEqual(originalRandomUUIDDescriptor);
   });
 
   it('disables Next when the nozzle selection is empty on step 3', async () => {
