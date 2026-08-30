@@ -53,29 +53,77 @@ export function validateBottomShellLayers(value: number): string | null {
 }
 
 /**
+ * Rejects only genuinely nonsensical values (negative or non-finite) without
+ * imposing the stricter ">= 1" floor. OrcaSlicer's own settings metadata
+ * declares `min: 0` for wall_loops/top_shell_layers/bottom_shell_layers, and
+ * Advanced-mode features such as Spiral vase (`spiral_mode`) *require*
+ * `top_shell_layers: 0` to slice at all — so a defense-in-depth check that
+ * covers Advanced mode and profile import must not flag a legitimate zero.
+ */
+function validateNonNegative(value: number, label: string): string | null {
+  if (!Number.isFinite(value) || value < 0) {
+    return `${label} cannot be negative.`;
+  }
+  return null;
+}
+
+/**
+ * Coerces a settings field to a finite number, tolerating the string/array
+ * encodings OrcaSlicer configs and profile imports sometimes use, so this
+ * check isn't silently bypassed just because a value wasn't stored as a raw
+ * JS `number`. Returns `undefined` if the field is genuinely absent/unset.
+ */
+function coerceToNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+  if (typeof value === 'number') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : NaN;
+  }
+  if (Array.isArray(value) && value.length > 0) {
+    return coerceToNumber(value[0]);
+  }
+  return undefined;
+}
+
+/**
  * Validates the print-quality fields of a raw OrcaProcessSettings object.
  * Both Simple and Advanced slicer modes write into the same underlying
  * OrcaProcessSettings state, so this single check covers either path plus
- * profile import. Fields left `undefined` are unset (a valid default is
- * applied elsewhere) and are skipped rather than flagged.
+ * profile import. Fields left unset are skipped rather than flagged.
+ *
+ * This is intentionally more lenient than the Simple-mode inline validators
+ * above (which require ">= 1" for wall loops/shell layers): it is a
+ * defense-in-depth net against paths the Simple panel's live per-field
+ * validation cannot see (Advanced mode, profile import), and Advanced mode
+ * legitimately allows zero for these fields (see `validateNonNegative`).
+ * Only a negative or non-finite value indicates the exact bug in #2223.
  */
 export function validateOrcaPrintSettings(settings: OrcaProcessSettings): SlicerFieldError[] {
   const errors: SlicerFieldError[] = [];
 
-  if (typeof settings.wall_loops === 'number') {
-    const message = validateWallLoops(settings.wall_loops);
+  const wallLoops = coerceToNumber(settings.wall_loops);
+  if (wallLoops !== undefined) {
+    const message = validateNonNegative(wallLoops, 'Wall loops');
     if (message) errors.push({ field: 'wallLoops', message });
   }
-  if (typeof settings.sparse_infill_density === 'number') {
-    const message = validateInfillPercent(settings.sparse_infill_density);
+  const infillPercent = coerceToNumber(settings.sparse_infill_density);
+  if (infillPercent !== undefined) {
+    const message = validateNonNegative(infillPercent, 'Infill density');
     if (message) errors.push({ field: 'infillPercent', message });
   }
-  if (typeof settings.top_shell_layers === 'number') {
-    const message = validateTopShellLayers(settings.top_shell_layers);
+  const topShellLayers = coerceToNumber(settings.top_shell_layers);
+  if (topShellLayers !== undefined) {
+    const message = validateNonNegative(topShellLayers, 'Top shell layers');
     if (message) errors.push({ field: 'topShellLayers', message });
   }
-  if (typeof settings.bottom_shell_layers === 'number') {
-    const message = validateBottomShellLayers(settings.bottom_shell_layers);
+  const bottomShellLayers = coerceToNumber(settings.bottom_shell_layers);
+  if (bottomShellLayers !== undefined) {
+    const message = validateNonNegative(bottomShellLayers, 'Bottom shell layers');
     if (message) errors.push({ field: 'bottomShellLayers', message });
   }
 

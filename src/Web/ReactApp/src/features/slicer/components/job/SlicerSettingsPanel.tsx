@@ -300,6 +300,11 @@ function DeferredNumberInput({
   const draftNumber = Number(draft);
   const liveError = validate && Number.isFinite(draftNumber) ? validate(draftNumber) : null;
 
+  const computeLiveError = (text: string): string | null => {
+    const parsed = Number(text);
+    return validate && Number.isFinite(parsed) ? validate(parsed) : null;
+  };
+
   useEffect(() => {
     onValidityChange?.(!liveError);
     // Only the error text itself should re-trigger the parent notification.
@@ -327,7 +332,12 @@ function DeferredNumberInput({
   };
 
   return (
-    <>
+    // Stack the input and its inline error vertically so the error renders
+    // below the field instead of as a sibling flex item beside it — the
+    // parent rows are `flex` containers, so an unwrapped fragment would lay
+    // the <input> and <p> out side by side rather than stacked (issue #2223
+    // review finding).
+    <div className="flex shrink-0 flex-col items-end gap-1">
       <input
         {...rest}
         type="number"
@@ -338,7 +348,16 @@ function DeferredNumberInput({
         className={className}
         aria-invalid={liveError ? true : undefined}
         aria-describedby={[describedBy, liveError ? errorId : undefined].filter(Boolean).join(' ') || undefined}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => {
+          const nextDraft = event.target.value;
+          setDraft(nextDraft);
+          // Notify validity synchronously within this event handler rather than
+          // waiting on the `liveError` effect above (review finding #2223): a
+          // user could otherwise type an invalid value and click "Slice" before
+          // the effect has re-run, submitting while the parent's aggregated
+          // validity state still reads stale/valid.
+          onValidityChange?.(!computeLiveError(nextDraft));
+        }}
         onBlur={commitValue}
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
@@ -348,11 +367,11 @@ function DeferredNumberInput({
         }}
       />
       {liveError && errorId && (
-        <p id={errorId} role="alert" className="mt-1 text-xs text-red-400">
+        <p id={errorId} role="alert" className="text-xs text-red-400 text-right">
           {liveError}
         </p>
       )}
-    </>
+    </div>
   );
 }
 
