@@ -16,15 +16,16 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                 table: "ProcessProfiles",
                 type: "integer",
                 nullable: false,
-                defaultValue: 0);
+                defaultValue: 60);
 
             migrationBuilder.AddColumn<string>(
                 name: "Material",
                 schema: "slicer",
                 table: "ProcessProfiles",
-                type: "text",
+                type: "character varying(64)",
+                maxLength: 64,
                 nullable: false,
-                defaultValue: string.Empty);
+                defaultValue: "PLA");
 
             migrationBuilder.AddColumn<int>(
                 name: "NozzleTemperature",
@@ -32,7 +33,7 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                 table: "ProcessProfiles",
                 type: "integer",
                 nullable: false,
-                defaultValue: 0);
+                defaultValue: 210);
         }
 
         /// <inheritdoc />

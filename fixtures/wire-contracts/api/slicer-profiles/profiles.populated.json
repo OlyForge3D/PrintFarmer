@@ -1,5 +1,5 @@
 {
-  "id": "f00d7a9f-72f5-44df-9843-0bb8bbc08fd8",
+  "id": "e22506b6-475d-477a-945d-04cd65ef0979",
   "name": "Wire Contract PETG Profile",
   "description": "Populated wire-contract fixture profile.",
   "slicerType": "PrusaSlicer",
@@ -14,6 +14,6 @@
   "advancedSettings": "{\u0022retractionDistance\u0022:1.2}",
   "isDefault": false,
   "isPublic": true,
-  "createdAt": "2026-08-30T21:50:41.0794544Z",
-  "updatedAt": "2026-08-30T21:50:41.0794547Z"
+  "createdAt": "2026-08-30T22:15:52.2939493",
+  "updatedAt": "2026-08-30T22:15:52.2939494"
 }

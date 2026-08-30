@@ -626,7 +626,8 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
 
                     b.Property<string>("Material")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("Name")
                         .IsRequired()

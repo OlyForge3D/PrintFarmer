@@ -158,23 +158,44 @@ public sealed class SlicerProfileContractTests : IAsyncLifetime
         JsonContractAssertions.AssertEnumToken(created, "slicerType", "PrusaSlicer");
         JsonContractAssertions.AssertEnumToken(created, "quality", "Fine");
         _ = JsonContractAssertions.AssertProperty(created, "description", JsonValueKind.String);
-        JsonElement advancedSettings = JsonContractAssertions.AssertProperty(created, "advancedSettings", JsonValueKind.String);
-        _ = advancedSettings.GetString().Should().Be("{\"retractionDistance\":1.2}");
-        JsonElement nozzleTemperature = JsonContractAssertions.AssertProperty(created, "nozzleTemperature", JsonValueKind.Number);
-        _ = nozzleTemperature.GetInt32().Should().Be(235);
-        JsonElement bedTemperature = JsonContractAssertions.AssertProperty(created, "bedTemperature", JsonValueKind.Number);
-        _ = bedTemperature.GetInt32().Should().Be(80);
-        JsonElement material = JsonContractAssertions.AssertProperty(created, "material", JsonValueKind.String);
-        _ = material.GetString().Should().Be("PETG");
+        JsonElement createdAdvancedSettings = JsonContractAssertions.AssertProperty(created, "advancedSettings", JsonValueKind.String);
+        _ = createdAdvancedSettings.GetString().Should().Be("{\"retractionDistance\":1.2}");
+        JsonElement createdNozzleTemperature = JsonContractAssertions.AssertProperty(created, "nozzleTemperature", JsonValueKind.Number);
+        _ = createdNozzleTemperature.GetInt32().Should().Be(235);
+        JsonElement createdBedTemperature = JsonContractAssertions.AssertProperty(created, "bedTemperature", JsonValueKind.Number);
+        _ = createdBedTemperature.GetInt32().Should().Be(80);
+        JsonElement createdMaterial = JsonContractAssertions.AssertProperty(created, "material", JsonValueKind.String);
+        _ = createdMaterial.GetString().Should().Be("PETG");
+        Guid id = created.GetProperty("id").GetGuid();
+
+        // Issue #2247 was specifically a GET-response mapping defect (ProfilesService.ToResponseDto
+        // never copied these fields onto the DTO returned by GetProfileAsync), so this regression
+        // guard must exercise the real GET endpoint, not just the POST response.
+        using HttpResponseMessage getResponse = await client.GetAsync($"/api/slicer/profiles/{id}");
+        _ = getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        string getJson = await getResponse.Content.ReadAsStringAsync();
+        using JsonDocument getDocument = JsonDocument.Parse(getJson);
+        JsonElement fetched = getDocument.RootElement;
+
+        JsonContractAssertions.AssertEnumToken(fetched, "slicerType", "PrusaSlicer");
+        JsonContractAssertions.AssertEnumToken(fetched, "quality", "Fine");
+        JsonElement fetchedAdvancedSettings = JsonContractAssertions.AssertProperty(fetched, "advancedSettings", JsonValueKind.String);
+        _ = fetchedAdvancedSettings.GetString().Should().Be("{\"retractionDistance\":1.2}");
+        JsonElement fetchedNozzleTemperature = JsonContractAssertions.AssertProperty(fetched, "nozzleTemperature", JsonValueKind.Number);
+        _ = fetchedNozzleTemperature.GetInt32().Should().Be(235);
+        JsonElement fetchedBedTemperature = JsonContractAssertions.AssertProperty(fetched, "bedTemperature", JsonValueKind.Number);
+        _ = fetchedBedTemperature.GetInt32().Should().Be(80);
+        JsonElement fetchedMaterial = JsonContractAssertions.AssertProperty(fetched, "material", JsonValueKind.String);
+        _ = fetchedMaterial.GetString().Should().Be("PETG");
 
         var volatilePaths = new HashSet<string> { "$.id", "$.createdAt", "$.updatedAt" };
         await WireContractFixtureWriter.CaptureOrVerifyAsync(
             WireContractCorpusPaths.ApiRoot,
             "slicer-profiles/profiles.populated.json",
-            endpoint: "POST /api/slicer/profiles",
+            endpoint: "GET /api/slicer/profiles/{id}",
             producingTest: $"{nameof(SlicerProfileContractTests)}.{nameof(CreateThenGetProfile_Populated_MatchesCorpus)}",
             schemaVersion: "1.0",
-            actualJson: createdJson,
+            actualJson: getJson,
             volatilePaths: volatilePaths);
     }
 

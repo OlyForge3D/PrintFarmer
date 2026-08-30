@@ -614,6 +614,7 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
 
                     b.Property<string>("Material")
                         .IsRequired()
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Name")

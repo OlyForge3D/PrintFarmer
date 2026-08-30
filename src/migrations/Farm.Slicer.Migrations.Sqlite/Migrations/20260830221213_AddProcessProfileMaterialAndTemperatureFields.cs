@@ -2,7 +2,7 @@
 
 #nullable disable
 
-namespace Farm.Slicer.Migrations.SqlServer.Migrations
+namespace Farm.Slicer.Migrations.Sqlite.Migrations
 {
     /// <inheritdoc />
     public partial class AddProcessProfileMaterialAndTemperatureFields : Migration
@@ -12,27 +12,25 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
         {
             migrationBuilder.AddColumn<int>(
                 name: "BedTemperature",
-                schema: "slicer",
                 table: "ProcessProfiles",
-                type: "int",
+                type: "INTEGER",
                 nullable: false,
-                defaultValue: 0);
+                defaultValue: 60);
 
             migrationBuilder.AddColumn<string>(
                 name: "Material",
-                schema: "slicer",
                 table: "ProcessProfiles",
-                type: "nvarchar(max)",
+                type: "TEXT",
+                maxLength: 64,
                 nullable: false,
-                defaultValue: string.Empty);
+                defaultValue: "PLA");
 
             migrationBuilder.AddColumn<int>(
                 name: "NozzleTemperature",
-                schema: "slicer",
                 table: "ProcessProfiles",
-                type: "int",
+                type: "INTEGER",
                 nullable: false,
-                defaultValue: 0);
+                defaultValue: 210);
         }
 
         /// <inheritdoc />
@@ -40,17 +38,14 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
         {
             migrationBuilder.DropColumn(
                 name: "BedTemperature",
-                schema: "slicer",
                 table: "ProcessProfiles");
 
             migrationBuilder.DropColumn(
                 name: "Material",
-                schema: "slicer",
                 table: "ProcessProfiles");
 
             migrationBuilder.DropColumn(
                 name: "NozzleTemperature",
-                schema: "slicer",
                 table: "ProcessProfiles");
         }
     }

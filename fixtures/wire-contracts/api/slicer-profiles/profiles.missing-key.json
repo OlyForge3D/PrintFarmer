@@ -1,5 +1,5 @@
 {
-  "id": "112037a4-70ea-41ab-8bbb-41770cbd5dde",
+  "id": "c263e38f-cb57-448e-8359-f3ffeb9162c5",
   "name": "Wire Contract PLA Profile",
   "slicerType": "OrcaSlicer",
   "layerHeight": 0.2,
@@ -12,6 +12,6 @@
   "quality": "Standard",
   "isDefault": false,
   "isPublic": true,
-  "createdAt": "2026-08-30T21:50:34.6853276",
-  "updatedAt": "2026-08-30T21:50:34.6853277"
+  "createdAt": "2026-08-30T22:15:47.3764028",
+  "updatedAt": "2026-08-30T22:15:47.3764028"
 }
