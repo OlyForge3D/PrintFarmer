@@ -174,9 +174,16 @@ public class CatalogUpdateDetectionService(
                 }
 
                 bool applied = await printersService.ApplyModelTemplateAsync(p, forceOverwrite: false, ct);
+
+                // ApplyModelTemplateAsync always advances LastModelSyncAt on the tracked
+                // ServiceState — even when it returns false because the printer already had
+                // every template value set — specifically so HasCatalogUpdate clears once the
+                // sync is recorded. Saving must not be conditioned on `applied`, or a printer
+                // that needs no further template changes would never have its sync timestamp
+                // persisted and would be re-detected as outdated on every subsequent scan.
+                await db.SaveChangesAsync(ct);
                 if (applied)
                 {
-                    await db.SaveChangesAsync(ct);
                     _logger.LogInformation(
                         "[AutoApply] Applied catalog update to printer '{Name}' (model: '{Model}')",
                         p.Name, p.Model?.Name);

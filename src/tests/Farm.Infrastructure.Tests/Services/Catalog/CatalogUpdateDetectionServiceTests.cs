@@ -130,6 +130,51 @@ public class CatalogUpdateDetectionServiceTests
             "LastModelSyncAt never advanced from its stale seeded value");
     }
 
+    [Fact]
+    public async Task DetectAndHandleUpdatesAsync_AutoApplyReturnsFalse_StillPersistsSyncTimestamp()
+    {
+        // Regression coverage for a review finding on the #2228 fix: PrintersService's real
+        // ApplyModelTemplateAsync unconditionally advances ServiceState.LastModelSyncAt — even
+        // when it returns false because the printer already has every template value set —
+        // specifically so HasCatalogUpdate clears once the sync is recorded (see its "Always
+        // mark the sync as complete" comment). AutoApplyUpdatesAsync must persist that change
+        // regardless of the mock/real service's boolean return value: gating SaveChangesAsync on
+        // `applied` would leave LastModelSyncAt stale whenever no template fields needed
+        // updating, so the printer would be re-detected as outdated on every subsequent scan —
+        // reproducing the "detection never actually resolves" symptom of #2228 even after a
+        // successful auto-apply pass.
+        (string dbName, Guid printerId, Guid userId) = await SeedAsync(
+            modelUpdatedAt: DateTime.UtcNow,
+            lastModelSyncAt: DateTime.UtcNow.AddDays(-1));
+
+        var printersService = new Mock<IPrintersService>();
+        printersService
+            .Setup(s => s.ApplyModelTemplateAsync(It.IsAny<Printer>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Callback<Printer, bool, CancellationToken>((printer, _, _) =>
+            {
+                // Mirrors the real ApplyModelTemplateAsync: it always advances the sync
+                // timestamp on the tracked ServiceState even when no template field changed.
+                printer.ServiceState ??= new PrinterServiceState { PrinterId = printer.Id };
+                printer.ServiceState.LastModelSyncAt = DateTime.UtcNow;
+            })
+            .ReturnsAsync(false); // No template fields needed changing — production returns false here.
+
+        CatalogUpdateDetectionService service = CreateService(
+            dbName, userId, autoApply: true, out CatalogUpdateSettings settings, printersService.Object);
+
+        await service.DetectAndHandleUpdatesAsync(settings, CancellationToken.None);
+
+        await using AppDbContext db = OpenDbContext(dbName);
+        PrinterServiceState? state = await db.PrinterServiceStates
+            .AsNoTracking()
+            .SingleOrDefaultAsync(s => s.PrinterId == printerId);
+        state.Should().NotBeNull();
+        state!.LastModelSyncAt.Should().NotBeNull().And.BeAfter(DateTime.UtcNow.AddMinutes(-1),
+            "ApplyModelTemplateAsync returning false (no fields needed changing) must not prevent " +
+            "the advanced sync timestamp from being saved — otherwise the printer would be " +
+            "re-detected as outdated forever, even after auto-apply successfully ran");
+    }
+
     private static async Task<(string DbName, Guid PrinterId, Guid UserId)> SeedAsync(
         DateTime modelUpdatedAt,
         DateTime? lastModelSyncAt)
