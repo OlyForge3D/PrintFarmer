@@ -6,6 +6,7 @@ import { Alert, Button, Card, Checkbox, FormField, Input, Spinner } from '@/comm
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import { isApiError } from '@/common/utils/apiErrors';
 import { renderUnknown } from '@/common/utils/renderUnknown';
+import { generateUUID } from '@/utils/uuid';
 import {
   slicerProfilesService,
   type CloneProfileFamilyRequest,
@@ -347,7 +348,7 @@ export function CreateProfileFamilyModal({
 
   const addAdvancedOverride = () => {
     markDirty();
-    setAdvancedOverrides((rows) => [...rows, { id: crypto.randomUUID(), key: '', value: '' }]);
+    setAdvancedOverrides((rows) => [...rows, { id: generateUUID(), key: '', value: '' }]);
   };
 
   const updateAdvancedOverride = (id: string, patch: Partial<AdvancedOverrideRow>) => {
