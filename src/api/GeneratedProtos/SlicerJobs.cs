@@ -27,7 +27,9 @@ namespace Farm.Web.Api.Grpc
         Critical = 4,
     }
 
-    public enum SlicerEngineType
+    // Named GrpcSlicerEngineType, not SlicerEngineType, to avoid a same-simple-name collision
+    // with Farm.Slicer.Module.Models.SlicerEngineType (the REST/JSON domain enum) -- see #2290.
+    public enum GrpcSlicerEngineType
     {
         Unknown = 0,
         Orca = 1,

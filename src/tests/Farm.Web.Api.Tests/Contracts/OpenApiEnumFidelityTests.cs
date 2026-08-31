@@ -39,7 +39,8 @@ namespace Farm.Web.Api.Tests.Contracts;
 /// (<c>ConfigureHttpJsonOptions</c> vs MVC <c>AddJsonOptions</c> divergence) as #2242's
 /// family-scoped tests -- that divergence was fixed by #2274, and issue #2282 removed this test's
 /// blocking <c>Skip</c> and resolved (or filed as a separate, narrowly-scoped exclusion -- see
-/// #2289 and #2290) everything the unblocked sweep still flagged.
+/// #2289; #2290's collision was resolved by renaming the gRPC-only duplicate) everything the
+/// unblocked sweep still flagged.
 /// </summary>
 [Collection(OpenApiDocumentCollection.Name)]
 public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
@@ -138,10 +139,14 @@ public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
         // A regression check on the resolution/eligibility logic itself: "ApiKeyPurpose" is a plain,
         // globally-converted enum with no same-name collisions, while "AttentionSeverity" has two
         // same-named CLR types and is only checkable because the custom-converter one is correctly
-        // excluded from eligibility. "GcodeHarvestQueueItemStatus"/"SlicerEngineType" are each also
-        // a same-name collision (see #2289/#2290), resolved instead via the exact-type-identity
-        // exclusions in ResolveEnumTypeCandidatesByName -- asserting they are still checked guards
-        // against an inverted exclusion silently dropping the type actually bound to the schema.
+        // excluded from eligibility. "GcodeHarvestQueueItemStatus" is likewise a same-name collision
+        // (see #2289), resolved instead via the exact-type-identity exclusion in
+        // ResolveEnumTypeCandidatesByName -- asserting it is still checked guards against an
+        // inverted exclusion silently dropping the type actually bound to the schema.
+        // "SlicerEngineType" previously collided with the gRPC-only Farm.Web.Api.Grpc.SlicerEngineType
+        // (see #2290); that type was renamed to GrpcSlicerEngineType, so this simple name now
+        // resolves unambiguously to Farm.Slicer.Module.Models.SlicerEngineType with no exclusion
+        // needed -- still asserted here to guard against the rename regressing.
         // All must still be found and checked.
         _ = checkedSchemaNames.Should().Contain(
             new[] { "ApiKeyPurpose", "AttentionSeverity", "GcodeHarvestQueueItemStatus", "SlicerEngineType" },
@@ -226,21 +231,6 @@ public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
         typeof(Farm.Infrastructure.Domain.GcodeHarvestQueueItemStatus);
 
     /// <summary>
-    /// The gRPC-only half of the <c>SlicerEngineType</c> same-simple-name collision (see #2290):
-    /// <c>Farm.Web.Api.Grpc.SlicerEngineType</c> is auto-generated from
-    /// <c>proto/slicer_jobs.proto</c> and used exclusively by the internal
-    /// <c>SlicerJobsService</c> gRPC contract -- it is never referenced by a REST DTO and is not
-    /// reachable from <c>components.schemas</c>. The type actually bound to the
-    /// <c>SlicerEngineType</c> schema is <c>Farm.Slicer.Module.Models.SlicerEngineType</c>, which
-    /// carries the real <see cref="JsonStringEnumConverter"/> and is left eligible. Excluded here,
-    /// narrowly and by exact type identity, so this sweep does not report a same-name ambiguity
-    /// the schema itself doesn't have. Remove this exclusion if/when #2290's proto enum rename
-    /// lands and the collision no longer exists.
-    /// </summary>
-    private static readonly Type SlicerEngineTypeGrpcDuplicate =
-        typeof(Farm.Web.Api.Grpc.SlicerEngineType);
-
-    /// <summary>
     /// Every public enum type across the already-loaded application assemblies -- the shared
     /// <see cref="OpenApiDocumentFixture"/> already booted the full host to fetch the document, so
     /// every assembly that can contribute a component schema is already resident in this
@@ -257,8 +247,7 @@ public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
                 (assembly.GetName().Name?.StartsWith("Farm.", StringComparison.Ordinal) ?? false))
             .SelectMany(SafeGetTypes)
             .Where(type => type.IsEnum && (type.IsPublic || type.IsNestedPublic) &&
-                type != GcodeHarvestQueueItemStatusDomainDuplicate &&
-                type != SlicerEngineTypeGrpcDuplicate)
+                type != GcodeHarvestQueueItemStatusDomainDuplicate)
             .GroupBy(type => type.Name, StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,
