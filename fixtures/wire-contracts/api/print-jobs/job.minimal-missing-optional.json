@@ -1,0 +1,18 @@
+{
+  "id": "8fef6e78-93d6-41ff-904a-c06a00a80b5f",
+  "rowVersion": "AQAAAAAAAAAB",
+  "revision": 1,
+  "isIdempotentReplay": false,
+  "gcodeFileName": "",
+  "assignedPrinterName": "Unknown",
+  "status": "Queued",
+  "priority": "Normal",
+  "queuePosition": 1,
+  "toolRequirements": [],
+  "copies": 1,
+  "completedCopies": 0,
+  "remainingCopies": 1,
+  "toolheadUsages": [],
+  "createdAt": "2026-08-30T18:00:00",
+  "updatedAt": "2026-08-30T18:00:00"
+}
