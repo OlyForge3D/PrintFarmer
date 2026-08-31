@@ -427,7 +427,16 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
     <div
       data-print-hidden
       className={clsx(
-        'fixed inset-0 z-[60] flex items-start justify-center px-4 pt-[12vh] transition-opacity motion-reduce:transition-none',
+        // Symmetric top/bottom padding (instead of a fixed 12vh top-only
+        // offset) so the dialog always has room to shrink to fit small
+        // viewports (#2301) — at 320x568 a bare `pt-[12vh]` left the dialog
+        // 658px tall starting 68px down, clipping results/footer below the
+        // 568px viewport with no way to reach them. No overflow-y-auto here:
+        // the dialog below is capped to this container's height via
+        // `max-h-full`, so this container never needs to scroll itself —
+        // adding scroll here would fight the body scroll-lock on iOS Safari
+        // and let a scrollbar drag fire the backdrop's dismiss-on-click.
+        'fixed inset-0 z-[60] flex items-start justify-center px-4 py-6 sm:pt-[12vh] sm:pb-10 transition-opacity motion-reduce:transition-none',
         isVisible ? 'opacity-100' : 'opacity-0',
       )}
       style={transitionStyle}
@@ -453,7 +462,13 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
         onKeyDown={handleDialogKeyDown}
         onClick={(event) => event.stopPropagation()}
         className={clsx(
-          'relative w-full max-w-[32rem] overflow-hidden rounded-lg border border-pf-border/80 bg-pf-bg-0/92 shadow-[0_24px_80px_-40px_rgba(0,0,0,0.9)] backdrop-blur-xl transition-[transform,opacity] motion-reduce:transition-none',
+          // `max-h-full` resolves against the fixed, inset-0 backdrop's
+          // content-box height (viewport height minus its own padding), so
+          // the dialog can never grow taller than the space actually left by
+          // the surrounding padding on any viewport (#2301). `flex flex-col`
+          // lets the results region below claim the remaining height and
+          // scroll internally instead of pushing the footer off-screen.
+          'relative flex w-full max-w-[32rem] max-h-full flex-col overflow-hidden rounded-lg border border-pf-border/80 bg-pf-bg-0/92 shadow-[0_24px_80px_-40px_rgba(0,0,0,0.9)] backdrop-blur-xl transition-[transform,opacity] motion-reduce:transition-none',
           isVisible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-2 scale-[0.985] opacity-0',
         )}
         style={transitionStyle}
@@ -463,7 +478,7 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-pf-border to-transparent" aria-hidden="true" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-pf-accent-bg/14 via-transparent to-transparent" aria-hidden="true" />
 
-        <div className="relative border-b border-pf-border/70 px-5 py-4">
+        <div className="relative shrink-0 border-b border-pf-border/70 px-5 py-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-pf-text-tertiary">Search</p>
@@ -511,9 +526,9 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
           </div>
         </div>
 
-        <div className="relative px-3 py-3">
+        <div className="relative min-h-0 flex-1 overflow-y-auto px-3 py-3">
           {filteredItems.length > 0 ? (
-            <div id={listboxId} role="listbox" aria-label="Command palette results" className="max-h-[24rem] space-y-3 overflow-y-auto pr-1">
+            <div id={listboxId} role="listbox" aria-label="Command palette results" className="space-y-3">
               {filteredGroups.map((group) => {
                 const startIndex = filteredItems.indexOf(group.results[0]);
                 return (
@@ -607,7 +622,7 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
           )}
         </div>
 
-        <div className="border-t border-pf-border/70 px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-[0.18em] text-pf-text-tertiary">
+        <div className="shrink-0 border-t border-pf-border/70 px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-[0.18em] text-pf-text-tertiary">
           {COMMAND_HINT_TEXT}
         </div>
       </div>
