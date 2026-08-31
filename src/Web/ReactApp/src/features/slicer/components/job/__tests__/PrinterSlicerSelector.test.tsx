@@ -20,8 +20,12 @@ describe('PrinterSlicerSelector', () => {
     const trigger = screen.getByRole('button', { name: /Workshop MK4.*Change/i });
     const affordance = screen.getByTestId('printer-change-affordance');
 
-    expect(trigger).toHaveClass('relative', 'pr-10!');
+    const changeLabel = screen.getByText('Change');
+
+    expect(trigger).toHaveClass('relative', 'pr-10!', 'sm:pr-28!');
     expect(affordance).toHaveClass('absolute', 'right-3', 'top-1/2');
+    expect(changeLabel).toHaveClass('hidden', 'sm:inline');
     expect(trigger).toContainElement(affordance);
+    expect(affordance).toContainElement(changeLabel);
   });
 });

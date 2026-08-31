@@ -110,7 +110,7 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
               onClick={() => setIsModalOpen(true)}
               aria-haspopup="dialog"
               aria-expanded={isModalOpen}
-              className="group relative min-w-0 flex-1 justify-start! rounded-lg! p-3! pr-10!"
+              className="group relative min-w-0 flex-1 justify-start! rounded-lg! p-3! pr-10! sm:pr-28!"
             >
               {selectedPrinter ? (
                 <div className="flex items-start gap-3 w-full text-left">
