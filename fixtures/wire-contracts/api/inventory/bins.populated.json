@@ -1,0 +1,12 @@
+[
+  {
+    "id": "c411ea64-3137-4c40-b08c-5cb71f018b55",
+    "code": "BIN-WIRE-01",
+    "name": "Wire Contract Finished Parts",
+    "location": "Aisle 4 / Shelf B",
+    "notes": "Canonical mobile inventory bin",
+    "isActive": true,
+    "createdAt": "2026-08-30T12:34:56Z",
+    "updatedAt": "2026-08-30T13:34:56Z"
+  }
+]

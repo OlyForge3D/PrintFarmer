@@ -155,6 +155,42 @@ case_pr_touching_mobile_runs_build() {
   assert_eq "reason" "$(get_output "$out" reason)" "iOS-relevant paths changed" || return 1
 }
 
+# Canonical API fixtures and the backend sources that define their serialized
+# shape must exercise the real iOS APIClient tests even without a mobile/** edit.
+case_api_wire_contract_inputs_run_build() {
+  local out="$1" repo base_sha path
+  for path in \
+      "fixtures/wire-contracts/manifest.json" \
+      "fixtures/wire-contracts/api/inventory/parts.populated.json" \
+      "src/api/Program.cs" \
+      "src/api/Startup/ControllerStartup.cs" \
+      "src/api/Startup/SignalRStartup.cs" \
+      "src/infra/Infrastructure/PartsInventory/PartsInventoryProblemDetails.cs" \
+      "src/infra/Contracts/Auth/AuthDtos.cs" \
+      "src/infra/Domain/PartInventoryAdjustment.cs" \
+      "src/infra/Dtos/PartsInventory/PartsInventoryDtos.cs" \
+      "src/infra/Json/EnumJsonConverters.cs" \
+      "src/infra/Models/PrinterBackendCapabilitiesDto.cs" \
+      "src/infra/Serialization/ImportExportTypeInfoResolver.cs" \
+      "src/infra/SlicerHostLookupContract.cs" \
+      "src/infra/Services/ExampleWireContract.cs"; do
+    repo="$(mktemp -d)"
+    init_repo "$repo" || { rm -rf -- "$repo"; return 1; }
+    base_sha="$(git -C "$repo" rev-parse HEAD)"
+    git -C "$repo" checkout -q -b pr-branch
+    commit_file "$repo" "$path" "edit $path" || { rm -rf -- "$repo"; return 1; }
+
+    run_selector "$repo" "$out" \
+      EVENT_NAME=pull_request PR_BASE_SHA="$base_sha" \
+      PR_HEAD_SHA="$(git -C "$repo" rev-parse HEAD)" || { rm -rf -- "$repo"; return 1; }
+    rm -rf -- "$repo"
+
+    assert_eq "should_run ($path)" "$(get_output "$out" should_run)" "true" || return 1
+    assert_eq "reason ($path)" "$(get_output "$out" reason)" "iOS-relevant paths changed" || return 1
+    : > "$out"
+  done
+}
+
 # The workflow itself and its supporting scripts are iOS-relevant: editing the
 # selector or the simulator resolver must run the build that validates them.
 case_ios_support_paths_run_build() {
@@ -190,6 +226,9 @@ case_lookalike_paths_do_not_run_build() {
   local out="$1" repo base_sha path
   for path in \
       "docs/mobile/README.md" \
+      "fixtures/wire-contracts/README.md" \
+      "fixtures/wire-contracts/manifest.json.lock" \
+      "fixtures/other/api/inventory/parts.populated.json" \
       "src/Web/ReactApp/src/mobile/useMobileLayout.ts" \
       "tools/scripts/ci/select-ios-build.sh"; do
     repo="$(mktemp -d)"
@@ -244,6 +283,40 @@ case_missing_shas_fails_safe() {
 
   assert_eq "should_run" "$(get_output "$out" should_run)" "true" || return 1
   assert_eq "reason" "$(get_output "$out" reason)" "missing base/head SHA — running full iOS build to be safe" || return 1
+}
+
+# A successful `git diff -z` is expected to produce a complete NUL stream. This
+# wrapper simulates a corrupted/truncated producer that exits zero after writing
+# an unterminated non-iOS path. Treating `read` failure as ordinary EOF would
+# incorrectly skip the build; the sentinel must make the selector fail closed.
+case_incomplete_nul_diff_fails_safe() {
+  local out="$1" repo fake_bin real_git head_sha
+  repo="$(mktemp -d)"
+  fake_bin="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf -- '$repo' '$fake_bin'" RETURN
+
+  init_repo "$repo" || return 1
+  head_sha="$(git -C "$repo" rev-parse HEAD)"
+  real_git="$(command -v git)"
+
+  cat > "$fake_bin/git" <<'EOF'
+#!/usr/bin/env bash
+if [[ " $* " == *" diff "* ]]; then
+  printf 'docs/incomplete-path'
+  exit 0
+fi
+exec "$REAL_GIT" "$@"
+EOF
+  chmod +x "$fake_bin/git"
+
+  run_selector "$repo" "$out" \
+    PATH="$fake_bin:$PATH" REAL_GIT="$real_git" \
+    EVENT_NAME=pull_request PR_BASE_SHA="$head_sha" PR_HEAD_SHA="$head_sha" || return 1
+
+  assert_eq "should_run" "$(get_output "$out" should_run)" "true" || return 1
+  assert_eq "reason" "$(get_output "$out" reason)" \
+    "could not read complete diff output — running full iOS build to be safe" || return 1
 }
 
 # Non-pull_request events (workflow_dispatch, push, …) always run the build.
@@ -507,10 +580,12 @@ case_downstream_jobs_skip_only_on_explicit_false() {
 TESTS=(
   case_drifted_base_sha_ignores_base_branch_mobile_commits
   case_pr_touching_mobile_runs_build
+  case_api_wire_contract_inputs_run_build
   case_ios_support_paths_run_build
   case_lookalike_paths_do_not_run_build
   case_unresolvable_merge_base_fails_safe
   case_missing_shas_fails_safe
+  case_incomplete_nul_diff_fails_safe
   case_non_pull_request_event_runs_build
   case_empty_diff_skips_build
   case_mixed_pr_runs_build

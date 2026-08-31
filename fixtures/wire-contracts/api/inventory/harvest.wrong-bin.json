@@ -1,0 +1,14 @@
+{
+  "type": "https://printfarmer.io/errors/wrong-bin",
+  "title": "Wrong destination bin",
+  "status": 409,
+  "detail": "One or more scanned destination bins do not match the expected bins.",
+  "code": "wrongBin",
+  "mismatches": [
+    {
+      "partSku": "PF-WIRE-01",
+      "expectedBinCode": "BIN-WIRE-01",
+      "scannedBinCode": "BIN-SCANNED"
+    }
+  ]
+}

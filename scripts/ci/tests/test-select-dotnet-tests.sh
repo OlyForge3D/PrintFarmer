@@ -362,6 +362,49 @@ case_docs_only() {
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
 }
 
+case_api_wire_contract_fixture_change_selects_producer_tests() {
+  local out="$1" path matrix reason
+  for path in \
+      "fixtures/wire-contracts/manifest.json" \
+      "fixtures/wire-contracts/api/inventory/parts.populated.json"; do
+    CHANGED_FILES="$path"
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+      CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+      select_run >/dev/null 2>&1
+
+    assert_eq "want_frontend ($path)" "$(get_output "$out" want_frontend)" "false" || return 1
+    assert_eq "want_dotnet_build ($path)" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+    assert_eq "want_dotnet_test ($path)" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+    assert_eq "want_mig_drift ($path)" "$(get_output "$out" want_mig_drift)" "false" || return 1
+    assert_eq "full_matrix ($path)" "$(get_output "$out" full_matrix)" "false" || return 1
+    matrix="$(get_output "$out" matrix)"
+    reason="$(get_output "$out" reason)"
+    assert_contains "matrix api ($path)" "$matrix" "Farm.Web.Api.Tests" || return 1
+    assert_api_shard_matrix "wire-contract fixture ($path)" "$matrix" "$TEST_MANIFEST" || return 1
+    assert_not_contains "no infra test leg ($path)" "$matrix" "Farm.Infrastructure.Tests" || return 1
+    assert_not_contains "no integration leg ($path)" "$matrix" "Farm.Web.IntegrationTests" || return 1
+    assert_contains "reason ($path)" "$reason" "wire-contract" || return 1
+    : > "$out"
+  done
+}
+
+case_api_wire_contract_lookalikes_remain_inert() {
+  local out="$1" path
+  for path in \
+      "fixtures/wire-contracts/README.md" \
+      "fixtures/wire-contracts/manifest.json.lock" \
+      "fixtures/other/api/inventory/parts.populated.json"; do
+    CHANGED_FILES="$path"
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+      CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+      select_run >/dev/null 2>&1
+
+    assert_eq "want_dotnet_build ($path)" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+    assert_eq "want_dotnet_test ($path)" "$(get_output "$out" want_dotnet_test)" "false" || return 1
+    : > "$out"
+  done
+}
+
 case_api_change() {
   local out="$1"
   CHANGED_FILES="src/api/Controllers/PrintersController.cs"
@@ -381,6 +424,58 @@ case_api_change() {
   assert_api_shard_matrix "api change" "$matrix" "$TEST_MANIFEST" || return 1
   assert_contains "integration opt-in" "$matrix" '"run_integration":"true"' || return 1
   assert_not_contains "no orca for api-only" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
+}
+
+case_infra_serialization_source_adds_api_contract_tests() {
+  local out="$1" path matrix reason
+  for path in \
+      "src/infra/Contracts/Auth/AuthDtos.cs" \
+      "src/infra/Domain/PartInventoryAdjustment.cs" \
+      "src/infra/Dtos/PartsInventory/PartsInventoryDtos.cs" \
+      "src/infra/Infrastructure/PartsInventory/PartsInventoryProblemDetails.cs" \
+      "src/infra/Json/EnumJsonConverters.cs" \
+      "src/infra/Models/PrinterBackendCapabilitiesDto.cs" \
+      "src/infra/Serialization/ImportExportTypeInfoResolver.cs" \
+      "src/infra/SlicerHostLookupContract.cs" \
+      "src/infra/Services/ExampleWireContract.cs"; do
+    CHANGED_FILES="$path"
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+      CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+      select_run >/dev/null 2>&1
+
+    assert_eq "want_dotnet_build ($path)" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+    assert_eq "want_dotnet_test ($path)" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+    assert_eq "full_matrix ($path)" "$(get_output "$out" full_matrix)" "false" || return 1
+    matrix="$(get_output "$out" matrix)"
+    reason="$(get_output "$out" reason)"
+    assert_contains "matrix infra ($path)" "$matrix" "Farm.Infrastructure.Tests" || return 1
+    assert_contains "matrix api ($path)" "$matrix" "Farm.Web.Api.Tests" || return 1
+    assert_api_shard_matrix "infra serialization source ($path)" "$matrix" "$TEST_MANIFEST" || return 1
+    assert_contains "reason wire-contract ($path)" "$reason" "wire-contract" || return 1
+    assert_contains "reason infra ($path)" "$reason" "infra" || return 1
+    assert_app_migration_drift "$out" || return 1
+    : > "$out"
+  done
+}
+
+case_api_serialization_startup_marks_wire_contract_selection() {
+  local out="$1" path matrix reason
+  for path in \
+      "src/api/Startup/ControllerStartup.cs" \
+      "src/api/Startup/SignalRStartup.cs"; do
+    CHANGED_FILES="$path"
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+      CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+      select_run >/dev/null 2>&1
+
+    matrix="$(get_output "$out" matrix)"
+    reason="$(get_output "$out" reason)"
+    assert_contains "matrix api ($path)" "$matrix" "Farm.Web.Api.Tests" || return 1
+    assert_api_shard_matrix "api serialization startup ($path)" "$matrix" "$TEST_MANIFEST" || return 1
+    assert_contains "reason wire-contract ($path)" "$reason" "wire-contract" || return 1
+    assert_contains "reason api ($path)" "$reason" "api" || return 1
+    : > "$out"
+  done
 }
 
 case_auth_forwarded_headers_change_selects_integration() {
@@ -3781,7 +3876,11 @@ JSON
 TESTS=(
   case_react_only
   case_docs_only
+  case_api_wire_contract_fixture_change_selects_producer_tests
+  case_api_wire_contract_lookalikes_remain_inert
   case_api_change
+  case_infra_serialization_source_adds_api_contract_tests
+  case_api_serialization_startup_marks_wire_contract_selection
   case_auth_forwarded_headers_change_selects_integration
   case_infra_change
   case_infra_change_does_not_build_web_api_test_leg

@@ -1,0 +1,24 @@
+{
+  "items": [
+    {
+      "id": 77,
+      "name": "Wire Contract PLA",
+      "material": "PLA",
+      "colorHex": "3366CC",
+      "vendor": "Wire Contract Vendor",
+      "density": 1.24,
+      "diameter": 1.75,
+      "weight": 1000,
+      "spoolWeight": 220,
+      "price": 24.95,
+      "settingsExtruderTemp": 215,
+      "settingsBedTemp": 60,
+      "articleNumber": "WIRE-PLA-1000",
+      "comment": "Canonical mobile inventory filament",
+      "multiColorHexes": "3366CC,FFFFFF",
+      "externalId": "wire-contract-filament",
+      "gtin": "00012345678905"
+    }
+  ],
+  "totalCount": 1
+}
