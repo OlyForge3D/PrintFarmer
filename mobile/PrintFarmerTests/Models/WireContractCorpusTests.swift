@@ -109,6 +109,132 @@ final class WireContractCorpusTests: XCTestCase {
         XCTAssertEqual(empty, [])
     }
 
+    func testAPIClientDecodesCanonicalSpoolmanInventoryVariants() async throws {
+        let spools: SpoolmanPagedResult<SpoolmanSpool> = try await decodeThroughAPIClient(
+            "api/inventory/spoolman-spools.populated.json"
+        )
+        XCTAssertEqual(spools.totalCount, 1)
+        XCTAssertEqual(spools.items.first?.id, 501)
+        XCTAssertEqual(spools.items.first?.filamentId, 77)
+        XCTAssertNil(spools.items.first?.hasNfcTag)
+
+        let emptySpools: SpoolmanPagedResult<SpoolmanSpool> = try await decodeThroughAPIClient(
+            "api/inventory/spoolman-spools.empty-collection.json"
+        )
+        XCTAssertEqual(emptySpools.totalCount, 0)
+        XCTAssertTrue(emptySpools.items.isEmpty)
+
+        let filaments: SpoolmanPagedResult<SpoolmanFilament> = try await decodeThroughAPIClient(
+            "api/inventory/spoolman-filaments.populated.json"
+        )
+        XCTAssertEqual(filaments.totalCount, 1)
+        XCTAssertEqual(filaments.items.first?.gtin, "00012345678905")
+
+        let emptyFilaments: SpoolmanPagedResult<SpoolmanFilament> = try await decodeThroughAPIClient(
+            "api/inventory/spoolman-filaments.empty-collection.json"
+        )
+        XCTAssertEqual(emptyFilaments.totalCount, 0)
+        XCTAssertTrue(emptyFilaments.items.isEmpty)
+
+        let vendors: [SpoolmanVendor] = try await decodeThroughAPIClient(
+            "api/inventory/spoolman-vendors.populated.json"
+        )
+        XCTAssertEqual(vendors.first?.name, "Wire Contract Vendor")
+        let emptyVendors: [SpoolmanVendor] = try await decodeThroughAPIClient(
+            "api/inventory/spoolman-vendors.empty-collection.json"
+        )
+        XCTAssertTrue(emptyVendors.isEmpty)
+
+        let materials: [SpoolmanMaterial] = try await decodeThroughAPIClient(
+            "api/inventory/spoolman-materials.populated.json"
+        )
+        XCTAssertEqual(materials.first?.name, "PLA")
+        let emptyMaterials: [SpoolmanMaterial] = try await decodeThroughAPIClient(
+            "api/inventory/spoolman-materials.empty-collection.json"
+        )
+        XCTAssertTrue(emptyMaterials.isEmpty)
+
+        let availableMaterials: [String] = try await decodeThroughAPIClient(
+            "api/inventory/spoolman-available-materials.populated.json"
+        )
+        XCTAssertEqual(availableMaterials, ["ASA", "PLA"])
+        let emptyAvailableMaterials: [String] = try await decodeThroughAPIClient(
+            "api/inventory/spoolman-available-materials.empty-collection.json"
+        )
+        XCTAssertTrue(emptyAvailableMaterials.isEmpty)
+    }
+
+    func testAPIClientDecodesCanonicalPrintedPartsInventoryVariants() async throws {
+        let parts: [PartInventoryResponse] = try await decodeThroughAPIClient(
+            "api/inventory/parts.populated.json"
+        )
+        XCTAssertEqual(parts.first?.sku, "PF-WIRE-01")
+        XCTAssertEqual(parts.first?.defaultBinCode, "BIN-WIRE-01")
+        XCTAssertEqual(parts.first?.needsReorder, true)
+        let emptyParts: [PartInventoryResponse] = try await decodeThroughAPIClient(
+            "api/inventory/parts.empty-collection.json"
+        )
+        XCTAssertTrue(emptyParts.isEmpty)
+
+        let bins: [BinResponse] = try await decodeThroughAPIClient(
+            "api/inventory/bins.populated.json"
+        )
+        XCTAssertEqual(bins.first?.code, "BIN-WIRE-01")
+        let emptyBins: [BinResponse] = try await decodeThroughAPIClient(
+            "api/inventory/bins.empty-collection.json"
+        )
+        XCTAssertTrue(emptyBins.isEmpty)
+
+        let reorder: [ReorderCandidateResponse] = try await decodeThroughAPIClient(
+            "api/inventory/reorder.populated.json"
+        )
+        XCTAssertEqual(reorder.first?.deficit, 3)
+        let emptyReorder: [ReorderCandidateResponse] = try await decodeThroughAPIClient(
+            "api/inventory/reorder.empty-collection.json"
+        )
+        XCTAssertTrue(emptyReorder.isEmpty)
+
+        let mappings: [PartOutputMappingResponse] = try await decodeThroughAPIClient(
+            "api/inventory/mappings.populated.json"
+        )
+        XCTAssertNotNil(mappings.first?.gcodeFileId)
+        XCTAssertNil(mappings.first?.printProjectFileId)
+        let emptyMappings: [PartOutputMappingResponse] = try await decodeThroughAPIClient(
+            "api/inventory/mappings.empty-collection.json"
+        )
+        XCTAssertTrue(emptyMappings.isEmpty)
+
+        let adjustment: PartAdjustmentResponse = try await decodeThroughAPIClient(
+            "api/inventory/adjustment.populated.json"
+        )
+        XCTAssertEqual(adjustment.reason, .qcReject)
+        XCTAssertEqual(adjustment.delta, -1)
+
+        let harvest: HarvestJobResponse = try await decodeThroughAPIClient(
+            "api/inventory/harvest.populated.json"
+        )
+        XCTAssertEqual(harvest.adjustments.first?.reason, .harvest)
+        XCTAssertEqual(harvest.outputs.first?.origin, .explicitOutputs)
+        XCTAssertEqual(harvest.outputs.first?.partSku, "PF-WIRE-01")
+    }
+
+    func testAPIClientDecodesCanonicalPrintedPartsInventoryConflicts() async throws {
+        let wrongBin = try await decodeInventoryConflictThroughAPIClient(
+            "api/inventory/harvest.wrong-bin.json"
+        )
+        XCTAssertTrue(wrongBin.isWrongBin)
+        XCTAssertEqual(wrongBin.mismatches?.first?.partSku, "PF-WIRE-01")
+        XCTAssertEqual(wrongBin.mismatches?.first?.scannedBinCode, "BIN-SCANNED")
+
+        let mappingRequired = try await decodeInventoryConflictThroughAPIClient(
+            "api/inventory/harvest.part-mapping-required.json"
+        )
+        XCTAssertTrue(mappingRequired.isPartMappingRequired)
+        XCTAssertNotNil(mappingRequired.projectFileId)
+        XCTAssertNil(mappingRequired.gcodeFileId)
+        XCTAssertNotNil(mappingRequired.guidance)
+    }
+
     func testUnknownStringEnumTokenUsesForwardCompatibleTaskFallback() async throws {
         let data = try WireContractCorpus.data("api/tasks/tasks.populated.json")
         var object = try XCTUnwrap(
@@ -257,6 +383,27 @@ final class WireContractCorpusTests: XCTestCase {
             (TestData.httpResponse(url: request.url, statusCode: 200), data)
         }
         return try await mock.apiClient.get("/api/wire-contract-corpus")
+    }
+
+    private func decodeInventoryConflictThroughAPIClient(
+        _ relativePath: String
+    ) async throws -> PartsInventoryConflict {
+        let data = try WireContractCorpus.data(relativePath)
+        let mock = MockAPIClient()
+        mock.requestHandler = { request in
+            (TestData.httpResponse(url: request.url, statusCode: 409), data)
+        }
+
+        var decodedConflict: PartsInventoryConflict?
+        do {
+            let _: HarvestJobResponse = try await mock.apiClient.get("/api/wire-contract-corpus")
+            XCTFail("Expected APIClient to surface a typed printed-parts inventory conflict")
+        } catch NetworkError.partsInventoryConflict(let conflict) {
+            decodedConflict = conflict
+        } catch {
+            throw error
+        }
+        return try XCTUnwrap(decodedConflict)
     }
 
     private func signalRInvocation(
