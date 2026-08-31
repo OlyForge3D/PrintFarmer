@@ -20,8 +20,6 @@ export const PART_ADJUSTMENT_REASONS: readonly PartAdjustmentReason[] = [
   'manual',
 ] as const;
 
-export type PartHarvestOutputOrigin = 'mapping' | 'override' | 'fallback';
-
 /** Response DTO for a printed-part SKU. Mirrors `PartInventoryResponse`. */
 export interface PartInventoryDto {
   id: string;
