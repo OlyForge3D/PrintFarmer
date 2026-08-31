@@ -1,0 +1,81 @@
+name: Contract Drift Gate
+
+# =============================================================================
+# Contract Drift Gate (issue #2243, parent epic #2237).
+#
+# A NEW, standalone workflow — deliberately not a change to ci.yml,
+# deployment-tests.yml, or ios-pr-ci.yml (see #2243 "Non-goals / do not
+# edit"). It runs scripts/ci/check-contract-drift.mjs as a required gate:
+#
+#   - self-tests the drift-check script itself (scripts/ci/tests/test-check-contract-drift.mjs),
+#   - runs the script against this repository's real fixtures/wire-contracts/
+#     corpus and the reviewed exception allowlist
+#     (scripts/ci/contract-drift-exceptions.json), asserting zero unexplained
+#     findings,
+#   - and, on pull_request events, feeds the PR's own changed-path diff
+#     (computed with the same scripts/ci/compute-change-set.sh used by
+#     ci.yml's selector, reused rather than duplicated) into the script so it
+#     can also enforce the fixture-edit-without-producer-change check (the
+#     #2232 regression shape) for THIS PR's diff specifically.
+#
+# No path filter on pull_request: every PR must produce this required check,
+# mirroring ci.yml's own rationale — a change to fixtures/wire-contracts/**
+# with nothing else touched is exactly the case this gate must not skip.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, development]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: contract-drift-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  contract-drift:
+    name: Contract drift gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install tooling dependencies
+        run: npm ci
+
+      - name: bash -n syntax check (reused compute-change-set.sh)
+        run: bash -n scripts/ci/compute-change-set.sh
+
+      - name: Compute change set
+        id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+          OUT_FILE: ${{ runner.temp }}/contract-drift-changed.z
+        run: bash scripts/ci/compute-change-set.sh
+
+      - name: Test the drift-check script
+        run: node --test scripts/ci/tests/test-check-contract-drift.mjs
+
+      - name: Test this workflow's own structure
+        run: node --test scripts/ci/tests/test-contract-drift-workflow.mjs
+
+      - name: Run contract drift gate
+        env:
+          CONTRACT_DRIFT_CHANGED_FILE: ${{ steps.diff.outputs.changed_file }}
+        run: node scripts/ci/check-contract-drift.mjs
