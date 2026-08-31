@@ -464,6 +464,11 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
               id={shortcutsPanelId}
               role="dialog"
               aria-labelledby={shortcutsTitleId}
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') {
+                  event.stopPropagation();
+                }
+              }}
               className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-pf-border bg-pf-card p-3 shadow-xl"
             >
               <div className="mb-2 flex items-center justify-between gap-3">

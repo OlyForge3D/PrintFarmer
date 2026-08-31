@@ -82,7 +82,18 @@ describe('SlicerToolbar narrow-width layout (issue #1902)', () => {
 
     const trigger = screen.getByRole('button', { name: 'Show keyboard shortcuts' });
     fireEvent.click(trigger);
-    fireEvent.keyDown(document, { key: 'Escape' });
+    const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
+    const closeButton = within(dialog).getByRole('button', { name: 'Close keyboard shortcuts' });
+    const workspaceKeyDown = vi.fn();
+    window.addEventListener('keydown', workspaceKeyDown);
+
+    fireEvent.keyDown(closeButton, { key: 'A' });
+    fireEvent.keyDown(closeButton, { key: 't' });
+    window.removeEventListener('keydown', workspaceKeyDown);
+
+    expect(workspaceKeyDown).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(closeButton, { key: 'Escape' });
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument();
