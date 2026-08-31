@@ -47,6 +47,14 @@ public sealed class SlicerProfileOpenApiSchemaTests(OpenApiDocumentFixture fixtu
         };
         _ = OpenApiSchemaTestSupport.GetPropertyNames(processProfileListEntryDto).Should().BeEquivalentTo(expectedPropertyNames,
             "the documented shape should match exactly what ProfilesController.GetProfilesAsync's projection returns");
+
+        foreach (string plainStringProperty in new[] { "material", "quality" })
+        {
+            JsonElement property = OpenApiSchemaTestSupport.GetProperty(processProfileListEntryDto, plainStringProperty);
+            _ = property.TryGetProperty("$ref", out _).Should().BeFalse(
+                $"'{plainStringProperty}' is a plain string on ProcessProfileListEntryDto, not a $ref'd enum component");
+            _ = OpenApiSchemaTestSupport.GetTypes(property).Should().Contain("string");
+        }
     }
 
     /// <summary>

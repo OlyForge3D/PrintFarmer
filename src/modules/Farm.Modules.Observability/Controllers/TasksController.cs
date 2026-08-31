@@ -50,7 +50,11 @@ public class TasksController(
     // target the same status code, the LAST one wins for the emitted schema. The default (no
     // 'view' query parameter) response is the flat UserTaskDto array — far more common than
     // view=shift, and the one this operation's own summary promises — so its attribute is
-    // declared last to make it the documented 200 schema (issue #2283).
+    // declared last to make it the documented 200 schema (issue #2283). Consequence: with no
+    // other operation in the document referencing ShiftPlanDto, this schema is dropped from
+    // "components/schemas" entirely, so the view=shift branch is now wholly undocumented rather
+    // than merely mis-prioritized. That's an accepted trade for this fix (the default path is
+    // the common one; a future change could split view=shift into its own documented operation).
     [HttpGet]
     [ProducesResponseType(typeof(ShiftPlanDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(IReadOnlyList<UserTaskDto>), StatusCodes.Status200OK)]

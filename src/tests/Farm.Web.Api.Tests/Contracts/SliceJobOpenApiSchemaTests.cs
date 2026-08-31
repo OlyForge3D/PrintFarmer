@@ -34,7 +34,11 @@ public sealed class SliceJobOpenApiSchemaTests(OpenApiDocumentFixture fixture)
         _ = responseSchema.Should().NotBeNull(
             "the OpenAPI document now declares a 'content'/schema for the 200 response of GET /api/slice/{id}");
 
-        JsonElement sliceJobStatusResponse = OpenApiSchemaTestSupport.ResolveRef(_document, responseSchema!.Value);
+        _ = responseSchema!.Value.GetProperty("$ref").GetString().Should().Be("#/components/schemas/SliceJobStatusResponse",
+            "the action is now annotated with [ProducesResponseType(typeof(SliceJobStatusResponse), 200)], " +
+            "matching the type MapToPublicStatusResponse actually returns");
+
+        JsonElement sliceJobStatusResponse = OpenApiSchemaTestSupport.ResolveRef(_document, responseSchema.Value);
         IReadOnlySet<string> propertyNames = OpenApiSchemaTestSupport.GetPropertyNames(sliceJobStatusResponse);
 
         foreach (string fixtureFile in new[] { "job.completed-populated.json", "job.minimal-status.json" })
