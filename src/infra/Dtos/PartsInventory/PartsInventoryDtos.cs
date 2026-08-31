@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Idempotency;
 
@@ -41,7 +42,7 @@ public record PartAdjustmentResponse(
     string? BinCode,
     int Delta,
     int ResultingBalance,
-    PartAdjustmentReason Reason,
+    [property: JsonConverter(typeof(PartAdjustmentReasonConverter))] PartAdjustmentReason Reason,
     Guid? PrintJobId,
     string? OperationKey,
     string? Notes,
@@ -133,7 +134,7 @@ public record HarvestJobRequest(
 /// <summary>Request body for adjusting a printed-part SKU stock level.</summary>
 public record AdjustPartInventoryRequest(
     [Range(-10000, 10000)] int Delta,
-    PartAdjustmentReason Reason,
+    [property: JsonConverter(typeof(PartAdjustmentReasonConverter))] PartAdjustmentReason Reason,
     Guid? JobId = null,
     string? BinCode = null,
     string? Notes = null,

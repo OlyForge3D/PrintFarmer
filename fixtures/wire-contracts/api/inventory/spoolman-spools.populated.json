@@ -1,0 +1,31 @@
+{
+  "items": [
+    {
+      "id": 501,
+      "name": "Wire Contract PLA Spool",
+      "material": "PLA",
+      "remainingWeightG": 640.5,
+      "colorHex": "3366CC",
+      "inUse": true,
+      "filamentName": "Wire Contract PLA",
+      "vendor": "Wire Contract Vendor",
+      "registeredAt": "2026-08-30T12:34:56Z",
+      "firstUsedAt": "2026-08-31T12:34:56Z",
+      "lastUsedAt": "2026-09-01T12:34:56Z",
+      "initialWeightG": 1000,
+      "usedWeightG": 359.5,
+      "spoolWeightG": 220,
+      "remainingLengthMm": 214000,
+      "usedLengthMm": 120000,
+      "location": "Rack A",
+      "lotNumber": "LOT-WIRE-01",
+      "archived": false,
+      "price": 24.95,
+      "comment": "Canonical mobile inventory spool",
+      "filamentId": 77,
+      "usedPercent": 35.949999999999996,
+      "remainingPercent": 64.05
+    }
+  ],
+  "totalCount": 1
+}

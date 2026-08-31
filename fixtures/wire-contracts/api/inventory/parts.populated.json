@@ -1,0 +1,18 @@
+[
+  {
+    "id": "2d2cb44c-6958-493f-99c8-7bd62acfe847",
+    "sku": "PF-WIRE-01",
+    "name": "Wire Contract Bracket",
+    "description": "Canonical printed-part inventory item",
+    "modelFileRef": "models/wire-contract-bracket.3mf",
+    "defaultBinId": "c411ea64-3137-4c40-b08c-5cb71f018b55",
+    "defaultBinCode": "BIN-WIRE-01",
+    "defaultBinName": "Wire Contract Finished Parts",
+    "onHand": 2,
+    "reorderPoint": 5,
+    "needsReorder": true,
+    "isActive": true,
+    "createdAt": "2026-08-30T12:34:56Z",
+    "updatedAt": "2026-08-30T14:34:56Z"
+  }
+]

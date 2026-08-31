@@ -1,0 +1,11 @@
+[
+  {
+    "id": "fe7118ee-63f7-4d70-aa19-531ca37cb008",
+    "partInventoryId": "2d2cb44c-6958-493f-99c8-7bd62acfe847",
+    "sku": "PF-WIRE-01",
+    "gcodeFileId": "44959ed9-49db-4911-83a0-bad7793075df",
+    "quantity": 2,
+    "createdAt": "2026-08-30T12:34:56Z",
+    "updatedAt": "2026-08-30T15:34:56Z"
+  }
+]
