@@ -38,9 +38,10 @@ namespace Farm.Web.Api.Tests.Contracts;
 /// list of enums. Per #2262/#2261, most previously failed for the same systemic root cause
 /// (<c>ConfigureHttpJsonOptions</c> vs MVC <c>AddJsonOptions</c> divergence) as #2242's
 /// family-scoped tests -- that divergence was fixed by #2274, and issue #2282 removed this test's
-/// blocking <c>Skip</c> and resolved (or filed as a separate, narrowly-scoped exclusion -- see
-/// #2289; #2290's collision was resolved by renaming the gRPC-only duplicate) everything the
-/// unblocked sweep still flagged.
+/// blocking <c>Skip</c> and resolved (or filed as a separate, narrowly-scoped exclusion) everything
+/// the unblocked sweep still flagged; #2289's collision was resolved by removing the duplicate enum
+/// entirely, and #2290's collision was resolved by renaming the gRPC-only duplicate, so neither
+/// needs an exclusion here anymore.
 /// </summary>
 [Collection(OpenApiDocumentCollection.Name)]
 public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
@@ -139,15 +140,15 @@ public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
         // A regression check on the resolution/eligibility logic itself: "ApiKeyPurpose" is a plain,
         // globally-converted enum with no same-name collisions, while "AttentionSeverity" has two
         // same-named CLR types and is only checkable because the custom-converter one is correctly
-        // excluded from eligibility. "GcodeHarvestQueueItemStatus" is likewise a same-name collision
-        // (see #2289), resolved instead via the exact-type-identity exclusion in
-        // ResolveEnumTypeCandidatesByName -- asserting it is still checked guards against an
-        // inverted exclusion silently dropping the type actually bound to the schema.
+        // excluded from eligibility. "GcodeHarvestQueueItemStatus" no longer collides at all -- #2289
+        // removed the duplicate Dto enum, leaving `Farm.Infrastructure.Domain.GcodeHarvestQueueItemStatus`
+        // as the single CLR type referenced (directly, with no cast) by `GcodeHarvestQueueItemDto.Status`.
         // "SlicerEngineType" previously collided with the gRPC-only Farm.Web.Api.Grpc.SlicerEngineType
         // (see #2290); that type was renamed to GrpcSlicerEngineType, so this simple name now
         // resolves unambiguously to Farm.Slicer.Module.Models.SlicerEngineType with no exclusion
-        // needed -- still asserted here to guard against the rename regressing.
-        // All must still be found and checked.
+        // needed either. Asserting these are still checked guards against an inverted exclusion (or a
+        // future regression) silently dropping the type actually bound to the schema. All must still
+        // be found and checked.
         _ = checkedSchemaNames.Should().Contain(
             new[] { "ApiKeyPurpose", "AttentionSeverity", "GcodeHarvestQueueItemStatus", "SlicerEngineType" },
             "the sweep should resolve and check at least these known, non-ambiguous-after-filtering enums");
@@ -216,21 +217,6 @@ public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
     }
 
     /// <summary>
-    /// The domain/entity-only, unreachable-from-a-DTO half of the <c>GcodeHarvestQueueItemStatus</c>
-    /// same-simple-name collision (see #2289): <c>Farm.Infrastructure.Domain.GcodeHarvestQueueItemStatus</c> is a
-    /// domain/entity-only concept never referenced by an API DTO -- it is bridged to
-    /// <c>Farm.Infrastructure.GcodeHarvestQueueItemStatus</c> (the Dto enum actually reachable from
-    /// <c>components.schemas</c>, e.g. via <c>GcodeHarvestQueueItemDto.Status</c>) by an unsafe
-    /// numeric round-trip cast in <c>GcodeHarvestController</c>. Excluded here, narrowly and by
-    /// exact type identity rather than a name- or namespace-based heuristic, so this sweep can
-    /// still check the one CLR type that is actually bound to the schema instead of reporting a
-    /// same-name ambiguity the schema itself doesn't have. Remove this exclusion once #2289 is
-    /// resolved (either enum duplication removed entirely, or the unsafe cast replaced).
-    /// </summary>
-    private static readonly Type GcodeHarvestQueueItemStatusDomainDuplicate =
-        typeof(Farm.Infrastructure.Domain.GcodeHarvestQueueItemStatus);
-
-    /// <summary>
     /// Every public enum type across the already-loaded application assemblies -- the shared
     /// <see cref="OpenApiDocumentFixture"/> already booted the full host to fetch the document, so
     /// every assembly that can contribute a component schema is already resident in this
@@ -246,8 +232,7 @@ public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
             .Where(assembly => !assembly.IsDynamic &&
                 (assembly.GetName().Name?.StartsWith("Farm.", StringComparison.Ordinal) ?? false))
             .SelectMany(SafeGetTypes)
-            .Where(type => type.IsEnum && (type.IsPublic || type.IsNestedPublic) &&
-                type != GcodeHarvestQueueItemStatusDomainDuplicate)
+            .Where(type => type.IsEnum && (type.IsPublic || type.IsNestedPublic))
             .GroupBy(type => type.Name, StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,

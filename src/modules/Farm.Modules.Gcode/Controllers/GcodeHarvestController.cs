@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.GcodeHarvest;
@@ -68,12 +69,12 @@ public class GcodeHarvestController(
             _logger.LogInformation("Queueing harvest operation for printer {RequestPrinterId}", request.PrinterId);
 
             // Queue the harvest operation for background processing
-            Farm.Infrastructure.Domain.GcodeHarvestQueueItem queueItem = await _harvestQueue.EnqueueAsync(request.PrinterId, request);
+            GcodeHarvestQueueItem queueItem = await _harvestQueue.EnqueueAsync(request.PrinterId, request);
 
             var response = new QueueHarvestResponseDto(
                 queueItem.Id,
                 $"Harvest operation queued. Queue item ID: {queueItem.Id}",
-                (GcodeHarvestQueueItemStatus)(int)queueItem.Status);
+                queueItem.Status);
 
             return Accepted(response);
         }
@@ -472,10 +473,10 @@ public class GcodeHarvestController(
 
         try
         {
-            IReadOnlyList<Farm.Infrastructure.Domain.GcodeHarvestQueueItem> items = await _harvestQueue.GetQueuedItemsAsync(status);
+            IReadOnlyList<GcodeHarvestQueueItem> items = await _harvestQueue.GetQueuedItemsAsync(status);
 
             // Filter by printer ID if provided
-            IEnumerable<Farm.Infrastructure.Domain.GcodeHarvestQueueItem> filtered = printerId.HasValue
+            IEnumerable<GcodeHarvestQueueItem> filtered = printerId.HasValue
                 ? items.Where(i => i.PrinterId == printerId.Value)
                 : items;
 
@@ -486,7 +487,7 @@ public class GcodeHarvestController(
                 item.QueuedAt,
                 item.ProcessingStartedAt,
                 item.CompletedAt,
-                (GcodeHarvestQueueItemStatus)(int)item.Status,
+                item.Status,
                 item.Priority,
                 item.ErrorMessage,
                 item.FilesFound,
@@ -518,7 +519,7 @@ public class GcodeHarvestController(
 
         try
         {
-            IReadOnlyList<Farm.Infrastructure.Domain.GcodeHarvestQueueItem> items = await _harvestQueue.GetPendingForPrinterAsync(printerId);
+            IReadOnlyList<GcodeHarvestQueueItem> items = await _harvestQueue.GetPendingForPrinterAsync(printerId);
 
             GcodeHarvestQueueItemDto[] dtos = items.Select(item => new GcodeHarvestQueueItemDto(
                 item.Id,
@@ -527,7 +528,7 @@ public class GcodeHarvestController(
                 item.QueuedAt,
                 item.ProcessingStartedAt,
                 item.CompletedAt,
-                (GcodeHarvestQueueItemStatus)(int)item.Status,
+                item.Status,
                 item.Priority,
                 item.ErrorMessage,
                 item.FilesFound,
