@@ -61,6 +61,32 @@ export interface ImportSlicerProfileRequest {
   isPublic?: boolean;
 }
 
+/**
+ * Response shape for `POST /slicer/profiles/import` (the only call site of this type —
+ * see `slicerProfilesService.importProfile`). The backend serializes
+ * `ProcessProfileExtendedDto` (`src/slicer/Farm.Slicer.Module/Dtos/ProcessProfileManagementDtos.cs`),
+ * constructed by `ProfilesService.ImportProfileAsync`
+ * (`src/slicer/Farm.Slicer.Module.Api/Services/ProfilesService.cs`) — this interface does NOT
+ * fully mirror that DTO field-for-field; see the per-field notes below.
+ *
+ * `isSystem`, `hash`, and `metadata` are non-nullable on `ProcessProfileExtendedDto` and are
+ * always populated by `ImportProfileAsync` (defaulting to `false`, `""`, and `{}` respectively),
+ * so they remain required here — the `fixtures/wire-contracts/api/slicer-profiles/profiles.populated.json`
+ * corpus fixture that omits them is captured from the unrelated `GET /api/slicer/profiles/{id}`
+ * endpoint (`ProcessProfileResponseDto`), which this type does not model.
+ *
+ * `material`, `nozzleTemperature`, and `bedTemperature` are marked optional because
+ * `ProcessProfileExtendedDto` has no such properties at all — `ImportProfileAsync` never sets
+ * them on the response, even though the equivalent `ProcessProfile` entity persists them. They
+ * were previously (incorrectly) declared required here; they are kept on the type as optional so
+ * existing call sites that narrow on them still compile, but callers must not assume they are
+ * present for the import response.
+ *
+ * `advancedSettings` is optional for the same reason — `ProcessProfileExtendedDto` doesn't carry
+ * it either (only `ProcessProfileResponseDto`, returned by the unrelated plain CRUD `/api/slicer/profiles`
+ * endpoints, does). It's declared here only as tolerant of a future backend alignment, not because
+ * the import endpoint sends it today.
+ */
 export interface SlicerProfileExtended {
   id: string;
   name: string;
@@ -69,11 +95,12 @@ export interface SlicerProfileExtended {
   layerHeight: number;
   infillPercentage: number;
   printSpeed: number;
-  nozzleTemperature: number;
-  bedTemperature: number;
+  nozzleTemperature?: number;
+  bedTemperature?: number;
   enableSupports: boolean;
-  material: string;
+  material?: string;
   quality: string;
+  advancedSettings?: string;
   isDefault: boolean;
   isPublic: boolean;
   isSystem: boolean;
