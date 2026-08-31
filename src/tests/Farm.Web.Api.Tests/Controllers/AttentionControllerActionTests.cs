@@ -49,12 +49,12 @@ public sealed class AttentionControllerActionTests
         ObjectResult conflict = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
         Assert.Contains("application/problem+json", conflict.ContentTypes);
-        ProblemDetails problem = Assert.IsType<ProblemDetails>(conflict.Value);
-        Assert.Equal("partMappingRequired", problem.Extensions["code"]);
-        Assert.Equal(jobId, problem.Extensions["jobId"]);
-        Assert.Equal(projectFileId, problem.Extensions["projectFileId"]);
-        Assert.Equal(gcodeFileId, problem.Extensions["gcodeFileId"]);
-        Assert.Equal(details.Guidance, problem.Extensions["guidance"]);
+        HarvestConflictResponse problem = Assert.IsType<HarvestConflictResponse>(conflict.Value);
+        Assert.Equal("partMappingRequired", problem.Code);
+        Assert.Equal(jobId, problem.JobId);
+        Assert.Equal(projectFileId, problem.ProjectFileId);
+        Assert.Equal(gcodeFileId, problem.GcodeFileId.Value);
+        Assert.Equal(details.Guidance, problem.Guidance);
         service.VerifyAll();
         broadcaster.VerifyNoOtherCalls();
     }
@@ -89,11 +89,10 @@ public sealed class AttentionControllerActionTests
         ObjectResult conflict = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
         Assert.Contains("application/problem+json", conflict.ContentTypes);
-        ProblemDetails problem = Assert.IsType<ProblemDetails>(conflict.Value);
-        Assert.Equal("wrongBin", problem.Extensions["code"]);
+        HarvestConflictResponse problem = Assert.IsType<HarvestConflictResponse>(conflict.Value);
+        Assert.Equal("wrongBin", problem.Code);
         IReadOnlyList<WrongBinMismatchResponse> mismatches =
-            Assert.IsAssignableFrom<IReadOnlyList<WrongBinMismatchResponse>>(
-                problem.Extensions["mismatches"]);
+            Assert.IsAssignableFrom<IReadOnlyList<WrongBinMismatchResponse>>(problem.Mismatches);
         WrongBinMismatchResponse mismatch = Assert.Single(mismatches);
         Assert.Equal("SKU-A", mismatch.PartSku);
         Assert.Equal("BIN-A", mismatch.ExpectedBinCode);
