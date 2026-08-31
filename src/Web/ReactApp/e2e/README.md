@@ -43,6 +43,11 @@ partway through on a pre-existing, out-of-scope FK-constraint failure in
 Queue page's Timeline tab has no such printer-gated empty state and always
 issues a real `GET /api/job-queue` call, so it exercises a genuine,
 network-intercepted browser journey without needing a printer to exist.
+Because the corpus's own `queue.empty-collection.json` fixture is `[]`
+(there is no populated-element template on a printer-less DB), this
+particular assertion only proves array kind/emptiness, not per-element
+structure — the populated-object shape check is instead covered by
+`tasks-widget-smoke.spec.ts` against `tasks.populated.json`.
 
 ### Running locally
 

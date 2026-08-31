@@ -20,26 +20,16 @@
  * /api/setup/status` reports `needsSetup: false` and subsequent calls
  * simply log in.
  */
-import { test as base, expect, type Page } from '@playwright/test';
+import { test as base, expect } from '@playwright/test';
 import {
   API_BASE_URL,
   BASE_URL,
   dismissTourIfVisible,
+  getStoredAuthToken,
   provisionAdminAndLogin,
 } from '../../fixtures/emulator-setup';
 
-export { API_BASE_URL, BASE_URL };
-
-/**
- * Read the JWT the `monolithReady` fixture injected into `localStorage`,
- * for specs that need to make authenticated `page.request` calls directly
- * (the app's own axios client attaches this automatically, but
- * `page.request` does not).
- */
-export async function getStoredAuthToken(page: Page): Promise<string | undefined> {
-  const token = await page.evaluate(() => localStorage.getItem('auth-token'));
-  return token ?? undefined;
-}
+export { API_BASE_URL, BASE_URL, getStoredAuthToken };
 
 type MonolithFixtures = {
   /** Ensures the API is healthy and the browser is authenticated before each test. */
@@ -56,8 +46,10 @@ export const test = base.extend<MonolithFixtures>({
     const token = await provisionAdminAndLogin(page.request, (ms) => page.waitForTimeout(ms));
     expect(token, 'Failed to obtain auth token for test admin').toBeTruthy();
 
-    // 3. Inject the JWT into localStorage before the app loads, and
-    //    suppress onboarding tours that would otherwise intercept clicks.
+    // 3. Load the app once (unauthenticated) so `localStorage` exists for
+    //    this origin, then inject the JWT and suppress onboarding tours
+    //    that would otherwise intercept clicks. Step 4 reloads so the app
+    //    picks up the injected token.
     await page.goto(BASE_URL);
     await page.evaluate((t: string) => {
       localStorage.setItem('auth-token', t);

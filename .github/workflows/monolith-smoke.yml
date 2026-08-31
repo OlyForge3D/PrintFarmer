@@ -101,6 +101,10 @@ jobs:
         working-directory: src
         run: dotnet restore ./farm-web.sln
 
+      - name: Build monolith API
+        working-directory: src
+        run: dotnet build ./api/Farm.Web.Api.csproj -c Debug --no-restore
+
       - name: Install frontend deps
         working-directory: src/Web/ReactApp
         run: npm ci
@@ -114,13 +118,20 @@ jobs:
         env:
           ConnectionStrings__Default: Data Source=${{ runner.temp }}/monolith-smoke.db
         run: |
-          nohup dotnet run --project ./api/Farm.Web.Api.csproj --no-launch-profile \
+          # setsid detaches into its own process group so the whole tree
+          # (dotnet run's launcher + the actual Farm.Web.Api child process
+          # it forks) can be killed together via that group id, rather than
+          # `kill`ing only the launcher PID and leaving the API child alive.
+          # --no-build: the previous step already built the API; starting
+          # from a prebuilt DLL keeps the health-check wait bounded by host
+          # startup + DB seeding time only, not a cold build too.
+          setsid nohup dotnet run --project ./api/Farm.Web.Api.csproj --no-launch-profile --no-build \
             > ${{ runner.temp }}/monolith-smoke-api.log 2>&1 &
           echo "$!" > ${{ runner.temp }}/monolith-smoke-api.pid
 
       - name: Wait for API health check
         run: |
-          for i in $(seq 1 60); do
+          for i in $(seq 1 90); do
             if curl --fail --silent --output /dev/null "http://localhost:5245/healthz"; then
               echo "API is healthy."
               exit 0
@@ -137,7 +148,7 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: monolith-smoke-playwright-report
           path: src/Web/ReactApp/playwright-report/
@@ -146,7 +157,7 @@ jobs:
 
       - name: Upload API log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: monolith-smoke-api-log
           path: ${{ runner.temp }}/monolith-smoke-api.log
@@ -157,5 +168,8 @@ jobs:
         if: always()
         run: |
           if [ -f "${{ runner.temp }}/monolith-smoke-api.pid" ]; then
-            kill "$(cat "${{ runner.temp }}/monolith-smoke-api.pid")" 2>/dev/null || true
+            pid="$(cat "${{ runner.temp }}/monolith-smoke-api.pid")"
+            # Negative PID targets the whole process group setsid created,
+            # so the dotnet launcher and its Farm.Web.Api child both stop.
+            kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
           fi

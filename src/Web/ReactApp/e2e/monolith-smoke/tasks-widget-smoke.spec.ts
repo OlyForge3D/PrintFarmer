@@ -40,6 +40,17 @@ test.describe('monolith smoke: tasks', () => {
     const authHeader = 'Bearer ' + token;
     const authHeaders = { Authorization: authHeader };
 
+    // Before creating anything, this pristine seeded DB has zero tasks —
+    // assert the real, live empty-list response against the corpus's
+    // empty-collection fixture (rather than a hardcoded `[]` literal that
+    // never touched the API), genuinely exercising the comparator's
+    // "no template" branch for an empty corpus array.
+    const initialListResponse = await page.request.get(`${API_BASE_URL}/api/tasks`, { headers: authHeaders });
+    expect(initialListResponse.status(), 'GET /api/tasks (before creating any task) must succeed').toBe(200);
+    const initialList = await initialListResponse.json();
+    expect(initialList, 'expected a pristine seeded DB to have zero tasks').toEqual([]);
+    assertMatchesWireContractShape(initialList, TASK_LIST_EMPTY_FIXTURE);
+
     const title = `Monolith smoke task ${Date.now()}`;
     const createResponse = await page.request.post(`${API_BASE_URL}/api/tasks`, {
       headers: authHeaders,
@@ -56,16 +67,12 @@ test.describe('monolith smoke: tasks', () => {
 
     const list = await listResponse.json();
     expect(Array.isArray(list), 'GET /api/tasks must return an array').toBe(true);
-    expect(list.length, 'expected the task just created to appear in the flat list').toBeGreaterThan(0);
 
-    // The corpus's own empty-collection fixture only proves the array
-    // "kind" for a `GET /api/tasks` response with zero rows; assert the
-    // populated-object shape against the element the list actually
-    // contains, since we just guaranteed at least one exists.
-    assertMatchesWireContractShape(list[0], TASK_POPULATED_FIXTURE);
-    // Referencing the empty-collection fixture too keeps the shape
-    // comparator's "no template" branch (an empty corpus array) exercised
-    // by this suite, matching the acceptance criteria's corpus coverage.
-    assertMatchesWireContractShape([], TASK_LIST_EMPTY_FIXTURE);
+    // Find the task this test actually created (by id), rather than
+    // trusting list[0] — another task could already be first in the list
+    // even if the POST above silently failed to persist.
+    const createdInList = list.find((t: { id: unknown }) => t.id === created.id);
+    expect(createdInList, 'expected the task just created to appear in GET /api/tasks by id').toBeTruthy();
+    assertMatchesWireContractShape(createdInList, TASK_POPULATED_FIXTURE);
   });
 });

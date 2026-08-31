@@ -35,6 +35,12 @@ test.describe('monolith smoke: print queue', () => {
 
     const payload = await response.json();
     expect(Array.isArray(payload), 'GET /api/job-queue must return an array').toBe(true);
+    // The corpus fixture for this scenario is `[]` (no printers seeded), so
+    // this shape assertion only proves array "kind" and emptiness here —
+    // there is no populated-element template to validate against on a
+    // pristine DB. Assert the fixture's actual content (an empty array)
+    // explicitly rather than relying on the shape check alone to convey it.
+    expect(payload, 'a pristine seeded DB has no printers, so the queue must be empty').toEqual([]);
     assertMatchesWireContractShape(payload, QUEUE_EMPTY_FIXTURE);
   });
 });

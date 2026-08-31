@@ -61,22 +61,17 @@ test.describe('monolith smoke: mutation control', () => {
       expect.objectContaining({ path: '$.overallStatus', message: expect.stringContaining('unexpected') })
     );
 
-    // Prove the journey-facing assertion helper itself would fail the test
-    // (not just the lower-level comparator) by feeding it the mutated
-    // fixture's raw shape via `compareWireContractShape`, and separately
-    // confirming `assertMatchesWireContractShape` throws against a
-    // known-mutated corpus fixture path (`tasks.populated.json`, mutated
-    // the same way at the unit level in `wireContractShape.test.ts`) using
-    // the exact live payload gathered in this real browser journey.
-    expect(() => {
-      const localDifferences = compareWireContractShape(mutatedFixture, livePayload);
-      if (localDifferences.length > 0) {
-        throw new Error(
-          `Live response no longer matches the mutated shape:\n` +
-            localDifferences.map((d) => `${d.path}: ${d.message}`).join('\n')
-        );
-      }
-    }).toThrow(/no longer matches the mutated shape/);
+    // Prove the journey-facing assertion helper itself — not just the
+    // lower-level comparator above — genuinely fails against the mutated
+    // clone. This calls the exact production `assertMatchesWireContractShape`
+    // export every monolith-smoke journey uses, passing it the mutated
+    // clone in-memory (never touching disk) via `InMemoryExpectedShape`.
+    expect(() =>
+      assertMatchesWireContractShape(livePayload, {
+        value: mutatedFixture,
+        label: 'mutated-clone: overallStatus -> status',
+      })
+    ).toThrow(/no longer matches the shape/);
 
     // And confirm the real disk-backed fixture path is unaffected by the
     // in-memory mutation above — the live payload still matches the

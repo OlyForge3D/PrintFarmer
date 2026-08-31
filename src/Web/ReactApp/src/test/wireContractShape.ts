@@ -137,19 +137,36 @@ export function compareWireContractShape(expected: unknown, actual: unknown): Wi
   return differences;
 }
 
+/** An in-memory expected shape, for callers that need to assert against a
+ * value that was never (and must never be) written to disk — e.g. the
+ * mutation-control journey, which clones and mutates a corpus fixture in
+ * memory and must exercise this exact production assertion helper against
+ * that mutated clone to prove the helper itself (not just the lower-level
+ * `compareWireContractShape`) genuinely fails on injected drift. */
+export interface InMemoryExpectedShape {
+  value: unknown;
+  /** Human-readable label used in the thrown error message in place of a fixture path. */
+  label: string;
+}
+
 /**
  * Asserts that `actual` (a live, parsed JSON response body) has the same
  * shape — same keys at every level, same JSON kind at every leaf — as the
- * canonical corpus fixture at `fixtureRelativePath` (e.g.
- * `api/tasks/tasks.populated.json`). Throws with a full diff summary if
- * they differ.
+ * canonical corpus fixture at `expectedFixture` (e.g.
+ * `api/tasks/tasks.populated.json`), or an in-memory expected shape (see
+ * `InMemoryExpectedShape`). Throws with a full diff summary if they differ.
  */
-export function assertMatchesWireContractShape(actual: unknown, fixtureRelativePath: string): void {
-  const expected = loadWireContractFixture(fixtureRelativePath);
+export function assertMatchesWireContractShape(
+  actual: unknown,
+  expectedFixture: string | InMemoryExpectedShape
+): void {
+  const expected =
+    typeof expectedFixture === 'string' ? loadWireContractFixture(expectedFixture) : expectedFixture.value;
+  const label = typeof expectedFixture === 'string' ? expectedFixture : expectedFixture.label;
   const differences = compareWireContractShape(expected, actual);
   if (differences.length > 0) {
     throw new Error(
-      `Live response no longer matches the shape of wire-contract fixture "${fixtureRelativePath}":\n` +
+      `Live response no longer matches the shape of wire-contract fixture "${label}":\n` +
         differences.map((d) => `${d.path}: ${d.message}`).join('\n')
     );
   }
