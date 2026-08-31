@@ -126,6 +126,11 @@ builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler
 Action<JsonSerializerOptions> configureJson = options =>
 {
     options.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+
+    // Matches the main API's ControllerStartup.cs/SignalRStartup.cs null-handling policy (issue
+    // #2248): a null CLR property value is omitted from the wire payload rather than serialized
+    // as an explicit JSON null, so this host's contract doesn't diverge from the main API's.
+    options.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
     options.Converters.Add(new JsonStringEnumConverter());
 };
 
