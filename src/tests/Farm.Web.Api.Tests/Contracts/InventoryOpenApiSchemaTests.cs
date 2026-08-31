@@ -175,10 +175,14 @@ public sealed class InventoryOpenApiSchemaTests(OpenApiDocumentFixture fixture)
     /// <c>PartAdjustmentConflictResponse</c> -- adjust's only conflict path never raises the
     /// wrong-bin/mapping-required codes above (those are harvest-only outcomes), so it is
     /// deliberately not forced into <c>HarvestConflictResponse</c>'s richer, code-discriminated
-    /// shape. It carries just a single required <c>message</c> string.
+    /// shape. It carries just a single nullable <c>message</c> string, not required: the shared
+    /// <c>[Idempotent]</c> filter can also short-circuit this action with a filter-level 409 that
+    /// has no <c>message</c> at all (see <c>PartAdjustmentConflictResponse</c> remarks), so
+    /// <c>message</c> must stay optional for the declared schema to describe every 409 this
+    /// action can actually emit.
     /// </summary>
     [Fact]
-    public void AdjustConflict_ResponseSchema_IsPartAdjustmentConflictResponse_WithRequiredMessage()
+    public void AdjustConflict_ResponseSchema_IsPartAdjustmentConflictResponse_WithOptionalMessage()
     {
         JsonElement operation = OpenApiSchemaTestSupport.GetOperation(_document, "/api/parts-inventory/{sku}/adjust", "post");
         JsonElement responseSchema = OpenApiSchemaTestSupport.GetResponseSchema(operation, statusCode: "409")!.Value;
@@ -186,10 +190,10 @@ public sealed class InventoryOpenApiSchemaTests(OpenApiDocumentFixture fixture)
         _ = responseSchema.GetProperty("$ref").GetString().Should().Be("#/components/schemas/PartAdjustmentConflictResponse");
 
         JsonElement partAdjustmentConflictResponse = OpenApiSchemaTestSupport.ResolveRef(_document, responseSchema);
-        _ = OpenApiSchemaTestSupport.GetRequiredSet(partAdjustmentConflictResponse).Should().BeEquivalentTo(new[] { "message" });
+        _ = OpenApiSchemaTestSupport.GetRequiredSet(partAdjustmentConflictResponse).Should().BeEmpty();
         _ = OpenApiSchemaTestSupport.GetPropertyNames(partAdjustmentConflictResponse).Should().BeEquivalentTo(new[] { "message" });
 
         JsonElement message = OpenApiSchemaTestSupport.GetProperty(partAdjustmentConflictResponse, "message");
-        _ = OpenApiSchemaTestSupport.GetTypes(message).Should().BeEquivalentTo(new[] { "string" });
+        _ = OpenApiSchemaTestSupport.GetTypes(message).Should().BeEquivalentTo(new[] { "string", "null" });
     }
 }

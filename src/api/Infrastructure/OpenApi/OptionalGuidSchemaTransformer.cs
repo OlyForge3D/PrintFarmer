@@ -39,6 +39,7 @@ internal sealed class OptionalGuidSchemaTransformer : IOpenApiSchemaTransformer
             schema.Type = JsonSchemaType.String | JsonSchemaType.Null;
             schema.Format = "uuid";
             schema.Properties = null;
+            schema.Required = null;
             schema.AdditionalPropertiesAllowed = true;
             schema.AdditionalProperties = null;
         }

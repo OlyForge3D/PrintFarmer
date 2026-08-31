@@ -894,7 +894,7 @@ public class JobQueueController(
             PartInventoryOutcome.Ok => Ok(result.Response),
             PartInventoryOutcome.IdempotentReplay => Ok(result.Response),
             PartInventoryOutcome.JobNotFound => NotFound(new { message = result.Message }),
-            PartInventoryOutcome.JobNotCompleted => Conflict(new { message = result.Message }),
+            PartInventoryOutcome.JobNotCompleted => PartsInventoryProblemDetails.JobNotCompleted(result.Message),
             PartInventoryOutcome.BinNotFound => BadRequest(new { message = result.Message }),
             PartInventoryOutcome.WrongBin when result.WrongBin is not null
                 => PartsInventoryProblemDetails.WrongBin(result.WrongBin),
@@ -902,7 +902,7 @@ public class JobQueueController(
                 => PartsInventoryProblemDetails.PartMappingRequired(result.MappingRequired),
             PartInventoryOutcome.PartNotFound => NotFound(new { message = result.Message }),
             PartInventoryOutcome.InvalidRequest => BadRequest(new { message = result.Message }),
-            PartInventoryOutcome.Conflict => Conflict(new { message = result.Message }),
+            PartInventoryOutcome.Conflict => PartsInventoryProblemDetails.Generic(result.Message),
             PartInventoryOutcome.FeatureDisabled => OperatorFeatureProblemDetails.NotFound(
                 operatorFeatureGate,
                 OperatorFeature.PrintedPartsInventory),

@@ -195,7 +195,19 @@ public readonly struct OptionalGuid : IEquatable<OptionalGuid>
 public sealed class OptionalGuidJsonConverter : JsonConverter<OptionalGuid>
 {
     public override OptionalGuid Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        => OptionalGuid.Of(reader.TokenType == JsonTokenType.Null ? null : reader.GetGuid());
+    {
+        if (reader.TokenType == JsonTokenType.Null)
+        {
+            return OptionalGuid.Of(null);
+        }
+
+        if (reader.TokenType != JsonTokenType.String || !reader.TryGetGuid(out Guid guid))
+        {
+            throw new JsonException("Expected a GUID string or null for OptionalGuid.");
+        }
+
+        return OptionalGuid.Of(guid);
+    }
 
     public override void Write(Utf8JsonWriter writer, OptionalGuid value, JsonSerializerOptions options)
     {
@@ -217,7 +229,19 @@ public sealed class OptionalGuidJsonConverter : JsonConverter<OptionalGuid>
 /// <see cref="Message"/> -- so it gets its own accurate, narrower DTO rather than being forced into
 /// <see cref="HarvestConflictResponse"/>'s richer, code-discriminated shape.
 /// </summary>
-public sealed record PartAdjustmentConflictResponse(string Message);
+/// <remarks>
+/// <see cref="Message"/> is nullable (not <c>required</c>) even though the controller's own
+/// in-action conflict path always supplies one: the shared <c>[Idempotent]</c> filter can also
+/// short-circuit this same action with a <c>409</c> before the controller runs, and that
+/// filter-level payload is a plain <c>ProblemDetails</c> with a <c>code</c> extension and no
+/// <c>message</c> at all (see <c>IdempotencyProblemDetails.HashConflict</c>/<c>InProgress</c>).
+/// A <c>required</c> <see cref="Message"/> would make the declared
+/// <c>[ProducesResponseType(typeof(PartAdjustmentConflictResponse), 409)]</c> schema fail to
+/// describe that filter-emitted response (Bishop review, issue #2294); making the property
+/// optional keeps the schema accurate for every 409 this action can actually emit without
+/// changing what the controller's own conflict path writes on the wire.
+/// </remarks>
+public sealed record PartAdjustmentConflictResponse(string? Message);
 
 /// <summary>Item in a caller-supplied harvest override / mapping fallback.</summary>
 public record HarvestOutputRequestItem(
