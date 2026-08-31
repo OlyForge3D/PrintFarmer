@@ -872,14 +872,21 @@ public class FilamentCoverageSpoolResolverTests
     }
 
     [Fact]
-    public async Task ResolveAsync_CallerCancellationWhileSourcesQueued_PropagatesCallerToken()
+    public async Task ResolveAsync_CallerCancellationWhileSourcesQueued_ReportsCallerTokenUniformly()
     {
-        // Distinct from ResolveAsync_CallerCancellation_PropagatesInsteadOfDegrading, which
-        // only covers sources already IN FLIGHT. With more sources than
-        // MaxConcurrentSourceRequests, the surplus is parked on the fan-out semaphore, and
-        // WaitAsync throws carrying the internal linked budget token rather than the
-        // caller's. Without explicit normalisation there, a caller that cancels a large
-        // fleet gets back a token it does not recognise purely because of queue position.
+        // UNIFORMITY GUARD, NOT A REGRESSION TEST - it cannot fail by construction, and that
+        // was verified by mutation: deleting the queued-path normalising catch arm in
+        // FilamentCoverageSpoolResolver leaves this test passing.
+        //
+        // ResolveAsync surfaces cancellation via Task.WhenAll, which reports the LOWEST-INDEX
+        // cancelled task's token. SemaphoreSlim.WaitAsync completes synchronously while permits
+        // remain, so indices 0..MaxConcurrentSourceRequests-1 always run straight through the
+        // gate and are always in flight; only higher indices park. A queued source therefore can
+        // never be the task whose token escapes, so the queued-path defect is unobservable here.
+        //
+        // Kept because it documents the intended contract across the fan-out and would catch a
+        // future change that made queued cancellation observable - for example awaiting the
+        // sources individually instead of through Task.WhenAll.
         const int fleetSize = 20;
         using SemaphoreSlim readsStarted = new(0);
         Mock<IBackendClient> native = new();
@@ -931,7 +938,7 @@ public class FilamentCoverageSpoolResolverTests
         canceled.Should().NotBeNull("caller cancellation must propagate rather than degrade to an unavailable source");
         canceled!.CancellationToken.Should().Be(
             cts.Token,
-            "a queued source must report the caller's token, not the internal budget token");
+            "cancellation must surface the caller's token, never the internal budget token");
     }
 
     [Fact]

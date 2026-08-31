@@ -376,11 +376,17 @@ public sealed class FilamentCoverageSpoolResolver(
                 }
                 catch (OperationCanceledException)
                 {
-                    // The CALLER cancelled while this source was still queued. WaitAsync threw
-                    // carrying the linked budget token, so normalise to the caller's token the
-                    // same way the in-flight paths do - otherwise a caller that cancels a
-                    // fleet larger than MaxConcurrentSourceRequests sees a token it does not
-                    // recognise purely because that source had not started yet.
+                    // The CALLER cancelled while this source was still queued. WaitAsync throws
+                    // carrying the linked budget token, so normalise to the caller's token and
+                    // keep all three cancellation exits uniform.
+                    //
+                    // This is hardening, not a repair of observable behaviour: ResolveAsync
+                    // surfaces cancellation through Task.WhenAll, which reports the LOWEST-INDEX
+                    // cancelled task's token, and indices 0..MaxConcurrentSourceRequests-1 always
+                    // win the gate synchronously and so are always in flight. A queued source can
+                    // therefore never be the task whose token escapes. Normalising anyway means
+                    // the guarantee does not silently depend on that Task.WhenAll ordering detail
+                    // if the await strategy here ever changes.
                     ct.ThrowIfCancellationRequested();
                     throw;
                 }
