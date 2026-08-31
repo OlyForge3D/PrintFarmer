@@ -26,14 +26,14 @@ public sealed class FilamentCoverageSpoolResolver(
     /// <summary>
     /// Upper bound on spool sources resolved at once. Distinct sources are
     /// independent hosts, so this exists only to stop a large farm creating
-    /// unbounded fan-out.
+    /// unbounded fan-out against the network.
     ///
     /// <para>
-    /// It interacts with <see cref="SpoolCoverageSettings.SpoolSourceTimeoutMs"/>: when
-    /// several printers are powered down at once, the gate serialises them into
-    /// <c>ceil(sources / MaxConcurrentSourceRequests)</c> timeout waves. Eight keeps the
-    /// worst case for a realistic farm inside the mobile client's readiness budget
-    /// (10s per probe) instead of stacking waves past it.
+    /// This is NOT what keeps the endpoint inside the mobile client's readiness budget.
+    /// Dark sources each hold a slot for the full per-source timeout, so N of them
+    /// serialise into <c>ceil(N / MaxConcurrentSourceRequests)</c> waves and total latency
+    /// still grows with fleet size. <see cref="SpoolCoverageSettings.FleetResolveTimeoutMs"/>
+    /// is what bounds the endpoint, at any fleet size.
     /// </para>
     /// </summary>
     private const int MaxConcurrentSourceRequests = 8;
@@ -50,30 +50,63 @@ public sealed class FilamentCoverageSpoolResolver(
     private readonly ISettingsService? _settingsService = settingsService;
 
     /// <summary>
-    /// Resolves the configured per-source read timeout, falling back to the
-    /// <see cref="SpoolCoverageSettings"/> default when settings are unavailable.
+    /// The read deadlines for one resolve operation. Captured once per call so every
+    /// source in a fan-out uses the same values: <c>SettingsService.Get</c> enumerates a
+    /// shared dictionary, so reading it from each of the concurrent source tasks can race
+    /// a concurrent settings save and fall back to defaults for some sources but not
+    /// others.
+    /// </summary>
+    private readonly record struct SpoolReadBudget(TimeSpan PerSource, TimeSpan Fleet);
+
+    /// <summary>
+    /// Resolves the configured read deadlines, falling back to the
+    /// <see cref="SpoolCoverageSettings"/> defaults when settings are unavailable.
     /// Coverage must never inherit the backend's print-control timeout for this
     /// read-only projection.
     /// </summary>
-    private TimeSpan SpoolSourceTimeout
+    private SpoolReadBudget ReadBudget()
     {
-        get
+        SpoolCoverageSettings settings = new();
+        try
         {
-            int timeoutMs = new SpoolCoverageSettings().SpoolSourceTimeoutMs;
-            try
+            if (_settingsService?.Get<SpoolCoverageSettings>() is SpoolCoverageSettings configured)
             {
-                if (_settingsService?.Get<SpoolCoverageSettings>() is SpoolCoverageSettings settings)
-                {
-                    timeoutMs = settings.SpoolSourceTimeoutMs;
-                }
+                settings = configured;
             }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "[FilamentCoverage] Falling back to default spool source timeout");
-            }
-
-            return TimeSpan.FromMilliseconds(Math.Max(250, timeoutMs));
         }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[FilamentCoverage] Falling back to default spool read budget");
+        }
+
+        // Clamp both ends. Validate() enforces these ranges on the write path, but a row
+        // persisted by another path (a migration, a direct edit) must not be able to
+        // reintroduce the very stall this budget exists to prevent.
+        return new SpoolReadBudget(
+            TimeSpan.FromMilliseconds(Math.Clamp(settings.SpoolSourceTimeoutMs, 250, 30_000)),
+            TimeSpan.FromMilliseconds(Math.Clamp(settings.FleetResolveTimeoutMs, 1_000, 60_000)));
+    }
+
+    /// <summary>
+    /// Renders a spool source's URL for logging with any embedded userinfo removed.
+    /// <see cref="LogSanitizer"/> only defeats log forging; it does not strip credentials,
+    /// and a server URL is free text an operator may have typed as
+    /// <c>http://user:secret@host</c>.
+    /// </summary>
+    private static string? DescribeSource(string? serverUrl)
+    {
+        if (string.IsNullOrWhiteSpace(serverUrl))
+        {
+            return LogSanitizer.Sanitize(serverUrl);
+        }
+
+        if (Uri.TryCreate(serverUrl, UriKind.Absolute, out Uri? uri) && !string.IsNullOrEmpty(uri.UserInfo))
+        {
+            UriBuilder redacted = new(uri) { UserName = string.Empty, Password = string.Empty };
+            return LogSanitizer.Sanitize(redacted.Uri.ToString());
+        }
+
+        return LogSanitizer.Sanitize(serverUrl);
     }
 
     public async Task<FilamentCoverageSpoolSnapshot> ResolveSpoolAsync(
@@ -84,6 +117,10 @@ public sealed class FilamentCoverageSpoolResolver(
             .CaptureAsync(_watermarkReader, _logger, "source-qualified filament spool", ct)
             .ConfigureAwait(false);
         HashSet<int> spoolIds = [identity.SpoolId];
+
+        // Single source, so the fleet budget adds nothing beyond the per-source deadline;
+        // pass the caller token through as the budget token.
+        SpoolReadBudget budget = ReadBudget();
         Dictionary<int, FilamentCoverageSpoolSnapshot> resolved;
 
         if (identity.SourceKind == SpoolSourceKind.Central)
@@ -121,7 +158,7 @@ public sealed class FilamentCoverageSpoolResolver(
                     ReasonSourceUnavailable);
             }
 
-            resolved = await ResolveCentralAsync(spoolIds, originWatermark, ct).ConfigureAwait(false);
+            resolved = await ResolveCentralAsync(spoolIds, originWatermark, budget, ct, ct).ConfigureAwait(false);
         }
         else
         {
@@ -154,6 +191,8 @@ public sealed class FilamentCoverageSpoolResolver(
                         SpoolIds = { identity.SpoolId },
                     },
                     originWatermark,
+                    budget,
+                    ct,
                     ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -242,9 +281,13 @@ public sealed class FilamentCoverageSpoolResolver(
 
         var request = new SourceRequest(selection.NativeClient, selection.ServerUrl);
         _ = request.SpoolIds.Add(spoolId);
+
+        // Single source, so the fleet budget adds nothing beyond the per-source deadline;
+        // pass the caller token through as the budget token.
+        SpoolReadBudget budget = ReadBudget();
         Dictionary<int, FilamentCoverageSpoolSnapshot> resolved = selection.Key.Native
-            ? await ResolveNativeAsync(request, originWatermark, ct).ConfigureAwait(false)
-            : await ResolveCentralAsync(request.SpoolIds, originWatermark, ct).ConfigureAwait(false);
+            ? await ResolveNativeAsync(request, originWatermark, budget, ct, ct).ConfigureAwait(false)
+            : await ResolveCentralAsync(request.SpoolIds, originWatermark, budget, ct, ct).ConfigureAwait(false);
 
         return resolved.TryGetValue(spoolId, out FilamentCoverageSpoolSnapshot? snapshot)
             ? snapshot
@@ -306,16 +349,37 @@ public sealed class FilamentCoverageSpoolResolver(
 
         // Distinct spool sources are independent HTTP adapters. Resolve them in
         // parallel without allowing a large farm to create unbounded fan-out.
+        //
+        // The gate alone cannot bound this endpoint: dark sources each hold a slot for
+        // the full per-source timeout, so they serialise into successive timeout waves
+        // and total latency grows with fleet size. The fleet deadline below is what makes
+        // the bound hold at any size — when it expires, sources still in flight degrade
+        // to "unavailable" and the projection returns the coverage it already has.
+        SpoolReadBudget budget = ReadBudget();
+        using CancellationTokenSource fleetCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        fleetCts.CancelAfter(budget.Fleet);
+        CancellationToken budgetToken = fleetCts.Token;
+
         using SemaphoreSlim sourceRequestGate = new(MaxConcurrentSourceRequests);
         Task<KeyValuePair<SourceKey, Dictionary<int, FilamentCoverageSpoolSnapshot>>>[] pendingSources =
             requests.Select(async pair =>
             {
-                await sourceRequestGate.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    await sourceRequestGate.WaitAsync(budgetToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    // The fleet deadline expired while this source was still queued behind
+                    // the gate. Report it as unavailable rather than failing the projection.
+                    return KeyValuePair.Create(pair.Key, Failure(pair.Value.SpoolIds, pair.Key.Native, ReasonSourceUnavailable));
+                }
+
                 try
                 {
                     Dictionary<int, FilamentCoverageSpoolSnapshot> resolved = pair.Key.Native
-                        ? await ResolveNativeAsync(pair.Value, originWatermark, ct).ConfigureAwait(false)
-                        : await ResolveCentralAsync(pair.Value.SpoolIds, originWatermark, ct).ConfigureAwait(false);
+                        ? await ResolveNativeAsync(pair.Value, originWatermark, budget, budgetToken, ct).ConfigureAwait(false)
+                        : await ResolveCentralAsync(pair.Value.SpoolIds, originWatermark, budget, budgetToken, ct).ConfigureAwait(false);
                     return KeyValuePair.Create(pair.Key, resolved);
                 }
                 finally
@@ -360,26 +424,30 @@ public sealed class FilamentCoverageSpoolResolver(
     private async Task<Dictionary<int, FilamentCoverageSpoolSnapshot>> ResolveNativeAsync(
         SourceRequest request,
         long? originWatermark,
+        SpoolReadBudget budget,
+        CancellationToken budgetToken,
         CancellationToken ct)
     {
-        TimeSpan timeout = SpoolSourceTimeout;
+        TimeSpan timeout = budget.PerSource;
         try
         {
             // A powered-down printer that still holds its address black-holes packets
             // instead of refusing them, so this read must carry its own deadline. Without
             // it the call inherits the backend's print-control timeout (60s) and one dark
-            // printer stalls the entire fleet projection.
-            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            // printer stalls the entire fleet projection. Linking off the fleet budget (not
+            // the caller token) also cuts this read short when the overall deadline expires.
+            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(budgetToken);
             linked.CancelAfter(timeout);
 
             string? json = await request.NativeClient!
                 .GetSpoolmanSpoolsAsync(request.ServerUrl!, linked.Token)
                 .ConfigureAwait(false);
 
-            // The Moonraker client reports a cancelled/timed-out proxy call as a null
-            // body, so a genuine caller cancellation must be re-surfaced explicitly
-            // rather than being recorded as an unavailable source.
-            ct.ThrowIfCancellationRequested();
+            // The Moonraker client swallows every exception from its Spoolman proxy and
+            // reports a cancelled or timed-out call as a null body, so cancellation has to
+            // be re-surfaced explicitly. Checking the LINKED token covers both cases; the
+            // catch filters below then separate our timeout from a caller cancellation.
+            linked.Token.ThrowIfCancellationRequested();
 
             if (json is null)
             {
@@ -393,19 +461,25 @@ public sealed class FilamentCoverageSpoolResolver(
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
+            // Either this source's own deadline or the fleet deadline. Both degrade; only a
+            // genuine caller cancellation propagates, via the rethrow below.
             _logger.LogDebug(
                 "[FilamentCoverage] Native Spoolman source timed out after {TimeoutMs}ms at {ServerUrl}",
                 timeout.TotalMilliseconds,
-                LogSanitizer.Sanitize(request.ServerUrl));
+                DescribeSource(request.ServerUrl));
             return Failure(request.SpoolIds, true, ReasonSourceUnavailable);
         }
         catch (OperationCanceledException)
         {
+            // Reached only when the CALLER cancelled. Rethrow carrying the caller's token
+            // rather than the internal linked one, so callers can identify their own
+            // cancellation from ex.CancellationToken.
+            ct.ThrowIfCancellationRequested();
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "[FilamentCoverage] Native Spoolman source unavailable at {ServerUrl}", LogSanitizer.Sanitize(request.ServerUrl));
+            _logger.LogDebug(ex, "[FilamentCoverage] Native Spoolman source unavailable at {ServerUrl}", DescribeSource(request.ServerUrl));
             return Failure(request.SpoolIds, true, ReasonSourceUnavailable);
         }
     }
@@ -413,6 +487,8 @@ public sealed class FilamentCoverageSpoolResolver(
     private async Task<Dictionary<int, FilamentCoverageSpoolSnapshot>> ResolveCentralAsync(
         HashSet<int> spoolIds,
         long? originWatermark,
+        SpoolReadBudget budget,
+        CancellationToken budgetToken,
         CancellationToken ct)
     {
         SpoolmanConfigDto? config = _spoolmanService.GetConfig();
@@ -421,12 +497,12 @@ public sealed class FilamentCoverageSpoolResolver(
             return Failure(spoolIds, false, ReasonSpoolmanUnconfigured);
         }
 
-        TimeSpan timeout = SpoolSourceTimeout;
+        TimeSpan timeout = budget.PerSource;
         try
         {
             // Bound the whole paged read, not each page: an unreachable central Spoolman
             // must not stall coverage any longer than a dark printer does.
-            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(budgetToken);
             linked.CancelAfter(timeout);
 
             const int pageSize = 500;
@@ -443,6 +519,14 @@ public sealed class FilamentCoverageSpoolResolver(
                         AllowArchived = true,
                     },
                     linked.Token).ConfigureAwait(false);
+
+                // SpoolmanService.ListSpoolsAsync catches every exception - including
+                // cancellation - and returns an EMPTY page. Without this check a timed-out
+                // read would fall through to BuildSnapshots and be reported as
+                // `spool-not-found`, i.e. an affirmative "that spool does not exist" claim
+                // about a source we never actually reached. Re-surface cancellation here so
+                // the catch filters below degrade to `spool-source-unavailable` instead.
+                linked.Token.ThrowIfCancellationRequested();
 
                 foreach (SpoolmanSpoolDto spool in page.Items.Where(spool => spoolIds.Contains(spool.Id)))
                 {
@@ -465,6 +549,10 @@ public sealed class FilamentCoverageSpoolResolver(
         }
         catch (OperationCanceledException)
         {
+            // Reached only when the CALLER cancelled. Rethrow carrying the caller's token
+            // rather than the internal linked one, so callers can identify their own
+            // cancellation from ex.CancellationToken.
+            ct.ThrowIfCancellationRequested();
             throw;
         }
         catch (Exception ex)
