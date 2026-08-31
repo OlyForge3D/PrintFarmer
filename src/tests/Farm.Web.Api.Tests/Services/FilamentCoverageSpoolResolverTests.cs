@@ -722,11 +722,11 @@ public class FilamentCoverageSpoolResolverTests
             .Returns(async (SpoolmanSpoolQueryParams _, CancellationToken ct) =>
             {
                 // Mirrors the real SpoolmanService, which catches every exception -
-                // cancellation included - and returns an EMPTY page rather than throwing.
-                // A mock that threw would hide the fact that a timed-out central read used
-                // to fall through and be reported as `spool-not-found`.
+                // cancellation included - and reports SourceUnavailable rather than
+                // throwing (#2312). A mock that threw would exercise a failure path the
+                // real service never takes.
                 await SwallowedHangAsync(ct);
-                return new SpoolmanPagedResult<SpoolmanSpoolDto>([], 0);
+                return SpoolmanReadResult.Unavailable<SpoolmanSpoolDto>();
             });
         FilamentCoverageSpoolResolver resolver = new(
             central.Object,
@@ -885,10 +885,11 @@ public class FilamentCoverageSpoolResolverTests
     public async Task ResolveAsync_CentralSourceCallerCancellation_PropagatesInsteadOfDegrading()
     {
         // The central path needs its own cancellation test because SpoolmanService swallows
-        // every exception - cancellation included - and returns an EMPTY page. Without the
-        // resolver's explicit post-call check, a cancelled read would fall through to
-        // BuildSnapshots and be reported as `spool-not-found`: an affirmative "that spool
-        // does not exist" claim about a source that was never actually read.
+        // every exception - cancellation included - and reports SourceUnavailable rather
+        // than rethrowing (#2312). That is the right answer for a timed-out read, but it
+        // cannot distinguish the CALLER cancelling: without the resolver's explicit
+        // post-call check, a caller that cancelled its own request would get a fabricated
+        // `spool-source-unavailable` answer instead of an OperationCanceledException.
         using SemaphoreSlim sourceReadStarted = new(0);
         Mock<ISpoolmanService> central = new();
         central.Setup(s => s.GetConfig()).Returns(new SpoolmanConfigDto("http://central.local"));
@@ -898,7 +899,7 @@ public class FilamentCoverageSpoolResolverTests
             {
                 sourceReadStarted.Release();
                 await SwallowedHangAsync(ct);
-                return new SpoolmanPagedResult<SpoolmanSpoolDto>([], 0);
+                return SpoolmanReadResult.Unavailable<SpoolmanSpoolDto>();
             });
         FilamentCoverageSpoolResolver resolver = new(
             central.Object,

@@ -553,12 +553,15 @@ public sealed class FilamentCoverageSpoolResolver(
                     },
                     linked.Token).ConfigureAwait(false);
 
-                // SpoolmanService.ListSpoolsAsync catches every exception - including
-                // cancellation - and returns an EMPTY page. Without this check a timed-out
-                // read would fall through to BuildSnapshots and be reported as
-                // `spool-not-found`, i.e. an affirmative "that spool does not exist" claim
-                // about a source we never actually reached. Re-surface cancellation here so
-                // the catch filters below degrade to `spool-source-unavailable` instead.
+                // SpoolmanService.ListSpoolsAsync catches every exception - cancellation
+                // included - and reports it as SourceUnavailable rather than rethrowing
+                // (#2312). The !page.Success arm below therefore already covers a timed-out
+                // read. This check exists for the case that arm CANNOT distinguish: a
+                // cancellation originating from the CALLER's token must propagate as an
+                // OperationCanceledException rather than degrade, otherwise a caller that
+                // cancelled its own request gets a fabricated `spool-source-unavailable`
+                // answer instead of the cancellation it asked for. Re-surfacing it here lets
+                // the catch filters below tell the two apart.
                 linked.Token.ThrowIfCancellationRequested();
 
                 if (!page.Success)
