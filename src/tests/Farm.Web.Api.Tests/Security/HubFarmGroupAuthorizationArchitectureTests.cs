@@ -164,41 +164,222 @@ public sealed class HubFarmGroupAuthorizationArchitectureTests
     }
 
     /// <summary>
-    /// Determines whether <paramref name="conditionText"/> contains at least one call to
-    /// <c>HasPermission(</c>/<c>IsFarmAdmin(</c> that is NOT logically negated (i.e. not
-    /// immediately preceded — modulo whitespace and wrapping parens — by a <c>!</c>). A bare
-    /// <see cref="GuardConditionPattern"/> match is insufficient: <c>if (!HasPermission(...))
-    /// { join }</c> textually contains the guard call but actually re-creates the exact
-    /// unconditional-join vulnerability this test exists to catch (the join only happens when
-    /// the caller LACKS the permission), so it must not be accepted as a guard frame.
+    /// Determines whether <paramref name="conditionText"/> guarantees a permission check on every
+    /// path that can make it true. A bare <see cref="GuardConditionPattern"/> match on the whole
+    /// condition text is insufficient in three ways this method closes:
+    /// <list type="bullet">
+    /// <item>Negation: <c>if (!HasPermission(...)) { join }</c> textually contains the guard call
+    /// but actually re-creates the unconditional-join vulnerability (the join only happens when
+    /// the caller LACKS the permission), so a negated call must not count as a guard.</item>
+    /// <item>Disjunction bypass: <c>if (HasPermission(...) || true) { join }</c> contains a
+    /// non-negated guard call, but the <c>|| true</c> alternative makes the whole condition true
+    /// regardless of permission. Every top-level (paren-depth-0) <c>||</c>-separated disjunct must
+    /// independently carry a non-negated guard call, or the disjunction is rejected outright — two
+    /// real alternative permission checks (<c>HasPermission(a) || HasPermission(b)</c>) still pass
+    /// since both disjuncts qualify.</item>
+    /// <item>De Morgan negation of a compound expression: <c>if (!(a &amp;&amp;
+    /// HasPermission(...))) { join }</c> has no <c>!</c> immediately before the call, but the
+    /// enclosing <c>!( ... )</c> negates the whole conjunction, so the join actually fires when
+    /// either <c>a</c> is false or the caller lacks the permission — the same vulnerability shape
+    /// as a bare negation, just one parenthesis level removed.</item>
+    /// </list>
     /// </summary>
     private static bool ConditionContainsPositiveGuard(string conditionText)
     {
-        foreach (Match match in GuardConditionPattern.Matches(conditionText))
+        foreach (string disjunct in SplitTopLevelOr(conditionText))
         {
-            int idx = match.Index - 1;
-
-            // Walk back over the (possibly qualified) receiver preceding the guard call name
-            // itself, e.g. "PrintFarmerPermissions." in "PrintFarmerPermissions.HasPermission(",
-            // so a "!" written before the qualifier (the common case) is not missed.
-            while (idx >= 0 && (char.IsLetterOrDigit(conditionText[idx]) || conditionText[idx] is '.' or '_'))
+            if (!DisjunctHasPositiveGuard(disjunct))
             {
-                idx--;
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Splits <paramref name="text"/> on <c>||</c> occurrences at paren-depth 0 (i.e. logical-OR
+    /// alternatives of the overall condition, not <c>||</c> nested inside a sub-call's arguments).
+    /// A condition with no top-level <c>||</c> yields a single element equal to the whole text.
+    /// </summary>
+    private static IEnumerable<string> SplitTopLevelOr(string text)
+    {
+        int depth = 0;
+        int start = 0;
+        int i = 0;
+
+        while (i < text.Length)
+        {
+            char c = text[i];
+            int advance = 1;
+
+            if (c == '(')
+            {
+                depth++;
+            }
+            else if (c == ')')
+            {
+                depth--;
+            }
+            else if (depth == 0 && c == '|' && i + 1 < text.Length && text[i + 1] == '|')
+            {
+                yield return text[start..i];
+                advance = 2;
+                start = i + advance;
             }
 
-            while (idx >= 0 && (char.IsWhiteSpace(conditionText[idx]) || conditionText[idx] == '('))
+            i += advance;
+        }
+
+        yield return text[start..];
+    }
+
+    /// <summary>
+    /// Determines whether a single (already top-level-OR-split) condition fragment contains at
+    /// least one non-negated call to <c>HasPermission(</c>/<c>IsFarmAdmin(</c>, per the negation
+    /// rules documented on <see cref="ConditionContainsPositiveGuard"/>. A guard call counts as
+    /// negated (and is skipped in favor of another match, if any) when it is either immediately
+    /// preceded by <c>!</c> (<see cref="IsImmediatelyNegated"/>) or sits inside a parenthesized
+    /// group that is itself preceded by <c>!</c> (<see cref="IsInsideNegatedGroup"/>) — the De
+    /// Morgan case, e.g. <c>if (!(a &amp;&amp; HasPermission(...))) { join }</c>, where the call
+    /// reads as positive in isolation but the enclosing negation flips it, so the join actually
+    /// fires when <c>a</c> is false OR the caller LACKS the permission.
+    /// </summary>
+    private static bool DisjunctHasPositiveGuard(string disjunctText)
+    {
+        foreach (Match match in GuardConditionPattern.Matches(disjunctText))
+        {
+            if (IsImmediatelyNegated(disjunctText, match.Index) || IsInsideNegatedGroup(disjunctText, match.Index))
             {
-                idx--;
+                continue;
             }
 
-            bool negated = idx >= 0 && conditionText[idx] == '!';
-            if (!negated)
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks whether the guard call starting at <paramref name="matchIndex"/> is directly
+    /// negated, i.e. preceded (after skipping its own qualified-receiver text and any wrapping
+    /// whitespace/parens) by a <c>!</c>, such as <c>!HasPermission(</c> or
+    /// <c>!(PrintFarmerPermissions.HasPermission(</c>.
+    /// </summary>
+    private static bool IsImmediatelyNegated(string text, int matchIndex)
+    {
+        int idx = matchIndex - 1;
+
+        // Walk back over the (possibly qualified) receiver preceding the guard call name itself,
+        // e.g. "PrintFarmerPermissions." in "PrintFarmerPermissions.HasPermission(", so a "!"
+        // written before the qualifier (the common case) is not missed.
+        while (idx >= 0 && (char.IsLetterOrDigit(text[idx]) || text[idx] is '.' or '_'))
+        {
+            idx--;
+        }
+
+        while (idx >= 0 && (char.IsWhiteSpace(text[idx]) || text[idx] == '('))
+        {
+            idx--;
+        }
+
+        return idx >= 0 && text[idx] == '!';
+    }
+
+    /// <summary>
+    /// Checks whether the position <paramref name="matchIndex"/> sits inside one or more
+    /// parenthesized groups — of arbitrary content, not just a bare wrapped call — where the
+    /// nearest such enclosing <c>(</c> is itself immediately preceded by <c>!</c>. This catches
+    /// a guard call buried inside a negated compound expression (<c>!(a &amp;&amp;
+    /// HasPermission(...))</c>, <c>!(a || HasPermission(...))</c>) that <see
+    /// cref="IsImmediatelyNegated"/> cannot see, because by De Morgan's laws negating a
+    /// conjunction or disjunction negates every operand, including a permission check buried
+    /// arbitrarily deep inside it.
+    /// </summary>
+    private static bool IsInsideNegatedGroup(string text, int matchIndex)
+    {
+        int depth = 0;
+
+        for (int idx = matchIndex - 1; idx >= 0; idx--)
+        {
+            char c = text[idx];
+            if (c == ')')
             {
-                return true;
+                // A fully-closed nested group that occurs entirely before matchIndex — not an
+                // enclosing scope of the match, just something the scan must skip past.
+                depth++;
+            }
+            else if (c == '(')
+            {
+                if (depth > 0)
+                {
+                    depth--;
+                    continue;
+                }
+
+                // depth == 0: this "(" has no matching ")" yet seen while scanning backward, so
+                // it genuinely encloses matchIndex. Check whether it is itself negated, and if
+                // not, keep scanning left for a further (outer) enclosing group.
+                int before = idx - 1;
+                while (before >= 0 && char.IsWhiteSpace(text[before]))
+                {
+                    before--;
+                }
+
+                if (before >= 0 && text[before] == '!')
+                {
+                    return true;
+                }
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Strips a keyword-and-parenthesis wrapper (e.g. <c>if (</c> ... <c>)</c>, <c>else if (</c>
+    /// ... <c>)</c>) from the text immediately preceding a <c>{</c>, returning just the innermost
+    /// parenthesized expression — the actual boolean condition, without the surrounding keyword or
+    /// its wrapping parens. This matters because <see cref="SplitTopLevelOr"/> and <see
+    /// cref="DisjunctHasPositiveGuard"/> reason about paren depth relative to the condition
+    /// itself: if the <c>if (</c> wrapper's own opening paren were left in, it would permanently
+    /// hold the depth counter at 1 for the whole condition, so a genuine top-level <c>||</c> (at
+    /// depth 0 <em>within the condition</em>) would never be recognized as depth 0 and the
+    /// disjunction-bypass check in <see cref="ConditionContainsPositiveGuard"/> would silently
+    /// stop firing. Finds the innermost condition by matching the LAST <c>)</c> in the (trimmed)
+    /// text back to its corresponding <c>(</c>. Text that does not end in <c>)</c> (e.g. a bare
+    /// <c>else {</c>, or an unrelated preceding statement with no trailing condition) is returned
+    /// unchanged, which safely yields "no guard found" downstream.
+    /// </summary>
+    private static string ExtractParenthesizedCondition(string text)
+    {
+        string trimmed = text.TrimEnd();
+        if (trimmed.Length == 0 || trimmed[^1] != ')')
+        {
+            return text;
+        }
+
+        int depth = 0;
+        for (int idx = trimmed.Length - 1; idx >= 0; idx--)
+        {
+            char c = trimmed[idx];
+            if (c == ')')
+            {
+                depth++;
+            }
+            else if (c == '(')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return trimmed[(idx + 1)..^1];
+                }
+            }
+        }
+
+        // Unbalanced parens (shouldn't happen for a real if-condition) — fall back to the
+        // original text so downstream logic still runs and conservatively finds no guard.
+        return text;
     }
 
     /// <summary>
@@ -224,7 +405,8 @@ public sealed class HubFarmGroupAuthorizationArchitectureTests
             if (c == '{')
             {
                 string precedingText = methodBody[lastStatementBoundary..i];
-                bool isGuardFrame = ConditionContainsPositiveGuard(precedingText);
+                string conditionText = ExtractParenthesizedCondition(precedingText);
+                bool isGuardFrame = ConditionContainsPositiveGuard(conditionText);
                 guardStack.Push(isGuardFrame);
                 lastStatementBoundary = i + 1;
                 continue;
@@ -336,14 +518,16 @@ public sealed class HubFarmGroupAuthorizationArchitectureTests
 
     /// <summary>
     /// Self-test of the scanner's own guard-detection logic (not the repo scan above). Ensures a
-    /// positively-gated join is accepted, an ungated join is rejected, and — the case a reviewer
-    /// caught in this test's own first draft — a join gated behind a NEGATED
-    /// <c>HasPermission(</c>/<c>IsFarmAdmin(</c> check (which recreates the exact vulnerability
-    /// this test exists to catch: the join fires only when the caller LACKS the permission) is
-    /// also rejected, not falsely accepted as "guarded" just because the guard call's name
-    /// appears in the condition text.
+    /// positively-gated join is accepted, an ungated join is rejected, a join gated behind a
+    /// NEGATED <c>HasPermission(</c>/<c>IsFarmAdmin(</c> check (which recreates the exact
+    /// vulnerability this test exists to catch: the join fires only when the caller LACKS the
+    /// permission) is rejected, and a top-level <c>||</c> disjunction with a non-guarded
+    /// alternative (e.g. <c>HasPermission(...) || true</c>, which would let the join through
+    /// regardless of permission) is also rejected, while a disjunction of two genuine alternative
+    /// permission checks is still accepted. Each case above was a real gap caught by reviewer
+    /// feedback on this test's own first two drafts.
     /// </summary>
-    [Theory(DisplayName = "Presubmit: the scanner's own guard detection rejects negated permission checks")]
+    [Theory(DisplayName = "Presubmit: the scanner's own guard detection rejects negated and disjunction-bypassed permission checks")]
     [InlineData(
         "if (PrintFarmerPermissions.HasPermission(Context.User!, HarvestAdminPermission)) { Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm); }",
         true)]
@@ -359,6 +543,15 @@ public sealed class HubFarmGroupAuthorizationArchitectureTests
     [InlineData(
         "if (PrintFarmerPermissions.IsFarmAdmin(Context.User!)) { Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm); }",
         true)]
+    [InlineData(
+        "if (PrintFarmerPermissions.HasPermission(Context.User!, HarvestAdminPermission) || true) { Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm); }",
+        false)]
+    [InlineData(
+        "if (PrintFarmerPermissions.HasPermission(Context.User!, \"a\") || PrintFarmerPermissions.HasPermission(Context.User!, \"b\")) { Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm); }",
+        true)]
+    [InlineData(
+        "if (!(someFlag && PrintFarmerPermissions.HasPermission(Context.User!, HarvestAdminPermission))) { Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm); }",
+        false)]
     public void GuardDetection_HandlesNegatedAndPositiveConditions(string snippet, bool expectedAllGuarded)
     {
         bool allGuarded = AllFarmGroupJoinsAreGuarded(snippet, out bool referencesFarmGroup);
