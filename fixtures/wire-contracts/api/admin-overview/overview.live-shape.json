@@ -1,7 +1,6 @@
 {
   "checkedAt": "2026-08-30T21:24:35.5300609Z",
   "overallStatus": "Healthy",
-  "handEditedField": "negative-control-demo-for-issue-2243",
   "subsystems": [
     {
       "key": "api",
