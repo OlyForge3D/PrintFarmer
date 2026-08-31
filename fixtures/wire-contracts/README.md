@@ -91,7 +91,7 @@ semantics, and do not hand-edit a fixture file — regenerate it via the owning 
 `src/Web/ReactApp/src/features/slicer/components/profile-family/__tests__/CreateProfileFamilyModal.test.tsx`
 and `src/Web/ReactApp/src/features/slicer/pages/__tests__/NewSliceJobPage.test.tsx` are
 **explicitly excluded** from the P0 corpus-driven conversion effort (issue #2256, filed while
-implementing #2240). They exercise `slicerProfilesService.getWorkerHierarchy()`
+implementing #2240). Both mock `slicerProfilesService.getWorkerHierarchy()`
 (`GET /slicer/profiles/worker-hierarchy`), which returns the OrcaSlicer worker profile-bundle
 hierarchy (`AllProfilesResponseDto` → `MachineProfileDto`/`FilamentProfileDto`/`ProcessProfileDto`
 in `Farm.Slicer.Module.Dtos`). This is architecturally distinct from every family this corpus
@@ -104,17 +104,28 @@ currently covers:
   pure PrintFarmer-camelCase; filing it under `native-slicer/` would misrepresent it as a raw Orca
   payload with no PrintFarmer-side promotion. Neither existing family models this correctly without
   inventing a third precedent — exactly the kind of `api/`↔`native-slicer/` boundary-merging this
-  corpus's own rules (above) forbid.
-- Both suites use their hand-built hierarchies as **parameterized UI-behavior fixtures** — driving
-  manufacturer/model grouping, compatible-profile counting with `null`/missing/populated
-  `compatible_printers` permutations, and search/filter behavior across many bespoke combinations —
-  rather than asserting a single endpoint's wire shape. Converting them would mean either
-  fabricating a disproportionate number of new corpus variants to cover every ad hoc UI scenario, or
-  only partially replacing the mocks for one canonical shape while leaving most of the
-  behavior-driving data hand-written anyway, neither of which meaningfully reduces #2232-class drift
-  risk for the effort involved.
-- No test in the current corpus (owned by #2238) exercises this endpoint end-to-end; standing one up
-  and settling its family classification is net-new work, not "regenerate an existing fixture."
+  corpus's own rules (above) forbid. (The client-side `OrcaMachineProfile` TS type also spells these
+  fields `printerModel`/`inherits`, not the DTO's actual wire names `printer_model`/`inherits` — a
+  latent, unverified #2232-class mismatch that is itself part of why this endpoint eventually
+  deserves real corpus coverage, not evidence that adoption would be free.)
+- `CreateProfileFamilyModal.test.tsx` uses its `getWorkerHierarchy` mock as a genuinely
+  **parameterized UI-behavior fixture**: two manufacturers, multiple models, and `null`/missing/
+  populated `compatible_printers` permutations across 17+ generated process profiles, driving
+  grouping, compatible-profile counting, and search assertions — not a single wire-shape check.
+  `NewSliceJobPage.test.tsx` mocks the same method far more trivially (one manufacturer, one model,
+  empty filament/process lists) purely to let its embedded `CreateProfileFamilyModal` open; its own
+  `null`/`[]`/populated `compatible_printers` permutations exercise *different* mocked service calls
+  (`getMachineProfilesForModel`, `getFilamentProfilesForMachines`, `getProcessProfilesForMachines`,
+  `listExtended`) against flat `FilamentProfileDto`/`ProcessProfileDto`/`MachineProfileDto` lists —
+  the same DTOs, but not the hybrid `ByHierarchy` shape, and already the same wire family as the
+  existing `native-slicer/filament` fixtures (just missing machine/process siblings). Converting
+  either file's ad hoc UI-behavior data to a handful of canonical corpus variants would still leave
+  most of the behavior-driving permutations hand-written, so it doesn't meaningfully reduce
+  #2232-class drift risk for the effort involved.
+- No test in the current corpus (owned by #2238) exercises `GET /slicer/profiles/worker-hierarchy`
+  or `AllProfilesResponseDto` end-to-end; standing one up and settling its family classification is
+  net-new work, not "regenerate an existing fixture."
 
 Given this is `priority:p3` backlog work, these two suites keep their hand-written mocks for now.
-Revisit only alongside a dedicated follow-up that settles the family classification question above.
+Revisit only alongside a dedicated follow-up that settles the family classification question above
+(and, ideally, the `printerModel`/`printer_model` TS-vs-wire naming question noted above).
