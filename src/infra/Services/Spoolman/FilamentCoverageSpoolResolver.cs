@@ -386,7 +386,7 @@ public sealed class FilamentCoverageSpoolResolver(
                     // win the gate synchronously and so are always in flight. A queued source can
                     // therefore never be the task whose token escapes. Normalising anyway means
                     // the guarantee does not silently depend on that Task.WhenAll ordering detail
-                    // if the await strategy here ever changes.
+                    // if the fan-out ever consumes sources in completion order instead.
                     ct.ThrowIfCancellationRequested();
                     throw;
                 }

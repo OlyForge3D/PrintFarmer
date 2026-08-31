@@ -885,8 +885,10 @@ public class FilamentCoverageSpoolResolverTests
         // never be the task whose token escapes, so the queued-path defect is unobservable here.
         //
         // Kept because it documents the intended contract across the fan-out and would catch a
-        // future change that made queued cancellation observable - for example awaiting the
-        // sources individually instead of through Task.WhenAll.
+        // future change that consumed sources in COMPLETION order - Task.WhenEach, or a channel -
+        // since a source cancelled at the gate unwinds faster than one unwinding through a backend
+        // call, so a queued task could then be the first observed. Awaiting individually in index
+        // order would NOT expose it: index 0 is still in flight and still wins.
         const int fleetSize = 20;
         using SemaphoreSlim readsStarted = new(0);
         Mock<IBackendClient> native = new();
