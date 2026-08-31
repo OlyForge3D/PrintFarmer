@@ -19,7 +19,13 @@ import { Button } from '@/common/components/ui';
 import { useSlicerViewMode } from '@/features/slicer/hooks/useSlicerViewMode';
 import { MetadataTabRenderer } from '@/features/slicer/components/settings/MetadataTabRenderer';
 import { getMetadataForVersion } from '@/features/slicer/components/settings/orcaSettingsMetadataResolver';
-import type { ProfileType, TabLayout } from '@/features/slicer/components/settings/metadataTypes';
+import {
+  isSettingModified,
+  type MetadataSectionAddition,
+  type ProfileType,
+  type SettingMetadata,
+  type TabLayout,
+} from '@/features/slicer/components/settings/metadataTypes';
 
 // Re-export all types for backward compatibility
 export type {
@@ -56,6 +62,12 @@ export interface MetadataProfileEditorProps {
    * fallback for engine-agnostic profile management pages.
    */
   engineVersion?: string;
+  /** Additional metadata for settings not yet represented by Orca's generated bundle */
+  additionalSettings?: Readonly<Record<string, SettingMetadata>>;
+  /** Additional sections inserted into matching generated tabs */
+  additionalSections?: readonly MetadataSectionAddition[];
+  /** Advanced metadata keys deliberately promoted into Simple mode */
+  simpleModeSettingKeys?: ReadonlySet<string>;
 }
 
 export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
@@ -66,12 +78,48 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
   disabled = false,
   className = '',
   engineVersion,
+  additionalSettings,
+  additionalSections,
+  simpleModeSettingKeys,
 }) => {
   const scopedBundle = useMemo(
     () => getMetadataForVersion(engineVersion),
     [engineVersion],
   );
-  const profileMeta = scopedBundle.profileTypes[profileType];
+  const baseProfileMeta = scopedBundle.profileTypes[profileType];
+  const profileMeta = useMemo(() => {
+    if (!additionalSettings && !additionalSections?.length) {
+      return baseProfileMeta;
+    }
+
+    const existingFieldKeys = new Set(
+      baseProfileMeta.tabs.flatMap((tab) =>
+        tab.sections.flatMap((section) => section.fields.map((field) => field.key))),
+    );
+    const tabs = baseProfileMeta.tabs.map((tab) => {
+      const sections = (additionalSections ?? [])
+        .filter((addition) => addition.tabName === tab.name)
+        .map((addition) => ({
+          ...addition.section,
+          fields: addition.section.fields.filter((field) => !existingFieldKeys.has(field.key)),
+        }))
+        .filter((section) => section.fields.length > 0);
+
+      return sections.length > 0
+        ? { ...tab, sections: [...sections, ...tab.sections] }
+        : tab;
+    });
+
+    return {
+      tabs,
+      settings: {
+        // Generated Orca metadata is authoritative when an additional entry graduates
+        // into the bundle; this ordering prevents a stale local definition from winning.
+        ...(additionalSettings ?? {}),
+        ...baseProfileMeta.settings,
+      },
+    };
+  }, [additionalSections, additionalSettings, baseProfileMeta]);
   const [viewMode, toggleViewMode] = useSlicerViewMode();
   const [activeTabIdx, setActiveTabIdx] = useState(0);
 
@@ -82,7 +130,11 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
       const m = profileMeta.settings[key];
       if (!m) return false;
       if (m.mode === 'developer') return false;
-      if (viewMode === 'simple' && m.mode === 'advanced') return false;
+      if (
+        viewMode === 'simple'
+        && m.mode === 'advanced'
+        && !simpleModeSettingKeys?.has(key)
+      ) return false;
       return true;
     };
 
@@ -102,7 +154,11 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
         if (tabbedKeys.has(k)) return false;
         const m = profileMeta.settings[k];
         if (!m || !m.mode || m.mode === 'developer') return false;
-        if (viewMode === 'simple' && m.mode === 'advanced') return false;
+        if (
+          viewMode === 'simple'
+          && m.mode === 'advanced'
+          && !simpleModeSettingKeys?.has(k)
+        ) return false;
         return true;
       })
       .map((k) => ({ key: k, compound: false }));
@@ -116,7 +172,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
     }
 
     return filtered;
-  }, [profileMeta.tabs, profileMeta.settings, viewMode]);
+  }, [profileMeta.tabs, profileMeta.settings, simpleModeSettingKeys, viewMode]);
 
   // Clamp activeTabIdx when visibleTabs changes
   const clampedActiveTabIdx = Math.min(activeTabIdx, Math.max(0, visibleTabs.length - 1));
@@ -150,9 +206,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
       if (!originalSettings) return false;
       return tab.sections.some((section) =>
         section.fields.some((field) => {
-          const cur = settings[field.key];
-          const orig = originalSettings[field.key];
-          return orig !== undefined && cur !== undefined && JSON.stringify(cur) !== JSON.stringify(orig);
+          return isSettingModified(settings, originalSettings, field.key);
         }),
       );
     },
@@ -242,6 +296,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
           onUpdate={onUpdate}
           viewMode={viewMode}
           disabled={disabled}
+          simpleModeSettingKeys={simpleModeSettingKeys}
         />
       </div>
     </div>
