@@ -215,7 +215,8 @@ public class SpoolmanController(
             AllowArchived = allowArchived,
         };
 
-        return Ok(await spoolman.ListSpoolsAsync(queryParams, ct));
+        SpoolmanReadResult<SpoolmanSpoolDto> result = await spoolman.ListSpoolsAsync(queryParams, ct);
+        return Ok(result.ToPagedResult());
     }
 
     /// <summary>

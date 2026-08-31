@@ -544,7 +544,7 @@ public sealed class FilamentCoverageSpoolResolver(
             int totalCount;
             do
             {
-                SpoolmanPagedResult<SpoolmanSpoolDto> page = await _spoolmanService.ListSpoolsAsync(
+                SpoolmanReadResult<SpoolmanSpoolDto> page = await _spoolmanService.ListSpoolsAsync(
                     new SpoolmanSpoolQueryParams
                     {
                         Limit = pageSize,
@@ -560,6 +560,17 @@ public sealed class FilamentCoverageSpoolResolver(
                 // about a source we never actually reached. Re-surface cancellation here so
                 // the catch filters below degrade to `spool-source-unavailable` instead.
                 linked.Token.ThrowIfCancellationRequested();
+
+                if (!page.Success)
+                {
+                    // The read itself failed (non-success HTTP status, invalid JSON, or a
+                    // thrown exception inside SpoolmanService) rather than succeeding with zero
+                    // matching rows. Spool IDs already resolved from an earlier page keep their
+                    // data; anything still unresolved is unavailable, not affirmatively
+                    // not-found (#2312).
+                    _logger.LogDebug("[FilamentCoverage] Central Spoolman read failed at offset {Offset}", offset);
+                    return BuildSnapshots(spoolIds, found, false, originWatermark, ReasonSourceUnavailable);
+                }
 
                 foreach (SpoolmanSpoolDto spool in page.Items.Where(spool => spoolIds.Contains(spool.Id)))
                 {
@@ -599,12 +610,13 @@ public sealed class FilamentCoverageSpoolResolver(
         IEnumerable<int> spoolIds,
         Dictionary<int, SpoolmanSpoolDto> spools,
         bool tracksLiveConsumption,
-        long? originWatermark)
+        long? originWatermark,
+        string notFoundReason = ReasonSpoolNotFound)
         => spoolIds.ToDictionary(
             id => id,
             id => spools.TryGetValue(id, out SpoolmanSpoolDto? spool)
                 ? new FilamentCoverageSpoolSnapshot(spool, tracksLiveConsumption, null, originWatermark)
-                : new FilamentCoverageSpoolSnapshot(null, tracksLiveConsumption, ReasonSpoolNotFound, OriginWatermark: null));
+                : new FilamentCoverageSpoolSnapshot(null, tracksLiveConsumption, notFoundReason, OriginWatermark: null));
 
     private static Dictionary<int, FilamentCoverageSpoolSnapshot> Failure(
         IEnumerable<int> spoolIds,

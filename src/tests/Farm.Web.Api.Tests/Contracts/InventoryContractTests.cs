@@ -633,7 +633,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             var service = new Mock<ISpoolmanService>();
             service
                 .Setup(value => value.ListSpoolsAsync(It.IsAny<SpoolmanSpoolQueryParams>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => new SpoolmanPagedResult<SpoolmanSpoolDto>(state.Spools, state.Spools.Count));
+                .ReturnsAsync(() => SpoolmanReadResult.Ok<SpoolmanSpoolDto>(state.Spools, state.Spools.Count));
             service
                 .Setup(value => value.ListFilamentsPagedAsync(It.IsAny<SpoolmanFilamentQueryParams>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => new SpoolmanPagedResult<SpoolmanFilamentDto>(state.Filaments, state.Filaments.Count));

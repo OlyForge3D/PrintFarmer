@@ -974,7 +974,7 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
         central.Setup(s => s.ListSpoolsAsync(
                 It.IsAny<SpoolmanSpoolQueryParams>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SpoolmanPagedResult<SpoolmanSpoolDto>(
+            .ReturnsAsync(SpoolmanReadResult.Ok<SpoolmanSpoolDto>(
                 [new SpoolmanSpoolDto(88, "central", "PLA", 400, "#FFFFFF", true)],
                 1));
         Mock<IBackendClientFactory> backendFactory = new(MockBehavior.Strict);
