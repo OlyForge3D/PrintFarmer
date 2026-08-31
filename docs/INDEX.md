@@ -101,6 +101,7 @@ repository are intentionally omitted.
 ## Testing And CI
 
 - [CI](./CI.md) - Affected-test selection and required checks
+- [Contract Drift Gate](./CONTRACT_DRIFT_GATE.md) - Wire-contract corpus drift check and reviewed exception allowlist
 - [Testing Guidelines](./TESTING_GUIDELINES.md) - Deployment script test
   guidance
 - [Testing Patterns](./TESTING_PATTERNS.md) - Reusable backend test patterns

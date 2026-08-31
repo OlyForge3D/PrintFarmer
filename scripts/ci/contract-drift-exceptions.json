@@ -1,0 +1,9 @@
+[
+  {
+    "boundary": "native-slicer:filament",
+    "rationale": "OrcaSlicer's native filament settings bag (e.g. 'compatible_printers', 'filament_flow_ratio') is the vendor's own snake_case wire format, captured verbatim in fixtures/wire-contracts/native-slicer/filament/ by Farm.OrcaSlicer.Worker.Tests.Contracts.NativeSlicerCorpusTests. It is never re-serialized through PrintFarmer's camelCase JSON options and must not be normalized by a compatibility shim — see fixtures/wire-contracts/README.md and issue #2238.",
+    "owner": "squad:lambert",
+    "reviewTrigger": "Re-review if the OrcaSlicer worker ever adopts a re-serialization/normalization layer over native profile settings, or on the next OrcaSlicer binary version upgrade (see .github/skills/orcaslicer-upgrade/SKILL.md).",
+    "expiry": "2027-08-30"
+  }
+]
