@@ -7,8 +7,12 @@
 // produced by real production serialization per issue #2238 — never
 // hand-written) against a reviewed exception allowlist
 // (`scripts/ci/contract-drift-exceptions.json`) and the PR's own diff, and
-// fails the gate on any unexplained finding. Three checks, each independently
+// fails the gate on any unexplained finding. Four checks, each independently
 // testable (see scripts/ci/tests/test-check-contract-drift.mjs):
+//
+//   0. CORPUS SANITY. The corpus walk must find at least one payload fixture;
+//      an empty result (misconfigured path, missing directory) is itself a
+//      finding rather than a silently "clean" 0-fixtures pass.
 //
 //   1. PROPERTY-CASING DRIFT. Every PrintFarmer DTO fixture under
 //      `fixtures/wire-contracts/api/**` must use camelCase property names

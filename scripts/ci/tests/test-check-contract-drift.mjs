@@ -305,7 +305,7 @@ test('evaluateDrift is ok:true and empty findings for a fully clean input', () =
   assert.deepEqual(result, { findings: [], ok: true });
 });
 
-test('evaluateDrift aggregates findings from all three checks', () => {
+test('evaluateDrift aggregates findings from all four checks', () => {
   const result = evaluateDrift({
     allowlist: [{ boundary: 'x' }], // missing fields -> allowlist-shape finding
     fixtures: new Map([

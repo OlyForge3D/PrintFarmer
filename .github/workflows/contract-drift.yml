@@ -76,9 +76,18 @@ jobs:
         # changed" and would let the producer-coupling check (check 3) silently
         # pass on a diff that was never actually examined. Fail the job outright
         # rather than let the gate report a false "0 unexplained findings".
+        #
+        # The step output is passed through an env var rather than interpolated
+        # directly into the run: script (`${{ }}` inside a shell body is a
+        # documented script-injection anti-pattern on pull_request workflows,
+        # since the checked-out compute-change-set.sh that produces this output
+        # is itself PR-author-controlled). env-var indirection lets the shell
+        # treat the value as inert data instead of script text.
         if: steps.diff.outputs.force_full_safe != ''
+        env:
+          FORCE_FULL_SAFE: ${{ steps.diff.outputs.force_full_safe }}
         run: |
-          echo "::error::compute-change-set.sh could not compute a diff (force_full_safe=${{ steps.diff.outputs.force_full_safe }}). Refusing to silently skip the fixture-edit-without-producer-change check." >&2
+          echo "::error::compute-change-set.sh could not compute a diff (force_full_safe=${FORCE_FULL_SAFE}). Refusing to silently skip the fixture-edit-without-producer-change check." >&2
           exit 1
 
       - name: Test the drift-check script
