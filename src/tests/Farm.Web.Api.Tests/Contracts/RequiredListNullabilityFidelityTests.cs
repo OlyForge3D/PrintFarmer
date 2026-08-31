@@ -1,5 +1,7 @@
-﻿using System.Reflection;
+﻿using System.ComponentModel.DataAnnotations;
+using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Farm.Infrastructure;
 
@@ -10,7 +12,10 @@ namespace Farm.Web.Api.Tests.Contracts;
 /// <see cref="Farm.Web.Api.Infrastructure.OpenApi.NullablePropertiesNotRequiredSchemaTransformer"/>
 /// removed every nullable-typed property from every object schema's "required" list, plus
 /// targeted checks against the four suspect DTOs the issue named
-/// (<c>PrinterDetailsDto</c>, <c>ToolheadDto</c>, <c>SpoolmanSpoolDto</c>, <c>PrintJobDto</c>).
+/// (<c>PrinterDetailsDto</c>, <c>ToolheadDto</c>, <c>SpoolmanSpoolDto</c>, <c>PrintJobDto</c>),
+/// and two regression tests (<c>ZOffsetSaveRequest</c>, <c>AssignPrinterToLocationRequest</c>)
+/// proving the transformer does not strip a nullable property that an explicit
+/// DataAnnotations <c>[Required]</c> attribute keeps mandatory for request validation.
 ///
 /// A repo-wide sweep of positional records under <c>src/infra/Dtos/</c> found 60 affected types
 /// (constructor parameters that are nullable but lack a default value) -- far more than the ~30
@@ -25,7 +30,11 @@ namespace Farm.Web.Api.Tests.Contracts;
 /// schema, present and future, using only the OpenAPI document's own self-consistency (a
 /// "required" property whose own schema types it "null" is a structural contradiction the .NET
 /// exporter should never produce once <see cref="Farm.Web.Api.Infrastructure.OpenApi.NullablePropertiesNotRequiredSchemaTransformer"/>
-/// runs).
+/// runs). Because the transformer is registered globally, it also reaches request-body schemas;
+/// the two regression tests below guard the case a nullable property is nullable specifically so
+/// DataAnnotations <c>[Required]</c> validation can distinguish "omitted" from an explicit but
+/// invalid value, which the sweep's "always Farm.*-backed, never framework-owned" scoping does not
+/// itself distinguish from an ordinary nullable-and-truly-optional property.
 /// </summary>
 [Collection(OpenApiDocumentCollection.Name)]
 public sealed class RequiredListNullabilityFidelityTests(OpenApiDocumentFixture fixture)
@@ -37,6 +46,11 @@ public sealed class RequiredListNullabilityFidelityTests(OpenApiDocumentFixture 
     {
         JsonElement schemas = _document.RootElement.GetProperty("components").GetProperty("schemas");
         Dictionary<string, IReadOnlyList<Type>> candidatesByTypeName = ResolveFarmTypeCandidatesByName();
+        JsonSerializerOptions camelCaseOptions = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        };
         var failures = new List<string>();
         int schemasWithRequiredProperties = 0;
 
@@ -61,6 +75,9 @@ public sealed class RequiredListNullabilityFidelityTests(OpenApiDocumentFixture 
             }
 
             schemasWithRequiredProperties++;
+            Dictionary<string, JsonPropertyInfo> jsonPropertiesByName = camelCaseOptions
+                .GetTypeInfo(candidates[0]).Properties
+                .ToDictionary(p => p.Name, StringComparer.Ordinal);
 
             foreach (string requiredName in required)
             {
@@ -71,10 +88,23 @@ public sealed class RequiredListNullabilityFidelityTests(OpenApiDocumentFixture 
                     continue;
                 }
 
-                if (OpenApiSchemaTestSupport.IsNullable(property))
+                if (!OpenApiSchemaTestSupport.IsNullable(property))
                 {
-                    failures.Add($"{schemaProperty.Name}.{requiredName}");
+                    continue;
                 }
+
+                // A nullable property may legitimately stay "required" when something explicitly
+                // asked for that: the C# `required` modifier/[JsonRequired] (JsonPropertyInfo.IsRequired),
+                // or a DataAnnotations [Required] attribute enforcing request-body validation --
+                // exactly the two cases NullablePropertiesNotRequiredSchemaTransformer itself
+                // leaves untouched. Skip those instead of flagging them as failures.
+                if (jsonPropertiesByName.TryGetValue(requiredName, out JsonPropertyInfo? propertyInfo)
+                    && IsExplicitlyRequired(propertyInfo))
+                {
+                    continue;
+                }
+
+                failures.Add($"{schemaProperty.Name}.{requiredName}");
             }
         }
 
@@ -85,9 +115,36 @@ public sealed class RequiredListNullabilityFidelityTests(OpenApiDocumentFixture 
 
         _ = failures.Should().BeEmpty(
             "every reachable, Farm.*-backed object schema's 'required' list should exclude " +
-            "nullable-typed properties, since DefaultIgnoreCondition = WhenWritingNull means a " +
-            "nullable property is always omitted from the wire when its value is null (issue #2273):\n" +
-            string.Join("\n", failures));
+            "nullable-typed properties unless something explicitly asked for the property to stay " +
+            "required ([Required]/C# 'required'/[JsonRequired]), since DefaultIgnoreCondition = " +
+            "WhenWritingNull means an otherwise-nullable property is always omitted from the wire " +
+            "when its value is null (issue #2273):\n" + string.Join("\n", failures));
+    }
+
+    /// <summary>
+    /// Mirrors <c>NullablePropertiesNotRequiredSchemaTransformer.IsExplicitlyRequired</c> so this
+    /// sweep and the production fix agree on what "explicitly required" means.
+    /// </summary>
+    private static bool IsExplicitlyRequired(JsonPropertyInfo propertyInfo)
+    {
+        if (propertyInfo.IsRequired)
+        {
+            return true;
+        }
+
+        if (propertyInfo.AttributeProvider is not { } attributeProvider)
+        {
+            return false;
+        }
+
+        if (attributeProvider.GetCustomAttributes(typeof(RequiredAttribute), inherit: true) is { Length: > 0 })
+        {
+            return true;
+        }
+
+        return attributeProvider.GetCustomAttributes(typeof(JsonIgnoreAttribute), inherit: true)
+            .OfType<JsonIgnoreAttribute>()
+            .Any(a => a.Condition == JsonIgnoreCondition.Never);
     }
 
     /// <summary>
@@ -238,6 +295,16 @@ public sealed class RequiredListNullabilityFidelityTests(OpenApiDocumentFixture 
         Dictionary<string, bool> isNullableByPropertyName = typeInfo.Properties
             .ToDictionary(p => p.Name, p => p.IsGetNullable, StringComparer.Ordinal);
 
+        // Guard against a silently vacuous test: every constructor parameter name must resolve to
+        // a JsonPropertyInfo. Without no naming policy on `options` this holds today (PascalCase
+        // parameter names match PascalCase default JSON property names 1:1), but would silently
+        // stop holding -- and TryGetValue below would just skip every parameter, making the
+        // assertion below pass on zero evidence -- if e.g. a future [JsonPropertyName] rename went
+        // unaccounted for here.
+        _ = parameters.Select(p => p.Name!).Should().BeSubsetOf(isNullableByPropertyName.Keys,
+            "every constructor parameter name must resolve to a JsonPropertyInfo, or this test's " +
+            "assertion below would silently pass on zero evidence instead of proving anything");
+
         List<string> nullableParametersWithoutDefault = parameters
             .Where(p => isNullableByPropertyName.TryGetValue(p.Name!, out bool isNullable) && isNullable)
             .Where(p => !p.HasDefaultValue)
@@ -248,5 +315,44 @@ public sealed class RequiredListNullabilityFidelityTests(OpenApiDocumentFixture 
             "every nullable constructor parameter on PrintJobDto already carries an explicit " +
             "default value, so .NET's OpenAPI generator's 'no default => required' rule never " +
             "applied to it -- PrintJobDto is a ruled-out suspect, not a fix target");
+    }
+
+    /// <summary>
+    /// Regression test for a review finding on this same PR: the transformer is registered
+    /// globally, so it also reaches request-body schemas, not just the response DTOs under
+    /// <c>src/infra/Dtos/</c>. <c>ZOffsetSaveRequest.OffsetMm</c> is a nullable value type
+    /// (<c>decimal?</c>) carrying an explicit DataAnnotations <c>[Required]</c> attribute --
+    /// ASP.NET Core model validation rejects a request that omits it with a 400, independently of
+    /// System.Text.Json's own nullability handling. The transformer must leave it in "required"
+    /// rather than blindly stripping every nullable property.
+    /// </summary>
+    [Fact]
+    public void ZOffsetSaveRequest_RequiredList_KeepsExplicitlyRequiredNullableProperty()
+    {
+        JsonElement schema = OpenApiSchemaTestSupport.GetComponentSchema(_document, "ZOffsetSaveRequest");
+        IReadOnlySet<string> required = OpenApiSchemaTestSupport.GetRequiredSet(schema);
+
+        _ = required.Should().Contain("offsetMm",
+            "OffsetMm is a nullable decimal? carrying [Required]; ASP.NET Core model validation " +
+            "rejects its omission with a 400, so the schema must keep documenting it as required " +
+            "even though the property's CLR type is nullable");
+    }
+
+    /// <summary>
+    /// Same regression as <see cref="ZOffsetSaveRequest_RequiredList_KeepsExplicitlyRequiredNullableProperty"/>,
+    /// for the other DataAnnotations-<c>[Required]</c>-on-a-nullable-value-type case a reviewer
+    /// found on this PR: <c>AssignPrinterToLocationRequest.LocationId</c> is a nullable
+    /// <c>Guid?</c> that must stay required.
+    /// </summary>
+    [Fact]
+    public void AssignPrinterToLocationRequest_RequiredList_KeepsExplicitlyRequiredNullableProperty()
+    {
+        JsonElement schema = OpenApiSchemaTestSupport.GetComponentSchema(_document, "AssignPrinterToLocationRequest");
+        IReadOnlySet<string> required = OpenApiSchemaTestSupport.GetRequiredSet(schema);
+
+        _ = required.Should().Contain("locationId",
+            "LocationId is a nullable Guid? carrying [Required]; ASP.NET Core model validation " +
+            "rejects its omission with a 400, so the schema must keep documenting it as required " +
+            "even though the property's CLR type is nullable");
     }
 }
