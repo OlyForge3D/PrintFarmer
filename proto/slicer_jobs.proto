@@ -36,7 +36,7 @@ message SubmitJobRequest {
   string printer_id = 3; // UUID as string
   string model_file_url = 4;
   string model_file_name = 5;
-  SlicerEngineType slicer_engine = 6;
+  GrpcSlicerEngineType slicer_engine = 6;
   SlicerProfile slicer_profile = 7;
   JobPriority priority = 8;
   map<string, string> metadata = 9;
@@ -125,7 +125,7 @@ message RegisterWorkerRequest {
   string worker_id = 1;
   string worker_name = 2;
   string worker_url = 3;
-  repeated SlicerEngineType supported_engines = 4;
+  repeated GrpcSlicerEngineType supported_engines = 4;
   WorkerCapabilities capabilities = 5;
   string version = 6;
 }
@@ -173,7 +173,7 @@ message WorkerInfo {
   string worker_name = 2;
   string worker_url = 3;
   WorkerStatus status = 4;
-  repeated SlicerEngineType supported_engines = 5;
+  repeated GrpcSlicerEngineType supported_engines = 5;
   WorkerCapabilities capabilities = 6;
   int64 last_heartbeat = 7; // Unix timestamp
   repeated string active_job_ids = 8;
@@ -230,7 +230,10 @@ enum JobPriority {
   JOB_PRIORITY_CRITICAL = 4;
 }
 
-enum SlicerEngineType {
+// Named GrpcSlicerEngineType (not SlicerEngineType) to avoid colliding, by simple
+// C# type name, with the unrelated Farm.Slicer.Module.Models.SlicerEngineType REST/JSON
+// domain enum -- see issue #2290. Wire format (field numbers) is unaffected by this rename.
+enum GrpcSlicerEngineType {
   SLICER_ENGINE_UNKNOWN = 0;
   SLICER_ENGINE_ORCA = 1;
   SLICER_ENGINE_PRUSA = 2;

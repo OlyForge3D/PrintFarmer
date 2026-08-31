@@ -1,6 +1,6 @@
 ﻿using GrpcJobPriority = Farm.Web.Api.Grpc.JobPriority;
 using GrpcJobStatus = Farm.Web.Api.Grpc.JobStatus;
-using GrpcSlicerEngineType = Farm.Web.Api.Grpc.SlicerEngineType;
+using GrpcSlicerEngineType = Farm.Web.Api.Grpc.GrpcSlicerEngineType;
 using GrpcWorkerStatus = Farm.Web.Api.Grpc.WorkerStatus;
 
 namespace Farm.Slicer.Module.Tests.ContractTests;
