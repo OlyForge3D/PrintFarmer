@@ -94,10 +94,25 @@ describe('slicerHubService — canonical wire-contract corpus (#2240)', () => {
     // passing even if a field were silently added, removed, or renamed on
     // either side. Assert the exact key set explicitly so this test actually
     // fails if that drift (the class of bug fixed by #2258) reappears.
-    const expectedKeys: (keyof SlicerRegisteredEvent)[] = [
-      'id', 'name', 'slicerType', 'version', 'maxConcurrentJobs', 'status', 'lastSeen'
-    ];
-    expect(Object.keys(fixture).sort()).toEqual([...expectedKeys].sort());
+    //
+    // The witness object below is typed `Record<keyof SlicerRegisteredEvent, true>`
+    // rather than a hand-written key array: if a field is ever added to the
+    // interface without updating this witness, TypeScript's `Record` mapped
+    // type requires every key to be present, so the witness fails to compile.
+    // That makes the guard exhaustive in both directions — it catches an
+    // interface field removed/renamed (fixture keys no longer match) and an
+    // interface field added (witness no longer compiles) — not just the
+    // removal/rename direction a plain literal array would catch.
+    const expectedKeysWitness: Record<keyof SlicerRegisteredEvent, true> = {
+      id: true,
+      name: true,
+      slicerType: true,
+      version: true,
+      maxConcurrentJobs: true,
+      status: true,
+      lastSeen: true,
+    };
+    expect(Object.keys(fixture).sort()).toEqual(Object.keys(expectedKeysWitness).sort());
 
     await slicerHubService.start();
 
