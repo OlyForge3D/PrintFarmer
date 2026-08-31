@@ -406,6 +406,7 @@ public partial class SliceJobController(
     [HttpGet("{id}")]
     [Authorize]
     [RequirePermission(PrintFarmerPermissions.Queue.Read)]
+    [ProducesResponseType(typeof(SliceJobStatusResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAsync(Guid id, CancellationToken ct)
     {
         SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);

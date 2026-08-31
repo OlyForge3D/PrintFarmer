@@ -24,7 +24,7 @@ public sealed class SlicerProfileContractTests : IAsyncLifetime
 
     /// <summary>
     /// Empty-collection variant: <c>GET /api/slicer/profiles</c> maps the internal
-    /// <c>SlicerProfileDto</c> list through an anonymous-object projection
+    /// <c>SlicerProfileDto</c> list through a <c>ProcessProfileListEntryDto</c> projection
     /// (<c>ProfilesController.GetProfilesAsync</c>); with no seeded profiles the result is a
     /// real, genuinely empty JSON array — not a missing key, not null.
     /// </summary>
