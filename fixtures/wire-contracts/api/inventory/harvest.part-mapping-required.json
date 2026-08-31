@@ -1,0 +1,11 @@
+{
+  "type": "https://printfarmer.io/errors/part-mapping-required",
+  "title": "Printed-part mapping required",
+  "status": 409,
+  "detail": "Map the project output to a printed-part SKU before harvesting.",
+  "code": "partMappingRequired",
+  "jobId": "4c694fd3-4936-4184-b376-d504842f2985",
+  "projectFileId": "1d313e87-072f-49df-a6d0-2e9cc61ac6cd",
+  "gcodeFileId": null,
+  "guidance": "Map the project output to a printed-part SKU before harvesting."
+}

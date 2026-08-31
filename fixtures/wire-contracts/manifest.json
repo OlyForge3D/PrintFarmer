@@ -7,6 +7,160 @@
     "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
   },
   {
+    "Path": "api/inventory/adjustment.populated.json",
+    "Endpoint": "POST /api/parts-inventory/{sku}/adjust",
+    "ProducingTest": "InventoryContractTests.GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/bins.empty-collection.json",
+    "Endpoint": "GET /api/bins",
+    "ProducingTest": "InventoryContractTests.GetPartsInventoryEndpoints_EmptyCollections_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/bins.populated.json",
+    "Endpoint": "GET /api/bins",
+    "ProducingTest": "InventoryContractTests.GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/harvest.part-mapping-required.json",
+    "Endpoint": "POST /api/job-queue/{id}/harvest (partMappingRequired)",
+    "ProducingTest": "InventoryContractTests.GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/harvest.populated.json",
+    "Endpoint": "POST /api/job-queue/{id}/harvest",
+    "ProducingTest": "InventoryContractTests.GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/harvest.wrong-bin.json",
+    "Endpoint": "POST /api/job-queue/{id}/harvest (wrongBin)",
+    "ProducingTest": "InventoryContractTests.GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/mappings.empty-collection.json",
+    "Endpoint": "GET /api/parts-inventory/mappings",
+    "ProducingTest": "InventoryContractTests.GetPartsInventoryEndpoints_EmptyCollections_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/mappings.populated.json",
+    "Endpoint": "GET /api/parts-inventory/mappings",
+    "ProducingTest": "InventoryContractTests.GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/parts.empty-collection.json",
+    "Endpoint": "GET /api/parts-inventory",
+    "ProducingTest": "InventoryContractTests.GetPartsInventoryEndpoints_EmptyCollections_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/parts.populated.json",
+    "Endpoint": "GET /api/parts-inventory",
+    "ProducingTest": "InventoryContractTests.GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/reorder.empty-collection.json",
+    "Endpoint": "GET /api/parts-inventory/reorder",
+    "ProducingTest": "InventoryContractTests.GetPartsInventoryEndpoints_EmptyCollections_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/reorder.populated.json",
+    "Endpoint": "GET /api/parts-inventory/reorder",
+    "ProducingTest": "InventoryContractTests.GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/spoolman-available-materials.empty-collection.json",
+    "Endpoint": "GET /api/spoolman/materials/available",
+    "ProducingTest": "InventoryContractTests.GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/spoolman-available-materials.populated.json",
+    "Endpoint": "GET /api/spoolman/materials/available",
+    "ProducingTest": "InventoryContractTests.GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/spoolman-filaments.empty-collection.json",
+    "Endpoint": "GET /api/spoolman/filaments",
+    "ProducingTest": "InventoryContractTests.GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/spoolman-filaments.populated.json",
+    "Endpoint": "GET /api/spoolman/filaments",
+    "ProducingTest": "InventoryContractTests.GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/spoolman-materials.empty-collection.json",
+    "Endpoint": "GET /api/spoolman/materials",
+    "ProducingTest": "InventoryContractTests.GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/spoolman-materials.populated.json",
+    "Endpoint": "GET /api/spoolman/materials",
+    "ProducingTest": "InventoryContractTests.GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/spoolman-spools.empty-collection.json",
+    "Endpoint": "GET /api/spoolman/spools",
+    "ProducingTest": "InventoryContractTests.GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/spoolman-spools.populated.json",
+    "Endpoint": "GET /api/spoolman/spools",
+    "ProducingTest": "InventoryContractTests.GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/spoolman-vendors.empty-collection.json",
+    "Endpoint": "GET /api/spoolman/vendors",
+    "ProducingTest": "InventoryContractTests.GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
+    "Path": "api/inventory/spoolman-vendors.populated.json",
+    "Endpoint": "GET /api/spoolman/vendors",
+    "ProducingTest": "InventoryContractTests.GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "efcc050d371108c276eb06bb237aebbbfa440092"
+  },
+  {
     "Path": "api/print-queue/queue.empty-collection.json",
     "Endpoint": "GET /api/job-queue",
     "ProducingTest": "PrintQueueContractTests.GetQueue_NoPrinters_ReturnsEmptyCollection",

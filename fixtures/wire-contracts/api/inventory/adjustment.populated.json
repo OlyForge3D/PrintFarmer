@@ -1,0 +1,15 @@
+{
+  "id": "7b6476f4-d81d-445f-aad4-23e5b8d0f21f",
+  "partInventoryId": "2d2cb44c-6958-493f-99c8-7bd62acfe847",
+  "sku": "PF-WIRE-01",
+  "binId": "c411ea64-3137-4c40-b08c-5cb71f018b55",
+  "binCode": "BIN-WIRE-01",
+  "delta": -1,
+  "resultingBalance": 1,
+  "reason": "qc-reject",
+  "printJobId": "49ad99f7-80f3-45ee-884c-6f713ca3af5d",
+  "operationKey": "wire-contract-adjustment",
+  "notes": "Wire contract QC rejection",
+  "userId": "wire-contract-user",
+  "createdAt": "2026-08-30T16:34:56Z"
+}
