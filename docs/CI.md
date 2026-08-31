@@ -145,10 +145,10 @@ classify.
 Canonical API corpus inputs also drive the iOS selector. Changes to
 `fixtures/wire-contracts/manifest.json`, API fixture JSON, `src/api/Program.cs`,
 `src/api/Startup/{Controller,SignalR}Startup.cs`, serialization-source C# under
-`src/infra/{Contracts,Domain,Dtos,Json,Models,Serialization}`, or any
-`src/infra/**/*Contract.cs` run the real iOS unit-test job so
-`WireContractCorpusTests` exercises the payloads through `APIClient`. Corpus
-documentation and lock files remain inert.
+`src/infra/{Contracts,Domain,Dtos,Json,Models,Serialization}`, the canonical
+parts-inventory `ProblemDetails` producer, or any `src/infra/**/*Contract.cs`
+run the real iOS unit-test job so `WireContractCorpusTests` exercises the
+payloads through `APIClient`. Corpus documentation and lock files remain inert.
 
 **`infra` and the `Farm.Web.Api` test legs (issue #2033):** an `src/infra/**`-only
 change no longer selects the `Farm.Web.Api.Tests`/`Farm.Web.IntegrationTests` matrix
@@ -162,8 +162,10 @@ has no `ProjectReference` to `Farm.Web.Api`, so selecting it satisfies "a change
 touching only `src/infra/**` selects this leg without building `Farm.Web.Api`."
 The narrow exception is an API serialization-source change under
 `src/infra/{Contracts,Domain,Dtos,Json,Models,Serialization}` or any
-`src/infra/**/*Contract.cs`; those paths additionally select `Farm.Web.Api.Tests`
-so the producer wire-contract assertions execute.
+`src/infra/**/*Contract.cs`, plus
+`src/infra/Infrastructure/PartsInventory/PartsInventoryProblemDetails.cs`;
+those paths additionally select `Farm.Web.Api.Tests` so the producer
+wire-contract assertions execute.
 
 `ci-tools` is unconditional and therefore runs for every bucket, including
 `docs`, `mobile`, and `unclassified`. `dependency-compliance` is gated on

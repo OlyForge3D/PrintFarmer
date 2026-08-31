@@ -41,7 +41,7 @@ set -uo pipefail
 # Paths whose modification requires the real iOS build. Canonical API corpus
 # inputs and the backend source files that define their serialized shape must
 # exercise the real APIClient decoders alongside direct mobile changes.
-IOS_RELEVANT_PATHS_RE='^(mobile/|fixtures/wire-contracts/(manifest\.json|api/.*\.json)$|src/api/Program\.cs$|src/api/Startup/(Controller|SignalR)Startup\.cs$|src/infra/(Contracts|Domain|Dtos|Json|Models|Serialization)/.*\.cs$|src/infra/.*Contract\.cs$|\.github/workflows/ios-pr-ci\.yml$|scripts/ci/resolve-ios-simulator\.sh$|scripts/ci/test-resolve-ios-simulator\.sh$|scripts/ci/select-ios-build\.sh$|scripts/ci/tests/test-select-ios-build\.sh$)'
+IOS_RELEVANT_PATHS_RE='^(mobile/|fixtures/wire-contracts/(manifest\.json|api/.*\.json)$|src/api/Program\.cs$|src/api/Startup/(Controller|SignalR)Startup\.cs$|src/infra/Infrastructure/PartsInventory/PartsInventoryProblemDetails\.cs$|src/infra/(Contracts|Domain|Dtos|Json|Models|Serialization)/.*\.cs$|src/infra/.*Contract\.cs$|\.github/workflows/ios-pr-ci\.yml$|scripts/ci/resolve-ios-simulator\.sh$|scripts/ci/test-resolve-ios-simulator\.sh$|scripts/ci/select-ios-build\.sh$|scripts/ci/tests/test-select-ios-build\.sh$)'
 
 should_run=true
 reason="non-pull_request event — running full iOS build"
@@ -85,11 +85,27 @@ if [[ "${EVENT_NAME:-}" == "pull_request" ]]; then
         failure="could not create temp file — running full iOS build to be safe"
       elif git -c core.quotePath=false diff -z --no-renames --name-only \
         "${base_list[0]}" "$head_sha" > "$diff_out" 2>/dev/null; then
-        # Bash 3.2-compatible NUL reader so the same selector suite runs on
-        # macOS developer hosts and the Ubuntu CI runner.
-        while IFS= read -r -d '' changed_path; do
-          changed_paths+=("$changed_path")
-        done < "$diff_out"
+        # Append a marker that cannot be a Git path because repository-relative
+        # paths never begin with '/'. Reaching it proves the Bash 3.2-compatible
+        # NUL reader consumed the complete stream; EOF or an I/O error before
+        # the marker must fail safe rather than classify a partial path set.
+        read_sentinel="/__printfarmer_ios_selector_diff_end__"
+        saw_read_sentinel=false
+        if ! printf '%s\0' "$read_sentinel" >> "$diff_out"; then
+          failure="could not finalize diff output — running full iOS build to be safe"
+        else
+          while IFS= read -r -d '' changed_path; do
+            if [[ "$changed_path" == "$read_sentinel" ]]; then
+              saw_read_sentinel=true
+              break
+            fi
+            changed_paths+=("$changed_path")
+          done < "$diff_out"
+
+          if [[ "$saw_read_sentinel" != true ]]; then
+            failure="could not read complete diff output — running full iOS build to be safe"
+          fi
+        fi
       else
         failure="diff failed — running full iOS build to be safe"
       fi

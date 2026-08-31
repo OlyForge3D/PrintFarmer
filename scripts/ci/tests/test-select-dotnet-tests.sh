@@ -432,6 +432,7 @@ case_infra_serialization_source_adds_api_contract_tests() {
       "src/infra/Contracts/Auth/AuthDtos.cs" \
       "src/infra/Domain/PartInventoryAdjustment.cs" \
       "src/infra/Dtos/PartsInventory/PartsInventoryDtos.cs" \
+      "src/infra/Infrastructure/PartsInventory/PartsInventoryProblemDetails.cs" \
       "src/infra/Json/EnumJsonConverters.cs" \
       "src/infra/Models/PrinterBackendCapabilitiesDto.cs" \
       "src/infra/Serialization/ImportExportTypeInfoResolver.cs" \

@@ -511,7 +511,7 @@ is_api_wire_contract_input() {
   case "$p" in
     fixtures/wire-contracts/manifest.json|fixtures/wire-contracts/api/*.json)
       return 0 ;;
-    src/api/Program.cs|src/api/Startup/ControllerStartup.cs|src/api/Startup/SignalRStartup.cs|src/infra/*Contract.cs)
+    src/api/Program.cs|src/api/Startup/ControllerStartup.cs|src/api/Startup/SignalRStartup.cs|src/infra/Infrastructure/PartsInventory/PartsInventoryProblemDetails.cs|src/infra/*Contract.cs)
       return 0 ;;
     src/infra/Contracts/*.cs|src/infra/Domain/*.cs|src/infra/Dtos/*.cs|src/infra/Json/*.cs|src/infra/Models/*.cs|src/infra/Serialization/*.cs)
       return 0 ;;
