@@ -74,6 +74,44 @@ modify `.github/workflows/ci.yml`, `deployment-tests.yml`, or `ios-pr-ci.yml`. I
    changed-file set wired in via `CONTRACT_DRIFT_CHANGED_FILE`, and fails the job on any
    finding.
 
+## Enforcement (required status check)
+
+This repository has no branch-protection-as-code mechanism (no Terraform/script/workflow
+manages `development`'s required status checks — it is configured directly via the GitHub
+API/UI). As of [#2288](https://github.com/OlyForge3D/PrintFarmer/issues/2288), `Contract
+drift gate` (the job name in `contract-drift.yml`, see above) has been added to
+`development`'s required status checks alongside `CI summary`, `CI tooling tests`,
+`path-casing`, and `Select affected tests`:
+
+```bash
+gh api repos/OlyForge3D/PrintFarmer/branches/development/protection \
+  -q '.required_status_checks.contexts'
+# ["CI summary","CI tooling tests","path-casing","Select affected tests","Build (iOS)","Contract drift gate"]
+```
+
+Before this change, the workflow ran and reported a status on every PR, but a red gate did
+not block a merge into `development` — only Ralph reading `statusCheckRollup` caught it,
+which is a policy control, not an enforced one. The job runs unconditionally (no path
+filter, no `if:` on the job itself — see the workflow above) on every `pull_request`
+event, so a required check can never hang unreported, including on doc-only PRs.
+
+`main`'s branch protection has no `required_status_checks` configured at all (a
+pre-existing, separate configuration) and was left untouched by #2288 — only
+`development` was in scope for that issue.
+
+**Because this is a live repository setting rather than a file in the repo, any future
+change to this list must be applied directly via the GitHub API or UI by a repository
+administrator (`farm_admin`)** — for example:
+
+```bash
+gh api --method POST repos/OlyForge3D/PrintFarmer/branches/development/protection/required_status_checks/contexts \
+  -f "contexts[]=<New Check Name>"
+```
+
+and then re-verified with the `gh api ... -q '.required_status_checks.contexts'` command
+above. This doc is the source of truth for what the list is *supposed* to contain; it does
+not enforce it.
+
 ## Filing findings
 
 If the gate ever reports a real finding, it is **not** fixed inline as part of an
