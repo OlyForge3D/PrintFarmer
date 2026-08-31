@@ -88,6 +88,17 @@ describe('slicerHubService — canonical wire-contract corpus (#2240)', () => {
       'api/signalr-events/SlicerRegistered.populated.json'
     );
 
+    // `loadWireContractFixture<T>` is an unchecked cast (`JSON.parse(...) as T`),
+    // so typing the fixture as `SlicerRegisteredEvent` alone does not prove the
+    // corpus and the interface stay in sync — it would keep compiling and
+    // passing even if a field were silently added, removed, or renamed on
+    // either side. Assert the exact key set explicitly so this test actually
+    // fails if that drift (the class of bug fixed by #2258) reappears.
+    const expectedKeys: (keyof SlicerRegisteredEvent)[] = [
+      'id', 'name', 'slicerType', 'version', 'maxConcurrentJobs', 'status', 'lastSeen'
+    ];
+    expect(Object.keys(fixture).sort()).toEqual([...expectedKeys].sort());
+
     await slicerHubService.start();
 
     const received: SlicerRegisteredEvent[] = [];
