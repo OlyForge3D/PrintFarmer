@@ -1,0 +1,29 @@
+{
+  "printJobId": "49ad99f7-80f3-45ee-884c-6f713ca3af5d",
+  "harvestedAt": "2026-08-30T16:34:56Z",
+  "alreadyHarvested": false,
+  "adjustments": [
+    {
+      "id": "ed4f602d-d007-4c29-81b6-8dd3e0c34a37",
+      "partInventoryId": "2d2cb44c-6958-493f-99c8-7bd62acfe847",
+      "sku": "PF-MINIMAL-01",
+      "delta": 1,
+      "resultingBalance": 2,
+      "reason": "harvest",
+      "createdAt": "2026-08-30T16:34:56Z"
+    }
+  ],
+  "outputs": [
+    {
+      "sequence": 1,
+      "partInventoryId": "2d2cb44c-6958-493f-99c8-7bd62acfe847",
+      "partSku": "PF-MINIMAL-01",
+      "quantity": 1,
+      "actualBinId": "c411ea64-3137-4c40-b08c-5cb71f018b55",
+      "actualBinCode": "BIN-MINIMAL-01",
+      "origin": "JobSnapshot",
+      "overrideApplied": false,
+      "createdAt": "2026-08-30T16:34:56Z"
+    }
+  ]
+}

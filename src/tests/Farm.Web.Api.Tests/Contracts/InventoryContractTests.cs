@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Farm.Infrastructure;
@@ -39,7 +39,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
 
     /// <summary>Empty collection and paged-result variants for every Spoolman inventory list consumed by iOS.</summary>
     [Fact]
-    public async Task GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpus()
+    public async Task GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpusAsync()
     {
         using HttpClient client = await Factory.CreateAuthenticatedClientAsync(
             username: "wire-contract-spoolman-empty",
@@ -50,41 +50,41 @@ public sealed class InventoryContractTests : IAsyncLifetime
             "/api/spoolman/spools?limit=50&offset=0",
             "inventory/spoolman-spools.empty-collection.json",
             "GET /api/spoolman/spools",
-            nameof(GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpus),
+            nameof(GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpusAsync),
             AssertEmptyPagedResult);
         await CaptureGetAsync(
             client,
             "/api/spoolman/filaments",
             "inventory/spoolman-filaments.empty-collection.json",
             "GET /api/spoolman/filaments",
-            nameof(GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpus),
+            nameof(GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpusAsync),
             AssertEmptyPagedResult);
         await CaptureGetAsync(
             client,
             "/api/spoolman/vendors",
             "inventory/spoolman-vendors.empty-collection.json",
             "GET /api/spoolman/vendors",
-            nameof(GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpus),
+            nameof(GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpusAsync),
             AssertEmptyArray);
         await CaptureGetAsync(
             client,
             "/api/spoolman/materials",
             "inventory/spoolman-materials.empty-collection.json",
             "GET /api/spoolman/materials",
-            nameof(GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpus),
+            nameof(GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpusAsync),
             AssertEmptyArray);
         await CaptureGetAsync(
             client,
             "/api/spoolman/materials/available",
             "inventory/spoolman-available-materials.empty-collection.json",
             "GET /api/spoolman/materials/available",
-            nameof(GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpus),
+            nameof(GetSpoolmanInventoryEndpoints_EmptyCollections_MatchCorpusAsync),
             AssertEmptyArray);
     }
 
     /// <summary>Populated variants for every Spoolman inventory response model consumed by iOS.</summary>
     [Fact]
-    public async Task GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpus()
+    public async Task GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpusAsync()
     {
         _state.PopulateSpoolman();
         using HttpClient client = await Factory.CreateAuthenticatedClientAsync(
@@ -96,7 +96,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             "/api/spoolman/spools?limit=50&offset=0",
             "inventory/spoolman-spools.populated.json",
             "GET /api/spoolman/spools",
-            nameof(GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpus),
+            nameof(GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpusAsync),
             root =>
             {
                 JsonElement items = JsonContractAssertions.AssertNonEmptyCollection(root, "items");
@@ -113,7 +113,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             "/api/spoolman/filaments",
             "inventory/spoolman-filaments.populated.json",
             "GET /api/spoolman/filaments",
-            nameof(GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpus),
+            nameof(GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpusAsync),
             root =>
             {
                 JsonElement items = JsonContractAssertions.AssertNonEmptyCollection(root, "items");
@@ -127,7 +127,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             "/api/spoolman/vendors",
             "inventory/spoolman-vendors.populated.json",
             "GET /api/spoolman/vendors",
-            nameof(GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpus),
+            nameof(GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpusAsync),
             root =>
             {
                 Assert.Equal(1, root.GetArrayLength());
@@ -138,7 +138,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             "/api/spoolman/materials",
             "inventory/spoolman-materials.populated.json",
             "GET /api/spoolman/materials",
-            nameof(GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpus),
+            nameof(GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpusAsync),
             root =>
             {
                 Assert.Equal(1, root.GetArrayLength());
@@ -149,7 +149,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             "/api/spoolman/materials/available",
             "inventory/spoolman-available-materials.populated.json",
             "GET /api/spoolman/materials/available",
-            nameof(GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpus),
+            nameof(GetSpoolmanInventoryEndpoints_PopulatedCollections_MatchCorpusAsync),
             root =>
             {
                 Assert.Equal(JsonValueKind.Array, root.ValueKind);
@@ -157,9 +157,105 @@ public sealed class InventoryContractTests : IAsyncLifetime
             });
     }
 
+    /// <summary>Missing-key variants for nullable Spoolman inventory fields consumed by iOS.</summary>
+    [Fact]
+    public async Task GetSpoolmanInventoryEndpoints_MissingOptionalKeys_MatchCorpusAsync()
+    {
+        _state.PopulateSpoolmanMissingKeys();
+        using HttpClient client = await Factory.CreateAuthenticatedClientAsync(
+            username: "wire-contract-spoolman-missing-keys",
+            email: "wire-contract-spoolman-missing-keys@example.com");
+
+        await CaptureGetAsync(
+            client,
+            "/api/spoolman/spools?limit=50&offset=0",
+            "inventory/spoolman-spools.missing-key.json",
+            "GET /api/spoolman/spools",
+            nameof(GetSpoolmanInventoryEndpoints_MissingOptionalKeys_MatchCorpusAsync),
+            root =>
+            {
+                JsonElement spool = JsonContractAssertions.AssertNonEmptyCollection(root, "items")[0];
+                Assert.Equal("Minimal Spool", JsonContractAssertions.AssertProperty(spool, "name", JsonValueKind.String).GetString());
+                AssertMissingKeys(
+                    spool,
+                    "remainingWeightG",
+                    "colorHex",
+                    "filamentName",
+                    "vendor",
+                    "registeredAt",
+                    "firstUsedAt",
+                    "lastUsedAt",
+                    "initialWeightG",
+                    "usedWeightG",
+                    "spoolWeightG",
+                    "remainingLengthMm",
+                    "usedLengthMm",
+                    "location",
+                    "lotNumber",
+                    "archived",
+                    "price",
+                    "comment",
+                    "filamentId",
+                    "usedPercent",
+                    "remainingPercent",
+                    "hasNfcTag");
+            });
+        await CaptureGetAsync(
+            client,
+            "/api/spoolman/filaments",
+            "inventory/spoolman-filaments.missing-key.json",
+            "GET /api/spoolman/filaments",
+            nameof(GetSpoolmanInventoryEndpoints_MissingOptionalKeys_MatchCorpusAsync),
+            root =>
+            {
+                JsonElement filament = JsonContractAssertions.AssertNonEmptyCollection(root, "items")[0];
+                Assert.Equal(78, JsonContractAssertions.AssertProperty(filament, "id", JsonValueKind.Number).GetInt32());
+                AssertMissingKeys(
+                    filament,
+                    "name",
+                    "material",
+                    "colorHex",
+                    "vendor",
+                    "density",
+                    "diameter",
+                    "weight",
+                    "spoolWeight",
+                    "price",
+                    "settingsExtruderTemp",
+                    "settingsBedTemp",
+                    "articleNumber",
+                    "comment",
+                    "multiColorHexes",
+                    "externalId",
+                    "gtin");
+            });
+        await CaptureGetAsync(
+            client,
+            "/api/spoolman/vendors",
+            "inventory/spoolman-vendors.missing-key.json",
+            "GET /api/spoolman/vendors",
+            nameof(GetSpoolmanInventoryEndpoints_MissingOptionalKeys_MatchCorpusAsync),
+            root =>
+            {
+                Assert.Equal("Minimal Vendor", JsonContractAssertions.AssertProperty(root[0], "name", JsonValueKind.String).GetString());
+                JsonContractAssertions.AssertMissingKey(root[0], "externalId");
+            });
+        await CaptureGetAsync(
+            client,
+            "/api/spoolman/materials",
+            "inventory/spoolman-materials.missing-key.json",
+            "GET /api/spoolman/materials",
+            nameof(GetSpoolmanInventoryEndpoints_MissingOptionalKeys_MatchCorpusAsync),
+            root =>
+            {
+                Assert.Equal("Minimal Material", JsonContractAssertions.AssertProperty(root[0], "name", JsonValueKind.String).GetString());
+                AssertMissingKeys(root[0], "density", "colorHex");
+            });
+    }
+
     /// <summary>Empty collection variants for the printed-parts inventory lists consumed by iOS.</summary>
     [Fact]
-    public async Task GetPartsInventoryEndpoints_EmptyCollections_MatchCorpus()
+    public async Task GetPartsInventoryEndpoints_EmptyCollections_MatchCorpusAsync()
     {
         using HttpClient client = await Factory.CreateAuthenticatedClientAsync(
             username: "wire-contract-parts-empty",
@@ -170,28 +266,28 @@ public sealed class InventoryContractTests : IAsyncLifetime
             "/api/parts-inventory?includeInactive=false",
             "inventory/parts.empty-collection.json",
             "GET /api/parts-inventory",
-            nameof(GetPartsInventoryEndpoints_EmptyCollections_MatchCorpus),
+            nameof(GetPartsInventoryEndpoints_EmptyCollections_MatchCorpusAsync),
             AssertEmptyArray);
         await CaptureGetAsync(
             client,
             "/api/bins?includeInactive=false",
             "inventory/bins.empty-collection.json",
             "GET /api/bins",
-            nameof(GetPartsInventoryEndpoints_EmptyCollections_MatchCorpus),
+            nameof(GetPartsInventoryEndpoints_EmptyCollections_MatchCorpusAsync),
             AssertEmptyArray);
         await CaptureGetAsync(
             client,
             "/api/parts-inventory/reorder",
             "inventory/reorder.empty-collection.json",
             "GET /api/parts-inventory/reorder",
-            nameof(GetPartsInventoryEndpoints_EmptyCollections_MatchCorpus),
+            nameof(GetPartsInventoryEndpoints_EmptyCollections_MatchCorpusAsync),
             AssertEmptyArray);
         await CaptureGetAsync(
             client,
             "/api/parts-inventory/mappings",
             "inventory/mappings.empty-collection.json",
             "GET /api/parts-inventory/mappings",
-            nameof(GetPartsInventoryEndpoints_EmptyCollections_MatchCorpus),
+            nameof(GetPartsInventoryEndpoints_EmptyCollections_MatchCorpusAsync),
             AssertEmptyArray);
     }
 
@@ -200,7 +296,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
     /// typed conflict envelopes decoded by the iOS APIClient.
     /// </summary>
     [Fact]
-    public async Task GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus()
+    public async Task GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpusAsync()
     {
         _state.PopulatePrintedParts();
         using HttpClient client = await Factory.CreateAdminClientAsync(
@@ -212,7 +308,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             "/api/parts-inventory?includeInactive=false",
             "inventory/parts.populated.json",
             "GET /api/parts-inventory",
-            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus),
+            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpusAsync),
             root =>
             {
                 Assert.Equal(1, root.GetArrayLength());
@@ -226,7 +322,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             "/api/bins?includeInactive=false",
             "inventory/bins.populated.json",
             "GET /api/bins",
-            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus),
+            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpusAsync),
             root =>
             {
                 Assert.Equal(1, root.GetArrayLength());
@@ -237,7 +333,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             "/api/parts-inventory/reorder",
             "inventory/reorder.populated.json",
             "GET /api/parts-inventory/reorder",
-            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus),
+            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpusAsync),
             root =>
             {
                 Assert.Equal(1, root.GetArrayLength());
@@ -249,7 +345,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             "/api/parts-inventory/mappings",
             "inventory/mappings.populated.json",
             "GET /api/parts-inventory/mappings",
-            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus),
+            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpusAsync),
             root =>
             {
                 Assert.Equal(1, root.GetArrayLength());
@@ -272,7 +368,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             HttpStatusCode.OK,
             "inventory/adjustment.populated.json",
             "POST /api/parts-inventory/{sku}/adjust",
-            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus),
+            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpusAsync),
             root =>
             {
                 Assert.Equal("qc-reject", JsonContractAssertions.AssertProperty(root, "reason", JsonValueKind.String).GetString());
@@ -291,7 +387,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             HttpStatusCode.OK,
             "inventory/harvest.populated.json",
             "POST /api/job-queue/{id}/harvest",
-            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus),
+            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpusAsync),
             root =>
             {
                 JsonElement adjustments = JsonContractAssertions.AssertNonEmptyCollection(root, "adjustments");
@@ -308,7 +404,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             HttpStatusCode.Conflict,
             "inventory/harvest.wrong-bin.json",
             "POST /api/job-queue/{id}/harvest (wrongBin)",
-            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus),
+            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpusAsync),
             root =>
             {
                 Assert.Equal("wrongBin", JsonContractAssertions.AssertProperty(root, "code", JsonValueKind.String).GetString());
@@ -323,7 +419,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             HttpStatusCode.Conflict,
             "inventory/harvest.part-mapping-required.json",
             "POST /api/job-queue/{id}/harvest (partMappingRequired)",
-            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpus),
+            nameof(GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpusAsync),
             root =>
             {
                 Assert.Equal("partMappingRequired", JsonContractAssertions.AssertProperty(root, "code", JsonValueKind.String).GetString());
@@ -331,6 +427,94 @@ public sealed class InventoryContractTests : IAsyncLifetime
                 _ = JsonContractAssertions.AssertProperty(root, "projectFileId", JsonValueKind.String);
                 _ = JsonContractAssertions.AssertProperty(root, "gcodeFileId", JsonValueKind.Null);
             });
+    }
+
+    /// <summary>Missing-key variants for nullable printed-parts inventory fields consumed by iOS.</summary>
+    [Fact]
+    public async Task GetPartsInventoryEndpoints_MissingOptionalKeys_MatchCorpusAsync()
+    {
+        _state.PopulatePrintedPartsMissingKeys();
+        using HttpClient client = await Factory.CreateAdminClientAsync(
+            username: "wire-contract-parts-missing-keys",
+            email: "wire-contract-parts-missing-keys@example.com");
+
+        await CaptureGetAsync(
+            client,
+            "/api/parts-inventory?includeInactive=false",
+            "inventory/parts.missing-key.json",
+            "GET /api/parts-inventory",
+            nameof(GetPartsInventoryEndpoints_MissingOptionalKeys_MatchCorpusAsync),
+            root =>
+            {
+                JsonElement part = root[0];
+                Assert.Equal("PF-MINIMAL-01", JsonContractAssertions.AssertProperty(part, "sku", JsonValueKind.String).GetString());
+                AssertMissingKeys(part, "description", "modelFileRef", "defaultBinId", "defaultBinCode", "defaultBinName");
+            });
+        await CaptureGetAsync(
+            client,
+            "/api/bins?includeInactive=false",
+            "inventory/bins.missing-key.json",
+            "GET /api/bins",
+            nameof(GetPartsInventoryEndpoints_MissingOptionalKeys_MatchCorpusAsync),
+            root =>
+            {
+                JsonElement bin = root[0];
+                Assert.Equal("BIN-MINIMAL-01", JsonContractAssertions.AssertProperty(bin, "code", JsonValueKind.String).GetString());
+                AssertMissingKeys(bin, "location", "notes");
+            });
+        await CapturePostAsync(
+            client,
+            "/api/parts-inventory/PF-MINIMAL-01/adjust",
+            new
+            {
+                delta = 1,
+                reason = "manual",
+            },
+            HttpStatusCode.OK,
+            "inventory/adjustment.missing-key.json",
+            "POST /api/parts-inventory/{sku}/adjust",
+            nameof(GetPartsInventoryEndpoints_MissingOptionalKeys_MatchCorpusAsync),
+            root =>
+            {
+                Assert.Equal("manual", JsonContractAssertions.AssertProperty(root, "reason", JsonValueKind.String).GetString());
+                AssertMissingKeys(root, "binId", "binCode", "printJobId", "operationKey", "notes", "userId");
+            });
+        await CapturePostAsync(
+            client,
+            $"/api/job-queue/{InventoryContractState.PrintJobId}/harvest",
+            new HarvestJobRequest(),
+            HttpStatusCode.OK,
+            "inventory/harvest.missing-key.json",
+            "POST /api/job-queue/{id}/harvest",
+            nameof(GetPartsInventoryEndpoints_MissingOptionalKeys_MatchCorpusAsync),
+            root =>
+            {
+                AssertMissingKeys(root, "binId", "binCode");
+                JsonElement adjustment = JsonContractAssertions.AssertNonEmptyCollection(root, "adjustments")[0];
+                AssertMissingKeys(adjustment, "binId", "binCode", "printJobId", "operationKey", "notes", "userId");
+                JsonElement output = JsonContractAssertions.AssertNonEmptyCollection(root, "outputs")[0];
+                Assert.Equal("JobSnapshot", JsonContractAssertions.AssertProperty(output, "origin", JsonValueKind.String).GetString());
+                AssertMissingKeys(output, "expectedBinId", "expectedBinCode", "sourceFileId", "sourceMappingId", "overrideReason");
+            });
+    }
+
+    /// <summary>Non-string adjustment reasons fail model binding instead of escaping as server errors.</summary>
+    [Fact]
+    public async Task AdjustPartInventory_NonStringReason_ReturnsBadRequestAsync()
+    {
+        using HttpClient client = await Factory.CreateAdminClientAsync(
+            username: "wire-contract-adjustment-invalid-reason",
+            email: "wire-contract-adjustment-invalid-reason@example.com");
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/parts-inventory/PF-WIRE-01/adjust",
+            new
+            {
+                delta = -1,
+                reason = 1,
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     private static async Task CaptureGetAsync(
@@ -391,7 +575,7 @@ public sealed class InventoryContractTests : IAsyncLifetime
             WireContractCorpusPaths.ApiRoot,
             fixturePath,
             endpoint,
-            $"{nameof(InventoryContractTests)}.{producingTest}",
+            $"{typeof(InventoryContractTests).FullName}.{producingTest}",
             schemaVersion: "1.0",
             actualJson: json);
     }
@@ -406,6 +590,14 @@ public sealed class InventoryContractTests : IAsyncLifetime
     {
         Assert.Equal(JsonValueKind.Array, root.ValueKind);
         Assert.Equal(0, root.GetArrayLength());
+    }
+
+    private static void AssertMissingKeys(JsonElement root, params string[] propertyNames)
+    {
+        foreach (string propertyName in propertyNames)
+        {
+            JsonContractAssertions.AssertMissingKey(root, propertyName);
+        }
     }
 
     private sealed class InventoryContractFactory(InventoryContractState state)
@@ -654,6 +846,33 @@ public sealed class InventoryContractTests : IAsyncLifetime
             AvailableMaterials = ["ASA", "PLA"];
         }
 
+        internal void PopulateSpoolmanMissingKeys()
+        {
+            Spools = [new SpoolmanSpoolDto(502, "Minimal Spool", "PLA", null, null, InUse: false)];
+            Filaments =
+            [
+                new SpoolmanFilamentDto(
+                    78,
+                    Name: null,
+                    Material: null,
+                    ColorHex: null,
+                    Vendor: null,
+                    Density: null,
+                    Diameter: null,
+                    Weight: null,
+                    SpoolWeight: null,
+                    Price: null,
+                    SettingsExtruderTemp: null,
+                    SettingsBedTemp: null,
+                    ArticleNumber: null,
+                    Comment: null,
+                    MultiColorHexes: null,
+                    ExternalId: null),
+            ];
+            Vendors = [new SpoolmanVendorDto(13, "Minimal Vendor", null)];
+            Materials = [new SpoolmanMaterialDto(6, "Minimal Material")];
+        }
+
         internal void PopulatePrintedParts()
         {
             var bin = new Bin
@@ -784,6 +1003,89 @@ public sealed class InventoryContractTests : IAsyncLifetime
                     ProjectFileId,
                     null,
                     "Map the project output to a printed-part SKU before harvesting."));
+            HarvestResult = SuccessfulHarvest;
+        }
+
+        internal void PopulatePrintedPartsMissingKeys()
+        {
+            var bin = new Bin
+            {
+                Id = BinId,
+                Code = "BIN-MINIMAL-01",
+                Name = "Minimal Bin",
+                IsActive = true,
+                CreatedAt = Timestamp,
+                UpdatedAt = Timestamp.AddHours(1),
+            };
+            var part = new PartInventory
+            {
+                Id = PartId,
+                Sku = "PF-MINIMAL-01",
+                Name = "Minimal Part",
+                OnHand = 1,
+                ReorderPoint = 0,
+                IsActive = true,
+                CreatedAt = Timestamp,
+                UpdatedAt = Timestamp.AddHours(2),
+            };
+            var adjustment = new PartAdjustmentResponse(
+                AdjustmentId,
+                PartId,
+                "PF-MINIMAL-01",
+                BinId: null,
+                BinCode: null,
+                Delta: 1,
+                ResultingBalance: 2,
+                PartAdjustmentReason.Manual,
+                PrintJobId: null,
+                OperationKey: null,
+                Notes: null,
+                UserId: null,
+                Timestamp.AddHours(3));
+            var harvestAdjustment = new PartAdjustmentResponse(
+                HarvestAdjustmentId,
+                PartId,
+                "PF-MINIMAL-01",
+                BinId: null,
+                BinCode: null,
+                Delta: 1,
+                ResultingBalance: 2,
+                PartAdjustmentReason.Harvest,
+                PrintJobId: null,
+                OperationKey: null,
+                Notes: null,
+                UserId: null,
+                Timestamp.AddHours(4));
+            var harvestOutput = new HarvestOutputResponse(
+                Sequence: 1,
+                PartInventoryId: PartId,
+                PartSku: "PF-MINIMAL-01",
+                Quantity: 1,
+                ExpectedBinId: null,
+                ExpectedBinCode: null,
+                ActualBinId: BinId,
+                ActualBinCode: "BIN-MINIMAL-01",
+                Origin: PartHarvestOutputOrigin.JobSnapshot,
+                SourceFileId: null,
+                SourceMappingId: null,
+                OverrideApplied: false,
+                OverrideReason: null,
+                CreatedAt: Timestamp.AddHours(4));
+
+            Parts = [part];
+            Bins = [bin];
+            AdjustResult = new AdjustResult(PartInventoryOutcome.Ok, adjustment, 2, null);
+            SuccessfulHarvest = new HarvestResult(
+                PartInventoryOutcome.Ok,
+                new HarvestJobResponse(
+                    PrintJobId,
+                    Timestamp.AddHours(4),
+                    BinId: null,
+                    BinCode: null,
+                    AlreadyHarvested: false,
+                    Adjustments: [harvestAdjustment],
+                    Outputs: [harvestOutput]),
+                null);
             HarvestResult = SuccessfulHarvest;
         }
     }

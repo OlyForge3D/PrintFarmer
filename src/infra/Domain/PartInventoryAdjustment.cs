@@ -27,6 +27,12 @@ public sealed class PartAdjustmentReasonConverter : JsonConverter<PartAdjustment
     /// <inheritdoc />
     public override PartAdjustmentReason Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
+        if (reader.TokenType is not JsonTokenType.String)
+        {
+            throw new JsonException(
+                $"Printed-part adjustment reason must be a JSON string; received {reader.TokenType}.");
+        }
+
         string? value = reader.GetString();
         return value switch
         {

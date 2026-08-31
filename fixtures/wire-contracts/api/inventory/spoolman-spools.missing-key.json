@@ -1,0 +1,11 @@
+{
+  "items": [
+    {
+      "id": 502,
+      "name": "Minimal Spool",
+      "material": "PLA",
+      "inUse": false
+    }
+  ],
+  "totalCount": 1
+}
