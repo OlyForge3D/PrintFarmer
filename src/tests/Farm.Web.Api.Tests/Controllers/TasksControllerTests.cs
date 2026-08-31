@@ -150,7 +150,23 @@ public class TasksControllerTests
         Assert.Same(plan, ok.Value);
     }
 
-    /// <summary>Fix 6: enum fields in ShiftPlanDto must serialize as camelCase strings, not integers.</summary>
+    /// <summary>
+    /// Fix 6: enum fields in ShiftPlanDto must serialize as camelCase-named strings, not integers.
+    /// NOTE: this uses a hand-built <see cref="JsonSerializerOptions"/> with NO *options-level* enum
+    /// converter registered — no global <see cref="System.Text.Json.Serialization.JsonStringEnumConverter"/>
+    /// and no explicit property-level converter added to <c>Converters</c> here. Attributes are
+    /// intrinsic to the member/type, not the options bag, so the property-level
+    /// <c>[JsonConverter]</c> attribute on <see cref="ShiftPlanGroupDto.AnchorKind"/> still applies
+    /// in this test and is what actually produces <c>"now"</c>. This test therefore only proves
+    /// property-NAME casing, not enum-VALUE global-converter-vs-property-attribute precedence — it
+    /// would keep passing even if that property-level attribute were removed, because the
+    /// type-level <c>[JsonConverter]</c> attribute on <see cref="Farm.Infrastructure.Domain.UserTaskAnchorKind"/>
+    /// would then take over (issue #2246 finding; only removing BOTH attributes would make this
+    /// assert an integer). For the real global-converter-precedence proof across every
+    /// anchor/source token via this app's actual DI-registered MVC and SignalR
+    /// <see cref="JsonSerializerOptions"/>, see
+    /// <c>Farm.Web.Api.Tests.Contracts.UserTaskDtoWireContractTests</c>.
+    /// </summary>
     [Fact]
     public async Task GetPendingTasksAsync_ViewShift_SerializesAnchorKindAsCamelCaseString()
     {
@@ -166,7 +182,11 @@ public class TasksControllerTests
         IActionResult result = await _controller.GetPendingTasksAsync(view: "shift", CancellationToken.None);
         OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
 
-        // Serialize exactly as ASP.NET Core would (with camelCase policy).
+        // Serialize with camelCase property-naming only (no options-level enum converter added).
+        // The property-level [JsonConverter] attribute on AnchorKind still applies here (attributes
+        // are intrinsic to the member, not the options bag) and is what produces "now" below. This
+        // proves the anchorKind PROPERTY name is camelCase, not global-converter-vs-property-attribute
+        // precedence — see UserTaskDtoWireContractTests for that proof against real DI options.
         string json = JsonSerializer.Serialize(ok.Value, new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,

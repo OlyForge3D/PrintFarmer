@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
@@ -487,6 +488,112 @@ public sealed class SignalREventContractTests : IAsyncLifetime
             "signalr-events/SlicerRegistered.populated.json",
             endpoint: "SignalR SlicerHub \"SlicerRegistered\" (PascalCase; ISlicersService.RegisterAsync)",
             producingTest: $"{nameof(SignalREventContractTests)}.{nameof(SlicerRegister_RealBroadcast_SendsSlicerRegisteredMatchingCorpus)}",
+            schemaVersion: "1.0",
+            actualJson: json,
+            volatilePaths: volatilePaths);
+    }
+
+    /// <summary>
+    /// <c>PrinterHub</c> <c>"taskcreated"</c>, real-broadcast via
+    /// <c>IUserTaskService.CreateManualTaskAsync</c> (driven end-to-end through the real
+    /// <c>POST /api/tasks</c> endpoint, never a hand-built DTO). Issue #2246: proves
+    /// <c>UserTaskDto.AnchorKind</c>/<c>SourceKind</c> emit their canonical lowercase camelCase
+    /// tokens over the SignalR transport too, not just MVC — the DTO crosses both.
+    /// </summary>
+    [Fact]
+    public async Task CreateManualTask_RealBroadcast_SendsTaskCreatedWithLowercaseEnumTokens()
+    {
+        string token = await CreateFarmAdminTokenAsync();
+        var receivedTcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using HubConnection connection = BuildHubConnection("/hubs/printers", token);
+        _ = connection.On<JsonElement>("taskcreated", payload => receivedTcs.TrySetResult(payload));
+        await connection.StartAsync();
+        // Non-maintenance tasks broadcast to AuthorizedHubGroups.Farm, which (unlike the
+        // farm_admin/AdminTaskGroup this connection auto-joined on connect) requires an
+        // explicit subscribe.
+        await connection.InvokeAsync("SubscribeToFarmAsync");
+
+        using HttpClient client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var createRequest = new
+        {
+            title = "SignalR wire contract manual task",
+            description = (string?)null,
+            priority = "Normal",
+        };
+        using HttpResponseMessage response = await client.PostAsJsonAsync("/api/tasks", createRequest);
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        JsonElement received = await WaitForEventAsync(receivedTcs);
+
+        // Property-level [JsonConverter] attributes on UserTaskDto.AnchorKind/SourceKind
+        // outrank SignalRStartup's global JsonStringEnumConverter, so these are the canonical
+        // lowercase camelCase tokens over the wire, not the PascalCase CLR names.
+        JsonContractAssertions.AssertEnumToken(received, "anchorKind", "unspecified");
+        JsonContractAssertions.AssertEnumToken(received, "sourceKind", "unspecified");
+        JsonContractAssertions.AssertEnumToken(received, "status", "Pending");
+        JsonContractAssertions.AssertEnumToken(received, "priority", "Normal");
+        JsonContractAssertions.AssertEnumToken(received, "taskType", "Custom");
+
+        string json = received.GetRawText();
+        var volatilePaths = new HashSet<string> { "$.id", "$.entityId", "$.createdAt" };
+        await WireContractFixtureWriter.CaptureOrVerifyAsync(
+            WireContractCorpusPaths.ApiRoot,
+            "signalr-events/taskcreated.populated.json",
+            endpoint: "SignalR PrinterHub \"taskcreated\" (POST /api/tasks)",
+            producingTest: $"{nameof(SignalREventContractTests)}.{nameof(CreateManualTask_RealBroadcast_SendsTaskCreatedWithLowercaseEnumTokens)}",
+            schemaVersion: "1.0",
+            actualJson: json,
+            volatilePaths: volatilePaths);
+    }
+
+    /// <summary>
+    /// <c>PrinterHub</c> <c>"taskupdated"</c>, real-broadcast via
+    /// <c>IUserTaskService.CompleteTaskAsync</c> (driven end-to-end through the real
+    /// <c>POST /api/tasks/{id}/complete</c> endpoint). Companion to
+    /// <see cref="CreateManualTask_RealBroadcast_SendsTaskCreatedWithLowercaseEnumTokens"/> for
+    /// the update path (issue #2246).
+    /// </summary>
+    [Fact]
+    public async Task CompleteTask_RealBroadcast_SendsTaskUpdatedWithLowercaseEnumTokens()
+    {
+        string token = await CreateFarmAdminTokenAsync();
+        using HttpClient client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var createRequest = new
+        {
+            title = "SignalR wire contract manual task (update)",
+            description = (string?)null,
+            priority = "Normal",
+        };
+        using HttpResponseMessage createResponse = await client.PostAsJsonAsync("/api/tasks", createRequest);
+        _ = createResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+        using JsonDocument createdDocument = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        Guid taskId = createdDocument.RootElement.GetProperty("id").GetGuid();
+
+        var receivedTcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using HubConnection connection = BuildHubConnection("/hubs/printers", token);
+        _ = connection.On<JsonElement>("taskupdated", payload => receivedTcs.TrySetResult(payload));
+        await connection.StartAsync();
+        await connection.InvokeAsync("SubscribeToFarmAsync");
+
+        using HttpResponseMessage completeResponse = await client.PostAsync($"/api/tasks/{taskId}/complete", content: null);
+        _ = completeResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        JsonElement received = await WaitForEventAsync(receivedTcs);
+
+        JsonContractAssertions.AssertEnumToken(received, "anchorKind", "unspecified");
+        JsonContractAssertions.AssertEnumToken(received, "sourceKind", "unspecified");
+        JsonContractAssertions.AssertEnumToken(received, "status", "Completed");
+
+        string json = received.GetRawText();
+        var volatilePaths = new HashSet<string> { "$.id", "$.entityId", "$.createdAt", "$.completedAt" };
+        await WireContractFixtureWriter.CaptureOrVerifyAsync(
+            WireContractCorpusPaths.ApiRoot,
+            "signalr-events/taskupdated.completed.json",
+            endpoint: "SignalR PrinterHub \"taskupdated\" (POST /api/tasks/{id}/complete)",
+            producingTest: $"{nameof(SignalREventContractTests)}.{nameof(CompleteTask_RealBroadcast_SendsTaskUpdatedWithLowercaseEnumTokens)}",
             schemaVersion: "1.0",
             actualJson: json,
             volatilePaths: volatilePaths);
