@@ -65,7 +65,7 @@ public class FilamentCoverageSpoolResolverTests
             .Setup(service => service.ListSpoolsAsync(
                 It.IsAny<SpoolmanSpoolQueryParams>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SpoolmanPagedResult<SpoolmanSpoolDto>(
+            .ReturnsAsync(SpoolmanReadResult.Ok<SpoolmanSpoolDto>(
                 [new SpoolmanSpoolDto(42, "spool", "PLA", 321, "#FFFFFF", true)],
                 1));
         FilamentCoverageSpoolResolver resolver = new(
@@ -166,7 +166,7 @@ public class FilamentCoverageSpoolResolverTests
         central.Setup(s => s.ListSpoolsAsync(
                 It.IsAny<SpoolmanSpoolQueryParams>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SpoolmanPagedResult<SpoolmanSpoolDto>(
+            .ReturnsAsync(SpoolmanReadResult.Ok<SpoolmanSpoolDto>(
                 [new SpoolmanSpoolDto(7, "central", "PLA", 111, "#FFFFFF", true)],
                 1));
         FilamentCoverageSpoolResolver resolver = new(
@@ -364,7 +364,7 @@ public class FilamentCoverageSpoolResolverTests
         central.Setup(s => s.GetConfig()).Returns(new SpoolmanConfigDto("http://central.local"));
         central
             .Setup(s => s.ListSpoolsAsync(It.IsAny<SpoolmanSpoolQueryParams>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SpoolmanPagedResult<SpoolmanSpoolDto>(
+            .ReturnsAsync(SpoolmanReadResult.Ok<SpoolmanSpoolDto>(
                 [Spool(1, 100), Spool(2, 200)],
                 2));
 
@@ -513,6 +513,56 @@ public class FilamentCoverageSpoolResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_CentralSourceReadUnavailable_ReturnsSourceUnavailable()
+    {
+        // Regression for issue #2312: a failed Spoolman read (non-success HTTP status,
+        // invalid JSON, or a thrown exception, all normalized by SpoolmanService into
+        // SpoolmanReadOutcome.SourceUnavailable) must surface as spool-source-unavailable,
+        // never the affirmative spool-not-found -- distinct from the mock-throws case above,
+        // which exercises the resolver's own outer catch rather than a returned failure result.
+        Mock<ISpoolmanService> central = new();
+        central.Setup(s => s.GetConfig()).Returns(new SpoolmanConfigDto("http://central.local"));
+        central
+            .Setup(s => s.ListSpoolsAsync(It.IsAny<SpoolmanSpoolQueryParams>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SpoolmanReadResult.Unavailable<SpoolmanSpoolDto>());
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            new Mock<IBackendClientFactory>(MockBehavior.Strict).Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+        Printer printer = PrinterWithSpool("http://octo.local", PrinterBackend.OctoPrint, 10);
+
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result =
+            await resolver.ResolveAsync([printer], CancellationToken.None);
+
+        result[printer.Id][10].Spool.Should().BeNull();
+        result[printer.Id][10].ErrorReason.Should().Be(FilamentCoverageSpoolResolver.ReasonSourceUnavailable);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_CentralSourceGenuinelyEmpty_ReturnsSpoolNotFound()
+    {
+        // Regression for issue #2312: a genuinely empty Spoolman inventory (successful read,
+        // zero items) must still resolve as spool-not-found, not spool-source-unavailable --
+        // proving the fix distinguishes "empty" from "failed" in both directions.
+        Mock<ISpoolmanService> central = new();
+        central.Setup(s => s.GetConfig()).Returns(new SpoolmanConfigDto("http://central.local"));
+        central
+            .Setup(s => s.ListSpoolsAsync(It.IsAny<SpoolmanSpoolQueryParams>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SpoolmanReadResult.Ok<SpoolmanSpoolDto>([], 0));
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            new Mock<IBackendClientFactory>(MockBehavior.Strict).Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+        Printer printer = PrinterWithSpool("http://octo.local", PrinterBackend.OctoPrint, 10);
+
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result =
+            await resolver.ResolveAsync([printer], CancellationToken.None);
+
+        result[printer.Id][10].Spool.Should().BeNull();
+        result[printer.Id][10].ErrorReason.Should().Be(FilamentCoverageSpoolResolver.ReasonSpoolNotFound);
+    }
+
+    [Fact]
     public async Task ResolveAsync_MissingSpoolInOwningSource_DoesNotFallBack()
     {
         Mock<IBackendClient> native = NativeClient("[]");
@@ -538,7 +588,7 @@ public class FilamentCoverageSpoolResolverTests
         central.Setup(s => s.GetConfig()).Returns(new SpoolmanConfigDto("http://central.local"));
         central
             .Setup(s => s.ListSpoolsAsync(It.IsAny<SpoolmanSpoolQueryParams>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SpoolmanPagedResult<SpoolmanSpoolDto>([Spool(44, 300)], 1));
+            .ReturnsAsync(SpoolmanReadResult.Ok<SpoolmanSpoolDto>([Spool(44, 300)], 1));
         FilamentCoverageSpoolResolver resolver = new(
             central.Object,
             new Mock<IBackendClientFactory>(MockBehavior.Strict).Object,

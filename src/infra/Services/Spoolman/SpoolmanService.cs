@@ -235,7 +235,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         settingsService.Save(settings);
     }
 
-    public async Task<SpoolmanPagedResult<SpoolmanSpoolDto>> ListSpoolsAsync(SpoolmanSpoolQueryParams queryParams, CancellationToken ct)
+    public async Task<SpoolmanReadResult<SpoolmanSpoolDto>> ListSpoolsAsync(SpoolmanSpoolQueryParams queryParams, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(queryParams);
 
@@ -243,7 +243,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
             logger.LogDebug("Spoolman not configured – returning empty spool list");
-            return new SpoolmanPagedResult<SpoolmanSpoolDto>([], 0);
+            return SpoolmanReadResult.Empty<SpoolmanSpoolDto>();
         }
 
         string baseUrl = cfg.BaseUrl.TrimEnd('/');
@@ -258,7 +258,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             if (!resp.IsSuccessStatusCode)
             {
                 logger.LogWarning("Spoolman spool listing returned {StatusCode}", resp.StatusCode);
-                return new SpoolmanPagedResult<SpoolmanSpoolDto>([], 0);
+                return SpoolmanReadResult.Unavailable<SpoolmanSpoolDto>();
             }
 
             // Read total count from Spoolman's X-Total-Count header
@@ -276,7 +276,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             if (doc is null)
             {
                 logger.LogWarning("Spoolman spool listing returned invalid JSON");
-                return new SpoolmanPagedResult<SpoolmanSpoolDto>([], 0);
+                return SpoolmanReadResult.Unavailable<SpoolmanSpoolDto>();
             }
 
             List<SpoolmanSpoolDto> items = new();
@@ -295,12 +295,12 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             }
 
             logger.LogDebug("Retrieved {Count} spools (total {TotalCount})", items.Count, totalCount);
-            return new SpoolmanPagedResult<SpoolmanSpoolDto>(items, totalCount);
+            return SpoolmanReadResult.Ok<SpoolmanSpoolDto>(items, totalCount);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to fetch spools from Spoolman");
-            return new SpoolmanPagedResult<SpoolmanSpoolDto>([], 0);
+            return SpoolmanReadResult.Unavailable<SpoolmanSpoolDto>();
         }
     }
 
@@ -1485,8 +1485,16 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
         do
         {
-            SpoolmanPagedResult<SpoolmanSpoolDto> page = await ListSpoolsAsync(
+            SpoolmanReadResult<SpoolmanSpoolDto> page = await ListSpoolsAsync(
                 new SpoolmanSpoolQueryParams { Limit = pageSize, Offset = offset, AllowArchived = true }, ct);
+
+            if (!page.Success)
+            {
+                // The read failed (as opposed to succeeding with zero rows); stop paging rather
+                // than treating the unreadable remainder as "no more spools" (#2312).
+                logger.LogDebug("Spoolman spool listing failed while computing filter options at offset {Offset}", offset);
+                break;
+            }
 
             allSpools.AddRange(page.Items);
             totalCount = page.TotalCount;
