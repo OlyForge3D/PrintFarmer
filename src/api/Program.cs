@@ -3,10 +3,13 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Json;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services.FeatureFlags;
@@ -247,11 +250,21 @@ builder.Services.AddMoonrakerEmulatorSeederDependencies(builder.Configuration);
 
 builder.Services.AddEndpointsApiExplorer();
 
-// Native OpenAPI builds schemas from Http.Json metadata. MVC controller serialization is configured separately.
+// Native OpenAPI builds schemas from Http.Json metadata, which is otherwise a completely
+// separate configuration surface from MVC controller serialization (AddJsonOptions in
+// ControllerStartup). Kept in parity here (issue #2261) so the generated schema reflects the
+// real wire contract: camelCase names, null-omission, and the same enum converters.
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.TypeInfoResolver = (options.SerializerOptions.TypeInfoResolver ?? new DefaultJsonTypeInfoResolver())
         .WithAddedModifier(PruneOpenApiMaintenanceNavigationProperties);
+    options.SerializerOptions.MaxDepth = 256;
+    options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    options.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+    options.SerializerOptions.Converters.Add(new PrinterBackendJsonConverter());
+    options.SerializerOptions.Converters.Add(new PrintJobStatusJsonConverter());
+    options.SerializerOptions.Converters.Add(new FilamentCoverageStatusJsonConverter());
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 
 // .NET 10 native OpenAPI - auto-detects JWT Bearer security from authentication configuration
@@ -260,8 +273,6 @@ builder.Services.AddOpenApi(options =>
     options.AddDocumentTransformer<BearerSecuritySchemeTransformer>();
     options.AddOperationTransformer<AuthorizationOperationTransformer>();
 });
-builder.Services.ConfigureHttpJsonOptions(options =>
-    options.SerializerOptions.MaxDepth = 256);
 
 // CORS configuration for API access
 builder.Services.AddPrintFarmerCors();

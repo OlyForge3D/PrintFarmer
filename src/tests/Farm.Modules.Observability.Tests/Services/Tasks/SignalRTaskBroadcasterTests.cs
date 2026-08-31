@@ -15,26 +15,28 @@ namespace Farm.Modules.Observability.Tests.Services.Tasks;
 /// </summary>
 public class SignalRTaskBroadcasterTests
 {
-    private static UserTaskDto Dto(UserTaskSourceKind sourceKind, string title = "t") => new(
-        Id: Guid.NewGuid(),
-        TaskType: UserTaskType.MaintenanceDue,
-        EntityType: "Printer",
-        EntityId: Guid.NewGuid(),
-        Title: title,
-        Description: "sensitive maintenance detail",
-        Status: UserTaskStatus.Pending,
-        Priority: UserTaskPriority.Normal,
-        CreatedAt: DateTime.UtcNow,
-        DueAt: null,
-        CompletedAt: null,
-        RelatedEntityCount: 0,
-        MetadataJson: null,
-        AnchorKind: UserTaskAnchorKind.Window,
-        AnchorAtUtc: null,
-        WindowStartUtc: DateTime.UtcNow.AddHours(1),
-        WindowEndUtc: null,
-        SourceKind: sourceKind,
-        SourceId: sourceKind == UserTaskSourceKind.Maintenance ? "maintenancealert:1" : "failure:1");
+    private static UserTaskDto Dto(UserTaskSourceKind sourceKind, string title = "t") => new()
+    {
+        Id = Guid.NewGuid(),
+        TaskType = UserTaskType.MaintenanceDue,
+        EntityType = "Printer",
+        EntityId = Guid.NewGuid(),
+        Title = title,
+        Description = "sensitive maintenance detail",
+        Status = UserTaskStatus.Pending,
+        Priority = UserTaskPriority.Normal,
+        CreatedAt = DateTime.UtcNow,
+        DueAt = null,
+        CompletedAt = null,
+        RelatedEntityCount = 0,
+        MetadataJson = null,
+        AnchorKind = UserTaskAnchorKind.Window,
+        AnchorAtUtc = null,
+        WindowStartUtc = DateTime.UtcNow.AddHours(1),
+        WindowEndUtc = null,
+        SourceKind = sourceKind,
+        SourceId = sourceKind == UserTaskSourceKind.Maintenance ? "maintenancealert:1" : "failure:1",
+    };
 
     [Fact]
     public async Task BroadcastTaskCreatedAsync_MaintenanceTask_SendsOnlyToAdminGroup()

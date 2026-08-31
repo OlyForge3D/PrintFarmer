@@ -14,29 +14,29 @@ public sealed class AdminOverviewOpenApiSchemaTests(OpenApiDocumentFixture fixtu
     private readonly JsonDocument _document = fixture.Document;
 
     /// <summary>
-    /// <b>Characterizes a confirmed mismatch (finding), the most self-contradicting instance of
-    /// this issue's systemic root cause.</b> <c>SubsystemStatus</c> and <c>AttentionSeverity</c>
-    /// are each documented as a plain <c>integer</c> with no "enum" token list — the same
-    /// MVC-only-global-converter root cause as the <c>tasks</c> family — but each component
-    /// schema's own XML-doc-derived "description" text literally states the type "is serialized
-    /// as a string via JsonStringEnumConverter", directly contradicting its own sibling "type"
-    /// keyword one line away in the same schema object. This self-contradiction is quoted into the
-    /// assertion failure message so it is visible without cross-referencing the source.
+    /// <b>Fixed by issue #2261.</b> Before the fix, <c>SubsystemStatus</c> and
+    /// <c>AttentionSeverity</c> were documented as a plain <c>type: integer</c> with no "enum"
+    /// token list at all, directly contradicting each schema's own XML-doc-derived "description"
+    /// text (which already said the type "is serialized as a string via JsonStringEnumConverter"
+    /// even before this fix). Now that the global <c>JsonStringEnumConverter</c> is also
+    /// registered on <c>ConfigureHttpJsonOptions</c>, .NET's OpenAPI schema exporter documents
+    /// each schema purely via its "enum" token list (the exporter's convention for a
+    /// converter-driven string enum: no explicit "type" keyword, since the string-typed "enum"
+    /// array is self-describing) — matching the description text and the corpus's real string
+    /// wire values.
     /// </summary>
     [Theory]
-    [InlineData("SubsystemStatus")]
-    [InlineData("AttentionSeverity")]
-    public void EnumComponentSchema_IsIntegerTyped_ContradictingItsOwnDescriptionText(string componentSchemaName)
+    [InlineData("SubsystemStatus", new[] { "Healthy", "Degraded", "Unknown", "Unhealthy" })]
+    [InlineData("AttentionSeverity", new[] { "Info", "Warning", "Error" })]
+    public void EnumComponentSchema_IsStringTyped_MatchingItsOwnDescriptionText(string componentSchemaName, string[] expectedTokens)
     {
         JsonElement schema = OpenApiSchemaTestSupport.GetComponentSchema(_document, componentSchemaName);
-        string description = schema.TryGetProperty("description", out JsonElement descriptionElement)
-            ? descriptionElement.GetString() ?? string.Empty
-            : string.Empty;
 
-        _ = OpenApiSchemaTestSupport.GetTypes(schema).Should().BeEquivalentTo(new[] { "integer" },
-            $"'{componentSchemaName}' relies solely on the MVC-only global JsonStringEnumConverter, which OpenAPI " +
-            $"schema generation does not consult, even though its own description text says: \"{description}\"");
-        _ = OpenApiSchemaTestSupport.GetEnumTokens(schema).Should().BeNull();
+        _ = OpenApiSchemaTestSupport.GetTypes(schema).Should().BeEmpty(
+            $"'{componentSchemaName}' now relies on the global JsonStringEnumConverter, so .NET's OpenAPI schema " +
+            "exporter documents it purely via its 'enum' token list with no explicit 'type' keyword, unlike the " +
+            "pre-fix schema which had 'type: integer' and no 'enum' tokens at all");
+        _ = OpenApiSchemaTestSupport.GetEnumTokens(schema).Should().BeEquivalentTo(expectedTokens);
     }
 
     /// <summary>

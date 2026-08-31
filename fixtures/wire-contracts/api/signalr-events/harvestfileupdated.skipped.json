@@ -1,0 +1,12 @@
+{
+  "id": "8b2015b7-28f9-4003-ad6f-50476561615c",
+  "harvestOperationId": "e30ef835-57d3-42ef-8fa7-a3b89104e66a",
+  "printerPath": "/gcodes/wire-contract-fixture.gcode",
+  "fileName": "wire-contract-fixture.gcode",
+  "fileSizeBytes": 1048576,
+  "isSelected": false,
+  "alreadyInLibrary": false,
+  "processingFailed": false,
+  "errorMessage": "Skipped by user",
+  "status": "Skipped"
+}

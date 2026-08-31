@@ -7,6 +7,13 @@
     "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
   },
   {
+    "Path": "api/inventory/harvest.populated.json",
+    "Endpoint": "POST /api/job-queue/{id}/harvest",
+    "ProducingTest": "Farm.Web.Api.Tests.Contracts.InventoryContractTests.GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpusAsync",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "0159b20b5481636fef00ce98b154ab652bb26d8f"
+  },
+  {
     "Path": "api/print-jobs/job.minimal-missing-optional.json",
     "Endpoint": "GET /api/job-queue/{id}",
     "ProducingTest": "PrintQueueContractTests.GetJob_MinimalPrintJob_OmitsOptionalKeysAndMatchesCorpusAsync",
@@ -56,6 +63,20 @@
     "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
   },
   {
+    "Path": "api/signalr-events/alertcreated.populated.json",
+    "Endpoint": "SignalR MaintenanceHub \u0022alertcreated\u0022 (MaintenanceAlertEngine.EvaluatePrinterMaintenanceAsync)",
+    "ProducingTest": "HarvestAndMaintenanceSignalREventContractTests.EvaluatePrinterMaintenance_OverdueDeployment_SendsAlertCreatedEventMatchingCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "359ae2ac1b6d664914d64b21aa4f6089fe6c2a6e"
+  },
+  {
+    "Path": "api/signalr-events/alertstatuschanged.resolved.json",
+    "Endpoint": "SignalR MaintenanceHub \u0022alertstatuschanged\u0022 (MaintenanceAlertResolutionService.ResolveAlertWithCompletionLogAsync)",
+    "ProducingTest": "HarvestAndMaintenanceSignalREventContractTests.ResolveAlertWithCompletionLog_RealServiceCall_SendsAlertStatusChangedAndMaintenanceCompletedEventsMatchingCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "359ae2ac1b6d664914d64b21aa4f6089fe6c2a6e"
+  },
+  {
     "Path": "api/signalr-events/discoveryprogress.missing-message.json",
     "Endpoint": "SignalR PrinterHub \u0022discoveryprogress\u0022 (JoinDiscoveryGroupAsync, null Message)",
     "ProducingTest": "SignalREventContractTests.JoinDiscoveryGroup_CachedProgressNoMessage_OmitsMessageKey",
@@ -68,6 +89,27 @@
     "ProducingTest": "SignalREventContractTests.JoinDiscoveryGroup_CachedProgress_ReplaysDiscoveryProgressEvent",
     "SchemaVersion": "1.0",
     "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+  },
+  {
+    "Path": "api/signalr-events/harvestfileprogress.populated.json",
+    "Endpoint": "SignalR HarvestHub \u0022harvestfileprogress\u0022 (BroadcastFileProgressAsync)",
+    "ProducingTest": "HarvestAndMaintenanceSignalREventContractTests.BroadcastFileProgress_RealHubMethod_SendsHarvestFileProgressEventMatchingCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "359ae2ac1b6d664914d64b21aa4f6089fe6c2a6e"
+  },
+  {
+    "Path": "api/signalr-events/harvestfileupdated.skipped.json",
+    "Endpoint": "SignalR HarvestHub \u0022harvestfileupdated\u0022 (GcodeHarvestService.SkipDiscoveredFileAsync)",
+    "ProducingTest": "HarvestAndMaintenanceSignalREventContractTests.SkipDiscoveredFile_RealServiceCall_SendsHarvestFileUpdatedEventMatchingCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "359ae2ac1b6d664914d64b21aa4f6089fe6c2a6e"
+  },
+  {
+    "Path": "api/signalr-events/maintenancecompleted.populated.json",
+    "Endpoint": "SignalR MaintenanceHub \u0022maintenancecompleted\u0022 (MaintenanceAlertResolutionService.ResolveAlertWithCompletionLogAsync)",
+    "ProducingTest": "HarvestAndMaintenanceSignalREventContractTests.ResolveAlertWithCompletionLog_RealServiceCall_SendsAlertStatusChangedAndMaintenanceCompletedEventsMatchingCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "359ae2ac1b6d664914d64b21aa4f6089fe6c2a6e"
   },
   {
     "Path": "api/signalr-events/slicejobevent.queued.json",

@@ -1,0 +1,42 @@
+{
+  "printJobId": "49ad99f7-80f3-45ee-884c-6f713ca3af5d",
+  "harvestedAt": "2026-08-30T17:34:56Z",
+  "binId": "c411ea64-3137-4c40-b08c-5cb71f018b55",
+  "binCode": "BIN-WIRE-01",
+  "alreadyHarvested": false,
+  "adjustments": [
+    {
+      "id": "ed4f602d-d007-4c29-81b6-8dd3e0c34a37",
+      "partInventoryId": "2d2cb44c-6958-493f-99c8-7bd62acfe847",
+      "sku": "PF-WIRE-01",
+      "binId": "c411ea64-3137-4c40-b08c-5cb71f018b55",
+      "binCode": "BIN-WIRE-01",
+      "delta": 2,
+      "resultingBalance": 4,
+      "reason": "harvest",
+      "printJobId": "49ad99f7-80f3-45ee-884c-6f713ca3af5d",
+      "operationKey": "wire-contract-harvest",
+      "notes": "Canonical harvest",
+      "userId": "wire-contract-user",
+      "createdAt": "2026-08-30T17:34:56Z"
+    }
+  ],
+  "outputs": [
+    {
+      "sequence": 1,
+      "partInventoryId": "2d2cb44c-6958-493f-99c8-7bd62acfe847",
+      "partSku": "PF-WIRE-01",
+      "quantity": 2,
+      "expectedBinId": "c411ea64-3137-4c40-b08c-5cb71f018b55",
+      "expectedBinCode": "BIN-WIRE-01",
+      "actualBinId": "c411ea64-3137-4c40-b08c-5cb71f018b55",
+      "actualBinCode": "BIN-WIRE-01",
+      "origin": "ExplicitOutputs",
+      "sourceFileId": "44959ed9-49db-4911-83a0-bad7793075df",
+      "sourceMappingId": "fe7118ee-63f7-4d70-aa19-531ca37cb008",
+      "overrideApplied": true,
+      "overrideReason": "Operator confirmed canonical destination",
+      "createdAt": "2026-08-30T17:34:56Z"
+    }
+  ]
+}

@@ -50,26 +50,28 @@ public sealed class UserTaskDtoWireContractTests : IAsyncLifetime
         return scope.ServiceProvider.GetRequiredService<IOptions<JsonHubProtocolOptions>>().Value.PayloadSerializerOptions;
     }
 
-    private static UserTaskDto CreateDto(UserTaskAnchorKind anchorKind, UserTaskSourceKind sourceKind) => new(
-        Id: Guid.NewGuid(),
-        TaskType: UserTaskType.Custom,
-        EntityType: "Manual",
-        EntityId: Guid.Empty,
-        Title: "Wire contract task",
-        Description: null,
-        Status: UserTaskStatus.Pending,
-        Priority: UserTaskPriority.Normal,
-        CreatedAt: DateTime.UtcNow,
-        DueAt: null,
-        CompletedAt: null,
-        RelatedEntityCount: 0,
-        MetadataJson: null,
-        AnchorKind: anchorKind,
-        AnchorAtUtc: null,
-        WindowStartUtc: null,
-        WindowEndUtc: null,
-        SourceKind: sourceKind,
-        SourceId: null);
+    private static UserTaskDto CreateDto(UserTaskAnchorKind anchorKind, UserTaskSourceKind sourceKind) => new()
+    {
+        Id = Guid.NewGuid(),
+        TaskType = UserTaskType.Custom,
+        EntityType = "Manual",
+        EntityId = Guid.Empty,
+        Title = "Wire contract task",
+        Description = null,
+        Status = UserTaskStatus.Pending,
+        Priority = UserTaskPriority.Normal,
+        CreatedAt = DateTime.UtcNow,
+        DueAt = null,
+        CompletedAt = null,
+        RelatedEntityCount = 0,
+        MetadataJson = null,
+        AnchorKind = anchorKind,
+        AnchorAtUtc = null,
+        WindowStartUtc = null,
+        WindowEndUtc = null,
+        SourceKind = sourceKind,
+        SourceId = null,
+    };
 
     public static IEnumerable<object[]> AllAnchorKinds()
     {

@@ -43,36 +43,32 @@ public sealed class PrintQueueOpenApiSchemaTests(OpenApiDocumentFixture fixture)
     }
 
     /// <summary>
-    /// <b>Characterizes a confirmed mismatch (finding).</b> <c>QueueOverviewDto</c> has no
-    /// "required" keyword at all — meaning, per JSON Schema semantics, the OpenAPI document
-    /// asserts <em>nothing</em> is guaranteed present, including <c>printerId</c>/
-    /// <c>printerName</c>/<c>printerModel</c>/<c>isAvailable</c>/<c>queuedJobsCount</c>, which the
-    /// #2238 corpus's populated fixture proves are always emitted with non-null values for a
-    /// registered printer. This is the opposite-direction defect from the <c>tasks</c> family's
-    /// over-required <c>UserTaskDto</c> (see <c>TasksOpenApiSchemaTests</c>): the same root
-    /// misconfiguration (schema generation not honoring the MVC-only JSON options) produces
-    /// under-declaration here rather than over-declaration, depending on the DTO's own nullable
-    /// reference-type annotations.
+    /// <b>Fixed by issue #2261.</b> <c>QueueOverviewDto</c> now marks the 5 properties the
+    /// #2238 corpus's populated fixture proves are always present for a registered printer
+    /// (<c>printerId</c>, <c>printerName</c>, <c>printerModel</c>, <c>isAvailable</c>,
+    /// <c>queuedJobsCount</c>) with the C# <c>required</c> modifier, so the generated schema's
+    /// "required" list now names exactly them — the opposite-direction fix from the <c>tasks</c>
+    /// family's previously over-required <c>UserTaskDto</c> (see <c>TasksOpenApiSchemaTests</c>).
     /// </summary>
     [Fact]
-    public void GetQueue_ItemSchema_HasNoRequiredList_DespiteCorpusProvingSomePropertiesAreAlwaysPresent()
+    public void GetQueue_ItemSchema_RequiredList_MatchesCorpusProvenAlwaysPresentProperties()
     {
         JsonElement operation = OpenApiSchemaTestSupport.GetOperation(_document, "/api/job-queue", "get");
         JsonElement responseSchema = OpenApiSchemaTestSupport.GetResponseSchema(operation)!.Value;
         JsonElement queueOverviewDto = OpenApiSchemaTestSupport.ResolveRef(_document, responseSchema.GetProperty("items"));
 
-        _ = OpenApiSchemaTestSupport.GetRequiredSet(queueOverviewDto).Should().BeEmpty(
-            "the schema currently declares no 'required' properties at all for QueueOverviewDto");
+        string[] alwaysPresent = ["printerId", "printerName", "printerModel", "isAvailable", "queuedJobsCount"];
+        _ = OpenApiSchemaTestSupport.GetRequiredSet(queueOverviewDto).Should().BeEquivalentTo(alwaysPresent,
+            "the schema now declares exactly the properties the corpus proves are always present");
 
         string populatedJson = File.ReadAllText(
             Path.Join(WireContractCorpusPaths.ApiRoot, "print-queue", "queue.populated.json"));
         using JsonDocument corpusFixture = JsonDocument.Parse(populatedJson);
         JsonElement firstItem = corpusFixture.RootElement[0];
-        foreach (string alwaysPresent in new[] { "printerId", "printerName", "printerModel", "isAvailable", "queuedJobsCount" })
+        foreach (string propertyName in alwaysPresent)
         {
-            _ = firstItem.TryGetProperty(alwaysPresent, out _).Should().BeTrue(
-                $"the corpus proves '{alwaysPresent}' is always present for a registered printer, even though the " +
-                "schema's empty 'required' list documents nothing as guaranteed");
+            _ = firstItem.TryGetProperty(propertyName, out _).Should().BeTrue(
+                $"the corpus proves '{propertyName}' is always present for a registered printer");
         }
     }
 

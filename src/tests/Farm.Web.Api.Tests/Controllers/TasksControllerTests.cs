@@ -556,26 +556,28 @@ public class TasksControllerTests
         Guid? id = null,
         UserTaskSourceKind sourceKind = UserTaskSourceKind.Unspecified)
     {
-        return new UserTaskDto(
-            Id: id ?? Guid.NewGuid(),
-            TaskType: taskType,
-            EntityType: "PrinterModel",
-            EntityId: Guid.NewGuid(),
-            Title: title,
-            Description: "Test description",
-            Status: UserTaskStatus.Pending,
-            Priority: UserTaskPriority.Normal,
-            CreatedAt: DateTime.UtcNow,
-            DueAt: null,
-            CompletedAt: null,
-            RelatedEntityCount: 1,
-            MetadataJson: null,
-            AnchorKind: UserTaskAnchorKind.Unspecified,
-            AnchorAtUtc: null,
-            WindowStartUtc: null,
-            WindowEndUtc: null,
-            SourceKind: sourceKind,
-            SourceId: null);
+        return new UserTaskDto
+        {
+            Id = id ?? Guid.NewGuid(),
+            TaskType = taskType,
+            EntityType = "PrinterModel",
+            EntityId = Guid.NewGuid(),
+            Title = title,
+            Description = "Test description",
+            Status = UserTaskStatus.Pending,
+            Priority = UserTaskPriority.Normal,
+            CreatedAt = DateTime.UtcNow,
+            DueAt = null,
+            CompletedAt = null,
+            RelatedEntityCount = 1,
+            MetadataJson = null,
+            AnchorKind = UserTaskAnchorKind.Unspecified,
+            AnchorAtUtc = null,
+            WindowStartUtc = null,
+            WindowEndUtc = null,
+            SourceKind = sourceKind,
+            SourceId = null,
+        };
     }
 
     #endregion
