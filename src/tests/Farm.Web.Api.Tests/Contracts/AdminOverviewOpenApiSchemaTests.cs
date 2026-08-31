@@ -40,6 +40,22 @@ public sealed class AdminOverviewOpenApiSchemaTests(OpenApiDocumentFixture fixtu
     }
 
     /// <summary>
+    /// Positive check, added in response to review feedback: confirms
+    /// <c>GET /api/admin/overview</c>'s 200 response schema actually <c>$ref</c>s
+    /// <c>AdminOverviewDto</c>. Without this, the other tests in this file inspect the
+    /// <c>AdminOverviewDto</c>/<c>AttentionItemDto</c> component schemas in isolation and would
+    /// still pass even if the operation's response were missing or bound to the wrong schema.
+    /// </summary>
+    [Fact]
+    public void GetAdminOverview_ResponseSchema_ReferencesAdminOverviewDto()
+    {
+        JsonElement operation = OpenApiSchemaTestSupport.GetOperation(_document, "/api/admin/overview", "get");
+        JsonElement responseSchema = OpenApiSchemaTestSupport.GetResponseSchema(operation)!.Value;
+
+        _ = responseSchema.GetProperty("$ref").GetString().Should().Be("#/components/schemas/AdminOverviewDto");
+    }
+
+    /// <summary>
     /// Positive check: <c>AdminOverviewDto</c>'s top-level "required" list correctly matches the
     /// corpus's always-present top-level keys.
     /// </summary>

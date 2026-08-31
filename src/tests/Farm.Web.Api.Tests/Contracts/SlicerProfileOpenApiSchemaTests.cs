@@ -16,10 +16,19 @@ public sealed class SlicerProfileOpenApiSchemaTests(OpenApiDocumentFixture fixtu
     /// <summary>
     /// <b>Characterizes a confirmed mismatch (finding).</b> <c>GET /api/slicer/profiles</c>'s 200
     /// response schema is <c>{"type":"array"}</c> with no <c>items</c> key — the array element
-    /// shape is completely undocumented — even though the sibling operations
-    /// <c>POST /api/slicer/profiles</c> and <c>GET /api/slicer/profiles/{id}</c> both correctly
-    /// <c>$ref</c> <c>ProcessProfileResponseDto</c> for the same conceptual resource, strongly
-    /// implying the list operation should too.
+    /// shape is completely undocumented. This is not merely an under-annotated version of the
+    /// sibling <c>ProcessProfileResponseDto</c> shape: per
+    /// <c>ProfilesController.GetProfilesAsync</c>, this action actually returns
+    /// <c>IEnumerable&lt;object&gt;</c> of an anonymous projection with a distinct property set
+    /// (<c>id</c>/<c>name</c> both set to the process-profile name, <c>layerHeight</c>,
+    /// <c>infillPercentage</c>, <c>printSpeed</c>, <c>nozzleTemperature</c>,
+    /// <c>bedTemperature</c>, <c>supports</c>, <c>material</c>, <c>quality</c>) that has no
+    /// corresponding named DTO at all and does not match <c>ProcessProfileResponseDto</c>
+    /// (returned by the sibling <c>POST /api/slicer/profiles</c> and
+    /// <c>GET /api/slicer/profiles/{id}</c> operations exercised below). So the missing
+    /// <c>items</c> key is not just an annotation gap — the real element shape could not be
+    /// expressed by reusing <c>ProcessProfileResponseDto</c> even if a schema author tried;
+    /// see finding issue #2261.
     /// </summary>
     [Fact]
     public void GetProfilesList_ResponseSchema_IsUntypedArray_WithNoItemsSchema()

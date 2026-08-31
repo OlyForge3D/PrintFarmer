@@ -26,7 +26,11 @@ public sealed class OpenApiDocumentFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        Document.Dispose();
+        // Document defaults to null! until InitializeAsync completes; if initialization threw
+        // partway through, xUnit still calls DisposeAsync for cleanup. Guard with ?. so a failed
+        // InitializeAsync doesn't mask its own exception behind an NRE here, and so _factory is
+        // still disposed (avoiding a leaked WebApplicationFactory/isolated database).
+        Document?.Dispose();
         if (_factory is not null)
         {
             await _factory.DisposeAsync();
@@ -51,8 +55,6 @@ public sealed class OpenApiDocumentCollection : ICollectionFixture<OpenApiDocume
 /// </summary>
 public static class OpenApiSchemaTestSupport
 {
-    private static readonly HashSet<string> EmptySet = [];
-
     /// <summary>Looks up <c>paths.{path}.{method}</c> (method is lowercase, e.g. <c>"get"</c>).</summary>
     public static JsonElement GetOperation(JsonDocument document, string path, string method)
     {
@@ -92,7 +94,13 @@ public static class OpenApiSchemaTestSupport
             return null;
         }
 
-        return media.GetProperty("schema");
+        if (!media.TryGetProperty("schema", out JsonElement schema))
+        {
+            throw new InvalidOperationException(
+                $"Operation's '{statusCode}' response has a '{mediaType}' media type entry with no 'schema' key.");
+        }
+
+        return schema;
     }
 
     public static JsonElement GetComponentSchema(JsonDocument document, string name)
@@ -129,7 +137,7 @@ public static class OpenApiSchemaTestSupport
     {
         if (!objectSchema.TryGetProperty("required", out JsonElement required))
         {
-            return EmptySet;
+            return new HashSet<string>(StringComparer.Ordinal);
         }
 
         return required.EnumerateArray().Select(e => e.GetString()!).ToHashSet(StringComparer.Ordinal);
@@ -151,7 +159,7 @@ public static class OpenApiSchemaTestSupport
     {
         if (!objectSchema.TryGetProperty("properties", out JsonElement properties))
         {
-            return EmptySet;
+            return new HashSet<string>(StringComparer.Ordinal);
         }
 
         return properties.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
@@ -167,14 +175,14 @@ public static class OpenApiSchemaTestSupport
     {
         if (!schema.TryGetProperty("type", out JsonElement type))
         {
-            return EmptySet;
+            return new HashSet<string>(StringComparer.Ordinal);
         }
 
         return type.ValueKind switch
         {
             JsonValueKind.String => new HashSet<string>(StringComparer.Ordinal) { type.GetString()! },
             JsonValueKind.Array => type.EnumerateArray().Select(e => e.GetString()!).ToHashSet(StringComparer.Ordinal),
-            _ => EmptySet,
+            _ => new HashSet<string>(StringComparer.Ordinal),
         };
     }
 

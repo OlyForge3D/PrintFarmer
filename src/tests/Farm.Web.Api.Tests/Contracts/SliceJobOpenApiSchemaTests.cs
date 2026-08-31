@@ -25,8 +25,14 @@ public sealed class SliceJobOpenApiSchemaTests(OpenApiDocumentFixture fixture)
     public void GetSliceJob_ResponseSchema_IsCompletelyUndocumented_DespiteCorpusProvingAStableShapeExists()
     {
         JsonElement operation = OpenApiSchemaTestSupport.GetOperation(_document, "/api/slice/{id}", "get");
-        JsonElement? responseSchema = OpenApiSchemaTestSupport.GetResponseSchema(operation);
 
+        JsonElement response200 = operation.GetProperty("responses").GetProperty("200");
+        _ = response200.TryGetProperty("content", out _).Should().BeFalse(
+            "the 200 response for GET /api/slice/{id} should have no 'content' key at all — not merely a " +
+            "'content' object missing an 'application/json' entry — to support the claim that the schema " +
+            "information is completely absent, not just absent for one particular media type");
+
+        JsonElement? responseSchema = OpenApiSchemaTestSupport.GetResponseSchema(operation);
         _ = responseSchema.Should().BeNull(
             "the OpenAPI document currently has no 'content'/schema at all for the 200 response of GET /api/slice/{id}");
 
