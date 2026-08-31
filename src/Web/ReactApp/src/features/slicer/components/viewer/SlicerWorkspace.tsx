@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/preserve-manual-memoization -- Complex R3F component; compiler cannot infer deps for 3D scene callbacks */
 /**
  * Slicer Workspace Component
  * Main container combining toolbar, 3D bed visualization, left tools, and status bar
@@ -68,8 +67,6 @@ export interface SlicerWorkspaceProps {
   ) => void;
   /** Callback when Add Model is clicked */
   onAddModel?: () => void;
-  /** Callback when Settings & Profiles is clicked */
-  onSettingsProfiles?: () => void;
   /** Callback when Slice is clicked. Receives the IDs of the active plate's models. */
   onSlice?: (activeModelIds: string[]) => void;
   /** Whether slicing is in progress */
@@ -139,7 +136,6 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
   onModelSelect,
   onModelTransform,
   onAddModel,
-  onSettingsProfiles,
   onSlice,
   slicing = false,
   canSlice = true,
@@ -1437,12 +1433,6 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     toast.info(next ? 'Assembly view: models offset for inspection' : 'Assembly view off — positions restored');
   }, [assemblyViewActive]);
 
-  const handleKeyboardShortcuts = useCallback(() => {
-    if (window.PrintFarmerDebug?.slicer) { console.log('Show keyboard shortcuts'); }
-    // Placeholder history marker until shortcut dialog state is implemented.
-    pushHistoryEntry({ action: 'Keyboard Shortcuts', deltas: [] });
-  }, [pushHistoryEntry]);
-
   const handleToolChange = useCallback((tool: ToolType) => {
     if (!hasSelection && tool !== 'layers') return;
     setLayFlatMode(false);
@@ -1495,10 +1485,16 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       }
 
       if (event.key === 'Escape') {
-        if (cutMode || supportPaintMode || seamPaintMode || colorPaintMode || fuzzySkinPaintMode || measureMode || layFlatMode || textToolActive) {
+        if (activeTool || cutMode || supportPaintMode || seamPaintMode || colorPaintMode || fuzzySkinPaintMode || measureMode || layFlatMode || textToolActive) {
           event.preventDefault();
+          setActiveTool(null);
           exitAllToolModes();
           toast.info('Tool mode exited');
+          return;
+        }
+        if (selectedModelId) {
+          event.preventDefault();
+          handleModelSelect(null);
           return;
         }
       }
@@ -1572,7 +1568,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleToolChange, hasSelection, cutMode, supportPaintMode, seamPaintMode, colorPaintMode, fuzzySkinPaintMode, measureMode, layFlatMode, textToolActive, exitAllToolModes, handleArrange, activePaintTool, handleColorPaint, handleSupportPaint, handleSeamPaint, handleFuzzySkinPaint, simpleMode]);
+  }, [handleToolChange, handleModelSelect, hasSelection, selectedModelId, activeTool, cutMode, supportPaintMode, seamPaintMode, colorPaintMode, fuzzySkinPaintMode, measureMode, layFlatMode, textToolActive, exitAllToolModes, handleArrange, activePaintTool, handleColorPaint, handleSupportPaint, handleSeamPaint, handleFuzzySkinPaint, simpleMode]);
 
   const handleLayersToggle = useCallback(() => {
     setShowLayers(prev => !prev);
@@ -1649,8 +1645,6 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         onUndo={handleUndo}
         onRedo={handleRedo}
         onAssemblyView={handleAssemblyView}
-        onSettingsProfiles={onSettingsProfiles}
-        onKeyboardShortcuts={handleKeyboardShortcuts}
         onToggleSidebar={onToggleSidebar}
         sidebarOpen={sidebarOpen}
         canUndo={undoStack.length > 0}

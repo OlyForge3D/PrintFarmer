@@ -110,7 +110,7 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
               onClick={() => setIsModalOpen(true)}
               aria-haspopup="dialog"
               aria-expanded={isModalOpen}
-              className="group min-w-0 flex-1 justify-start! p-3! rounded-lg!"
+              className="group relative min-w-0 flex-1 justify-start! rounded-lg! p-3! pr-10! sm:pr-28!"
             >
               {selectedPrinter ? (
                 <div className="flex items-start gap-3 w-full text-left">
@@ -150,7 +150,10 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
                       Below `sm` the text is hidden, so the icon carries the label there
                       and is decorative above it — otherwise the button's accessible name
                       would end "...Change Change printer". */}
-                  <div className="ml-auto shrink-0 flex items-center gap-1.5 text-pf-text-muted">
+                  <div
+                    data-testid="printer-change-affordance"
+                    className="absolute right-3 top-1/2 flex shrink-0 -translate-y-1/2 items-center gap-1.5 text-pf-text-muted"
+                  >
                     <span className="hidden sm:inline text-[10px] font-medium uppercase tracking-wider opacity-0 transition-opacity duration-200 group-hover:opacity-80 group-focus-visible:opacity-80">
                       Change
                     </span>

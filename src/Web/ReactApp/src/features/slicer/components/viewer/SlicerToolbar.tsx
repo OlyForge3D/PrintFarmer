@@ -2,9 +2,10 @@
  * Slicer Toolbar Component
  * Top toolbar matching OrcaSlicer's interface style
  */
-import React from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
+import { CloseIcon } from '@/common/components/icons/MdiIcons';
 import {
   AddModelIcon,
   AddPlateIcon,
@@ -28,7 +29,6 @@ import {
   SequentialIcon,
   UndoIcon,
   RedoIcon,
-  SettingsProfilesIcon,
   KeyboardIcon,
 } from './SlicerToolbarIcons';
 
@@ -39,16 +39,24 @@ interface ToolbarButtonProps {
   active?: boolean;
   disabled?: boolean;
   title?: string;
+  ariaLabel?: string;
+  ariaExpanded?: boolean;
+  ariaControls?: string;
+  ariaHaspopup?: React.AriaAttributes['aria-haspopup'];
 }
 
-const ToolbarButton: React.FC<ToolbarButtonProps> = ({
+const ToolbarButton = React.forwardRef<HTMLButtonElement, ToolbarButtonProps>(function ToolbarButton({
   icon,
   label,
   onClick,
   active = false,
   disabled = false,
-  title
-}) => {
+  title,
+  ariaLabel,
+  ariaExpanded,
+  ariaControls,
+  ariaHaspopup,
+}, ref) {
   const sizedIcon = React.isValidElement<{ className?: string }>(icon)
     ? React.cloneElement(icon, {
         className: clsx('w-7 h-7 shrink-0', icon.props.className),
@@ -57,11 +65,16 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({
 
   return (
     <Button
+      ref={ref}
       type="button"
       variant="unstyled"
       onClick={onClick}
       disabled={disabled}
       title={title || label}
+      aria-label={ariaLabel ?? (!label ? title : undefined)}
+      aria-expanded={ariaExpanded}
+      aria-controls={ariaControls}
+      aria-haspopup={ariaHaspopup}
       className={clsx(
         'flex items-center justify-center p-1 rounded transition-all shrink-0',
         active
@@ -74,11 +87,22 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({
       {label ? <span className="text-sm hidden xl:inline">{label}</span> : sizedIcon}
     </Button>
   );
-};
+});
 
 const ToolbarDivider: React.FC = () => (
   <div className="w-px h-5 bg-pf-border/40 mx-0.5" />
 );
+
+const SHORTCUTS = [
+  { keys: ['A'], action: 'Auto arrange models' },
+  { keys: ['T'], action: 'Move selected model' },
+  { keys: ['R'], action: 'Rotate selected model' },
+  { keys: ['S'], action: 'Scale selected model' },
+  { keys: ['P'], action: 'Cycle paint tools' },
+  { keys: ['[', ']'], action: 'Decrease or increase brush size' },
+  { keys: ['X'], action: 'Toggle paint and erase while painting' },
+  { keys: ['Esc'], action: 'Exit an active tool or clear the selection' },
+] as const;
 
 export interface SlicerToolbarProps {
   onAddModel?: () => void;
@@ -103,8 +127,6 @@ export interface SlicerToolbarProps {
   onSequentialToggle?: () => void;
   onUndo?: () => void;
   onRedo?: () => void;
-  onSettingsProfiles?: () => void;
-  onKeyboardShortcuts?: () => void;
   onToggleSidebar?: () => void;
   sidebarOpen?: boolean;
   canUndo?: boolean;
@@ -161,8 +183,6 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   onSequentialToggle,
   onUndo,
   onRedo,
-  onSettingsProfiles,
-  onKeyboardShortcuts,
   onToggleSidebar,
   sidebarOpen = true,
   canUndo = false,
@@ -184,6 +204,55 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   sequentialActive = false,
   simpleMode = false,
 }) => {
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const shortcutsTriggerRef = useRef<HTMLButtonElement>(null);
+  const shortcutsPanelRef = useRef<HTMLDivElement>(null);
+  const shortcutsCloseRef = useRef<HTMLButtonElement>(null);
+  const shortcutsPanelId = useId();
+  const shortcutsTitleId = useId();
+
+  const dismissShortcuts = useCallback(() => {
+    setShortcutsOpen(false);
+  }, []);
+
+  const closeShortcuts = useCallback(() => {
+    dismissShortcuts();
+    window.requestAnimationFrame(() => shortcutsTriggerRef.current?.focus());
+  }, [dismissShortcuts]);
+
+  useEffect(() => {
+    if (!shortcutsOpen) {
+      return undefined;
+    }
+
+    const focusFrame = window.requestAnimationFrame(() => shortcutsCloseRef.current?.focus());
+    const handleMouseDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (
+        target
+        && !shortcutsPanelRef.current?.contains(target)
+        && !shortcutsTriggerRef.current?.contains(target)
+      ) {
+        dismissShortcuts();
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closeShortcuts();
+      }
+    };
+
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [closeShortcuts, dismissShortcuts, shortcutsOpen]);
+
   return (
     // flex-wrap (issue #1902): the pinned left/right groups and the tool
     // region are each `shrink-0`/no-grow blocks, so when the toolbar's own
@@ -377,27 +446,67 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
 
         <ToolbarDivider />
 
-        {/* Settings & Profiles button */}
-        <Button
-          variant="primary"
-          onClick={onSettingsProfiles}
-          className="px-3 py-1.5"
-          iconLeft={<SettingsProfilesIcon className="w-4 h-4" />}
-        >
-          <span className="text-sm font-medium hidden lg:inline">SETTINGS &amp; PROFILES</span>
-        </Button>
-
         {/* Keyboard shortcuts */}
-        <ToolbarButton
-          icon={<KeyboardIcon />}
-          title="Keyboard Shortcuts"
-          onClick={onKeyboardShortcuts}
-        />
-
-        {/* Beta badge */}
-        <span className="ml-1 px-2 py-0.5 text-xs font-semibold rounded-sm bg-pf-accent-bg text-[var(--pf-on-accent)]">
-          Beta
-        </span>
+        <div className="relative">
+          <ToolbarButton
+            ref={shortcutsTriggerRef}
+            icon={<KeyboardIcon />}
+            title="Keyboard Shortcuts"
+            ariaLabel="Show keyboard shortcuts"
+            ariaExpanded={shortcutsOpen}
+            ariaControls={shortcutsOpen ? shortcutsPanelId : undefined}
+            ariaHaspopup="dialog"
+            onClick={() => setShortcutsOpen((open) => !open)}
+          />
+          {shortcutsOpen && (
+            <div
+              ref={shortcutsPanelRef}
+              id={shortcutsPanelId}
+              role="dialog"
+              aria-labelledby={shortcutsTitleId}
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') {
+                  event.stopPropagation();
+                }
+              }}
+              className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-pf-border bg-pf-card p-3 shadow-xl"
+            >
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <h2 id={shortcutsTitleId} className="text-sm font-semibold text-pf-text-primary">
+                  Keyboard shortcuts
+                </h2>
+                <Button
+                  ref={shortcutsCloseRef}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Close keyboard shortcuts"
+                  title="Close"
+                  className="h-7 w-7 p-1"
+                  iconCenter={<CloseIcon className="h-4 w-4" />}
+                  onClick={closeShortcuts}
+                />
+              </div>
+              <dl className="space-y-1.5">
+                {SHORTCUTS.map(({ keys, action }) => (
+                  <div key={action} className="flex items-center justify-between gap-4 text-xs">
+                    <dt className="text-pf-text-secondary">{action}</dt>
+                    <dd className="flex shrink-0 items-center gap-1">
+                      {keys.map((key) => (
+                        <kbd
+                          key={key}
+                          className="min-w-6 rounded border border-pf-border bg-pf-bg-1 px-1.5 py-0.5 text-center font-mono font-semibold text-pf-text-primary"
+                        >
+                          {key}
+                        </kbd>
+                      ))}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
