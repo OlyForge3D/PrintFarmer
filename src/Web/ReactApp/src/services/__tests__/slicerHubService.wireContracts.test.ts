@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadWireContractFixture } from '@/test/wireContracts';
-import type { SliceJobEvent } from '@/services/slicerHubService';
+import type { SliceJobEvent, SlicerRegisteredEvent } from '@/services/slicerHubService';
 
 // -----------------------------------------------------------------------------
 // Canonical wire-contract corpus (issue #2240): slicerHubService's
@@ -80,25 +80,43 @@ describe('slicerHubService — canonical wire-contract corpus (#2240)', () => {
   });
 
   it('delivers the corpus SlicerRegistered fixture unchanged to onSlicerRegistered subscribers', async () => {
-    // NOTE (finding, to be filed separately): the wire corpus for
-    // "SlicerRegistered" carries {id, name, slicerType, version,
-    // maxConcurrentJobs, status, lastSeen} — it has no `capabilities` field.
-    // The TS `SlicerRegisteredEvent` interface instead declares a required
-    // `capabilities: string[]` and omits maxConcurrentJobs/status/lastSeen
-    // entirely. That is a type/wire drift (same class of bug as #2232), so
-    // this test intentionally does NOT type the fixture as
-    // `SlicerRegisteredEvent` — asserting against that interface would force
-    // us to either fabricate a `capabilities` field the server never sends,
-    // or silently paper over the mismatch. We load it as `unknown` and
-    // assert pass-through instead.
-    const fixture = loadWireContractFixture<Record<string, unknown>>(
+    // The wire corpus for "SlicerRegistered" carries {id, name, slicerType,
+    // version, maxConcurrentJobs, status, lastSeen} — the `SlicerRegisteredEvent`
+    // TS interface was fixed to match (issue #2258), so the fixture can now be
+    // typed against the real interface instead of `Record<string, unknown>`.
+    const fixture = loadWireContractFixture<SlicerRegisteredEvent>(
       'api/signalr-events/SlicerRegistered.populated.json'
     );
-    expect(fixture).not.toHaveProperty('capabilities');
+
+    // `loadWireContractFixture<T>` is an unchecked cast (`JSON.parse(...) as T`),
+    // so typing the fixture as `SlicerRegisteredEvent` alone does not prove the
+    // corpus and the interface stay in sync — it would keep compiling and
+    // passing even if a field were silently added, removed, or renamed on
+    // either side. Assert the exact key set explicitly so this test actually
+    // fails if that drift (the class of bug fixed by #2258) reappears.
+    //
+    // The witness object below is typed `Record<keyof SlicerRegisteredEvent, true>`
+    // rather than a hand-written key array: if a field is ever added to the
+    // interface without updating this witness, TypeScript's `Record` mapped
+    // type requires every key to be present, so the witness fails to compile.
+    // That makes the guard exhaustive in both directions — it catches an
+    // interface field removed/renamed (fixture keys no longer match) and an
+    // interface field added (witness no longer compiles) — not just the
+    // removal/rename direction a plain literal array would catch.
+    const expectedKeysWitness: Record<keyof SlicerRegisteredEvent, true> = {
+      id: true,
+      name: true,
+      slicerType: true,
+      version: true,
+      maxConcurrentJobs: true,
+      status: true,
+      lastSeen: true,
+    };
+    expect(Object.keys(fixture).sort()).toEqual(Object.keys(expectedKeysWitness).sort());
 
     await slicerHubService.start();
 
-    const received: unknown[] = [];
+    const received: SlicerRegisteredEvent[] = [];
     slicerHubService.onSlicerRegistered((event) => received.push(event));
 
     hubTestState.emit('SlicerRegistered', fixture);
