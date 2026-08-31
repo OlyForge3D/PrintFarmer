@@ -80,8 +80,8 @@ This repository has no branch-protection-as-code mechanism (no Terraform/script/
 manages `development`'s required status checks — it is configured directly via the GitHub
 API/UI). As of [#2288](https://github.com/OlyForge3D/PrintFarmer/issues/2288), `Contract
 drift gate` (the job name in `contract-drift.yml`, see above) has been added to
-`development`'s required status checks alongside `CI summary`, `CI tooling tests`,
-`path-casing`, and `Select affected tests`:
+`development`'s required status checks alongside the pre-existing `CI summary`,
+`CI tooling tests`, `path-casing`, `Select affected tests`, and `Build (iOS)`:
 
 ```bash
 gh api repos/OlyForge3D/PrintFarmer/branches/development/protection \
@@ -91,17 +91,21 @@ gh api repos/OlyForge3D/PrintFarmer/branches/development/protection \
 
 Before this change, the workflow ran and reported a status on every PR, but a red gate did
 not block a merge into `development` — only Ralph reading `statusCheckRollup` caught it,
-which is a policy control, not an enforced one. The job runs unconditionally (no path
-filter, no `if:` on the job itself — see the workflow above) on every `pull_request`
-event, so a required check can never hang unreported, including on doc-only PRs.
+which is a policy control, not an enforced one. The job has no path filter and no job-level
+`if:` condition (see the workflow above), so every PR head commit produces this check on
+`opened`/`synchronize`/`reopened` — a required check can never hang unreported, including
+on doc-only PRs.
 
 `main`'s branch protection has no `required_status_checks` configured at all (a
 pre-existing, separate configuration) and was left untouched by #2288 — only
 `development` was in scope for that issue.
 
 **Because this is a live repository setting rather than a file in the repo, any future
-change to this list must be applied directly via the GitHub API or UI by a repository
-administrator (`farm_admin`)** — for example:
+change to this list must be applied directly via the GitHub API or UI by a GitHub
+repository administrator** (someone with `admin` permission on
+`OlyForge3D/PrintFarmer` — not to be confused with the in-app `farm_admin` user role,
+which is unrelated) — for example, to *append* one more context without disturbing the
+rest of the list:
 
 ```bash
 gh api --method POST repos/OlyForge3D/PrintFarmer/branches/development/protection/required_status_checks/contexts \
