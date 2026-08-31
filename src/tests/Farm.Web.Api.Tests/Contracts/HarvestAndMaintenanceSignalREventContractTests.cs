@@ -158,6 +158,65 @@ public sealed class HarvestAndMaintenanceSignalREventContractTests : IAsyncLifet
     }
 
     /// <summary>
+    /// Coverage gap fix for issue #2300: every other fixture in this file connects only with a
+    /// farm_admin token, so the wire-contract corpus never exercised the non-admin path
+    /// <c>HarvestHub.OnConnectedAsync</c>/<c>JoinHarvestGroupAsync</c> must reject. This connects
+    /// with a token that holds no <c>gcode_harvest:admin</c> permission and no <c>farm_admin</c>
+    /// role, and asserts both invariants the fix introduces: (a) <c>JoinHarvestGroupAsync</c>
+    /// rejects the per-operation join outright, and (b) the farm-wide auto-join in
+    /// <c>OnConnectedAsync</c> never happened either, so a real farm-wide
+    /// <c>"singlefileharvestcomplete"</c> broadcast (produced by the real
+    /// <see cref="IHarvestEventBroadcaster"/> production path, not a hand-built payload) never
+    /// reaches this connection — while a farm_admin connection still receives it.
+    /// </summary>
+    [Fact]
+    public async Task SingleFileHarvestComplete_NonAdminToken_JoinRejectedAndNeverReceivesFarmWideEvent()
+    {
+        string adminToken = await CreateFarmAdminTokenAsync();
+        string nonAdminToken = await CreateNonAdminTokenAsync();
+
+        var adminReceivedTcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var nonAdminReceivedTcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using HubConnection adminConnection = BuildHubConnection("/hubs/harvest", adminToken);
+        await using HubConnection nonAdminConnection = BuildHubConnection("/hubs/harvest", nonAdminToken);
+        _ = adminConnection.On<JsonElement>("singlefileharvestcomplete", payload => adminReceivedTcs.TrySetResult(payload));
+        _ = nonAdminConnection.On<JsonElement>("singlefileharvestcomplete", payload => nonAdminReceivedTcs.TrySetResult(payload));
+
+        await adminConnection.StartAsync();
+        await nonAdminConnection.StartAsync();
+
+        // The non-admin caller holds no gcode_harvest:admin permission, so JoinHarvestGroupAsync
+        // must reject the per-operation join exactly like OnConnectedAsync rejects the farm-wide
+        // auto-join for the same caller.
+        Microsoft.AspNetCore.SignalR.HubException exception = await Assert.ThrowsAsync<Microsoft.AspNetCore.SignalR.HubException>(
+            () => nonAdminConnection.InvokeAsync("JoinHarvestGroupAsync", Guid.NewGuid()));
+        Assert.Contains("resource_forbidden", exception.Message, StringComparison.Ordinal);
+
+        // Act: broadcast a real "singlefileharvestcomplete" event via the real production
+        // broadcaster, which targets the farm-wide group the admin connection auto-joined in
+        // OnConnectedAsync and the non-admin connection never joined.
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            IHarvestEventBroadcaster broadcaster = scope.ServiceProvider.GetRequiredService<IHarvestEventBroadcaster>();
+            await broadcaster.BroadcastSingleFileHarvestCompleteAsync(
+                "wire-contract-nonadmin-fixture.gcode",
+                success: true,
+                message: "Harvest complete.");
+        }
+
+        JsonElement received = await WaitForEventAsync(adminReceivedTcs);
+        _ = JsonContractAssertions.AssertProperty(received, "fileName", JsonValueKind.String);
+
+        // Give the non-admin connection a bounded window to (wrongly) receive the event; it must
+        // not, since it could join neither the farm-wide group (OnConnectedAsync) nor the
+        // per-operation group (JoinHarvestGroupAsync, rejected above).
+        await Task.WhenAny(nonAdminReceivedTcs.Task, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.False(
+            nonAdminReceivedTcs.Task.IsCompleted,
+            "a caller with no gcode_harvest:admin permission must never receive farm-wide harvest events.");
+    }
+
+    /// <summary>
     /// <c>MaintenanceHub</c> <c>"alertcreated"</c>, broadcast by the real
     /// <see cref="IMaintenanceAlertService.EvaluatePrinterMaintenanceAsync"/> production call after
     /// it determines a seeded day-based maintenance task is overdue for a real deployed
@@ -476,6 +535,53 @@ public sealed class HarvestAndMaintenanceSignalREventContractTests : IAsyncLifet
             if (!result.Success || string.IsNullOrWhiteSpace(result.Token))
             {
                 throw new InvalidOperationException("Failed to authenticate the wire-contract farm_admin test user.");
+            }
+
+            return result.Token;
+        }
+    }
+
+    /// <summary>
+    /// Creates a fresh bearer token for a real, DB-seeded user with no roles and no
+    /// <c>gcode_harvest:admin</c> (or any other) permission claim — the coverage gap this file
+    /// previously had for issue #2300: every fixture above authenticates as farm_admin, so the
+    /// non-admin path <c>HarvestHub</c> is supposed to reject was never exercised end-to-end.
+    /// </summary>
+    private async Task<string> CreateNonAdminTokenAsync()
+    {
+        string username = $"wire-contract-harvest-nonadmin-{Guid.NewGuid():N}";
+        string email = $"{username}@example.test";
+        const string password = "WireContractPassword123!";
+        Guid userId = Guid.NewGuid();
+
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            IPasswordHashingService passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+
+            db.Users.Add(new User
+            {
+                Id = userId,
+                Username = username,
+                Email = email,
+                PasswordHash = passwordHasher.HashPassword(password),
+                FirstName = "Wire",
+                LastName = "Contract",
+                IsActive = true,
+                EmailConfirmed = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            _ = await db.SaveChangesAsync();
+        }
+
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            IAuthenticationService auth = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+            AuthenticationResult result = await auth.AuthenticateAsync(username, password);
+            if (!result.Success || string.IsNullOrWhiteSpace(result.Token))
+            {
+                throw new InvalidOperationException("Failed to authenticate the wire-contract non-admin test user.");
             }
 
             return result.Token;
