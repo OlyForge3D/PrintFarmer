@@ -254,6 +254,98 @@ describe("QueueJobsTable Component", () => {
     expect(onCancel).toHaveBeenCalledWith("job-1");
   });
 
+  it("qualifies row action accessible names with file/printer/status context so they're row-unique (#2302)", () => {
+    const mockHandlers = {
+      onPause: vi.fn(),
+      onResume: vi.fn(),
+      onCancel: vi.fn(),
+      onAbortPrint: vi.fn(),
+      onPriority: vi.fn(),
+    };
+
+    // mockJobs[0] is Queued "test-print.gcode" on "Printer 1"; mockJobs[1] is
+    // Printing "another-print.gcode" on the same printer — same printer, so
+    // the fix must disambiguate on file name/status, not just printer name.
+    render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
+
+    const cancelButtons = screen.getAllByRole("button", { name: /^Cancel /i });
+    expect(cancelButtons).toHaveLength(2);
+    const cancelNames = cancelButtons.map((button) => button.getAttribute("aria-label"));
+    expect(new Set(cancelNames).size).toBe(cancelNames.length);
+    expect(cancelNames[0]).toBe("Cancel test-print.gcode on Printer 1 Queued");
+    expect(cancelNames[1]).toBe("Cancel another-print.gcode on Printer 1 Printing");
+
+    // Visible label must stay concise — only the accessible name is qualified.
+    expect(cancelButtons[0]).toHaveTextContent("Cancel");
+    expect(cancelButtons[0]).not.toHaveTextContent("test-print.gcode");
+    expect(cancelButtons[1]).toHaveTextContent("Cancel");
+    expect(cancelButtons[1]).not.toHaveTextContent("another-print.gcode");
+
+    const abortButton = screen.getByRole("button", { name: "Abort another-print.gcode on Printer 1 Printing" });
+    expect(abortButton).toHaveTextContent("Abort");
+    expect(abortButton).not.toHaveTextContent("another-print.gcode");
+    expect(screen.getByRole("button", { name: "Pause another-print.gcode on Printer 1 Printing" }))
+      .toHaveTextContent("Pause");
+  });
+
+  it.each([
+    { status: "Queued", visible: "Start Print", labelPrefix: "Start print" },
+    { status: "Assigned", visible: "Start Print", labelPrefix: "Start print" },
+  ])(
+    "qualifies the Start Print accessible name for a $status job without changing its visible label",
+    ({ status, visible, labelPrefix }) => {
+      const job = createMockJob({
+        job: { ...createMockJob().job, status },
+      });
+
+      render(<QueueJobsTable jobs={[job]} onCancel={vi.fn()} />);
+
+      const button = screen.getByRole("button", {
+        name: `${labelPrefix} test-print.gcode on Printer 1 ${status}`,
+      });
+      expect(button).toHaveTextContent(visible);
+      expect(button).not.toHaveTextContent("test-print.gcode");
+    },
+  );
+
+  it("qualifies the Schedule accessible name without changing its visible label", () => {
+    const job = createMockJob({ job: { ...createMockJob().job, status: "Queued" } });
+
+    render(<QueueJobsTable jobs={[job]} onCancel={vi.fn()} onSchedule={vi.fn()} />);
+
+    const button = screen.getByRole("button", { name: "Schedule test-print.gcode on Printer 1 Queued" });
+    expect(button).toHaveTextContent("Schedule");
+    expect(button).not.toHaveTextContent("test-print.gcode");
+  });
+
+  it("qualifies the Pause and Abort accessible names for a Printing job without changing their visible labels", () => {
+    const job = createMockJob({ job: { ...createMockJob().job, status: "Printing" } });
+
+    render(<QueueJobsTable jobs={[job]} onCancel={vi.fn()} onPause={vi.fn()} onAbortPrint={vi.fn()} />);
+
+    const pauseButton = screen.getByRole("button", { name: "Pause test-print.gcode on Printer 1 Printing" });
+    expect(pauseButton).toHaveTextContent("Pause");
+    expect(pauseButton).not.toHaveTextContent("test-print.gcode");
+
+    const abortButton = screen.getByRole("button", { name: "Abort test-print.gcode on Printer 1 Printing" });
+    expect(abortButton).toHaveTextContent("Abort");
+    expect(abortButton).not.toHaveTextContent("test-print.gcode");
+  });
+
+  it("qualifies the Resume and Abort accessible names for a Paused job without changing their visible labels", () => {
+    const job = createMockJob({ job: { ...createMockJob().job, status: "Paused" } });
+
+    render(<QueueJobsTable jobs={[job]} onCancel={vi.fn()} onResume={vi.fn()} onAbortPrint={vi.fn()} />);
+
+    const resumeButton = screen.getByRole("button", { name: "Resume test-print.gcode on Printer 1 Paused" });
+    expect(resumeButton).toHaveTextContent("Resume");
+    expect(resumeButton).not.toHaveTextContent("test-print.gcode");
+
+    const abortButton = screen.getByRole("button", { name: "Abort test-print.gcode on Printer 1 Paused" });
+    expect(abortButton).toHaveTextContent("Abort");
+    expect(abortButton).not.toHaveTextContent("test-print.gcode");
+  });
+
   it("does not expose manual reorder controls", () => {
     const mockHandlers = {
       onPause: vi.fn(),
