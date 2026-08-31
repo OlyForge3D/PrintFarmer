@@ -21,12 +21,20 @@ export type PartAdjustmentReason =
  * Enum values match the backend `PartHarvestOutputOrigin` wire contract. This
  * enum has no custom converter, so the global `JsonStringEnumConverter`
  * serializes the PascalCase member names verbatim.
+ *
+ * Exported as a runtime array (not just a type) so tests can assert against
+ * the token set itself — a type-only union erases at compile time and this
+ * repo's build/lint/test pipeline does not typecheck test files, so a wrong
+ * union would silently regress without a runtime witness (issue #2268).
  */
-export type PartHarvestOutputOrigin =
-  | 'ExplicitOutputs'
-  | 'JobSnapshot'
-  | 'ProjectMapping'
-  | 'GcodeMapping';
+export const PART_HARVEST_OUTPUT_ORIGINS = [
+  'ExplicitOutputs',
+  'JobSnapshot',
+  'ProjectMapping',
+  'GcodeMapping',
+] as const;
+
+export type PartHarvestOutputOrigin = (typeof PART_HARVEST_OUTPUT_ORIGINS)[number];
 
 /** Response DTO for a printed-part SKU. */
 export interface PartInventoryResponse {
