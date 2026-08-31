@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ApiClient } from "@/services/api";
 import { PrinterBackend, type AutoDispatchDetailedStatus } from "@/types/api";
+import { loadWireContractFixture } from "@/test/wireContracts";
 
 // Mock axios
 vi.mock("axios", () => ({
@@ -1327,6 +1328,40 @@ describe("ApiClient", () => {
 
       const callArgs = mockGet.mock.calls[0][1] as { params?: Record<string, unknown> };
       expect(callArgs?.params?.offset).toBeUndefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Canonical wire-contract corpus (issue #2240): getQueueOverview() is driven
+  // from the real serialized payloads captured in
+  // fixtures/wire-contracts/api/print-queue by issue #2238, instead of a
+  // hand-written mock. The corpus is loaded byte-identical and never edited or
+  // normalized here — see src/Web/ReactApp/src/test/wireContracts.ts.
+  // ---------------------------------------------------------------------------
+  describe("getQueueOverview — canonical wire-contract corpus (#2240)", () => {
+    it("returns the corpus populated fixture unchanged (GET /job-queue)", async () => {
+      const fixture = loadWireContractFixture<unknown[]>(
+        "api/print-queue/queue.populated.json"
+      );
+      const mockGet = vi.fn().mockResolvedValue({ data: fixture });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getQueueOverview();
+
+      expect(mockGet).toHaveBeenCalledWith("/job-queue", { params: {} });
+      expect(result).toEqual(fixture);
+    });
+
+    it("returns the corpus empty-collection fixture unchanged when no printers are queued", async () => {
+      const fixture = loadWireContractFixture<unknown[]>(
+        "api/print-queue/queue.empty-collection.json"
+      );
+      const mockGet = vi.fn().mockResolvedValue({ data: fixture });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getQueueOverview();
+
+      expect(result).toEqual([]);
     });
   });
 });
