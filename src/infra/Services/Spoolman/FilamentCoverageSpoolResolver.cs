@@ -19,7 +19,8 @@ public sealed class FilamentCoverageSpoolResolver(
     IBackendClientFactory backendClientFactory,
     ILogger<FilamentCoverageSpoolResolver> logger,
     AppDbContext? db = null,
-    IMutationWatermarkReader? watermarkReader = null) : IFilamentCoverageSpoolResolver
+    IMutationWatermarkReader? watermarkReader = null,
+    IPrinterStatusCacheReader? statusCache = null) : IFilamentCoverageSpoolResolver
 {
     private const int MaxConcurrentSourceRequests = 4;
 
@@ -32,6 +33,7 @@ public sealed class FilamentCoverageSpoolResolver(
     private readonly ILogger<FilamentCoverageSpoolResolver> _logger = logger;
     private readonly AppDbContext? _db = db;
     private readonly IMutationWatermarkReader? _watermarkReader = watermarkReader;
+    private readonly IPrinterStatusCacheReader? _statusCache = statusCache;
 
     public async Task<FilamentCoverageSpoolSnapshot> ResolveSpoolAsync(
         CanonicalSpoolIdentity identity,
@@ -248,6 +250,21 @@ public sealed class FilamentCoverageSpoolResolver(
                     selection.Key,
                     spoolIds,
                     selection.ErrorReason);
+                continue;
+            }
+
+            // Fast-fail printers the status cache already knows are offline (#2118): a
+            // powered-down printer that still holds its network address black-holes the
+            // packet instead of refusing it, so attempting the read would stall this
+            // source for a full timeout window. Skip the network round-trip entirely
+            // rather than let it join the fan-out.
+            if (selection.Key.Native
+                && _statusCache?.GetStatus(printer.Id) is { IsOnline: false })
+            {
+                assignments[printer.Id] = new SourceAssignment(
+                    selection.Key,
+                    spoolIds,
+                    ReasonSourceUnavailable);
                 continue;
             }
 
