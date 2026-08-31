@@ -20,6 +20,7 @@ import {
   parsePoint,
   parseCoFloats,
   toString,
+  isSettingModified,
 } from '@/features/slicer/components/settings/metadataTypes';
 
 // ── Props ───────────────────────────────────────────────────────────────
@@ -56,11 +57,7 @@ function useChangeTracking(
   originalValues?: Record<string, unknown>,
 ) {
   const origVal = originalValues?.[key];
-  const curVal = values[key];
-  const isModified =
-    originalValues !== undefined &&
-    origVal !== undefined &&
-    JSON.stringify(curVal) !== JSON.stringify(origVal);
+  const isModified = isSettingModified(values, originalValues, key);
   return { origVal, isModified };
 }
 
@@ -263,6 +260,7 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
             rows={8}
             value={toString(values[field.key], meta)}
             onChange={(e) => onUpdate(field.key, e.target.value)}
+            aria-label={meta.label}
             disabled={disabled}
             className="font-mono text-sm"
           />

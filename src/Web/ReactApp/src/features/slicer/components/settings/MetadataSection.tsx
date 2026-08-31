@@ -15,7 +15,11 @@ import type {
   FieldRef,
   ViewMode,
 } from '@/features/slicer/components/settings/metadataTypes';
-import { CONDITIONAL_HIDDEN_KEYS, TEXTAREA_KEYS } from '@/features/slicer/components/settings/metadataTypes';
+import {
+  CONDITIONAL_HIDDEN_KEYS,
+  TEXTAREA_KEYS,
+  isSettingModified,
+} from '@/features/slicer/components/settings/metadataTypes';
 import { OrcaIcon } from '@/features/slicer/components/settings/OrcaIcon';
 
 // ── Compound Row (renders multiple fields on one line with a shared label) ──
@@ -39,22 +43,13 @@ const CompoundRow: React.FC<CompoundRowProps> = ({
   onUpdate,
   disabled,
 }) => {
-  const anyModified = fields.some((f) => {
-    const orig = originalValues?.[f.key];
-    const cur = values[f.key];
-    // Use the same JSON-based comparison as MetadataSettingRow's change tracking
-    // and the tab-dirty check so the reset button and the orange "modified"
-    // label/tab indicator never disagree.
-    return orig !== undefined && JSON.stringify(cur) !== JSON.stringify(orig);
-  });
+  const anyModified = fields.some((f) => isSettingModified(values, originalValues, f.key));
 
   const handleReset = () => {
     fields.forEach((f) => {
-      const orig = originalValues?.[f.key];
-      if (orig === undefined) return;
-      const meta = allSettings[f.key];
-      const next = meta?.type === 'string' ? String(orig) : Number(orig);
-      onUpdate(f.key, next);
+      if (isSettingModified(values, originalValues, f.key)) {
+        onUpdate(f.key, originalValues?.[f.key]);
+      }
     });
   };
 
@@ -87,6 +82,7 @@ const CompoundRow: React.FC<CompoundRowProps> = ({
                 <input
                   type="number"
                   title={meta.tooltip || `${label} ${meta.label || ''}`}
+                  aria-label={`${label} ${meta.label}`}
                   className="w-full py-1 px-2 bg-pf-panel border border-pf-border text-pf-text-primary text-xs text-right rounded-l-lg rounded-r-none border-r-0 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden"
                   value={numVal}
                   min={meta.min}
@@ -144,6 +140,8 @@ export interface MetadataSectionProps {
   viewMode: ViewMode;
   /** Whether all controls are disabled */
   disabled: boolean;
+  /** Advanced metadata keys deliberately promoted into Simple mode */
+  simpleModeSettingKeys?: ReadonlySet<string>;
 }
 
 // ── Component ───────────────────────────────────────────────────────────
@@ -156,6 +154,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
   onUpdate,
   viewMode,
   disabled,
+  simpleModeSettingKeys,
 }) => {
   // Resolve visible fields: filter by mode and existence in settings dict
   const visibleFields = useMemo(() => {
@@ -163,11 +162,15 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
       const meta = allSettings[f.key];
       if (!meta) return false;
       if (meta.mode === 'developer') return false;
-      if (viewMode === 'simple' && meta.mode === 'advanced') return false;
+      if (
+        viewMode === 'simple'
+        && meta.mode === 'advanced'
+        && !simpleModeSettingKeys?.has(f.key)
+      ) return false;
       if (CONDITIONAL_HIDDEN_KEYS.has(f.key)) return false;
       return true;
     });
-  }, [section.fields, allSettings, viewMode]);
+  }, [section.fields, allSettings, viewMode, simpleModeSettingKeys]);
 
   if (visibleFields.length === 0) return null;
 

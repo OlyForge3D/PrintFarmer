@@ -19,6 +19,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button, Input, Alert } from '@/common/components/ui';
 import { MetadataProfileEditor } from '@/features/slicer/components/settings/MetadataProfileRenderer';
+import {
+  MACHINE_PROFILE_ADDITIONAL_SECTIONS,
+  MACHINE_PROFILE_ADDITIONAL_SETTINGS,
+  MACHINE_PROFILE_COMMON_SIMPLE_KEYS,
+  areProfileSettingsEqual,
+  hydrateMachineProfileSettings,
+  serializeMachineProfileSettings,
+} from '@/features/slicer/components/machineProfileEditorAdapter';
 import { slicerProfilesService } from '@/services/slicerProfilesService';
 import type { OrcaMachineProfile, OrcaFilamentProfile } from '@/services/slicerProfilesService';
 
@@ -46,12 +54,22 @@ function getDefaultProfileName(profileType: ProfileType, originalName: string | 
 }
 
 /**
- * Extract settings from a profile DTO.
- * The backend now returns properly-typed values (arrays as List<string>,
- * scalars as strings) so no frontend coercion is needed.
+ * Extract the complete settings bag and hydrate machine values promoted by the DTO.
  */
-function extractSettings(profile: OrcaMachineProfile | OrcaFilamentProfile | null): Record<string, unknown> {
+function isMachineProfile(
+  profile: OrcaMachineProfile | OrcaFilamentProfile,
+): profile is OrcaMachineProfile {
+  return !('material' in profile);
+}
+
+function extractSettings(
+  profileType: ProfileType,
+  profile: OrcaMachineProfile | OrcaFilamentProfile | null,
+): Record<string, unknown> {
   if (!profile) return {};
+  if (profileType === 'machine' && isMachineProfile(profile)) {
+    return hydrateMachineProfileSettings(profile);
+  }
   return { ...(profile.settings ?? {}) };
 }
 
@@ -63,6 +81,7 @@ export function ProfileEditorModal({
   onSaveSuccess,
 }: ProfileEditorModalProps) {
   const queryClient = useQueryClient();
+  const profileNameId = React.useId();
   
   // Profile name for saving
   const [profileName, setProfileName] = useState('');
@@ -73,17 +92,13 @@ export function ProfileEditorModal({
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [originalSettings, setOriginalSettings] = useState<Record<string, unknown>>({});
   
-  // Track if settings have been modified
-  const [hasChanges, setHasChanges] = useState(false);
-  
   // Initialize profile name and reset state when modal opens
   React.useEffect(() => {
     if (isOpen) {
       setProfileName(getDefaultProfileName(profileType, originalProfile?.name));
       setShowSaveForm(false);
       setSaveError(null);
-      setHasChanges(false);
-      const extracted = extractSettings(originalProfile);
+      const extracted = extractSettings(profileType, originalProfile);
       setSettings(extracted);
       setOriginalSettings(extracted);
     }
@@ -91,17 +106,32 @@ export function ProfileEditorModal({
   
   // Handle individual setting updates
   const handleUpdate = React.useCallback((key: string, value: unknown) => {
-    setSettings(prev => ({ ...prev, [key]: value }));
-    setHasChanges(true);
+    setSettings((previous) => {
+      const next = { ...previous };
+      if (value === undefined) {
+        delete next[key];
+      } else {
+        next[key] = value;
+      }
+      return next;
+    });
   }, []);
+
+  const hasChanges = useMemo(
+    () => !areProfileSettingsEqual(settings, originalSettings),
+    [originalSettings, settings],
+  );
   
   // Save mutation using uploadProfile
   const saveMutation = useMutation({
     mutationFn: async () => {
+      const serializedSettings = profileType === 'machine'
+        ? serializeMachineProfileSettings(settings, originalSettings)
+        : settings;
       const response = await slicerProfilesService.uploadProfile({
         name: profileName.trim(),
         profileType,
-        rawJson: JSON.stringify(settings),
+        rawJson: JSON.stringify(serializedSettings),
       });
       return response;
     },
@@ -199,10 +229,14 @@ export function ProfileEditorModal({
       {/* Save Form (shown when Save as Custom clicked) */}
       {showSaveForm && (
         <div className="mb-4 p-4 bg-pf-bg-1 rounded-lg border border-pf-border">
-          <label className="block text-sm font-medium text-pf-text-primary mb-2">
+          <label
+            htmlFor={profileNameId}
+            className="block text-sm font-medium text-pf-text-primary mb-2"
+          >
             Custom Profile Name
           </label>
           <Input
+            id={profileNameId}
             type="text"
             value={profileName}
             onChange={(e) => setProfileName(e.target.value)}
@@ -225,6 +259,15 @@ export function ProfileEditorModal({
           settings={settings}
           originalSettings={originalSettings}
           onUpdate={handleUpdate}
+          additionalSettings={profileType === 'machine'
+            ? MACHINE_PROFILE_ADDITIONAL_SETTINGS
+            : undefined}
+          additionalSections={profileType === 'machine'
+            ? MACHINE_PROFILE_ADDITIONAL_SECTIONS
+            : undefined}
+          simpleModeSettingKeys={profileType === 'machine'
+            ? MACHINE_PROFILE_COMMON_SIMPLE_KEYS
+            : undefined}
         />
       </div>
     </Modal>

@@ -30,6 +30,8 @@ export interface MetadataTabRendererProps {
   viewMode: ViewMode;
   /** Whether all controls are disabled */
   disabled: boolean;
+  /** Advanced metadata keys deliberately promoted into Simple mode */
+  simpleModeSettingKeys?: ReadonlySet<string>;
 }
 
 // ── Component ───────────────────────────────────────────────────────────
@@ -42,6 +44,7 @@ export const MetadataTabRenderer: React.FC<MetadataTabRendererProps> = ({
   onUpdate,
   viewMode,
   disabled,
+  simpleModeSettingKeys,
 }) => (
   <div className="space-y-1">
     {tab.sections.map((section) => (
@@ -54,6 +57,7 @@ export const MetadataTabRenderer: React.FC<MetadataTabRendererProps> = ({
         onUpdate={onUpdate}
         viewMode={viewMode}
         disabled={disabled}
+        simpleModeSettingKeys={simpleModeSettingKeys}
       />
     ))}
   </div>

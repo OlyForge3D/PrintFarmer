@@ -205,9 +205,37 @@ export interface OrcaMachineProfile {
   manufacturer: string;
   description?: string;
   nozzleDiameter?: number;
+  nozzleType?: string;
+  printer_model?: string;
   printerModel?: string;
+  printerVariant?: string;
   instantiation?: boolean;
   inherits?: string;
+  buildVolumeX?: number;
+  buildVolumeY?: number;
+  buildVolumeZ?: number;
+  printableArea?: string;
+  maxPrintSpeed?: number;
+  motionType?: string;
+  gcodeDialect?: string;
+  hasHeatedBed?: boolean;
+  hasHeatedChamber?: boolean;
+  maxBedTemperature?: number;
+  maxHotendTemperature?: number;
+  extruderCount?: number;
+  supportMultiMaterial?: boolean;
+  retractionLength?: number;
+  retractionSpeed?: number;
+  retractionLiftZ?: number;
+  detractionSpeed?: number;
+  bedType?: string;
+  bedShape?: string;
+  startGcode?: string;
+  endGcode?: string;
+  maxAccelerationX?: number;
+  maxAccelerationY?: number;
+  maxFeedrateX?: number;
+  maxFeedrateY?: number;
   settings?: Record<string, unknown>;
   /** High-flow (HF) hotend variant flag, derived backend-side (#1780). Some vendor
    * bundles (e.g. Prusa CORE One / CORE One L) never set nozzle_type, so this is the

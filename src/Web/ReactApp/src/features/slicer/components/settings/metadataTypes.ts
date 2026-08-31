@@ -48,6 +48,11 @@ export interface ProfileTypeMetadata {
   settings: Record<string, SettingMetadata>;
 }
 
+export interface MetadataSectionAddition {
+  tabName: string;
+  section: SectionLayout;
+}
+
 export type ProfileType = 'filament' | 'machine' | 'process';
 export type ViewMode = 'simple' | 'advanced';
 
@@ -545,4 +550,18 @@ export function toString(raw: unknown, meta: SettingMetadata): string {
     return raw.length > 0 ? raw.join(', ') : (meta.default ?? '');
   }
   return String(raw);
+}
+
+export function isSettingModified(
+  values: Record<string, unknown>,
+  originalValues: Record<string, unknown> | undefined,
+  key: string,
+): boolean {
+  if (!originalValues) return false;
+
+  const hasCurrent = Object.prototype.hasOwnProperty.call(values, key);
+  const hasOriginal = Object.prototype.hasOwnProperty.call(originalValues, key);
+  if (!hasCurrent || !hasOriginal) return false;
+
+  return JSON.stringify(values[key]) !== JSON.stringify(originalValues[key]);
 }
