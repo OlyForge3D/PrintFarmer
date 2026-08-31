@@ -29,6 +29,9 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Fixed
 
+- **Database-backed print-job timestamps** — Print-job responses whose UTC
+  timestamps are serialized without an explicit zone suffix now decode
+  correctly instead of failing the entire API response.
 - **Backend-disabled operator features** — The app now reads canonical nested
   operator capability flags and removes disabled Attention, Tasks, filament
   coverage, and printed-parts inventory surfaces while keeping spool inventory

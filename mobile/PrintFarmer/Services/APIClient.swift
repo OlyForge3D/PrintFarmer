@@ -501,6 +501,35 @@ actor APIClient {
         return f
     }()
 
+    /// ISO 8601 formatter for database-backed API values whose `DateTimeKind`
+    /// is unspecified after materialization and therefore serialize without a
+    /// zone suffix. The API contract treats these values as UTC.
+    nonisolated(unsafe) static let iso8601UnzonedWithFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [
+            .withFullDate,
+            .withTime,
+            .withDashSeparatorInDate,
+            .withColonSeparatorInTime,
+            .withFractionalSeconds
+        ]
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        return f
+    }()
+
+    /// Whole-second companion to ``iso8601UnzonedWithFractional``.
+    nonisolated(unsafe) static let iso8601UnzonedPlain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [
+            .withFullDate,
+            .withTime,
+            .withDashSeparatorInDate,
+            .withColonSeparatorInTime
+        ]
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        return f
+    }()
+
     init(
         baseURL: URL,
         session: URLSession? = nil,
@@ -529,6 +558,8 @@ actor APIClient {
             let text = try container.decode(String.self)
             if let date = Self.iso8601WithFractional.date(from: text) { return date }
             if let date = Self.iso8601Plain.date(from: text) { return date }
+            if let date = Self.iso8601UnzonedWithFractional.date(from: text) { return date }
+            if let date = Self.iso8601UnzonedPlain.date(from: text) { return date }
             throw DecodingError.dataCorruptedError(
                 in: container,
                 debugDescription: "Cannot decode date string: \(text)"
