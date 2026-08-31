@@ -11,7 +11,9 @@ export interface SlicerRegisteredEvent {
   name: string;
   slicerType: number;
   version: string;
-  capabilities: string[];
+  maxConcurrentJobs: number;
+  status: string;
+  lastSeen: string;
 }
 
 export interface SlicerHeartbeatEvent {
