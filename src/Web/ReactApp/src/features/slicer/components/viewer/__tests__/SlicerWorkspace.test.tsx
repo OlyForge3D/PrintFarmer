@@ -146,6 +146,46 @@ describe('SlicerWorkspace multi-plate', () => {
     });
   });
 
+  it('Escape exits an active transform tool before clearing the selected model', async () => {
+    const onModelSelect = vi.fn();
+    const a = model('A', [60, 60, 5]);
+
+    const { rerender } = render(
+      <SlicerWorkspace
+        bedConfig={bedConfig}
+        models={[]}
+        onModelSelect={onModelSelect}
+        onModelTransform={vi.fn()}
+      />,
+    );
+    rerender(
+      <SlicerWorkspace
+        bedConfig={bedConfig}
+        models={[a]}
+        selectedModelId="A"
+        onModelSelect={onModelSelect}
+        onModelTransform={vi.fn()}
+      />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.keyDown(window, { key: 't' });
+    await waitFor(() => {
+      expect(lastBedProps.transformMode).toBe('translate');
+    });
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => {
+      expect(lastBedProps.transformMode).toBeNull();
+    });
+    expect(onModelSelect).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onModelSelect).toHaveBeenCalledWith(null);
+  });
+
   // Regression coverage for issue #1709: "Slice Plate" remained enabled and
   // threw after a model on the active plate failed to load its source file.
   describe('slice action after a model load failure', () => {
@@ -257,7 +297,7 @@ describe('SlicerWorkspace multi-plate', () => {
       // Slicing is never blocked by the nudge (advisory only).
       expect(screen.getByRole('button', { name: /slice/i })).not.toBeDisabled();
 
-      fireEvent.click(screen.getByRole('button', { name: /auto-orient/i }));
+      fireEvent.click(screen.getByRole('button', { name: 'Auto-orient' }));
 
       // The banner's action is the SAME plate-level auto-orient path
       // (handleOrientPlate), so it reports a changed rotation for the model.
