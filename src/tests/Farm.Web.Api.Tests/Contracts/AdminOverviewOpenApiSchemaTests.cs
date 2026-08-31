@@ -14,16 +14,17 @@ public sealed class AdminOverviewOpenApiSchemaTests(OpenApiDocumentFixture fixtu
     private readonly JsonDocument _document = fixture.Document;
 
     /// <summary>
-    /// <b>Fixed by issue #2261.</b> Before the fix, <c>SubsystemStatus</c> and
+    /// <b>Fixed by issue #2261/#2282.</b> Before the fix, <c>SubsystemStatus</c> and
     /// <c>AttentionSeverity</c> were documented as a plain <c>type: integer</c> with no "enum"
     /// token list at all, directly contradicting each schema's own XML-doc-derived "description"
     /// text (which already said the type "is serialized as a string via JsonStringEnumConverter"
-    /// even before this fix). Now that the global <c>JsonStringEnumConverter</c> is also
-    /// registered on <c>ConfigureHttpJsonOptions</c>, .NET's OpenAPI schema exporter documents
-    /// each schema purely via its "enum" token list (the exporter's convention for a
-    /// converter-driven string enum: no explicit "type" keyword, since the string-typed "enum"
-    /// array is self-describing) — matching the description text and the corpus's real string
-    /// wire values.
+    /// even before this fix). Registering the global <c>JsonStringEnumConverter</c> on
+    /// <c>ConfigureHttpJsonOptions</c> fixed the "enum" token list, but .NET's OpenAPI schema
+    /// exporter has a confirmed limitation (dotnet/aspnetcore#61303, #62022) that leaves the
+    /// schema's own "type" keyword unset even though "enum" is present.
+    /// <c>EnumSchemaTypeStringTransformer</c> (registered in <c>Program.cs</c>) now adds the
+    /// missing <c>type: string</c>, so the schema matches both the description text and the
+    /// corpus's real string wire values with both keywords present.
     /// </summary>
     [Theory]
     [InlineData("SubsystemStatus", new[] { "Healthy", "Degraded", "Unknown", "Unhealthy" })]
@@ -32,10 +33,9 @@ public sealed class AdminOverviewOpenApiSchemaTests(OpenApiDocumentFixture fixtu
     {
         JsonElement schema = OpenApiSchemaTestSupport.GetComponentSchema(_document, componentSchemaName);
 
-        _ = OpenApiSchemaTestSupport.GetTypes(schema).Should().BeEmpty(
-            $"'{componentSchemaName}' now relies on the global JsonStringEnumConverter, so .NET's OpenAPI schema " +
-            "exporter documents it purely via its 'enum' token list with no explicit 'type' keyword, unlike the " +
-            "pre-fix schema which had 'type: integer' and no 'enum' tokens at all");
+        _ = OpenApiSchemaTestSupport.GetTypes(schema).Should().BeEquivalentTo(new[] { "string" },
+            $"'{componentSchemaName}' is now constrained by EnumSchemaTypeStringTransformer, matching the " +
+            "schema's own description text and the pre-existing 'enum' token list");
         _ = OpenApiSchemaTestSupport.GetEnumTokens(schema).Should().BeEquivalentTo(expectedTokens);
     }
 

@@ -117,14 +117,15 @@ public sealed class TasksOpenApiSchemaTests(OpenApiDocumentFixture fixture)
     }
 
     /// <summary>
-    /// <b>Fixed by issue #2261.</b> Before the fix, <c>status</c>/<c>priority</c>/<c>taskType</c>
-    /// were documented as a plain <c>type: integer</c> with no "enum" token list at all. Now that
-    /// the global <c>JsonStringEnumConverter</c> is also registered on
-    /// <c>ConfigureHttpJsonOptions</c> (previously MVC-only, via <c>ControllerStartup</c>), each
-    /// component schema is documented purely via its "enum" token list — .NET's OpenAPI schema
-    /// exporter's convention for a converter-driven string enum: no explicit "type" keyword, since
-    /// the string-typed "enum" array is self-describing — matching the #2238 corpus's real wire
-    /// value (e.g. <c>"status": "Pending"</c>).
+    /// <b>Fixed by issue #2261/#2282.</b> Before the fix, <c>status</c>/<c>priority</c>/<c>taskType</c>
+    /// were documented as a plain <c>type: integer</c> with no "enum" token list at all. Once the
+    /// global <c>JsonStringEnumConverter</c> was also registered on <c>ConfigureHttpJsonOptions</c>
+    /// (previously MVC-only, via <c>ControllerStartup</c>), each component schema's "enum" token
+    /// list was populated correctly, but .NET's OpenAPI schema exporter has a confirmed limitation
+    /// (dotnet/aspnetcore#61303, #62022) that leaves the schema's own "type" keyword unset even
+    /// though "enum" is present. <c>EnumSchemaTypeStringTransformer</c> (registered in
+    /// <c>Program.cs</c>) now adds the missing <c>type: string</c>, so the schema matches the
+    /// #2238 corpus's real wire value (e.g. <c>"status": "Pending"</c>) with both keywords present.
     /// </summary>
     [Theory]
     [InlineData("status", "UserTaskStatus", new[] { "Pending", "InProgress", "Completed", "Dismissed", "Skipped" })]
@@ -143,27 +144,36 @@ public sealed class TasksOpenApiSchemaTests(OpenApiDocumentFixture fixture)
         _ = property.GetProperty("$ref").GetString().Should().Be($"#/components/schemas/{componentSchemaName}");
         JsonElement enumSchema = OpenApiSchemaTestSupport.ResolveRef(_document, property);
 
-        _ = OpenApiSchemaTestSupport.GetTypes(enumSchema).Should().BeEmpty(
-            $"'{componentSchemaName}' now relies on the global JsonStringEnumConverter registered on both " +
-            "ConfigureHttpJsonOptions and MVC's AddJsonOptions");
+        _ = OpenApiSchemaTestSupport.GetTypes(enumSchema).Should().BeEquivalentTo(new[] { "string" },
+            $"'{componentSchemaName}' is now constrained by EnumSchemaTypeStringTransformer");
         _ = OpenApiSchemaTestSupport.GetEnumTokens(enumSchema).Should().BeEquivalentTo(expectedTokens,
             "the schema now lists every enum member as a string token");
     }
 
     /// <summary>
-    /// <b>Characterizes a confirmed mismatch (finding), a distinct sub-case of the same root cause.</b>
-    /// <c>anchorKind</c>/<c>sourceKind</c> use PROPERTY-level <c>[JsonConverter]</c> attributes
-    /// (issue #2246) that outrank the global converter for the real wire value (lowercase camelCase
-    /// tokens, e.g. <c>"unspecified"</c>), but .NET's reflection-based OpenAPI schema generator does
-    /// not inspect property-level converters when producing a schema for the referenced enum type.
-    /// The resulting component schema carries no "type" or "enum" keyword at all — completely
-    /// unconstrained — which is worse for a generated client than the integer-typed case above: it
-    /// would see no schema information whatsoever for these two properties.
+    /// <b>Fixed by issue #2282 (finding 2 from #2261).</b> <c>anchorKind</c>/<c>sourceKind</c> use a
+    /// custom <c>[JsonConverter]</c> (issue #2246, applied both on the enum declaration itself and
+    /// again on each referencing property) for their real wire value (lowercase camelCase tokens,
+    /// e.g. <c>"unspecified"</c>), but .NET's reflection-based OpenAPI schema generator only knows
+    /// how to introspect the standard <c>JsonStringEnumConverter</c> when producing an enum's
+    /// component schema -- any other custom converter, at either placement, is opaque to it, since
+    /// enumerating its real output would require executing arbitrary converter code. This
+    /// previously left the component schema with no "type" or "enum" keyword at all (see the
+    /// corpus-proven wire tokens in <c>TasksContractTests</c>). <c>CustomConverterEnumSchemaTransformer</c>
+    /// now constrains both component schemas directly from <c>UserTaskAnchorKindJsonConverter.ToWire</c>/
+    /// <c>UserTaskSourceKindJsonConverter.ToWire</c>, so the documented shape matches the real wire
+    /// contract and can never silently drift from the converter that actually serializes these
+    /// properties.
     /// </summary>
     [Theory]
-    [InlineData("anchorKind", "UserTaskAnchorKind")]
-    [InlineData("sourceKind", "UserTaskSourceKind")]
-    public void CreateTask_ResponseSchema_PropertyLevelConverterEnums_HaveNoTypeConstraintAtAll(string propertyName, string componentSchemaName)
+    [InlineData("anchorKind", "UserTaskAnchorKind", new[] { "unspecified", "now", "at", "window", "anytimeToday", "timeline" })]
+    [InlineData("sourceKind", "UserTaskSourceKind", new[]
+    {
+        "unspecified", "attention", "failureIncident", "harvest", "filamentCoverage", "maintenance",
+        "spoolReorder", "printedPartStock",
+    })]
+    public void CreateTask_ResponseSchema_PropertyLevelConverterEnums_AreDocumentedAsStringWithMatchingEnumTokens(
+        string propertyName, string componentSchemaName, string[] expectedTokens)
     {
         JsonElement operation = OpenApiSchemaTestSupport.GetOperation(_document, "/api/tasks", "post");
         JsonElement responseSchema = OpenApiSchemaTestSupport.GetResponseSchema(operation, "201")!.Value;
@@ -172,9 +182,9 @@ public sealed class TasksOpenApiSchemaTests(OpenApiDocumentFixture fixture)
         _ = property.GetProperty("$ref").GetString().Should().Be($"#/components/schemas/{componentSchemaName}");
         JsonElement enumSchema = OpenApiSchemaTestSupport.ResolveRef(_document, property);
 
-        _ = OpenApiSchemaTestSupport.GetTypes(enumSchema).Should().BeEmpty(
-            $"'{componentSchemaName}' is emitted by a property-level [JsonConverter] attribute the schema generator " +
-            "does not inspect, so the component schema has no 'type' keyword at all");
-        _ = OpenApiSchemaTestSupport.GetEnumTokens(enumSchema).Should().BeNull();
+        _ = OpenApiSchemaTestSupport.GetTypes(enumSchema).Should().BeEquivalentTo(new[] { "string" },
+            $"'{componentSchemaName}' is now constrained by CustomConverterEnumSchemaTransformer");
+        _ = OpenApiSchemaTestSupport.GetEnumTokens(enumSchema).Should().BeEquivalentTo(expectedTokens,
+            $"'{componentSchemaName}' should list the exact wire tokens its property-level converter emits");
     }
 }
