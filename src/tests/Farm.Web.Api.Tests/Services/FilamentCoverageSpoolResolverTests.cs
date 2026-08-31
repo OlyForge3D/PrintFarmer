@@ -9,6 +9,7 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Spoolman;
+using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -532,8 +533,138 @@ public class FilamentCoverageSpoolResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_DarkNativeSource_DegradesWithinConfiguredTimeout()
+    {
+        // Regression evidence for issue #2118 (re-opened): the previous fix bounded how
+        // many spool sources are read at once but never bounded how long a single source
+        // may take. A powered-down Moonraker printer that still holds its address
+        // black-holes packets, so the read inherited the backend's print-control timeout
+        // (BackendTimeoutSettings.PrintControlTimeoutSeconds = 60) and stalled the whole
+        // fleet projection. The mobile readiness gate allows 10s per probe, so both
+        // /api/attention and /api/printers/filament-coverage were reported unavailable.
+        const int sourceTimeoutMs = 300;
+        TimeSpan inheritedPrintControlTimeout = TimeSpan.FromSeconds(60);
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(DarkNativeClient().Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            settingsService: SettingsWithSourceTimeout(sourceTimeoutMs));
+        Printer printer = PrinterWithSpool("http://dark-moon.local", PrinterBackend.Moonraker, 7);
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result =
+            await resolver.ResolveAsync([printer], CancellationToken.None);
+        stopwatch.Stop();
+
+        stopwatch.Elapsed.Should().BeLessThan(inheritedPrintControlTimeout);
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5),
+            "the bounded read must resolve well inside the mobile client's 10s readiness budget");
+        result[printer.Id][7].Spool.Should().BeNull();
+        result[printer.Id][7].ErrorReason.Should().Be("spool-source-unavailable");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_DarkNativeSource_DoesNotStallHealthySources()
+    {
+        // The reported symptom was fleet-wide: one unreachable printer degraded coverage
+        // for every other printer because ResolveAsync awaits all sources together.
+        const string darkUrl = "http://dark-moon.local";
+        Mock<IBackendClient> native = new();
+        native.As<ISupportsSpoolman>()
+            .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string baseUrl, CancellationToken ct) =>
+            {
+                if (string.Equals(baseUrl, darkUrl, StringComparison.OrdinalIgnoreCase))
+                {
+                    await Task.Delay(Timeout.Infinite, ct);
+                }
+
+                return JsonSerializer.Serialize(new[]
+                {
+                    new { id = 1, remaining_weight = 250, material = "PLA" },
+                });
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(native.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            settingsService: SettingsWithSourceTimeout(300));
+        Printer healthyPrinter = PrinterWithSpool("http://good-moon.local", PrinterBackend.Moonraker, 1);
+        Printer darkPrinter = PrinterWithSpool(darkUrl, PrinterBackend.Moonraker, 2);
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result =
+            await resolver.ResolveAsync([healthyPrinter, darkPrinter], CancellationToken.None);
+        stopwatch.Stop();
+
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
+        result[healthyPrinter.Id][1].Spool!.RemainingWeightG.Should().Be(250);
+        result[healthyPrinter.Id][1].ErrorReason.Should().BeNull();
+        result[darkPrinter.Id][2].ErrorReason.Should().Be("spool-source-unavailable");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_CallerCancellation_PropagatesInsteadOfDegrading()
+    {
+        // The Moonraker client swallows every exception from its Spoolman proxy and
+        // returns a null body, so without an explicit re-check a genuine caller
+        // cancellation would be misrecorded as an unavailable source.
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(DarkNativeClient().Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            settingsService: SettingsWithSourceTimeout(30_000));
+        Printer printer = PrinterWithSpool("http://dark-moon.local", PrinterBackend.Moonraker, 7);
+        using CancellationTokenSource cts = new();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(200));
+
+        Exception? thrown = await Record.ExceptionAsync(
+            async () => await resolver.ResolveAsync([printer], cts.Token).ConfigureAwait(false));
+
+        thrown.Should().BeAssignableTo<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_UnreachableCentralSource_DegradesWithinConfiguredTimeout()
+    {
+        // Central Spoolman is read through the same fan-out, so an unreachable central
+        // host must not stall coverage any longer than a dark printer does.
+        Mock<ISpoolmanService> central = new();
+        central.Setup(s => s.GetConfig()).Returns(new SpoolmanConfigDto("http://central.local"));
+        central
+            .Setup(s => s.ListSpoolsAsync(It.IsAny<SpoolmanSpoolQueryParams>(), It.IsAny<CancellationToken>()))
+            .Returns(async (SpoolmanSpoolQueryParams _, CancellationToken ct) =>
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+                return new SpoolmanPagedResult<SpoolmanSpoolDto>([], 0);
+            });
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            new Mock<IBackendClientFactory>(MockBehavior.Strict).Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            settingsService: SettingsWithSourceTimeout(300));
+        Printer printer = PrinterWithSpool("http://octo.local", PrinterBackend.OctoPrint, 10);
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result =
+            await resolver.ResolveAsync([printer], CancellationToken.None);
+        stopwatch.Stop();
+
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
+        result[printer.Id][10].Spool.Should().BeNull();
+        result[printer.Id][10].ErrorReason.Should().Be("spool-source-unavailable");
+    }
+
+    [Fact]
     public async Task ResolveAsync_PrinterLevelSpoolBinding_IsIncludedForManagedPrimaryFallback()
     {
+
         Mock<ISpoolmanService> central = new();
         central.Setup(s => s.GetConfig()).Returns(new SpoolmanConfigDto("http://central.local"));
         central
@@ -560,6 +691,32 @@ public class FilamentCoverageSpoolResolverTests
             .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(json);
         return client;
+    }
+
+    /// <summary>
+    /// A spool source that never answers, modelling a printer that is powered down but
+    /// still holds its address: it black-holes packets instead of refusing them, so the
+    /// read hangs rather than failing fast.
+    /// </summary>
+    private static Mock<IBackendClient> DarkNativeClient()
+    {
+        Mock<IBackendClient> client = new();
+        client.As<ISupportsSpoolman>()
+            .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, CancellationToken ct) =>
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+                return (string?)null;
+            });
+        return client;
+    }
+
+    private static ISettingsService SettingsWithSourceTimeout(int timeoutMs)
+    {
+        Mock<ISettingsService> settings = new();
+        settings.Setup(s => s.Get<SpoolCoverageSettings>())
+            .Returns(new SpoolCoverageSettings { SpoolSourceTimeoutMs = timeoutMs });
+        return settings.Object;
     }
 
     private static AppDbContext CreateContext()

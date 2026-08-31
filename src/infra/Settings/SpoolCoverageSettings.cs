@@ -62,6 +62,25 @@ public class SpoolCoverageSettings : IAppSetting, IValidatableSetting
     [SettingDisplay(Name = "Live progress timeout", Unit = "ms", Description = "How long the coverage endpoint waits for a live progress reading from each printer.", InputType = SettingInputType.Number, MinValue = 100, MaxValue = 30000, Order = 5)]
     public int LiveProgressTimeoutMs { get; set; } = 2000;
 
+    /// <summary>
+    /// Per-source timeout in milliseconds for reading spool inventory from a spool
+    /// source (a printer's native Spoolman proxy, or the central Spoolman server).
+    ///
+    /// <para>
+    /// Coverage is a read-only projection, so it must not inherit the backend's
+    /// <see cref="BackendTimeoutSettings.PrintControlTimeout"/> (60s by default). A
+    /// printer that is powered down but still holds its address black-holes packets
+    /// rather than refusing them, so without this bound a single dark printer stalls
+    /// the whole fleet projection — and with it <c>/api/attention</c>, which composes
+    /// the same pipeline. A source that exceeds this budget degrades to
+    /// <c>spool-source-unavailable</c> (status <c>Unknown</c>), never to a fabricated
+    /// coverage verdict.
+    /// </para>
+    /// </summary>
+    [JsonPropertyName("spoolSourceTimeoutMs")]
+    [SettingDisplay(Name = "Spool source timeout", Unit = "ms", Description = "How long the coverage endpoint waits for spool inventory from each spool source before treating that source as unavailable.", InputType = SettingInputType.Number, MinValue = 250, MaxValue = 30000, Order = 6)]
+    public int SpoolSourceTimeoutMs { get; set; } = 3000;
+
     public void Validate()
     {
         if (RunoutWarningLeadMinutes is < 5 or > 1440)
@@ -77,6 +96,11 @@ public class SpoolCoverageSettings : IAppSetting, IValidatableSetting
         if (LiveProgressTimeoutMs is < 100 or > 30000)
         {
             throw new ValidationException("Live progress timeout must be between 100 and 30000 ms.");
+        }
+
+        if (SpoolSourceTimeoutMs is < 250 or > 30000)
+        {
+            throw new ValidationException("Spool source timeout must be between 250 and 30000 ms.");
         }
     }
 }
