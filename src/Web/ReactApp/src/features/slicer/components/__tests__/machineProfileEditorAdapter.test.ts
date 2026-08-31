@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   BUILD_VOLUME_X_EDITOR_KEY,
   BUILD_VOLUME_Y_EDITOR_KEY,
+  MACHINE_PROFILE_COMMON_SIMPLE_KEYS,
+  MACHINE_PROFILE_SETTING_MAPPINGS,
   hydrateMachineProfileSettings,
   serializeMachineProfileSettings,
 } from '@/features/slicer/components/machineProfileEditorAdapter';
@@ -102,6 +104,26 @@ describe('machineProfileEditorAdapter', () => {
     ]);
   });
 
+  it('scales every point of a non-rectangular printable-area polygon', () => {
+    const raw = {
+      printable_area: ['10x20', '210x20', '210x120', '110x80', '10x120'],
+    };
+    const original = hydrateMachineProfileSettings(machineProfile({ settings: raw }));
+    const edited = {
+      ...original,
+      [BUILD_VOLUME_X_EDITOR_KEY]: 400,
+      [BUILD_VOLUME_Y_EDITOR_KEY]: 200,
+    };
+
+    expect(serializeMachineProfileSettings(edited, original, raw).printable_area).toEqual([
+      '10x20',
+      '410x20',
+      '410x220',
+      '210x140',
+      '10x220',
+    ]);
+  });
+
   it('does not materialize absent promoted settings from metadata defaults', () => {
     const original = hydrateMachineProfileSettings(machineProfile({
       settings: { raw_only_setting: 'kept' },
@@ -170,6 +192,103 @@ describe('machineProfileEditorAdapter', () => {
       original,
       {},
     )).toThrow('Boolean machine settings must be true or false.');
+  });
+
+  it('serializes the promoted firmware-retraction checkbox as an Orca boolean string', () => {
+    const raw = { use_firmware_retraction: '0' };
+    const original = hydrateMachineProfileSettings(machineProfile({ settings: raw }));
+
+    expect(serializeMachineProfileSettings(
+      { ...original, use_firmware_retraction: true },
+      original,
+      raw,
+    )).toEqual({ use_firmware_retraction: '1' });
+  });
+
+  it('preserves fallback aliases until their canonical control is explicitly edited', () => {
+    const raw = {
+      max_print_height: '220',
+      bed_temperature_limit: '110',
+      nozzle_temperature_range_high: ['300'],
+      retract_length: ['0.8'],
+      retract_speed: ['35'],
+      deretract_speed: ['25'],
+      machine_type: 'corexy',
+      bed_custom_texture: 'texture.svg',
+    };
+    const original = hydrateMachineProfileSettings(machineProfile({
+      buildVolumeZ: 220,
+      maxBedTemperature: 110,
+      maxHotendTemperature: 300,
+      retractionLength: 0.8,
+      retractionSpeed: 35,
+      detractionSpeed: 25,
+      motionType: 'corexy',
+      hasHeatedBed: true,
+      settings: raw,
+    }));
+
+    expect(serializeMachineProfileSettings(original, original, raw)).toEqual(raw);
+
+    const serialized = serializeMachineProfileSettings({
+      ...original,
+      printable_height: 250,
+      max_bed_temp: 120,
+      max_hotend_temp: 320,
+      retraction_length: 1,
+      retraction_speed: 40,
+      deretraction_speed: 30,
+      printer_type: 'cartesian',
+      has_heated_bed: false,
+    }, original, raw);
+
+    expect(serialized).toMatchObject({
+      printable_height: '250',
+      max_bed_temp: '120',
+      max_hotend_temp: '320',
+      retraction_length: ['1'],
+      retraction_speed: ['40'],
+      deretraction_speed: ['30'],
+      printer_type: 'cartesian',
+      has_heated_bed: '0',
+      bed_custom_texture: 'texture.svg',
+    });
+    for (const alias of [
+      'max_print_height',
+      'bed_temperature_limit',
+      'nozzle_temperature_range_high',
+      'retract_length',
+      'retract_speed',
+      'deretract_speed',
+      'machine_type',
+    ]) {
+      expect(serialized).not.toHaveProperty(alias);
+    }
+  });
+
+  it('does not expose the provenance-losing retraction lift DTO as retract_lift_above', () => {
+    const settings = hydrateMachineProfileSettings(machineProfile({
+      retractionLiftZ: 2,
+    }));
+
+    expect(settings).not.toHaveProperty('retract_lift_above');
+    expect(MACHINE_PROFILE_COMMON_SIMPLE_KEYS.has('retract_lift_above')).toBe(false);
+  });
+
+  it('has a wire-shape mapping for every non-pseudo Simple-mode promotion', () => {
+    const mappedKeys = new Set(
+      MACHINE_PROFILE_SETTING_MAPPINGS.map((mapping) => mapping.orcaKey),
+    );
+    const pseudoKeys = new Set([
+      BUILD_VOLUME_X_EDITOR_KEY,
+      BUILD_VOLUME_Y_EDITOR_KEY,
+    ]);
+
+    for (const key of MACHINE_PROFILE_COMMON_SIMPLE_KEYS) {
+      if (!pseudoKeys.has(key)) {
+        expect(mappedKeys.has(key), key).toBe(true);
+      }
+    }
   });
 
   it('rejects a partial build-volume edit rather than fabricating the missing dimension', () => {

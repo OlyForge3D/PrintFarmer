@@ -8,9 +8,6 @@ export const BUILD_VOLUME_X_EDITOR_KEY = '__machine_build_volume_x';
 export const BUILD_VOLUME_Y_EDITOR_KEY = '__machine_build_volume_y';
 
 type MappedMachineProfileProperty =
-  | 'printableArea'
-  | 'buildVolumeX'
-  | 'buildVolumeY'
   | 'buildVolumeZ'
   | 'nozzleDiameter'
   | 'nozzleType'
@@ -22,7 +19,6 @@ type MappedMachineProfileProperty =
   | 'maxHotendTemperature'
   | 'retractionLength'
   | 'retractionSpeed'
-  | 'retractionLiftZ'
   | 'detractionSpeed'
   | 'bedType'
   | 'startGcode'
@@ -36,157 +32,125 @@ type MachineSettingWireShape =
   | 'scalarString'
   | 'string'
   | 'booleanString'
-  | 'singleValueStringArray'
-  | 'printableArea'
-  | 'printableAreaDimension';
+  | 'singleValueStringArray';
 
 interface MachineProfileSettingMapping {
-  profileProperty: MappedMachineProfileProperty;
-  editorKey: string;
+  profileProperty?: MappedMachineProfileProperty;
   orcaKey: string;
+  sourceAliases?: readonly string[];
   wireShape: MachineSettingWireShape;
 }
 
-export const MACHINE_PROFILE_SETTING_MAPPINGS = [
-  {
-    profileProperty: 'printableArea',
-    editorKey: 'printable_area',
-    orcaKey: 'printable_area',
-    wireShape: 'printableArea',
-  },
-  {
-    profileProperty: 'buildVolumeX',
-    editorKey: BUILD_VOLUME_X_EDITOR_KEY,
-    orcaKey: 'printable_area',
-    wireShape: 'printableAreaDimension',
-  },
-  {
-    profileProperty: 'buildVolumeY',
-    editorKey: BUILD_VOLUME_Y_EDITOR_KEY,
-    orcaKey: 'printable_area',
-    wireShape: 'printableAreaDimension',
-  },
+export const MACHINE_PROFILE_SETTING_MAPPINGS: readonly MachineProfileSettingMapping[] = [
   {
     profileProperty: 'buildVolumeZ',
-    editorKey: 'printable_height',
     orcaKey: 'printable_height',
+    sourceAliases: ['max_print_height'],
     wireShape: 'scalarString',
   },
   {
     profileProperty: 'nozzleDiameter',
-    editorKey: 'nozzle_diameter',
     orcaKey: 'nozzle_diameter',
     wireShape: 'singleValueStringArray',
   },
   {
     profileProperty: 'nozzleType',
-    editorKey: 'nozzle_type',
     orcaKey: 'nozzle_type',
     wireShape: 'string',
   },
   {
     profileProperty: 'motionType',
-    editorKey: 'printer_type',
     orcaKey: 'printer_type',
+    sourceAliases: ['machine_type'],
     wireShape: 'string',
   },
   {
     profileProperty: 'gcodeDialect',
-    editorKey: 'gcode_flavor',
     orcaKey: 'gcode_flavor',
     wireShape: 'string',
   },
   {
     profileProperty: 'hasHeatedBed',
-    editorKey: 'has_heated_bed',
     orcaKey: 'has_heated_bed',
+    // bed_custom_texture is only a worker presence heuristic, not an equivalent
+    // boolean source; editing this control must not remove or rewrite that texture.
     wireShape: 'booleanString',
   },
   {
     profileProperty: 'hasHeatedChamber',
-    editorKey: 'has_heated_chamber',
     orcaKey: 'has_heated_chamber',
     wireShape: 'booleanString',
   },
   {
     profileProperty: 'maxBedTemperature',
-    editorKey: 'max_bed_temp',
     orcaKey: 'max_bed_temp',
+    sourceAliases: ['bed_temperature_limit'],
     wireShape: 'scalarString',
   },
   {
     profileProperty: 'maxHotendTemperature',
-    editorKey: 'max_hotend_temp',
     orcaKey: 'max_hotend_temp',
+    sourceAliases: ['nozzle_temperature_range_high'],
     wireShape: 'scalarString',
   },
   {
     profileProperty: 'retractionLength',
-    editorKey: 'retraction_length',
     orcaKey: 'retraction_length',
+    sourceAliases: ['retract_length'],
     wireShape: 'singleValueStringArray',
   },
   {
     profileProperty: 'retractionSpeed',
-    editorKey: 'retraction_speed',
     orcaKey: 'retraction_speed',
-    wireShape: 'singleValueStringArray',
-  },
-  {
-    profileProperty: 'retractionLiftZ',
-    editorKey: 'retract_lift_above',
-    orcaKey: 'retract_lift_above',
+    sourceAliases: ['retract_speed'],
     wireShape: 'singleValueStringArray',
   },
   {
     profileProperty: 'detractionSpeed',
-    editorKey: 'deretraction_speed',
     orcaKey: 'deretraction_speed',
+    sourceAliases: ['deretract_speed'],
     wireShape: 'singleValueStringArray',
   },
   {
     profileProperty: 'bedType',
-    editorKey: 'curr_bed_type',
     orcaKey: 'curr_bed_type',
     wireShape: 'string',
   },
   {
     profileProperty: 'startGcode',
-    editorKey: 'machine_start_gcode',
     orcaKey: 'machine_start_gcode',
     wireShape: 'string',
   },
   {
     profileProperty: 'endGcode',
-    editorKey: 'machine_end_gcode',
     orcaKey: 'machine_end_gcode',
     wireShape: 'string',
   },
   {
     profileProperty: 'maxAccelerationX',
-    editorKey: 'machine_max_acceleration_x',
     orcaKey: 'machine_max_acceleration_x',
     wireShape: 'singleValueStringArray',
   },
   {
     profileProperty: 'maxAccelerationY',
-    editorKey: 'machine_max_acceleration_y',
     orcaKey: 'machine_max_acceleration_y',
     wireShape: 'singleValueStringArray',
   },
   {
     profileProperty: 'maxFeedrateX',
-    editorKey: 'machine_max_speed_x',
     orcaKey: 'machine_max_speed_x',
     wireShape: 'singleValueStringArray',
   },
   {
     profileProperty: 'maxFeedrateY',
-    editorKey: 'machine_max_speed_y',
     orcaKey: 'machine_max_speed_y',
     wireShape: 'singleValueStringArray',
   },
-] as const satisfies readonly MachineProfileSettingMapping[];
+  {
+    orcaKey: 'use_firmware_retraction',
+    wireShape: 'booleanString',
+  },
+];
 
 export const MACHINE_PROFILE_COMMON_SIMPLE_KEYS = new Set<string>([
   BUILD_VOLUME_X_EDITOR_KEY,
@@ -205,7 +169,6 @@ export const MACHINE_PROFILE_COMMON_SIMPLE_KEYS = new Set<string>([
   'retraction_length',
   'retraction_speed',
   'deretraction_speed',
-  'retract_lift_above',
   'machine_max_speed_x',
   'machine_max_speed_y',
   'machine_max_acceleration_x',
@@ -322,6 +285,7 @@ interface PrintableAreaBounds {
   minY: number;
   width: number;
   depth: number;
+  points: readonly { x: number; y: number }[];
 }
 
 function hasOwn(settings: Record<string, unknown>, key: string): boolean {
@@ -358,7 +322,13 @@ function parsePrintableArea(value: unknown): PrintableAreaBounds | undefined {
   const maxY = Math.max(...ys);
   if (![minX, maxX, minY, maxY].every(Number.isFinite)) return undefined;
 
-  return { minX, minY, width: maxX - minX, depth: maxY - minY };
+  return {
+    minX,
+    minY,
+    width: maxX - minX,
+    depth: maxY - minY,
+    points,
+  };
 }
 
 function createPrintableArea(
@@ -367,6 +337,16 @@ function createPrintableArea(
   sourceArea?: unknown,
 ): string[] {
   const sourceBounds = parsePrintableArea(sourceArea);
+  if (sourceBounds && sourceBounds.width > 0 && sourceBounds.depth > 0) {
+    return sourceBounds.points.map((point) => {
+      const x = sourceBounds.minX
+        + ((point.x - sourceBounds.minX) / sourceBounds.width) * width;
+      const y = sourceBounds.minY
+        + ((point.y - sourceBounds.minY) / sourceBounds.depth) * depth;
+      return `${formatNumber(x)}x${formatNumber(y)}`;
+    });
+  }
+
   const minX = sourceBounds?.minX ?? 0;
   const minY = sourceBounds?.minY ?? 0;
   const maxX = minX + width;
@@ -459,17 +439,13 @@ export function hydrateMachineProfileSettings(
   const settings = { ...(profile.settings ?? {}) };
 
   for (const mapping of MACHINE_PROFILE_SETTING_MAPPINGS) {
-    if (
-      mapping.wireShape === 'printableArea'
-      || mapping.wireShape === 'printableAreaDimension'
-      || hasOwn(settings, mapping.orcaKey)
-    ) {
+    if (hasOwn(settings, mapping.orcaKey) || !mapping.profileProperty) {
       continue;
     }
 
     const hydrated = toWireValue(profile[mapping.profileProperty], mapping.wireShape);
     if (hydrated !== undefined) {
-      settings[mapping.editorKey] = hydrated;
+      settings[mapping.orcaKey] = hydrated;
     }
   }
 
@@ -506,11 +482,7 @@ export function serializeMachineProfileSettings(
 ): Record<string, unknown> {
   const serialized = { ...rawSettings };
   const editorKeys = new Set(
-    MACHINE_PROFILE_SETTING_MAPPINGS
-      .filter((mapping) =>
-        mapping.wireShape !== 'printableArea'
-        && mapping.wireShape !== 'printableAreaDimension')
-      .map((mapping) => mapping.editorKey),
+    MACHINE_PROFILE_SETTING_MAPPINGS.map((mapping) => mapping.orcaKey),
   );
 
   for (const key of new Set([...Object.keys(settings), ...Object.keys(originalSettings)])) {
@@ -562,19 +534,19 @@ export function serializeMachineProfileSettings(
 
   for (const mapping of MACHINE_PROFILE_SETTING_MAPPINGS) {
     if (
-      mapping.wireShape === 'printableArea'
-      || mapping.wireShape === 'printableAreaDimension'
-      || (
-        valuesEqual(settings[mapping.editorKey], originalSettings[mapping.editorKey])
-        && hasOwn(settings, mapping.editorKey) === hasOwn(originalSettings, mapping.editorKey)
-      )
+      valuesEqual(settings[mapping.orcaKey], originalSettings[mapping.orcaKey])
+      && hasOwn(settings, mapping.orcaKey) === hasOwn(originalSettings, mapping.orcaKey)
     ) {
       continue;
     }
 
-    if (hasOwn(settings, mapping.editorKey)) {
+    for (const alias of mapping.sourceAliases ?? []) {
+      delete serialized[alias];
+    }
+
+    if (hasOwn(settings, mapping.orcaKey)) {
       serialized[mapping.orcaKey] = normalizeEditedValue(
-        settings[mapping.editorKey],
+        settings[mapping.orcaKey],
         mapping.wireShape,
       );
     } else {
