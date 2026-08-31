@@ -332,6 +332,7 @@ final class APIClientTests: XCTestCase {
             of: #""createdAt": "2025-01-01T00:00:00Z""#,
             with: #""createdAt": "2025-01-01T00:00:00""#
         )
+        XCTAssertNotEqual(response, TestJSON.authResponseSuccess)
         mockAPIClient.stubResponse(json: response)
 
         let request = LoginRequest(usernameOrEmail: "admin", password: "pass", rememberMe: true)
