@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure;
+﻿using Farm.Infrastructure.Domain;
+
+namespace Farm.Infrastructure;
 
 /// <summary>
 /// DTO representing a queued harvest operation (for API responses).

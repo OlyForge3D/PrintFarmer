@@ -3,8 +3,6 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using GcodeHarvestQueueItemStatusDto = Farm.Infrastructure.GcodeHarvestQueueItemStatus;
-using GcodeHarvestQueueItemStatusEntity = Farm.Infrastructure.Domain.GcodeHarvestQueueItemStatus;
 
 namespace Farm.Infrastructure.Services.GcodeHarvest;
 
@@ -22,7 +20,7 @@ public class EfGcodeHarvestQueue(AppDbContext db, ILogger<EfGcodeHarvestQueue> l
             PrinterId = printerId,
             QueuedAt = DateTime.UtcNow,
             Priority = priority,
-            Status = (GcodeHarvestQueueItemStatusEntity)GcodeHarvestQueueItemStatusDto.Pending,
+            Status = GcodeHarvestQueueItemStatus.Pending,
             Parameters = JsonSerializer.Serialize(parameters)
         };
 
@@ -37,7 +35,7 @@ public class EfGcodeHarvestQueue(AppDbContext db, ILogger<EfGcodeHarvestQueue> l
     {
         // Get the highest priority pending item, oldest first (FIFO within same priority)
         GcodeHarvestQueueItem? nextItem = await db.GcodeHarvestQueueItems
-            .Where(q => q.Status == (GcodeHarvestQueueItemStatusEntity)GcodeHarvestQueueItemStatusDto.Pending)
+            .Where(q => q.Status == GcodeHarvestQueueItemStatus.Pending)
             .OrderByDescending(q => q.Priority)
             .ThenBy(q => q.QueuedAt)
             .FirstOrDefaultAsync();
@@ -48,19 +46,19 @@ public class EfGcodeHarvestQueue(AppDbContext db, ILogger<EfGcodeHarvestQueue> l
     public async Task<IReadOnlyList<GcodeHarvestQueueItem>> GetPendingForPrinterAsync(Guid printerId)
     {
         return await db.GcodeHarvestQueueItems
-            .Where(q => q.PrinterId == printerId && q.Status == (GcodeHarvestQueueItemStatusEntity)GcodeHarvestQueueItemStatusDto.Pending)
+            .Where(q => q.PrinterId == printerId && q.Status == GcodeHarvestQueueItemStatus.Pending)
             .OrderByDescending(q => q.Priority)
             .ThenBy(q => q.QueuedAt)
             .ToListAsync();
     }
 
-    public async Task<IReadOnlyList<GcodeHarvestQueueItem>> GetQueuedItemsAsync(GcodeHarvestQueueItemStatusDto? status = null)
+    public async Task<IReadOnlyList<GcodeHarvestQueueItem>> GetQueuedItemsAsync(GcodeHarvestQueueItemStatus? status = null)
     {
         IQueryable<GcodeHarvestQueueItem> query = db.GcodeHarvestQueueItems.AsQueryable();
 
         if (status.HasValue)
         {
-            query = query.Where(q => q.Status == (GcodeHarvestQueueItemStatusEntity)status.Value);
+            query = query.Where(q => q.Status == status.Value);
         }
 
         return await query
@@ -78,13 +76,13 @@ public class EfGcodeHarvestQueue(AppDbContext db, ILogger<EfGcodeHarvestQueue> l
         }
 
         // Only allow cancellation of pending items
-        if (item.Status != (GcodeHarvestQueueItemStatusEntity)GcodeHarvestQueueItemStatusDto.Pending)
+        if (item.Status != GcodeHarvestQueueItemStatus.Pending)
         {
             logger.LogWarning("Cannot cancel queue item {QueueItemId} - not in pending status: {Status}", queueItemId, item.Status);
             return false;
         }
 
-        item.Status = (GcodeHarvestQueueItemStatusEntity)GcodeHarvestQueueItemStatusDto.Cancelled;
+        item.Status = GcodeHarvestQueueItemStatus.Cancelled;
         item.CompletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
@@ -97,7 +95,7 @@ public class EfGcodeHarvestQueue(AppDbContext db, ILogger<EfGcodeHarvestQueue> l
         GcodeHarvestQueueItem? item = await db.GcodeHarvestQueueItems.FindAsync(queueItemId);
         if (item != null)
         {
-            item.Status = (GcodeHarvestQueueItemStatusEntity)GcodeHarvestQueueItemStatusDto.Processing;
+            item.Status = GcodeHarvestQueueItemStatus.Processing;
             item.ProcessingStartedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
             logger.LogInformation("Marked queue item {QueueItemId} as processing", queueItemId);
@@ -114,7 +112,7 @@ public class EfGcodeHarvestQueue(AppDbContext db, ILogger<EfGcodeHarvestQueue> l
         GcodeHarvestQueueItem? item = await db.GcodeHarvestQueueItems.FindAsync(queueItemId);
         if (item != null)
         {
-            item.Status = (GcodeHarvestQueueItemStatusEntity)GcodeHarvestQueueItemStatusDto.Completed;
+            item.Status = GcodeHarvestQueueItemStatus.Completed;
             item.CompletedAt = DateTime.UtcNow;
             item.FilesFound = filesFound;
             item.FilesAdded = filesAdded;
@@ -134,7 +132,7 @@ public class EfGcodeHarvestQueue(AppDbContext db, ILogger<EfGcodeHarvestQueue> l
         GcodeHarvestQueueItem? item = await db.GcodeHarvestQueueItems.FindAsync(queueItemId);
         if (item != null)
         {
-            item.Status = (GcodeHarvestQueueItemStatusEntity)GcodeHarvestQueueItemStatusDto.Failed;
+            item.Status = GcodeHarvestQueueItemStatus.Failed;
             item.CompletedAt = DateTime.UtcNow;
             item.ErrorMessage = errorMessage;
             item.ErrorDetails = errorDetails;
