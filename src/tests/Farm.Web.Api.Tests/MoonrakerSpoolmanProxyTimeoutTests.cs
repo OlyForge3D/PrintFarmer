@@ -98,7 +98,7 @@ public class MoonrakerSpoolmanProxyTimeoutTests
         BackendTimeoutSettings timeouts = new()
         {
             StatusPollTimeoutSeconds = 1,
-            PrintControlTimeoutSeconds = 2,
+            PrintControlTimeoutSeconds = 4,
         };
         (MoonrakerClient client, _) = CreateHangingClient(timeouts);
 
@@ -108,8 +108,17 @@ public class MoonrakerSpoolmanProxyTimeoutTests
         stopwatch.Stop();
 
         result.Should().BeNull();
-        stopwatch.Elapsed.Should().BeGreaterThanOrEqualTo(
-            TimeSpan.FromSeconds(timeouts.StatusPollTimeoutSeconds),
-            "a mutating request must not be cut short by the read-only status-poll timeout");
+
+        // Assert against the *print-control* budget, not just >= the status-poll timeout: if the
+        // fix regressed and mutations were incorrectly cut off by the short StatusPollTimeout
+        // (1s), elapsed would still be >= 1s and a weaker ">= StatusPollTimeout" assertion would
+        // pass anyway, hiding the bug. The 3s gap between the two timeouts (1s vs 4s) with a 1s
+        // tolerance window means the assertion can only pass if the *longer* budget - not the
+        // short one - actually gated this call, proving the longer timeout, not the short one,
+        // was used.
+        stopwatch.Elapsed.Should().BeCloseTo(
+            TimeSpan.FromSeconds(timeouts.PrintControlTimeoutSeconds),
+            TimeSpan.FromSeconds(1),
+            "a mutating request must run for the full print-control budget, not the shorter status-poll timeout");
     }
 }
