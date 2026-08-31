@@ -31,8 +31,9 @@ public class SpoolmanServiceTests
 
         SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
-        SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
+        SpoolmanReadResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
 
+        Assert.True(result.Success);
         Assert.Empty(result.Items);
         Assert.Equal(0, result.TotalCount);
     }
@@ -62,8 +63,9 @@ public class SpoolmanServiceTests
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
         SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
-        SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams { Limit = 50 }, CancellationToken.None);
+        SpoolmanReadResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams { Limit = 50 }, CancellationToken.None);
 
+        Assert.True(result.Success);
         Assert.Equal(2, result.Items.Count);
         Assert.Equal(42, result.TotalCount);
         Assert.Contains(result.Items, i => i.Id == 1);
@@ -145,8 +147,9 @@ public class SpoolmanServiceTests
 
         SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
-        SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
+        SpoolmanReadResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
 
+        Assert.True(result.Success);
         _ = Assert.Single(result.Items);
         Assert.Equal(42, result.Items[0].Id);
     }
@@ -478,7 +481,7 @@ public class SpoolmanServiceTests
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
         SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
-        SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(
+        SpoolmanReadResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(
             new SpoolmanSpoolQueryParams
             {
                 Limit = 25,
@@ -492,6 +495,7 @@ public class SpoolmanServiceTests
             CancellationToken.None);
 
         Assert.NotNull(capturedUrl);
+        Assert.True(result.Success);
         Assert.Contains("limit=25", capturedUrl);
         Assert.Contains("offset=50", capturedUrl);
         Assert.Contains("sort=", capturedUrl);
@@ -554,7 +558,73 @@ public class SpoolmanServiceTests
         HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
         SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
-        SpoolmanPagedResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
+        SpoolmanReadResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
+        Assert.True(result.Success);
+        Assert.Empty(result.Items);
+        Assert.Equal(0, result.TotalCount);
+    }
+
+    [Fact]
+    public async Task ListSpoolsAsync_ReturnsSourceUnavailable_OnNonSuccessStatusCode()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
+            new HttpResponseMessage(HttpStatusCode.InternalServerError));
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
+
+        SpoolmanReadResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(SpoolmanReadOutcome.SourceUnavailable, result.Outcome);
+        Assert.Empty(result.Items);
+        Assert.Equal(0, result.TotalCount);
+    }
+
+    [Fact]
+    public async Task ListSpoolsAsync_ReturnsSourceUnavailable_OnInvalidJson()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("not json", Encoding.UTF8, "application/json")
+            });
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
+
+        SpoolmanReadResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(SpoolmanReadOutcome.SourceUnavailable, result.Outcome);
+        Assert.Empty(result.Items);
+        Assert.Equal(0, result.TotalCount);
+    }
+
+    [Fact]
+    public async Task ListSpoolsAsync_ReturnsSourceUnavailable_WhenSendAsyncThrows()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        using ThrowingHttpMessageHandler handler = new ThrowingHttpMessageHandler(new HttpRequestException("connection refused"));
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
+
+        SpoolmanReadResult<SpoolmanSpoolDto> result = await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams(), CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(SpoolmanReadOutcome.SourceUnavailable, result.Outcome);
         Assert.Empty(result.Items);
         Assert.Equal(0, result.TotalCount);
     }
@@ -770,11 +840,22 @@ public class SpoolmanServiceTests
         using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
         SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object, Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
 
-        SpoolmanPagedResult<SpoolmanSpoolDto> result =
+        SpoolmanReadResult<SpoolmanSpoolDto> result =
             await svc.ListSpoolsAsync(new SpoolmanSpoolQueryParams { Limit = 100, Offset = 100 }, CancellationToken.None);
 
+        Assert.True(result.Success);
         Assert.Equal(2, result.Items.Count);
         // Lower bound: 100 (offset) + 2 (items on this page) = 102, not just 2.
         Assert.Equal(102, result.TotalCount);
+    }
+
+    private sealed class ThrowingHttpMessageHandler(Exception exception) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            throw exception;
+        }
     }
 }

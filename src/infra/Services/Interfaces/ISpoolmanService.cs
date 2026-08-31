@@ -37,8 +37,12 @@ public interface ISpoolmanService
     /// </summary>
     /// <param name="queryParams">Query parameters for pagination, filtering, and sorting.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    /// <returns>A paginated result containing matching spools and total count.</returns>
-    Task<SpoolmanPagedResult<SpoolmanSpoolDto>> ListSpoolsAsync(SpoolmanSpoolQueryParams queryParams, CancellationToken ct);
+    /// <returns>
+    /// A result carrying an explicit <see cref="SpoolmanReadOutcome"/> alongside the matching
+    /// spools and total count, so a failed read (non-success HTTP status, invalid JSON, or a
+    /// thrown exception) is never indistinguishable from a genuinely empty inventory (#2312).
+    /// </returns>
+    Task<SpoolmanReadResult<SpoolmanSpoolDto>> ListSpoolsAsync(SpoolmanSpoolQueryParams queryParams, CancellationToken ct);
 
     /// <summary>
     /// Gets a list of all filament types (product definitions) from the configured Spoolman server.
