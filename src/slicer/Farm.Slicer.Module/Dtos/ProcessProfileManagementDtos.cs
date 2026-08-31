@@ -89,6 +89,40 @@ public class ProcessProfileResponseDto
 }
 
 /// <summary>
+/// Response DTO for the <c>GET /api/slicer/profiles</c> list operation (see
+/// <c>ProfilesController.GetProfilesAsync</c>). This is a distinct, name-keyed projection over
+/// composite <c>SlicerProfileDto</c> entries — not the same shape as
+/// <see cref="ProcessProfileResponseDto"/> returned by the sibling by-id operations, and not the
+/// same shape as <c>ProcessProfileListItemDto</c> (declared in <c>ProfileListDtos.cs</c>) used by
+/// other list endpoints on this controller: notably <see cref="Id"/> holds the process profile's
+/// <b>name</b>, not its GUID, and several values (e.g. <see cref="PrintSpeed"/>,
+/// <see cref="NozzleTemperature"/>, <see cref="BedTemperature"/>, <see cref="Material"/>) prefer
+/// the linked filament profile's value over the process profile's own default.
+/// </summary>
+public class ProcessProfileListEntryDto
+{
+    public string Id { get; set; } = string.Empty;
+
+    public string Name { get; set; } = string.Empty;
+
+    public double LayerHeight { get; set; }
+
+    public int InfillPercentage { get; set; }
+
+    public int PrintSpeed { get; set; }
+
+    public int NozzleTemperature { get; set; }
+
+    public int BedTemperature { get; set; }
+
+    public bool Supports { get; set; }
+
+    public string Material { get; set; } = string.Empty;
+
+    public string Quality { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// Request DTO for importing a process profile from raw slicer JSON.
 /// </summary>
 public class ImportProcessProfileDto

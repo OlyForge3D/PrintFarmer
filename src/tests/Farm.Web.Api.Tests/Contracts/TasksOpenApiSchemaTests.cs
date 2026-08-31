@@ -19,33 +19,37 @@ public sealed class TasksOpenApiSchemaTests(OpenApiDocumentFixture fixture)
     private readonly JsonDocument _document = fixture.Document;
 
     /// <summary>
-    /// <b>Characterizes a confirmed mismatch (finding).</b> <c>GET /api/tasks</c> with no <c>view</c>
+    /// <b>Fixed by issue #2283 (finding 3 of #2261).</b> <c>GET /api/tasks</c> with no <c>view</c>
     /// query parameter is documented by its own operation summary as preserving "the existing flat
     /// list contract" — and the #2238 corpus (<c>tasks.empty-collection.json</c>, captured via a real
     /// HTTP round trip with no <c>view</c> parameter) proves the real default-view payload is a JSON
-    /// <em>array</em>. The OpenAPI document nonetheless declares a single <c>ShiftPlanDto</c> object
-    /// schema for the operation's only documented 200 response — because native OpenAPI records one
-    /// response schema per operation regardless of query-string-driven branching in the handler. A
-    /// client generated from this document would be typed for the <c>view=shift</c> response shape
-    /// even when calling the default (and far more common) flat-list variant.
+    /// <em>array</em>. Native OpenAPI generation records only one response schema per status code, and
+    /// resolves it from the last-declared <c>[ProducesResponseType(200)]</c> attribute on the action;
+    /// the action's attributes were reordered so the <c>UserTaskDto</c> array (declared last) — not
+    /// <c>ShiftPlanDto</c> — is now the documented 200 schema, matching what the default (no
+    /// <c>view</c> parameter) call path actually returns.
     /// </summary>
     [Fact]
-    public void GetTasks_DefaultViewResponseSchema_IsDocumentedAsShiftPlanObject_NotTheFlatArrayItActuallyReturns()
+    public void GetTasks_DefaultViewResponseSchema_IsDocumentedAsFlatArray_MatchingWhatItActuallyReturns()
     {
         JsonElement operation = OpenApiSchemaTestSupport.GetOperation(_document, "/api/tasks", "get");
         JsonElement? responseSchema = OpenApiSchemaTestSupport.GetResponseSchema(operation);
         _ = responseSchema.Should().NotBeNull("the operation documents a 200 response with a JSON schema");
 
-        _ = responseSchema!.Value.GetProperty("$ref").GetString()
-            .Should().Be("#/components/schemas/ShiftPlanDto",
-                "the document's only schema for GET /api/tasks is the shift-plan (view=shift) shape");
+        _ = OpenApiSchemaTestSupport.GetTypes(responseSchema!.Value).Should().Contain("array",
+            "GET /api/tasks now documents its 200 response as a flat JSON array, matching the default-view payload");
+
+        JsonElement items = responseSchema.Value.GetProperty("items");
+        _ = items.GetProperty("$ref").GetString()
+            .Should().Be("#/components/schemas/UserTaskDto",
+                "the array's element schema should be the same UserTaskDto sibling operations use");
 
         string emptyCollectionJson = File.ReadAllText(
             Path.Join(WireContractCorpusPaths.ApiRoot, "tasks", "tasks.empty-collection.json"));
         using JsonDocument corpusFixture = JsonDocument.Parse(emptyCollectionJson);
         _ = corpusFixture.RootElement.ValueKind.Should().Be(JsonValueKind.Array,
             "the #2238 corpus proves the real default-view (no 'view' query parameter) payload is a flat JSON array, " +
-            "not the ShiftPlanDto object the OpenAPI schema documents");
+            "which the OpenAPI schema now correctly documents");
     }
 
     /// <summary>

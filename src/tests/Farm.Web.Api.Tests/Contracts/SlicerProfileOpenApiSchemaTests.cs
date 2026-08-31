@@ -14,32 +14,39 @@ public sealed class SlicerProfileOpenApiSchemaTests(OpenApiDocumentFixture fixtu
     private readonly JsonDocument _document = fixture.Document;
 
     /// <summary>
-    /// <b>Characterizes a confirmed mismatch (finding).</b> <c>GET /api/slicer/profiles</c>'s 200
-    /// response schema is <c>{"type":"array"}</c> with no <c>items</c> key — the array element
-    /// shape is completely undocumented. This is not merely an under-annotated version of the
-    /// sibling <c>ProcessProfileResponseDto</c> shape: per
-    /// <c>ProfilesController.GetProfilesAsync</c>, this action actually returns
-    /// <c>IEnumerable&lt;object&gt;</c> of an anonymous projection with a distinct property set
-    /// (<c>id</c>/<c>name</c> both set to the process-profile name, <c>layerHeight</c>,
-    /// <c>infillPercentage</c>, <c>printSpeed</c>, <c>nozzleTemperature</c>,
-    /// <c>bedTemperature</c>, <c>supports</c>, <c>material</c>, <c>quality</c>) that has no
-    /// corresponding named DTO at all and does not match <c>ProcessProfileResponseDto</c>
-    /// (returned by the sibling <c>POST /api/slicer/profiles</c> and
-    /// <c>GET /api/slicer/profiles/{id}</c> operations exercised below). So the missing
-    /// <c>items</c> key is not just an annotation gap — the real element shape could not be
-    /// expressed by reusing <c>ProcessProfileResponseDto</c> even if a schema author tried;
-    /// see finding issue #2261.
+    /// <b>Fixed by issue #2283 (finding 5 of #2261).</b> <c>GET /api/slicer/profiles</c>'s 200
+    /// response schema previously was <c>{"type":"array"}</c> with no <c>items</c> key — the array
+    /// element shape was completely undocumented. Per <c>ProfilesController.GetProfilesAsync</c>,
+    /// this action actually returns a projection with a distinct property set (<c>id</c>/<c>name</c>
+    /// both set to the process-profile name, <c>layerHeight</c>, <c>infillPercentage</c>,
+    /// <c>printSpeed</c>, <c>nozzleTemperature</c>, <c>bedTemperature</c>, <c>supports</c>,
+    /// <c>material</c>, <c>quality</c>) that does not match the sibling <c>ProcessProfileResponseDto</c>
+    /// shape (returned by <c>POST /api/slicer/profiles</c> and <c>GET /api/slicer/profiles/{id}</c>
+    /// below) — so reusing <c>ProcessProfileResponseDto</c> verbatim would misdocument the real
+    /// payload. The action now returns a strongly-typed <c>ProcessProfileListEntryDto</c> projection
+    /// and is annotated accordingly, giving the array element shape a named, accurate <c>$ref</c>
+    /// the same way the sibling operations do.
     /// </summary>
     [Fact]
-    public void GetProfilesList_ResponseSchema_IsUntypedArray_WithNoItemsSchema()
+    public void GetProfilesList_ResponseSchema_IsArray_WithItemsResolvingToProcessProfileListEntryDto()
     {
         JsonElement operation = OpenApiSchemaTestSupport.GetOperation(_document, "/api/slicer/profiles", "get");
         JsonElement responseSchema = OpenApiSchemaTestSupport.GetResponseSchema(operation)!.Value;
 
         _ = OpenApiSchemaTestSupport.GetTypes(responseSchema).Should().BeEquivalentTo(new[] { "array" });
-        _ = responseSchema.TryGetProperty("items", out _).Should().BeFalse(
-                "the schema for GET /api/slicer/profiles currently declares an array with no 'items' key, " +
-                "leaving the element shape completely undocumented");
+        _ = responseSchema.TryGetProperty("items", out JsonElement items).Should().BeTrue(
+                "GET /api/slicer/profiles now declares an 'items' schema for its array element");
+        _ = items.GetProperty("$ref").GetString().Should().Be("#/components/schemas/ProcessProfileListEntryDto",
+            "the array's element schema is now a named DTO matching the real projection the handler returns");
+
+        JsonElement processProfileListEntryDto = OpenApiSchemaTestSupport.ResolveRef(_document, items);
+        var expectedPropertyNames = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "id", "name", "layerHeight", "infillPercentage", "printSpeed",
+            "nozzleTemperature", "bedTemperature", "supports", "material", "quality",
+        };
+        _ = OpenApiSchemaTestSupport.GetPropertyNames(processProfileListEntryDto).Should().BeEquivalentTo(expectedPropertyNames,
+            "the documented shape should match exactly what ProfilesController.GetProfilesAsync's projection returns");
     }
 
     /// <summary>

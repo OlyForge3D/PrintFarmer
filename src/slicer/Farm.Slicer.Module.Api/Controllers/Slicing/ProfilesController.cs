@@ -312,7 +312,7 @@ public class ProfilesController(
     /// <param name="printerId">Optional printer ID to filter profiles.</param>
     /// <param name="slicerType">Optional slicer type to filter profiles.</param>
     [HttpGet]
-    [ProducesResponseType(typeof(IEnumerable<object>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(IEnumerable<ProcessProfileListEntryDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetProfilesAsync([FromQuery] string? printerId = null, [FromQuery] string? slicerType = null)
     {
         _ = printerId;
@@ -322,20 +322,20 @@ public class ProfilesController(
         {
             IReadOnlyList<SlicerProfileDto> allProfiles = await _profilesService.GetProfilesAsync(CancellationToken.None);
 
-            IReadOnlyList<object> result = allProfiles
+            IReadOnlyList<ProcessProfileListEntryDto> result = allProfiles
                 .Where(p => p.ProcessProfile != null)
-                .Select(p => (object)new
+                .Select(p => new ProcessProfileListEntryDto
                 {
-                    id = p.ProcessProfile!.Name,
-                    name = p.ProcessProfile!.Name,
-                    layerHeight = p.ProcessProfile!.LayerHeight,
-                    infillPercentage = p.ProcessProfile!.InfillPercentage,
-                    printSpeed = p.FilamentProfile?.PrintSpeed ?? p.ProcessProfile!.PrintSpeed,
-                    nozzleTemperature = p.FilamentProfile?.NozzleTemperature ?? 210,
-                    bedTemperature = p.FilamentProfile?.BedTemperature ?? 60,
-                    supports = p.ProcessProfile!.Supports,
-                    material = p.FilamentProfile?.Material ?? "Unknown",
-                    quality = p.ProcessProfile!.Quality
+                    Id = p.ProcessProfile!.Name,
+                    Name = p.ProcessProfile!.Name,
+                    LayerHeight = p.ProcessProfile!.LayerHeight,
+                    InfillPercentage = p.ProcessProfile!.InfillPercentage,
+                    PrintSpeed = p.FilamentProfile?.PrintSpeed ?? p.ProcessProfile!.PrintSpeed,
+                    NozzleTemperature = p.FilamentProfile?.NozzleTemperature ?? 210,
+                    BedTemperature = p.FilamentProfile?.BedTemperature ?? 60,
+                    Supports = p.ProcessProfile!.Supports,
+                    Material = p.FilamentProfile?.Material ?? "Unknown",
+                    Quality = p.ProcessProfile!.Quality
                 })
                 .ToList();
 
