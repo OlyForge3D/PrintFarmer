@@ -7,6 +7,27 @@
     "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
   },
   {
+    "Path": "api/inventory/harvest.populated.json",
+    "Endpoint": "POST /api/job-queue/{id}/harvest",
+    "ProducingTest": "Farm.Web.Api.Tests.Contracts.InventoryContractTests.GetPartsInventoryEndpoints_PopulatedResponses_MatchCorpusAsync",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "0159b20b5481636fef00ce98b154ab652bb26d8f"
+  },
+  {
+    "Path": "api/print-jobs/job.minimal-missing-optional.json",
+    "Endpoint": "GET /api/job-queue/{id}",
+    "ProducingTest": "PrintQueueContractTests.GetJob_MinimalPrintJob_OmitsOptionalKeysAndMatchesCorpusAsync",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "3e25a6550beecb010514b0765ece3fff4792ff7e"
+  },
+  {
+    "Path": "api/print-jobs/job.populated.json",
+    "Endpoint": "GET /api/job-queue/{id}",
+    "ProducingTest": "PrintQueueContractTests.GetJob_PopulatedPrintJob_UsesExactEnumTokensAndMatchesCorpusAsync",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "3e25a6550beecb010514b0765ece3fff4792ff7e"
+  },
+  {
     "Path": "api/print-queue/queue.empty-collection.json",
     "Endpoint": "GET /api/job-queue",
     "ProducingTest": "PrintQueueContractTests.GetQueue_NoPrinters_ReturnsEmptyCollection",
