@@ -1,0 +1,175 @@
+name: Monolith smoke (wire-contract corpus)
+
+# =============================================================================
+# Monolith browser/API smoke journeys (issue #2286, epic #2237).
+#
+# A NEW, standalone workflow — deliberately not a change to ci.yml, per the
+# epic's file-ownership matrix (#2286 non-goals: "do NOT edit ci.yml"). This
+# is not a deployment-script regression suite either, so it is not folded
+# into deployment-tests.yml: that workflow's jobs exercise
+# scripts/deploy-docker.sh and generated Docker/nginx config on ubuntu-latest
+# with Docker Compose, whereas this job boots the real .NET API and React
+# app directly (no containers) and drives them with a browser.
+#
+# Scope (bounded, per #2286's acceptance criteria — NOT the whole Playwright
+# estate under src/Web/ReactApp/e2e/, and NOT tests/ui-validation/):
+#   1. Start the API on :5245 (isolated, seeded SQLite DB) and the React app
+#      on :3000 (Playwright's own `webServer` in playwright.config.ts starts
+#      the Vite dev server; see src/Web/ReactApp/e2e/monolith-smoke/).
+#   2. Run a small set of authenticated browser journeys covering one
+#      admin/settings surface (Admin Control Center overview) and one
+#      printer/queue/task surface (Print Queue timeline + direct Tasks API).
+#   3. Assert intercepted response payloads against
+#      fixtures/wire-contracts/api/** via src/Web/ReactApp/src/test/
+#      wireContractShape.ts (built on the existing wireContracts.ts loader),
+#      not just rendered text.
+#   4. Prove the assertion is non-vacuous with a mutation control
+#      (corpus-mutation-control-smoke.spec.ts renames a key in a cloned,
+#      in-memory fixture and shows the journey itself fail).
+#
+# fixtures/wire-contracts/** is a read-only corpus owned by #2238 — this
+# workflow only reads it, and never writes to it.
+# =============================================================================
+
+on:
+  pull_request:
+    paths:
+      - 'src/Web/ReactApp/e2e/monolith-smoke/**'
+      - 'src/Web/ReactApp/src/test/wireContract*.ts'
+      - 'src/Web/ReactApp/playwright.config.ts'
+      - 'src/Web/ReactApp/package.json'
+      - 'src/Web/ReactApp/package-lock.json'
+      - 'fixtures/wire-contracts/**'
+      - 'src/api/**'
+      - 'src/infra/**'
+      - '.github/workflows/monolith-smoke.yml'
+  push:
+    branches:
+      - development
+      - main
+    paths:
+      - 'src/Web/ReactApp/e2e/monolith-smoke/**'
+      - 'src/Web/ReactApp/src/test/wireContract*.ts'
+      - 'fixtures/wire-contracts/**'
+      - '.github/workflows/monolith-smoke.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: monolith-smoke-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  monolith-smoke:
+    name: Monolith browser/API smoke journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # The isolated dev SQLite DB this job seeds is created fresh in
+      # ${{ runner.temp }} on every run — never a checked-out or shared path.
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://localhost:5245
+      DB_PROVIDER: sqlite
+      NetworkDiscovery__EnableDiscovery: "false"
+      # Required for the API host to start at all: SlicerApiKeyStartupValidationService
+      # throws an unhandled startup exception without a configured shared key.
+      # This value has no meaning outside this ephemeral CI run.
+      WorkerAuth__SharedKey: monolith-smoke-ci-worker-key
+      API_BASE_URL: http://localhost:5245
+      BASE_URL: http://localhost:3000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: "npm"
+          cache-dependency-path: src/Web/ReactApp/package-lock.json
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore .NET
+        working-directory: src
+        run: dotnet restore ./farm-web.sln
+
+      - name: Build monolith API
+        working-directory: src
+        run: dotnet build ./api/Farm.Web.Api.csproj -c Debug --no-restore
+
+      - name: Install frontend deps
+        working-directory: src/Web/ReactApp
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: src/Web/ReactApp
+        run: npx playwright install --with-deps chromium
+
+      - name: Start monolith API (seeded, isolated SQLite DB)
+        working-directory: src
+        env:
+          ConnectionStrings__Default: Data Source=${{ runner.temp }}/monolith-smoke.db
+        run: |
+          # setsid detaches into its own process group so the whole tree
+          # (dotnet run's launcher + the actual Farm.Web.Api child process
+          # it forks) can be killed together via that group id, rather than
+          # `kill`ing only the launcher PID and leaving the API child alive.
+          # --no-build: the previous step already built the API; starting
+          # from a prebuilt DLL keeps the health-check wait bounded by host
+          # startup + DB seeding time only, not a cold build too.
+          setsid nohup dotnet run --project ./api/Farm.Web.Api.csproj --no-launch-profile --no-build \
+            > ${{ runner.temp }}/monolith-smoke-api.log 2>&1 &
+          echo "$!" > ${{ runner.temp }}/monolith-smoke-api.pid
+
+      - name: Wait for API health check
+        run: |
+          for i in $(seq 1 90); do
+            if curl --fail --silent --output /dev/null "http://localhost:5245/healthz"; then
+              echo "API is healthy."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::API did not become healthy within the timeout." >&2
+          cat "${{ runner.temp }}/monolith-smoke-api.log" || true
+          exit 1
+
+      - name: Run monolith smoke journeys
+        working-directory: src/Web/ReactApp
+        run: npm run test:e2e:monolith-smoke
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: monolith-smoke-playwright-report
+          path: src/Web/ReactApp/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload API log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: monolith-smoke-api-log
+          path: ${{ runner.temp }}/monolith-smoke-api.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop monolith API
+        if: always()
+        run: |
+          if [ -f "${{ runner.temp }}/monolith-smoke-api.pid" ]; then
+            pid="$(cat "${{ runner.temp }}/monolith-smoke-api.pid")"
+            # Negative PID targets the whole process group setsid created,
+            # so the dotnet launcher and its Farm.Web.Api child both stop.
+            kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+          fi

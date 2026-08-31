@@ -11,6 +11,73 @@ npm run test:e2e:chromium            # Chromium only
 npm run test:e2e -- --project=firefox  # Firefox only
 ```
 
+## Monolith Smoke Journeys (Wire-Contract Corpus)
+
+`e2e/monolith-smoke/` (issue #2286) is a small, bounded set of authenticated
+browser/API journeys against the real monolith API + React app that assert
+**intercepted response payloads** — not just rendered text — structurally
+against the canonical, read-only wire-contract corpus at
+`fixtures/wire-contracts/api/**` (issue #2238), via the shape comparator at
+`src/test/wireContractShape.ts` built on the existing `src/test/
+wireContracts.ts` loader.
+
+This is deliberately narrow: it is **not** a conversion of the other 40+
+existing e2e specs under `e2e/`, and it does not merge with
+`tests/ui-validation/`. It covers exactly:
+
+| Spec | Surface | Endpoint | Corpus fixture |
+|------|---------|----------|-----------------|
+| `admin-overview-smoke.spec.ts` | Admin/settings | `GET /api/admin/overview` | `api/admin-overview/overview.live-shape.json` |
+| `print-queue-smoke.spec.ts` | Printer/queue | `GET /api/job-queue` (Print Queue → Timeline tab) | `api/print-queue/queue.empty-collection.json` |
+| `tasks-widget-smoke.spec.ts` | Task | `POST` / `GET /api/tasks` | `api/tasks/tasks.populated.json`, `api/tasks/tasks.empty-collection.json` |
+| `corpus-mutation-control-smoke.spec.ts` | (meta) | reuses `GET /api/admin/overview` | proves the shape assertion is non-vacuous |
+
+`print-queue-smoke.spec.ts` (rather than the dashboard's printer-gated
+`TasksWidget` "Create Task" UI flow) is the printer/queue journey because
+`PrinterDashboard.tsx` only renders any dashboard widget once at least one
+printer exists, and a fresh SQLite dev DB cannot currently have one seeded:
+`DatabaseInitializer.SeedAllAsync`'s YAML catalog seed pipeline throws
+partway through on a pre-existing, out-of-scope FK-constraint failure in
+`SeedNozzlesAsync`, so `SeedPrinterModelsAsync` never runs and there is no
+"Unknown" `PrinterModel` for `PrintersService` to fall back to. The Print
+Queue page's Timeline tab has no such printer-gated empty state and always
+issues a real `GET /api/job-queue` call, so it exercises a genuine,
+network-intercepted browser journey without needing a printer to exist.
+Because the corpus's own `queue.empty-collection.json` fixture is `[]`
+(there is no populated-element template on a printer-less DB), this
+particular assertion only proves array kind/emptiness, not per-element
+structure — the populated-object shape check is instead covered by
+`tasks-widget-smoke.spec.ts` against `tasks.populated.json`.
+
+### Running locally
+
+1. Start the API against an isolated, seeded SQLite DB:
+
+   ```bash
+   cd src
+   $env:ASPNETCORE_ENVIRONMENT = "Development"
+   $env:ASPNETCORE_URLS = "http://localhost:5245"
+   $env:DB_PROVIDER = "sqlite"
+   $env:ConnectionStrings__Default = "Data Source=$env:TEMP\monolith-smoke.db"
+   $env:NetworkDiscovery__EnableDiscovery = "false"
+   # Required or the API host throws an unhandled startup exception
+   # (SlicerApiKeyStartupValidationService).
+   $env:WorkerAuth__SharedKey = "local-dev-worker-key"
+   dotnet run --project ./api/Farm.Web.Api.csproj --no-launch-profile
+   ```
+
+2. Run the suite — Playwright's own `webServer` config starts the React dev
+   server automatically:
+
+   ```bash
+   cd src/Web/ReactApp
+   npm run test:e2e:monolith-smoke
+   ```
+
+CI runs the same suite in `.github/workflows/monolith-smoke.yml` (a new,
+standalone workflow — not a change to `ci.yml` or `deployment-tests.yml`,
+per the epic's file-ownership matrix).
+
 ## Running E2E Tests with the Moonraker Emulator
 
 Printer-facing emulator specs live in `e2e/emulator/` (the `printer-*.spec.ts`,
