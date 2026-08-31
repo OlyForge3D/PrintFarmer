@@ -75,17 +75,16 @@ public sealed class TasksOpenApiSchemaTests(OpenApiDocumentFixture fixture)
     }
 
     /// <summary>
-    /// <b>Characterizes a confirmed mismatch (finding).</b> The <c>UserTaskDto</c> schema's
-    /// "required" list names every one of its 18 properties — including the 8 that the #2238
-    /// corpus proves are routinely <em>absent</em> from the wire payload when null (the API's
-    /// <c>DefaultIgnoreCondition = WhenWritingNull</c> MVC option, which — like the enum-string
-    /// converter — has no influence on OpenAPI schema generation; only the separate
-    /// <c>ConfigureHttpJsonOptions</c> options object does, and it sets neither). A client
-    /// generated from this schema would treat these 8 properties as always-present non-nullable
-    /// values, when the real payload routinely omits them entirely.
+    /// <b>Fixed by issue #2261.</b> The <c>UserTaskDto</c> schema's "required" list no longer
+    /// names the 8 properties that the #2238 corpus proves are routinely <em>absent</em> from
+    /// the wire payload when null: <c>ConfigureHttpJsonOptions</c> now mirrors MVC's
+    /// <c>DefaultIgnoreCondition = WhenWritingNull</c>, and <c>UserTaskDto</c> was converted from
+    /// a positional record (whose constructor parameters are all non-optional, and therefore all
+    /// "required" regardless of nullability) to a property-only record that marks only the 11
+    /// always-present properties <c>required</c>.
     /// </summary>
     [Fact]
-    public void CreateTask_ResponseSchema_RequiredList_IncludesPropertiesCorpusProvesAreOmittedWhenNull()
+    public void CreateTask_ResponseSchema_RequiredList_ExcludesPropertiesCorpusProvesAreOmittedWhenNull()
     {
         JsonElement operation = OpenApiSchemaTestSupport.GetOperation(_document, "/api/tasks", "post");
         JsonElement responseSchema = OpenApiSchemaTestSupport.GetResponseSchema(operation, "201")!.Value;
@@ -97,28 +96,41 @@ public sealed class TasksOpenApiSchemaTests(OpenApiDocumentFixture fixture)
             "description", "dueAt", "completedAt", "metadataJson",
             "anchorAtUtc", "windowStartUtc", "windowEndUtc", "sourceId",
         ];
+        string[] corpusProvenAlwaysPresent =
+        [
+            "id", "taskType", "entityType", "entityId", "title", "status", "priority",
+            "createdAt", "relatedEntityCount", "anchorKind", "sourceKind",
+        ];
 
         foreach (string propertyName in corpusProvenOmittable)
         {
-            _ = required.Should().Contain(propertyName,
-                $"the schema currently (incorrectly) marks '{propertyName}' required even though the corpus " +
-                "proves it is omitted from the wire payload when null");
+            _ = required.Should().NotContain(propertyName,
+                $"the corpus proves '{propertyName}' is omitted from the wire payload when null");
         }
+
+        _ = required.Should().BeEquivalentTo(corpusProvenAlwaysPresent,
+            "these are exactly the properties the corpus proves are always present on the wire");
     }
 
     /// <summary>
-    /// <b>Characterizes a confirmed mismatch (finding), root cause.</b> <c>status</c>/<c>priority</c>/
-    /// <c>taskType</c> rely solely on the global <c>JsonStringEnumConverter</c> registered in
-    /// <c>ControllerStartup</c>'s MVC-only JSON options — which OpenAPI schema generation never
-    /// consults. Each component schema is therefore documented as a plain <c>integer</c> with no
-    /// "enum" token list, even though the #2238 corpus proves the real wire value is always a
-    /// PascalCase string token (e.g. <c>"status": "Pending"</c>).
+    /// <b>Fixed by issue #2261.</b> Before the fix, <c>status</c>/<c>priority</c>/<c>taskType</c>
+    /// were documented as a plain <c>type: integer</c> with no "enum" token list at all. Now that
+    /// the global <c>JsonStringEnumConverter</c> is also registered on
+    /// <c>ConfigureHttpJsonOptions</c> (previously MVC-only, via <c>ControllerStartup</c>), each
+    /// component schema is documented purely via its "enum" token list — .NET's OpenAPI schema
+    /// exporter's convention for a converter-driven string enum: no explicit "type" keyword, since
+    /// the string-typed "enum" array is self-describing — matching the #2238 corpus's real wire
+    /// value (e.g. <c>"status": "Pending"</c>).
     /// </summary>
     [Theory]
-    [InlineData("status", "UserTaskStatus")]
-    [InlineData("priority", "UserTaskPriority")]
-    [InlineData("taskType", "UserTaskType")]
-    public void CreateTask_ResponseSchema_PlainEnumProperties_AreDocumentedAsIntegerNotString(string propertyName, string componentSchemaName)
+    [InlineData("status", "UserTaskStatus", new[] { "Pending", "InProgress", "Completed", "Dismissed", "Skipped" })]
+    [InlineData("priority", "UserTaskPriority", new[] { "Low", "Normal", "High" })]
+    [InlineData("taskType", "UserTaskType", new[]
+    {
+        "None", "ProfileImport", "MaintenanceDue", "FirmwareUpdate", "CalibrationNeeded", "Custom",
+        "FailureClear", "HarvestReady", "FilamentRunout", "MaintenanceInIdleWindow", "SpoolRestock", "PrintedPartRestock",
+    })]
+    public void CreateTask_ResponseSchema_PlainEnumProperties_AreDocumentedAsStringWithEnumTokens(string propertyName, string componentSchemaName, string[] expectedTokens)
     {
         JsonElement operation = OpenApiSchemaTestSupport.GetOperation(_document, "/api/tasks", "post");
         JsonElement responseSchema = OpenApiSchemaTestSupport.GetResponseSchema(operation, "201")!.Value;
@@ -127,11 +139,11 @@ public sealed class TasksOpenApiSchemaTests(OpenApiDocumentFixture fixture)
         _ = property.GetProperty("$ref").GetString().Should().Be($"#/components/schemas/{componentSchemaName}");
         JsonElement enumSchema = OpenApiSchemaTestSupport.ResolveRef(_document, property);
 
-        _ = OpenApiSchemaTestSupport.GetTypes(enumSchema).Should().BeEquivalentTo(new[] { "integer" },
-            $"'{componentSchemaName}' relies solely on the MVC-only global JsonStringEnumConverter, which OpenAPI " +
-            "schema generation (ConfigureHttpJsonOptions) does not consult");
-        _ = OpenApiSchemaTestSupport.GetEnumTokens(enumSchema).Should().BeNull(
-            "an integer-typed schema with no property-level converter carries no string enum token list");
+        _ = OpenApiSchemaTestSupport.GetTypes(enumSchema).Should().BeEmpty(
+            $"'{componentSchemaName}' now relies on the global JsonStringEnumConverter registered on both " +
+            "ConfigureHttpJsonOptions and MVC's AddJsonOptions");
+        _ = OpenApiSchemaTestSupport.GetEnumTokens(enumSchema).Should().BeEquivalentTo(expectedTokens,
+            "the schema now lists every enum member as a string token");
     }
 
     /// <summary>

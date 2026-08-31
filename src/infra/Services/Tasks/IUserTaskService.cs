@@ -38,26 +38,58 @@ public record CreateManualTaskDto(
 /// canonical lowercase camelCase tokens working across HTTP and SignalR.
 /// </para>
 /// </remarks>
-public record UserTaskDto(
-    Guid Id,
-    UserTaskType TaskType,
-    string EntityType,
-    Guid EntityId,
-    string Title,
-    string? Description,
-    UserTaskStatus Status,
-    UserTaskPriority Priority,
-    DateTime CreatedAt,
-    DateTime? DueAt,
-    DateTime? CompletedAt,
-    int RelatedEntityCount,
-    string? MetadataJson,
-    [property: JsonConverter(typeof(UserTaskAnchorKindJsonConverter))] UserTaskAnchorKind AnchorKind,
-    DateTime? AnchorAtUtc,
-    DateTime? WindowStartUtc,
-    DateTime? WindowEndUtc,
-    [property: JsonConverter(typeof(UserTaskSourceKindJsonConverter))] UserTaskSourceKind SourceKind,
-    string? SourceId);
+/// <remarks>
+/// A property-only record (issue #2261), not a positional one: the 8 properties below marked
+/// without <c>required</c> are corpus-proven omitted-when-null on the wire (see
+/// <c>DefaultIgnoreCondition = WhenWritingNull</c>), so they must NOT appear in the generated
+/// OpenAPI schema's "required" list. A positional record can't express that distinction here —
+/// all of its constructor parameters would be non-optional and therefore "required" regardless
+/// of nullability — and the nullable properties are interleaved with required ones, so trailing
+/// default values (the pattern used elsewhere, e.g. <c>AttentionItemDto</c>) isn't available
+/// without reordering the wire property order.
+/// </remarks>
+public sealed record UserTaskDto
+{
+    public required Guid Id { get; init; }
+
+    public required UserTaskType TaskType { get; init; }
+
+    public required string EntityType { get; init; }
+
+    public required Guid EntityId { get; init; }
+
+    public required string Title { get; init; }
+
+    public string? Description { get; init; }
+
+    public required UserTaskStatus Status { get; init; }
+
+    public required UserTaskPriority Priority { get; init; }
+
+    public required DateTime CreatedAt { get; init; }
+
+    public DateTime? DueAt { get; init; }
+
+    public DateTime? CompletedAt { get; init; }
+
+    public required int RelatedEntityCount { get; init; }
+
+    public string? MetadataJson { get; init; }
+
+    [JsonConverter(typeof(UserTaskAnchorKindJsonConverter))]
+    public required UserTaskAnchorKind AnchorKind { get; init; }
+
+    public DateTime? AnchorAtUtc { get; init; }
+
+    public DateTime? WindowStartUtc { get; init; }
+
+    public DateTime? WindowEndUtc { get; init; }
+
+    [JsonConverter(typeof(UserTaskSourceKindJsonConverter))]
+    public required UserTaskSourceKind SourceKind { get; init; }
+
+    public string? SourceId { get; init; }
+}
 
 /// <summary>
 /// A group of tasks sharing the same anchor bucket in the shift-plan view.

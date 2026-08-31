@@ -34,11 +34,11 @@ public record QueueAssignmentResultDto(
 public class QueueOverviewDto
 #pragma warning restore SA1402 // File may only contain a single type
 {
-    public Guid PrinterId { get; set; }
+    public required Guid PrinterId { get; set; }
 
-    public string PrinterName { get; set; } = string.Empty;
+    public required string PrinterName { get; set; } = string.Empty;
 
-    public string PrinterModel { get; set; } = string.Empty;
+    public required string PrinterModel { get; set; } = string.Empty;
 
     /// <summary>
     /// Slicer-specific model names that map to this printer's model (e.g., "COREONEL", "MK4IS").
@@ -46,9 +46,9 @@ public class QueueOverviewDto
     /// </summary>
     public List<string>? ModelAliases { get; set; }
 
-    public bool IsAvailable { get; set; }
+    public required bool IsAvailable { get; set; }
 
-    public int QueuedJobsCount { get; set; }
+    public required int QueuedJobsCount { get; set; }
 
     public Guid? CurrentJobId { get; set; }
 

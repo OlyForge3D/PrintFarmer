@@ -477,26 +477,28 @@ public class UserTaskService(
     {
         int relatedCount = ParseRelatedEntityIds(task.RelatedEntityIdsJson).Count;
 
-        return new UserTaskDto(
-            task.Id,
-            task.TaskType,
-            task.EntityType,
-            task.EntityId,
-            task.Title,
-            task.Description,
-            task.Status,
-            task.Priority,
-            task.CreatedAt,
-            task.DueAt,
-            task.CompletedAt,
-            relatedCount,
-            task.MetadataJson,
-            task.AnchorKind,
-            task.AnchorAtUtc,
-            task.WindowStartUtc,
-            task.WindowEndUtc,
-            task.SourceKind,
-            task.SourceId);
+        return new UserTaskDto
+        {
+            Id = task.Id,
+            TaskType = task.TaskType,
+            EntityType = task.EntityType,
+            EntityId = task.EntityId,
+            Title = task.Title,
+            Description = task.Description,
+            Status = task.Status,
+            Priority = task.Priority,
+            CreatedAt = task.CreatedAt,
+            DueAt = task.DueAt,
+            CompletedAt = task.CompletedAt,
+            RelatedEntityCount = relatedCount,
+            MetadataJson = task.MetadataJson,
+            AnchorKind = task.AnchorKind,
+            AnchorAtUtc = task.AnchorAtUtc,
+            WindowStartUtc = task.WindowStartUtc,
+            WindowEndUtc = task.WindowEndUtc,
+            SourceKind = task.SourceKind,
+            SourceId = task.SourceId,
+        };
     }
 
     private static List<Guid> ParseRelatedEntityIds(string? json)
