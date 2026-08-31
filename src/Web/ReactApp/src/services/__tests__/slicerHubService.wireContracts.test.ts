@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadWireContractFixture } from '@/test/wireContracts';
-import type { SliceJobEvent } from '@/services/slicerHubService';
+import type { SliceJobEvent, SlicerRegisteredEvent } from '@/services/slicerHubService';
 
 // -----------------------------------------------------------------------------
 // Canonical wire-contract corpus (issue #2240): slicerHubService's
@@ -80,25 +80,17 @@ describe('slicerHubService — canonical wire-contract corpus (#2240)', () => {
   });
 
   it('delivers the corpus SlicerRegistered fixture unchanged to onSlicerRegistered subscribers', async () => {
-    // NOTE (finding, to be filed separately): the wire corpus for
-    // "SlicerRegistered" carries {id, name, slicerType, version,
-    // maxConcurrentJobs, status, lastSeen} — it has no `capabilities` field.
-    // The TS `SlicerRegisteredEvent` interface instead declares a required
-    // `capabilities: string[]` and omits maxConcurrentJobs/status/lastSeen
-    // entirely. That is a type/wire drift (same class of bug as #2232), so
-    // this test intentionally does NOT type the fixture as
-    // `SlicerRegisteredEvent` — asserting against that interface would force
-    // us to either fabricate a `capabilities` field the server never sends,
-    // or silently paper over the mismatch. We load it as `unknown` and
-    // assert pass-through instead.
-    const fixture = loadWireContractFixture<Record<string, unknown>>(
+    // The wire corpus for "SlicerRegistered" carries {id, name, slicerType,
+    // version, maxConcurrentJobs, status, lastSeen} — the `SlicerRegisteredEvent`
+    // TS interface was fixed to match (issue #2258), so the fixture can now be
+    // typed against the real interface instead of `Record<string, unknown>`.
+    const fixture = loadWireContractFixture<SlicerRegisteredEvent>(
       'api/signalr-events/SlicerRegistered.populated.json'
     );
-    expect(fixture).not.toHaveProperty('capabilities');
 
     await slicerHubService.start();
 
-    const received: unknown[] = [];
+    const received: SlicerRegisteredEvent[] = [];
     slicerHubService.onSlicerRegistered((event) => received.push(event));
 
     hubTestState.emit('SlicerRegistered', fixture);
