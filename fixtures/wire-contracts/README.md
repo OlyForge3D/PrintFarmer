@@ -85,3 +85,56 @@ Every consumer other than the tests listed above (owned by issue #2238) reads th
 **read-only**. Do not add a normalizing/adapter layer that merges `api/` and `native-slicer/`
 semantics, and do not hand-edit a fixture file — regenerate it via the owning test with
 `WIRE_CONTRACT_REGEN=1` instead, so the provenance manifest stays accurate.
+
+## Known out-of-scope consumers
+
+`src/Web/ReactApp/src/features/slicer/components/profile-family/__tests__/CreateProfileFamilyModal.test.tsx`
+and `src/Web/ReactApp/src/features/slicer/pages/__tests__/NewSliceJobPage.test.tsx` are
+**explicitly excluded** from the P0 corpus-driven conversion effort (issue #2256, filed while
+implementing #2240). Both mock `slicerProfilesService.getWorkerHierarchy()`
+(`GET /slicer/profiles/worker-hierarchy`), which returns the OrcaSlicer worker profile-bundle
+hierarchy (`AllProfilesResponseDto` → `MachineProfileDto`/`FilamentProfileDto`/`ProcessProfileDto`
+in `Farm.Slicer.Module.Dtos`). This is architecturally distinct from every family this corpus
+currently covers:
+
+- It is a **hybrid** shape, not a pure member of either existing family: most fields are promoted,
+  camelCase PrintFarmer DTO properties, but several (`compatible_printers`, `inherits`,
+  `printer_model`, and the entire `settings` forward-compatibility bag) are deliberately kept as
+  raw, snake_case, pass-through OrcaSlicer keys. Filing it under `api/` would misrepresent it as
+  pure PrintFarmer-camelCase; filing it under `native-slicer/` would misrepresent it as a raw Orca
+  payload with no PrintFarmer-side promotion. Neither existing family models this correctly without
+  inventing a third precedent — exactly the kind of `api/`↔`native-slicer/` boundary-merging this
+  corpus's own rules (above) forbid. (The client-side `OrcaMachineProfile` TS type also spells these
+  fields `printerModel`/`inherits`, not the DTO's actual wire names `printer_model`/`inherits` — a
+  latent, unverified #2232-class mismatch that is itself part of why this endpoint eventually
+  deserves real corpus coverage, not evidence that adoption would be free.)
+- `CreateProfileFamilyModal.test.tsx` uses its `getWorkerHierarchy` mock as a genuinely
+  **parameterized UI-behavior fixture**: two manufacturers, two models, and `null`/missing/
+  populated `compatible_printers` permutations across 17+ generated process profiles, driving
+  grouping, compatible-profile counting, and search assertions — not a single wire-shape check.
+  `NewSliceJobPage.test.tsx` mocks the same method far more trivially (one manufacturer, one model,
+  empty filament/process lists) purely to let its embedded `CreateProfileFamilyModal` open. Instead,
+  it separately mocks `GET /slicer/profiles/machine/for-model/{id}` (machine profile selection;
+  `MachineProfileDto` has no `compatible_printers` field), `POST /slicer/profiles/filament/for-machines`
+  (populated `compatible_printers` lists), and `POST /slicer/profiles/process/for-machines` (its own
+  `null`/missing/`[]`/populated `compatible_printers` permutations) — the same promoted, hybrid
+  `MachineProfileDto`/`FilamentProfileDto`/`ProcessProfileDto` shapes as `worker-hierarchy`. (Its
+  `listExtended` mock is a fourth, unrelated call to `GET /slicer/profiles/extended`, returning a
+  distinct `ExtendedProfilesResponse` shape with no corpus coverage either — a separate gap, not
+  part of the hybrid-DTO family above.) None of the three hybrid-DTO routes are the existing
+  `native-slicer/filament` fixtures, which capture the unrelated `GET /api/profiles/filament`
+  endpoint's fully raw, untransformed native settings bag (verbatim
+  `filament_flow_ratio`/`bed_temperature` string arrays, no promotion at all). The two are
+  conceptually adjacent (same underlying OrcaSlicer profile data) but are genuinely different
+  response shapes from different endpoints; adding coverage for `NewSliceJobPage.test.tsx`'s
+  flat-list calls would still be net-new hybrid-family fixture work, not a trivial reuse of
+  `native-slicer/filament`. Converting either file's ad hoc UI-behavior data to a handful of
+  canonical corpus variants would still leave most of the behavior-driving permutations
+  hand-written, so it doesn't meaningfully reduce #2232-class drift risk for the effort involved.
+- No test in the current corpus (owned by #2238) exercises `GET /slicer/profiles/worker-hierarchy`
+  or `AllProfilesResponseDto` end-to-end; standing one up and settling its family classification is
+  net-new work, not "regenerate an existing fixture."
+
+Given this is `priority:p3` backlog work, these two suites keep their hand-written mocks for now.
+Revisit only alongside a dedicated follow-up that settles the family classification question above
+(and, ideally, the `printerModel`/`printer_model` TS-vs-wire naming question noted above).
