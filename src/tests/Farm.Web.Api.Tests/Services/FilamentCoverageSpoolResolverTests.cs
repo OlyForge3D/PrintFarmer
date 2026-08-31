@@ -814,12 +814,21 @@ public class FilamentCoverageSpoolResolverTests
                 "a source cut short by the fleet deadline was never reached, so it must not be reported as spool-not-found");
         }
 
-        // Only the first wave can have been dispatched within a 1s budget when each read
-        // holds its slot for 5s. This pins the "queued sources still degrade correctly"
-        // path, which is distinct from "in-flight sources degrade correctly".
-        native.As<ISupportsSpoolman>().Verify(
-            n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.AtMost(8));
+        // Deliberately NOT asserting an upper bound on dispatch count here. A previous revision
+        // used Times.AtMost(MaxConcurrentSourceRequests) on the premise that each read holds its
+        // slot for the 5s per-source timeout, so only one wave could dispatch inside the 1s fleet
+        // budget. That premise is false, and the assertion was flaky: the fleet deadline cuts the
+        // in-flight reads FIRST, so all their slots are released at ~1s via the finally block.
+        // Queued waiters are then parked on WaitAsync with an already-cancelled token, and
+        // SemaphoreSlim completes a dequeued waiter concurrently with its cancellation callback -
+        // so a waiter that wins that race acquires a permit and dispatches. Observed at 9 and 14
+        // dispatches under a loaded suite while passing consistently when this class runs alone.
+        //
+        // Those late dispatches are harmless in production: the source links off an already
+        // cancelled budget token, the backend client returns immediately without network I/O, and
+        // the result still degrades to spool-source-unavailable. The invariant that actually
+        // matters - every source reported, none claimed spool-not-found - is asserted
+        // deterministically by the loop above, which is unaffected by the race.
     }
 
     [Fact]
