@@ -11,6 +11,7 @@ import {
   isKnownTaskType,
 } from '../tasksApi';
 import { apiClient } from '../api';
+import { loadWireContractFixture } from '@/test/wireContracts';
 
 vi.mock('../api', () => ({
   apiClient: {
@@ -377,6 +378,63 @@ describe('tasksApi', () => {
     it('propagates non-404 errors instead of masking them', async () => {
       vi.mocked(apiClient.get).mockRejectedValue({ statusCode: 500, message: 'boom' });
       await expect(tasksApi.getShiftPlan()).rejects.toMatchObject({ statusCode: 500 });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Canonical wire-contract corpus (issue #2240): these tests drive tasksApi
+  // from the real serialized payloads captured in fixtures/wire-contracts/api/tasks
+  // by issue #2238, instead of hand-written mock objects. The corpus is loaded
+  // byte-identical and never edited or normalized here — see
+  // src/Web/ReactApp/src/test/wireContracts.ts.
+  // ---------------------------------------------------------------------------
+  describe('tasksApi — canonical wire-contract corpus (#2240)', () => {
+    it('getPendingTasks() returns the corpus empty-collection fixture unchanged (GET /api/tasks)', async () => {
+      const fixture = loadWireContractFixture<unknown[]>('api/tasks/tasks.empty-collection.json');
+      vi.mocked(apiClient.get).mockResolvedValue({ data: fixture });
+
+      const result = await tasksApi.getPendingTasks();
+
+      expect(apiClient.get).toHaveBeenCalledWith('/tasks');
+      expect(result).toEqual([]);
+    });
+
+    it('createTask() normalizes the corpus populated fixture, preserving the lowercase anchorKind/sourceKind tokens (POST /api/tasks)', async () => {
+      const fixture = loadWireContractFixture<Record<string, unknown>>(
+        'api/tasks/tasks.populated.json'
+      );
+      // The corpus fixture is what #2246 fixed: the wire carries lowercase
+      // camelCase tokens ("unspecified"), not the PascalCase enum member name
+      // ("Unspecified"). Assert the raw wire shape first so a future corpus
+      // refresh that regresses the casing fails this test immediately.
+      expect(fixture.anchorKind).toBe('unspecified');
+      expect(fixture.sourceKind).toBe('unspecified');
+      vi.mocked(apiClient.post).mockResolvedValue({ data: fixture });
+
+      const result = await tasksApi.createTask({ title: fixture.title as string });
+
+      expect(apiClient.post).toHaveBeenCalledWith('/tasks', { title: fixture.title });
+      expect(result.id).toBe(fixture.id);
+      expect(result.title).toBe(fixture.title);
+      expect(result.status).toBe(fixture.status);
+      expect(result.priority).toBe(fixture.priority);
+      expect(result.anchorKind).toBe(UserTaskAnchorKind.Unspecified);
+      expect(result.sourceKind).toBe(UserTaskSourceKind.Unspecified);
+    });
+
+    it('createTask() tolerates the corpus unknown-additive-request-field fixture without dropping known fields', async () => {
+      const fixture = loadWireContractFixture<Record<string, unknown>>(
+        'api/tasks/tasks.unknown-additive-request-field.json'
+      );
+      vi.mocked(apiClient.post).mockResolvedValue({ data: fixture });
+
+      const result = await tasksApi.createTask({ title: fixture.title as string });
+
+      expect(result.id).toBe(fixture.id);
+      expect(result.title).toBe(fixture.title);
+      expect(result.priority).toBe(fixture.priority);
+      expect(result.anchorKind).toBe(UserTaskAnchorKind.Unspecified);
+      expect(result.sourceKind).toBe(UserTaskSourceKind.Unspecified);
     });
   });
 });

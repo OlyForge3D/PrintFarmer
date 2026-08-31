@@ -43,6 +43,7 @@
 		137CA002069C980DF3C582AF /* TestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DD48733BD08251D5B57CCA3 /* TestFixtures.swift */; };
 		13A9714DB66389EFE231ED4E /* ActionButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46DEBCDF7D99C0F2AEFB6AEC /* ActionButtonStyle.swift */; };
 		14548BCF3A6E9E12FB4673B2 /* ModelDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */; };
+		224100000000000000000002 /* WireContractCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 224100000000000000000001 /* WireContractCorpusTests.swift */; };
 		14D1CA5B7AC14F03A2C76A77 /* DeepLinkHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF81383E489642A1A80EE943 /* DeepLinkHandler.swift */; };
 		168C55CF29586F848BE4B869 /* DemoData.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8D59686935AD2C62C29D912 /* DemoData.swift */; };
 		174989D8244174929492B23F /* DemoNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C81783B769C3897AF7B30353 /* DemoNotificationService.swift */; };
@@ -628,6 +629,7 @@
 		6B82175969F41E18F12CE414 /* PredictiveInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PredictiveInsightsView.swift; sourceTree = "<group>"; };
 		6E4E6FB4888EBB6541E982BC /* MockAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAPIClient.swift; sourceTree = "<group>"; };
 		6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDecodingTests.swift; sourceTree = "<group>"; };
+		224100000000000000000001 /* WireContractCorpusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WireContractCorpusTests.swift; sourceTree = "<group>"; };
 		6EE23E12C23FE0D3C5476AD0 /* AutoDispatchServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoDispatchServiceProtocol.swift; sourceTree = "<group>"; };
 		6F6608F46256F5914589FD48 /* HarvestSheetView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HarvestSheetView.swift; sourceTree = "<group>"; };
 		6FC5DA3A29833B7C3CCD9C38 /* BinPartLoggingViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BinPartLoggingViewModel.swift; sourceTree = "<group>"; };
@@ -1544,6 +1546,7 @@
 			children = (
 				FA5A0000000000000000000A /* FarmSnapshotEnvelopeTests.swift */,
 				6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */,
+				224100000000000000000001 /* WireContractCorpusTests.swift */,
 				A70A710000000000B0000101 /* AttentionModelDecodingTests.swift */,
 				FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */,
 				F711A0003000000000000001 /* FilamentFallbackGroupModelsTests.swift */,
@@ -1795,6 +1798,7 @@
 				77900F336D89DB7A75E19D5B /* MockStatisticsService.swift in Sources */,
 				DBFCFDB1D7F8B850275D56D4 /* TestProtocols.swift in Sources */,
 				14548BCF3A6E9E12FB4673B2 /* ModelDecodingTests.swift in Sources */,
+				224100000000000000000002 /* WireContractCorpusTests.swift in Sources */,
 				A70A710000000000A0000101 /* AttentionModelDecodingTests.swift in Sources */,
 				A70A710000000000A0000201 /* PrinterBackendCapabilitiesTests.swift in Sources */,
 				BF277001100A1B2C3D4E5F6A /* PrinterProgressContractTests.swift in Sources */,
