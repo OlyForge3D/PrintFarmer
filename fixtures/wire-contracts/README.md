@@ -113,10 +113,11 @@ currently covers:
   populated `compatible_printers` permutations across 17+ generated process profiles, driving
   grouping, compatible-profile counting, and search assertions — not a single wire-shape check.
   `NewSliceJobPage.test.tsx` mocks the same method far more trivially (one manufacturer, one model,
-  empty filament/process lists) purely to let its embedded `CreateProfileFamilyModal` open; its own
-  `null`/`[]`/populated `compatible_printers` permutations instead exercise separately mocked calls
-  to `GET /slicer/profiles/machine/for-model/{id}`, `POST /slicer/profiles/filament/for-machines`,
-  and `POST /slicer/profiles/process/for-machines` — the same promoted, hybrid
+  empty filament/process lists) purely to let its embedded `CreateProfileFamilyModal` open. Instead,
+  it separately mocks `GET /slicer/profiles/machine/for-model/{id}` (machine profile selection;
+  `MachineProfileDto` has no `compatible_printers` field), `POST /slicer/profiles/filament/for-machines`
+  (populated `compatible_printers` lists), and `POST /slicer/profiles/process/for-machines` (its own
+  `null`/missing/`[]`/populated `compatible_printers` permutations) — the same promoted, hybrid
   `MachineProfileDto`/`FilamentProfileDto`/`ProcessProfileDto` shapes as `worker-hierarchy`. (Its
   `listExtended` mock is a fourth, unrelated call to `GET /slicer/profiles/extended`, returning a
   distinct `ExtendedProfilesResponse` shape with no corpus coverage either — a separate gap, not
