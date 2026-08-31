@@ -182,19 +182,84 @@ public sealed class HubFarmGroupAuthorizationArchitectureTests
     /// enclosing <c>!( ... )</c> negates the whole conjunction, so the join actually fires when
     /// either <c>a</c> is false or the caller lacks the permission — the same vulnerability shape
     /// as a bare negation, just one parenthesis level removed.</item>
+    /// <item>Redundant-parenthesis bypass: <c>if ((HasPermission(...) || true)) { join }</c> has
+    /// an extra wrapping pair of parens around the whole disjunction. <see
+    /// cref="ExtractParenthesizedCondition"/> only strips the outermost <c>if (</c> keyword
+    /// wrapper, so this redundant inner pair would otherwise hold <see cref="SplitTopLevelOr"/>'s
+    /// depth counter at 1 for the entire condition and the top-level <c>||</c> would never be
+    /// found — silently defeating the disjunction-bypass check above. This method strips
+    /// redundant wholly-enclosing parens and recurses into each split disjunct (not just the
+    /// top level) so an arbitrary number of redundant-paren layers, at any nesting depth, cannot
+    /// hide a further top-level <c>||</c> from the disjunction check.</item>
     /// </list>
     /// </summary>
     private static bool ConditionContainsPositiveGuard(string conditionText)
     {
-        foreach (string disjunct in SplitTopLevelOr(conditionText))
+        string normalized = StripRedundantOuterParens(conditionText);
+        var disjuncts = SplitTopLevelOr(normalized).ToList();
+
+        if (disjuncts.Count > 1)
         {
-            if (!DisjunctHasPositiveGuard(disjunct))
+            // The text had a top-level "||": each disjunct must independently satisfy this same
+            // guarantee, recursively, since a disjunct may itself be wrapped in redundant parens
+            // hiding a further top-level "||" (e.g. "a || (b || HasPermission(...))" is really a
+            // 3-way disjunction where "a" alone lets the join through unconditionally).
+            return disjuncts.All(ConditionContainsPositiveGuard);
+        }
+
+        return DisjunctHasPositiveGuard(normalized);
+    }
+
+    /// <summary>
+    /// Repeatedly strips a pair of parens that wholly wraps <paramref name="text"/> — i.e. the
+    /// first <c>(</c> is the one matching the last <c>)</c>, not merely the first and last
+    /// characters happening to be parens while an earlier sub-expression closes independently
+    /// (e.g. <c>(a) || (b)</c> must NOT be stripped, since its leading <c>(</c> closes before the
+    /// end). Redundant parens can appear at any nesting depth around an entire condition or
+    /// disjunct (e.g. <c>((HasPermission(...) || true))</c>), and stripping them is required for
+    /// <see cref="SplitTopLevelOr"/> to see a hidden top-level <c>||</c> at depth 0.
+    /// </summary>
+    private static string StripRedundantOuterParens(string text)
+    {
+        string result = text.Trim();
+
+        while (result.Length >= 2 && result[0] == '(' && result[^1] == ')' && FirstParenWrapsWholeText(result))
+        {
+            result = result[1..^1].Trim();
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Checks whether the opening <c>(</c> at index 0 of <paramref name="text"/> is matched by
+    /// the closing <c>)</c> at the very end — i.e. the parens wrap the entire text — as opposed
+    /// to closing earlier (e.g. in <c>(a) || (b)</c>, the leading <c>(</c> closes at index 2, well
+    /// before the end, so this returns <see langword="false"/> and the pair must not be stripped
+    /// as if it were a redundant outer wrap).
+    /// </summary>
+    private static bool FirstParenWrapsWholeText(string text)
+    {
+        int depth = 0;
+
+        for (int idx = 0; idx < text.Length; idx++)
+        {
+            char c = text[idx];
+            if (c == '(')
             {
-                return false;
+                depth++;
+            }
+            else if (c == ')')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return idx == text.Length - 1;
+                }
             }
         }
 
-        return true;
+        return false;
     }
 
     /// <summary>
@@ -524,10 +589,14 @@ public sealed class HubFarmGroupAuthorizationArchitectureTests
     /// permission) is rejected, and a top-level <c>||</c> disjunction with a non-guarded
     /// alternative (e.g. <c>HasPermission(...) || true</c>, which would let the join through
     /// regardless of permission) is also rejected, while a disjunction of two genuine alternative
-    /// permission checks is still accepted. Each case above was a real gap caught by reviewer
-    /// feedback on this test's own first two drafts.
+    /// permission checks is still accepted. A redundant extra pair of parens wrapping the whole
+    /// disjunction (e.g. <c>((HasPermission(...) || true))</c>) does not hide the bypass, nor
+    /// does nesting the unguarded alternative one level deeper (e.g. <c>a || (b ||
+    /// HasPermission(...))</c>, where <c>a</c> alone lets the join through unconditionally). Each
+    /// case above was a real gap caught by reviewer feedback on this test's own first three
+    /// drafts.
     /// </summary>
-    [Theory(DisplayName = "Presubmit: the scanner's own guard detection rejects negated and disjunction-bypassed permission checks")]
+    [Theory(DisplayName = "Presubmit: the scanner's own guard detection rejects negated, disjunction-bypassed, and redundant-paren-hidden permission checks")]
     [InlineData(
         "if (PrintFarmerPermissions.HasPermission(Context.User!, HarvestAdminPermission)) { Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm); }",
         true)]
@@ -551,6 +620,12 @@ public sealed class HubFarmGroupAuthorizationArchitectureTests
         true)]
     [InlineData(
         "if (!(someFlag && PrintFarmerPermissions.HasPermission(Context.User!, HarvestAdminPermission))) { Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm); }",
+        false)]
+    [InlineData(
+        "if ((PrintFarmerPermissions.HasPermission(Context.User!, HarvestAdminPermission) || true)) { Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm); }",
+        false)]
+    [InlineData(
+        "if (someFlag || (otherFlag || PrintFarmerPermissions.HasPermission(Context.User!, HarvestAdminPermission))) { Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm); }",
         false)]
     public void GuardDetection_HandlesNegatedAndPositiveConditions(string snippet, bool expectedAllGuarded)
     {
