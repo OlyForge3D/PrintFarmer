@@ -114,20 +114,22 @@ currently covers:
   grouping, compatible-profile counting, and search assertions — not a single wire-shape check.
   `NewSliceJobPage.test.tsx` mocks the same method far more trivially (one manufacturer, one model,
   empty filament/process lists) purely to let its embedded `CreateProfileFamilyModal` open; its own
-  `null`/`[]`/populated `compatible_printers` permutations exercise *different* mocked service calls
-  (`getMachineProfilesForModel`, `getFilamentProfilesForMachines`, `getProcessProfilesForMachines`,
-  `listExtended`) hitting distinct `/slicer/profiles/{machine,filament,process}/for-machines`-style
-  routes that return the same promoted, hybrid `FilamentProfileDto`/`ProcessProfileDto`/
-  `MachineProfileDto` shapes as `worker-hierarchy` — **not** the existing `native-slicer/filament`
-  fixtures, which capture the unrelated `GET /api/profiles/filament` endpoint's fully raw,
-  untransformed native settings bag (verbatim `filament_flow_ratio`/`bed_temperature` string arrays,
-  no promotion at all). The two are conceptually adjacent (same underlying OrcaSlicer profile data)
-  but are genuinely different response shapes from different endpoints; adding coverage for
-  `NewSliceJobPage.test.tsx`'s flat-list calls would still be net-new hybrid-family fixture work, not
-  a trivial reuse of `native-slicer/filament`. Converting either file's ad hoc UI-behavior data to a
-  handful of canonical corpus variants would still leave
-  most of the behavior-driving permutations hand-written, so it doesn't meaningfully reduce
-  #2232-class drift risk for the effort involved.
+  `null`/`[]`/populated `compatible_printers` permutations instead exercise separately mocked calls
+  to `GET /slicer/profiles/machine/for-model/{id}`, `POST /slicer/profiles/filament/for-machines`,
+  and `POST /slicer/profiles/process/for-machines` — the same promoted, hybrid
+  `MachineProfileDto`/`FilamentProfileDto`/`ProcessProfileDto` shapes as `worker-hierarchy`. (Its
+  `listExtended` mock is a fourth, unrelated call to `GET /slicer/profiles/extended`, returning a
+  distinct `ExtendedProfilesResponse` shape with no corpus coverage either — a separate gap, not
+  part of the hybrid-DTO family above.) None of the three hybrid-DTO routes are the existing
+  `native-slicer/filament` fixtures, which capture the unrelated `GET /api/profiles/filament`
+  endpoint's fully raw, untransformed native settings bag (verbatim
+  `filament_flow_ratio`/`bed_temperature` string arrays, no promotion at all). The two are
+  conceptually adjacent (same underlying OrcaSlicer profile data) but are genuinely different
+  response shapes from different endpoints; adding coverage for `NewSliceJobPage.test.tsx`'s
+  flat-list calls would still be net-new hybrid-family fixture work, not a trivial reuse of
+  `native-slicer/filament`. Converting either file's ad hoc UI-behavior data to a handful of
+  canonical corpus variants would still leave most of the behavior-driving permutations
+  hand-written, so it doesn't meaningfully reduce #2232-class drift risk for the effort involved.
 - No test in the current corpus (owned by #2238) exercises `GET /slicer/profiles/worker-hierarchy`
   or `AllProfilesResponseDto` end-to-end; standing one up and settling its family classification is
   net-new work, not "regenerate an existing fixture."
