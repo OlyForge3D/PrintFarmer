@@ -44,6 +44,10 @@ public sealed class InventoryOpenApiSchemaTests(OpenApiDocumentFixture fixture)
             "type", "title", "status", "detail", "instance",
             // Issue #2294's new discriminator/context extension properties:
             "code", "mismatches", "jobId", "projectFileId", "gcodeFileId", "guidance",
+            // The shared [Idempotent] filter can short-circuit this action with its own
+            // "idempotencyKeyInProgress" 409, which carries this extension alongside code
+            // (Hicks review, issue #2294):
+            "retryAfterSeconds",
         };
         _ = OpenApiSchemaTestSupport.GetPropertyNames(harvestConflictResponse).Should().BeEquivalentTo(expectedPropertyNames);
     }
@@ -172,14 +176,14 @@ public sealed class InventoryOpenApiSchemaTests(OpenApiDocumentFixture fixture)
 
     /// <summary>
     /// The adjust endpoint's 409 response <c>$ref</c>s its own, narrower
-    /// <c>PartAdjustmentConflictResponse</c> -- adjust's only conflict path never raises the
+    /// <c>PartAdjustmentConflictResponse</c> -- adjust's own conflict path never raises the
     /// wrong-bin/mapping-required codes above (those are harvest-only outcomes), so it is
     /// deliberately not forced into <c>HarvestConflictResponse</c>'s richer, code-discriminated
-    /// shape. It carries just a single nullable <c>message</c> string, not required: the shared
-    /// <c>[Idempotent]</c> filter can also short-circuit this action with a filter-level 409 that
-    /// has no <c>message</c> at all (see <c>PartAdjustmentConflictResponse</c> remarks), so
-    /// <c>message</c> must stay optional for the declared schema to describe every 409 this
-    /// action can actually emit.
+    /// shape. It extends the base ProblemDetails shape with a nullable <c>message</c>, plus
+    /// nullable <c>code</c>/<c>retryAfterSeconds</c> to describe the shared <c>[Idempotent]</c>
+    /// filter's alternate filter-level 409 (no <c>message</c> at all -- see
+    /// <c>PartAdjustmentConflictResponse</c> remarks). None of these are required: the two
+    /// structurally different 409 emitters for this action populate disjoint subsets.
     /// </summary>
     [Fact]
     public void AdjustConflict_ResponseSchema_IsPartAdjustmentConflictResponse_WithOptionalMessage()
@@ -191,7 +195,15 @@ public sealed class InventoryOpenApiSchemaTests(OpenApiDocumentFixture fixture)
 
         JsonElement partAdjustmentConflictResponse = OpenApiSchemaTestSupport.ResolveRef(_document, responseSchema);
         _ = OpenApiSchemaTestSupport.GetRequiredSet(partAdjustmentConflictResponse).Should().BeEmpty();
-        _ = OpenApiSchemaTestSupport.GetPropertyNames(partAdjustmentConflictResponse).Should().BeEquivalentTo(new[] { "message" });
+        _ = OpenApiSchemaTestSupport.GetPropertyNames(partAdjustmentConflictResponse).Should().BeEquivalentTo(new[]
+        {
+            // Inherited from the base ProblemDetails shape:
+            "type", "title", "status", "detail", "instance",
+            // The controller's own conflict path:
+            "message",
+            // The shared [Idempotent] filter's alternate filter-level 409 (Hicks review, issue #2294):
+            "code", "retryAfterSeconds",
+        });
 
         JsonElement message = OpenApiSchemaTestSupport.GetProperty(partAdjustmentConflictResponse, "message");
         _ = OpenApiSchemaTestSupport.GetTypes(message).Should().BeEquivalentTo(new[] { "string", "null" });

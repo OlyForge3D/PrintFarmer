@@ -276,7 +276,7 @@ public class PartsInventoryController(
             PartInventoryOutcome.JobNotFound => NotFound(new { message = result.Message }),
             PartInventoryOutcome.BinNotFound => BadRequest(new { message = result.Message }),
             PartInventoryOutcome.InvalidRequest => BadRequest(new { message = result.Message }),
-            PartInventoryOutcome.Conflict => Conflict(new PartAdjustmentConflictResponse(result.Message ?? "Adjustment conflict.")),
+            PartInventoryOutcome.Conflict => Conflict(new PartAdjustmentConflictResponse { Message = result.Message ?? "Adjustment conflict." }),
             PartInventoryOutcome.FeatureDisabled => OperatorFeatureProblemDetails.NotFound(featureGate, OperatorFeature.PrintedPartsInventory),
             _ => Problem(result.Message, statusCode: 500),
         };

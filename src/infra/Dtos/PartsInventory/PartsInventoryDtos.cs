@@ -150,6 +150,15 @@ public sealed class HarvestConflictResponse : Microsoft.AspNetCore.Mvc.ProblemDe
 
     /// <summary>Populated when <see cref="Code"/> is <c>"partMappingRequired"</c>; otherwise omitted.</summary>
     public string? Guidance { get; set; }
+
+    /// <summary>
+    /// Seconds a client should wait before retrying. The shared <c>[Idempotent]</c> filter can
+    /// short-circuit this action with its own <c>409 idempotencyKeyInProgress</c> before the
+    /// controller runs (see <c>IdempotencyProblemDetails.InProgress</c>), which carries this
+    /// extension alongside <c>code</c>; not populated for any code this controller emits directly
+    /// (Hicks review, issue #2294).
+    /// </summary>
+    public int? RetryAfterSeconds { get; set; }
 }
 
 /// <summary>
@@ -224,24 +233,44 @@ public sealed class OptionalGuidJsonConverter : JsonConverter<OptionalGuid>
 
 /// <summary>
 /// 409 conflict envelope for <c>POST /api/parts-inventory/{sku}/adjust</c> (issue #2294). The
-/// adjust endpoint's conflict path (e.g. adjusting a job that was already fully reconciled) never
-/// raises the wrong-bin/mapping-required codes above -- it only ever carries a single human-readable
-/// <see cref="Message"/> -- so it gets its own accurate, narrower DTO rather than being forced into
-/// <see cref="HarvestConflictResponse"/>'s richer, code-discriminated shape.
+/// adjust endpoint's own conflict path (e.g. adjusting a job that was already fully reconciled)
+/// never raises the wrong-bin/mapping-required codes above -- it only ever carries a single
+/// human-readable <see cref="Message"/> -- so it gets its own narrower DTO rather than being
+/// forced into <see cref="HarvestConflictResponse"/>'s richer, code-discriminated shape.
 /// </summary>
 /// <remarks>
-/// <see cref="Message"/> is nullable (not <c>required</c>) even though the controller's own
-/// in-action conflict path always supplies one: the shared <c>[Idempotent]</c> filter can also
-/// short-circuit this same action with a <c>409</c> before the controller runs, and that
-/// filter-level payload is a plain <c>ProblemDetails</c> with a <c>code</c> extension and no
-/// <c>message</c> at all (see <c>IdempotencyProblemDetails.HashConflict</c>/<c>InProgress</c>).
-/// A <c>required</c> <see cref="Message"/> would make the declared
-/// <c>[ProducesResponseType(typeof(PartAdjustmentConflictResponse), 409)]</c> schema fail to
-/// describe that filter-emitted response (Bishop review, issue #2294); making the property
-/// optional keeps the schema accurate for every 409 this action can actually emit without
-/// changing what the controller's own conflict path writes on the wire.
+/// Extends <see cref="Microsoft.AspNetCore.Mvc.ProblemDetails"/> (type/title/status/detail) and
+/// declares nullable <see cref="Code"/>/<see cref="RetryAfterSeconds"/> properties, none of them
+/// <c>required</c>, because this action has two structurally different 409 emitters that must
+/// both validate against the one declared schema (Bishop/Hicks review, issue #2294):
+/// <list type="bullet">
+/// <item>The controller's own in-action conflict path always supplies <see cref="Message"/> and
+/// never touches the base ProblemDetails fields or <see cref="Code"/>/<see cref="RetryAfterSeconds"/>.</item>
+/// <item>The shared <c>[Idempotent]</c> filter can short-circuit this same action with a
+/// filter-level <c>409</c> before the controller runs -- a plain <c>ProblemDetails</c> with
+/// <c>type</c>/<c>title</c>/<c>status</c>/<c>detail</c> and a <c>code</c> extension (plus
+/// <c>retryAfterSeconds</c> for the in-progress case), but never <see cref="Message"/> (see
+/// <c>IdempotencyProblemDetails.HashConflict</c>/<c>InProgress</c>).</item>
+/// </list>
 /// </remarks>
-public sealed record PartAdjustmentConflictResponse(string? Message);
+public sealed class PartAdjustmentConflictResponse : Microsoft.AspNetCore.Mvc.ProblemDetails
+{
+    /// <summary>The controller's own conflict message; not populated for a filter-emitted 409.</summary>
+    public string? Message { get; set; }
+
+    /// <summary>
+    /// Machine-readable discriminator (e.g. <c>"idempotencyKeyConflict"</c>,
+    /// <c>"idempotencyKeyInProgress"</c>) for a filter-emitted 409; not populated for the
+    /// controller's own conflict path.
+    /// </summary>
+    public string? Code { get; set; }
+
+    /// <summary>
+    /// Seconds a client should wait before retrying; only populated alongside
+    /// <c>Code == "idempotencyKeyInProgress"</c>.
+    /// </summary>
+    public int? RetryAfterSeconds { get; set; }
+}
 
 /// <summary>Item in a caller-supplied harvest override / mapping fallback.</summary>
 public record HarvestOutputRequestItem(
