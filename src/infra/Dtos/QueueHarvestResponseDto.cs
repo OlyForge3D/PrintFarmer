@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure;
+﻿using Farm.Infrastructure.Domain;
+
+namespace Farm.Infrastructure;
 
 /// <summary>
 /// Response when a harvest operation is queued.

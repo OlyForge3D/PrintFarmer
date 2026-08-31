@@ -25,27 +25,6 @@ public enum GcodeHarvestStatusDto
 }
 
 /// <summary>
-/// Status of a harvest operation in the processing queue.
-/// </summary>
-public enum GcodeHarvestQueueItemStatus
-{
-    /// <summary>Waiting in queue to be processed.</summary>
-    Pending = 0,
-
-    /// <summary>Currently being processed by a worker.</summary>
-    Processing = 1,
-
-    /// <summary>Successfully completed all processing steps.</summary>
-    Completed = 2,
-
-    /// <summary>Failed during processing with an error.</summary>
-    Failed = 3,
-
-    /// <summary>Cancelled by user before completion.</summary>
-    Cancelled = 4
-}
-
-/// <summary>
 /// Phase of the harvest operation where an error occurred.
 /// </summary>
 public enum HarvestErrorPhaseDto
