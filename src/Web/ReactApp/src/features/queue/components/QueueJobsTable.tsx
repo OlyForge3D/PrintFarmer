@@ -171,6 +171,12 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
     const status = job.status || "Unknown";
     const priority = job.priority;
     const projectName = job.projectName;
+    // Row action buttons share visible labels (e.g. "Abort", "Cancel") across
+    // every row, so a keyboard/screen-reader user tabbing through controls
+    // out of table context can't tell which job or printer an action affects
+    // (see #2302). Qualify each action's accessible name with the job/printer
+    // context while keeping the on-screen label concise.
+    const jobActionContext = `${fileName} on ${printerName} ${status}`;
 
     const livePrinterId = jobWrapper.assignedPrinter?.id;
     const liveProgressRaw = livePrinterId ? printProgressByPrinterId?.[livePrinterId] : undefined;
@@ -407,6 +413,7 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
                   variant="primary"
                   size="sm"
                   disabled={dispatchingJobId === jobId}
+                  aria-label={`Start print ${jobActionContext}`}
                 >
                   {dispatchingJobId === jobId ? (
                     <span className="flex items-center gap-1">
@@ -427,6 +434,7 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
                   variant="subtle"
                   size="sm"
                   title="Schedule this job for a specific time"
+                  aria-label={`Schedule ${jobActionContext}`}
                 >
                   Schedule
                 </Button>
@@ -439,6 +447,7 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
                   }}
                   variant="subtle"
                   size="sm"
+                  aria-label={`Pause ${jobActionContext}`}
                 >
                   Pause
                 </Button>
@@ -451,6 +460,7 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
                   }}
                   variant="subtle"
                   size="sm"
+                  aria-label={`Resume ${jobActionContext}`}
                 >
                   Resume
                 </Button>
@@ -464,6 +474,7 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
                   variant="subtle"
                   size="sm"
                   title="Abort current print attempt, keep job in queue"
+                  aria-label={`Abort ${jobActionContext}`}
                 >
                   Abort
                 </Button>
@@ -478,6 +489,7 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
                   size="sm"
                   disabled={cancelingJobId === jobId}
                   title="Cancel job and remove from queue"
+                  aria-label={`Cancel ${jobActionContext}`}
                 >
                   Cancel
                 </Button>

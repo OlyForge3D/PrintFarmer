@@ -254,6 +254,35 @@ describe("QueueJobsTable Component", () => {
     expect(onCancel).toHaveBeenCalledWith("job-1");
   });
 
+  it("qualifies row action accessible names with file/printer/status context so they're row-unique (#2302)", () => {
+    const mockHandlers = {
+      onPause: vi.fn(),
+      onResume: vi.fn(),
+      onCancel: vi.fn(),
+      onAbortPrint: vi.fn(),
+      onPriority: vi.fn(),
+    };
+
+    // mockJobs[0] is Queued "test-print.gcode" on "Printer 1"; mockJobs[1] is
+    // Printing "another-print.gcode" on the same printer — same printer, so
+    // the fix must disambiguate on file name/status, not just printer name.
+    render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
+
+    const cancelButtons = screen.getAllByRole("button", { name: /^Cancel /i });
+    expect(cancelButtons).toHaveLength(2);
+    const cancelNames = cancelButtons.map((button) => button.getAttribute("aria-label"));
+    expect(new Set(cancelNames).size).toBe(cancelNames.length);
+    expect(cancelNames[0]).toBe("Cancel test-print.gcode on Printer 1 Queued");
+    expect(cancelNames[1]).toBe("Cancel another-print.gcode on Printer 1 Printing");
+
+    // Visible label must stay concise — only the accessible name is qualified.
+    expect(cancelButtons[0]).toHaveTextContent("Cancel");
+    expect(cancelButtons[0]).not.toHaveTextContent("test-print.gcode");
+
+    const abortButton = screen.getByRole("button", { name: "Abort another-print.gcode on Printer 1 Printing" });
+    expect(abortButton).toHaveTextContent("Abort");
+  });
+
   it("does not expose manual reorder controls", () => {
     const mockHandlers = {
       onPause: vi.fn(),
