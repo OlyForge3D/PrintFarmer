@@ -32,7 +32,7 @@ const TASK_POPULATED_FIXTURE = 'api/tasks/tasks.populated.json';
 const TASK_LIST_EMPTY_FIXTURE = 'api/tasks/tasks.empty-collection.json';
 
 test.describe('monolith smoke: tasks', () => {
-  test('POST then GET /api/tasks shapes match the wire-contract corpus', async ({ page }) => {
+  test('POST then GET /api/tasks shapes match the wire-contract corpus', async ({ page }, testInfo) => {
     await page.goto('/');
 
     const token = await getStoredAuthToken(page);
@@ -44,12 +44,18 @@ test.describe('monolith smoke: tasks', () => {
     // assert the real, live empty-list response against the corpus's
     // empty-collection fixture (rather than a hardcoded `[]` literal that
     // never touched the API), genuinely exercising the comparator's
-    // "no template" branch for an empty corpus array.
-    const initialListResponse = await page.request.get(`${API_BASE_URL}/api/tasks`, { headers: authHeaders });
-    expect(initialListResponse.status(), 'GET /api/tasks (before creating any task) must succeed').toBe(200);
-    const initialList = await initialListResponse.json();
-    expect(initialList, 'expected a pristine seeded DB to have zero tasks').toEqual([]);
-    assertMatchesWireContractShape(initialList, TASK_LIST_EMPTY_FIXTURE);
+    // "no template" branch for an empty corpus array. Only on the first
+    // attempt: this task's own creation below is never rolled back, so a
+    // Playwright CI retry (see playwright.config.ts) re-runs against a DB
+    // that already has this test's own task in it, and asserting strict
+    // emptiness there would be a false failure, not a genuine regression.
+    if (testInfo.retry === 0) {
+      const initialListResponse = await page.request.get(`${API_BASE_URL}/api/tasks`, { headers: authHeaders });
+      expect(initialListResponse.status(), 'GET /api/tasks (before creating any task) must succeed').toBe(200);
+      const initialList = await initialListResponse.json();
+      expect(initialList, 'expected a pristine seeded DB to have zero tasks').toEqual([]);
+      assertMatchesWireContractShape(initialList, TASK_LIST_EMPTY_FIXTURE);
+    }
 
     const title = `Monolith smoke task ${Date.now()}`;
     const createResponse = await page.request.post(`${API_BASE_URL}/api/tasks`, {
