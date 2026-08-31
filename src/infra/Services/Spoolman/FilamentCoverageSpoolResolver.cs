@@ -78,6 +78,15 @@ public sealed class FilamentCoverageSpoolResolver(
         }
         catch (Exception ex)
         {
+            // Deliberately broad (CodeQL "generic catch clause"): this helper's contract is to
+            // never fail. Failing to READ a timeout must not become the very outage that
+            // timeout exists to prevent, so every failure degrades to defaults. The concrete
+            // SettingsService throws InvalidOperationException for an unregistered type, but
+            // _settingsService is an interface and another implementation may surface its own
+            // storage or binding failures; enumerating them would be fragile in exactly the
+            // direction that stalls the fleet. Nothing is hidden - the exception is logged -
+            // and no cancellation can be swallowed here, because this path is synchronous and
+            // takes no CancellationToken.
             _logger.LogDebug(ex, "[FilamentCoverage] Falling back to default spool read budget");
         }
 
