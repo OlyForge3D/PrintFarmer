@@ -224,6 +224,18 @@ public sealed class HarvestAndMaintenanceSignalREventContractTests : IAsyncLifet
 
         await connection.StartAsync();
 
+        // HubConnection.StartAsync completing only proves the client received the SignalR
+        // handshake response — it does NOT guarantee the server's MaintenanceHub.OnConnectedAsync
+        // (which does the actual Groups.AddToGroupAsync(..., Farm) call this test relies on) has
+        // finished running. Invoking the harmless, idempotent RequestAlertsUpdateAsync hub method
+        // immediately after StartAsync forces a synchronization point: SignalR guarantees a
+        // connection's OnConnectedAsync completes before any of its hub-method invocations are
+        // dispatched, so once this call returns, the group join from OnConnectedAsync is
+        // guaranteed complete. Without this, the broadcast below could race ahead of the group
+        // join under load and the event would never arrive — a flake, not a production defect.
+        // Mirrors the identical barrier pattern in SignalREventContractTests.cs.
+        await connection.InvokeAsync("RequestAlertsUpdateAsync");
+
         using (IServiceScope scope = _factory.Services.CreateScope())
         {
             IMaintenanceAlertService alertService = scope.ServiceProvider.GetRequiredService<IMaintenanceAlertService>();
@@ -288,6 +300,11 @@ public sealed class HarvestAndMaintenanceSignalREventContractTests : IAsyncLifet
         _ = connection.On<JsonElement>("maintenancecompleted", payload => maintenanceCompletedTcs.TrySetResult(payload));
 
         await connection.StartAsync();
+
+        // See the identical barrier rationale on the alertcreated test above: force
+        // MaintenanceHub.OnConnectedAsync's group join to complete before triggering the
+        // broadcast, so this fixture-capture test cannot race and flake under load.
+        await connection.InvokeAsync("RequestAlertsUpdateAsync");
 
         using (IServiceScope scope = _factory.Services.CreateScope())
         {
