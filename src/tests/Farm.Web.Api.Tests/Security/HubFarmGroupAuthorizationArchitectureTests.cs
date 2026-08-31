@@ -164,13 +164,52 @@ public sealed class HubFarmGroupAuthorizationArchitectureTests
     }
 
     /// <summary>
+    /// Determines whether <paramref name="conditionText"/> contains at least one call to
+    /// <c>HasPermission(</c>/<c>IsFarmAdmin(</c> that is NOT logically negated (i.e. not
+    /// immediately preceded — modulo whitespace and wrapping parens — by a <c>!</c>). A bare
+    /// <see cref="GuardConditionPattern"/> match is insufficient: <c>if (!HasPermission(...))
+    /// { join }</c> textually contains the guard call but actually re-creates the exact
+    /// unconditional-join vulnerability this test exists to catch (the join only happens when
+    /// the caller LACKS the permission), so it must not be accepted as a guard frame.
+    /// </summary>
+    private static bool ConditionContainsPositiveGuard(string conditionText)
+    {
+        foreach (Match match in GuardConditionPattern.Matches(conditionText))
+        {
+            int idx = match.Index - 1;
+
+            // Walk back over the (possibly qualified) receiver preceding the guard call name
+            // itself, e.g. "PrintFarmerPermissions." in "PrintFarmerPermissions.HasPermission(",
+            // so a "!" written before the qualifier (the common case) is not missed.
+            while (idx >= 0 && (char.IsLetterOrDigit(conditionText[idx]) || conditionText[idx] is '.' or '_'))
+            {
+                idx--;
+            }
+
+            while (idx >= 0 && (char.IsWhiteSpace(conditionText[idx]) || conditionText[idx] == '('))
+            {
+                idx--;
+            }
+
+            bool negated = idx >= 0 && conditionText[idx] == '!';
+            if (!negated)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Determines whether every occurrence of <c>AuthorizedHubGroups.Farm</c> in
     /// <paramref name="methodBody"/> is nested inside an <c>if</c> block whose condition text
-    /// mentions <c>HasPermission(</c> or <c>IsFarmAdmin(</c>. Walks the body char-by-char tracking
-    /// a brace-depth guard stack: the frame pushed for each <c>{</c> records whether the
+    /// contains a non-negated (see <see cref="ConditionContainsPositiveGuard"/>) call to
+    /// <c>HasPermission(</c> or <c>IsFarmAdmin(</c>. Walks the body char-by-char tracking a
+    /// brace-depth guard stack: the frame pushed for each <c>{</c> records whether the
     /// immediately preceding (non-brace) text back to the previous <c>{</c>/<c>}</c>/<c>;</c>
-    /// contains a guard-condition call. A <c>AuthorizedHubGroups.Farm</c> join is guarded if any
-    /// frame currently on the stack is a guard frame.
+    /// contains a positive guard-condition call. A <c>AuthorizedHubGroups.Farm</c> join is
+    /// guarded if any frame currently on the stack is a guard frame.
     /// </summary>
     private static bool AllFarmGroupJoinsAreGuarded(string methodBody, out bool referencesFarmGroup)
     {
@@ -185,7 +224,7 @@ public sealed class HubFarmGroupAuthorizationArchitectureTests
             if (c == '{')
             {
                 string precedingText = methodBody[lastStatementBoundary..i];
-                bool isGuardFrame = GuardConditionPattern.IsMatch(precedingText);
+                bool isGuardFrame = ConditionContainsPositiveGuard(precedingText);
                 guardStack.Push(isGuardFrame);
                 lastStatementBoundary = i + 1;
                 continue;
@@ -293,5 +332,38 @@ public sealed class HubFarmGroupAuthorizationArchitectureTests
             "join behind a check such as PrintFarmerPermissions.HasPermission(Context.User!, " +
             $"\"<resource>:admin\"), or add a justified entry to {nameof(Allowlist)} if a genuine " +
             "exception applies. Offenders: " + string.Join(", ", offenders));
+    }
+
+    /// <summary>
+    /// Self-test of the scanner's own guard-detection logic (not the repo scan above). Ensures a
+    /// positively-gated join is accepted, an ungated join is rejected, and — the case a reviewer
+    /// caught in this test's own first draft — a join gated behind a NEGATED
+    /// <c>HasPermission(</c>/<c>IsFarmAdmin(</c> check (which recreates the exact vulnerability
+    /// this test exists to catch: the join fires only when the caller LACKS the permission) is
+    /// also rejected, not falsely accepted as "guarded" just because the guard call's name
+    /// appears in the condition text.
+    /// </summary>
+    [Theory(DisplayName = "Presubmit: the scanner's own guard detection rejects negated permission checks")]
+    [InlineData(
+        "if (PrintFarmerPermissions.HasPermission(Context.User!, HarvestAdminPermission)) { Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm); }",
+        true)]
+    [InlineData(
+        "Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm);",
+        false)]
+    [InlineData(
+        "if (!PrintFarmerPermissions.HasPermission(Context.User!, HarvestAdminPermission)) { Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm); }",
+        false)]
+    [InlineData(
+        "if (!(PrintFarmerPermissions.HasPermission(Context.User!, HarvestAdminPermission))) { Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm); }",
+        false)]
+    [InlineData(
+        "if (PrintFarmerPermissions.IsFarmAdmin(Context.User!)) { Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm); }",
+        true)]
+    public void GuardDetection_HandlesNegatedAndPositiveConditions(string snippet, bool expectedAllGuarded)
+    {
+        bool allGuarded = AllFarmGroupJoinsAreGuarded(snippet, out bool referencesFarmGroup);
+
+        Assert.True(referencesFarmGroup, "Test snippet must reference AuthorizedHubGroups.Farm.");
+        Assert.Equal(expectedAllGuarded, allGuarded);
     }
 }
