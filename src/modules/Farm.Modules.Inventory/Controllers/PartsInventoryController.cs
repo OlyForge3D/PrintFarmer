@@ -223,7 +223,7 @@ public class PartsInventoryController(
     [ProducesResponseType(typeof(PartAdjustmentResponse), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
-    [ProducesResponseType(409)]
+    [ProducesResponseType(typeof(PartAdjustmentConflictResponse), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<PartAdjustmentResponse>> AdjustAsync(
         string sku,
         [FromBody] AdjustPartInventoryRequest request,
@@ -276,7 +276,7 @@ public class PartsInventoryController(
             PartInventoryOutcome.JobNotFound => NotFound(new { message = result.Message }),
             PartInventoryOutcome.BinNotFound => BadRequest(new { message = result.Message }),
             PartInventoryOutcome.InvalidRequest => BadRequest(new { message = result.Message }),
-            PartInventoryOutcome.Conflict => Conflict(new { message = result.Message }),
+            PartInventoryOutcome.Conflict => Conflict(new PartAdjustmentConflictResponse(result.Message ?? "Adjustment conflict.")),
             PartInventoryOutcome.FeatureDisabled => OperatorFeatureProblemDetails.NotFound(featureGate, OperatorFeature.PrintedPartsInventory),
             _ => Problem(result.Message, statusCode: 500),
         };

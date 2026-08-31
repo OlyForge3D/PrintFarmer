@@ -14,15 +14,15 @@ public static class PartsInventoryProblemDetails
     public static ObjectResult WrongBin(WrongBinResponse details)
     {
         ArgumentNullException.ThrowIfNull(details);
-        var problem = new ProblemDetails
+        var problem = new HarvestConflictResponse
         {
             Status = StatusCodes.Status409Conflict,
             Title = "Wrong destination bin",
             Detail = "One or more scanned destination bins do not match the expected bins.",
             Type = "https://printfarmer.io/errors/wrong-bin",
+            Code = WrongBinCode,
+            Mismatches = details.Mismatches,
         };
-        problem.Extensions["code"] = WrongBinCode;
-        problem.Extensions["mismatches"] = details.Mismatches;
         return Conflict(problem);
     }
 
@@ -30,18 +30,18 @@ public static class PartsInventoryProblemDetails
     public static ObjectResult PartMappingRequired(PartMappingRequiredResponse details)
     {
         ArgumentNullException.ThrowIfNull(details);
-        var problem = new ProblemDetails
+        var problem = new HarvestConflictResponse
         {
             Status = StatusCodes.Status409Conflict,
             Title = "Printed-part mapping required",
             Detail = details.Guidance,
             Type = "https://printfarmer.io/errors/part-mapping-required",
+            Code = PartMappingRequiredCode,
+            JobId = details.JobId,
+            ProjectFileId = details.ProjectFileId,
+            GcodeFileId = OptionalGuid.Of(details.GcodeFileId),
+            Guidance = details.Guidance,
         };
-        problem.Extensions["code"] = PartMappingRequiredCode;
-        problem.Extensions["jobId"] = details.JobId;
-        problem.Extensions["projectFileId"] = details.ProjectFileId;
-        problem.Extensions["gcodeFileId"] = details.GcodeFileId;
-        problem.Extensions["guidance"] = details.Guidance;
         return Conflict(problem);
     }
 

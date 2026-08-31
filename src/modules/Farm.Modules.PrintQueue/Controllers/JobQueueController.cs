@@ -869,7 +869,7 @@ public class JobQueueController(
     [ProducesResponseType(typeof(HarvestJobResponse), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
-    [ProducesResponseType(409)]
+    [ProducesResponseType(typeof(HarvestConflictResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<HarvestJobResponse>> HarvestJobAsync(
         Guid id,
