@@ -28,8 +28,7 @@ public record CreateManualTaskDto(
 /// issue #713 for the shift-plan compiler. Legacy tasks materialize with
 /// <c>Unspecified</c> for both — this is compatible with existing clients that
 /// simply ignore the new fields.
-/// </remarks>
-/// <remarks>
+/// <para>
 /// <see cref="AnchorKind"/> and <see cref="SourceKind"/> carry property-level
 /// <c>[JsonConverter]</c> attributes (issue #2246) because a property-level
 /// attribute is the only thing that outranks the global
@@ -37,6 +36,7 @@ public record CreateManualTaskDto(
 /// <c>SignalRStartup</c>; the type-level attributes on the enums themselves are
 /// otherwise dead code for real MVC/SignalR output. Keep both properties'
 /// canonical lowercase camelCase tokens working across HTTP and SignalR.
+/// </para>
 /// </remarks>
 public record UserTaskDto(
     Guid Id,

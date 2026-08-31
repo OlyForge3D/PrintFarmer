@@ -150,7 +150,18 @@ public class TasksControllerTests
         Assert.Same(plan, ok.Value);
     }
 
-    /// <summary>Fix 6: enum fields in ShiftPlanDto must serialize as camelCase strings, not integers.</summary>
+    /// <summary>
+    /// Fix 6: enum fields in ShiftPlanDto must serialize as camelCase-named strings, not integers.
+    /// NOTE: this uses a hand-built <see cref="JsonSerializerOptions"/> with NO enum converter at
+    /// all (neither the property-level attribute nor the app's global
+    /// <see cref="System.Text.Json.Serialization.JsonStringEnumConverter"/>), so it only proves
+    /// property-NAME casing, not enum-VALUE precedence — it would pass identically even if the
+    /// property-level <c>[JsonConverter]</c> attribute on <see cref="ShiftPlanGroupDto.AnchorKind"/>
+    /// were removed (issue #2246 finding). For the real global-converter-precedence proof across
+    /// every anchor/source token via this app's actual DI-registered MVC and SignalR
+    /// <see cref="JsonSerializerOptions"/>, see
+    /// <c>Farm.Web.Api.Tests.Contracts.UserTaskDtoWireContractTests</c>.
+    /// </summary>
     [Fact]
     public async Task GetPendingTasksAsync_ViewShift_SerializesAnchorKindAsCamelCaseString()
     {
@@ -166,7 +177,9 @@ public class TasksControllerTests
         IActionResult result = await _controller.GetPendingTasksAsync(view: "shift", CancellationToken.None);
         OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
 
-        // Serialize exactly as ASP.NET Core would (with camelCase policy).
+        // Serialize with camelCase property-naming only (no enum converter registered at all)
+        // to prove the anchorKind PROPERTY name is camelCase and the value is a string, not an
+        // integer. This does NOT exercise global-converter-vs-property-attribute precedence.
         string json = JsonSerializer.Serialize(ok.Value, new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
