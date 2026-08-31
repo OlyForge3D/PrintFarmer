@@ -21,9 +21,10 @@ public sealed class InventoryOpenApiSchemaTests(OpenApiDocumentFixture fixture)
     /// the corpus-observed DTO.
     /// </summary>
     [Theory]
-    [InlineData("/api/spoolman/spools", "SpoolmanPagedResultOfSpoolmanSpoolDto")]
-    [InlineData("/api/spoolman/filaments", "SpoolmanPagedResultOfSpoolmanFilamentDto")]
-    public void GetSpoolmanPagedListEndpoints_ResponseSchema_ResolvesToExpectedPagedResultDto(string path, string pagedResultSchemaName)
+    [InlineData("/api/spoolman/spools", "SpoolmanPagedResultOfSpoolmanSpoolDto", "SpoolmanSpoolDto")]
+    [InlineData("/api/spoolman/filaments", "SpoolmanPagedResultOfSpoolmanFilamentDto", "SpoolmanFilamentDto")]
+    public void GetSpoolmanPagedListEndpoints_ResponseSchema_ResolvesToExpectedPagedResultDto(
+        string path, string pagedResultSchemaName, string itemSchemaName)
     {
         JsonElement operation = OpenApiSchemaTestSupport.GetOperation(_document, path, "get");
         JsonElement responseSchema = OpenApiSchemaTestSupport.GetResponseSchema(operation)!.Value;
@@ -32,6 +33,11 @@ public sealed class InventoryOpenApiSchemaTests(OpenApiDocumentFixture fixture)
         JsonElement pagedResultDto = OpenApiSchemaTestSupport.ResolveRef(_document, responseSchema);
         _ = OpenApiSchemaTestSupport.GetPropertyNames(pagedResultDto).Should().BeEquivalentTo(new[] { "items", "totalCount" });
         _ = OpenApiSchemaTestSupport.GetRequiredSet(pagedResultDto).Should().BeEquivalentTo(new[] { "items", "totalCount" });
+
+        JsonElement itemsProperty = OpenApiSchemaTestSupport.GetProperty(pagedResultDto, "items");
+        _ = OpenApiSchemaTestSupport.GetTypes(itemsProperty).Should().Contain("array");
+        _ = itemsProperty.GetProperty("items").GetProperty("$ref").GetString().Should().Be($"#/components/schemas/{itemSchemaName}",
+            "'items' should be an array of the corpus-observed item DTO, not just any schema with the right property names");
     }
 
     [Theory]
@@ -67,6 +73,12 @@ public sealed class InventoryOpenApiSchemaTests(OpenApiDocumentFixture fixture)
         _ = OpenApiSchemaTestSupport.GetTypes(itemSchema).Should().BeEquivalentTo(new[] { "string" });
         _ = OpenApiSchemaTestSupport.GetEnumTokens(itemSchema).Should().BeNull(
             "available materials is a freeform string list server-side, not a C# enum");
+
+        string json = File.ReadAllText(Path.Join(WireContractCorpusPaths.ApiRoot, "inventory", "spoolman-available-materials.populated.json"));
+        using JsonDocument corpusFixture = JsonDocument.Parse(json);
+        _ = corpusFixture.RootElement.EnumerateArray().Select(e => e.GetString())
+            .Should().Contain(new[] { "ASA", "PLA" },
+                "every material-name token the corpus proves is emitted on the wire should be representable by a plain string schema");
     }
 
     /// <summary>
@@ -78,6 +90,8 @@ public sealed class InventoryOpenApiSchemaTests(OpenApiDocumentFixture fixture)
     {
         yield return ["SpoolmanSpoolDto", "spoolman-spools.missing-key.json", new[] { "id", "name", "material", "inUse" }];
         yield return ["SpoolmanFilamentDto", "spoolman-filaments.missing-key.json", new[] { "id" }];
+        yield return ["SpoolmanVendorDto", "spoolman-vendors.missing-key.json", new[] { "id", "name" }];
+        yield return ["SpoolmanMaterialDto", "spoolman-materials.missing-key.json", new[] { "id", "name" }];
         yield return ["PartInventoryResponse", "parts.missing-key.json", new[]
         {
             "id", "sku", "name", "onHand", "reorderPoint", "needsReorder", "isActive", "createdAt", "updatedAt",
@@ -107,11 +121,16 @@ public sealed class InventoryOpenApiSchemaTests(OpenApiDocumentFixture fixture)
                 ? items[0]
                 : corpusFixture.RootElement;
 
-        foreach (string propertyName in expectedRequired)
-        {
-            _ = firstItem.TryGetProperty(propertyName, out _).Should().BeTrue(
-                $"the corpus's missing-key fixture proves '{propertyName}' is always present even in the minimal scenario");
-        }
+        // The "missing-key" fixture naming convention proves the *lower bound* (every property
+        // named here must be present), and by construction of these particular fixtures also the
+        // *upper bound*: the minimal-scenario payload's own property set is exactly the always-
+        // present set, with every optional member genuinely omitted. Asserting exact key-set
+        // equality (not just containment) catches an under-declared "required" list the same way
+        // #2261 caught one for QueueOverviewDto.
+        var corpusPropertyNames = firstItem.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        _ = corpusPropertyNames.Should().BeEquivalentTo(expectedRequired,
+            $"'{missingKeyFixtureFile}' is expected to include exactly the always-present properties " +
+            "with every optional member omitted, per its 'missing-key' naming convention");
     }
 
     /// <summary>

@@ -65,11 +65,11 @@ public sealed class PrintJobsOpenApiSchemaTests(OpenApiDocumentFixture fixture)
         JsonElement dto = OpenApiSchemaTestSupport.GetComponentSchema(_document, "JobQueuePrintJobDto");
         JsonElement property = OpenApiSchemaTestSupport.GetProperty(dto, propertyName);
 
-        JsonElement resolved = ResolveDirectOrNullableRef(property);
-        JsonElement componentSchema = OpenApiSchemaTestSupport.GetComponentSchema(_document, componentSchemaName);
-        _ = resolved.GetRawText().Should().Be(componentSchema.GetRawText(),
-            $"'{propertyName}' should resolve (directly or via 'oneOf') to the '{componentSchemaName}' component schema");
+        JsonElement refSchema = FindDirectOrNullableRef(property);
+        _ = refSchema.GetProperty("$ref").GetString().Should().Be($"#/components/schemas/{componentSchemaName}",
+            $"'{propertyName}' should resolve (directly or via 'oneOf') to the named '{componentSchemaName}' component, not just any schema with an equivalent body");
 
+        JsonElement componentSchema = OpenApiSchemaTestSupport.ResolveRef(_document, refSchema);
         _ = OpenApiSchemaTestSupport.GetTypes(componentSchema).Should().Contain("string");
         IReadOnlyList<string>? enumTokens = OpenApiSchemaTestSupport.GetEnumTokens(componentSchema);
         _ = enumTokens.Should().NotBeNull($"'{componentSchemaName}' should declare an 'enum' token list");
@@ -95,25 +95,27 @@ public sealed class PrintJobsOpenApiSchemaTests(OpenApiDocumentFixture fixture)
         JsonElement dto = OpenApiSchemaTestSupport.GetComponentSchema(_document, "JobQueuePrintJobDto");
         JsonElement property = OpenApiSchemaTestSupport.GetProperty(dto, "status");
 
-        JsonElement resolved = ResolveDirectOrNullableRef(property);
-        JsonElement componentSchema = OpenApiSchemaTestSupport.GetComponentSchema(_document, "PrintJobStatus");
-        _ = resolved.GetRawText().Should().Be(componentSchema.GetRawText(),
-            "'status' should resolve (directly or via 'oneOf') to the 'PrintJobStatus' component schema");
+        JsonElement refSchema = FindDirectOrNullableRef(property);
+        _ = refSchema.GetProperty("$ref").GetString().Should().Be("#/components/schemas/PrintJobStatus",
+            "'status' should resolve (directly or via 'oneOf') to the named 'PrintJobStatus' component");
 
-        _ = OpenApiSchemaTestSupport.GetTypes(componentSchema).Should().BeEmpty(
-            "PrintJobStatus's custom converter leaves the schema with no 'type' keyword, matching " +
-            "the same custom-converter exclusion OpenApiEnumFidelityTests already documents for " +
-            "other bespoke-converter enums");
-        _ = OpenApiSchemaTestSupport.GetEnumTokens(componentSchema).Should().BeNull(
-            "PrintJobStatus's custom converter leaves the schema with no 'enum' token list either");
+        JsonElement componentSchema = OpenApiSchemaTestSupport.ResolveRef(_document, refSchema);
+        _ = componentSchema.EnumerateObject().Should().BeEmpty(
+            "PrintJobStatus's custom converter is expected to leave the component schema completely " +
+            "unconstrained (no keys at all) today, matching the same custom-converter exclusion " +
+            "OpenApiEnumFidelityTests already documents for other bespoke-converter enums; if this now " +
+            "fails, either the schema gained unexpected content or the converter behavior changed, and " +
+            "this test should be revisited");
+        _ = OpenApiSchemaTestSupport.GetTypes(componentSchema).Should().BeEmpty();
+        _ = OpenApiSchemaTestSupport.GetEnumTokens(componentSchema).Should().BeNull();
     }
 
-    /// <summary>Resolves a property schema that is either a direct <c>$ref</c> or a nullable <c>oneOf: [null, $ref]</c> pairing to its target component schema.</summary>
-    private JsonElement ResolveDirectOrNullableRef(JsonElement property)
+    /// <summary>Locates the <c>$ref</c> schema of a property that is either a direct <c>$ref</c> or a nullable <c>oneOf: [null, $ref]</c> pairing, without resolving it.</summary>
+    private static JsonElement FindDirectOrNullableRef(JsonElement property)
     {
         if (property.TryGetProperty("$ref", out _))
         {
-            return OpenApiSchemaTestSupport.ResolveRef(_document, property);
+            return property;
         }
 
         JsonElement oneOf = property.GetProperty("oneOf");
@@ -121,7 +123,7 @@ public sealed class PrintJobsOpenApiSchemaTests(OpenApiDocumentFixture fixture)
         {
             if (variant.TryGetProperty("$ref", out _))
             {
-                return OpenApiSchemaTestSupport.ResolveRef(_document, variant);
+                return variant;
             }
         }
 
@@ -129,10 +131,10 @@ public sealed class PrintJobsOpenApiSchemaTests(OpenApiDocumentFixture fixture)
     }
 
     /// <summary>
-    /// Positive check: <c>toolRequirements</c>/<c>toolheadUsages</c> are arrays whose item schema
-    /// resolves to the corpus-observed nested DTOs, and every corpus-observed nested property
-    /// (<c>toolIndex</c>, <c>materialType</c> from the populated fixture's single tool
-    /// requirement) is declared.
+    /// Positive check: <c>toolRequirements</c> is an array whose item schema resolves to the
+    /// corpus-observed nested DTO, and every corpus-observed nested property (e.g.
+    /// <c>toolIndex</c>, <c>materialType</c>, <c>colorHint</c>, <c>estimatedGrams</c> from the
+    /// populated fixture's single tool requirement) is declared.
     /// </summary>
     [Fact]
     public void ToolRequirements_ItemSchema_ResolvesToPrintJobToolRequirementDto_WithCorpusObservedProperties()
