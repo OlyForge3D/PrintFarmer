@@ -272,6 +272,15 @@ builder.Services.AddOpenApi(options =>
 {
     options.AddDocumentTransformer<BearerSecuritySchemeTransformer>();
     options.AddOperationTransformer<AuthorizationOperationTransformer>();
+
+    // Issue #2273: nullable properties are omitted from the wire when null
+    // (DefaultIgnoreCondition = WhenWritingNull, set above and in ControllerStartup's
+    // AddJsonOptions) but .NET's schema generator still lists every non-defaulted
+    // constructor parameter of a positional record as "required" regardless of
+    // nullability. Strip nullable properties from every schema's "required" list so
+    // the schema matches the real wire contract for all DTOs, not just the ones
+    // fixed individually in #2261.
+    options.AddSchemaTransformer<NullablePropertiesNotRequiredSchemaTransformer>();
 });
 
 // CORS configuration for API access
