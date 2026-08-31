@@ -43,6 +43,53 @@ final class WireContractCorpusTests: XCTestCase {
         XCTAssertTrue(empty.isEmpty)
     }
 
+    func testAPIClientDecodesCanonicalPrintJobVariants() async throws {
+        let populated: PrintJob = try await decodeThroughAPIClient(
+            "api/print-jobs/job.populated.json"
+        )
+        XCTAssertEqual(populated.id, UUID(uuidString: "0d8a40a5-a20c-4bdf-b747-efc46f211746"))
+        XCTAssertEqual(populated.status, .completed)
+        XCTAssertEqual(populated.priority, .urgent)
+        XCTAssertEqual(populated.jobKind, "Standard")
+        XCTAssertEqual(populated.gcodeFileName, "wire-contract-populated.gcode")
+        XCTAssertEqual(populated.assignedPrinterName, "Wire Contract Queue Printer")
+        XCTAssertEqual(populated.estimatedPrintTime, "01:30:00")
+        XCTAssertEqual(populated.copies, 4)
+        XCTAssertEqual(populated.remainingCopies, 0)
+        XCTAssertEqual(populated.dispatchResult?.outcome, .accepted)
+        XCTAssertEqual(populated.createdAt, Date(timeIntervalSince1970: 1_788_102_000))
+        XCTAssertEqual(populated.harvestedAt, Date(timeIntervalSince1970: 1_788_109_200))
+
+        let minimal: PrintJob = try await decodeThroughAPIClient(
+            "api/print-jobs/job.minimal-missing-optional.json"
+        )
+        XCTAssertEqual(minimal.id, UUID(uuidString: "8fef6e78-93d6-41ff-904a-c06a00a80b5f"))
+        XCTAssertEqual(minimal.status, .queued)
+        XCTAssertEqual(minimal.priority, .normal)
+        XCTAssertEqual(minimal.gcodeFileName, "")
+        XCTAssertEqual(minimal.assignedPrinterName, "Unknown")
+        XCTAssertEqual(minimal.copies, 1)
+        XCTAssertEqual(minimal.remainingCopies, 1)
+        XCTAssertNil(minimal.dispatchStateRowVersion)
+        XCTAssertNil(minimal.dispatchResult)
+        XCTAssertNil(minimal.jobKind)
+        XCTAssertNil(minimal.gcodeFileId)
+        XCTAssertNil(minimal.assignedPrinterId)
+        XCTAssertNil(minimal.actualStartTime)
+        XCTAssertNil(minimal.harvestedAt)
+        XCTAssertEqual(minimal.createdAt, Date(timeIntervalSince1970: 1_788_112_800))
+
+        do {
+            let _: PrintJob = try await decodeThroughAPIClient(
+                "api/slice-jobs/job.completed-populated.json"
+            )
+            XCTFail("Slicer-job payloads must not decode as print-queue PrintJob values")
+        } catch NetworkError.decodingFailed(let failure) {
+            XCTAssertEqual(failure.kind, "keyNotFound")
+            XCTAssertTrue(failure.codingPath.contains("priority"))
+        }
+    }
+
     func testAPIClientDecodesCanonicalTaskVariants() async throws {
         let populated: ShiftTask = try await decodeThroughAPIClient(
             "api/tasks/tasks.populated.json"
