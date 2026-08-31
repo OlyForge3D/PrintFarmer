@@ -293,6 +293,11 @@ builder.Services.AddOpenApi(options =>
     // because it only special-cases the standard JsonStringEnumConverter -- any other
     // [JsonConverter], type-level or property-level, is opaque to it.
     options.AddSchemaTransformer<CustomConverterEnumSchemaTransformer>();
+
+    // Issue #2294: document HarvestConflictResponse.GcodeFileId's OptionalGuid wrapper as the
+    // plain nullable UUID string it actually serializes as, instead of the opaque, typeless
+    // component schema the generator would otherwise emit for a custom-converter-only type.
+    options.AddSchemaTransformer<OptionalGuidSchemaTransformer>();
 });
 
 // CORS configuration for API access

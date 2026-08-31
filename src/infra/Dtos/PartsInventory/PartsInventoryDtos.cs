@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Idempotency;
@@ -102,6 +103,174 @@ public record PartMappingRequiredResponse(
     Guid? ProjectFileId,
     Guid? GcodeFileId,
     string Guidance);
+
+/// <summary>
+/// Discriminated 409 conflict envelope for <c>POST /api/job-queue/{id}/harvest</c> (issue #2294).
+/// Extends the base <see cref="Microsoft.AspNetCore.Mvc.ProblemDetails"/> members
+/// (<c>type</c>/<c>title</c>/<c>status</c>/<c>detail</c>/<c>instance</c>) with the discriminator
+/// and code-specific extension properties the server always emits for a harvest conflict --
+/// previously only reachable via <see cref="Microsoft.AspNetCore.Mvc.ProblemDetails.Extensions"/>
+/// and therefore invisible to the OpenAPI schema and any generated client (including iOS).
+/// <see cref="Code"/> selects which remaining properties are meaningful: <c>"wrongBin"</c>
+/// populates <see cref="Mismatches"/>; <c>"partMappingRequired"</c> populates
+/// <see cref="JobId"/>, <see cref="ProjectFileId"/>, <see cref="GcodeFileId"/>, and
+/// <see cref="Guidance"/>. Properties that do not apply to the current <see cref="Code"/> are left
+/// unset and, under the global <c>DefaultIgnoreCondition = WhenWritingNull</c> controller JSON
+/// options, are omitted from the wire payload entirely -- matching the corpus fixtures, where e.g.
+/// <c>harvest.wrong-bin.json</c> has no <c>jobId</c>/<c>projectFileId</c>/<c>gcodeFileId</c>/
+/// <c>guidance</c> keys at all.
+/// </summary>
+public sealed class HarvestConflictResponse : Microsoft.AspNetCore.Mvc.ProblemDetails
+{
+    /// <summary>Discriminator: <c>"wrongBin"</c> or <c>"partMappingRequired"</c>.</summary>
+    public required string Code { get; set; }
+
+    /// <summary>Populated when <see cref="Code"/> is <c>"wrongBin"</c>; otherwise omitted.</summary>
+    public IReadOnlyList<WrongBinMismatchResponse>? Mismatches { get; set; }
+
+    /// <summary>Populated when <see cref="Code"/> is <c>"partMappingRequired"</c>; otherwise omitted.</summary>
+    public Guid? JobId { get; set; }
+
+    /// <summary>Populated when <see cref="Code"/> is <c>"partMappingRequired"</c>; otherwise omitted.</summary>
+    public Guid? ProjectFileId { get; set; }
+
+    /// <summary>
+    /// Populated when <see cref="Code"/> is <c>"partMappingRequired"</c>; the corpus fixture requires
+    /// the key to be present with an explicit JSON <c>null</c> when no gcode file exists yet, and
+    /// absent entirely for any other <see cref="Code"/>. A plain <c>Guid?</c> cannot express both
+    /// "explicitly null" and "entirely absent" under a single <c>DefaultIgnoreCondition</c> policy, so
+    /// this uses <see cref="OptionalGuid"/>: left at its default (<see cref="OptionalGuid.Absent"/>)
+    /// for <c>"wrongBin"</c>, which <see cref="JsonIgnoreCondition.WhenWritingDefault"/> then omits;
+    /// set to <see cref="OptionalGuid.Of"/> (even wrapping a <see langword="null"/> <see cref="Guid"/>)
+    /// for <c>"partMappingRequired"</c>, which is never equal to the struct default and therefore always
+    /// serializes, as an explicit <c>null</c> when the wrapped value is itself <see langword="null"/>.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public OptionalGuid GcodeFileId { get; set; }
+
+    /// <summary>Populated when <see cref="Code"/> is <c>"partMappingRequired"</c>; otherwise omitted.</summary>
+    public string? Guidance { get; set; }
+
+    /// <summary>
+    /// Seconds a client should wait before retrying. The shared <c>[Idempotent]</c> filter can
+    /// short-circuit this action with its own <c>409 idempotencyKeyInProgress</c> before the
+    /// controller runs (see <c>IdempotencyProblemDetails.InProgress</c>), which carries this
+    /// extension alongside <c>code</c>; not populated for any code this controller emits directly
+    /// (Hicks review, issue #2294).
+    /// </summary>
+    public int? RetryAfterSeconds { get; set; }
+}
+
+/// <summary>
+/// Wraps a nullable <see cref="Guid"/> so JSON serialization can distinguish "property entirely
+/// absent from the payload" (this struct's default value) from "property present with an explicit
+/// JSON <c>null</c>" (any other value, including one wrapping a <see langword="null"/>
+/// <see cref="Guid"/>). Needed for <see cref="HarvestConflictResponse.GcodeFileId"/>: see that
+/// property's remarks for why a plain <c>Guid?</c> cannot express this distinction.
+/// </summary>
+[JsonConverter(typeof(OptionalGuidJsonConverter))]
+public readonly struct OptionalGuid : IEquatable<OptionalGuid>
+{
+    /// <summary>The struct's default value: no value was ever supplied, so the property is omitted.</summary>
+    public static readonly OptionalGuid Absent;
+
+    private OptionalGuid(Guid? value)
+    {
+        HasValue = true;
+        Value = value;
+    }
+
+    /// <summary><see langword="true"/> for any instance created via <see cref="Of"/>; <see langword="false"/> for <see cref="Absent"/>.</summary>
+    public bool HasValue { get; }
+
+    /// <summary>The wrapped, possibly-<see langword="null"/>, value.</summary>
+    public Guid? Value { get; }
+
+    /// <summary>Wraps <paramref name="value"/> (including <see langword="null"/>) as an explicitly-present value.</summary>
+    public static OptionalGuid Of(Guid? value) => new(value);
+
+    public bool Equals(OptionalGuid other) => HasValue == other.HasValue && Value == other.Value;
+
+    public override bool Equals(object? obj) => obj is OptionalGuid other && Equals(other);
+
+    public override int GetHashCode() => HashCode.Combine(HasValue, Value);
+
+    public static bool operator ==(OptionalGuid left, OptionalGuid right) => left.Equals(right);
+
+    public static bool operator !=(OptionalGuid left, OptionalGuid right) => !left.Equals(right);
+}
+
+/// <summary>Serializes <see cref="OptionalGuid.Value"/> as either a GUID string or an explicit JSON <c>null</c>.</summary>
+public sealed class OptionalGuidJsonConverter : JsonConverter<OptionalGuid>
+{
+    public override OptionalGuid Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Null)
+        {
+            return OptionalGuid.Of(null);
+        }
+
+        if (reader.TokenType != JsonTokenType.String || !reader.TryGetGuid(out Guid guid))
+        {
+            throw new JsonException("Expected a GUID string or null for OptionalGuid.");
+        }
+
+        return OptionalGuid.Of(guid);
+    }
+
+    public override void Write(Utf8JsonWriter writer, OptionalGuid value, JsonSerializerOptions options)
+    {
+        if (value.Value is { } guid)
+        {
+            writer.WriteStringValue(guid);
+        }
+        else
+        {
+            writer.WriteNullValue();
+        }
+    }
+}
+
+/// <summary>
+/// 409 conflict envelope for <c>POST /api/parts-inventory/{sku}/adjust</c> (issue #2294). The
+/// adjust endpoint's own conflict path (e.g. adjusting a job that was already fully reconciled)
+/// never raises the wrong-bin/mapping-required codes above -- it only ever carries a single
+/// human-readable <see cref="Message"/> -- so it gets its own narrower DTO rather than being
+/// forced into <see cref="HarvestConflictResponse"/>'s richer, code-discriminated shape.
+/// </summary>
+/// <remarks>
+/// Extends <see cref="Microsoft.AspNetCore.Mvc.ProblemDetails"/> (type/title/status/detail) and
+/// declares nullable <see cref="Code"/>/<see cref="RetryAfterSeconds"/> properties, none of them
+/// <c>required</c>, because this action has two structurally different 409 emitters that must
+/// both validate against the one declared schema (Bishop/Hicks review, issue #2294):
+/// <list type="bullet">
+/// <item>The controller's own in-action conflict path always supplies <see cref="Message"/> and
+/// never touches the base ProblemDetails fields or <see cref="Code"/>/<see cref="RetryAfterSeconds"/>.</item>
+/// <item>The shared <c>[Idempotent]</c> filter can short-circuit this same action with a
+/// filter-level <c>409</c> before the controller runs -- a plain <c>ProblemDetails</c> with
+/// <c>type</c>/<c>title</c>/<c>status</c>/<c>detail</c> and a <c>code</c> extension (plus
+/// <c>retryAfterSeconds</c> for the in-progress case), but never <see cref="Message"/> (see
+/// <c>IdempotencyProblemDetails.HashConflict</c>/<c>InProgress</c>).</item>
+/// </list>
+/// </remarks>
+public sealed class PartAdjustmentConflictResponse : Microsoft.AspNetCore.Mvc.ProblemDetails
+{
+    /// <summary>The controller's own conflict message; not populated for a filter-emitted 409.</summary>
+    public string? Message { get; set; }
+
+    /// <summary>
+    /// Machine-readable discriminator (e.g. <c>"idempotencyKeyConflict"</c>,
+    /// <c>"idempotencyKeyInProgress"</c>) for a filter-emitted 409; not populated for the
+    /// controller's own conflict path.
+    /// </summary>
+    public string? Code { get; set; }
+
+    /// <summary>
+    /// Seconds a client should wait before retrying; only populated alongside
+    /// <c>Code == "idempotencyKeyInProgress"</c>.
+    /// </summary>
+    public int? RetryAfterSeconds { get; set; }
+}
 
 /// <summary>Item in a caller-supplied harvest override / mapping fallback.</summary>
 public record HarvestOutputRequestItem(
