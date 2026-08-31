@@ -20,9 +20,11 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   CAMEL_CASE_RE,
+  activeAllowlistBoundaries,
   apiFamilyBoundary,
   apiKeyBoundary,
   checkAllowlistShape,
+  checkCorpusNonEmpty,
   checkFixtureBoundaries,
   checkFixtureProducerCoupling,
   collectObjectKeys,
@@ -133,6 +135,67 @@ test('checkAllowlistShape flags an unparsable expiry', () => {
 test('checkAllowlistShape flags a duplicate boundary', () => {
   const findings = checkAllowlistShape([validException(), validException()], new Date('2026-01-01'));
   assert.ok(findings.some((f) => f.includes("duplicate boundary 'native-slicer:widget'")));
+});
+
+// --- activeAllowlistBoundaries -----------------------------------------------
+// Bishop review (dev/jpapiez/contract-drift-gate @ 51aa7ee2): an expired entry
+// must stop suppressing the boundary it names, not just gain a second
+// "expired" finding alongside a suppressed original one.
+
+test('activeAllowlistBoundaries includes a well-formed, unexpired entry', () => {
+  const boundaries = activeAllowlistBoundaries([validException()], new Date('2026-01-01'));
+  assert.ok(boundaries.has('native-slicer:widget'));
+});
+
+test('activeAllowlistBoundaries excludes an expired entry', () => {
+  const boundaries = activeAllowlistBoundaries([validException({ expiry: '2020-01-01' })], new Date('2026-01-01'));
+  assert.ok(!boundaries.has('native-slicer:widget'));
+});
+
+test('activeAllowlistBoundaries excludes an entry with an unparsable expiry', () => {
+  const boundaries = activeAllowlistBoundaries([validException({ expiry: 'not-a-date' })], new Date('2026-01-01'));
+  assert.ok(!boundaries.has('native-slicer:widget'));
+});
+
+test('activeAllowlistBoundaries excludes an entry missing a required field', () => {
+  const entry = validException();
+  delete entry.rationale;
+  const boundaries = activeAllowlistBoundaries([entry], new Date('2026-01-01'));
+  assert.ok(!boundaries.has('native-slicer:widget'));
+});
+
+test('an expired allowlist entry stops suppressing the drift it named (does not silently keep passing)', () => {
+  // Regression for the exact bug Bishop's review caught: evaluateDrift used to
+  // pass every allowlist boundary through to checkFixtureBoundaries regardless
+  // of expiry, so an expired exception kept suppressing the underlying finding
+  // forever — only a separate "expired" finding was ever visible.
+  const result = evaluateDrift({
+    allowlist: [validException({ expiry: '2020-01-01' })],
+    fixtures: new Map([['native-slicer/widget/a.json', { snake_case: 1 }]]),
+    changedPaths: [],
+    now: new Date('2026-01-01'),
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.findings.some((f) => f.includes('expired on 2020-01-01')));
+  assert.ok(
+    result.findings.some((f) => f.includes("native-slicer fixture family 'widget'")),
+    'the underlying native-boundary finding must reappear once the exception has expired',
+  );
+});
+
+// --- checkCorpusNonEmpty ------------------------------------------------------
+// Hicks review (dev/jpapiez/contract-drift-gate @ 51aa7ee2): a misconfigured
+// corpus path must not silently report "0 fixtures checked, 0 findings" as a
+// clean pass.
+
+test('checkCorpusNonEmpty flags an empty corpus', () => {
+  const findings = checkCorpusNonEmpty(new Map());
+  assert.equal(findings.length, 1);
+  assert.match(findings[0], /No payload fixtures were found/);
+});
+
+test('checkCorpusNonEmpty passes once at least one fixture is present', () => {
+  assert.deepEqual(checkCorpusNonEmpty(new Map([['api/tasks/tasks.populated.json', { id: '1' }]])), []);
 });
 
 // --- checkFixtureBoundaries --------------------------------------------------
@@ -263,17 +326,29 @@ test('CLI exits 0 with zero findings against this repository\'s real corpus and 
   assert.match(output, /OK — \d+ fixture\(s\) checked, 0 unexplained findings\./);
 });
 
-test('CLI reads a changed-file path and fails on an injected fixture-only edit', async () => {
+test('CLI reads a changed-file path and fails on an injected fixture-only edit, naming the actual finding', async () => {
   const tempDir = await mkdtemp(path.join(tmpdir(), 'contract-drift-cli-'));
   try {
     const changedFile = path.join(tempDir, 'changed.z');
     await writeFile(changedFile, 'fixtures/wire-contracts/api/tasks/tasks.populated.json\0');
-    assert.throws(() => {
+    let threw = false;
+    try {
       execFileSync('node', [scriptPath, '--changed-file', changedFile], {
         cwd: repositoryRoot,
         encoding: 'utf8',
       });
-    }, /Command failed/);
+    } catch (err) {
+      threw = true;
+      // Hicks review (dev/jpapiez/contract-drift-gate @ 51aa7ee2): a bare
+      // "the command failed" assertion would also pass if the CLI failed for
+      // an unrelated reason (a thrown exception, a crash, wrong exit code from
+      // a different check). Assert the actual producer-coupling finding is
+      // the one that fired.
+      assert.equal(err.status, 1);
+      assert.match(err.stderr, /#2232 regression shape/);
+      assert.match(err.stderr, /tasks\.populated\.json/);
+    }
+    assert.ok(threw, 'expected the CLI to exit non-zero for a fixture-only edit with no producer-side change');
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

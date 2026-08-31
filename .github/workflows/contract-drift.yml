@@ -69,6 +69,18 @@ jobs:
           OUT_FILE: ${{ runner.temp }}/contract-drift-changed.z
         run: bash scripts/ci/compute-change-set.sh
 
+      - name: Fail closed if the diff could not be computed
+        # compute-change-set.sh signals a failed merge-base/diff computation via
+        # `force_full_safe` while still exiting 0 and writing an empty changed-path
+        # file. Left unchecked, an empty file is indistinguishable from "no fixture
+        # changed" and would let the producer-coupling check (check 3) silently
+        # pass on a diff that was never actually examined. Fail the job outright
+        # rather than let the gate report a false "0 unexplained findings".
+        if: steps.diff.outputs.force_full_safe != ''
+        run: |
+          echo "::error::compute-change-set.sh could not compute a diff (force_full_safe=${{ steps.diff.outputs.force_full_safe }}). Refusing to silently skip the fixture-edit-without-producer-change check." >&2
+          exit 1
+
       - name: Test the drift-check script
         run: node --test scripts/ci/tests/test-check-contract-drift.mjs
 

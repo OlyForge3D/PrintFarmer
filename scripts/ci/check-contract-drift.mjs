@@ -82,8 +82,21 @@ export const PRODUCER_PATH_PATTERNS = [
   /^src\/tests\/.*\.cs$/,
 ];
 
-/** Fixture-corpus paths that are metadata, not payload files, and are exempt from every structural check below. */
-const NON_PAYLOAD_CORPUS_FILES = new Set(['fixtures/wire-contracts/manifest.json', 'fixtures/wire-contracts/README.md']);
+/**
+ * Fixture-corpus file names that are metadata, not payload files, and are
+ * exempt from every structural check below. Listed corpus-relative (relative
+ * to `fixtures/wire-contracts/` itself); derived below into both a
+ * corpus-relative set (for `walkJsonFiles`, which computes paths relative to
+ * the corpus root) and a repo-root-relative set (for
+ * `checkFixtureProducerCoupling`, which operates on the PR's raw changed-path
+ * list). `README.md` is listed for documentation even though
+ * `.endsWith('.json')` already excludes it from the walk.
+ */
+const NON_PAYLOAD_CORPUS_RELATIVE_NAMES = ['manifest.json', 'README.md'];
+const NON_PAYLOAD_CORPUS_FILES = new Set(NON_PAYLOAD_CORPUS_RELATIVE_NAMES);
+const NON_PAYLOAD_CORPUS_FILES_REPO_RELATIVE = new Set(
+  NON_PAYLOAD_CORPUS_RELATIVE_NAMES.map((name) => `fixtures/wire-contracts/${name}`),
+);
 
 /**
  * Recursively collects every JSON object property name found in `value`
@@ -239,6 +252,26 @@ export function checkFixtureBoundaries(fixtures, allowlistBoundaries) {
 }
 
 /**
+ * Check 0 (structural sanity, not a corpus-content check): the corpus walk
+ * must find at least one payload fixture. An empty result almost always
+ * means the corpus path was misconfigured or the corpus directory itself
+ * went missing — treating that as a silent pass ("0 fixtures checked, 0
+ * findings") would be a fail-open gate masquerading as a clean run.
+ *
+ * @param {Map<string,unknown>} fixtures
+ */
+export function checkCorpusNonEmpty(fixtures) {
+  if (fixtures.size === 0) {
+    return [
+      'No payload fixtures were found under fixtures/wire-contracts/. This gate cannot distinguish ' +
+      '"legitimately empty corpus" from "corpus path misconfigured or corpus directory missing", so it ' +
+      'fails closed rather than silently reporting 0 fixtures checked as a clean pass.',
+    ];
+  }
+  return [];
+}
+
+/**
  * Check 3: a fixture JSON file changed in the diff with no producer-side
  * file (backend/worker source, or a .NET test file that could regenerate it)
  * changed alongside it — the #2232 regression shape reintroduced against the
@@ -248,7 +281,7 @@ export function checkFixtureBoundaries(fixtures, allowlistBoundaries) {
  */
 export function checkFixtureProducerCoupling(changedPaths) {
   const changedFixtures = changedPaths.filter(
-    (p) => p.startsWith('fixtures/wire-contracts/') && p.endsWith('.json') && !NON_PAYLOAD_CORPUS_FILES.has(p),
+    (p) => p.startsWith('fixtures/wire-contracts/') && p.endsWith('.json') && !NON_PAYLOAD_CORPUS_FILES_REPO_RELATIVE.has(p),
   );
   if (changedFixtures.length === 0) {
     return [];
@@ -267,13 +300,51 @@ export function checkFixtureProducerCoupling(changedPaths) {
 }
 
 /**
+ * An allowlist entry is "active" — able to suppress a boundary finding — only
+ * if it passes the same shape/expiry validation `checkAllowlistShape` reports
+ * on. A malformed or expired entry must not go on quietly suppressing the
+ * drift it names: `checkAllowlistShape` still reports it as its own finding,
+ * but the underlying casing/native-boundary violation must also reappear,
+ * per the acceptance criterion that an expired exception's suppression
+ * lapses rather than persisting silently.
+ */
+function isEntryActive(entry, now) {
+  if (typeof entry?.boundary !== 'string' || entry.boundary.trim() === '') {
+    return false;
+  }
+  for (const field of REQUIRED_EXCEPTION_FIELDS) {
+    if (typeof entry?.[field] !== 'string' || entry[field].trim() === '') {
+      return false;
+    }
+  }
+  const hasReviewTrigger = typeof entry?.reviewTrigger === 'string' && entry.reviewTrigger.trim() !== '';
+  const hasExpiry = typeof entry?.expiry === 'string' && entry.expiry.trim() !== '';
+  if (!hasReviewTrigger && !hasExpiry) {
+    return false;
+  }
+  if (hasExpiry) {
+    const expiryDate = new Date(`${entry.expiry}T00:00:00Z`);
+    if (Number.isNaN(expiryDate.getTime()) || expiryDate.getTime() < now.getTime()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Boundary strings from every allowlist entry that is currently valid and unexpired. */
+export function activeAllowlistBoundaries(allowlist, now = new Date()) {
+  return new Set(allowlist.filter((entry) => isEntryActive(entry, now)).map((entry) => entry.boundary));
+}
+
+/**
  * Runs every check and returns a flat findings list plus the boolean the CLI
  * uses for its exit code. Pure — no filesystem/process access.
  */
-export function evaluateDrift({ allowlist, fixtures, changedPaths, now }) {
+export function evaluateDrift({ allowlist, fixtures, changedPaths, now = new Date() }) {
   const findings = [
+    ...checkCorpusNonEmpty(fixtures),
     ...checkAllowlistShape(allowlist, now),
-    ...checkFixtureBoundaries(fixtures, new Set(allowlist.map((e) => e.boundary).filter((b) => typeof b === 'string'))),
+    ...checkFixtureBoundaries(fixtures, activeAllowlistBoundaries(allowlist, now)),
     ...checkFixtureProducerCoupling(changedPaths ?? []),
   ];
   return { findings, ok: findings.length === 0 };

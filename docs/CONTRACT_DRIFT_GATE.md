@@ -7,8 +7,11 @@ Issue: [#2243](https://github.com/OlyForge3D/PrintFarmer/issues/2243) (part of e
 
 `scripts/ci/check-contract-drift.mjs` is a deterministic, allowlist-backed gate over the
 canonical wire-contract corpus at `fixtures/wire-contracts/` (introduced by
-[#2238](https://github.com/OlyForge3D/PrintFarmer/issues/2238)). It runs three checks:
+[#2238](https://github.com/OlyForge3D/PrintFarmer/issues/2238)). It runs four checks:
 
+0. **Corpus sanity.** If the corpus resolves to zero payload fixtures (a misconfigured
+   root, an accidentally-emptied directory, or a bad path), that is itself a finding — an
+   empty corpus must never be reported as a clean "0 unexplained findings" pass.
 1. **camelCase enforcement on `api/**` fixtures.** Every property key in every
    `fixtures/wire-contracts/api/<family>/*.json` fixture must be camelCase, matching the
    JSON casing PrintFarmer's own `JsonStringEnumConverter`/System.Text.Json configuration
@@ -34,14 +37,19 @@ The script exits `0` with zero findings, or `1` and prints every finding it dete
 must carry:
 
 - `boundary` — the case- or check-specific identifier the exception applies to (e.g.
-  `native-slicer:filament`, or `api:<family>:<key>` for a single-key casing exception).
+  `native-slicer:filament` for a whole native family, `api:<family>` for a whole api
+  family, or `api:<family>#<key>` for one specific non-camelCase key within an api
+  family — the `#` separator matches what `apiKeyBoundary()` in
+  `check-contract-drift.mjs` actually emits).
 - `rationale` — why the exception is necessary and cannot be fixed at the source.
 - `owner` — a `squad:<member>` string naming who is accountable for the exception.
-- `reviewTrigger` — what change should prompt a fresh review of this exception (e.g. "any
-  new native-slicer family" or "next OrcaSlicer profile schema bump").
-- `expiry` — an ISO date after which the exception is stale and must be re-reviewed.
-  `check-contract-drift.mjs` treats an expired entry as if it didn't exist, so drift it
-  was suppressing reappears as a finding.
+- `reviewTrigger` and/or `expiry` — at least one is required. `reviewTrigger` names what
+  change should prompt a fresh review (e.g. "any new native-slicer family" or "next
+  OrcaSlicer profile schema bump"); `expiry` is an ISO `YYYY-MM-DD` date after which the
+  exception is stale and must be re-reviewed. An expired (or unparsably-dated) entry
+  stops suppressing the boundary it names — the underlying casing/native-boundary
+  finding reappears in the same run as the "expired" finding, so drift it was
+  suppressing never silently persists past expiry.
 
 Adding an entry to this file is itself a reviewable code change — it is not a
 self-service bypass. A PR that both introduces drift and quietly adds the exception that
@@ -57,7 +65,9 @@ modify `.github/workflows/ci.yml`, `deployment-tests.yml`, or `ios-pr-ci.yml`. I
 2. Installs Node from `.nvmrc` and runs `npm ci` (for the `js-yaml` dev dependency used by
    this workflow's own self-tests).
 3. Reuses the existing `scripts/ci/compute-change-set.sh` (unmodified) to compute the
-   changed-file set for the current event.
+   changed-file set for the current event, and fails the job outright if that script
+   signals it could not compute a diff (`force_full_safe` output non-empty) — an
+   uncomputed diff must never be silently treated as "0 changed files".
 4. Runs `scripts/ci/tests/test-check-contract-drift.mjs` and
    `scripts/ci/tests/test-contract-drift-workflow.mjs` (`node --test`).
 5. Runs `scripts/ci/check-contract-drift.mjs` against the real corpus, with the computed

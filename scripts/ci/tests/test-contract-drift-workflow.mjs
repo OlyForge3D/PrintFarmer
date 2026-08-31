@@ -66,6 +66,18 @@ test('contract-drift.yml runs the drift-check script and its self-tests', async 
   assert.match(runCommands, /bash scripts\/ci\/compute-change-set\.sh/);
 });
 
+test('contract-drift.yml fails closed if compute-change-set.sh could not compute a diff', async () => {
+  const workflow = await loadWorkflow();
+  const steps = workflow.jobs['contract-drift'].steps;
+  const diffStepIndex = steps.findIndex((s) => s.id === 'diff');
+  assert.ok(diffStepIndex >= 0, 'the "Compute change set" step must have id: diff so a later step can gate on its output');
+  const guardStep = steps
+    .slice(diffStepIndex + 1)
+    .find((s) => typeof s.if === 'string' && s.if.includes('force_full_safe'));
+  assert.ok(guardStep, 'a later step must check steps.diff.outputs.force_full_safe and fail the job when it is set');
+  assert.match(guardStep.run, /exit 1/);
+});
+
 test('contract-drift.yml grants only read repo contents permission', async () => {
   const workflow = await loadWorkflow();
   assert.deepEqual(workflow.permissions, { contents: 'read' });
