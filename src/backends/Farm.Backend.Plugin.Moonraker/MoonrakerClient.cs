@@ -2803,7 +2803,16 @@ public class MoonrakerClient(
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(_timeouts.PrintControlTimeout);
+
+            // Read-only proxy calls (GET) back fleet-wide status/readiness projections
+            // (filament coverage, attention runout) that must stay bounded even when a
+            // printer is powered off but still holding its network address and
+            // black-holing the connection instead of refusing it (#2118). Only
+            // state-mutating verbs (POST/PATCH/PUT/DELETE) legitimately need the longer
+            // print-control budget, since Spoolman may be persisting/validating data.
+            cts.CancelAfter(string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase)
+                ? _timeouts.StatusPollTimeout
+                : _timeouts.PrintControlTimeout);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/spoolman/proxy");
 

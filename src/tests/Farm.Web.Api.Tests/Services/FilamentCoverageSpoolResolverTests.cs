@@ -553,6 +553,58 @@ public class FilamentCoverageSpoolResolverTests
         result[printer.Id][44].Spool!.RemainingWeightG.Should().Be(300);
     }
 
+    [Fact]
+    public async Task ResolveAsync_PrinterKnownOfflineInStatusCache_SkipsNetworkReadAndStaysBounded()
+    {
+        // Regression evidence for issue #2118: FilamentCoverageSpoolResolver.ResolveAsync
+        // awaited every distinct spool source with Task.WhenAll, so a single printer that
+        // is powered down but still holds its network address (black-holing packets
+        // instead of refusing the connection) stalled the whole fleet projection for a
+        // full backend timeout. The offline printer's source must never even be attempted
+        // when the status cache already knows it is unreachable, and a healthy sibling on
+        // a distinct source must still resolve normally in the same call.
+        TaskCompletionSource<string?> neverCompletes = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Mock<IBackendClient> offlineNative = new(MockBehavior.Strict);
+        offlineNative.As<ISupportsSpoolman>()
+            .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(neverCompletes.Task);
+        Mock<IBackendClient> onlineNative = NativeClient(
+            JsonSerializer.Serialize(new[] { new { id = 5, remaining_weight = 400, material = "PLA" } }));
+        Mock<IBackendClientFactory> factory = new();
+        factory.SetupSequence(f => f.GetClient((int)PrinterBackend.Moonraker))
+            .Returns(offlineNative.Object)
+            .Returns(onlineNative.Object);
+
+        Printer offlinePrinter = PrinterWithSpool("http://moon-offline.local", PrinterBackend.Moonraker, 1);
+        Printer onlinePrinter = PrinterWithSpool("http://moon-online.local", PrinterBackend.Moonraker, 5);
+
+        Mock<IPrinterStatusCacheReader> statusCache = new();
+        statusCache.Setup(c => c.GetStatus(offlinePrinter.Id))
+            .Returns(new PrinterStatusDto(offlinePrinter.Id, IsOnline: false, State: null));
+        statusCache.Setup(c => c.GetStatus(onlinePrinter.Id))
+            .Returns(new PrinterStatusDto(onlinePrinter.Id, IsOnline: true, State: "idle"));
+
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            statusCache: statusCache.Object);
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result =
+            await resolver.ResolveAsync([offlinePrinter, onlinePrinter], CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+        stopwatch.Stop();
+
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
+        result[offlinePrinter.Id][1].Spool.Should().BeNull();
+        result[offlinePrinter.Id][1].ErrorReason.Should().Be(FilamentCoverageSpoolResolver.ReasonSourceUnavailable);
+        result[onlinePrinter.Id][5].Spool!.RemainingWeightG.Should().Be(400);
+        offlineNative.As<ISupportsSpoolman>().Verify(
+            n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     private static Mock<IBackendClient> NativeClient(string? json)
     {
         Mock<IBackendClient> client = new();
