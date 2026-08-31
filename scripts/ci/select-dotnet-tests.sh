@@ -502,9 +502,24 @@ load_changed_files() {
 #   tools           — src/tools/**
 #   dotnet_config   — src/*.props, src/*.targets, src/.editorconfig
 #   mobile          — mobile/** (does not force any .NET action)
+#   wire_contract   — canonical API wire-contract JSON/manifest inputs
 #   unknown_src     — any other src/**
 #   unclassified    — anything else outside the buckets above
 # ---------------------------------------------------------------------------
+is_api_wire_contract_input() {
+  local p="$1"
+  case "$p" in
+    fixtures/wire-contracts/manifest.json|fixtures/wire-contracts/api/*.json)
+      return 0 ;;
+    src/api/Program.cs|src/infra/*Contract.cs)
+      return 0 ;;
+    src/infra/Contracts/*.cs|src/infra/Domain/*.cs|src/infra/Dtos/*.cs|src/infra/Json/*.cs|src/infra/Models/*.cs|src/infra/Serialization/*.cs)
+      return 0 ;;
+    *)
+      return 1 ;;
+  esac
+}
+
 classify_path() {
   local p="$1"
   # Reject anything that could be shell-metacharacter-injected before we act.
@@ -520,6 +535,11 @@ classify_path() {
       printf 'shared_config' ; return ;;
     *.sln)
       printf 'shared_config' ; return ;;
+
+    # Canonical API wire payloads and their provenance registry are executable
+    # contract-test inputs, not inert repository data.
+    fixtures/wire-contracts/manifest.json|fixtures/wire-contracts/api/*.json)
+      printf 'wire_contract' ; return ;;
 
     # CI selector proper: only files that actually govern .NET test/build
     # selection, plus repo-wide git hooks. These MUST be matched before the
@@ -860,9 +880,13 @@ main() {
   local has_tests_gcode=0 has_tests_inventory=0 has_tests_administration=0 has_tests_observability=0
   local has_tests_printers=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
+  local has_wire_contract=0
 
   local p category
   for p in "${CHANGED_LIST[@]}"; do
+    if is_api_wire_contract_input "$p"; then
+      has_wire_contract=1
+    fi
     category="$(classify_path "$p")"
     case "$category" in
       shared_config)   has_shared_config=1 ;;
@@ -914,6 +938,7 @@ main() {
       unknown_src)     has_unknown_src=1 ;;
       docs)            has_docs=1 ;;
       mobile)          has_mobile=1 ;;
+      wire_contract)   has_wire_contract=1 ;;
       ci_other)        has_ci_other=1 ;;
       *)               has_other=1 ;;
     esac
@@ -977,7 +1002,7 @@ main() {
   # coverage across the whole graph. This is load-bearing: dotnet-test and
   # migration-drift both depend on dotnet-build and consume its artifacts, so
   # every bucket that can request either consumer must also request the build.
-  if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
+  if (( has_wire_contract || has_api || has_infra || has_backend || has_backend_core || has_slicer ||
         has_orca || has_smartplug || has_printqueue || has_maintenance || has_calibration || has_devices || has_identity ||
         has_gcode || has_inventory || has_administration || has_observability || has_printers ||
         has_mig_app || has_mig_slcr ||
@@ -990,6 +1015,13 @@ main() {
 
   # tools alone → build only, no tests.
   local net_test_bucket_hit=0
+  if (( has_wire_contract )); then
+    # API corpus files and serialization sources must execute the producer
+    # contract tests even when their ordinary bucket (notably infra) would
+    # otherwise omit Farm.Web.Api.Tests.
+    test_names+=("Farm.Web.Api.Tests")
+    net_test_bucket_hit=1
+  fi
   if (( has_api )); then
     # api sits under Farm.Web.Api.Tests directly; Slicer.Module.Tests and
     # IntegrationTests are run conservatively alongside it. Farm.Modules.Identity.Tests
@@ -1360,6 +1392,7 @@ main() {
 
   # Reason string composition.
   local reason=""
+  if (( has_wire_contract )); then reason+="wire-contract "; fi
   if (( has_frontend )); then reason+="frontend "; fi
   if (( has_api )); then reason+="api "; fi
   if (( has_infra )); then reason+="infra "; fi

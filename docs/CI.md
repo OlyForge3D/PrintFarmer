@@ -95,6 +95,7 @@ classify.
 | Bucket and exact path selector | Frontend | .NET build | .NET tests | Migration drift | Full-safe |
 | --- | :---: | :---: | --- | --- | :---: |
 | `frontend`: `src/Web/**` | ✓ | | | | |
+| `wire_contract`: `fixtures/wire-contracts/manifest.json`, `fixtures/wire-contracts/api/**/*.json` | | ✓ | `Farm.Web.Api.Tests` | | |
 | `api`: `src/api/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.Identity.Tests`, `Farm.Modules.Inventory.Tests`, `Farm.Modules.Administration.Tests` | `AppPg`, `AppSqlServer` | |
 | `infra`: `src/infra/**` | | ✓ | `Farm.Infrastructure.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Modules.SmartPlug.Tests`, `Farm.Modules.PrintQueue.Tests`, `Farm.Modules.Maintenance.Tests`, `Farm.Modules.Calibration.Tests`, `Farm.Modules.Devices.Tests`, `Farm.Modules.Gcode.Tests`, `Farm.Modules.Identity.Tests`, `Farm.Modules.Inventory.Tests`, `Farm.Modules.Administration.Tests`, `Farm.Modules.Observability.Tests`, `Farm.Modules.Printers.Tests`, `Farm.Backend.Plugins.Tests` | `AppPg`, `AppSqlServer` | |
 | `backend_core`: `src/backends/Farm.Backend.Plugin.Core/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Web.IntegrationTests`, `Farm.Infrastructure.Tests`, `Farm.Backend.Plugins.Tests`, `Farm.Modules.Printers.Tests` | | |
@@ -141,6 +142,14 @@ classify.
 | `mobile`: `mobile/**` | | | | | |
 | `unclassified`: every other repository path | | | | | |
 
+Canonical API corpus inputs also drive the iOS selector. Changes to
+`fixtures/wire-contracts/manifest.json`, API fixture JSON, `src/api/Program.cs`,
+serialization-source C# under
+`src/infra/{Contracts,Domain,Dtos,Json,Models,Serialization}`, or any
+`src/infra/**/*Contract.cs` run the real iOS unit-test job so
+`WireContractCorpusTests` exercises the payloads through `APIClient`. Corpus
+documentation and lock files remain inert.
+
 **`infra` and the `Farm.Web.Api` test legs (issue #2033):** an `src/infra/**`-only
 change no longer selects the `Farm.Web.Api.Tests`/`Farm.Web.IntegrationTests` matrix
 legs. Those legs restore/build/test `Farm.Web.Api.csproj` (or its `Farm.Web.Api`
@@ -151,6 +160,10 @@ already compiles `Farm.Web.Api` against the change, so compile coverage is not l
 only the (slower) web-host test suite is skipped. `Farm.Infrastructure.Tests` itself
 has no `ProjectReference` to `Farm.Web.Api`, so selecting it satisfies "a change
 touching only `src/infra/**` selects this leg without building `Farm.Web.Api`."
+The narrow exception is an API serialization-source change under
+`src/infra/{Contracts,Domain,Dtos,Json,Models,Serialization}` or any
+`src/infra/**/*Contract.cs`; those paths additionally select `Farm.Web.Api.Tests`
+so the producer wire-contract assertions execute.
 
 `ci-tools` is unconditional and therefore runs for every bucket, including
 `docs`, `mobile`, and `unclassified`. `dependency-compliance` is gated on

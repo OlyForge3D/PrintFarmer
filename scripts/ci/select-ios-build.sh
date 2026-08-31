@@ -38,9 +38,10 @@
 
 set -uo pipefail
 
-# Paths whose modification requires the real iOS build. Kept as a single
-# extended-regexp anchored at the start of each changed path.
-IOS_RELEVANT_PATHS_RE='^(mobile/|\.github/workflows/ios-pr-ci\.yml$|scripts/ci/resolve-ios-simulator\.sh$|scripts/ci/test-resolve-ios-simulator\.sh$|scripts/ci/select-ios-build\.sh$|scripts/ci/tests/test-select-ios-build\.sh$)'
+# Paths whose modification requires the real iOS build. Canonical API corpus
+# inputs and the backend source files that define their serialized shape must
+# exercise the real APIClient decoders alongside direct mobile changes.
+IOS_RELEVANT_PATHS_RE='^(mobile/|fixtures/wire-contracts/(manifest\.json|api/.*\.json)$|src/api/Program\.cs$|src/infra/(Contracts|Domain|Dtos|Json|Models|Serialization)/.*\.cs$|src/infra/.*Contract\.cs$|\.github/workflows/ios-pr-ci\.yml$|scripts/ci/resolve-ios-simulator\.sh$|scripts/ci/test-resolve-ios-simulator\.sh$|scripts/ci/select-ios-build\.sh$|scripts/ci/tests/test-select-ios-build\.sh$)'
 
 should_run=true
 reason="non-pull_request event — running full iOS build"
@@ -84,12 +85,11 @@ if [[ "${EVENT_NAME:-}" == "pull_request" ]]; then
         failure="could not create temp file — running full iOS build to be safe"
       elif git -c core.quotePath=false diff -z --no-renames --name-only \
         "${base_list[0]}" "$head_sha" > "$diff_out" 2>/dev/null; then
-        # `mapfile -d` needs bash >= 4.4 (the ubuntu-latest runner has 5.x).
-        # Check it explicitly: on failure changed_paths would stay empty and be
-        # mistaken for "nothing changed", which is the one fail-OPEN direction.
-        if ! mapfile -d '' -t changed_paths < "$diff_out"; then
-          failure="could not read diff output — running full iOS build to be safe"
-        fi
+        # Bash 3.2-compatible NUL reader so the same selector suite runs on
+        # macOS developer hosts and the Ubuntu CI runner.
+        while IFS= read -r -d '' changed_path; do
+          changed_paths+=("$changed_path")
+        done < "$diff_out"
       else
         failure="diff failed — running full iOS build to be safe"
       fi
