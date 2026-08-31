@@ -61,6 +61,24 @@ export interface ImportSlicerProfileRequest {
   isPublic?: boolean;
 }
 
+/**
+ * Response shape for `POST /slicer/profiles/import` (the only call site of this type —
+ * see `slicerProfilesService.importProfile`). Mirrors the backend
+ * `ProcessProfileExtendedDto` (`src/slicer/Farm.Slicer.Module/Dtos/ProcessProfileManagementDtos.cs`),
+ * which is what `ProfilesService.ImportProfileAsync` (`src/slicer/Farm.Slicer.Module.Api/Services/ProfilesService.cs`)
+ * actually constructs and the controller serializes.
+ *
+ * `isSystem`, `hash`, and `metadata` are non-nullable on `ProcessProfileExtendedDto` and are
+ * always populated by `ImportProfileAsync` (defaulting to `false`, `""`, and `{}` respectively),
+ * so they remain required here — the `fixtures/wire-contracts/api/slicer-profiles/profiles.populated.json`
+ * corpus fixture that omits them is captured from the unrelated `GET /api/slicer/profiles/{id}`
+ * endpoint (`ProcessProfileResponseDto`), which this type does not model.
+ *
+ * `advancedSettings` is optional because `ProcessProfileExtendedDto` does not carry it at all
+ * (only `ProcessProfileResponseDto`/`ProcessProfileExportDto` do); it is declared here so any
+ * future alignment of the import DTO with the raw-settings field does not require another
+ * type-drift fix.
+ */
 export interface SlicerProfileExtended {
   id: string;
   name: string;
@@ -74,6 +92,7 @@ export interface SlicerProfileExtended {
   enableSupports: boolean;
   material: string;
   quality: string;
+  advancedSettings?: string;
   isDefault: boolean;
   isPublic: boolean;
   isSystem: boolean;
