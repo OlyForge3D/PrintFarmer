@@ -144,7 +144,7 @@ classify.
 
 Canonical API corpus inputs also drive the iOS selector. Changes to
 `fixtures/wire-contracts/manifest.json`, API fixture JSON, `src/api/Program.cs`,
-serialization-source C# under
+`src/api/Startup/{Controller,SignalR}Startup.cs`, serialization-source C# under
 `src/infra/{Contracts,Domain,Dtos,Json,Models,Serialization}`, or any
 `src/infra/**/*Contract.cs` run the real iOS unit-test job so
 `WireContractCorpusTests` exercises the payloads through `APIClient`. Corpus

@@ -163,6 +163,8 @@ case_api_wire_contract_inputs_run_build() {
       "fixtures/wire-contracts/manifest.json" \
       "fixtures/wire-contracts/api/inventory/parts.populated.json" \
       "src/api/Program.cs" \
+      "src/api/Startup/ControllerStartup.cs" \
+      "src/api/Startup/SignalRStartup.cs" \
       "src/infra/Contracts/Auth/AuthDtos.cs" \
       "src/infra/Domain/PartInventoryAdjustment.cs" \
       "src/infra/Dtos/PartsInventory/PartsInventoryDtos.cs" \

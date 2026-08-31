@@ -457,6 +457,26 @@ case_infra_serialization_source_adds_api_contract_tests() {
   done
 }
 
+case_api_serialization_startup_marks_wire_contract_selection() {
+  local out="$1" path matrix reason
+  for path in \
+      "src/api/Startup/ControllerStartup.cs" \
+      "src/api/Startup/SignalRStartup.cs"; do
+    CHANGED_FILES="$path"
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+      CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+      select_run >/dev/null 2>&1
+
+    matrix="$(get_output "$out" matrix)"
+    reason="$(get_output "$out" reason)"
+    assert_contains "matrix api ($path)" "$matrix" "Farm.Web.Api.Tests" || return 1
+    assert_api_shard_matrix "api serialization startup ($path)" "$matrix" "$TEST_MANIFEST" || return 1
+    assert_contains "reason wire-contract ($path)" "$reason" "wire-contract" || return 1
+    assert_contains "reason api ($path)" "$reason" "api" || return 1
+    : > "$out"
+  done
+}
+
 case_auth_forwarded_headers_change_selects_integration() {
   local out="$1"
   CHANGED_FILES="src/api/Configuration/ForwardedHeadersConfiguration.cs"
@@ -3859,6 +3879,7 @@ TESTS=(
   case_api_wire_contract_lookalikes_remain_inert
   case_api_change
   case_infra_serialization_source_adds_api_contract_tests
+  case_api_serialization_startup_marks_wire_contract_selection
   case_auth_forwarded_headers_change_selects_integration
   case_infra_change
   case_infra_change_does_not_build_web_api_test_leg
