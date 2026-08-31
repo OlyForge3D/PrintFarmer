@@ -816,7 +816,16 @@ describe('NewSliceJobPage', () => {
       });
 
       const changeAffordance = screen.getByTestId('machine-profile-change-affordance');
-      expect(machineProfileTrigger.lastElementChild).toContainElement(changeAffordance);
+      const contentWrapper = machineProfileTrigger.firstElementChild;
+      const profileRow = contentWrapper?.firstElementChild;
+      const profileLabel = profileRow?.querySelector('.truncate');
+      const iconWrapper = machineProfileTrigger.lastElementChild;
+
+      expect(machineProfileTrigger).toHaveClass('justify-between', '[&>span:first-child]:flex-1');
+      expect(contentWrapper).toHaveClass('min-w-0');
+      expect(profileRow).toHaveClass('flex', 'min-w-0', 'items-center');
+      expect(profileLabel).toHaveClass('min-w-0', 'flex-1', 'truncate');
+      expect(iconWrapper).toContainElement(changeAffordance);
       expect(changeAffordance).toHaveClass('shrink-0');
 
       // There is no longer a standalone nozzle dropdown in the sidebar.

@@ -211,10 +211,14 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
   const shortcutsPanelId = useId();
   const shortcutsTitleId = useId();
 
-  const closeShortcuts = useCallback(() => {
+  const dismissShortcuts = useCallback(() => {
     setShortcutsOpen(false);
-    window.requestAnimationFrame(() => shortcutsTriggerRef.current?.focus());
   }, []);
+
+  const closeShortcuts = useCallback(() => {
+    dismissShortcuts();
+    window.requestAnimationFrame(() => shortcutsTriggerRef.current?.focus());
+  }, [dismissShortcuts]);
 
   useEffect(() => {
     if (!shortcutsOpen) {
@@ -229,7 +233,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         && !shortcutsPanelRef.current?.contains(target)
         && !shortcutsTriggerRef.current?.contains(target)
       ) {
-        closeShortcuts();
+        dismissShortcuts();
       }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -247,7 +251,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
       document.removeEventListener('mousedown', handleMouseDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [closeShortcuts, shortcutsOpen]);
+  }, [closeShortcuts, dismissShortcuts, shortcutsOpen]);
 
   return (
     // flex-wrap (issue #1902): the pinned left/right groups and the tool

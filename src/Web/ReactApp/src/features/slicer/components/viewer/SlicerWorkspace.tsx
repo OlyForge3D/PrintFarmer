@@ -1485,10 +1485,16 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       }
 
       if (event.key === 'Escape') {
-        if (cutMode || supportPaintMode || seamPaintMode || colorPaintMode || fuzzySkinPaintMode || measureMode || layFlatMode || textToolActive) {
+        if (activeTool || cutMode || supportPaintMode || seamPaintMode || colorPaintMode || fuzzySkinPaintMode || measureMode || layFlatMode || textToolActive) {
           event.preventDefault();
+          setActiveTool(null);
           exitAllToolModes();
           toast.info('Tool mode exited');
+          return;
+        }
+        if (selectedModelId) {
+          event.preventDefault();
+          handleModelSelect(null);
           return;
         }
       }
@@ -1562,7 +1568,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleToolChange, hasSelection, cutMode, supportPaintMode, seamPaintMode, colorPaintMode, fuzzySkinPaintMode, measureMode, layFlatMode, textToolActive, exitAllToolModes, handleArrange, activePaintTool, handleColorPaint, handleSupportPaint, handleSeamPaint, handleFuzzySkinPaint, simpleMode]);
+  }, [handleToolChange, handleModelSelect, hasSelection, selectedModelId, activeTool, cutMode, supportPaintMode, seamPaintMode, colorPaintMode, fuzzySkinPaintMode, measureMode, layFlatMode, textToolActive, exitAllToolModes, handleArrange, activePaintTool, handleColorPaint, handleSupportPaint, handleSeamPaint, handleFuzzySkinPaint, simpleMode]);
 
   const handleLayersToggle = useCallback(() => {
     setShowLayers(prev => !prev);

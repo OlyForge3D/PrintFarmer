@@ -89,4 +89,25 @@ describe('SlicerToolbar narrow-width layout (issue #1902)', () => {
       expect(trigger).toHaveFocus();
     });
   });
+
+  it('dismisses the shortcuts flyout on an outside pointer press without stealing focus', async () => {
+    render(
+      <>
+        <SlicerToolbar />
+        <button type="button">Outside control</button>
+      </>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show keyboard shortcuts' }));
+    const outsideControl = screen.getByRole('button', { name: 'Outside control' });
+
+    fireEvent.mouseDown(outsideControl);
+    outsideControl.focus();
+    fireEvent.click(outsideControl);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument();
+      expect(outsideControl).toHaveFocus();
+    });
+  });
 });
