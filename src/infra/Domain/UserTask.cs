@@ -10,7 +10,16 @@ namespace Farm.Infrastructure.Domain;
 /// Wire values are kept in lockstep with the EF value converter in
 /// <c>UserTaskConfiguration</c>.
 /// </summary>
-internal sealed class UserTaskAnchorKindJsonConverter : JsonConverter<UserTaskAnchorKind>
+/// <remarks>
+/// Public (issue #2261 finding 2), not internal: <c>Farm.Web.Api</c>'s
+/// <c>CustomConverterEnumSchemaTransformer</c> calls <see cref="ToWire"/> directly, across the
+/// assembly boundary, to constrain this enum's OpenAPI component schema to the same tokens this
+/// converter actually puts on the wire -- the native OpenAPI schema generator only ever resolves a
+/// referenced enum's schema via a TYPE-level converter (or one registered directly into
+/// <c>JsonSerializerOptions.Converters</c>), never the PROPERTY-level <see cref="JsonConverterAttribute"/>
+/// that makes this the real wire converter for <c>UserTaskDto.AnchorKind</c>/<c>ShiftPlanGroupDto.AnchorKind</c>.
+/// </remarks>
+public sealed class UserTaskAnchorKindJsonConverter : JsonConverter<UserTaskAnchorKind>
 {
     public override UserTaskAnchorKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
@@ -25,7 +34,7 @@ internal sealed class UserTaskAnchorKindJsonConverter : JsonConverter<UserTaskAn
     public override void Write(Utf8JsonWriter writer, UserTaskAnchorKind value, JsonSerializerOptions options)
         => writer.WriteStringValue(ToWire(value));
 
-    internal static string ToWire(UserTaskAnchorKind value) => value switch
+    public static string ToWire(UserTaskAnchorKind value) => value switch
     {
         UserTaskAnchorKind.Now => "now",
         UserTaskAnchorKind.At => "at",
@@ -52,7 +61,11 @@ internal sealed class UserTaskAnchorKindJsonConverter : JsonConverter<UserTaskAn
 /// Wire values are kept in lockstep with the EF value converter in
 /// <c>UserTaskConfiguration</c>.
 /// </summary>
-internal sealed class UserTaskSourceKindJsonConverter : JsonConverter<UserTaskSourceKind>
+/// <remarks>
+/// Public (issue #2261 finding 2), not internal -- see the analogous remark on
+/// <see cref="UserTaskAnchorKindJsonConverter"/>.
+/// </remarks>
+public sealed class UserTaskSourceKindJsonConverter : JsonConverter<UserTaskSourceKind>
 {
     public override UserTaskSourceKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
@@ -67,7 +80,7 @@ internal sealed class UserTaskSourceKindJsonConverter : JsonConverter<UserTaskSo
     public override void Write(Utf8JsonWriter writer, UserTaskSourceKind value, JsonSerializerOptions options)
         => writer.WriteStringValue(ToWire(value));
 
-    internal static string ToWire(UserTaskSourceKind value) => value switch
+    public static string ToWire(UserTaskSourceKind value) => value switch
     {
         UserTaskSourceKind.Attention => "attention",
         UserTaskSourceKind.FailureIncident => "failureIncident",

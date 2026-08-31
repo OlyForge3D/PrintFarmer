@@ -281,6 +281,18 @@ builder.Services.AddOpenApi(options =>
     // the schema matches the real wire contract for all DTOs, not just the ones
     // fixed individually in #2261.
     options.AddSchemaTransformer<NullablePropertiesNotRequiredSchemaTransformer>();
+
+    // Issue #2261/#2282: a confirmed .NET framework limitation (dotnet/aspnetcore#61303,
+    // #62022) leaves every standard-converter, non-[Flags] enum schema with an "enum" array but
+    // no "type" keyword at all. Add the missing "type" for every such schema before the more
+    // targeted transformer below runs.
+    options.AddSchemaTransformer<EnumSchemaTypeStringTransformer>();
+
+    // Issue #2261 finding 2: constrain the UserTaskAnchorKind/UserTaskSourceKind component
+    // schemas, which the generator otherwise documents with no "type" and no "enum" at all
+    // because their real wire converter is a property-level [JsonConverter] attribute the
+    // generator never inspects when building a referenced enum type's schema.
+    options.AddSchemaTransformer<CustomConverterEnumSchemaTransformer>();
 });
 
 // CORS configuration for API access

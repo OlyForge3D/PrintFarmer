@@ -35,19 +35,18 @@ namespace Farm.Web.Api.Tests.Contracts;
 /// Unlike its sibling classes, this is otherwise an ideal-behavior assertion, not a
 /// characterization test: for every remaining (non-excluded) reachable enum schema it expects the
 /// correct documented shape, rather than locking in today's known-broken shape for a hand-picked
-/// list of enums. Per #2262/#2261, most currently fail for the same systemic root cause
+/// list of enums. Per #2262/#2261, most previously failed for the same systemic root cause
 /// (<c>ConfigureHttpJsonOptions</c> vs MVC <c>AddJsonOptions</c> divergence) as #2242's
-/// family-scoped tests. Left unskipped, that would permanently redden the shared test assembly, so
-/// this fact is skipped until #2261 lands -- remove the <see cref="FactAttribute.Skip"/> then and
-/// let the (correctly scoped) failures drive the remaining fix-up work.
+/// family-scoped tests -- that divergence was fixed by #2274, and issue #2282 removed this test's
+/// blocking <c>Skip</c> and resolved (or filed as a separate, narrowly-scoped exclusion -- see
+/// #2289 and #2290) everything the unblocked sweep still flagged.
 /// </summary>
 [Collection(OpenApiDocumentCollection.Name)]
 public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
 {
     private readonly JsonDocument _document = fixture.Document;
 
-    [Fact(Skip = "Ideal-behavior sweep blocked by #2261 (ConfigureHttpJsonOptions vs AddJsonOptions " +
-        "divergence) -- remove this Skip once #2261 lands and address whatever the sweep still flags.")]
+    [Fact]
     public void EveryReachableEnumComponentSchema_IsDocumentedAsStringWithMatchingEnumTokens()
     {
         JsonElement schemas = _document.RootElement.GetProperty("components").GetProperty("schemas");
@@ -101,11 +100,23 @@ public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
 
             string[] expectedTokens = Enum.GetNames(enumType);
 
+            // A component schema can be shared by both a nullable and a non-nullable usage of the
+            // same enum type (e.g. ApiKeyPurpose: non-nullable on ApiKey.Purpose, nullable on an
+            // optional query parameter) -- the generator merges that by adding a literal JSON
+            // `null` entry to the shared schema's "enum" array (see
+            // EnumSchemaTypeStringTransformer's doc comment). That is a legitimate shape, not a
+            // fidelity gap, so a null entry is excluded from the member-name comparison below, and
+            // "type" is expected to include "null" alongside "string" precisely when the enum
+            // array carries that null entry -- neither more nor less.
+            bool hasNullToken = enumTokens?.Contains(null) ?? false;
+            string[] expectedTypes = hasNullToken ? new[] { "string", "null" } : new[] { "string" };
+            List<string>? nonNullEnumTokens = enumTokens?.Where(token => token is not null).ToList();
+
             bool isCorrectlyDocumented =
-                types.SetEquals(new[] { "string" }) &&
-                enumTokens is not null &&
-                enumTokens.Count == expectedTokens.Length &&
-                enumTokens.ToHashSet(StringComparer.Ordinal).SetEquals(expectedTokens);
+                types.SetEquals(expectedTypes) &&
+                nonNullEnumTokens is not null &&
+                nonNullEnumTokens.Count == expectedTokens.Length &&
+                nonNullEnumTokens.ToHashSet(StringComparer.Ordinal).SetEquals(expectedTokens);
 
             if (!isCorrectlyDocumented)
             {
@@ -115,7 +126,7 @@ public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
                     : string.Join(",", enumTokens.Select(token => token ?? "<null>"));
                 failures.Add(
                     $"{schemaProperty.Name}: documented type=[{actualType}] enum=[{actualEnum}]; " +
-                    $"expected type=[string] enum=[{string.Join(",", expectedTokens)}]");
+                    $"expected type=[{string.Join(",", expectedTypes)}] enum=[{string.Join(",", expectedTokens)}]");
             }
         }
 
@@ -164,6 +175,36 @@ public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
     }
 
     /// <summary>
+    /// Genuinely reachable-from-a-DTO half of the <c>GcodeHarvestQueueItemStatus</c> same-simple-name
+    /// collision (see #2289): <c>Farm.Infrastructure.Domain.GcodeHarvestQueueItemStatus</c> is a
+    /// domain/entity-only concept never referenced by an API DTO -- it is bridged to
+    /// <c>Farm.Infrastructure.GcodeHarvestQueueItemStatus</c> (the Dto enum actually reachable from
+    /// <c>components.schemas</c>, e.g. via <c>GcodeHarvestQueueItemDto.Status</c>) by an unsafe
+    /// numeric round-trip cast in <c>GcodeHarvestController</c>. Excluded here, narrowly and by
+    /// exact type identity rather than a name- or namespace-based heuristic, so this sweep can
+    /// still check the one CLR type that is actually bound to the schema instead of reporting a
+    /// same-name ambiguity the schema itself doesn't have. Remove this exclusion once #2289 is
+    /// resolved (either enum duplication removed entirely, or the unsafe cast replaced).
+    /// </summary>
+    private static readonly Type GcodeHarvestQueueItemStatusDomainDuplicate =
+        typeof(Farm.Infrastructure.Domain.GcodeHarvestQueueItemStatus);
+
+    /// <summary>
+    /// The gRPC-only half of the <c>SlicerEngineType</c> same-simple-name collision (see #2290):
+    /// <c>Farm.Web.Api.Grpc.SlicerEngineType</c> is auto-generated from
+    /// <c>proto/slicer_jobs.proto</c> and used exclusively by the internal
+    /// <c>SlicerJobsService</c> gRPC contract -- it is never referenced by a REST DTO and is not
+    /// reachable from <c>components.schemas</c>. The type actually bound to the
+    /// <c>SlicerEngineType</c> schema is <c>Farm.Slicer.Module.Models.SlicerEngineType</c>, which
+    /// carries the real <see cref="JsonStringEnumConverter"/> and is left eligible. Excluded here,
+    /// narrowly and by exact type identity, so this sweep does not report a same-name ambiguity
+    /// the schema itself doesn't have. Remove this exclusion if/when #2290's proto enum rename
+    /// lands and the collision no longer exists.
+    /// </summary>
+    private static readonly Type SlicerEngineTypeGrpcDuplicate =
+        typeof(Farm.Web.Api.Grpc.SlicerEngineType);
+
+    /// <summary>
     /// Every public enum type across the already-loaded application assemblies -- the shared
     /// <see cref="OpenApiDocumentFixture"/> already booted the full host to fetch the document, so
     /// every assembly that can contribute a component schema is already resident in this
@@ -179,7 +220,9 @@ public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
             .Where(assembly => !assembly.IsDynamic &&
                 (assembly.GetName().Name?.StartsWith("Farm.", StringComparison.Ordinal) ?? false))
             .SelectMany(SafeGetTypes)
-            .Where(type => type.IsEnum && (type.IsPublic || type.IsNestedPublic))
+            .Where(type => type.IsEnum && (type.IsPublic || type.IsNestedPublic) &&
+                type != GcodeHarvestQueueItemStatusDomainDuplicate &&
+                type != SlicerEngineTypeGrpcDuplicate)
             .GroupBy(type => type.Name, StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,
