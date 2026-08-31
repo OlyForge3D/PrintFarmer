@@ -22,7 +22,9 @@ namespace Farm.Slicer.Module.Tests.Contracts;
 /// DI container (never a locally-reimplemented copy), and serializes a representative payload
 /// through each of those two REAL registered option objects to prove — from the resulting JSON
 /// bytes, never from inspecting the CLR options object's properties — that this host shares the
-/// main API's camelCase-naming + string-enum convention.
+/// main API's camelCase-naming + string-enum convention. Also covers issue #2248: the null-field
+/// handling test below proves this host's null-handling now matches the main API's (a null field
+/// is omitted, not serialized as an explicit JSON null).
 /// </summary>
 public sealed class SlicerHostSerializerParityTests : IClassFixture<SlicerHostSerializerParityTests.Factory>
 {
@@ -72,18 +74,16 @@ public sealed class SlicerHostSerializerParityTests : IClassFixture<SlicerHostSe
     }
 
     /// <summary>
-    /// KNOWN GAP (filed as its own finding issue on #2237, not fixed here — out of scope for
-    /// #2238 per its "do not fix production code" instruction): unlike the main API's
-    /// <c>ControllerStartup.cs</c>/<c>SignalRStartup.cs</c>, which both set
-    /// <c>DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull</c>, the slicer host's
-    /// shared <c>configureJson</c> delegate in <c>Farm.Slicer.Host/Program.cs</c> sets neither
-    /// options object's <c>DefaultIgnoreCondition</c>. This test pins the REAL, current wire
-    /// behaviour (an explicit JSON <c>null</c>, not an omitted key) for a null field, so any
-    /// future fix for the finding shows up here as an intentional, reviewed test change rather
-    /// than a silent regression discovered downstream by React/mobile.
+    /// Fixed by issue #2248: the slicer host's shared <c>configureJson</c> delegate in
+    /// <c>Farm.Slicer.Host/Program.cs</c> now sets
+    /// <c>DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull</c>, matching the main
+    /// API's <c>ControllerStartup.cs</c>/<c>SignalRStartup.cs</c> policy. A null field now
+    /// serializes as a MISSING key, not an explicit JSON <c>null</c> — this test was updated in
+    /// lockstep with that production fix (previously it pinned the opposite, explicit-null
+    /// behavior as a known, intentional divergence from the main API).
     /// </summary>
     [Fact]
-    public void MvcJsonSerializerOptions_NullField_IsExplicitNull_NotOmitted_KnownDivergenceFromMainApi()
+    public void MvcJsonSerializerOptions_NullField_IsMissingKey_MatchesMainApi()
     {
         using IServiceScope scope = _factory.Services.CreateScope();
         JsonSerializerOptions options = scope.ServiceProvider
@@ -94,7 +94,7 @@ public sealed class SlicerHostSerializerParityTests : IClassFixture<SlicerHostSe
         string json = JsonSerializer.Serialize(dto, options);
         using JsonDocument document = JsonDocument.Parse(json);
 
-        JsonContractAssertions.AssertExplicitNull(document.RootElement, "message");
+        JsonContractAssertions.AssertMissingKey(document.RootElement, "message");
     }
 
     /// <summary>Proves the MVC and SignalR options within this host agree with each other (both derive from the same shared delegate).</summary>
