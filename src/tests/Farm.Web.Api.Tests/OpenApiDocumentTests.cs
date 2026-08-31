@@ -60,4 +60,65 @@ public class OpenApiDocumentTests
         (route.StartsWith("api/printers/", StringComparison.OrdinalIgnoreCase) ||
          route.StartsWith("/api/printers/", StringComparison.OrdinalIgnoreCase)) &&
         route.EndsWith("/gcode", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Issue #2242, generator-readiness smoke test: every local <c>$ref</c> pointer found anywhere
+    /// in the live OpenAPI document — recursively, across every path/operation/response/schema —
+    /// must resolve to an existing <c>components/schemas</c> entry. This is a document-wide,
+    /// family-agnostic check distinct from the per-family fidelity assertions in
+    /// <c>Contracts/*OpenApiSchemaTests.cs</c>: it does not assert a schema is *correct*, only
+    /// that a generated client would never fail to resolve a reference while walking the document.
+    /// </summary>
+    [Fact]
+    public async Task GetOpenApiDocumentAsync_EveryLocalSchemaRef_ResolvesToAnExistingComponentSchema()
+    {
+        await using CustomWebApplicationFactory factory = CustomWebApplicationFactory.CreateWithIsolatedDatabase();
+        using HttpClient client = factory.CreateClient();
+        using HttpResponseMessage response = await client.GetAsync("/openapi/v1.json");
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
+        await using Stream content = await response.Content.ReadAsStreamAsync();
+        using JsonDocument document = await JsonDocument.ParseAsync(content);
+
+        JsonElement schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
+        var declaredSchemaNames = new HashSet<string>(
+            schemas.EnumerateObject().Select(property => property.Name), StringComparer.Ordinal);
+
+        var unresolvedRefs = new List<string>();
+        CollectUnresolvedRefs(document.RootElement, declaredSchemaNames, unresolvedRefs);
+
+        _ = unresolvedRefs.Should().BeEmpty(
+            "every '$ref' pointer in the document should resolve to a declared component schema");
+    }
+
+    private static void CollectUnresolvedRefs(JsonElement element, HashSet<string> declaredSchemaNames, List<string> unresolvedRefs)
+    {
+        const string schemaRefPrefix = "#/components/schemas/";
+
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (JsonProperty property in element.EnumerateObject())
+                {
+                    if (property.NameEquals("$ref") &&
+                        property.Value.ValueKind == JsonValueKind.String &&
+                        property.Value.GetString() is string pointer &&
+                        pointer.StartsWith(schemaRefPrefix, StringComparison.Ordinal) &&
+                        !declaredSchemaNames.Contains(pointer[schemaRefPrefix.Length..]))
+                    {
+                        unresolvedRefs.Add(pointer);
+                    }
+
+                    CollectUnresolvedRefs(property.Value, declaredSchemaNames, unresolvedRefs);
+                }
+
+                break;
+            case JsonValueKind.Array:
+                foreach (JsonElement item in element.EnumerateArray())
+                {
+                    CollectUnresolvedRefs(item, declaredSchemaNames, unresolvedRefs);
+                }
+
+                break;
+        }
+    }
 }
