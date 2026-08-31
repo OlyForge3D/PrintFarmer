@@ -431,8 +431,12 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
         // offset) so the dialog always has room to shrink to fit small
         // viewports (#2301) — at 320x568 a bare `pt-[12vh]` left the dialog
         // 658px tall starting 68px down, clipping results/footer below the
-        // 568px viewport with no way to reach them.
-        'fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto px-4 py-6 sm:pt-[12vh] sm:pb-10 transition-opacity motion-reduce:transition-none',
+        // 568px viewport with no way to reach them. No overflow-y-auto here:
+        // the dialog below is capped to this container's height via
+        // `max-h-full`, so this container never needs to scroll itself —
+        // adding scroll here would fight the body scroll-lock on iOS Safari
+        // and let a scrollbar drag fire the backdrop's dismiss-on-click.
+        'fixed inset-0 z-[60] flex items-start justify-center px-4 py-6 sm:pt-[12vh] sm:pb-10 transition-opacity motion-reduce:transition-none',
         isVisible ? 'opacity-100' : 'opacity-0',
       )}
       style={transitionStyle}
@@ -524,7 +528,7 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
 
         <div className="relative min-h-0 flex-1 overflow-y-auto px-3 py-3">
           {filteredItems.length > 0 ? (
-            <div id={listboxId} role="listbox" aria-label="Command palette results" className="space-y-3 pr-1">
+            <div id={listboxId} role="listbox" aria-label="Command palette results" className="space-y-3">
               {filteredGroups.map((group) => {
                 const startIndex = filteredItems.indexOf(group.results[0]);
                 return (
