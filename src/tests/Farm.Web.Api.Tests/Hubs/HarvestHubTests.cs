@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Reflection;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Moq;
@@ -9,6 +11,14 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Hubs;
 
+/// <summary>
+/// Includes regression coverage for issue #2300: <see cref="HarvestHub"/> must not auto-join
+/// every authenticated connection to the farm-wide harvest group, and
+/// <c>JoinHarvestGroupAsync</c> must not let any authenticated caller join an arbitrary
+/// per-operation group — both mirroring the <c>gcode_harvest:admin</c> REST gate on
+/// <c>GcodeHarvestController</c> and the pattern already established by
+/// <see cref="Farm.Modules.Maintenance.Hubs.MaintenanceHub"/> (issue #1966).
+/// </summary>
 public class HarvestHubTests : IDisposable
 {
     private readonly Mock<IHubCallerClients> _clientsMock;
@@ -26,6 +36,11 @@ public class HarvestHubTests : IDisposable
 
         // Setup hub context
         _contextMock.Setup(c => c.ConnectionId).Returns("test-connection-id");
+        // Default to a gcode_harvest:admin caller so the pre-existing tests below (which predate
+        // issue #2300's permission gate) keep exercising JoinHarvestGroupAsync's group-join
+        // behavior unchanged. The permission-gate regression tests further down set their own
+        // Context.User per case.
+        _contextMock.Setup(c => c.User).Returns(HarvestAdminUser());
 
         // Setup clients
         _clientsMock.Setup(c => c.Group(It.IsAny<string>())).Returns(_groupMock.Object);
@@ -39,6 +54,89 @@ public class HarvestHubTests : IDisposable
     }
 
     public void Dispose() => _hub.Dispose();
+
+    private static ClaimsPrincipal PlainAuthenticatedUser() =>
+        new(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
+        ], "Test"));
+
+    private static ClaimsPrincipal HarvestAdminUser() =>
+        new(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
+            new Claim(PrintFarmerPermissions.ClaimType, "gcode_harvest:admin"),
+        ], "Test"));
+
+    private static ClaimsPrincipal FarmAdminUser() =>
+        new(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
+            new Claim(ClaimTypes.Role, PrintFarmerPermissions.FarmAdminRole),
+        ], "Test"));
+
+    [Fact]
+    public async Task OnConnectedAsync_PlainAuthenticatedUser_DoesNotJoinFarmGroup()
+    {
+        _contextMock.Setup(c => c.User).Returns(PlainAuthenticatedUser());
+
+        await _hub.OnConnectedAsync();
+
+        _groupsMock.Verify(
+            groups => groups.AddToGroupAsync(
+                "test-connection-id",
+                AuthorizedHubGroups.Farm,
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task OnConnectedAsync_HarvestAdminPermission_JoinsFarmGroup()
+    {
+        _contextMock.Setup(c => c.User).Returns(HarvestAdminUser());
+
+        await _hub.OnConnectedAsync();
+
+        _groupsMock.Verify(
+            groups => groups.AddToGroupAsync(
+                "test-connection-id",
+                AuthorizedHubGroups.Farm,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task OnConnectedAsync_FarmAdminRole_JoinsFarmGroup()
+    {
+        _contextMock.Setup(c => c.User).Returns(FarmAdminUser());
+
+        await _hub.OnConnectedAsync();
+
+        _groupsMock.Verify(
+            groups => groups.AddToGroupAsync(
+                "test-connection-id",
+                AuthorizedHubGroups.Farm,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task JoinHarvestGroupAsync_PlainAuthenticatedUser_ThrowsAndDoesNotJoin()
+    {
+        _contextMock.Setup(c => c.User).Returns(PlainAuthenticatedUser());
+        Guid operationId = Guid.NewGuid();
+
+        HubException exception = await Assert.ThrowsAsync<HubException>(
+            () => _hub.JoinHarvestGroupAsync(operationId));
+        Assert.Contains("resource_forbidden", exception.Message, StringComparison.Ordinal);
+
+        _groupsMock.Verify(
+            groups => groups.AddToGroupAsync(
+                It.IsAny<string>(),
+                $"harvest-{operationId}",
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
 
     [Fact]
     public async Task JoinHarvestGroupAsync_AddsClientToGroup()
