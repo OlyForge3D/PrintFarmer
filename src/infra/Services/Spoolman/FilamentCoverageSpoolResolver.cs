@@ -374,6 +374,16 @@ public sealed class FilamentCoverageSpoolResolver(
                     // the gate. Report it as unavailable rather than failing the projection.
                     return KeyValuePair.Create(pair.Key, Failure(pair.Value.SpoolIds, pair.Key.Native, ReasonSourceUnavailable));
                 }
+                catch (OperationCanceledException)
+                {
+                    // The CALLER cancelled while this source was still queued. WaitAsync threw
+                    // carrying the linked budget token, so normalise to the caller's token the
+                    // same way the in-flight paths do - otherwise a caller that cancels a
+                    // fleet larger than MaxConcurrentSourceRequests sees a token it does not
+                    // recognise purely because that source had not started yet.
+                    ct.ThrowIfCancellationRequested();
+                    throw;
+                }
 
                 try
                 {

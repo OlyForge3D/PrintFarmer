@@ -765,9 +765,12 @@ public class FilamentCoverageSpoolResolverTests
         // a fan-out slot for their full timeout, so N of them serialise into
         // ceil(N / MaxConcurrentSourceRequests) waves and total latency still grows with
         // fleet size - which is exactly how the original bug reached the mobile client's 10s
-        // readiness budget. This asserts the fleet deadline makes the bound hold anyway:
-        // 24 dark sources at a 400ms per-source timeout would be 3 waves (~1200ms), but the
-        // 500ms fleet budget must cut the whole projection short well inside that.
+        // readiness budget.
+        //
+        // The numbers here are chosen so the test FAILS if the fleet deadline is removed:
+        // 24 dark sources at concurrency 8 is 3 waves, and at a 5s per-source timeout that
+        // is ~15s of pure source-wait. Only the 1s fleet budget can bring it under the 5s
+        // assertion below, so a per-source-only implementation cannot pass.
         Mock<IBackendClient> native = new();
         native.As<ISupportsSpoolman>()
             .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -782,7 +785,7 @@ public class FilamentCoverageSpoolResolverTests
             new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
             factory.Object,
             NullLogger<FilamentCoverageSpoolResolver>.Instance,
-            settingsService: SettingsWithSourceTimeout(400, fleetTimeoutMs: 1_000));
+            settingsService: SettingsWithSourceTimeout(5_000, fleetTimeoutMs: 1_000));
         List<Printer> printers = Enumerable.Range(1, 24)
             .Select(i => PrinterWithSpool($"http://dark-{i}.local", PrinterBackend.Moonraker, i))
             .ToList();
@@ -792,13 +795,15 @@ public class FilamentCoverageSpoolResolverTests
             await resolver.ResolveAsync(printers, CancellationToken.None);
         stopwatch.Stop();
 
-        // Generous headroom over the 1s budget so this asserts the bound exists rather than
-        // timing the CI host, but still far below the ~9.6s three-wave worst case that a
-        // per-source-only bound would produce at this fleet size.
+        // Comfortably above the 1s budget so this asserts the bound exists rather than
+        // timing the CI host, but far below both the ~15s three-wave worst case and even a
+        // single 5s per-source wave, so neither can sneak past.
         stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
 
-        // Every printer must still be reported - degraded, never fabricated, and never
-        // dropped from the projection.
+        // Sources queued behind the gate when the deadline fired were never read at all.
+        // They must still be reported, and reported as unavailable - never as
+        // `spool-not-found`, which would be an affirmative claim about a source nobody
+        // reached, and never dropped from the projection.
         result.Should().HaveCount(printers.Count);
         foreach (Printer printer in printers)
         {
@@ -808,6 +813,13 @@ public class FilamentCoverageSpoolResolverTests
                 "spool-source-unavailable",
                 "a source cut short by the fleet deadline was never reached, so it must not be reported as spool-not-found");
         }
+
+        // Only the first wave can have been dispatched within a 1s budget when each read
+        // holds its slot for 5s. This pins the "queued sources still degrade correctly"
+        // path, which is distinct from "in-flight sources degrade correctly".
+        native.As<ISupportsSpoolman>().Verify(
+            n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.AtMost(8));
     }
 
     [Fact]
@@ -857,6 +869,69 @@ public class FilamentCoverageSpoolResolverTests
 
         canceled.Should().NotBeNull("caller cancellation must propagate rather than degrade to an unavailable source");
         canceled!.CancellationToken.Should().Be(cts.Token, "the caller's cancellation must surface, not a timeout");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_CallerCancellationWhileSourcesQueued_PropagatesCallerToken()
+    {
+        // Distinct from ResolveAsync_CallerCancellation_PropagatesInsteadOfDegrading, which
+        // only covers sources already IN FLIGHT. With more sources than
+        // MaxConcurrentSourceRequests, the surplus is parked on the fan-out semaphore, and
+        // WaitAsync throws carrying the internal linked budget token rather than the
+        // caller's. Without explicit normalisation there, a caller that cancels a large
+        // fleet gets back a token it does not recognise purely because of queue position.
+        const int fleetSize = 20;
+        using SemaphoreSlim readsStarted = new(0);
+        Mock<IBackendClient> native = new();
+        native.As<ISupportsSpoolman>()
+            .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, CancellationToken ct) =>
+            {
+                readsStarted.Release();
+                await SwallowedHangAsync(ct);
+                return (string?)null;
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(native.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            // Both deadlines far out, so the only cancellation that can occur is the
+            // caller's - the fleet deadline must not be what ends this test.
+            settingsService: SettingsWithSourceTimeout(30_000, fleetTimeoutMs: 60_000));
+        List<Printer> printers = Enumerable.Range(1, fleetSize)
+            .Select(i => PrinterWithSpool($"http://moon-{i}.local", PrinterBackend.Moonraker, i))
+            .ToList();
+        using CancellationTokenSource cts = new();
+
+        Task<IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>>> resolve =
+            resolver.ResolveAsync(printers, cts.Token);
+
+        // Fill the gate so the remaining sources are genuinely parked on WaitAsync, then
+        // cancel. fleetSize exceeds MaxConcurrentSourceRequests, so some must still be queued.
+        for (int i = 0; i < 8; i++)
+        {
+            (await readsStarted.WaitAsync(UnreachableHostWatchdog)).Should().BeTrue(
+                "the fan-out must saturate before the caller cancels");
+        }
+
+        await cts.CancelAsync();
+
+        OperationCanceledException? canceled = null;
+        try
+        {
+            _ = await resolve;
+        }
+        catch (OperationCanceledException ex)
+        {
+            canceled = ex;
+        }
+
+        canceled.Should().NotBeNull("caller cancellation must propagate rather than degrade to an unavailable source");
+        canceled!.CancellationToken.Should().Be(
+            cts.Token,
+            "a queued source must report the caller's token, not the internal budget token");
     }
 
     [Fact]
