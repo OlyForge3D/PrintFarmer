@@ -138,14 +138,50 @@ public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
         // A regression check on the resolution/eligibility logic itself: "ApiKeyPurpose" is a plain,
         // globally-converted enum with no same-name collisions, while "AttentionSeverity" has two
         // same-named CLR types and is only checkable because the custom-converter one is correctly
-        // excluded from eligibility -- both must still be found and checked.
-        _ = checkedSchemaNames.Should().Contain(new[] { "ApiKeyPurpose", "AttentionSeverity" },
+        // excluded from eligibility. "GcodeHarvestQueueItemStatus"/"SlicerEngineType" are each also
+        // a same-name collision (see #2289/#2290), resolved instead via the exact-type-identity
+        // exclusions in ResolveEnumTypeCandidatesByName -- asserting they are still checked guards
+        // against an inverted exclusion silently dropping the type actually bound to the schema.
+        // All must still be found and checked.
+        _ = checkedSchemaNames.Should().Contain(
+            new[] { "ApiKeyPurpose", "AttentionSeverity", "GcodeHarvestQueueItemStatus", "SlicerEngineType" },
             "the sweep should resolve and check at least these known, non-ambiguous-after-filtering enums");
 
         _ = failures.Should().BeEmpty(
             "every reachable, in-scope enum type in components.schemas should be documented as " +
             "'type: string' with an 'enum' token array matching its CLR member names (see #2261 for " +
             "the known systemic root cause behind any failures below):\n" + string.Join("\n", failures));
+    }
+
+    /// <summary>
+    /// Ground-truth (not self-referential) regression check on the nullable/non-nullable
+    /// schema-sharing tolerance added to the main sweep above. Unlike that sweep -- which derives
+    /// its own "is a null token present" expectation from the very document under test, so it
+    /// cannot by itself catch a regression that silently drops the null entry (and its
+    /// corresponding <c>"null"</c> type flag) from <c>ApiKeyPurpose</c>'s schema -- this test hard-
+    /// codes the exact expected shape from first principles: <c>ApiKeyPurpose</c> is referenced
+    /// non-nullably by <c>ApiKey.Purpose</c> and nullably by an optional query parameter (see
+    /// <c>EnumSchemaTypeStringTransformer</c>'s doc comment), so its shared component schema must
+    /// carry <em>exactly</em> one literal JSON <c>null</c> alongside its two real string tokens, and
+    /// <c>type</c> must be exactly <c>{"string","null"}</c> -- never just <c>{"string"}</c>.
+    /// </summary>
+    [Fact]
+    public void ApiKeyPurposeSchema_IsDocumentedWithExactlyOneNullTokenAndStringNullType()
+    {
+        JsonElement schema = OpenApiSchemaTestSupport.GetComponentSchema(_document, "ApiKeyPurpose");
+
+        IReadOnlySet<string> types = OpenApiSchemaTestSupport.GetTypes(schema);
+        IReadOnlyList<string>? enumTokens = OpenApiSchemaTestSupport.GetEnumTokens(schema);
+
+        _ = types.Should().BeEquivalentTo(new[] { "string", "null" },
+            "ApiKeyPurpose's shared component schema is referenced both nullably and non-nullably, " +
+            "so its type must declare both, never just 'string' alone");
+        _ = enumTokens.Should().NotBeNull();
+        _ = enumTokens!.Count(token => token is null).Should().Be(1,
+            "the nullable usage site contributes exactly one literal JSON null to the shared enum array");
+        _ = enumTokens.Where(token => token is not null)
+            .Should().BeEquivalentTo(Enum.GetNames<Farm.Infrastructure.Domain.ApiKeyPurpose>(),
+                "the non-null tokens must still exactly match every ApiKeyPurpose member name");
     }
 
     /// <summary>
@@ -175,8 +211,8 @@ public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
     }
 
     /// <summary>
-    /// Genuinely reachable-from-a-DTO half of the <c>GcodeHarvestQueueItemStatus</c> same-simple-name
-    /// collision (see #2289): <c>Farm.Infrastructure.Domain.GcodeHarvestQueueItemStatus</c> is a
+    /// The domain/entity-only, unreachable-from-a-DTO half of the <c>GcodeHarvestQueueItemStatus</c>
+    /// same-simple-name collision (see #2289): <c>Farm.Infrastructure.Domain.GcodeHarvestQueueItemStatus</c> is a
     /// domain/entity-only concept never referenced by an API DTO -- it is bridged to
     /// <c>Farm.Infrastructure.GcodeHarvestQueueItemStatus</c> (the Dto enum actually reachable from
     /// <c>components.schemas</c>, e.g. via <c>GcodeHarvestQueueItemDto.Status</c>) by an unsafe

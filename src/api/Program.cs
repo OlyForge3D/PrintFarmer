@@ -290,8 +290,8 @@ builder.Services.AddOpenApi(options =>
 
     // Issue #2261 finding 2: constrain the UserTaskAnchorKind/UserTaskSourceKind component
     // schemas, which the generator otherwise documents with no "type" and no "enum" at all
-    // because their real wire converter is a property-level [JsonConverter] attribute the
-    // generator never inspects when building a referenced enum type's schema.
+    // because it only special-cases the standard JsonStringEnumConverter -- any other
+    // [JsonConverter], type-level or property-level, is opaque to it.
     options.AddSchemaTransformer<CustomConverterEnumSchemaTransformer>();
 });
 

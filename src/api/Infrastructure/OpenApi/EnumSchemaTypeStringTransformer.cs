@@ -46,7 +46,6 @@ namespace Farm.Web.Api.Infrastructure.OpenApi;
 /// does not fully describe, and <c>OpenApiEnumFidelityTests</c> itself excludes them from its
 /// strict comparison for the same reason.
 /// </para>
-/// </remarks>
 /// <para>
 /// A component schema can first be visited via a <c>Nullable&lt;TEnum&gt;</c>
 /// <see cref="OpenApiSchemaTransformerContext.JsonTypeInfo"/> (from the nullable usage site), whose
@@ -55,6 +54,14 @@ namespace Farm.Web.Api.Infrastructure.OpenApi;
 /// <see cref="Nullable.GetUnderlyingType(Type)"/> before the eligibility checks below, otherwise a
 /// shared nullable/non-nullable schema like <c>ApiKeyPurpose</c> would never get its <c>type</c> set.
 /// </para>
+/// <para>
+/// Also requires every non-null <c>enum</c> entry to already be a JSON string: a hypothetical
+/// converter that emitted numeric or other non-string tokens would otherwise get a
+/// self-contradictory <c>type: string</c> declaration alongside those tokens. No converter
+/// registered in this codebase does this today, but the check is cheap and keeps the transformer
+/// safe if one is ever added.
+/// </para>
+/// </remarks>
 internal sealed class EnumSchemaTypeStringTransformer : IOpenApiSchemaTransformer
 {
     public Task TransformAsync(
@@ -69,7 +76,8 @@ internal sealed class EnumSchemaTypeStringTransformer : IOpenApiSchemaTransforme
         if (!enumType.IsEnum ||
             Attribute.IsDefined(enumType, typeof(FlagsAttribute)) ||
             schema.Type is not null ||
-            schema.Enum is not { Count: > 0 } enumValues)
+            schema.Enum is not { Count: > 0 } enumValues ||
+            !enumValues.All(value => value is null || value.GetValueKind() == System.Text.Json.JsonValueKind.String))
         {
             return Task.CompletedTask;
         }

@@ -147,14 +147,16 @@ public sealed class TasksOpenApiSchemaTests(OpenApiDocumentFixture fixture)
     }
 
     /// <summary>
-    /// <b>Fixed by issue #2282 (finding 2 from #2261).</b> <c>anchorKind</c>/<c>sourceKind</c> use
-    /// PROPERTY-level <c>[JsonConverter]</c> attributes (issue #2246) that outrank the global
-    /// converter for the real wire value (lowercase camelCase tokens, e.g. <c>"unspecified"</c>),
-    /// but .NET's reflection-based OpenAPI schema generator does not inspect property-level
-    /// converters when producing a schema for the referenced enum type — previously leaving the
-    /// component schema with no "type" or "enum" keyword at all (see the corpus-proven wire tokens
-    /// in <c>TasksContractTests</c>). <c>CustomConverterEnumSchemaTransformer</c> now constrains
-    /// both component schemas directly from <c>UserTaskAnchorKindJsonConverter.ToWire</c>/
+    /// <b>Fixed by issue #2282 (finding 2 from #2261).</b> <c>anchorKind</c>/<c>sourceKind</c> use a
+    /// custom <c>[JsonConverter]</c> (issue #2246, applied both on the enum declaration itself and
+    /// again on each referencing property) for their real wire value (lowercase camelCase tokens,
+    /// e.g. <c>"unspecified"</c>), but .NET's reflection-based OpenAPI schema generator only knows
+    /// how to introspect the standard <c>JsonStringEnumConverter</c> when producing an enum's
+    /// component schema -- any other custom converter, at either placement, is opaque to it, since
+    /// enumerating its real output would require executing arbitrary converter code. This
+    /// previously left the component schema with no "type" or "enum" keyword at all (see the
+    /// corpus-proven wire tokens in <c>TasksContractTests</c>). <c>CustomConverterEnumSchemaTransformer</c>
+    /// now constrains both component schemas directly from <c>UserTaskAnchorKindJsonConverter.ToWire</c>/
     /// <c>UserTaskSourceKindJsonConverter.ToWire</c>, so the documented shape matches the real wire
     /// contract and can never silently drift from the converter that actually serializes these
     /// properties.

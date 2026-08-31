@@ -14,10 +14,12 @@ namespace Farm.Infrastructure.Domain;
 /// Public (issue #2261 finding 2), not internal: <c>Farm.Web.Api</c>'s
 /// <c>CustomConverterEnumSchemaTransformer</c> calls <see cref="ToWire"/> directly, across the
 /// assembly boundary, to constrain this enum's OpenAPI component schema to the same tokens this
-/// converter actually puts on the wire -- the native OpenAPI schema generator only ever resolves a
-/// referenced enum's schema via a TYPE-level converter (or one registered directly into
-/// <c>JsonSerializerOptions.Converters</c>), never the PROPERTY-level <see cref="JsonConverterAttribute"/>
-/// that makes this the real wire converter for <c>UserTaskDto.AnchorKind</c>/<c>ShiftPlanGroupDto.AnchorKind</c>.
+/// converter actually puts on the wire. Neither the TYPE-level <see cref="JsonConverterAttribute"/>
+/// on <see cref="UserTaskAnchorKind"/> itself nor the PROPERTY-level one repeated on each reference
+/// site (<c>UserTaskDto.AnchorKind</c>/<c>ShiftPlanGroupDto.AnchorKind</c>) helps here: the native
+/// OpenAPI schema generator only special-cases the standard <c>JsonStringEnumConverter</c> when
+/// producing an enum's component schema, and treats any other converter -- at either placement --
+/// as opaque, since enumerating its real output would require executing arbitrary converter code.
 /// </remarks>
 public sealed class UserTaskAnchorKindJsonConverter : JsonConverter<UserTaskAnchorKind>
 {
