@@ -90,7 +90,11 @@ export function MaintenanceDashboardPage() {
     ? (tabParam as MainTabId)
     : 'dashboard';
   const handleMainTabChange = (tabId: string) => {
-    setSearchParams({ tab: tabId });
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', tabId);
+      return next;
+    });
   };
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedDayTasks, setSelectedDayTasks] = useState<UpcomingMaintenanceTask[]>([]);

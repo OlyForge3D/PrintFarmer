@@ -1,8 +1,9 @@
 import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useLocation } from 'react-router';
 
 // Mock PageTemplate to simplify testing
 vi.mock('@/common/components/PageTemplate', () => ({
@@ -95,10 +96,16 @@ vi.mock('../../components/MaintenanceReport', () => ({
 // Import after mocks are set up
 import { MaintenanceDashboardPage } from '../MaintenanceDashboardPage';
 
+function LocationDisplay() {
+  const location = useLocation();
+  return <div data-testid="location-search">{location.search}</div>;
+}
+
 const renderWithRouter = (initialRoute = '/maintenance') => {
   return render(
     <MemoryRouter initialEntries={[initialRoute]}>
       <MaintenanceDashboardPage />
+      <LocationDisplay />
     </MemoryRouter>
   );
 };
@@ -146,6 +153,30 @@ describe('MaintenanceDashboardPage', () => {
       renderWithRouter('/maintenance?tab=bogus');
       expect(screen.getByRole('tab', { name: /dashboard/i })).toHaveAttribute('aria-selected', 'true');
       expect(screen.getByTestId('fleet-overview-content')).toBeInTheDocument();
+    });
+  });
+
+  describe('tab click updates the URL', () => {
+    it('writes ?tab=inventory to the URL when the Inventory tab is clicked', async () => {
+      const user = userEvent.setup();
+      renderWithRouter('/maintenance');
+
+      await user.click(screen.getByRole('tab', { name: /inventory/i }));
+
+      expect(screen.getByRole('tab', { name: /inventory/i })).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByTestId('parts-inventory-content')).toBeInTheDocument();
+      expect(screen.getByTestId('location-search')).toHaveTextContent('tab=inventory');
+    });
+
+    it('preserves unrelated existing query parameters when switching tabs', async () => {
+      const user = userEvent.setup();
+      renderWithRouter('/maintenance?highlight=printer-7');
+
+      await user.click(screen.getByRole('tab', { name: /inventory/i }));
+
+      const search = screen.getByTestId('location-search').textContent ?? '';
+      expect(search).toContain('tab=inventory');
+      expect(search).toContain('highlight=printer-7');
     });
   });
 });
