@@ -63,7 +63,11 @@ describe('machineProfileEditorAdapter', () => {
       machine_start_gcode: 'G28\nM117 Ready',
     };
 
-    const serialized = serializeMachineProfileSettings(edited, original);
+    const serialized = serializeMachineProfileSettings(
+      edited,
+      original,
+      { raw_only_setting: ['preserve', 'verbatim'] },
+    );
 
     expect(serialized).toMatchObject({
       printable_area: ['0x0', '300x0', '300x210', '0x210'],
@@ -86,7 +90,11 @@ describe('machineProfileEditorAdapter', () => {
       [BUILD_VOLUME_Y_EDITOR_KEY]: 300,
     };
 
-    expect(serializeMachineProfileSettings(edited, original).printable_area).toEqual([
+    expect(serializeMachineProfileSettings(
+      edited,
+      original,
+      { printable_area: ['50x30', '300x30', '300x300', '50x300'] },
+    ).printable_area).toEqual([
       '50x30',
       '300x30',
       '300x330',
@@ -100,16 +108,75 @@ describe('machineProfileEditorAdapter', () => {
     }));
 
     expect(original).toEqual({ raw_only_setting: 'kept' });
-    expect(serializeMachineProfileSettings(original, original)).toEqual({
+    expect(serializeMachineProfileSettings(
+      original,
+      original,
+      { raw_only_setting: 'kept' },
+    )).toEqual({
       raw_only_setting: 'kept',
     });
+  });
+
+  it('does not materialize untouched promoted DTO values during an unrelated edit', () => {
+    const raw = { raw_only_setting: 'kept' };
+    const original = hydrateMachineProfileSettings(machineProfile({
+      maxHotendTemperature: 300,
+      settings: raw,
+    }));
+    const edited = { ...original, raw_only_setting: 'changed' };
+
+    expect(serializeMachineProfileSettings(edited, original, raw)).toEqual({
+      raw_only_setting: 'changed',
+    });
+  });
+
+  it('normalizes promoted printable-area strings to native point arrays', () => {
+    const settings = hydrateMachineProfileSettings(machineProfile({
+      printableArea: '0x0, 250x0, 250x210, 0x210',
+    }));
+
+    expect(settings.printable_area).toEqual(['0x0', '250x0', '250x210', '0x210']);
+  });
+
+  it('hydrates scalar per-extruder DTO values as one supported Orca array entry', () => {
+    const settings = hydrateMachineProfileSettings(machineProfile({
+      nozzleDiameter: 0.4,
+      retractionLength: 0.8,
+    }));
+
+    expect(settings.nozzle_diameter).toEqual(['0.4']);
+    expect(settings.retraction_length).toEqual(['0.8']);
+  });
+
+  it('rejects empty or non-numeric per-extruder edits', () => {
+    const original = hydrateMachineProfileSettings(machineProfile({
+      nozzleDiameter: 0.4,
+    }));
+
+    expect(() => serializeMachineProfileSettings(
+      { ...original, nozzle_diameter: '' },
+      original,
+      {},
+    )).toThrow('Per-extruder machine settings require at least one numeric value.');
+  });
+
+  it('rejects unknown boolean edits instead of coercing them to false', () => {
+    const original = hydrateMachineProfileSettings(machineProfile({
+      hasHeatedBed: true,
+    }));
+
+    expect(() => serializeMachineProfileSettings(
+      { ...original, has_heated_bed: 'unknown' },
+      original,
+      {},
+    )).toThrow('Boolean machine settings must be true or false.');
   });
 
   it('rejects a partial build-volume edit rather than fabricating the missing dimension', () => {
     const original = hydrateMachineProfileSettings(machineProfile());
     const edited = { ...original, [BUILD_VOLUME_X_EDITOR_KEY]: 300 };
 
-    expect(() => serializeMachineProfileSettings(edited, original))
-      .toThrow('Build volume X and Y must both be greater than zero.');
+    expect(() => serializeMachineProfileSettings(edited, original, {}))
+      .toThrow('Build volume requires positive X and Y dimensions');
   });
 });

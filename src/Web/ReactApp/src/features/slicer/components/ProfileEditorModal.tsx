@@ -73,6 +73,12 @@ function extractSettings(
   return { ...(profile.settings ?? {}) };
 }
 
+function extractRawSettings(
+  profile: OrcaMachineProfile | OrcaFilamentProfile | null,
+): Record<string, unknown> {
+  return { ...(profile?.settings ?? {}) };
+}
+
 export function ProfileEditorModal({
   isOpen,
   onClose,
@@ -91,6 +97,7 @@ export function ProfileEditorModal({
   // Unified settings state — works for all profile types
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [originalSettings, setOriginalSettings] = useState<Record<string, unknown>>({});
+  const [rawSettings, setRawSettings] = useState<Record<string, unknown>>({});
   
   // Initialize profile name and reset state when modal opens
   React.useEffect(() => {
@@ -101,6 +108,7 @@ export function ProfileEditorModal({
       const extracted = extractSettings(profileType, originalProfile);
       setSettings(extracted);
       setOriginalSettings(extracted);
+      setRawSettings(extractRawSettings(originalProfile));
     }
   }, [isOpen, profileType, originalProfile]);
   
@@ -126,7 +134,7 @@ export function ProfileEditorModal({
   const saveMutation = useMutation({
     mutationFn: async () => {
       const serializedSettings = profileType === 'machine'
-        ? serializeMachineProfileSettings(settings, originalSettings)
+        ? serializeMachineProfileSettings(settings, originalSettings, rawSettings)
         : settings;
       const response = await slicerProfilesService.uploadProfile({
         name: profileName.trim(),

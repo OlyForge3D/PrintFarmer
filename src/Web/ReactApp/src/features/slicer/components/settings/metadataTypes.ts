@@ -561,7 +561,8 @@ export function isSettingModified(
 
   const hasCurrent = Object.prototype.hasOwnProperty.call(values, key);
   const hasOriginal = Object.prototype.hasOwnProperty.call(originalValues, key);
-  if (!hasCurrent || !hasOriginal) return false;
+  if (hasCurrent !== hasOriginal) return true;
+  if (!hasCurrent) return false;
 
   return JSON.stringify(values[key]) !== JSON.stringify(originalValues[key]);
 }

@@ -113,6 +113,53 @@ describe('ProfileEditorModal machine profiles', () => {
     });
   });
 
+  it('keeps an absent promoted value out of an unrelated save', async () => {
+    const user = userEvent.setup();
+    renderMachineEditor({
+      name: 'CoreXY',
+      manufacturer: 'Test',
+      maxHotendTemperature: 300,
+      settings: { machine_start_gcode: 'G28' },
+    });
+
+    await user.click(screen.getByRole('tab', { name: 'Machine G-code' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Start G-code' }), {
+      target: { value: 'G28\nM117 Ready' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Save as Custom Profile' }));
+    await user.click(screen.getByRole('button', { name: 'Save', exact: true }));
+
+    await waitFor(() => expect(slicerProfilesService.uploadProfile).toHaveBeenCalledOnce());
+    const request = vi.mocked(slicerProfilesService.uploadProfile).mock.calls[0][0];
+    expect(JSON.parse(request.rawJson)).toEqual({
+      machine_start_gcode: 'G28\nM117 Ready',
+    });
+  });
+
+  it('marks an initially absent field modified and reset removes its ownership', async () => {
+    const user = userEvent.setup();
+    renderMachineEditor({
+      name: 'CoreXY',
+      manufacturer: 'Test',
+      settings: {},
+    });
+
+    await user.click(screen.getByRole('tab', { name: 'Machine G-code' }));
+    const startGcode = screen.getByRole('textbox', { name: 'Start G-code' });
+    const saveAsButton = screen.getByRole('button', { name: 'Save as Custom Profile' });
+    fireEvent.change(startGcode, { target: { value: 'G28' } });
+
+    expect(saveAsButton).toBeEnabled();
+    expect(screen.getByText('Settings modified')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', {
+      name: 'Reset Start G-code to original value',
+    }));
+    expect(startGcode).toHaveValue('G28 ; home all axes\\nG1 Z5 F5000 ; lift nozzle\\n');
+    expect(saveAsButton).toBeDisabled();
+    expect(screen.queryByText('Settings modified')).not.toBeInTheDocument();
+  });
+
   it('shows common G-code in Simple mode without writing untouched absent settings', async () => {
     const user = userEvent.setup();
     renderMachineEditor({

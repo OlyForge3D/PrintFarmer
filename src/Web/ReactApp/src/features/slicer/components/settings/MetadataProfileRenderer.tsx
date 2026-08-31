@@ -113,6 +113,8 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
     return {
       tabs,
       settings: {
+        // Generated Orca metadata is authoritative when an additional entry graduates
+        // into the bundle; this ordering prevents a stale local definition from winning.
         ...(additionalSettings ?? {}),
         ...baseProfileMeta.settings,
       },

@@ -391,6 +391,8 @@ function toWireValue(
       if (typeof value !== 'boolean') return undefined;
       return value ? '1' : '0';
     case 'singleValueStringArray': {
+      // Promoted DTOs expose only the worker's first parsed extruder value, so
+      // hydration can restore exactly one Orca array entry without inventing others.
       const number = toFiniteNumber(value);
       return number === undefined ? undefined : [formatNumber(number)];
     }
@@ -411,10 +413,19 @@ function normalizeEditedValue(
 ): unknown {
   switch (wireShape) {
     case 'booleanString':
-      return value === true || value === 'true' || value === '1' ? '1' : '0';
+      if (value === true || value === 'true' || value === '1') return '1';
+      if (value === false || value === 'false' || value === '0') return '0';
+      throw new Error('Boolean machine settings must be true or false.');
     case 'singleValueStringArray': {
       const values = Array.isArray(value) ? value : String(value).split(',');
-      return values.map((item) => String(item).trim()).filter(Boolean);
+      const normalized = values.map((item) => String(item).trim()).filter(Boolean);
+      if (
+        normalized.length === 0
+        || normalized.some((item) => !Number.isFinite(Number(item)))
+      ) {
+        throw new Error('Per-extruder machine settings require at least one numeric value.');
+      }
+      return normalized.map((item) => formatNumber(Number(item)));
     }
     case 'scalarString': {
       const number = toFiniteNumber(value);
@@ -471,7 +482,9 @@ export function hydrateMachineProfileSettings(
     const depth = toFiniteNumber(profile.buildVolumeY);
 
     if (promotedArea) {
-      settings.printable_area = promotedArea;
+      settings.printable_area = promotedArea
+        .split(',')
+        .map((point) => point.trim());
     } else if (width !== undefined && depth !== undefined) {
       settings.printable_area = createPrintableArea(width, depth);
     }
@@ -489,8 +502,37 @@ export function hydrateMachineProfileSettings(
 export function serializeMachineProfileSettings(
   settings: Record<string, unknown>,
   originalSettings: Record<string, unknown>,
+  rawSettings: Record<string, unknown>,
 ): Record<string, unknown> {
-  const serialized = { ...settings };
+  const serialized = { ...rawSettings };
+  const editorKeys = new Set(
+    MACHINE_PROFILE_SETTING_MAPPINGS
+      .filter((mapping) =>
+        mapping.wireShape !== 'printableArea'
+        && mapping.wireShape !== 'printableAreaDimension')
+      .map((mapping) => mapping.editorKey),
+  );
+
+  for (const key of new Set([...Object.keys(settings), ...Object.keys(originalSettings)])) {
+    if (
+      editorKeys.has(key)
+      || key === BUILD_VOLUME_X_EDITOR_KEY
+      || key === BUILD_VOLUME_Y_EDITOR_KEY
+      || (
+        valuesEqual(settings[key], originalSettings[key])
+        && hasOwn(settings, key) === hasOwn(originalSettings, key)
+      )
+    ) {
+      continue;
+    }
+
+    if (hasOwn(settings, key)) {
+      serialized[key] = settings[key];
+    } else {
+      delete serialized[key];
+    }
+  }
+
   const widthChanged = !valuesEqual(
     settings[BUILD_VOLUME_X_EDITOR_KEY],
     originalSettings[BUILD_VOLUME_X_EDITOR_KEY],
@@ -504,7 +546,9 @@ export function serializeMachineProfileSettings(
     const width = toFiniteNumber(settings[BUILD_VOLUME_X_EDITOR_KEY]);
     const depth = toFiniteNumber(settings[BUILD_VOLUME_Y_EDITOR_KEY]);
     if (width === undefined || depth === undefined || width <= 0 || depth <= 0) {
-      throw new Error('Build volume X and Y must both be greater than zero.');
+      throw new Error(
+        'Build volume requires positive X and Y dimensions; enter values greater than zero for both.',
+      );
     }
     serialized.printable_area = createPrintableArea(
       width,
@@ -520,16 +564,22 @@ export function serializeMachineProfileSettings(
     if (
       mapping.wireShape === 'printableArea'
       || mapping.wireShape === 'printableAreaDimension'
-      || !hasOwn(serialized, mapping.editorKey)
-      || valuesEqual(settings[mapping.editorKey], originalSettings[mapping.editorKey])
+      || (
+        valuesEqual(settings[mapping.editorKey], originalSettings[mapping.editorKey])
+        && hasOwn(settings, mapping.editorKey) === hasOwn(originalSettings, mapping.editorKey)
+      )
     ) {
       continue;
     }
 
-    serialized[mapping.orcaKey] = normalizeEditedValue(
-      serialized[mapping.editorKey],
-      mapping.wireShape,
-    );
+    if (hasOwn(settings, mapping.editorKey)) {
+      serialized[mapping.orcaKey] = normalizeEditedValue(
+        settings[mapping.editorKey],
+        mapping.wireShape,
+      );
+    } else {
+      delete serialized[mapping.orcaKey];
+    }
   }
 
   return serialized;
