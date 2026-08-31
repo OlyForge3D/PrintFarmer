@@ -11,7 +11,7 @@
  */
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { format } from 'date-fns';
 import './MaintenanceDashboardPage.css';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -79,8 +79,19 @@ function SummaryStat({ label, value, accent = 'default' }: SummaryStatProps) {
 
 // ──────────────────────── Main Page ────────────────────────
 
+const MAIN_TAB_IDS = ['dashboard', 'schedule', 'library', 'inventory', 'analytics'] as const;
+type MainTabId = (typeof MAIN_TAB_IDS)[number];
+
 export function MaintenanceDashboardPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const activeMainTab: MainTabId = MAIN_TAB_IDS.includes(tabParam as MainTabId)
+    ? (tabParam as MainTabId)
+    : 'dashboard';
+  const handleMainTabChange = (tabId: string) => {
+    setSearchParams({ tab: tabId });
+  };
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedDayTasks, setSelectedDayTasks] = useState<UpcomingMaintenanceTask[]>([]);
 
@@ -190,7 +201,7 @@ export function MaintenanceDashboardPage() {
       </div>
 
       {/* ═══════════════════ Main Tabs ═══════════════════ */}
-      <Tabs defaultTab="dashboard" className="space-y-0">
+      <Tabs activeTab={activeMainTab} onTabChange={handleMainTabChange} className="space-y-0">
         <Tabs.List className="border-b border-pf-border bg-pf-bg-1 -mx-4 px-4 mb-0 overflow-x-auto">
           <Tabs.Tab id="dashboard" icon={<WrenchIcon className="h-4 w-4" />}>
             Dashboard
