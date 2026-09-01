@@ -42,6 +42,13 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
                 LogSanitizer.Sanitize(context.Request.Method),
                 LogSanitizer.Sanitize(context.Request.Path),
                 LogSanitizer.Sanitize(correlationId));
+
+            // Align the hosting access log with the telemetry metric (499) rather than
+            // leaving the default 200. Guarded by HasStarted since no body was written.
+            if (!context.Response.HasStarted)
+            {
+                context.Response.StatusCode = 499;
+            }
         }
 
         // CA1031: Intentionally catching all exceptions to prevent unhandled exceptions from crashing the application

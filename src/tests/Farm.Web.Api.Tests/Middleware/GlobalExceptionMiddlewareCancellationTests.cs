@@ -54,10 +54,11 @@ public class GlobalExceptionMiddlewareCancellationTests
         GlobalExceptionMiddleware middleware = new(_ => throw new OperationCanceledException(cts.Token));
 
         // Should NOT throw and should NOT set a 500 status - the general exception
-        // handler must never see this exception.
+        // handler must never see this exception. The access log is aligned with the
+        // 499 the telemetry layer records for the same client-abort case.
         await middleware.InvokeAsync(context, logger);
 
-        Assert.NotEqual(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
+        Assert.Equal(499, context.Response.StatusCode);
         Assert.DoesNotContain(LogLevel.Error, logger.Levels);
     }
 

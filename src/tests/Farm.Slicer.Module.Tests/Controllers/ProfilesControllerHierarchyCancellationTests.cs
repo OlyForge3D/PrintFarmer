@@ -3,8 +3,8 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
-using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -78,11 +78,36 @@ public class ProfilesControllerHierarchyCancellationTests
         ProfilesController controller = CreateController(profilesService, catalogService);
         using HttpClient httpClient = new();
 
-        Microsoft.AspNetCore.Mvc.IActionResult result =
-            await controller.GetWorkerProfilesHierarchyAsync(httpClient, requestToken);
+        IActionResult result = await controller.GetWorkerProfilesHierarchyAsync(httpClient, requestToken);
 
-        Microsoft.AspNetCore.Mvc.ObjectResult objectResult =
-            Assert.IsType<Microsoft.AspNetCore.Mvc.ObjectResult>(result);
+        ObjectResult objectResult = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(500, objectResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetLibraryProfilesHierarchyAsync_InternalCancellationUnrelatedToRequest_Returns500()
+    {
+        // Same discrimination as the worker-hierarchy negative test above, but for the
+        // library-hierarchy action's own independent catch clause: an unrelated internal
+        // cancellation (different, already-cancelled token) must still 500, not be masked
+        // by the `when (ct.IsCancellationRequested)` guard.
+        Mock<IProfilesService> profilesService = new(MockBehavior.Strict);
+        Mock<ICatalogServiceAdapter> catalogService = new(MockBehavior.Strict);
+        using CancellationTokenSource unrelatedCts = new();
+        unrelatedCts.Cancel();
+        CancellationToken requestToken = CancellationToken.None;
+
+        _ = profilesService
+            .Setup(s => s.GetCatalogAttributedWorkerHierarchyAsync(It.IsAny<HttpClient>(), "catalog", requestToken))
+            .ThrowsAsync(new OperationCanceledException(unrelatedCts.Token));
+
+        ProfilesController controller = CreateController(profilesService, catalogService);
+        using HttpClient httpClient = new();
+
+        IActionResult result =
+            await controller.GetLibraryProfilesHierarchyAsync(httpClient, "catalog", requestToken);
+
+        ObjectResult objectResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, objectResult.StatusCode);
     }
 
