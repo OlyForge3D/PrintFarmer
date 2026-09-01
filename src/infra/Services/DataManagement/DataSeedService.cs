@@ -30,6 +30,67 @@ public class DataSeedService : IDataSeedService
         _logger = logger;
     }
 
+    /// <summary>
+    /// Case-insensitive, manufacturer-scoped key comparer for the (ManufacturerId, Name) preload
+    /// dictionaries used throughout this class. The preload dictionaries replace a server-side
+    /// <c>==</c> comparison (translated to SQL, collation-dependent) with a client-side .NET
+    /// comparison. SQLite and PostgreSQL are case-sensitive by default, but SQL Server's default
+    /// collation is case-insensitive, so comparing ordinally here would make a YAML casing-only
+    /// edit miss a row on SQL Server that the old per-row query would have matched. Matching
+    /// case-insensitively everywhere is the safe, permissive choice: it can only turn a miss into
+    /// a hit (update instead of a duplicate insert attempt), never the reverse.
+    /// </summary>
+    private sealed class ManufacturerScopedNameComparer : IEqualityComparer<(Guid ManufacturerId, string Name)>
+    {
+        public static readonly ManufacturerScopedNameComparer Instance = new();
+
+        public bool Equals((Guid ManufacturerId, string Name) x, (Guid ManufacturerId, string Name) y) =>
+            x.ManufacturerId == y.ManufacturerId &&
+            string.Equals(x.Name, y.Name, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode((Guid ManufacturerId, string Name) obj) =>
+            HashCode.Combine(obj.ManufacturerId, obj.Name.ToUpperInvariant());
+    }
+
+    /// <summary>
+    /// Case-insensitive (Name, Category) key comparer for maintenance component lookups. See
+    /// <see cref="ManufacturerScopedNameComparer"/> for why case-insensitivity matters here.
+    /// </summary>
+    private sealed class NameCategoryComparer : IEqualityComparer<(string Name, string Category)>
+    {
+        public static readonly NameCategoryComparer Instance = new();
+
+        public bool Equals((string Name, string Category) x, (string Name, string Category) y) =>
+            string.Equals(x.Name, y.Name, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(x.Category, y.Category, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode((string Name, string Category) obj) =>
+            HashCode.Combine(obj.Name.ToUpperInvariant(), obj.Category.ToUpperInvariant());
+    }
+
+    /// <summary>
+    /// Builds a preload dictionary from an already-materialized list using first-wins insertion
+    /// (<see cref="Dictionary{TKey,TValue}.TryAdd"/>) instead of <c>ToDictionaryAsync</c>. Some
+    /// catalog entities (maintenance tasks/components/plans, and component definitions such as
+    /// hotends/extruders/toolheads/nozzles) have no unique database constraint on the key used
+    /// here, so legitimate duplicate-keyed rows can exist; <c>ToDictionaryAsync</c> throws
+    /// <see cref="ArgumentException"/> on the first duplicate, whereas the original per-row
+    /// <c>FirstOrDefaultAsync</c> silently tolerated duplicates by returning the first match. This
+    /// preserves that tolerant behavior while still issuing a single query.
+    /// </summary>
+    private static Dictionary<TKey, TValue> BuildFirstWinsDictionary<TKey, TValue>(
+        IEnumerable<TValue> source, Func<TValue, TKey> keySelector, IEqualityComparer<TKey>? comparer = null)
+        where TKey : notnull
+    {
+        Dictionary<TKey, TValue> dictionary = new(comparer);
+        foreach (TValue item in source)
+        {
+            dictionary.TryAdd(keySelector(item), item);
+        }
+
+        return dictionary;
+    }
+
     public async Task SeedAllAsync()
     {
         _logger.LogInformation("[SeedData] Starting seed data load from YAML files");
@@ -55,20 +116,29 @@ public class DataSeedService : IDataSeedService
 
             _logger.LogInformation("[SeedData] Seeding {ManufacturersDataCount} manufacturers from YAML", manufacturersData.Count);
 
+            // Preload all existing manufacturers once instead of issuing one existence query
+            // per row (#2328). Matches case-insensitively (the unique index is on a lowercased
+            // shadow column) so behavior is identical across SQLite/PostgreSQL/SQL Server, and
+            // the dictionary is updated after each Add so a duplicate name later in the same
+            // YAML file resolves against the row just created rather than inserting twice.
+            Dictionary<string, Manufacturer> existingByName = BuildFirstWinsDictionary(
+                await _context.Manufacturers.ToListAsync(), m => m.Name, StringComparer.OrdinalIgnoreCase);
+
             foreach (ManufacturerSeedDto dto in manufacturersData)
             {
                 string normalized = CatalogNameNormalizer.NormalizeManufacturer(dto.Name);
 
-                Manufacturer? existing = await _context.Manufacturers
-                    .FirstOrDefaultAsync(m => m.Name == normalized);
+                existingByName.TryGetValue(normalized, out Manufacturer? existing);
 
                 if (existing == null)
                 {
-                    _context.Manufacturers.Add(new Manufacturer
+                    var manufacturer = new Manufacturer
                     {
                         Id = Guid.NewGuid(),
                         Name = normalized
-                    });
+                    };
+                    _context.Manufacturers.Add(manufacturer);
+                    existingByName[normalized] = manufacturer;
                 }
             }
 
@@ -90,14 +160,19 @@ public class DataSeedService : IDataSeedService
 
             _logger.LogInformation("[SeedData] Seeding {FilamentsDataCount} filament types from YAML", filamentsData.Count);
 
+            // Preload all existing filament types once instead of one existence query per row.
+            // Matches case-insensitively (unique index is on a lowercased shadow column) and the
+            // dictionary is updated after each Add for intra-loop duplicate protection.
+            Dictionary<string, FilamentType> existingByName = BuildFirstWinsDictionary(
+                await _context.FilamentTypes.ToListAsync(), f => f.Name, StringComparer.OrdinalIgnoreCase);
+
             foreach (FilamentTypeSeedDto dto in filamentsData)
             {
-                FilamentType? existing = await _context.FilamentTypes
-                    .FirstOrDefaultAsync(f => f.Name == dto.Name);
+                existingByName.TryGetValue(dto.Name, out FilamentType? existing);
 
                 if (existing == null)
                 {
-                    _context.FilamentTypes.Add(new FilamentType
+                    var filamentType = new FilamentType
                     {
                         Id = Guid.NewGuid(),
                         Name = dto.Name,
@@ -107,7 +182,9 @@ public class DataSeedService : IDataSeedService
                         NeedsEnclosure = dto.NeedsEnclosure,
                         DefaultPricePerKg = dto.DefaultPricePerKg,
                         DefaultDensity = dto.DefaultDensity
-                    });
+                    };
+                    _context.FilamentTypes.Add(filamentType);
+                    existingByName[dto.Name] = filamentType;
                 }
                 else
                 {
@@ -150,10 +227,18 @@ public class DataSeedService : IDataSeedService
 
             _logger.LogInformation("[SeedData] Seeding {Count} default bed types", defaultBedTypes.Length);
 
+            // Preload existing names once instead of one existence query per row. Matched
+            // case-insensitively: the original per-row query used `==` translated to SQL, which
+            // is collation-dependent (SQL Server's default collation is case-insensitive), so an
+            // ordinal client-side comparison here would regress case-tolerant matching on that
+            // provider. See ManufacturerScopedNameComparer for the same rationale.
+            HashSet<string> existingNames = new(
+                await _context.BedTypes.Select(b => b.Name).ToListAsync(),
+                StringComparer.OrdinalIgnoreCase);
+
             foreach ((string name, string description, string color) in defaultBedTypes)
             {
-                bool exists = await _context.BedTypes.AnyAsync(b => b.Name == name);
-                if (!exists)
+                if (existingNames.Add(name))
                 {
                     _context.BedTypes.Add(new BedType
                     {
@@ -205,10 +290,15 @@ public class DataSeedService : IDataSeedService
 
             _logger.LogInformation("[SeedData] Seeding {Count} built-in nozzle materials", builtInMaterials.Length);
 
+            // Preload existing names once instead of one existence query per row. Matched
+            // case-insensitively for the same collation-parity reason as SeedBedTypesAsync.
+            HashSet<string> existingNames = new(
+                await _context.NozzleMaterials.Select(m => m.Name).ToListAsync(),
+                StringComparer.OrdinalIgnoreCase);
+
             foreach ((Guid id, string name, bool isHardened, int defaultMaxTemp, string description) in builtInMaterials)
             {
-                bool exists = await _context.NozzleMaterials.AnyAsync(m => m.Name == name);
-                if (!exists)
+                if (existingNames.Add(name))
                 {
                     _context.NozzleMaterials.Add(new NozzleMaterial
                     {
@@ -250,6 +340,18 @@ public class DataSeedService : IDataSeedService
             Dictionary<string, Guid> manufacturers = await _context.Manufacturers
                 .ToDictionaryAsync(m => m.Name, m => m.Id, StringComparer.OrdinalIgnoreCase);
 
+            // Preload all existing printer models keyed by (ManufacturerId, Name) once instead
+            // of issuing one existence query per model row — this loop is the primary source of
+            // the ~400 sequential per-row queries measured in #2328 (~98 printer models seeded
+            // across four separate per-model lookups: this method, aliases, filament types, and
+            // toolheads). Matches case-insensitively (unique index is on a lowercased shadow
+            // column, and SQL Server's default collation is case-insensitive even without it) and
+            // the dictionary is updated after each Add for intra-loop duplicate protection.
+            Dictionary<(Guid ManufacturerId, string Name), PrinterModel> existingModels = BuildFirstWinsDictionary(
+                await _context.PrinterModels.ToListAsync(),
+                pm => (pm.ManufacturerId, pm.Name),
+                ManufacturerScopedNameComparer.Instance);
+
             foreach (PrinterModelSeedDto dto in modelsData)
             {
                 if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
@@ -260,8 +362,7 @@ public class DataSeedService : IDataSeedService
                     continue;
                 }
 
-                PrinterModel? existing = await _context.PrinterModels
-                    .FirstOrDefaultAsync(pm => pm.ManufacturerId == manufacturerId && pm.Name == dto.Name);
+                existingModels.TryGetValue((manufacturerId, dto.Name), out PrinterModel? existing);
 
                 if (existing == null)
                 {
@@ -306,6 +407,7 @@ public class DataSeedService : IDataSeedService
                     }
 
                     _context.PrinterModels.Add(printerModel);
+                    existingModels[(manufacturerId, dto.Name)] = printerModel;
                 }
                 else
                 {
@@ -349,8 +451,8 @@ public class DataSeedService : IDataSeedService
             _logger.LogInformation("[SeedData] Printer models seeded successfully");
 
             // Seed aliases and filament type associations
-            await SeedPrinterModelAliasesAsync(modelsData);
-            await SeedModelFilamentTypesAsync(modelsData);
+            await SeedPrinterModelAliasesAsync(modelsData, manufacturers);
+            await SeedModelFilamentTypesAsync(modelsData, manufacturers);
 
             // Seed printer model toolheads (components are already seeded before printer models)
             await SeedPrinterModelToolheadsAsync(modelsData, manufacturers);
@@ -418,6 +520,14 @@ public class DataSeedService : IDataSeedService
 
             int seededCount = 0;
 
+            // Preload printer models (with their toolheads) keyed by (ManufacturerId, Name) once
+            // instead of one query per model row. Case-insensitive for cross-provider parity;
+            // see ManufacturerScopedNameComparer.
+            Dictionary<(Guid ManufacturerId, string Name), PrinterModel> printerModelsByKey = BuildFirstWinsDictionary(
+                await _context.PrinterModels.Include(pm => pm.Toolheads).ToListAsync(),
+                pm => (pm.ManufacturerId, pm.Name),
+                ManufacturerScopedNameComparer.Instance);
+
             foreach (PrinterModelSeedDto dto in modelsData.Where(m => m.Toolheads?.Count > 0))
             {
                 if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
@@ -426,9 +536,7 @@ public class DataSeedService : IDataSeedService
                 }
 
                 // Find the printer model
-                PrinterModel? printerModel = await _context.PrinterModels
-                    .Include(pm => pm.Toolheads)
-                    .FirstOrDefaultAsync(pm => pm.Name == dto.Name && pm.ManufacturerId == manufacturerId);
+                printerModelsByKey.TryGetValue((manufacturerId, dto.Name), out PrinterModel? printerModel);
 
                 if (printerModel == null)
                 {
@@ -576,6 +684,16 @@ public class DataSeedService : IDataSeedService
 
         _logger.LogInformation("[SeedData] Seeding {HotendsCount} hotend models", hotends.Count);
 
+        // Preload existing hotends keyed by (ManufacturerId, Name) once instead of one
+        // existence query per row. Built via first-wins TryAdd (not ToDictionaryAsync) because
+        // this entity has no unique DB constraint on the key, so a legitimate duplicate would
+        // otherwise throw ArgumentException instead of being tolerated like the old per-row
+        // FirstOrDefaultAsync. Case-insensitive for cross-provider parity.
+        Dictionary<(Guid ManufacturerId, string Name), HotendModelDefinition> existingByKey = BuildFirstWinsDictionary(
+            await _context.HotendModelDefinitions.ToListAsync(),
+            h => (h.ManufacturerId, h.Name),
+            ManufacturerScopedNameComparer.Instance);
+
         foreach (HotendModelSeedDto dto in hotends)
         {
             if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
@@ -586,12 +704,11 @@ public class DataSeedService : IDataSeedService
                 continue;
             }
 
-            HotendModelDefinition? existing = await _context.HotendModelDefinitions
-                .FirstOrDefaultAsync(h => h.Name == dto.Name && h.ManufacturerId == manufacturerId);
+            existingByKey.TryGetValue((manufacturerId, dto.Name), out HotendModelDefinition? existing);
 
             if (existing == null)
             {
-                _context.HotendModelDefinitions.Add(new HotendModelDefinition
+                var hotend = new HotendModelDefinition
                 {
                     Id = Guid.NewGuid(),
                     Name = dto.Name,
@@ -601,7 +718,9 @@ public class DataSeedService : IDataSeedService
                     MaxFlowRate = dto.MaxFlowRate,
                     Description = dto.Description,
                     Url = dto.Url
-                });
+                };
+                _context.HotendModelDefinitions.Add(hotend);
+                existingByKey[(manufacturerId, dto.Name)] = hotend;
             }
             else
             {
@@ -628,6 +747,14 @@ public class DataSeedService : IDataSeedService
 
         _logger.LogInformation("[SeedData] Seeding {ExtrudersCount} extruder models", extruders.Count);
 
+        // Preload existing extruders keyed by (ManufacturerId, Name) once instead of one
+        // existence query per row. Built via first-wins TryAdd (not ToDictionaryAsync); see
+        // SeedHotendsAsync for why. Case-insensitive for cross-provider parity.
+        Dictionary<(Guid ManufacturerId, string Name), ExtruderModelDefinition> existingByKey = BuildFirstWinsDictionary(
+            await _context.ExtruderModelDefinitions.ToListAsync(),
+            e => (e.ManufacturerId, e.Name),
+            ManufacturerScopedNameComparer.Instance);
+
         foreach (ExtruderModelSeedDto dto in extruders)
         {
             if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
@@ -638,12 +765,11 @@ public class DataSeedService : IDataSeedService
                 continue;
             }
 
-            ExtruderModelDefinition? existing = await _context.ExtruderModelDefinitions
-                .FirstOrDefaultAsync(e => e.Name == dto.Name && e.ManufacturerId == manufacturerId);
+            existingByKey.TryGetValue((manufacturerId, dto.Name), out ExtruderModelDefinition? existing);
 
             if (existing == null)
             {
-                _context.ExtruderModelDefinitions.Add(new ExtruderModelDefinition
+                var extruder = new ExtruderModelDefinition
                 {
                     Id = Guid.NewGuid(),
                     Name = dto.Name,
@@ -652,7 +778,9 @@ public class DataSeedService : IDataSeedService
                     IsDirectDrive = dto.IsDirectDrive,
                     Description = dto.Description,
                     Url = dto.Url
-                });
+                };
+                _context.ExtruderModelDefinitions.Add(extruder);
+                existingByKey[(manufacturerId, dto.Name)] = extruder;
             }
             else
             {
@@ -678,6 +806,14 @@ public class DataSeedService : IDataSeedService
 
         _logger.LogInformation("[SeedData] Seeding {ToolheadsCount} toolhead models", toolheads.Count);
 
+        // Preload existing toolheads keyed by (ManufacturerId, Name) once instead of one
+        // existence query per row. Built via first-wins TryAdd (not ToDictionaryAsync); see
+        // SeedHotendsAsync for why. Case-insensitive for cross-provider parity.
+        Dictionary<(Guid ManufacturerId, string Name), ToolheadModelDefinition> existingByKey = BuildFirstWinsDictionary(
+            await _context.ToolheadModelDefinitions.ToListAsync(),
+            t => (t.ManufacturerId, t.Name),
+            ManufacturerScopedNameComparer.Instance);
+
         foreach (ToolheadModelSeedDto dto in toolheads)
         {
             if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
@@ -688,19 +824,20 @@ public class DataSeedService : IDataSeedService
                 continue;
             }
 
-            ToolheadModelDefinition? existing = await _context.ToolheadModelDefinitions
-                .FirstOrDefaultAsync(t => t.Name == dto.Name && t.ManufacturerId == manufacturerId);
+            existingByKey.TryGetValue((manufacturerId, dto.Name), out ToolheadModelDefinition? existing);
 
             if (existing == null)
             {
-                _context.ToolheadModelDefinitions.Add(new ToolheadModelDefinition
+                var toolhead = new ToolheadModelDefinition
                 {
                     Id = Guid.NewGuid(),
                     Name = dto.Name,
                     ManufacturerId = manufacturerId,
                     Description = dto.Description,
                     Url = dto.Url
-                });
+                };
+                _context.ToolheadModelDefinitions.Add(toolhead);
+                existingByKey[(manufacturerId, dto.Name)] = toolhead;
             }
             else
             {
@@ -767,6 +904,15 @@ public class DataSeedService : IDataSeedService
 
         int updatedCount = 0;
 
+        // Preload toolhead definitions keyed by (ManufacturerId, Name) once instead of one
+        // existence query per row. Built via first-wins TryAdd (not ToDictionaryAsync); see
+        // SeedHotendsAsync for why. Case-insensitive for cross-provider parity.
+        Dictionary<(Guid ManufacturerId, string Name), ToolheadModelDefinition> toolheadsByManufacturerAndName =
+            BuildFirstWinsDictionary(
+                await _context.ToolheadModelDefinitions.ToListAsync(),
+                t => (t.ManufacturerId, t.Name),
+                ManufacturerScopedNameComparer.Instance);
+
         foreach (ToolheadModelSeedDto dto in toolheads)
         {
             // Skip if no defaults specified
@@ -783,8 +929,7 @@ public class DataSeedService : IDataSeedService
             }
 
             // Find the toolhead definition
-            ToolheadModelDefinition? toolhead = await _context.ToolheadModelDefinitions
-                .FirstOrDefaultAsync(t => t.Name == dto.Name && t.ManufacturerId == manufacturerId);
+            toolheadsByManufacturerAndName.TryGetValue((manufacturerId, dto.Name), out ToolheadModelDefinition? toolhead);
 
             if (toolhead == null)
             {
@@ -906,6 +1051,14 @@ public class DataSeedService : IDataSeedService
             _logger.LogWarning("[SeedData] Built-in nozzle material '{Material}' not found, nozzle seeding may be incomplete", nameof(NozzleType.Brass));
         }
 
+        // Preload existing nozzles keyed by (ManufacturerId, Name) once instead of one
+        // existence query per row. Built via first-wins TryAdd (not ToDictionaryAsync); see
+        // SeedHotendsAsync for why. Case-insensitive for cross-provider parity.
+        Dictionary<(Guid ManufacturerId, string Name), NozzleModelDefinition> existingByKey = BuildFirstWinsDictionary(
+            await _context.NozzleModelDefinitions.ToListAsync(),
+            n => (n.ManufacturerId, n.Name),
+            ManufacturerScopedNameComparer.Instance);
+
         foreach (NozzleModelSeedDto dto in nozzles)
         {
             if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
@@ -933,12 +1086,11 @@ public class DataSeedService : IDataSeedService
                     nozzleType, dto.Name);
             }
 
-            NozzleModelDefinition? existing = await _context.NozzleModelDefinitions
-                .FirstOrDefaultAsync(n => n.Name == dto.Name && n.ManufacturerId == manufacturerId);
+            existingByKey.TryGetValue((manufacturerId, dto.Name), out NozzleModelDefinition? existing);
 
             if (existing == null)
             {
-                _context.NozzleModelDefinitions.Add(new NozzleModelDefinition
+                var nozzle = new NozzleModelDefinition
                 {
                     Id = Guid.NewGuid(),
                     Name = dto.Name,
@@ -950,7 +1102,9 @@ public class DataSeedService : IDataSeedService
                     NozzleInterface = nozzleInterface,
                     Description = dto.Description,
                     Url = dto.Url
-                });
+                };
+                _context.NozzleModelDefinitions.Add(nozzle);
+                existingByKey[(manufacturerId, dto.Name)] = nozzle;
             }
             else
             {
@@ -1011,8 +1165,23 @@ public class DataSeedService : IDataSeedService
         return fallback;
     }
 
-    private async Task SeedPrinterModelAliasesAsync(List<PrinterModelSeedDto> modelsData)
+    private async Task SeedPrinterModelAliasesAsync(
+        List<PrinterModelSeedDto> modelsData,
+        Dictionary<string, Guid> manufacturers)
     {
+        // Preload printer models together with their existing aliases in a single query,
+        // keyed by (ManufacturerId, Name) — matching the unique index and the lookup used
+        // when the models themselves are created/updated — instead of one per-model lookup
+        // plus one per-alias existence query. This loop was a major contributor to the ~400
+        // sequential seed queries in #2328. A name-only lookup would silently collapse models
+        // that share a Name across different manufacturers onto whichever row happens to come
+        // back first, so aliases for the "losing" manufacturer's model would never be seeded.
+        // Case-insensitive for cross-provider parity; see ManufacturerScopedNameComparer.
+        Dictionary<(Guid ManufacturerId, string Name), PrinterModel> modelsByKey = BuildFirstWinsDictionary(
+            await _context.PrinterModels.Include(pm => pm.Aliases).ToListAsync(),
+            pm => (pm.ManufacturerId, pm.Name),
+            ManufacturerScopedNameComparer.Instance);
+
         foreach (PrinterModelSeedDto dto in modelsData)
         {
             if (dto.Aliases == null || dto.Aliases.Count == 0)
@@ -1020,10 +1189,15 @@ public class DataSeedService : IDataSeedService
                 continue;
             }
 
-            PrinterModel? model = await _context.PrinterModels
-                .FirstOrDefaultAsync(pm => pm.Name == dto.Name);
+            if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
+            {
+                _logger.LogWarning(
+                    "[SeedData] Manufacturer '{Manufacturer}' not found for model '{Model}', skipping aliases",
+                    dto.Manufacturer, dto.Name);
+                continue;
+            }
 
-            if (model == null)
+            if (!modelsByKey.TryGetValue((manufacturerId, dto.Name), out PrinterModel? model))
             {
                 continue;
             }
@@ -1035,10 +1209,9 @@ public class DataSeedService : IDataSeedService
                 // unique index on the normalized columns would reject (#2080).
                 string normalizedSeedName = PrinterModelAlias.NormalizeLookupValue(alias.SlicerModelName);
                 string normalizedSeedType = PrinterModelAlias.NormalizeLookupValue(alias.SlicerType);
-                bool aliasExists = await _context.PrinterModelAliases
-                    .AnyAsync(a => a.PrinterModelId == model.Id &&
-                        a.SlicerModelNameNormalized == normalizedSeedName &&
-                        a.SlicerTypeNormalized == normalizedSeedType);
+                bool aliasExists = model.Aliases.Any(a =>
+                    a.SlicerModelNameNormalized == normalizedSeedName &&
+                    a.SlicerTypeNormalized == normalizedSeedType);
 
                 if (!aliasExists)
                 {
@@ -1057,11 +1230,27 @@ public class DataSeedService : IDataSeedService
         await _context.SaveChangesAsync();
     }
 
-    private async Task SeedModelFilamentTypesAsync(List<PrinterModelSeedDto> modelsData)
+    private async Task SeedModelFilamentTypesAsync(
+        List<PrinterModelSeedDto> modelsData,
+        Dictionary<string, Guid> manufacturers)
     {
-        // Build filament type lookup
-        Dictionary<string, Guid> filamentTypes = await _context.FilamentTypes
-            .ToDictionaryAsync(ft => ft.Name, ft => ft.Id, StringComparer.OrdinalIgnoreCase);
+        // Build filament type lookup (full entities, so associations can be added without an
+        // extra FindAsync round trip per association).
+        Dictionary<string, FilamentType> filamentTypesByName = await _context.FilamentTypes
+            .ToDictionaryAsync(ft => ft.Name, StringComparer.OrdinalIgnoreCase);
+
+        // Preload printer models together with their existing filament-type associations in a
+        // single query, keyed by (ManufacturerId, Name) — matching the unique index and the
+        // lookup used when the models themselves are created/updated — instead of one per-model
+        // lookup plus an explicit Collection(...).LoadAsync() round trip per model. This loop was
+        // a major contributor to the ~400 sequential seed queries in #2328. A name-only lookup
+        // would silently collapse models that share a Name across different manufacturers onto
+        // whichever row happens to come back first, so the "losing" manufacturer's model would
+        // never get its filament-type associations.
+        Dictionary<(Guid ManufacturerId, string Name), PrinterModel> modelsByKey = BuildFirstWinsDictionary(
+            await _context.PrinterModels.Include(pm => pm.SupportedFilamentTypes).ToListAsync(),
+            pm => (pm.ManufacturerId, pm.Name),
+            ManufacturerScopedNameComparer.Instance);
 
         foreach (PrinterModelSeedDto dto in modelsData)
         {
@@ -1070,32 +1259,29 @@ public class DataSeedService : IDataSeedService
                 continue;
             }
 
-            PrinterModel? model = await _context.PrinterModels
-                .FirstOrDefaultAsync(pm => pm.Name == dto.Name);
+            if (!manufacturers.TryGetValue(dto.Manufacturer, out Guid manufacturerId))
+            {
+                _logger.LogWarning(
+                    "[SeedData] Manufacturer '{Manufacturer}' not found for model '{Model}', skipping filament types",
+                    dto.Manufacturer, dto.Name);
+                continue;
+            }
 
-            if (model == null)
+            if (!modelsByKey.TryGetValue((manufacturerId, dto.Name), out PrinterModel? model))
             {
                 continue;
             }
 
-            // Ensure the model's SupportedFilamentTypes collection is loaded
-            await _context.Entry(model).Collection(m => m.SupportedFilamentTypes).LoadAsync();
-
             foreach (string material in dto.SupportedMaterials)
             {
-                if (filamentTypes.TryGetValue(material, out Guid filamentTypeId))
+                if (filamentTypesByName.TryGetValue(material, out FilamentType? filamentType))
                 {
                     // Check if filament type is already associated using skip navigation
-                    bool exists = model.SupportedFilamentTypes.Any(ft => ft.Id == filamentTypeId);
+                    bool exists = model.SupportedFilamentTypes.Any(ft => ft.Id == filamentType.Id);
 
                     if (!exists)
                     {
-                        // Load the FilamentType entity and add to the collection
-                        FilamentType? filamentType = await _context.FilamentTypes.FindAsync(filamentTypeId);
-                        if (filamentType != null)
-                        {
-                            model.SupportedFilamentTypes.Add(filamentType);
-                        }
+                        model.SupportedFilamentTypes.Add(filamentType);
                     }
                 }
             }
@@ -1118,14 +1304,23 @@ public class DataSeedService : IDataSeedService
 
             _logger.LogInformation("[SeedData] Seeding {TaskCount} maintenance tasks from YAML", tasksData.Count);
 
+            // Preload all existing maintenance tasks once instead of one existence query per row.
+            // Built via first-wins TryAdd (not ToDictionaryAsync): MaintenanceTaskName has no
+            // unique DB constraint (tasks are user-creatable), so two legitimately-named-the-same
+            // rows can exist; ToDictionaryAsync would throw ArgumentException on the second one,
+            // whereas the old per-row FirstOrDefaultAsync silently tolerated it. Case-insensitive
+            // for cross-provider parity and to match the other call site over this same table
+            // (SeedMaintenancePlansAsync), which previously used OrdinalIgnoreCase inconsistently.
+            Dictionary<string, MaintenanceTask> existingByName = BuildFirstWinsDictionary(
+                await _context.MaintenanceTasks.ToListAsync(), t => t.TaskName, StringComparer.OrdinalIgnoreCase);
+
             foreach (MaintenanceTaskSeedDto dto in tasksData)
             {
-                MaintenanceTask? existing = await _context.MaintenanceTasks
-                    .FirstOrDefaultAsync(t => t.TaskName == dto.TaskName);
+                existingByName.TryGetValue(dto.TaskName, out MaintenanceTask? existing);
 
                 if (existing == null)
                 {
-                    _context.MaintenanceTasks.Add(new MaintenanceTask
+                    var task = new MaintenanceTask
                     {
                         Id = Guid.NewGuid(),
                         TaskName = dto.TaskName,
@@ -1151,7 +1346,9 @@ public class DataSeedService : IDataSeedService
                         RequiresMultiMaterial = dto.RequiresMultiMaterial,
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow
-                    });
+                    };
+                    _context.MaintenanceTasks.Add(task);
+                    existingByName[dto.TaskName] = task;
                 }
                 else
                 {
@@ -1202,14 +1399,22 @@ public class DataSeedService : IDataSeedService
 
             _logger.LogInformation("[SeedData] Seeding {ComponentCount} maintenance components from YAML", componentsData.Count);
 
+            // Preload all existing maintenance components keyed by (Name, Category) once
+            // instead of one existence query per row. Built via first-wins TryAdd (not
+            // ToDictionaryAsync): this key has no unique DB constraint (components are
+            // user-creatable), so a legitimate duplicate would otherwise throw ArgumentException
+            // instead of being tolerated like the old per-row FirstOrDefaultAsync.
+            // Case-insensitive for cross-provider parity.
+            Dictionary<(string Name, string Category), MaintenanceComponent> existingByKey = BuildFirstWinsDictionary(
+                await _context.MaintenanceComponents.ToListAsync(), c => (c.Name, c.Category), NameCategoryComparer.Instance);
+
             foreach (MaintenanceComponentSeedDto dto in componentsData)
             {
-                MaintenanceComponent? existing = await _context.MaintenanceComponents
-                    .FirstOrDefaultAsync(c => c.Name == dto.Name && c.Category == dto.Category);
+                existingByKey.TryGetValue((dto.Name, dto.Category), out MaintenanceComponent? existing);
 
                 if (existing == null)
                 {
-                    _context.MaintenanceComponents.Add(new MaintenanceComponent
+                    var component = new MaintenanceComponent
                     {
                         Id = Guid.NewGuid(),
                         Name = dto.Name,
@@ -1223,7 +1428,9 @@ public class DataSeedService : IDataSeedService
                         MinimumStock = dto.RecommendedMinimumStock,
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow
-                    });
+                    };
+                    _context.MaintenanceComponents.Add(component);
+                    existingByKey[(dto.Name, dto.Category)] = component;
                 }
                 else
                 {
@@ -1261,15 +1468,27 @@ public class DataSeedService : IDataSeedService
 
             _logger.LogInformation("[SeedData] Seeding {PlanCount} maintenance plans from YAML", plansData.Count);
 
-            // Pre-load all tasks by name for efficient lookup
-            Dictionary<string, MaintenanceTask> tasksByName = await _context.MaintenanceTasks
-                .ToDictionaryAsync(t => t.TaskName, StringComparer.OrdinalIgnoreCase);
+            // Pre-load all tasks by name for efficient lookup. Built via first-wins TryAdd (not
+            // ToDictionaryAsync): TaskName has no unique DB constraint, so a legitimate duplicate
+            // would otherwise throw ArgumentException instead of resolving to the first match,
+            // same as the old per-row lookup.
+            Dictionary<string, MaintenanceTask> tasksByName = BuildFirstWinsDictionary(
+                await _context.MaintenanceTasks.ToListAsync(), t => t.TaskName, StringComparer.OrdinalIgnoreCase);
+
+            // Preload all existing plans (with their tasks) once instead of one existence
+            // query per row. Built via first-wins TryAdd (not ToDictionaryAsync): plan Name has
+            // no unique DB constraint (plans are user-creatable per printer/model), so a
+            // legitimate duplicate would otherwise throw ArgumentException instead of being
+            // tolerated like the old per-row FirstOrDefaultAsync. Case-insensitive for
+            // cross-provider parity.
+            Dictionary<string, MaintenancePlan> existingByName = BuildFirstWinsDictionary(
+                await _context.MaintenancePlans.Include(p => p.PlanTasks).ToListAsync(),
+                p => p.Name,
+                StringComparer.OrdinalIgnoreCase);
 
             foreach (MaintenancePlanSeedDto dto in plansData)
             {
-                MaintenancePlan? existing = await _context.MaintenancePlans
-                    .Include(p => p.PlanTasks)
-                    .FirstOrDefaultAsync(p => p.Name == dto.Name);
+                existingByName.TryGetValue(dto.Name, out MaintenancePlan? existing);
 
                 if (existing == null)
                 {
@@ -1305,6 +1524,7 @@ public class DataSeedService : IDataSeedService
                     }
 
                     _context.MaintenancePlans.Add(plan);
+                    existingByName[dto.Name] = plan;
                 }
                 else
                 {
