@@ -154,4 +154,64 @@ public class UrlCredentialRedactorTests
 
         result.Should().Be("<redacted>");
     }
+
+    [Fact]
+    public void Redact_ReturnsPlaceholder_ForSchemeOnlyInputWithNoAuthority()
+    {
+        // Regression: the empty-remainder guard must inspect the *host* portion, not just
+        // whether the whole redacted string is empty -- "http://" alone is a non-empty string
+        // even though the authority it names is empty.
+        string? result = UrlCredentialRedactor.Redact("http://@@@@");
+
+        result.Should().Be("<redacted>");
+    }
+
+    [Theory]
+    [InlineData("admin:s3cr3t@printer.local/a://b")]
+    [InlineData("admin:s3cr3t@printer.local/x://y@z")]
+    public void Redact_StripsCredential_WhenPathContainsASchemeLikeSeparator(string input)
+    {
+        // Regression: a scheme separator must only be honored at the very start of the
+        // string. Searching for "://" anywhere in the value let a later path/query segment
+        // that itself contains "://" move the authority boundary past the real credentials,
+        // leaking the password either verbatim or, worse, appearing to succeed while still
+        // emitting it in the preserved prefix.
+        const string password = "s3cr3t";
+
+        string? result = UrlCredentialRedactor.Redact(input);
+
+        result.Should().NotContain(password);
+        result.Should().StartWith("printer.local");
+    }
+
+    [Fact]
+    public void Redact_LeavesSchemeUrlUnaffected_ByLaterSchemeLikeSeparatorInQuery()
+    {
+        // A well-formed leading scheme must still be honored normally even when a later query
+        // parameter itself contains "://" (e.g. an embedded callback URL).
+        const string password = "s3cr3t";
+        string input = $"http://admin:{password}@printer.local/api?redirect=http://evil.example";
+
+        string? result = UrlCredentialRedactor.Redact(input);
+
+        result.Should().Be("http://printer.local/api?redirect=http://evil.example");
+        result.Should().NotContain(password);
+    }
+
+    [Theory]
+    [InlineData("admin:pa/ss@printer.local")]
+    [InlineData("admin:pa?ss@printer.local")]
+    [InlineData("admin:pa#ss@printer.local")]
+    public void Redact_ReturnsPlaceholder_WhenUnescapedDelimiterAppearsInsideUserInfo(string input)
+    {
+        // Regression: an unescaped '/', '?', or '#' inside malformed userinfo used to stop the
+        // authority scan before it ever reached the real '@', so the whole value -- password
+        // included -- was returned unchanged. Since the true host boundary can no longer be
+        // trusted once this happens, the helper must fail closed to a placeholder rather than
+        // ever echo the raw value back.
+        string? result = UrlCredentialRedactor.Redact(input);
+
+        result.Should().Be("<redacted>");
+        result.Should().NotContain("pa");
+    }
 }

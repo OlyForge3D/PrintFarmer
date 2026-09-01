@@ -27,13 +27,34 @@
 /// unescaped <c>@</c>" specifically so a password containing a literal <c>@</c> cannot be
 /// mistaken for the userinfo/host separator; scanning for the last <c>@</c> ourselves
 /// preserves that guarantee without depending on a successful <see cref="Uri"/> parse.
+///
+/// Two boundary cases need extra care, both found by adversarial review of the first version
+/// of this helper:
+/// <list type="bullet">
+/// <item>A scheme separator ("://") must only be honored when it appears at the very start of
+/// the string, immediately after RFC 3986 scheme grammar (letters, then letters/digits/"+"/
+/// "-"/"."). Searching for "://" anywhere in the value is unsafe: a scheme-less, credentialed
+/// authority followed later by a path/query that itself contains "://" (for example a
+/// callback URL embedded in the query string) would otherwise move the authority boundary
+/// past the real credentials and let them leak through untouched.</item>
+/// <item>Malformed userinfo can itself contain an unescaped "/", "?", or "#", which would stop
+/// the authority scan before it ever reaches the real "@". Rather than trust that boundary and
+/// conclude "no credentials found", this helper checks whether an "@" exists anywhere later in
+/// the string; if so, the input is too ambiguous to safely strip, so the whole value is
+/// replaced with a placeholder instead of ever being echoed back.</item>
+/// </list>
 /// </remarks>
 public static class UrlCredentialRedactor
 {
+    private const string Placeholder = "<redacted>";
+
     /// <summary>
     /// Returns <paramref name="serverUrl"/> with any userinfo (username/password) removed.
     /// Null, empty, and whitespace-only input pass through unchanged. A value with no
-    /// <c>@</c> in its authority segment is returned unchanged (nothing to redact).
+    /// <c>@</c> anywhere at or after the authority start is returned unchanged (nothing to
+    /// redact). Ambiguous or degenerate input that cannot be safely stripped down to a
+    /// credential-free remainder is replaced with a fixed placeholder rather than ever risking
+    /// an unredacted (or partially redacted) password reaching the log.
     /// </summary>
     public static string? Redact(string? serverUrl)
     {
@@ -42,16 +63,13 @@ public static class UrlCredentialRedactor
             return serverUrl;
         }
 
-        // Skip past "scheme://" when present; otherwise the whole string is authority-or-more.
-        int authorityStart = 0;
-        int schemeSeparator = serverUrl.IndexOf("://", StringComparison.Ordinal);
-        if (schemeSeparator >= 0)
-        {
-            authorityStart = schemeSeparator + 3;
-        }
+        // Skip past "scheme://" when present at the very start of the string; otherwise the
+        // whole string is authority-or-more. See remarks above for why this must be anchored
+        // to the start rather than found anywhere in the value.
+        int authorityStart = ScanLeadingScheme(serverUrl);
 
-        // The authority segment ends at the first path/query/fragment delimiter, or at the
-        // end of the string when there is none.
+        // The authority segment nominally ends at the first path/query/fragment delimiter, or
+        // at the end of the string when there is none.
         int authorityEnd = serverUrl.Length;
         for (int i = authorityStart; i < serverUrl.Length; i++)
         {
@@ -63,8 +81,9 @@ public static class UrlCredentialRedactor
             }
         }
 
-        // Scan backward for the LAST '@' in the authority segment (see remarks above for why
-        // this must not use Uri.UserInfo). Everything up to and including it is userinfo.
+        // Scan backward for the LAST '@' in the nominal authority segment (see remarks above
+        // for why this must not use Uri.UserInfo). Everything up to and including it is
+        // userinfo.
         int lastAt = -1;
         for (int i = authorityEnd - 1; i >= authorityStart; i--)
         {
@@ -77,15 +96,48 @@ public static class UrlCredentialRedactor
 
         if (lastAt < 0)
         {
-            // No credentials present in the authority segment; nothing to strip.
-            return serverUrl;
+            // Nothing found within the nominal authority segment. Before concluding there are
+            // no credentials, check whether an '@' exists anywhere further into the string: if
+            // so, an unescaped '/', '?', or '#' inside malformed userinfo cut the scan short,
+            // and we cannot safely tell where the real host begins. Fail closed.
+            return serverUrl.IndexOf('@', authorityStart) >= 0 ? Placeholder : serverUrl;
         }
 
-        string redacted = serverUrl[..authorityStart] + serverUrl[(lastAt + 1)..];
-
         // Degenerate input (e.g. an authority that is nothing but "@" characters) can strip
-        // down to an empty or scheme-only remainder. Never emit that silently — make it
-        // obvious in the log that credentials were removed rather than the field vanishing.
-        return string.IsNullOrEmpty(redacted) ? "<redacted>" : redacted;
+        // down to an empty host. Never emit that silently — make it obvious in the log that
+        // credentials were removed rather than the field vanishing or the boundary collapsing
+        // to nothing meaningful.
+        if (lastAt + 1 >= authorityEnd)
+        {
+            return Placeholder;
+        }
+
+        return serverUrl[..authorityStart] + serverUrl[(lastAt + 1)..];
+    }
+
+    /// <summary>
+    /// Returns the index immediately after a leading "scheme://" prefix per RFC 3986 scheme
+    /// grammar (<c>ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )</c>), or 0 when no such prefix is
+    /// present at the very start of <paramref name="value"/>.
+    /// </summary>
+    private static int ScanLeadingScheme(string value)
+    {
+        if (value.Length == 0 || !char.IsAsciiLetter(value[0]))
+        {
+            return 0;
+        }
+
+        int i = 1;
+        while (i < value.Length && (char.IsAsciiLetterOrDigit(value[i]) || value[i] is '+' or '-' or '.'))
+        {
+            i++;
+        }
+
+        if (i + 2 < value.Length && value[i] == ':' && value[i + 1] == '/' && value[i + 2] == '/')
+        {
+            return i + 3;
+        }
+
+        return 0;
     }
 }
