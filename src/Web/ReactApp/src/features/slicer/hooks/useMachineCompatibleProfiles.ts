@@ -1,0 +1,77 @@
+import { useQuery } from '@tanstack/react-query';
+import {
+  slicerProfilesService,
+  type OrcaFilamentProfile,
+  type OrcaMachineProfile,
+  type OrcaProcessProfile,
+} from '@/services/slicerProfilesService';
+import {
+  isProcessProfileCoreOneVariantCompatible,
+  resolveHighFlow,
+} from '@/features/slicer/utils/machineProfileLabels';
+
+export {
+  classifyCustomProfileScope,
+  legacyMachineProfileMatchesPrinter,
+  legacyProcessProfileMatchesMachine,
+} from '@/features/slicer/utils/customProfileScoping';
+export { isProcessProfileCoreOneVariantCompatible } from '@/features/slicer/utils/machineProfileLabels';
+
+interface MachineCompatibleProfilesOptions {
+  enabled: boolean;
+  engineVersion?: string;
+  summary?: boolean;
+}
+
+export function useMachineCompatibleProfiles(
+  machineNames: string[],
+  { enabled, engineVersion, summary = false }: MachineCompatibleProfilesOptions,
+) {
+  const filamentProfilesQuery = useQuery<OrcaFilamentProfile[]>({
+    queryKey: ['filamentProfilesForMachines', machineNames, engineVersion ?? null],
+    queryFn: () => summary
+      ? slicerProfilesService.getFilamentProfilesForMachines(machineNames, engineVersion, 'summary')
+      : slicerProfilesService.getFilamentProfilesForMachines(machineNames, engineVersion),
+    enabled: enabled && machineNames.length > 0,
+    staleTime: 30_000,
+  });
+
+  const processProfilesQuery = useQuery<OrcaProcessProfile[]>({
+    queryKey: ['processProfilesForMachines', machineNames, engineVersion ?? null],
+    queryFn: () => summary
+      ? slicerProfilesService.getProcessProfilesForMachines(machineNames, engineVersion, 'summary')
+      : slicerProfilesService.getProcessProfilesForMachines(machineNames, engineVersion),
+    enabled: enabled && machineNames.length > 0,
+    staleTime: 30_000,
+  });
+
+  return { filamentProfilesQuery, processProfilesQuery };
+}
+
+export function isProcessProfileCompatibleWithMachine(
+  profile: OrcaProcessProfile,
+  selectedMachine: Pick<OrcaMachineProfile, 'name' | 'isHighFlowNozzle'> | null | undefined,
+): boolean {
+  const selectedMachineName = selectedMachine?.name ?? '';
+  const compatiblePrinters = Array.isArray(profile.compatible_printers)
+    ? profile.compatible_printers
+    : [];
+
+  if (
+    selectedMachineName
+    && compatiblePrinters.length > 0
+    && !compatiblePrinters.some((printerName) => printerName === selectedMachineName)
+  ) {
+    return false;
+  }
+
+  if (!selectedMachineName.toLowerCase().includes('core one')) {
+    return true;
+  }
+
+  return isProcessProfileCoreOneVariantCompatible(
+    profile.name,
+    compatiblePrinters,
+    resolveHighFlow(selectedMachine?.isHighFlowNozzle, selectedMachineName),
+  );
+}
