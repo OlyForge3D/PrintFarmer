@@ -275,7 +275,7 @@ public class SpoolmanControllerTests
 
         _spoolmanServiceMock
             .Setup(s => s.ListSpoolsAsync(It.IsAny<SpoolmanSpoolQueryParams>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SpoolmanPagedResult<SpoolmanSpoolDto>(spools, 2));
+            .ReturnsAsync(SpoolmanReadResult.Ok<SpoolmanSpoolDto>(spools, 2));
 
         // Act
         ActionResult<SpoolmanPagedResult<SpoolmanSpoolDto>> result = await _controller.GetSpoolsAsync(null, null, null, null, null, null, null, null, CancellationToken.None);
@@ -290,7 +290,7 @@ public class SpoolmanControllerTests
         // Arrange
         _spoolmanServiceMock
             .Setup(s => s.ListSpoolsAsync(It.IsAny<SpoolmanSpoolQueryParams>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SpoolmanPagedResult<SpoolmanSpoolDto>([], 0));
+            .ReturnsAsync(SpoolmanReadResult.Empty<SpoolmanSpoolDto>());
 
         // Act
         await _controller.GetSpoolsAsync(null, null, null, null, null, null, null, null, CancellationToken.None);
