@@ -96,8 +96,12 @@ public class PrintStatsExternalBaselineTests
         };
         var jobStatsMock = new Mock<IPrintJobStatisticsRepository>();
         jobStatsMock
-            .Setup(r => r.GetByPrinterModelAsync(modelId, true, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pfJobs);
+            .Setup(r => r.GetAggregateByPrinterModelAsync(modelId, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrintJobStatisticsAggregate
+            {
+                JobCount = pfJobs.Count,
+                TotalDurationMs = pfJobs.Sum(j => j.ActualDurationMs ?? 0),
+            });
 
         var gateMock = new Mock<IOperatorFeatureGate>();
         gateMock.Setup(g => g.IsEnabled(OperatorFeature.MultiSlotFallback)).Returns(true);
@@ -192,8 +196,12 @@ public class PrintStatsExternalBaselineTests
         ];
         Mock<IPrintJobStatisticsRepository> jobStats = new();
         jobStats
-            .Setup(r => r.GetByPrinterModelAsync(modelId, true, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pfJobs);
+            .Setup(r => r.GetAggregateByPrinterModelAsync(modelId, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrintJobStatisticsAggregate
+            {
+                JobCount = pfJobs.Count,
+                TotalDurationMs = pfJobs.Sum(j => j.ActualDurationMs ?? 0),
+            });
         using ServiceProvider provider = new ServiceCollection().BuildServiceProvider();
         PrintStatsSyncHostedService service = CreateService(provider);
         PrintStatsSyncSettings settings = new()
@@ -275,11 +283,12 @@ public class PrintStatsExternalBaselineTests
             .BuildServiceProvider();
         Mock<IPrintJobStatisticsRepository> jobStats = new();
         jobStats
-            .Setup(r => r.GetByPrinterModelAsync(modelId, true, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(
-            [
-                new PrintJobStatistics { ActualDurationMs = (long)(50.0 * 3600 * 1000) }
-            ]);
+            .Setup(r => r.GetAggregateByPrinterModelAsync(modelId, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrintJobStatisticsAggregate
+            {
+                JobCount = 1,
+                TotalDurationMs = (long)(50.0 * 3600 * 1000),
+            });
         PrintStatsSyncHostedService service = CreateService(provider);
         PrintStatsSyncSettings settings = new()
         {
@@ -358,8 +367,12 @@ public class PrintStatsExternalBaselineTests
         ];
         Mock<IPrintJobStatisticsRepository> jobStats = new();
         jobStats
-            .Setup(r => r.GetByPrinterModelAsync(modelId, true, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pfJobs);
+            .Setup(r => r.GetAggregateByPrinterModelAsync(modelId, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrintJobStatisticsAggregate
+            {
+                JobCount = pfJobs.Count,
+                TotalDurationMs = pfJobs.Sum(j => j.ActualDurationMs ?? 0),
+            });
         using ServiceProvider provider = new ServiceCollection().BuildServiceProvider();
         PrintStatsSyncHostedService service = CreateService(provider);
         PrintStatsSyncSettings settings = new()
@@ -936,15 +949,15 @@ public class PrintStatsExternalBaselineTests
             .Returns(Task.CompletedTask);
 
         Mock<IPrintJobStatisticsRepository> jobStats = new(MockBehavior.Strict);
-        jobStats.Setup(repository => repository.GetByPrinterModelAsync(
+        jobStats.Setup(repository => repository.GetAggregateByPrinterModelAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<bool>(),
                 It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()))
             .Returns((Guid modelId, bool _, DateTime? _, CancellationToken _) =>
                 modelId == failingModelId
-                    ? Task.FromException<List<PrintJobStatistics>>(new TimeoutException("injected after baseline"))
-                    : Task.FromResult(new List<PrintJobStatistics>()));
+                    ? Task.FromException<PrintJobStatisticsAggregate>(new TimeoutException("injected after baseline"))
+                    : Task.FromResult(new PrintJobStatisticsAggregate()));
 
         Mock<IBackendClient> client = new();
         client.As<ISupportsHistory>()
@@ -1054,7 +1067,7 @@ public class PrintStatsExternalBaselineTests
         // previously have credited the single physical head with the full 10h.
         healthyToolhead.CumulativePrintHours.Should().Be(0,
             "without SupportsPerToolAttribution per-toolhead wear stays unattributed");
-        jobStats.Verify(repository => repository.GetByPrinterModelAsync(
+        jobStats.Verify(repository => repository.GetAggregateByPrinterModelAsync(
             healthyModelId,
             true,
             null,
@@ -1085,12 +1098,12 @@ public class PrintStatsExternalBaselineTests
         List<Guid> printerIds = [.. Enumerable.Range(0, printerCount).Select(_ => Guid.NewGuid())];
 
         Mock<IPrintJobStatisticsRepository> jobStats = new(MockBehavior.Strict);
-        jobStats.Setup(repository => repository.GetByPrinterModelAsync(
+        jobStats.Setup(repository => repository.GetAggregateByPrinterModelAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<bool>(),
                 It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()))
-            .Returns(Task.FromException<List<PrintJobStatistics>>(
+            .Returns(Task.FromException<PrintJobStatisticsAggregate>(
                 new TimeoutException("injected: every printer fails every iteration")));
 
         Mock<IBackendClient> client = new();

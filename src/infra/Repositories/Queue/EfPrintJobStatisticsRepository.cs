@@ -122,6 +122,43 @@ public class EfPrintJobStatisticsRepository(AppDbContext context) : IPrintJobSta
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<PrintJobStatisticsAggregate> GetAggregateByPrinterModelAsync(
+        Guid modelId,
+        bool successfulOnly = true,
+        DateTime? fromDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        IQueryable<PrintJobStatistics> query = context.PrintJobStatistics
+            .AsNoTracking()
+            .Where(s => s.PrinterModelId == modelId)
+            .AsQueryable();
+
+        if (successfulOnly)
+        {
+            query = query.Where(s => s.IsSuccess);
+        }
+
+        if (fromDate.HasValue)
+        {
+            query = query.Where(s => s.CompletedAtUtc >= fromDate);
+        }
+
+        // Single grouped aggregate query (COUNT + SUM pushed down to SQL) instead of
+        // materializing every matching row and aggregating in memory (issue #2329). Sum over a
+        // nullable selector already excludes nulls, matching the prior in-memory
+        // `.Where(j => j.ActualDurationMs.HasValue)` filter exactly.
+        PrintJobStatisticsAggregate? result = await query
+            .GroupBy(_ => 1)
+            .Select(g => new PrintJobStatisticsAggregate
+            {
+                JobCount = g.Count(),
+                TotalDurationMs = g.Sum(s => s.ActualDurationMs) ?? 0L,
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return result ?? new PrintJobStatisticsAggregate();
+    }
+
     public async Task<List<PrintJobStatistics>> GetByMaterialAsync(
         string material,
         bool successfulOnly = true,

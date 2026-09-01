@@ -78,6 +78,23 @@ public interface IPrintJobStatisticsRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets aggregate (count + summed duration) statistics for a specific printer model using a
+    /// single grouped SQL query, without materializing the matching rows. Used by
+    /// <c>PrintStatsSyncHostedService</c> so printers that share a model reuse one query per
+    /// sync cycle instead of each re-fetching and re-aggregating the full row set in memory
+    /// (issue #2329).
+    /// </summary>
+    /// <param name="modelId">The printer model ID to filter by.</param>
+    /// <param name="successfulOnly">Only include successful jobs.</param>
+    /// <param name="fromDate">Start date for filtering (UTC, optional).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<PrintJobStatisticsAggregate> GetAggregateByPrinterModelAsync(
+        Guid modelId,
+        bool successfulOnly = true,
+        DateTime? fromDate = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets statistics grouped by material type
     /// Used for material analysis and reporting
     /// </summary>

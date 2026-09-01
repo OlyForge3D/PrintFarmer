@@ -136,6 +136,14 @@ public class PrintStatsSyncHostedService(
                 "Syncing statistics for {SyncCount} printers this iteration",
                 printers.Count);
 
+            // Issue #2329: printers sharing a ModelId within this rotation batch reuse one
+            // grouped job-statistics aggregate query instead of each re-materializing the
+            // model's entire all-time job history. Scoped to this single cycle only (fresh
+            // dictionary per call) and populated lazily as printers are processed below, so a
+            // failing model's aggregate query is isolated to just the printers that share it -
+            // matching the per-printer scope isolation already used elsewhere in this loop.
+            Dictionary<Guid, PrintJobStatisticsAggregate> jobStatsAggregateCache = [];
+
             // Process each printer
             foreach (Printer printer in printers)
             {
@@ -163,7 +171,8 @@ public class PrintStatsSyncHostedService(
                         jobStatsRepo,
                         featureGate,
                         scopedServices,
-                        ct);
+                        ct,
+                        jobStatsAggregateCache);
 
                     // Persist only after the complete per-printer flow succeeds. This atomically
                     // commits the external baseline, aggregate totals, and toolhead wear. Pending
@@ -229,7 +238,8 @@ public class PrintStatsSyncHostedService(
         IPrintJobStatisticsRepository jobStatsRepo,
         IOperatorFeatureGate featureGate,
         IServiceProvider serviceProvider,
-        CancellationToken ct)
+        CancellationToken ct,
+        IDictionary<Guid, PrintJobStatisticsAggregate>? jobStatsAggregateCache = null)
     {
         _logger.LogDebug(
             "Syncing statistics for printer '{Name}' (ID: {Id}, Backend: {Backend})",
@@ -387,7 +397,12 @@ public class PrintStatsSyncHostedService(
         {
             stats.TotalPrintHours = stats.ExternalPrintHours;
             stats.TotalJobsCompleted = checked((int)stats.ExternalJobsCompleted);
-            await SyncPrintFarmerJobStatisticsAsync(printer, stats, jobStatsRepo, ct);
+            await SyncPrintFarmerJobStatisticsAsync(
+                printer,
+                stats,
+                jobStatsRepo,
+                jobStatsAggregateCache ?? new Dictionary<Guid, PrintJobStatisticsAggregate>(),
+                ct);
         }
 
         ToolheadActivitySnapshot? snapshotToAcknowledge = null;
@@ -724,21 +739,33 @@ public class PrintStatsSyncHostedService(
         Printer printer,
         PrinterStatistics stats,
         IPrintJobStatisticsRepository jobStatsRepo,
+        IDictionary<Guid, PrintJobStatisticsAggregate> jobStatsAggregateCache,
         CancellationToken ct)
     {
         try
         {
             // TODO(#711): Replace this model-wide, all-time aggregation with a per-printer
             // completion watermark. Until then it must not feed per-toolhead wear attribution.
-            // Get all successful jobs for this printer from PrintFarmer history
-            // Note: PrintJobStatistics doesn't have PrinterId directly, so we query by printer model
-            List<PrintJobStatistics> printerJobs = await jobStatsRepo.GetByPrinterModelAsync(
-                printer.ModelId,
-                successfulOnly: true,
-                fromDate: null,
-                cancellationToken: ct);
+            // Note: PrintJobStatistics doesn't have PrinterId directly, so we query by printer
+            // model.
+            //
+            // Issue #2329: printers that share a ModelId within the same sync cycle reuse one
+            // grouped SQL aggregate (COUNT + SUM) instead of each independently re-fetching and
+            // re-summing the model's entire all-time job history. The cache is populated lazily,
+            // per distinct ModelId, and only on success - a failed aggregate query is never
+            // cached, so it doesn't silently suppress aggregation for a later printer sharing the
+            // same (possibly transiently failing) model.
+            if (!jobStatsAggregateCache.TryGetValue(printer.ModelId, out PrintJobStatisticsAggregate? aggregate))
+            {
+                aggregate = await jobStatsRepo.GetAggregateByPrinterModelAsync(
+                    printer.ModelId,
+                    successfulOnly: true,
+                    fromDate: null,
+                    cancellationToken: ct);
+                jobStatsAggregateCache[printer.ModelId] = aggregate;
+            }
 
-            if (printerJobs.Count == 0)
+            if (aggregate.JobCount == 0)
             {
                 _logger.LogDebug(
                     "No PrintFarmer job statistics found for printer model of '{Name}'",
@@ -746,21 +773,15 @@ public class PrintStatsSyncHostedService(
                 return;
             }
 
-            // Aggregate PrintFarmer job data
-            int totalJobs = printerJobs.Count;
-            double totalHours = printerJobs
-                .Where(j => j.ActualDurationMs.HasValue)
-                .Sum(j => j.ActualDurationMs!.Value / 1000.0 / 3600.0); // ms to hours
-
             // Add to existing statistics (combining external and PrintFarmer data)
-            stats.TotalJobsCompleted += totalJobs;
-            stats.TotalPrintHours += totalHours;
+            stats.TotalJobsCompleted += aggregate.JobCount;
+            stats.TotalPrintHours += aggregate.TotalDurationHours;
 
             _logger.LogDebug(
                 "Added PrintFarmer statistics for '{Name}': +{Jobs} jobs, +{Hours}h",
                 printer.Name,
-                totalJobs,
-                totalHours);
+                aggregate.JobCount,
+                aggregate.TotalDurationHours);
         }
         catch (Exception ex)
         {
