@@ -57,6 +57,35 @@ public class ProfilesControllerHierarchyCancellationTests
             () => controller.GetLibraryProfilesHierarchyAsync(httpClient, "catalog", cts.Token));
     }
 
+    [Fact]
+    public async Task GetWorkerProfilesHierarchyAsync_InternalCancellationUnrelatedToRequest_Returns500()
+    {
+        // The service throws OperationCanceledException tied to a DIFFERENT, already-cancelled
+        // token (e.g. an internal timeout), while the request's own token is still live. The
+        // guard `when (ct.IsCancellationRequested)` must NOT treat this as a client abort - it
+        // should fall through to the general handler and still surface as a 500, so a genuine
+        // internal fault is not silently masked as a benign disconnect.
+        Mock<IProfilesService> profilesService = new(MockBehavior.Strict);
+        Mock<ICatalogServiceAdapter> catalogService = new(MockBehavior.Strict);
+        using CancellationTokenSource unrelatedCts = new();
+        unrelatedCts.Cancel();
+        CancellationToken requestToken = CancellationToken.None;
+
+        _ = profilesService
+            .Setup(s => s.GetWorkerProfilesHierarchyAsync(It.IsAny<HttpClient>(), requestToken))
+            .ThrowsAsync(new OperationCanceledException(unrelatedCts.Token));
+
+        ProfilesController controller = CreateController(profilesService, catalogService);
+        using HttpClient httpClient = new();
+
+        Microsoft.AspNetCore.Mvc.IActionResult result =
+            await controller.GetWorkerProfilesHierarchyAsync(httpClient, requestToken);
+
+        Microsoft.AspNetCore.Mvc.ObjectResult objectResult =
+            Assert.IsType<Microsoft.AspNetCore.Mvc.ObjectResult>(result);
+        Assert.Equal(500, objectResult.StatusCode);
+    }
+
     private static ProfilesController CreateController(
         Mock<IProfilesService> profilesService,
         Mock<ICatalogServiceAdapter> catalogService)
