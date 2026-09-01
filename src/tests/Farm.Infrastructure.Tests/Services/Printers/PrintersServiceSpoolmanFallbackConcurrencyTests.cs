@@ -136,6 +136,76 @@ public sealed class PrintersServiceSpoolmanFallbackConcurrencyTests
         blackHoled.SpoolName.Should().BeNull();
     }
 
+    [Fact]
+    public async Task GetAllCompleteDtosAsync_MoreThanCapDistinctSpoolIds_NeverExceedsBoundedFanOutConcurrency()
+    {
+        // Twelve printers, twelve DISTINCT spool IDs -- more than the fallback's bounded
+        // parallelism cap. Every upstream lookup is slow-but-successful (not black-holed), so this
+        // test isolates and directly measures the fan-out concurrency bound itself (the
+        // SemaphoreSlim cap), rather than the per-lookup timeout covered by the black-hole test
+        // above. Regressing to unbounded Task.WhenAll fan-out (or back to fully sequential calls)
+        // would both be caught here: unbounded fan-out blows past the cap, sequential execution
+        // collapses concurrency to 1.
+        const int PrinterCount = 12;
+        List<Printer> printers = [.. Enumerable.Range(1, PrinterCount).Select(id => CreatePrinter(spoolId: id))];
+
+        var active = 0;
+        var maxObserved = 0;
+        var spoolman = new Mock<ISpoolmanService>();
+        _ = spoolman
+            .Setup(s => s.GetSpoolByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns<int, CancellationToken>(async (id, ct) =>
+            {
+                int current = Interlocked.Increment(ref active);
+                InterlockedMax(ref maxObserved, current);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(150), ct);
+                    return new SpoolmanSpoolDto(id, $"Spool{id}", "PLA", 900, null, false, FilamentName: $"Spool{id}");
+                }
+                finally
+                {
+                    _ = Interlocked.Decrement(ref active);
+                }
+            });
+
+        SpoolmanStatusCache statusCache = CreateStatusCache(spoolman.Object, TimeProvider.System);
+        await using AppDbContext db = CreateDbContext();
+        PrintersService service = CreateService(db, printers, statusCache);
+
+        var stopwatch = Stopwatch.StartNew();
+        CompletePrinterDto[] dtos = await service.GetAllCompleteDtosAsync(CancellationToken.None);
+        stopwatch.Stop();
+
+        dtos.Should().HaveCount(PrinterCount);
+        dtos.Should().OnlyContain(dto => dto.SpoolInfo != null && dto.SpoolInfo.SpoolName != null);
+
+        // The fallback's bounded parallelism cap (MaxConcurrentSpoolLookups in PrintersService) is
+        // 8 -- asserting <= 8 here (rather than hardcoding == 8) keeps the test resilient to a
+        // deliberate future change to the constant while still catching an unbounded fan-out
+        // regression. Asserting > 1 proves this genuinely ran concurrently, not sequentially.
+        maxObserved.Should().BeGreaterThan(1, "the fallback must fan out concurrently, not sequentially");
+        maxObserved.Should().BeLessThanOrEqualTo(8, "the fallback's SemaphoreSlim must bound concurrent upstream Spoolman calls");
+
+        // With 12 distinct IDs against a cap of 8, two waves of ~150ms each easily fit well under
+        // a single old-style 30s HttpClient.Timeout, let alone 12 sequential 30s calls.
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
+    }
+
+    private static void InterlockedMax(ref int target, int candidate)
+    {
+        int initial;
+        do
+        {
+            initial = Volatile.Read(ref target);
+            if (candidate <= initial)
+            {
+                return;
+            }
+        }
+        while (Interlocked.CompareExchange(ref target, candidate, initial) != initial);
+    }
+
     private static CompletePrinterDto GetDto(IReadOnlyCollection<CompletePrinterDto> dtos, Printer printer) =>
         dtos.Single(d => d.Id == printer.Id);
 
